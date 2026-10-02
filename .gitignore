@@ -1,0 +1,33 @@
+# Python and uv
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Tool caches and reports
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Documentation build output (Zensical)
+site/
+
+# Environment files hold secrets: never commit them. Use .env.example as the template.
+.env
+.env.*
+!.env.example
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Machine-local Claude Code files
+CLAUDE.local.md
+.claude/settings.local.json
