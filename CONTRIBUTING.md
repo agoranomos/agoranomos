@@ -30,7 +30,7 @@ Then check that everything works:
 
 ```bash
 uv run prek run --all-files     # every check on the whole repository, as CI runs it
-uv run zensical build --strict  # builds the documentation; a broken link or navigation entry fails
+uv run zensical build --strict  # builds the documentation; a broken link or anchor fails it
 ```
 
 The checks are configured in `.pre-commit-config.yaml` and run by [prek](https://prek.j178.dev/). They cover file hygiene (large files, merge conflict markers, JSON, TOML and YAML syntax, private keys, final newlines, line endings and trailing whitespace), linting and formatting with ruff, spelling with typos, secrets with gitleaks, and GitHub Actions workflows, issue forms and the Renovate configuration.
@@ -41,7 +41,7 @@ CI also scans the whole git history for secrets. You can do the same on a full c
 uv run prek run gitleaks-history --all-files --hook-stage manual
 ```
 
-To preview the documentation while you edit it, run `uv run zensical serve` and open <http://localhost:8000>. If that port is taken, add `--dev-addr 127.0.0.1:8001`.
+To preview the documentation while you edit it, run `uv run zensical serve` and open <http://localhost:8000>. If that port is taken, add `--dev-addr 127.0.0.1:8001`. The strict build does not check navigation entries yet (as of Zensical 0.0.67): an entry that points at a missing file builds without an error. When you add a page to the navigation, check it in this preview.
 
 ## Make a change
 
@@ -74,7 +74,7 @@ Use `--force-with-lease` only on your own branch.
 
 A change that alters what users or contributors see, such as behavior, commands, configuration or the design, updates the documentation in the same pull request.
 
-- The documentation is Markdown in `docs/` and follows [Diátaxis](https://diataxis.fr/): tutorials (learn by doing), how-to guides (recipes for tasks), reference (facts to look up) and explanation (background). Each page has one job. Add a new page to the navigation in `zensical.toml`.
+- The documentation is Markdown in `docs/` and follows [Diátaxis](https://diataxis.fr/): tutorials (learn by doing), how-to guides (recipes for tasks), reference (facts to look up) and explanation (background). Each page has one job. Add a new page to the navigation in `zensical.toml`, and check it with `zensical serve`.
 - Write in plain English with American spelling. Describe what exists today in the present tense, and say plainly that something is planned when it is not built yet.
 - The English README is the reference. When it changes, update `README.ru.md` as well.
 

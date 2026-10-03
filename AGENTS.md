@@ -27,10 +27,10 @@ uv run prek install              # once: run the checks on every commit
 uv run prek run --all-files      # all static checks, as CI runs them
 uv run prek run gitleaks-history --all-files --hook-stage manual   # scan the full git history for secrets
 uv run zensical serve            # preview the documentation at http://localhost:8000
-uv run zensical build --strict   # build the documentation; broken links and navigation entries fail
+uv run zensical build --strict   # build the documentation; broken links and anchors fail, navigation entries are not checked yet
 ```
 
-If port 8000 is in use, add `--dev-addr 127.0.0.1:8001` to `zensical serve`. Use `uv` for everything, not `pip`, and never edit `uv.lock` by hand.
+If port 8000 is in use, add `--dev-addr 127.0.0.1:8001` to `zensical serve`. The strict build does not check navigation entries yet (as of Zensical 0.0.67), so check a new page in the navigation with `zensical serve`. Use `uv` for everything, not `pip`, and never edit `uv.lock` by hand.
 
 There is no code and no test suite yet. CI runs the static checks, the full-history secret scan and the strict documentation build, and it checks the pull request title and the DCO sign-off.
 
