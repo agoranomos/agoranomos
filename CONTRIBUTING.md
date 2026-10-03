@@ -96,7 +96,7 @@ An accepted record is not rewritten. To change a decision, write a new ADR that 
 - The merge conflict check rejects a line that begins with the conflict markers `<<<<<<<`, `=======` or `>>>>>>>`, even inside a documentation example. Indent such a line, or mention the markers inside a sentence.
 - The secret scanner blocks anything that looks like a real key or token. Use obvious placeholders such as `<your-token>` in examples, and never commit `.env` files. They are git-ignored, and `.env.example` will be the template once it exists.
 - The spell checker, typos, may flag a correct word, such as a product name. Add it to `[default.extend-words]` in `_typos.toml`.
-- Some tool versions are pinned in more than one place: ruff in `pyproject.toml` and `.pre-commit-config.yaml`, and prek in `pyproject.toml` and `.github/workflows/ci.yml`. Renovate updates each pair in one pull request, and a change made by hand has to change both. The uv version is pinned in `.github/workflows/ci.yml`, and this guide gives the minimum version.
+- Some tool versions are pinned in more than one place: ruff in `pyproject.toml` and `.pre-commit-config.yaml`, and prek in `pyproject.toml` and `.github/workflows/ci.yml`. Once the Renovate app runs, it updates each pair in one pull request, and a change made by hand has to change both. The uv version is pinned in `.github/workflows/ci.yml`, and this guide gives the minimum version.
 
 ## License
 
