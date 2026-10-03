@@ -34,8 +34,8 @@ Chosen option: "Metabase OSS", because it is approachable for business users, it
 
 In practice this means:
 
-* **Version.** Metabase 0.60 or later is required, because 0.60 is the first release with the built-in MCP server. As of October 2026 the stack pins 0.63.
-* **Built-in MCP server.** Metabase serves it itself, so there is no separate component to run. It uses HTTP with OAuth, applies the permissions of the signed-in user, needs no LLM key, and its SQL tool can be switched off ([ADR-0007](0007-ai-access-via-mcp-read-only.md)).
+* **Version.** Metabase 0.60 or later is required, because 0.60 is the first release with the built-in MCP server. As of October 2026 the stack is to pin 0.63.
+* **Built-in MCP server.** Metabase serves it itself, so there is no separate component to run. It uses HTTP with OAuth, applies the permissions of the signed-in user, needs no LLM key, and its SQL tool can be switched off. The server also includes tools that create and change questions and dashboards ([ADR-0007](0007-ai-access-via-mcp-read-only.md)).
 * **Dashboards as code.** Metabase serialization and Remote Sync are available only in the paid editions. A one-shot init job therefore sets Metabase up through its REST API: it connects the warehouse, creates collections and dashboards from definitions kept in the repository, and enables the MCP server.
 * **Data access.** Metabase connects to the warehouse as the `metabase_reader` role, which sees only `marts`. Its own application database lives in the `platform` instance ([ADR-0003](0003-two-postgres-instances.md)).
 
@@ -51,7 +51,7 @@ Apache Superset also includes an MCP server, but as of October 2026 it runs as a
 
 ## More Information
 
-* Versions as of October 2026: Metabase 0.63 is the current regular release. Regular releases reach end of life two to four months after they appear (0.63 on 2026-11-01), and the LTS release, 0.58, has no built-in MCP server. The stack moves to the next LTS release once it includes the MCP server.
-* The built-in MCP server needs a correct `MB_SITE_URL`. Claude Code can connect to a server on localhost, but the Claude desktop app cannot, which is one reason for the server mode in [ADR-0011](0011-local-and-server-modes.md).
+* Versions as of October 2026: Metabase 0.63 is the current regular release. Regular releases reach end of life a few months after they appear: [Metabase's version feed](https://static.metabase.com/version-info.json) gives 0.63, released on 2026-07-07, an end of life of 2026-11-01. The LTS release, 0.58, has no built-in MCP server. The stack moves to the next LTS release once it includes the MCP server.
+* The built-in MCP server needs a correct `MB_SITE_URL`. Claude Code can connect to a server on localhost, but a custom connector in the Claude desktop app cannot, because Claude connects to custom connectors from Anthropic's cloud and not from the user's machine, so the endpoint has to be reachable over the public internet. This is one reason for the server mode in [ADR-0011](0011-local-and-server-modes.md). As of October 2026, both the [Metabase documentation](https://www.metabase.com/docs/v0.63/ai/mcp) and Anthropic's article [Get started with custom connectors using remote MCP](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp) say so.
 * Airflow refreshes the Metabase cache after each dbt build ([ADR-0002](0002-orchestrate-with-airflow-3.md)).
 * The [Metabase documentation](https://www.metabase.com/docs/latest/) covers the editions, the API and the MCP server.

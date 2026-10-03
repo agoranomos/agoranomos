@@ -17,7 +17,7 @@ Which Python version and tools do we use, and how are changes checked, merged an
 * One Python version that every component supports.
 * Reproducible environments: pinned tool versions and locked dependencies.
 * Fast checks that run the same way on a laptop and in CI.
-* No secrets in the repository or its history, and no unpinned code in CI.
+* No secrets in the repository or its history, and nothing unpinned in CI: actions are pinned by commit SHA, and hooks and tools by exact version.
 * A readable history, from which release notes can be produced.
 * Updates to pinned versions should be routine and not hand work.
 
@@ -35,7 +35,7 @@ Chosen option: "uv, prek and Renovate, with ruff and the checks described below,
 In place as of October 2026:
 
 * **Python 3.13** for every component. dbt-mcp and elementary require Python below 3.14. Airflow and Cosmos support 3.14 as well, but 3.13 is the newest version that all of them support, so it is used everywhere.
-* **uv** manages Python, the virtual environment and the lock file. The repository root is a uv project for the development tooling, and packages that are added later become members of its workspace. The root itself is never built or installed. `uv.lock` is committed, the tool versions are pinned in `pyproject.toml`, and CI installs with `uv sync --locked` using a pinned uv version.
+* **uv** manages Python, the virtual environment and the lock file. The repository root is a uv project for the development tooling, and packages that are added later become members of its workspace. The root itself is never built or installed. `uv.lock` is committed, the tool versions are pinned in `pyproject.toml`, which also sets the minimum uv version (`required-version`), and CI installs with `uv sync --locked` using a pinned uv version.
 * **ruff** lints and formats the code. The rules include the Airflow rules (`AIR`).
 * **prek** runs the git hooks of the standard `.pre-commit-config.yaml`: file hygiene checks (large files, case conflicts, merge conflict markers, JSON, TOML and YAML syntax, private keys, final newlines, line endings and trailing whitespace), ruff, `typos` for spelling, `gitleaks` for secrets, `actionlint` and `zizmor` for GitHub Actions workflows, and `check-jsonschema` for workflows, issue forms and the Renovate configuration.
 * **Full-repository checks.** Some hooks inspect only staged files or an in-progress merge, so on a clean CI checkout they would check nothing. The configuration therefore runs `check-added-large-files` with `--enforce-all` and `check-merge-conflict` with `--assume-in-merge`. It also adds a second `gitleaks` entry, `gitleaks-history`, in the manual stage. It scans the full git history, and CI runs it on a full clone, while the regular `gitleaks` hook checks staged changes at commit time.

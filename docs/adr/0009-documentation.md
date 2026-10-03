@@ -30,11 +30,11 @@ Which tool and structure do we use, and in which languages do we write?
 
 ## Decision Outcome
 
-Chosen option: "Zensical, with the Diátaxis structure", because Material for MkDocs is in maintenance and reaches end of life in November 2026, while Zensical reads MkDocs configuration and keeps the Python and Markdown toolchain.
+Chosen option: "Zensical, with the Diátaxis structure", because Material for MkDocs is in maintenance mode, with critical bug fixes and security updates promised only through May 5, 2027, while Zensical reads MkDocs configuration and keeps the Python and Markdown toolchain.
 
 In practice this means:
 
-* **Tool.** The site is built with Zensical. Its version is pinned in the development dependencies and locked in `uv.lock`, and CI builds the site with `zensical build --strict`, so a broken link, anchor or navigation entry fails the pull request.
+* **Tool.** The site is built with Zensical. Its version is pinned in the development dependencies and locked in `uv.lock`, and CI builds the site with `zensical build --strict`, so a broken link or anchor fails the pull request. Navigation entries are not checked yet (as of Zensical 0.0.67), so a new page in the navigation is checked with `zensical serve`.
 * **Structure.** The content follows [Diátaxis](https://diataxis.fr/): tutorials, how-to guides, reference and explanation. Each part has one job.
 * **Decision records.** ADRs live in `docs/adr` and are published with the site ([ADR-0001](0001-record-architecture-decisions.md)).
 * **Languages.** English is the primary language. The README (as `README.ru.md`) and the key pages are also to be provided in Russian.
@@ -42,7 +42,7 @@ In practice this means:
 
 The other options were not chosen for these reasons:
 
-* **Material for MkDocs** reaches end of life in November 2026, so a new site should not be built on it.
+* **Material for MkDocs** is in maintenance mode, and its team promises only critical bug fixes and security updates, through May 5, 2027, so a new site should not be built on it.
 * **Docusaurus** is built on JavaScript and would add a Node.js toolchain next to the Python tooling.
 * **Sphinx** uses reStructuredText as its native markup, and Markdown needs an extension, while the documentation of this project is Markdown.
 
@@ -50,14 +50,15 @@ The other options were not chosen for these reasons:
 
 * Good, because the site is built with a tool that reads MkDocs configuration, so the project does not start on a tool that is reaching its end of life.
 * Good, because Diátaxis gives every page one job and every contributor a clear place for new pages.
-* Good, because the strict build catches broken links, anchors and navigation entries before merge.
+* Good, because the strict build catches broken links and anchors before merge.
 * Good, because English as the primary language reaches the widest group of readers.
 * Bad, because Zensical is young (its versions are still 0.0.x). Behavior can change between releases, so the version is pinned and the build is strict, and the content stays plain Markdown that another tool can read.
+* Bad, because the strict build does not check navigation entries yet (as of Zensical 0.0.67): an entry that points at a missing file builds without an error, so a new page in the navigation has to be checked with `zensical serve`.
 * Bad, because the Russian README and key pages take effort to maintain and can lag behind the English text, which is the reference when they differ.
 
 ## More Information
 
-* Versions as of October 2026: Zensical 0.0.67. Material for MkDocs is at 9.7.7, in maintenance.
+* Versions as of October 2026: Zensical 0.0.67. Material for MkDocs is at 9.7.7, in maintenance mode. Its team's [end-of-life notice](https://github.com/squidfunk/mkdocs-material/issues/8523) says that critical bug fixes and security updates continue through May 5, 2027, six months beyond the end-of-life date announced earlier, November 5, 2026.
 * The site is configured in `zensical.toml`. Zensical also shows the `status` of an ADR as a page status, which is why the statuses are defined there.
 * Planned: the dbt documentation is generated and published together with the site.
 * [Zensical](https://zensical.org/) and [Diátaxis](https://diataxis.fr/) are described on their own sites.

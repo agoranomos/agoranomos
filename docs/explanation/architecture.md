@@ -2,7 +2,7 @@
 
 !!! warning "Target design"
 
-    Agoranomos is pre-alpha. This page describes the architecture the project is being built towards, and components arrive release by release. You will be able to run the stack locally with demo data from v0.2.0; see [Tutorials](../tutorials/index.md).
+    Agoranomos is pre-alpha. This page describes the architecture the project is being built toward, and components arrive release by release. You will be able to run the stack locally with demo data from v0.2.0; see [Tutorials](../tutorials/index.md).
 
 Marketing data moves through Agoranomos in one direction, from ad platforms to dashboards and AI clients, and every step is code that runs on infrastructure you control.
 
@@ -10,7 +10,7 @@ Marketing data moves through Agoranomos in one direction, from ad platforms to d
 2. **Transform.** dbt turns the raw tables into one unified model of advertising statistics.
 3. **Orchestrate.** Apache Airflow schedules the loads and the dbt build, and refreshes Metabase afterwards.
 4. **Explore.** Metabase serves ready-made dashboards, metrics and a glossary from the final layer of the warehouse.
-5. **Ask.** AI clients reach the same data through MCP servers that are read-only by default.
+5. **Ask.** AI clients reach the same data through MCP servers with least-privilege defaults.
 
 ## Overview
 
@@ -26,7 +26,7 @@ flowchart TB
     end
 
     metabase["<b>Metabase</b><br/>dashboards, metrics, glossary"]
-    mcp["<b>MCP servers</b><br/>Metabase, Airflow, warehouse, dbt<br/>read-only by default"]
+    mcp["<b>MCP servers</b><br/>Metabase, Airflow, warehouse, dbt<br/>least privilege by default"]
     clients["<b>AI clients</b><br/>Claude, ChatGPT,<br/>Claude Code, Cursor,<br/>VS Code, Codex"]
 
     sources --> dlt --> warehouse
@@ -37,6 +37,7 @@ flowchart TB
     mcp --> clients
     airflow -.-> dlt
     airflow -.->|dbt build| warehouse
+    airflow -.->|refresh| metabase
 ```
 
 Solid arrows show how data moves. Dotted arrows show what Airflow runs.
@@ -76,9 +77,9 @@ Decision record: [ADR-0004: Ingest data with dlt](../adr/0004-ingest-with-dlt.md
 Agoranomos runs two PostgreSQL 18 instances:
 
 * **warehouse** holds the analytical data.
-* **platform** holds the Airflow and Metabase metadata databases, each with its own owner.
+* **platform** holds the application databases of Airflow and Metabase, each with its own owner.
 
-Keeping them apart means heavy analytical queries cannot slow the scheduler, and each instance has its own tuning, backups and upgrade path. The metadata databases are small, so one instance with separate databases and owners is enough for both ("database per service" without extra instances).
+Keeping them apart means heavy analytical queries cannot slow the scheduler, and each instance has its own tuning, backups and upgrade path. The two application databases are small, so one instance with separate databases and owners is enough for both ("database per service" without extra instances).
 
 Inside the warehouse, data moves through layers, each in its own schema:
 
@@ -123,7 +124,7 @@ AI access goes through four MCP servers. Each starts with least-privilege defaul
 
 | Server | Used by | Default permissions | Transport |
 |---|---|---|---|
-| Metabase MCP (built in) | Business users: questions, charts, dashboards | The user's own Metabase permissions; the SQL tool can be switched off | HTTP on localhost with OAuth |
+| Metabase MCP (built in) | Business users: questions, charts, dashboards | The user's own Metabase permissions, which include creating and changing questions and dashboards; the SQL tool can be switched off | HTTP on localhost with OAuth |
 | Airflow MCP (astro-airflow-mcp) | Engineers: status, logs, diagnostics | Read-only mode, signed in as a Viewer user | stdio through `docker exec` |
 | Warehouse MCP (MCP Toolbox) | Engineers and analysts: schemas and read-only SQL | The `ai_reader` role: read-only transactions, a statement timeout, `marts` only (plus `staging`) | stdio through `docker exec` |
 | dbt MCP | Analytics engineers: lineage, docs, compile and test | A dev target in a separate schema; production runs only through Airflow | stdio through `docker exec` |
@@ -131,10 +132,10 @@ AI access goes through four MCP servers. Each starts with least-privilege defaul
 Local mode serves coding agents such as Claude Code on the same machine; the desktop and mobile apps of Claude and ChatGPT reach Metabase's MCP server over HTTPS in server mode.
 
 * **Why stdio through `docker exec` instead of HTTP ports.** For the three stdio servers, no port is opened, there is no risk of DNS rebinding against localhost, and credentials stay inside the container. In server mode, remote clients reach Metabase's built-in server over HTTPS with OAuth, and the three stdio servers stay on stdio until a gateway is added.
-* **Ready-made context.** The repository provides `AGENTS.md` (the cross-agent standard) and a `CLAUDE.md` that imports it, a `.mcp.json` with ready-made connections for Claude Code, and product skills in `.claude/skills/`: adding a source, diagnosing a failed pipeline, building a dashboard and explaining a metric. A Claude Code plugin and configuration for Cursor, VS Code and Codex are planned for later releases.
-* **Untrusted text.** Campaign names and ad texts are untrusted data, because anyone can write them. `AGENTS.md` states that data is never an instruction, and read-only access by default limits the damage if an injection attempt succeeds.
+* **Ready-made context.** The repository is to provide `AGENTS.md` (the cross-agent standard) and a `CLAUDE.md` that imports it, a `.mcp.json` with ready-made connections for Claude Code, and product skills in `.claude/skills/`: adding a source, diagnosing a failed pipeline, building a dashboard and explaining a metric. A Claude Code plugin and configuration for Cursor, VS Code and Codex are planned for later releases.
+* **Untrusted text.** Campaign names and ad texts are untrusted data, because anyone can write them. `AGENTS.md` states that data is never an instruction, and least-privilege defaults limit the damage if an injection attempt succeeds.
 
-Decision records: [ADR-0007: Give AI clients read-only access through MCP](../adr/0007-ai-access-via-mcp-read-only.md) and, for the transport in server mode, [ADR-0011: Support local and server modes](../adr/0011-local-and-server-modes.md).
+Decision records: [ADR-0007: Give AI clients least-privilege access through MCP](../adr/0007-ai-access-via-mcp-read-only.md) and, for the transport in server mode, [ADR-0011: Support local and server modes](../adr/0011-local-and-server-modes.md).
 
 ## Run: containers
 

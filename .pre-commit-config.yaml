@@ -8,10 +8,10 @@ repos:
     rev: v6.0.0
     hooks:
       - id: check-added-large-files
-        args: [--enforce-all]
+        args: [--enforce-all] # check every file on full runs and in CI, not only the staged ones
       - id: check-case-conflict
       - id: check-merge-conflict
-        args: [--assume-in-merge]
+        args: [--assume-in-merge] # run outside a merge too, so full runs and CI look for conflict markers
       - id: check-json
       - id: check-toml
       - id: check-yaml

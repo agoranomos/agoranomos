@@ -24,9 +24,9 @@ The `status` in the metadata block of a record is one of these words, written in
 | deprecated | The decision no longer applies, and no other record replaces it. |
 | superseded | A newer record replaced the decision. The status is `superseded`, and a line `Superseded by [ADR-0123](0123-title.md).` under the title names the new record. |
 
-## Accepted records are not edited
+## Accepted records keep their decision
 
-An accepted record is never rewritten to fit new circumstances. To change a decision, write a new ADR that supersedes the old one. The old record keeps its text. Its status becomes `superseded`, and one line under its title points to the new record; nothing else changes. That way the history of why things changed stays readable.
+An accepted record keeps its decision. Its status, the implementation status of what it decided (such as an "In place" or "Planned" list), factual corrections and editorial fixes may be edited, and the pull request says which. These edits leave the `date` unchanged: it is the day the decision was made or last changed. A changed decision needs a new ADR that supersedes the old one. The old record keeps its text. Its status becomes `superseded`, and one line under its title points to the new record; nothing else changes. That way the history of why things changed stays readable.
 
 A superseded record starts like this:
 
@@ -54,7 +54,7 @@ Agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0004](0004-ingest-with-dlt.md) | Ingest data with dlt | accepted | 2026-10-02 |
 | [0005](0005-transform-with-dbt-core.md) | Transform data with dbt Core | accepted | 2026-10-02 |
 | [0006](0006-metabase-as-bi.md) | Use Metabase as the BI layer | accepted | 2026-10-02 |
-| [0007](0007-ai-access-via-mcp-read-only.md) | Give AI clients read-only access through MCP | accepted | 2026-10-02 |
+| [0007](0007-ai-access-via-mcp-read-only.md) | Give AI clients least-privilege access through MCP | accepted | 2026-10-02 |
 | [0008](0008-apache-2-and-dco.md) | License under Apache-2.0 with DCO sign-off | accepted | 2026-10-02 |
 | [0009](0009-documentation.md) | Write documentation with Zensical and Diátaxis | accepted | 2026-10-02 |
 | [0010](0010-multi-arch-and-memory-budget.md) | Support amd64 and arm64 within a memory budget | accepted | 2026-10-02 |

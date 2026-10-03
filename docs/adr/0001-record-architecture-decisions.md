@@ -36,7 +36,8 @@ The rules are:
 
 * **What is recorded.** A decision gets an ADR when it is hard to reverse or affects users and contributors. Typical subjects are the components of the stack, the contracts of the data models, security defaults, the license and releases.
 * **Where and how.** Each record is a Markdown file `docs/adr/NNNN-title.md` with a sequential four-digit number. It follows the [MADR 4.0](https://adr.github.io/madr/) template, with a metadata block for status, date and decision-makers.
-* **Lifecycle.** A record has one of the statuses proposed, accepted, rejected, deprecated or superseded. An accepted record is not edited. To change a decision, a new ADR supersedes the old one. The old record keeps its text, its status becomes `superseded`, and one line under its title, `Superseded by [ADR-NNNN](NNNN-title.md)`, points to the new record.
+* **Lifecycle.** A record has one of the statuses proposed, accepted, rejected, deprecated or superseded. An accepted record keeps its decision. Its status, the implementation status of what it decided (such as an "In place" or "Planned" list), factual corrections and editorial fixes may be edited, and the pull request says which. A changed decision needs a new ADR that supersedes the old one: the old record keeps its text, its status becomes `superseded`, and one line under its title, `Superseded by [ADR-NNNN](NNNN-title.md)`, points to the new record.
+* **Date.** The `date` in the metadata block is the day the decision was made or last changed. The edits that an accepted record allows leave it unchanged. (MADR 4.0 defines `date` as when the decision was last updated.)
 
 ### Consequences
 
