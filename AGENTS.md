@@ -16,6 +16,7 @@ Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 - `pyproject.toml`, `uv.lock`, `.python-version`: the development tooling (Python 3.13, ruff, prek and Zensical). The root is a uv project that is never built or installed.
 - `.pre-commit-config.yaml`: the git hooks and static checks, run by prek. `_typos.toml` is the word list of the spell checker, and `.editorconfig` and `.gitattributes` fix indentation and line endings (LF).
 - `.github/`: the CI workflows (`workflows/`), the issue forms, the pull request template and `CODEOWNERS`.
+- `renovate.json`: the [Renovate](https://docs.renovatebot.com/) configuration that keeps the pinned versions current ([ADR-0012](docs/adr/0012-python-and-tooling.md)).
 - `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`: the community files. `LICENSE` and `NOTICE`: Apache-2.0.
 
 ## Commands

@@ -17,7 +17,7 @@ Contributions that you wrote with the help of an AI assistant are welcome under 
 
 ## Set up your environment
 
-You need `git` and [uv](https://docs.astral.sh/uv/) 0.12.22 or newer. That is the version that wrote `uv.lock`, and CI uses exactly this one. uv also installs Python 3.13 when it is missing.
+You need `git` and [uv](https://docs.astral.sh/uv/) 0.12.22 or newer (as of October 2026). CI uses the uv version pinned in `.github/workflows/ci.yml`. uv also installs Python 3.13 when it is missing.
 
 ```bash
 git clone https://github.com/agoranomos/agoranomos.git
@@ -33,7 +33,7 @@ uv run prek run --all-files     # every check on the whole repository, as CI run
 uv run zensical build --strict  # builds the documentation; a broken link or navigation entry fails
 ```
 
-The checks are configured in `.pre-commit-config.yaml` and run by [prek](https://prek.j178.dev/). They cover file hygiene (large files, merge conflict markers, JSON, TOML and YAML syntax, private keys, final newlines, line endings and trailing whitespace), linting and formatting with ruff, spelling with typos, secrets with gitleaks, and GitHub Actions workflows and issue forms.
+The checks are configured in `.pre-commit-config.yaml` and run by [prek](https://prek.j178.dev/). They cover file hygiene (large files, merge conflict markers, JSON, TOML and YAML syntax, private keys, final newlines, line endings and trailing whitespace), linting and formatting with ruff, spelling with typos, secrets with gitleaks, and GitHub Actions workflows, issue forms and the Renovate configuration.
 
 CI also scans the whole git history for secrets. You can do the same on a full clone (not a shallow one) with:
 
@@ -96,7 +96,7 @@ An accepted record is not rewritten. To change a decision, write a new ADR that 
 - The merge conflict check rejects a line that begins with the conflict markers `<<<<<<<`, `=======` or `>>>>>>>`, even inside a documentation example. Indent such a line, or mention the markers inside a sentence.
 - The secret scanner blocks anything that looks like a real key or token. Use obvious placeholders such as `<your-token>` in examples, and never commit `.env` files. They are git-ignored, and `.env.example` will be the template once it exists.
 - The spell checker, typos, may flag a correct word, such as a product name. Add it to `[default.extend-words]` in `_typos.toml`.
-- Some tool versions are pinned in more than one place: ruff in `pyproject.toml` and `.pre-commit-config.yaml`, and prek in `pyproject.toml` and `.github/workflows/ci.yml`. The uv version is pinned in `.github/workflows/ci.yml` and named in this guide. Change them together.
+- Some tool versions are pinned in more than one place: ruff in `pyproject.toml` and `.pre-commit-config.yaml`, and prek in `pyproject.toml` and `.github/workflows/ci.yml`. Renovate updates each pair in one pull request, and a change made by hand has to change both. The uv version is pinned in `.github/workflows/ci.yml`, and this guide gives the minimum version.
 
 ## License
 
