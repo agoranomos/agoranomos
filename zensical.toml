@@ -1,0 +1,50 @@
+[project]
+site_name = "Agoranomos"
+site_description = "Open-source marketing BI out of the box, with AI access via MCP."
+site_author = "Andrei Gromov"
+repo_url = "https://github.com/agoranomos/agoranomos"
+repo_name = "agoranomos/agoranomos"
+copyright = "Copyright &copy; 2026 Andrei Gromov and Agoranomos contributors. Apache-2.0."
+nav = [
+  { "Home" = "index.md" },
+  { "Tutorials" = ["tutorials/index.md"] },
+  { "How-to guides" = ["how-to/index.md"] },
+  { "Reference" = ["reference/index.md"] },
+  { "Explanation" = ["explanation/index.md", "explanation/architecture.md"] },
+  { "Decisions" = ["adr/index.md", "adr/0001-record-architecture-decisions.md"] },
+]
+
+[project.theme]
+language = "en"
+features = [
+  "content.code.copy",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.sections",
+  "navigation.top",
+  "search.highlight",
+]
+
+[[project.theme.palette]]
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[project.markdown_extensions]
+admonition = {}
+pymdownx.details = {}
+pymdownx.superfences.custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+
+# MADR keeps an ADR's status in the front matter. Zensical also reads that field as a page
+# status and shows an icon in the navigation, so give each status a name to show on hover.
+[project.extra.status]
+proposed = "Proposed"
+accepted = "Accepted"
+superseded = "Superseded"
