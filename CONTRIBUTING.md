@@ -86,7 +86,7 @@ To add one:
 
 1. Create `docs/adr/NNNN-short-title.md` with the next free number. Follow the [MADR 4.0](https://adr.github.io/madr/) structure of the existing records, with a metadata block that has `status`, `date` and `decision-makers`.
 2. Add a navigation entry for it under "Decisions" in `zensical.toml` and a row to the table in `docs/adr/index.md`.
-3. Start with `status: proposed`. The record becomes `accepted` when the pull request is merged.
+3. Start with `status: proposed`, both in the record and in the Status column of its row in the index. When the maintainer approves the pull request, you change both to `accepted` in that same pull request, before it is squash-merged, so the record is accepted from the moment it lands on `main`.
 
 An accepted record is not rewritten. To change a decision, write a new ADR that supersedes the old one, as the index describes.
 
@@ -94,9 +94,9 @@ An accepted record is not rewritten. To change a decision, write a new ADR that 
 
 - ruff also formats the `python` code blocks in Markdown files, so `ruff-format` can rewrite a code sample in the documentation. Write samples the way ruff formats them.
 - The merge conflict check rejects a line that begins with the conflict markers `<<<<<<<`, `=======` or `>>>>>>>`, even inside a documentation example. Indent such a line, or mention the markers inside a sentence.
-- The secret scanner blocks anything that looks like a real key or token. Use obvious placeholders such as `<your-token>` in examples, and never commit `.env` files (they are git-ignored; `.env.example` is the template).
+- The secret scanner blocks anything that looks like a real key or token. Use obvious placeholders such as `<your-token>` in examples, and never commit `.env` files. They are git-ignored, and `.env.example` will be the template once it exists.
 - The spell checker, typos, may flag a correct word, such as a product name. Add it to `[default.extend-words]` in `_typos.toml`.
-- Some tool versions are pinned in more than one place: ruff in `pyproject.toml` and `.pre-commit-config.yaml`, prek in `pyproject.toml` and `.github/workflows/ci.yml`, and uv in `.github/workflows/ci.yml`. Change them together.
+- Some tool versions are pinned in more than one place: ruff in `pyproject.toml` and `.pre-commit-config.yaml`, and prek in `pyproject.toml` and `.github/workflows/ci.yml`. The uv version is pinned in `.github/workflows/ci.yml` and named in this guide. Change them together.
 
 ## License
 
