@@ -1,10 +1,10 @@
 # Agoranomos
 
-Agoranomos is open-source marketing BI out of the box: ad platforms → Postgres warehouse → Metabase dashboards → ask anything in Claude or ChatGPT via MCP.
+Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreSQL warehouse → Metabase dashboards → ask anything in Claude or ChatGPT via MCP.
 
 !!! warning "Status: pre-alpha"
 
-    Agoranomos is under active development and is not ready for use yet. These pages describe the intended design, and pages for features that are not released yet say which release adds them.
+    Agoranomos is under active development and is not ready for use yet. These pages describe the intended design, and pages for features that are not released yet say when they are planned.
 
 ## What it does
 
@@ -20,7 +20,7 @@ To see how the pieces fit together, read the [architecture overview](explanation
 The documentation follows [Diátaxis](https://diataxis.fr/): content is split by what you need at the moment, so every part has one job.
 
 - [Tutorials](tutorials/index.md): learn by doing. The first tutorial, running Agoranomos locally with demo data, arrives in v0.2.0.
-- [How-to guides](how-to/index.md): recipes for specific tasks, such as adding a data source. Published from v0.2.0 onwards.
-- [Reference](reference/index.md): exact facts to look up, such as configuration and the data model. Published from v0.2.0 onwards.
+- [How-to guides](how-to/index.md): recipes for specific tasks, such as adding a data source. Published together with the features they describe.
+- [Reference](reference/index.md): exact facts to look up, such as configuration and the data model. Published together with the features they describe.
 - [Explanation](explanation/index.md): how Agoranomos works and why it is built that way, starting with the [architecture](explanation/architecture.md).
 - [Decisions](adr/index.md): the architecture decision records, one per significant choice.

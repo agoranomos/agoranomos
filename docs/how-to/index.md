@@ -9,4 +9,4 @@ How-to guides are short recipes for people who already have Agoranomos running a
 - **Back up and restore**: protect your data and bring it back after a failure.
 - **Connect an AI client**: give Claude, ChatGPT or a coding agent access to your data through MCP.
 
-Guides are published together with the features they describe, from v0.2.0 onwards. Agoranomos is pre-alpha and not ready for use yet, so there is nothing to follow today.
+Guides are published together with the features they describe. Agoranomos is pre-alpha and not ready for use yet, so there is nothing to follow today.

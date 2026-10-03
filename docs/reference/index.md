@@ -9,4 +9,4 @@ Reference pages are technical descriptions to look things up in, not to read fro
 - **Data model**: the marts layer, with tables, columns, grain and keys.
 - **Metrics catalog**: the definition of each metric, including how it is calculated and whether it is additive.
 
-Reference pages are published together with the interfaces they describe, from v0.2.0 onwards.
+Reference pages are published together with the features they describe.

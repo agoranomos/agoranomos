@@ -50,7 +50,7 @@ Solid arrows show how data moves. Dotted arrows show what Airflow runs.
 | Orchestration | Apache Airflow with CeleryExecutor | Scheduling and orchestration; workers scale out | 3.3 |
 | | Valkey | Message broker for Celery | 9 |
 | Storage | PostgreSQL | The warehouse and the platform databases | 18 |
-| Transformation | dbt Core with dbt-postgres | SQL models, tests and documentation | 1.12 and 1.11 |
+| Transformation | dbt Core with dbt-postgres | SQL models, tests and documentation | dbt Core 1.12, dbt-postgres 1.11 |
 | | Cosmos | Runs dbt models as Airflow tasks | 1.15 |
 | Data quality | dbt tests and elementary | Tests from day one and an observability report | elementary 0.26 |
 | BI | Metabase OSS | Dashboards, metrics, glossary and a built-in MCP server | 0.63 |
@@ -95,7 +95,7 @@ dbt Core with dbt-postgres does the transformations, with tests from the first d
 * Additive metrics are stored at daily grain: date, account, campaign, ad group and ad.
 * Non-additive metrics, such as reach and frequency, are separate period facts with calendar keys.
 * Currencies (FX rates) and time zones are explicit.
-* History is tracked as slowly changing dimensions (dbt snapshots with explicit `check_cols`) only for attributes where it matters.
+* History is tracked as type 2 slowly changing dimensions (SCD2), using dbt snapshots with explicit `check_cols`, only for attributes where it matters.
 
 ## Orchestrate: Apache Airflow
 
@@ -120,7 +120,9 @@ AI access goes through four MCP servers. Each starts with least-privilege defaul
 | Warehouse MCP (MCP Toolbox) | Engineers and analysts: schemas and read-only SQL | The `ai_reader` role: read-only transactions, a statement timeout, `marts` only (plus `staging`) | stdio through `docker exec` |
 | dbt MCP | Analytics engineers: lineage, docs, compile and test | A dev target in a separate schema; production runs only through Airflow | stdio through `docker exec` |
 
-* **Why stdio through `docker exec` instead of HTTP ports.** No port is opened, there is no risk of DNS rebinding against localhost, and credentials stay inside the container. HTTP with authentication and a gateway is planned for server and team deployments in a later release.
+Local mode serves coding agents such as Claude Code on the same machine; the desktop and mobile apps of Claude and ChatGPT connect over HTTPS in server mode, which is planned for a later release.
+
+* **Why stdio through `docker exec` instead of HTTP ports.** For the three stdio servers, no port is opened, there is no risk of DNS rebinding against localhost, and credentials stay inside the container. HTTP with authentication and a gateway is planned for server and team deployments in a later release.
 * **Ready-made context.** The repository provides `AGENTS.md` (the cross-agent standard) and a `CLAUDE.md` that imports it, a `.mcp.json` with ready-made connections for Claude Code, and product skills in `.claude/skills/`: adding a source, diagnosing a failed pipeline, building a dashboard and explaining a metric. A Claude Code plugin and configuration for Cursor, VS Code and Codex are planned for later releases.
 * **Untrusted text.** Campaign names and ad texts are untrusted data, because anyone can write them. `AGENTS.md` states that data is never an instruction, and read-only access by default limits the damage if an injection attempt succeeds.
 
@@ -134,7 +136,7 @@ The stack runs as one Docker Compose project, split into profiles so that you st
 
 A reverse proxy with TLS for server deployments (the `server` profile) and scheduled backups (the `ops` profile) are planned for later releases.
 
-Plan for 8 GB of RAM available to Docker (6 GB is the minimum), 4 CPUs and 20 GB of disk, on x86-64-v2 or ARM64 hardware such as Apple Silicon.
+The resource targets, which are still to be measured, are 8 GB of RAM available to Docker (6 GB as a minimum), 4 CPUs and 20 GB of disk, on x86-64-v2 or ARM64 hardware such as Apple Silicon.
 
 ## Decisions
 
