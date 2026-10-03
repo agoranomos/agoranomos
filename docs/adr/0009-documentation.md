@@ -37,7 +37,7 @@ In practice this means:
 * **Tool.** The site is built with Zensical. Its version is pinned in the development dependencies and locked in `uv.lock`, and CI builds the site with `zensical build --strict`, so a broken link, anchor or navigation entry fails the pull request.
 * **Structure.** The content follows [Diátaxis](https://diataxis.fr/): tutorials, how-to guides, reference and explanation. Each part has one job.
 * **Decision records.** ADRs live in `docs/adr` and are published with the site ([ADR-0001](0001-record-architecture-decisions.md)).
-* **Languages.** English is the primary language. The README (as `README.ru.md`) and the key pages are also provided in Russian.
+* **Languages.** English is the primary language. The README (as `README.ru.md`) and the key pages are also to be provided in Russian.
 * **Hosting.** The site is planned to be published on GitHub Pages.
 
 The other options were not chosen for these reasons:

@@ -35,11 +35,11 @@ Chosen option: "Metabase OSS", because it is approachable for business users, it
 In practice this means:
 
 * **Version.** Metabase 0.60 or later is required, because 0.60 is the first release with the built-in MCP server. As of October 2026 the stack pins 0.63.
-* **Built-in MCP server.** Metabase serves it over HTTP with OAuth and applies the permissions of the signed-in user. It needs no LLM key, and its SQL tool can be switched off ([ADR-0007](0007-ai-access-via-mcp-read-only.md)).
+* **Built-in MCP server.** Metabase serves it itself, so there is no separate component to run. It uses HTTP with OAuth, applies the permissions of the signed-in user, needs no LLM key, and its SQL tool can be switched off ([ADR-0007](0007-ai-access-via-mcp-read-only.md)).
 * **Dashboards as code.** Metabase serialization and Remote Sync are available only in the paid editions. A one-shot init job therefore sets Metabase up through its REST API: it connects the warehouse, creates collections and dashboards from definitions kept in the repository, and enables the MCP server.
 * **Data access.** Metabase connects to the warehouse as the `metabase_reader` role, which sees only `marts`. Its own application database lives in the `platform` instance ([ADR-0003](0003-two-postgres-instances.md)).
 
-The other options were weighed against the same drivers. None was preferred over Metabase's combination of an approachable interface for business users and an official built-in MCP server.
+Apache Superset also includes an MCP server, but as of October 2026 it runs as a separate process next to Superset, while Metabase's server needs no separate component to run. Grafana, Lightdash and Evidence were weighed against the same drivers, and none was preferred over Metabase's combination of an approachable interface for business users and a built-in MCP server.
 
 ### Consequences
 
@@ -51,7 +51,7 @@ The other options were weighed against the same drivers. None was preferred over
 
 ## More Information
 
-* Versions as of October 2026: Metabase 0.63 is the current regular release. Regular releases reach end of life two to four months after they appear (0.63 on 2026-11-01), and the LTS release, 58, has no built-in MCP server. The stack moves to the next LTS release once it includes the MCP server.
+* Versions as of October 2026: Metabase 0.63 is the current regular release. Regular releases reach end of life two to four months after they appear (0.63 on 2026-11-01), and the LTS release, 0.58, has no built-in MCP server. The stack moves to the next LTS release once it includes the MCP server.
 * The built-in MCP server needs a correct `MB_SITE_URL`. Claude Code can connect to a server on localhost, but the Claude desktop app cannot, which is one reason for the server mode in [ADR-0011](0011-local-and-server-modes.md).
 * Airflow refreshes the Metabase cache after each dbt build ([ADR-0002](0002-orchestrate-with-airflow-3.md)).
 * The [Metabase documentation](https://www.metabase.com/docs/latest/) covers the editions, the API and the MCP server.

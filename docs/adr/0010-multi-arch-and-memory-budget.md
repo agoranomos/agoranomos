@@ -30,10 +30,10 @@ Chosen option: "Images for amd64 and arm64, both tested in CI, within a memory b
 
 In practice this means:
 
-* **Two architectures.** The images that Agoranomos builds are published for `linux/amd64` and `linux/arm64`, and the third-party images in the default stack must be available for both.
-* **Both in CI.** CI builds and tests on both architectures, as a build matrix.
-* **A memory budget.** The whole stack is meant to fit on a host with 8 GB of RAM. The planning figures are 8 GB of RAM available to Docker (6 GB as a minimum), 4 CPUs and 20 GB of disk, on x86-64-v2 or ARM64 hardware.
-* **A target, not yet a measurement.** The figures are to be measured once the stack runs end to end. If the budget cannot be met, a lighter `lite` profile ([ADR-0002](0002-orchestrate-with-airflow-3.md)) is likely to be added.
+* **Two architectures.** The images that Agoranomos builds are to be published for `linux/amd64` and `linux/arm64`, and the third-party images in the default stack must be available for both.
+* **Both in CI.** CI is to build and test on both architectures, as a build matrix.
+* **A memory budget.** The planning figures are 8 GB of RAM available to Docker as the recommended amount and 6 GB as the minimum, which is what lets the stack fit on a host with 8 GB of RAM. The other figures are 4 CPUs and 20 GB of disk, on x86-64-v2 or ARM64 hardware.
+* **Targets, not yet measurements.** All of these figures are targets, to be measured once the stack runs end to end. If the budget cannot be met, a lighter `lite` profile ([ADR-0002](0002-orchestrate-with-airflow-3.md)) is likely to be added.
 
 The other option was not chosen for this reason:
 

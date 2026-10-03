@@ -32,9 +32,9 @@ Chosen option: "One Compose stack with two first-class modes, local and server, 
 In practice this means:
 
 * **Local mode** is for engineers on their own machine. Ports are published on `127.0.0.1` only, the databases publish no ports by default, and MCP runs over stdio through `docker exec`, with the Metabase endpoint on localhost ([ADR-0007](0007-ai-access-via-mcp-read-only.md)).
-* **Server mode** is for teams and for business users who connect from the Claude and ChatGPT apps. A Caddy reverse proxy with automatic TLS certificates (the `server` profile) sits in front of the web endpoints, MCP is served to remote clients over HTTPS with OAuth, and scheduled backups run (the `ops` profile).
+* **Server mode** is for teams and for business users who connect from the Claude and ChatGPT apps. A Caddy reverse proxy with automatic TLS certificates (the `server` profile) sits in front of the web endpoints, and scheduled backups run (the `ops` profile). The Metabase MCP server is served to remote clients over HTTPS with OAuth. The Airflow, Toolbox and dbt servers stay on stdio until a gateway is added ([ADR-0007](0007-ai-access-via-mcp-read-only.md)).
 * **One stack.** Both modes use the same services and the same Compose project, and profiles select what runs.
-* **Both are tested.** Each mode is covered by automated tests in CI, so neither can break unnoticed.
+* **Both are tested.** Each mode will be covered by automated tests in CI, so that a change that breaks one of them shows up there.
 
 The other option was not chosen for this reason:
 
@@ -53,6 +53,6 @@ The other option was not chosen for this reason:
 ## More Information
 
 * The Metabase MCP server needs a correct `MB_SITE_URL`, and the Claude desktop app cannot connect to an endpoint on localhost ([ADR-0006](0006-metabase-as-bi.md)). Claude Code can, which is why local mode works for coding agents.
-* A gateway in front of the MCP servers for team deployments may follow ([ADR-0007](0007-ai-access-via-mcp-read-only.md)). It is not needed to start.
+* A gateway that puts authentication in front of the Airflow, Toolbox and dbt servers may follow ([ADR-0007](0007-ai-access-via-mcp-read-only.md)). It is not needed to start.
 * Both modes have to fit the memory budget in [ADR-0010](0010-multi-arch-and-memory-budget.md).
 * [Caddy](https://caddyserver.com/docs/automatic-https) obtains and renews TLS certificates automatically.

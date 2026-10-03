@@ -128,9 +128,9 @@ AI access goes through four MCP servers. Each starts with least-privilege defaul
 | Warehouse MCP (MCP Toolbox) | Engineers and analysts: schemas and read-only SQL | The `ai_reader` role: read-only transactions, a statement timeout, `marts` only (plus `staging`) | stdio through `docker exec` |
 | dbt MCP | Analytics engineers: lineage, docs, compile and test | A dev target in a separate schema; production runs only through Airflow | stdio through `docker exec` |
 
-Local mode serves coding agents such as Claude Code on the same machine; the desktop and mobile apps of Claude and ChatGPT connect over HTTPS in server mode.
+Local mode serves coding agents such as Claude Code on the same machine; the desktop and mobile apps of Claude and ChatGPT reach Metabase's MCP server over HTTPS in server mode.
 
-* **Why stdio through `docker exec` instead of HTTP ports.** For the three stdio servers, no port is opened, there is no risk of DNS rebinding against localhost, and credentials stay inside the container. In server mode, remote clients connect over HTTPS with OAuth instead, and a gateway for team deployments may follow.
+* **Why stdio through `docker exec` instead of HTTP ports.** For the three stdio servers, no port is opened, there is no risk of DNS rebinding against localhost, and credentials stay inside the container. In server mode, remote clients reach Metabase's built-in server over HTTPS with OAuth, and the three stdio servers stay on stdio until a gateway is added.
 * **Ready-made context.** The repository provides `AGENTS.md` (the cross-agent standard) and a `CLAUDE.md` that imports it, a `.mcp.json` with ready-made connections for Claude Code, and product skills in `.claude/skills/`: adding a source, diagnosing a failed pipeline, building a dashboard and explaining a metric. A Claude Code plugin and configuration for Cursor, VS Code and Codex are planned for later releases.
 * **Untrusted text.** Campaign names and ad texts are untrusted data, because anyone can write them. `AGENTS.md` states that data is never an instruction, and read-only access by default limits the damage if an injection attempt succeeds.
 
@@ -144,7 +144,7 @@ The stack runs as one Docker Compose project, split into profiles so that you st
 * `ai`: one container with the Airflow, Toolbox and dbt MCP servers, reached over stdio with `docker exec`.
 * `flower`: Celery monitoring.
 
-The stack has two modes, local and server, and both are first-class and tested. In local mode, ports are published on `127.0.0.1` only. Server mode adds a reverse proxy with TLS (the `server` profile) and scheduled backups (the `ops` profile).
+The stack has two modes, local and server. Both are first-class, and both are to be covered by automated tests. In local mode, ports are published on `127.0.0.1` only. Server mode adds a reverse proxy with TLS (the `server` profile) and scheduled backups (the `ops` profile).
 
 The resource targets, which are still to be measured, are 8 GB of RAM available to Docker (6 GB as a minimum), 4 CPUs and 20 GB of disk, on x86-64-v2 or ARM64 hardware such as Apple Silicon.
 
@@ -152,4 +152,4 @@ Decision records: [ADR-0010: Support amd64 and arm64 within a memory budget](../
 
 ## Decisions
 
-The reasons behind the choice of each component, the container layout and the two modes, and the alternatives that were considered, are recorded as architecture decision records. The sections above link to them. [Decisions](../adr/index.md) lists all records, including those on the license and the documentation, and [ADR-0001](../adr/0001-record-architecture-decisions.md) explains which decisions are recorded and how.
+The reasons behind the choices about each component, the container layout and the two modes, and the alternatives that were considered, are recorded as architecture decision records. The sections above link to them. [Decisions](../adr/index.md) lists all records, including those on the license and the documentation, and [ADR-0001](../adr/0001-record-architecture-decisions.md) explains which decisions are recorded and how.

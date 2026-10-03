@@ -43,8 +43,8 @@ Each source loads into its own `raw_<source>` schema as the `loader` role. The d
 The other options were not chosen for these reasons:
 
 * **Self-written connectors** would mean reinventing retries, schema evolution, incremental state and name normalization.
-* **Airbyte** is a platform of its own that runs on Kubernetes, with the `abctl` tool for local installs. That is too heavy for a stack that loads data inside Airflow.
-* **Meltano with Singer taps** needs a runner and a connector format of its own next to Airflow, and a tap would not follow the shared contract without changes.
+* **Airbyte** is a platform of its own that runs on Kubernetes, with the `abctl` tool for local installs. That is too heavy for a stack that loads data inside Airflow. The objection is to running the platform, not to Airbyte's connectors.
+* **Meltano with Singer taps** needs a runner and a connector format of its own next to Airflow.
 
 ### Consequences
 

@@ -8,14 +8,14 @@ decision-makers: Andrei Gromov
 
 ## Context and Problem Statement
 
-Agoranomos keeps data in PostgreSQL in three places: the analytical warehouse, which dlt loads, dbt transforms and Metabase reads; the metadata database of Airflow; and the application database of Metabase. The warehouse is queried heavily and can grow large. The two metadata databases are small and transactional, but the Airflow scheduler needs its database to answer quickly at all times.
+Agoranomos keeps data in PostgreSQL in three places: the analytical warehouse, which dlt loads, dbt transforms and Metabase reads; the metadata database of Airflow; and the application database of Metabase. The warehouse is queried heavily and can grow large. The other two databases are small and transactional, but the Airflow scheduler needs its database to answer quickly at all times.
 
 How many PostgreSQL instances does the stack run, and which databases share an instance?
 
 ## Decision Drivers
 
 * Heavy analytical queries must not slow down the Airflow scheduler.
-* The warehouse and the metadata databases need their own tuning, backups and upgrades.
+* The warehouse needs its own tuning, backups and upgrades, apart from the small databases of Airflow and Metabase.
 * Every service should own its database and nothing else, and no application should run as a superuser.
 * The stack should run no more instances than it needs, because of the memory budget in [ADR-0010](0010-multi-arch-and-memory-budget.md).
 
@@ -27,14 +27,14 @@ How many PostgreSQL instances does the stack run, and which databases share an i
 
 ## Decision Outcome
 
-Chosen option: "Two instances: `warehouse` and `platform`", because it keeps analytical workloads away from the metadata at the cost of one extra instance, while the two small metadata databases can share an instance.
+Chosen option: "Two instances: `warehouse` and `platform`", because it keeps analytical workloads away from the databases of Airflow and Metabase at the cost of one extra instance, while those two small databases can share an instance.
 
 In practice this means:
 
 * **`warehouse`** holds the analytical data: the `raw_<source>`, `staging`, `intermediate`, `marts` and `ops` schemas.
 * **`platform`** holds the `airflow` and `metabase` databases, each with its own owner role. This is "database per service" without a separate instance for each service.
 * **PostgreSQL 18** is the major version of both instances. They run on the Debian-based official image and not on the Alpine one, so that text sorting uses the standard glibc collations.
-* **Data path.** PostgreSQL 18 images keep their data in a version-specific directory (`/var/lib/postgresql/18/docker`) and declare `/var/lib/postgresql` as the volume. The Compose files mount `/var/lib/postgresql`, not the `/var/lib/postgresql/data` of older images.
+* **Data path.** PostgreSQL 18 images keep their data in a version-specific directory (`/var/lib/postgresql/18/docker`) and declare `/var/lib/postgresql` as the volume. The Compose files must mount `/var/lib/postgresql`, not the `/var/lib/postgresql/data` of older images.
 
 The other options were not chosen for these reasons:
 
@@ -44,7 +44,7 @@ The other options were not chosen for these reasons:
 ### Consequences
 
 * Good, because heavy analytical queries cannot slow down the scheduler or the application database of Metabase.
-* Good, because the warehouse has its own tuning, backups and upgrade path, apart from the small metadata databases.
+* Good, because the warehouse has its own tuning, backups and upgrade path, apart from the small databases of Airflow and Metabase.
 * Good, because each service connects as the owner of its own database and of nothing else.
 * Bad, because two instances use more memory than one, which matters for the budget in [ADR-0010](0010-multi-arch-and-memory-budget.md).
 * Bad, because there are two instances to back up, monitor and upgrade, and the backup and upgrade procedures have to cover both.

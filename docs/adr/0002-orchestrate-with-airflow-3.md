@@ -16,7 +16,7 @@ Which orchestrator runs these pipelines, how does it execute tasks, and which di
 
 * Tasks should run apart from the scheduler, and it should be possible to add workers as the load grows.
 * The stack should stay vendor-neutral: it has to run on the official Apache image, without a vendor's CLI or runtime.
-* Integrations such as dbt and the Airflow MCP server should come from maintained projects instead of being written from scratch.
+* The orchestrator should have a maintained dbt integration and a maintained MCP server, so that neither has to be written from scratch.
 * The message broker should have a permissive open-source license.
 * The whole stack has to fit the memory budget set in [ADR-0010](0010-multi-arch-and-memory-budget.md).
 
@@ -31,7 +31,7 @@ Which orchestrator runs these pipelines, how does it execute tasks, and which di
 
 ## Decision Outcome
 
-Chosen option: "Airflow with the CeleryExecutor and a Valkey broker, on the official `apache/airflow` image", because it keeps task execution apart from the scheduler, lets workers scale out horizontally, needs no vendor-specific tooling and works with Cosmos and astro-airflow-mcp, which the stack uses for dbt and for AI access.
+Chosen option: "Airflow with the CeleryExecutor and a Valkey broker, on the official `apache/airflow` image", because Airflow is governed by the Apache Software Foundation, runs on an official image without vendor-specific tooling, has a broad ecosystem of provider packages and works with Cosmos for dbt and with astro-airflow-mcp for AI access, and because Celery workers keep task execution apart from the scheduler and scale out horizontally.
 
 In practice this means:
 
@@ -39,7 +39,7 @@ In practice this means:
 * **CeleryExecutor** runs every task on a worker. Celery keeps task results in the Airflow metadata database ([ADR-0003](0003-two-postgres-instances.md)), so no separate result backend is needed.
 * **Valkey 9** is the Celery broker. It is licensed under the BSD 3-Clause license and speaks the Redis protocol.
 * **Authentication** uses Airflow's FAB auth manager with the Admin, Op and Viewer roles.
-* **Own Compose files.** Agoranomos builds on the image and not on Airflow's own `docker-compose.yaml`, which is documented as not meant for production and ships default credentials.
+* **Our own Compose files.** Agoranomos builds on the image and not on Airflow's own `docker-compose.yaml`, which is documented as not meant for production and ships default credentials.
 * **Astronomer's open-source projects** are used where they fit: Cosmos, which runs dbt models as Airflow tasks ([ADR-0005](0005-transform-with-dbt-core.md)), and astro-airflow-mcp, the MCP server for Airflow ([ADR-0007](0007-ai-access-via-mcp-read-only.md)). The Astro CLI and Astro Runtime are not used.
 
 The other options were not chosen for these reasons:
@@ -47,7 +47,7 @@ The other options were not chosen for these reasons:
 * **Redis as the broker.** Redis 8.x is licensed under the RSAL, SSPL or AGPL, none of which is as permissive as the BSD license of Valkey, which is a drop-in replacement.
 * **LocalExecutor.** It is simpler and lighter, with no broker and no worker containers, but it runs tasks as subprocesses of the scheduler on the same machine, so it cannot scale out to separate workers.
 * **Astro CLI and Astro Runtime.** They tie the stack to one vendor's tooling and bring a Compose setup of their own, while the stack has to run on the official Apache image.
-* **Dagster and Prefect.** Cosmos and astro-airflow-mcp are built for Airflow, so choosing either orchestrator would mean replacing them.
+* **Dagster and Prefect** were considered but not evaluated in depth. Airflow was the starting premise of the project: its maintainers have operated it in production, and it is widely known among the data engineers the project is aimed at. Both Dagster and Prefect have dbt integrations and MCP servers of their own, so this choice is not a verdict on them.
 
 ### Consequences
 
@@ -57,6 +57,7 @@ The other options were not chosen for these reasons:
 * Good, because the broker has a permissive license, unlike recent Redis releases.
 * Bad, because the CeleryExecutor needs more containers and more memory than the LocalExecutor: a broker and separate workers come on top of Airflow's own services. This puts pressure on the memory budget, and a lighter `lite` profile based on the LocalExecutor is likely to be added if measurements call for it.
 * Bad, because Airflow 3 is itself made of several services, so there are many containers to pin, upgrade and monitor.
+* Bad, because Dagster and Prefect were not evaluated in depth, so the choice of Airflow rests on the starting premise of the project and not on a side-by-side comparison.
 
 ## More Information
 

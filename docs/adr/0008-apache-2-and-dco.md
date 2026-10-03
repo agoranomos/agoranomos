@@ -47,10 +47,10 @@ The other options were not chosen for these reasons:
 * Good, because a permissive license gives the project the widest reach and is compatible with the ecosystem it builds on.
 * Good, because the DCO is light: contributors add a sign-off to each commit and do not sign a legal agreement.
 * Bad, because others can offer Agoranomos as a hosted service, or build proprietary products on it, without contributing back.
-* Bad, because without a CLA the project cannot change its license without the agreement of the contributors, who keep the copyright in their contributions.
+* Bad, because contributors keep their copyright, so relicensing their code on terms that Apache-2.0 does not allow needs their agreement.
 * Bad, because a contributor who forgets the sign-off gets a failing check and has to fix the commit.
 
 ## More Information
 
 * The license covers the code in this repository. The third-party software that the stack runs keeps its own licenses.
-* The text of the [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0) and of the [Developer Certificate of Origin](https://developercertificate.org/) are published by their owners.
+* The full texts of the [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0) and of the [Developer Certificate of Origin](https://developercertificate.org/) are published by their owners.
