@@ -15,6 +15,17 @@
       "description": "Update prek in pyproject.toml and the prek version passed to prek-action in one pull request.",
       "matchDepNames": ["prek"],
       "groupName": "prek"
+    },
+    {
+      "description": "Python stays on the version chosen in ADR-0012: changing it is a decision, not a routine update.",
+      "matchManagers": ["pyenv", "pep621"],
+      "matchPackageNames": ["python"],
+      "enabled": false
+    },
+    {
+      "description": "GitHub's runner images have no release timestamps, so the three-day wait would hold their updates forever.",
+      "matchDatasources": ["github-runners"],
+      "minimumReleaseAge": null
     }
   ]
 }
