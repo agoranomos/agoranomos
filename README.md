@@ -74,8 +74,8 @@ Solid arrows show how data moves. Dotted arrows show what Airflow runs.
 
 The design rests on a few principles:
 
-- **Your data stays yours.** The warehouse is PostgreSQL on infrastructure you control, and the history stays there. Agoranomos needs no LLM account or key of its own: you use the AI client you already have, and it sees only what the MCP servers let it read.
-- **Read-only by default.** Each MCP server is limited by its own control, so one mistake does not open everything. Campaign names and ad texts can carry instructions written by anyone, so they are treated as data and never as instructions. See [ADR-0007](docs/adr/0007-ai-access-via-mcp-read-only.md).
+- **Your data stays yours.** The warehouse is PostgreSQL on infrastructure you control, and the history stays there. Agoranomos needs no LLM account or key of its own: you use the AI client you already have, and it sees only what the MCP servers let it read. Whatever the client reads to answer a question is sent to its AI provider: your data stays on your server, and what you ask an AI about goes to the AI you chose.
+- **Read-only by default.** Each MCP server is limited by its own control, so one mistake does not open everything. Campaign names and ad texts can carry instructions written by anyone, so Agoranomos treats them as untrusted data, and read-only access limits the damage if an AI client follows them anyway. See [ADR-0007](docs/adr/0007-ai-access-via-mcp-read-only.md).
 - **Local and server modes.** Local mode is for engineers on their own machine: ports are published on `127.0.0.1` only. Server mode is for teams and for business users who connect from the Claude and ChatGPT apps: a reverse proxy with TLS sits in front of the web endpoints, and the Metabase MCP server is served over HTTPS with OAuth. See [ADR-0011](docs/adr/0011-local-and-server-modes.md).
 - **amd64 and arm64.** Both architectures are supported targets, Apple Silicon included, within a memory budget meant for a host with 8 GB of RAM. The figures are targets that have not been measured yet. See [ADR-0010](docs/adr/0010-multi-arch-and-memory-budget.md).
 
