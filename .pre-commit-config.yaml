@@ -60,3 +60,4 @@ repos:
       - id: check-github-workflows-require-timeout
       - id: check-github-issue-forms
       - id: check-github-issue-config
+      - id: check-renovate

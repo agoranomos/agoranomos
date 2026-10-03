@@ -1,0 +1,31 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:best-practices", ":semanticCommits", ":gitSignOff"],
+  "pre-commit": {
+    "enabled": true
+  },
+  "minimumReleaseAge": "3 days",
+  "packageRules": [
+    {
+      "description": "Update ruff in pyproject.toml and the ruff-pre-commit hook in one pull request.",
+      "matchDepNames": ["ruff", "astral-sh/ruff-pre-commit"],
+      "groupName": "ruff"
+    },
+    {
+      "description": "Update prek in pyproject.toml and the prek version passed to prek-action in one pull request.",
+      "matchDepNames": ["prek"],
+      "groupName": "prek"
+    },
+    {
+      "description": "Python stays on the version chosen in ADR-0012: changing it is a decision, not a routine update.",
+      "matchManagers": ["pyenv", "pep621"],
+      "matchPackageNames": ["python"],
+      "enabled": false
+    },
+    {
+      "description": "Runner images change on purpose, not as routine updates: the checks must support a new image first (actionlint validates runner labels).",
+      "matchDatasources": ["github-runners"],
+      "enabled": false
+    }
+  ]
+}
