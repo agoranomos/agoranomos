@@ -33,7 +33,7 @@ uv run prek run --all-files     # every check on the whole repository, as CI run
 uv run zensical build --strict  # builds the documentation; a broken link or anchor fails it
 ```
 
-The checks are configured in `.pre-commit-config.yaml` and run by [prek](https://prek.j178.dev/). They cover file hygiene (large files, merge conflict markers, JSON, TOML and YAML syntax, private keys, final newlines, line endings and trailing whitespace), linting and formatting with ruff, spelling with typos, secrets with gitleaks, and GitHub Actions workflows, issue forms and the Renovate configuration.
+The checks are configured in `.pre-commit-config.yaml` and run by [prek](https://prek.j178.dev/). They cover file hygiene (large files, case conflicts, merge conflict markers, JSON, TOML and YAML syntax, private keys, final newlines, line endings and trailing whitespace), linting and formatting with ruff, spelling with typos, secrets with gitleaks, and GitHub Actions workflows, issue forms and the Renovate configuration.
 
 CI also scans the whole git history for secrets. You can do the same on a full clone (not a shallow one) with:
 
@@ -45,7 +45,7 @@ To preview the documentation while you edit it, run `uv run zensical serve` and 
 
 ## Make a change
 
-1. **Branch.** Start a short-lived branch from an up-to-date `main`, and do not commit to `main` directly. Name the branch after the type of change and a short description: `feat/...`, `fix/...`, `docs/...`, `chore/...` or `ci/...`, for example `docs/explain-attribution-windows`.
+1. **Branch.** Start a short-lived branch from an up-to-date `main`, and do not commit to `main` directly. Name the branch after the type of change and a short description. Any Conventional Commits type works as the prefix, for example `feat/...`, `fix/...`, `docs/...`, `chore/...` or `ci/...`, and a branch could be called `docs/explain-attribution-windows`.
 2. **Commit.** Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `type(optional scope): summary`. The accepted types are `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore` and `revert`. Keep the summary short and in the imperative, for example `docs: explain how attribution windows are reloaded`, and use the body to say why the change is needed.
 3. **Sign off.** Every commit needs a DCO sign-off, which `git commit -s` adds (see below).
 4. **Open a pull request** against `main` and fill in the template. Keep it focused on one change.

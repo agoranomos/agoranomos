@@ -36,7 +36,7 @@ There is no code and no test suite yet. CI runs the static checks, the full-hist
 
 ## Conventions
 
-- **Branches.** Work on a short-lived branch named `feat/...`, `fix/...`, `docs/...`, `chore/...` or `ci/...`, and open a pull request. Never commit to `main`. The maintainer reviews and merges.
+- **Branches.** Work on a short-lived branch named after a Conventional Commits type, for example `feat/...`, `fix/...`, `docs/...`, `chore/...` or `ci/...`, and open a pull request. Never commit to `main`. The maintainer reviews and merges.
 - **Commits.** [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): summary`. Pull requests are squash-merged and the pull request title becomes the commit title, so the title must follow the same format.
 - **DCO.** Every commit carries a `Signed-off-by` trailer: use `git commit -s`. Do not change the git user name or email. When an agent helped write the change, keep a `Co-Authored-By:` trailer that names the model.
 - **Docs with code.** A change to behavior, commands, configuration or design updates the documentation in the same pull request. Keep `README.ru.md` in step with `README.md`.
