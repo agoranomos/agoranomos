@@ -16,7 +16,7 @@ Do we start with local mode and add server mode later, or do we support both fro
 
 * Business users reach the data from the Claude and ChatGPT apps through remote MCP connectors, which means HTTPS.
 * The built-in MCP server of Metabase supports OAuth and applies each user's permissions, so it can be exposed over HTTPS safely.
-* Engineers work with coding agents on their own machine and need a closed stack: ports only on `127.0.0.1` and MCP over stdio.
+* Engineers work with coding agents on their own machine and need a closed stack: ports only on `127.0.0.1`, and MCP over stdio instead of extra ports.
 * The security work for a server, such as TLS, authentication and backups, is easier to design in from the start than to add to a finished local stack.
 * One Compose project should serve both modes, not two separate products.
 

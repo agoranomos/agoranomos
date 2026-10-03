@@ -23,14 +23,14 @@ How do AI clients get access to the data, the pipelines and the models, and what
 
 ## Considered Options
 
-* Four existing MCP servers, read-only by default, over stdio locally and over HTTPS with OAuth on a server
+* Four existing MCP servers, read-only by default, reached over stdio or authenticated HTTP
 * The same four servers, all exposed over HTTP ports by default
 * Our own chat interface with an LLM
 * A text-to-SQL product, such as Vanna or WrenAI
 
 ## Decision Outcome
 
-Chosen option: "Four existing MCP servers, read-only by default, over stdio locally and over HTTPS with OAuth on a server", because they work in the AI clients people already use, each one is limited by its own permission control, and maintained projects already provide them.
+Chosen option: "Four existing MCP servers, read-only by default, reached over stdio or authenticated HTTP", because they work in the AI clients people already use, each one is limited by its own permission control, and maintained projects already provide them.
 
 | Server | Used by | Default permissions | Transport |
 |---|---|---|---|
