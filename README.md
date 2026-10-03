@@ -118,4 +118,4 @@ Agoranomos is licensed under the [Apache License 2.0](LICENSE). The third-party 
 
 ## About the name
 
-The name comes from the *agoranomoi* (singular: *agoranomos*), the market overseers of ancient Athens. They watched over the agora, the marketplace, and checked that goods were genuine and that measures and prices were fair. Agoranomos tries to do the same for marketing numbers: one way of measuring every platform, in code that anyone can read.
+The name comes from the *agoranomoi* (singular: *agoranomos*), the market officials of ancient Athens. They made sure that the goods on sale were genuine and unadulterated (Aristotle, [*Constitution of the Athenians*, chapter 51](https://www.perseus.tufts.edu/hopper/text?doc=Perseus%3Atext%3A1999.01.0046%3Achapter%3D51)). Agoranomos tries to do the same for marketing numbers: one way of measuring every platform, and code that anyone can read, so that you can check that the numbers you rely on are genuine.
