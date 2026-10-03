@@ -14,7 +14,7 @@ Agoranomos is a marketing analytics stack that you run on your own infrastructur
 - **Load** data from ad platforms, web analytics, CRM systems and files into a PostgreSQL warehouse that you own, on a schedule.
 - **Model** that data with dbt into one view of advertising performance across all platforms.
 - **Show** it in Metabase, with dashboards, metrics and a glossary that come ready-made.
-- **Answer questions** asked in AI clients such as Claude and ChatGPT, through [MCP](https://modelcontextprotocol.io/) servers that are read-only by default. For example: "How much did we spend on each platform last week?"
+- **Answer questions** asked in AI clients such as Claude and ChatGPT, through [MCP](https://modelcontextprotocol.io/) servers with least-privilege defaults. For example: "How much did we spend on each platform last week?"
 
 It is designed to start with a single command, on a laptop or on a small server.
 
@@ -51,7 +51,7 @@ flowchart TB
     end
 
     metabase["<b>Metabase</b><br/>dashboards, metrics, glossary"]
-    mcp["<b>MCP servers</b><br/>Metabase, Airflow, warehouse, dbt<br/>read-only by default"]
+    mcp["<b>MCP servers</b><br/>Metabase, Airflow, warehouse, dbt<br/>least privilege by default"]
     clients["<b>AI clients</b><br/>Claude, ChatGPT,<br/>Claude Code, Cursor,<br/>VS Code, Codex"]
 
     sources --> dlt --> warehouse
@@ -75,7 +75,7 @@ Solid arrows show how data moves. Dotted arrows show what Airflow runs.
 The design rests on a few principles:
 
 - **Your data stays yours.** The warehouse is PostgreSQL on infrastructure you control, and the history stays there. Agoranomos needs no LLM account or key of its own: you use the AI client you already have, and it sees only what the MCP servers let it read. Whatever an AI client reads to answer a question is sent to that client's AI provider and handled under that provider's terms.
-- **Read-only by default.** Each MCP server is limited by its own control, so one mistake does not open everything. Campaign names and ad texts can carry instructions written by anyone, so Agoranomos treats them as untrusted data, and read-only access limits the damage if an AI client follows them anyway. See [ADR-0007](docs/adr/0007-ai-access-via-mcp-read-only.md).
+- **Least privilege by default.** Each MCP server is limited by its own control, so one mistake does not open everything. The Airflow and warehouse servers can only read, and dbt works in a development schema. Metabase applies the permissions of the signed-in user, and its built-in server can also create and change questions and dashboards, so the permissions that AI access gets there are to be decided before the AI layer ships. Campaign names and ad texts can carry instructions written by anyone, so Agoranomos treats them as untrusted data, and these limits reduce the damage if an AI client follows them anyway. See [ADR-0007](docs/adr/0007-ai-access-via-mcp-read-only.md).
 - **Local and server modes.** Local mode is for engineers on their own machine: ports are published on `127.0.0.1` only. Server mode is for teams and for business users who connect from the Claude and ChatGPT apps: a reverse proxy with TLS sits in front of the web endpoints, the Metabase MCP server is served over HTTPS with OAuth, and backups run on a schedule. See [ADR-0011](docs/adr/0011-local-and-server-modes.md).
 - **amd64 and arm64.** Both architectures are supported targets, Apple Silicon included, within a memory budget meant for a host with 8 GB of RAM. The figures are targets that have not been measured yet. See [ADR-0010](docs/adr/0010-multi-arch-and-memory-budget.md).
 

@@ -11,7 +11,7 @@ Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 - **Loads** data from ad platforms, web analytics, CRM systems and files into a PostgreSQL warehouse, on a schedule.
 - **Models** that data with dbt into one unified view of advertising performance across all platforms.
 - **Shows** it in Metabase, with dashboards, metrics and a glossary that come ready-made.
-- **Lets you ask** questions about the data in AI clients such as Claude and ChatGPT, through MCP servers that are read-only by default.
+- **Lets you ask** questions about the data in AI clients such as Claude and ChatGPT, through MCP servers with least-privilege defaults.
 
 To see how the pieces fit together, read the [architecture overview](explanation/architecture.md).
 
