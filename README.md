@@ -86,11 +86,11 @@ Agoranomos is **pre-alpha**. Phase 0, the foundation, is in progress: the reposi
 | Phase | Release | What it delivers |
 |---|---|---|
 | 0. Foundation | none | The name, repository, license and structure, the tooling (uv, ruff, prek), the CI and documentation skeletons, and the first architecture decision records. In progress. |
-| 1. Platform | v0.1.0 | A Docker Compose stack with two PostgreSQL instances, Valkey, Airflow 3.3 and Metabase; secrets initialization; preflight checks; every service healthy, with a smoke test in CI. |
+| 1. Platform | v0.1.0 | A Docker Compose stack with two PostgreSQL instances, Valkey, Airflow 3.3 and Metabase, in local and server modes (Caddy with automatic TLS), both covered by CI; secrets initialization; preflight checks; every service healthy, with a smoke test in CI. |
 | 2. End to end on demo data | v0.2.0 | A demo source (dlt) → raw → dbt (through Cosmos) → marts → Metabase dashboards created from code. |
-| 3. AI layer | v0.3.0 | The four MCP servers, database roles, a ready-made `.mcp.json`, skills for coding agents and the guide "Talk to your data". The candidate for the first public release. |
+| 3. AI layer | v0.3.0 | The four MCP servers, among them the Metabase MCP server over HTTPS with OAuth for the Claude and ChatGPT apps; database roles; a ready-made `.mcp.json`; skills for coding agents; and the guide "Talk to your data". The candidate for the first public release. |
 | 4. Real connectors | v0.4 and later | One data source per minor release, together with the unified model and FX rates. |
-| 5. Operations | v0.x | Backup and restore, an upgrade runbook, observability with elementary, and the server profile with TLS (Caddy). |
+| 5. Operations | v0.x | Automated backups and restore, an upgrade runbook, and observability with elementary. |
 | Stable | v1.0.0 | A stable contract for the configuration and the data models. |
 
 The roadmap gives the order of the work, not dates. Versions are 0.x until the configuration and the data model are stable.
