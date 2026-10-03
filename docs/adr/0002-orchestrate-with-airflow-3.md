@@ -47,7 +47,7 @@ The other options were not chosen for these reasons:
 * **Redis as the broker.** Redis 8.x is licensed under the RSAL, SSPL or AGPL, none of which is as permissive as the BSD license of Valkey, which is a drop-in replacement.
 * **LocalExecutor.** It is simpler and lighter, with no broker and no worker containers, but it runs tasks as subprocesses of the scheduler on the same machine, so it cannot scale out to separate workers.
 * **Astro CLI and Astro Runtime.** They tie the stack to one vendor's tooling and bring a Compose setup of their own, while the stack has to run on the official Apache image.
-* **Dagster and Prefect** were considered but not evaluated in depth. Airflow was the starting premise of the project: its maintainers have operated it in production, and it is widely known among the data engineers the project is aimed at. Both Dagster and Prefect have dbt integrations and MCP servers of their own, so this choice is not a verdict on them.
+* **Dagster and Prefect** were considered but not evaluated in depth. Airflow was the starting premise of the project: its maintainers have operated it in production, and it is widely known among the data engineers the project is aimed at. Both Dagster and Prefect have dbt integrations and MCP servers, so this choice is not a verdict on them.
 
 ### Consequences
 
