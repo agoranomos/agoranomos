@@ -35,7 +35,7 @@ Chosen option: "Metabase OSS", because it is approachable for business users, it
 In practice this means:
 
 * **Version.** Metabase 0.60 or later is required, because 0.60 is the first release with the built-in MCP server. As of October 2026 the stack pins 0.63.
-* **Built-in MCP server.** Metabase serves it itself, so there is no separate component to run. It uses HTTP with OAuth, applies the permissions of the signed-in user, needs no LLM key, and its SQL tool can be switched off ([ADR-0007](0007-ai-access-via-mcp-read-only.md)).
+* **Built-in MCP server.** Metabase serves it itself, so there is no separate component to run. It uses HTTP with OAuth, applies the permissions of the signed-in user, needs no LLM key, and its SQL tool can be switched off. The server also includes tools that create and change questions and dashboards ([ADR-0007](0007-ai-access-via-mcp-read-only.md)).
 * **Dashboards as code.** Metabase serialization and Remote Sync are available only in the paid editions. A one-shot init job therefore sets Metabase up through its REST API: it connects the warehouse, creates collections and dashboards from definitions kept in the repository, and enables the MCP server.
 * **Data access.** Metabase connects to the warehouse as the `metabase_reader` role, which sees only `marts`. Its own application database lives in the `platform` instance ([ADR-0003](0003-two-postgres-instances.md)).
 

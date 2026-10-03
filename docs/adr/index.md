@@ -54,7 +54,7 @@ Agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0004](0004-ingest-with-dlt.md) | Ingest data with dlt | accepted | 2026-10-02 |
 | [0005](0005-transform-with-dbt-core.md) | Transform data with dbt Core | accepted | 2026-10-02 |
 | [0006](0006-metabase-as-bi.md) | Use Metabase as the BI layer | accepted | 2026-10-02 |
-| [0007](0007-ai-access-via-mcp-read-only.md) | Give AI clients read-only access through MCP | accepted | 2026-10-02 |
+| [0007](0007-ai-access-via-mcp-read-only.md) | Give AI clients least-privilege access through MCP | accepted | 2026-10-02 |
 | [0008](0008-apache-2-and-dco.md) | License under Apache-2.0 with DCO sign-off | accepted | 2026-10-02 |
 | [0009](0009-documentation.md) | Write documentation with Zensical and Diátaxis | accepted | 2026-10-02 |
 | [0010](0010-multi-arch-and-memory-budget.md) | Support amd64 and arm64 within a memory budget | accepted | 2026-10-02 |
