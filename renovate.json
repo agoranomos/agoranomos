@@ -1,0 +1,20 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:best-practices", ":semanticCommits", ":gitSignOff"],
+  "pre-commit": {
+    "enabled": true
+  },
+  "minimumReleaseAge": "3 days",
+  "packageRules": [
+    {
+      "description": "Update ruff in pyproject.toml and the ruff-pre-commit hook in one pull request.",
+      "matchDepNames": ["ruff", "astral-sh/ruff-pre-commit"],
+      "groupName": "ruff"
+    },
+    {
+      "description": "Update prek in pyproject.toml and the prek version passed to prek-action in one pull request.",
+      "matchDepNames": ["prek"],
+      "groupName": "prek"
+    }
+  ]
+}
