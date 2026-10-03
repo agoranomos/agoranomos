@@ -30,7 +30,7 @@ Which tool and structure do we use, and in which languages do we write?
 
 ## Decision Outcome
 
-Chosen option: "Zensical, with the Diátaxis structure", because Material for MkDocs is in maintenance and reaches end of life in November 2026, while Zensical reads MkDocs configuration and keeps the Python and Markdown toolchain.
+Chosen option: "Zensical, with the Diátaxis structure", because Material for MkDocs is in maintenance mode, with critical bug fixes and security updates promised only through May 5, 2027, while Zensical reads MkDocs configuration and keeps the Python and Markdown toolchain.
 
 In practice this means:
 
@@ -42,7 +42,7 @@ In practice this means:
 
 The other options were not chosen for these reasons:
 
-* **Material for MkDocs** reaches end of life in November 2026, so a new site should not be built on it.
+* **Material for MkDocs** is in maintenance mode, and its team promises only critical bug fixes and security updates, through May 5, 2027, so a new site should not be built on it.
 * **Docusaurus** is built on JavaScript and would add a Node.js toolchain next to the Python tooling.
 * **Sphinx** uses reStructuredText as its native markup, and Markdown needs an extension, while the documentation of this project is Markdown.
 
@@ -58,7 +58,7 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* Versions as of October 2026: Zensical 0.0.67. Material for MkDocs is at 9.7.7, in maintenance.
+* Versions as of October 2026: Zensical 0.0.67. Material for MkDocs is at 9.7.7, in maintenance mode. Its team's [end-of-life notice](https://github.com/squidfunk/mkdocs-material/issues/8523) says that critical bug fixes and security updates continue through May 5, 2027, six months beyond the end-of-life date announced earlier, November 5, 2026.
 * The site is configured in `zensical.toml`. Zensical also shows the `status` of an ADR as a page status, which is why the statuses are defined there.
 * Planned: the dbt documentation is generated and published together with the site.
 * [Zensical](https://zensical.org/) and [Diátaxis](https://diataxis.fr/) are described on their own sites.

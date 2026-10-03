@@ -61,6 +61,6 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* Versions as of October 2026: Airflow 3.3 (3.3.2) and Valkey 9 (9.0). Airflow 3.3 supports Python 3.10 to 3.14 and PostgreSQL 14 to 18, which covers the choices in [ADR-0003](0003-two-postgres-instances.md) and [ADR-0012](0012-python-and-tooling.md).
+* Versions as of October 2026: Airflow 3.3 (3.3.2) and Valkey 9 (the latest release is 9.1.2, and the 9.0 line still gets patch releases, the latest being 9.0.6). Airflow 3.3 supports Python 3.10 to 3.14 and PostgreSQL 14 to 18, which covers the choices in [ADR-0003](0003-two-postgres-instances.md) and [ADR-0012](0012-python-and-tooling.md).
 * The memory use of the full stack is still to be measured. If it does not fit the budget, a `lite` profile is added, with a new record if that changes this decision.
 * The [Celery executor documentation](https://airflow.apache.org/docs/apache-airflow-providers-celery/stable/celery_executor.html) describes the executor and its broker settings. [Valkey](https://valkey.io/) is the broker project.

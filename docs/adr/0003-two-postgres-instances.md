@@ -52,7 +52,7 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* Versions as of October 2026: PostgreSQL 18.6, in the image `postgres:18.6-trixie`. PostgreSQL 19 is still in beta, and Airflow 3.3 supports PostgreSQL up to 18.
+* Versions as of October 2026: PostgreSQL 18.6, in the image `postgres:18.6-trixie`. On 2026-10-04, PostgreSQL 19 was still in beta (beta 4, released 2026-09-24), and Airflow 3.3 supports PostgreSQL up to 18.
 * Access to the warehouse is split by database role, so that each tool gets only what it needs. The [architecture overview](../explanation/architecture.md) describes the roles.
 * Related decisions: the metadata database belongs to Airflow ([ADR-0002](0002-orchestrate-with-airflow-3.md)), the schemas are filled by dlt and dbt ([ADR-0004](0004-ingest-with-dlt.md) and [ADR-0005](0005-transform-with-dbt-core.md)), and the read-only role for AI access is described in [ADR-0007](0007-ai-access-via-mcp-read-only.md).
 * The [official PostgreSQL image](https://hub.docker.com/_/postgres) documents the data directory and the available variants.

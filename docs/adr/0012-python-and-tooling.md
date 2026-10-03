@@ -17,7 +17,7 @@ Which Python version and tools do we use, and how are changes checked, merged an
 * One Python version that every component supports.
 * Reproducible environments: pinned tool versions and locked dependencies.
 * Fast checks that run the same way on a laptop and in CI.
-* No secrets in the repository or its history, and no unpinned code in CI.
+* No secrets in the repository or its history, and nothing unpinned in CI: actions are pinned by commit SHA, and hooks and tools by exact version.
 * A readable history, from which release notes can be produced.
 * Updates to pinned versions should be routine and not hand work.
 
