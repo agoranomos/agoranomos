@@ -14,8 +14,9 @@ dist/
 coverage.xml
 htmlcov/
 
-# Documentation build output (Zensical)
+# Documentation build output and cache (Zensical)
 site/
+.cache/
 
 # Environment files hold secrets: never commit them. Use .env.example as the template.
 .env
