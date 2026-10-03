@@ -17,7 +17,7 @@ Contributions that you wrote with the help of an AI assistant are welcome under 
 
 ## Set up your environment
 
-You need `git` and [uv](https://docs.astral.sh/uv/) 0.12.22 or newer (as of October 2026). CI uses the uv version pinned in `.github/workflows/ci.yml`. uv also installs Python 3.13 when it is missing.
+You need `git` and [uv](https://docs.astral.sh/uv/) 0.12.22 or newer (as of October 2026); `pyproject.toml` sets this minimum, and an older uv stops with an error. CI uses the uv version pinned in `.github/workflows/ci.yml`. uv also installs Python 3.13 when it is missing.
 
 ```bash
 git clone https://github.com/agoranomos/agoranomos.git
@@ -96,7 +96,7 @@ An accepted record keeps its decision: its status, the implementation status of 
 - The merge conflict check rejects a line that begins with the conflict markers `<<<<<<<`, `=======` or `>>>>>>>`, even inside a documentation example. Indent such a line, or mention the markers inside a sentence.
 - The secret scanner blocks anything that looks like a real key or token. Use obvious placeholders such as `<your-token>` in examples, and never commit `.env` files. They are git-ignored, and `.env.example` will be the template once it exists.
 - The spell checker, typos, may flag a correct word, such as a product name. Add it to `[default.extend-words]` in `_typos.toml`.
-- Some tool versions are pinned in more than one place: ruff in `pyproject.toml` and `.pre-commit-config.yaml`, and prek in `pyproject.toml` and `.github/workflows/ci.yml`. Once the Renovate app runs, it updates each pair in one pull request, and a change made by hand has to change both. The uv version is pinned in `.github/workflows/ci.yml`, and this guide gives the minimum version.
+- Some tool versions are pinned in more than one place: ruff in `pyproject.toml` and `.pre-commit-config.yaml`, and prek in `pyproject.toml` and `.github/workflows/ci.yml`. Once the Renovate app runs, it updates each pair in one pull request, and a change made by hand has to change both. The uv version is pinned in `.github/workflows/ci.yml`, and the minimum version is set in `pyproject.toml` (`required-version`) and given in this guide.
 
 ## License
 

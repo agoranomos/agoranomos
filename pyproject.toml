@@ -18,6 +18,8 @@ dev = [
 [tool.uv]
 # The root is a workspace for tooling and future packages; it is never built or installed itself.
 package = false
+# The minimum uv version: an older uv stops with an error. CI uses the exact version pinned in ci.yml.
+required-version = ">=0.12.22"
 
 [tool.ruff]
 line-length = 100
