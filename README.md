@@ -82,11 +82,11 @@ The design rests on a few principles:
 
 ## Status and roadmap
 
-Agoranomos is **pre-alpha**. Phase 0, the foundation, is in progress: the repository has its tooling, CI, documentation skeleton and the first decision records. Nothing is runnable yet, and the repository is private until v0.3.
+Agoranomos is **pre-alpha**. Phase 0, the foundation, is complete: the repository has its tooling, CI, documentation skeleton and the first decision records. Phase 1, the platform, is next. Nothing is runnable yet, and the repository is private until v0.3.
 
 | Phase | Release | What it delivers |
 |---|---|---|
-| 0. Foundation | none | The name, repository, license and structure, the tooling (uv, ruff, prek), the CI and documentation skeletons, and the first architecture decision records. In progress. |
+| 0. Foundation | none | The name, repository, license and structure, the tooling (uv, ruff, prek), the CI and documentation skeletons, and the first architecture decision records. Complete. |
 | 1. Platform | v0.1.0 | A Docker Compose stack with two PostgreSQL instances, Valkey, Airflow 3.3 and Metabase, in local and server modes, both covered by CI (server mode adds Caddy with automatic TLS and scheduled backups); secrets initialization; preflight checks; every service healthy, with a smoke test in CI. |
 | 2. End to end on demo data | v0.2.0 | A demo source (dlt) → raw → dbt (through Cosmos) → marts → Metabase dashboards created from code. |
 | 3. AI layer | v0.3.0 | The four MCP servers, among them the Metabase MCP server over HTTPS with OAuth for the Claude and ChatGPT apps; database roles; a ready-made `.mcp.json`; skills for coding agents; and the guide "Talk to your data". The candidate for the first public release. |
