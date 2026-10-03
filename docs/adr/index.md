@@ -26,7 +26,7 @@ The `status` in the metadata block of a record is one of these words, written in
 
 ## Accepted records are not edited
 
-An accepted record is never rewritten to fit new circumstances. To change a decision, write a new ADR that supersedes the old one. The old record keeps its text, and only its status changes: it becomes `superseded`, and a line under its title points to the new record. That way the history of why things changed stays readable.
+An accepted record is never rewritten to fit new circumstances. To change a decision, write a new ADR that supersedes the old one. The old record keeps its text. Its status becomes `superseded`, and one line under its title points to the new record; nothing else changes. That way the history of why things changed stays readable.
 
 A superseded record starts like this:
 
