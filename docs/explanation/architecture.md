@@ -43,20 +43,20 @@ Solid arrows show how data moves. Dotted arrows show what Airflow runs.
 
 ## Components
 
-| Layer | Component | What it does | Version line, as of 2026-10 |
-|---|---|---|---|
-| Runtime | Python | Language of the pipelines and tooling; the version supported by every component | 3.13 |
-| Ingestion | dlt | Incremental loading, schema evolution, merge | 1.30 |
-| Orchestration | Apache Airflow with CeleryExecutor | Scheduling and orchestration; workers scale out | 3.3 |
-| | Valkey | Message broker for Celery | 9 |
-| Storage | PostgreSQL | The warehouse and the platform databases | 18 |
-| Transformation | dbt Core with dbt-postgres | SQL models, tests and documentation | dbt Core 1.12, dbt-postgres 1.11 |
-| | Cosmos | Runs dbt models as Airflow tasks | 1.15 |
-| Data quality | dbt tests and elementary | Tests from day one and an observability report | elementary 0.26 |
-| BI | Metabase OSS | Dashboards, metrics, glossary and a built-in MCP server | 0.63 |
-| AI access | astro-airflow-mcp | MCP server for Airflow | 0.9 |
-| | MCP Toolbox for Databases | Curated SQL tools for the warehouse | 1.13 |
-| | dbt-mcp | Lineage, docs, compile and test on a dev target | 2.5 |
+| Layer | Component | What it does | Version line, as of 2026-10 | ADR |
+|---|---|---|---|---|
+| Runtime | Python | Language of the pipelines and tooling; the version supported by every component | 3.13 | [0012](../adr/0012-python-and-tooling.md) |
+| Ingestion | dlt | Incremental loading, schema evolution, merge | 1.30 | [0004](../adr/0004-ingest-with-dlt.md) |
+| Orchestration | Apache Airflow with CeleryExecutor | Scheduling and orchestration; workers scale out | 3.3 | [0002](../adr/0002-orchestrate-with-airflow-3.md) |
+| | Valkey | Message broker for Celery | 9 | [0002](../adr/0002-orchestrate-with-airflow-3.md) |
+| Storage | PostgreSQL | The warehouse and the platform databases | 18 | [0003](../adr/0003-two-postgres-instances.md) |
+| Transformation | dbt Core with dbt-postgres | SQL models, tests and documentation | dbt Core 1.12, dbt-postgres 1.11 | [0005](../adr/0005-transform-with-dbt-core.md) |
+| | Cosmos | Runs dbt models as Airflow tasks | 1.15 | [0005](../adr/0005-transform-with-dbt-core.md) |
+| Data quality | dbt tests and elementary | Tests from day one and an observability report | elementary 0.26 | [0005](../adr/0005-transform-with-dbt-core.md) |
+| BI | Metabase OSS | Dashboards, metrics, glossary and a built-in MCP server | 0.63 | [0006](../adr/0006-metabase-as-bi.md) |
+| AI access | astro-airflow-mcp | MCP server for Airflow | 0.9 | [0007](../adr/0007-ai-access-via-mcp-read-only.md) |
+| | MCP Toolbox for Databases | Curated SQL tools for the warehouse | 1.13 | [0007](../adr/0007-ai-access-via-mcp-read-only.md) |
+| | dbt-mcp | Lineage, docs, compile and test on a dev target | 2.5 | [0007](../adr/0007-ai-access-via-mcp-read-only.md) |
 
 ## Load: dlt
 
@@ -68,6 +68,8 @@ dlt takes care of incremental loading, schema evolution, merging and name normal
 * **Loud failures.** If an account fails, the run fails or raises an alert that lists the affected accounts and the original API error.
 
 The planned sources are ad platform APIs (for example Google, Meta, TikTok, Yandex and VK), GA4, CRM systems and files. A demo data generator produces realistic synthetic data for several fictional platforms. It needs no keys and fills the dashboards on first start.
+
+Decision record: [ADR-0004: Ingest data with dlt](../adr/0004-ingest-with-dlt.md).
 
 ## Transform and store: dbt and PostgreSQL
 
@@ -97,6 +99,8 @@ dbt Core with dbt-postgres does the transformations, with tests from the first d
 * Currencies (FX rates) and time zones are explicit.
 * History is tracked as type 2 slowly changing dimensions (SCD2), using dbt snapshots with explicit `check_cols`, only for attributes where it matters.
 
+Decision records: [ADR-0003: Run two PostgreSQL instances](../adr/0003-two-postgres-instances.md) and [ADR-0005: Transform data with dbt Core](../adr/0005-transform-with-dbt-core.md).
+
 ## Orchestrate: Apache Airflow
 
 Airflow 3.3 runs with the CeleryExecutor on the official `apache/airflow` image: API server, scheduler, DAG processor, triggerer and workers. Valkey is the message broker (BSD-licensed, speaking the Redis protocol), Celery results go to the metadata database, and workers can be scaled out horizontally. Authentication uses Airflow's FAB auth manager with the Admin, Op and Viewer roles.
@@ -105,9 +109,13 @@ Airflow Assets chain the pipeline, so each step starts when the previous one has
 
 Agoranomos uses Astronomer's open-source projects (Cosmos and astro-airflow-mcp) but not the Astro CLI or Astro Runtime. The stack stays vendor-neutral and runs on the official Apache Airflow image.
 
+Decision record: [ADR-0002: Orchestrate with Apache Airflow 3](../adr/0002-orchestrate-with-airflow-3.md).
+
 ## Explore: Metabase
 
 Metabase OSS reads only the `marts` schema, through the `metabase_reader` role. It comes with ready-made dashboards, metrics and a glossary. A one-shot init job sets Metabase up on first start through its API: it connects the warehouse, creates collections and dashboards from code, and enables the built-in MCP server (available since Metabase 0.60).
+
+Decision record: [ADR-0006: Use Metabase as the BI layer](../adr/0006-metabase-as-bi.md).
 
 ## Ask: MCP servers
 
@@ -120,11 +128,13 @@ AI access goes through four MCP servers. Each starts with least-privilege defaul
 | Warehouse MCP (MCP Toolbox) | Engineers and analysts: schemas and read-only SQL | The `ai_reader` role: read-only transactions, a statement timeout, `marts` only (plus `staging`) | stdio through `docker exec` |
 | dbt MCP | Analytics engineers: lineage, docs, compile and test | A dev target in a separate schema; production runs only through Airflow | stdio through `docker exec` |
 
-Local mode serves coding agents such as Claude Code on the same machine; the desktop and mobile apps of Claude and ChatGPT connect over HTTPS in server mode, which is planned for a later release.
+Local mode serves coding agents such as Claude Code on the same machine; the desktop and mobile apps of Claude and ChatGPT reach Metabase's MCP server over HTTPS in server mode.
 
-* **Why stdio through `docker exec` instead of HTTP ports.** For the three stdio servers, no port is opened, there is no risk of DNS rebinding against localhost, and credentials stay inside the container. HTTP with authentication and a gateway is planned for server and team deployments in a later release.
+* **Why stdio through `docker exec` instead of HTTP ports.** For the three stdio servers, no port is opened, there is no risk of DNS rebinding against localhost, and credentials stay inside the container. In server mode, remote clients reach Metabase's built-in server over HTTPS with OAuth, and the three stdio servers stay on stdio until a gateway is added.
 * **Ready-made context.** The repository provides `AGENTS.md` (the cross-agent standard) and a `CLAUDE.md` that imports it, a `.mcp.json` with ready-made connections for Claude Code, and product skills in `.claude/skills/`: adding a source, diagnosing a failed pipeline, building a dashboard and explaining a metric. A Claude Code plugin and configuration for Cursor, VS Code and Codex are planned for later releases.
 * **Untrusted text.** Campaign names and ad texts are untrusted data, because anyone can write them. `AGENTS.md` states that data is never an instruction, and read-only access by default limits the damage if an injection attempt succeeds.
+
+Decision records: [ADR-0007: Give AI clients read-only access through MCP](../adr/0007-ai-access-via-mcp-read-only.md) and, for the transport in server mode, [ADR-0011: Support local and server modes](../adr/0011-local-and-server-modes.md).
 
 ## Run: containers
 
@@ -134,10 +144,12 @@ The stack runs as one Docker Compose project, split into profiles so that you st
 * `ai`: one container with the Airflow, Toolbox and dbt MCP servers, reached over stdio with `docker exec`.
 * `flower`: Celery monitoring.
 
-A reverse proxy with TLS for server deployments (the `server` profile) and scheduled backups (the `ops` profile) are planned for later releases.
+The stack has two modes, local and server. Both are first-class, and both are to be covered by automated tests. In local mode, ports are published on `127.0.0.1` only. Server mode adds a reverse proxy with TLS (the `server` profile) and scheduled backups (the `ops` profile).
 
 The resource targets, which are still to be measured, are 8 GB of RAM available to Docker (6 GB as a minimum), 4 CPUs and 20 GB of disk, on x86-64-v2 or ARM64 hardware such as Apple Silicon.
 
+Decision records: [ADR-0010: Support amd64 and arm64 within a memory budget](../adr/0010-multi-arch-and-memory-budget.md) covers the architectures and the memory budget, and [ADR-0011: Support local and server modes](../adr/0011-local-and-server-modes.md) covers the two modes.
+
 ## Decisions
 
-The reasons behind these choices, and the alternatives that were considered, are recorded as architecture decision records. See [Decisions](../adr/index.md); [ADR-0001](../adr/0001-record-architecture-decisions.md) explains which decisions are recorded and how.
+The reasons behind the choices about each component, the container layout and the two modes, and the alternatives that were considered, are recorded as architecture decision records. The sections above link to them. [Decisions](../adr/index.md) lists all records, including those on the license and the documentation, and [ADR-0001](../adr/0001-record-architecture-decisions.md) explains which decisions are recorded and how.

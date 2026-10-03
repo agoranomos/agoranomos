@@ -11,7 +11,21 @@ nav = [
   { "How-to guides" = ["how-to/index.md"] },
   { "Reference" = ["reference/index.md"] },
   { "Explanation" = ["explanation/index.md", "explanation/architecture.md"] },
-  { "Decisions" = ["adr/index.md", "adr/0001-record-architecture-decisions.md"] },
+  { "Decisions" = [
+    "adr/index.md",
+    { "ADR-0001: Record architecture decisions" = "adr/0001-record-architecture-decisions.md" },
+    { "ADR-0002: Orchestrate with Apache Airflow 3" = "adr/0002-orchestrate-with-airflow-3.md" },
+    { "ADR-0003: Run two PostgreSQL instances" = "adr/0003-two-postgres-instances.md" },
+    { "ADR-0004: Ingest data with dlt" = "adr/0004-ingest-with-dlt.md" },
+    { "ADR-0005: Transform data with dbt Core" = "adr/0005-transform-with-dbt-core.md" },
+    { "ADR-0006: Use Metabase as the BI layer" = "adr/0006-metabase-as-bi.md" },
+    { "ADR-0007: Give AI clients read-only access through MCP" = "adr/0007-ai-access-via-mcp-read-only.md" },
+    { "ADR-0008: License under Apache-2.0 with DCO sign-off" = "adr/0008-apache-2-and-dco.md" },
+    { "ADR-0009: Write documentation with Zensical and Diátaxis" = "adr/0009-documentation.md" },
+    { "ADR-0010: Support amd64 and arm64 within a memory budget" = "adr/0010-multi-arch-and-memory-budget.md" },
+    { "ADR-0011: Support local and server modes" = "adr/0011-local-and-server-modes.md" },
+    { "ADR-0012: Use Python 3.13 and a pinned toolchain" = "adr/0012-python-and-tooling.md" },
+  ] },
 ]
 
 [project.theme]
@@ -44,7 +58,10 @@ pymdownx.superfences.custom_fences = [
 
 # MADR keeps an ADR's status in the front matter. Zensical also reads that field as a page
 # status and shows an icon in the navigation, so give each status a name to show on hover.
+# The keys are the status values that docs/adr/index.md lists: keep the two in step.
 [project.extra.status]
 proposed = "Proposed"
 accepted = "Accepted"
+rejected = "Rejected"
+deprecated = "Deprecated"
 superseded = "Superseded"

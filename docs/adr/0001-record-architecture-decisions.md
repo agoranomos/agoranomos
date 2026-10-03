@@ -36,15 +36,15 @@ The rules are:
 
 * **What is recorded.** A decision gets an ADR when it is hard to reverse or affects users and contributors. Typical subjects are the components of the stack, the contracts of the data models, security defaults, the license and releases.
 * **Where and how.** Each record is a Markdown file `docs/adr/NNNN-title.md` with a sequential four-digit number. It follows the [MADR 4.0](https://adr.github.io/madr/) template, with a metadata block for status, date and decision-makers.
-* **Lifecycle.** A record has one of the statuses proposed, accepted, deprecated or superseded. An accepted record is not edited. To change a decision, a new ADR supersedes the old one, and only the status of the old record is updated to point to the new one.
+* **Lifecycle.** A record has one of the statuses proposed, accepted, rejected, deprecated or superseded. An accepted record is not edited. To change a decision, a new ADR supersedes the old one. The old record keeps its text, its status becomes `superseded`, and one line under its title, `Superseded by [ADR-NNNN](NNNN-title.md)`, points to the new record.
 
 ### Consequences
 
 * Good, because the reasoning behind significant choices is public, searchable and versioned together with the code.
-* Good, because a change of direction is explicit: the new record names the one it supersedes.
+* Good, because a change of direction is explicit: the superseded record points to the one that replaced it.
 * Good, because proposing or questioning a decision follows the same pull request review as any other change.
 * Bad, because writing records takes effort, so they are limited to decisions that meet the criteria above.
-* Bad, because superseded records stay in place, so readers have to follow the status to the current decision.
+* Bad, because superseded records stay in place, so readers have to follow the "Superseded by" line to the current decision.
 
 ## More Information
 
