@@ -39,7 +39,7 @@ jobs:
           missing=0
           for commit in $(git rev-list --no-merges "${BASE_SHA}..${HEAD_SHA}"); do
             if ! git log -1 --format=%B "${commit}" | grep -qE '^Signed-off-by: .+ <.+@.+>$'; then
-              echo "::error::Commit ${commit} has no DCO sign-off. Fix it with: git rebase --signoff ${BASE_SHA}"
+              echo "::error::Commit ${commit} has no DCO sign-off. Fix it with: git fetch origin && git rebase --signoff origin/main && git push --force-with-lease (see CONTRIBUTING.md)"
               missing=1
             fi
           done
