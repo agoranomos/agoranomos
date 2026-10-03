@@ -23,9 +23,9 @@
       "enabled": false
     },
     {
-      "description": "GitHub's runner images have no release timestamps, so the three-day wait would hold their updates forever.",
+      "description": "Runner images change on purpose, not as routine updates: the checks must support a new image first (actionlint validates runner labels).",
       "matchDatasources": ["github-runners"],
-      "minimumReleaseAge": null
+      "enabled": false
     }
   ]
 }
