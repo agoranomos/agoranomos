@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest an idea, a data source or an improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Describe the problem first: a good solution follows from a clear problem. A change that affects the design of the stack may need an architecture decision record, which we can write together.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or goal
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like Agoranomos to do?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other ways to solve the problem, and why they fall short.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links and examples. For a new data source, name the platform and the API or report that matters. Remove secrets, tokens and personal data first.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the existing issues and found no duplicate.
+          required: true
+        - label: I would like to help build this.
