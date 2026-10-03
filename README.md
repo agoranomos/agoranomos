@@ -76,7 +76,7 @@ The design rests on a few principles:
 
 - **Your data stays yours.** The warehouse is PostgreSQL on infrastructure you control, and the history stays there. Agoranomos needs no LLM account or key of its own: you use the AI client you already have, and it sees only what the MCP servers let it read. Whatever the client reads to answer a question is sent to its AI provider: your data stays on your server, and what you ask an AI about goes to the AI you chose.
 - **Read-only by default.** Each MCP server is limited by its own control, so one mistake does not open everything. Campaign names and ad texts can carry instructions written by anyone, so Agoranomos treats them as untrusted data, and read-only access limits the damage if an AI client follows them anyway. See [ADR-0007](docs/adr/0007-ai-access-via-mcp-read-only.md).
-- **Local and server modes.** Local mode is for engineers on their own machine: ports are published on `127.0.0.1` only. Server mode is for teams and for business users who connect from the Claude and ChatGPT apps: a reverse proxy with TLS sits in front of the web endpoints, and the Metabase MCP server is served over HTTPS with OAuth. See [ADR-0011](docs/adr/0011-local-and-server-modes.md).
+- **Local and server modes.** Local mode is for engineers on their own machine: ports are published on `127.0.0.1` only. Server mode is for teams and for business users who connect from the Claude and ChatGPT apps: a reverse proxy with TLS sits in front of the web endpoints, the Metabase MCP server is served over HTTPS with OAuth, and backups run on a schedule. See [ADR-0011](docs/adr/0011-local-and-server-modes.md).
 - **amd64 and arm64.** Both architectures are supported targets, Apple Silicon included, within a memory budget meant for a host with 8 GB of RAM. The figures are targets that have not been measured yet. See [ADR-0010](docs/adr/0010-multi-arch-and-memory-budget.md).
 
 ## Status and roadmap
@@ -86,11 +86,11 @@ Agoranomos is **pre-alpha**. Phase 0, the foundation, is in progress: the reposi
 | Phase | Release | What it delivers |
 |---|---|---|
 | 0. Foundation | none | The name, repository, license and structure, the tooling (uv, ruff, prek), the CI and documentation skeletons, and the first architecture decision records. In progress. |
-| 1. Platform | v0.1.0 | A Docker Compose stack with two PostgreSQL instances, Valkey, Airflow 3.3 and Metabase, in local and server modes (Caddy with automatic TLS), both covered by CI; secrets initialization; preflight checks; every service healthy, with a smoke test in CI. |
+| 1. Platform | v0.1.0 | A Docker Compose stack with two PostgreSQL instances, Valkey, Airflow 3.3 and Metabase, in local and server modes, both covered by CI (server mode adds Caddy with automatic TLS and scheduled backups); secrets initialization; preflight checks; every service healthy, with a smoke test in CI. |
 | 2. End to end on demo data | v0.2.0 | A demo source (dlt) → raw → dbt (through Cosmos) → marts → Metabase dashboards created from code. |
 | 3. AI layer | v0.3.0 | The four MCP servers, among them the Metabase MCP server over HTTPS with OAuth for the Claude and ChatGPT apps; database roles; a ready-made `.mcp.json`; skills for coding agents; and the guide "Talk to your data". The candidate for the first public release. |
 | 4. Real connectors | v0.4 and later | One data source per minor release, together with the unified model and FX rates. |
-| 5. Operations | v0.x | Automated backups and restore, an upgrade runbook, and observability with elementary. |
+| 5. Operations | v0.x | Verified restores, an upgrade runbook, and observability with elementary. |
 | Stable | v1.0.0 | A stable contract for the configuration and the data models. |
 
 The roadmap gives the order of the work, not dates. Versions are 0.x until the configuration and the data model are stable.
