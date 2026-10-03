@@ -4,7 +4,7 @@ Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 
 !!! warning "Status: pre-alpha"
 
-    Agoranomos is under active development and is not ready for use yet. These pages describe the intended design, and pages for features that are not released yet say when they are planned.
+    Agoranomos is under active development and is not ready for use yet. These pages describe the intended design. Pages about features that are not released yet describe what is planned and, where a release is known, which one.
 
 ## What it does
 
