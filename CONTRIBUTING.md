@@ -88,7 +88,7 @@ To add one:
 2. Add a navigation entry for it under "Decisions" in `zensical.toml` and a row to the table in `docs/adr/index.md`.
 3. Start with `status: proposed`, both in the record and in the Status column of its row in the index. When the maintainer approves the pull request, you change both to `accepted` in that same pull request, before it is squash-merged, so the record is accepted from the moment it lands on `main`.
 
-An accepted record is not rewritten. To change a decision, write a new ADR that supersedes the old one, as the index describes.
+An accepted record keeps its decision: its status, the implementation status of what it decided, factual corrections and editorial fixes may be edited, and the pull request says which, but a changed decision needs a new ADR that supersedes the old one, as the index describes.
 
 ## Things that can surprise you
 

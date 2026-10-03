@@ -24,9 +24,9 @@ The `status` in the metadata block of a record is one of these words, written in
 | deprecated | The decision no longer applies, and no other record replaces it. |
 | superseded | A newer record replaced the decision. The status is `superseded`, and a line `Superseded by [ADR-0123](0123-title.md).` under the title names the new record. |
 
-## Accepted records are not edited
+## Accepted records keep their decision
 
-An accepted record is never rewritten to fit new circumstances. To change a decision, write a new ADR that supersedes the old one. The old record keeps its text. Its status becomes `superseded`, and one line under its title points to the new record; nothing else changes. That way the history of why things changed stays readable.
+An accepted record keeps its decision. Its status, the implementation status of what it decided (such as an "In place" or "Planned" list), factual corrections and editorial fixes may be edited, and the pull request says which. These edits leave the `date` unchanged: it is the day the decision was made or last changed. A changed decision needs a new ADR that supersedes the old one. The old record keeps its text. Its status becomes `superseded`, and one line under its title points to the new record; nothing else changes. That way the history of why things changed stays readable.
 
 A superseded record starts like this:
 
