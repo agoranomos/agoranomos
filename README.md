@@ -62,6 +62,7 @@ flowchart TB
     mcp --> clients
     airflow -.-> dlt
     airflow -.->|dbt build| warehouse
+    airflow -.->|refresh| metabase
 ```
 
 Solid arrows show how data moves. Dotted arrows show what Airflow runs.

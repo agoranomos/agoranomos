@@ -62,6 +62,7 @@ flowchart TB
     mcp --> clients
     airflow -.-> dlt
     airflow -.->|dbt build| warehouse
+    airflow -.->|обновление| metabase
 ```
 
 Сплошные стрелки показывают движение данных. Пунктирные показывают то, что запускает Airflow.
