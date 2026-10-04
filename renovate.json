@@ -26,6 +26,13 @@
       "description": "Runner images change on purpose, not as routine updates: the checks must support a new image first (actionlint validates runner labels).",
       "matchDatasources": ["github-runners"],
       "enabled": false
+    },
+    {
+      "description": "Renovate's own image, run by .github/workflows/renovate.yml: its registry (GHCR) publishes no release dates, so the three-day wait cannot apply; Renovate releases several times a week, so its version is updated once a week; and the action input holds a version tag only, so the image is not pinned by digest.",
+      "matchDepNames": ["ghcr.io/renovatebot/renovate"],
+      "minimumReleaseAgeBehaviour": "timestamp-optional",
+      "schedule": ["* 0-3 * * 1"],
+      "pinDigests": false
     }
   ]
 }
