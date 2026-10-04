@@ -28,7 +28,7 @@
       "enabled": false
     },
     {
-      "description": "Renovate's own image, run by .github/workflows/renovate.yml: its registry (GHCR) publishes no release dates, so the three-day wait cannot apply; Renovate releases several times a week, so its version is updated once a week; and the action input holds a version tag only, so the image is not pinned by digest.",
+      "description": "Renovate's own image, run by .github/workflows/renovate.yml. Renovate reads Docker release dates only from Docker Hub, and this image is on GHCR, so the three-day wait cannot apply (expect a 'no releaseTimestamp' warning on the Dependency Dashboard); Renovate releases almost daily, so its version is updated once a week; and the action input holds a version tag only, so the image is not pinned by digest.",
       "matchDepNames": ["ghcr.io/renovatebot/renovate"],
       "minimumReleaseAgeBehaviour": "timestamp-optional",
       "schedule": ["* 0-3 * * 1"],

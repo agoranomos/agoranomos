@@ -5,8 +5,8 @@ name: Renovate
 # RENOVATE_APP_CLIENT_ID, and its private key is the repository secret RENOVATE_APP_PRIVATE_KEY.
 on:
   schedule:
-    # Daily at 02:17 UTC. On Mondays this run falls inside the window of the weekly
-    # uv.lock refresh ("before 4am on monday" in renovate.json's presets).
+    # Daily at 02:17 UTC. Keep it before 04:00 UTC: the weekly work in renovate.json (the uv.lock
+    # refresh and Renovate's own version) runs only in the window "* 0-3 * * 1" (Monday, UTC).
     - cron: "17 2 * * *"
   workflow_dispatch:
 
