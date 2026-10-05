@@ -48,7 +48,7 @@ Agoranomos is pre-alpha. A record states a decision, and the components it descr
 
 | ADR | Title | Status | Date |
 |---|---|---|---|
-| [0001](0001-record-architecture-decisions.md) | Record architecture decisions | accepted | 2026-10-02 |
+| [0001](0001-record-architecture-decisions.md) | Record architecture decisions | accepted | 2026-10-04 |
 | [0002](0002-orchestrate-with-airflow-3.md) | Orchestrate with Apache Airflow 3 | accepted | 2026-10-02 |
 | [0003](0003-two-postgres-instances.md) | Run two PostgreSQL instances | accepted | 2026-10-02 |
 | [0004](0004-ingest-with-dlt.md) | Ingest data with dlt | accepted | 2026-10-02 |

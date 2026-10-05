@@ -82,7 +82,7 @@ The design rests on a few principles:
 
 ## Status and roadmap
 
-Agoranomos is **pre-alpha**. Phase 0, the foundation, is complete: the repository has its tooling, CI, documentation skeleton and the first decision records. Phase 1, the platform, is next. Nothing is runnable yet, and the repository is private until v0.3.
+Agoranomos is **pre-alpha**. Phase 0, the foundation, is complete: the repository has its tooling, CI, documentation skeleton and the first decision records. Phase 1, the platform, is in progress. Nothing is runnable yet, and the repository is private until v0.3.
 
 | Phase | Release | What it delivers |
 |---|---|---|

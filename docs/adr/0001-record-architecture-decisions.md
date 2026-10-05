@@ -1,6 +1,6 @@
 ---
 status: accepted
-date: 2026-10-02
+date: 2026-10-04
 decision-makers: Andrei Gromov
 ---
 
