@@ -3,9 +3,12 @@
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
+import threading
 import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import ai_switches
@@ -367,6 +370,212 @@ def test_pytest_does_not_print_the_secrets_of_a_failing_test(tmp_path, options):
     assert f"Bearer {values['__TOKEN__']}" not in report
     # The control shows that this check can see a leak.
     assert values["__PLAIN__"] in report
+
+
+def unused_port() -> int:
+    """A port on loopback where nothing listens: a socket binds it and lets it go."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+@pytest.fixture
+def http_server():
+    """A local server for http_json: each path answers as its entry in ANSWERS says, and the
+    requests that it got are kept in server.requests as (method, path, headers, body)."""
+    answers = {
+        "/ok": (200, "application/json", b'{"answer": [1, 2]}'),
+        "/empty": (204, "application/json", b""),
+        "/text": (200, "text/plain", b"not json"),
+        "/denied": (401, "application/json", b'{"detail": "Not authenticated"}'),
+        "/missing": (404, "text/plain", b"nothing here"),
+    }
+
+    class Handler(BaseHTTPRequestHandler):
+        def serve(self) -> None:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(length) if length else None
+            server.requests.append((self.command, self.path, dict(self.headers), body))
+            path = self.path.split("?")[0]
+            if path == "/hangs-up":
+                self.close_connection = True
+                return
+            if path == "/cut-off":
+                self.close_connection = True
+                self.send_response(200)
+                self.send_header("Content-Length", "100")
+                self.end_headers()
+                self.wfile.write(b'{"part": ')
+                return
+            status, content_type, data = answers[path]
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        do_GET = do_POST = do_PUT = serve
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.requests = []
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+    )
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_address[1]}", server
+    server.shutdown()
+    server.server_close()
+
+
+def test_http_json_sends_the_body_and_the_headers_and_reads_the_json(http_server):
+    url, server = http_server
+    secret = stack_helpers.Secret("a-session-that-must-stay-out-of-the-report")
+    headers = stack_helpers.SecretHeaders({"X-Session": secret})
+    body = {"username": "admin", "password": stack_helpers.Secret("a-password-for-the-wire")}
+    assert stack_helpers.http_json("POST", f"{url}/ok", body, headers) == (200, {"answer": [1, 2]})
+    [(method, path, sent, data)] = server.requests
+    assert (method, path) == ("POST", "/ok")
+    assert json.loads(data) == {"username": "admin", "password": "a-password-for-the-wire"}
+    assert sent["Content-Type"] == "application/json"
+    assert sent["X-Session"] == "a-session-that-must-stay-out-of-the-report"
+
+
+def test_http_json_sends_no_body_when_it_has_none(http_server):
+    url, server = http_server
+    assert stack_helpers.http_json("GET", f"{url}/ok") == (200, {"answer": [1, 2]})
+    [(method, _, sent, data)] = server.requests
+    assert method == "GET"
+    assert data is None
+    assert "Content-Length" not in sent
+
+
+@pytest.mark.parametrize(
+    ("path", "answer"),
+    [
+        pytest.param("/empty", (204, None), id="no-body"),
+        pytest.param("/text", (200, "not json"), id="not-json"),
+        pytest.param("/denied", (401, {"detail": "Not authenticated"}), id="a-status-of-401"),
+        pytest.param("/missing", (404, "nothing here"), id="a-status-of-404-that-is-text"),
+    ],
+)
+def test_http_json_returns_every_answer_of_the_server_as_a_status_and_a_body(
+    http_server, path, answer
+):
+    # An error status is an answer to look at, and not an exception: tests assert on it.
+    url, _ = http_server
+    assert stack_helpers.http_json("GET", f"{url}{path}") == answer
+
+
+@pytest.mark.parametrize(
+    ("path", "failure"),
+    [
+        pytest.param("/hangs-up", "RemoteDisconnected", id="hangs-up"),
+        pytest.param("/cut-off", "IncompleteRead", id="cut-off"),
+    ],
+)
+def test_http_json_names_the_call_and_the_class_of_a_failure_and_nothing_else(
+    http_server, path, failure
+):
+    url, _ = http_server
+    with pytest.raises(ConnectionError) as raised:
+        stack_helpers.http_json(
+            "PUT", f"{url}{path}?token=in-the-query", {"password": "in-the-body"}
+        )
+    assert str(raised.value) == f"PUT {path} failed: {failure}"
+    # The original error is not kept to be printed: its frames hold the request.
+    assert raised.value.__cause__ is None
+    assert raised.value.__suppress_context__ is True
+
+
+def test_http_json_names_the_path_of_a_url_that_has_none():
+    with pytest.raises(ConnectionError) as raised:
+        stack_helpers.http_json("GET", f"http://127.0.0.1:{unused_port()}")
+    assert str(raised.value) == "GET / failed: URLError"
+
+
+# A request with a password in its body, to a port where nothing listens, so that the transport
+# fails. The values reach the test through the environment, not as literals: pytest prints the
+# source of the failing test, and a literal would be in the report as text. The control makes the
+# same request with plain urllib in a helper that keeps the body in a local and in an argument:
+# pytest prints those under --tb=long and --showlocals, and the check must see it there, or it
+# could not see a leak at all.
+FAILING_REQUESTS = """
+import json
+import os
+import urllib.request
+
+import stack_helpers
+
+URL = "http://127.0.0.1:" + os.environ["TEST_PORT"] + "/api/session?marker=visible-in-the-query"
+
+
+def leaky_helper(url, password):
+    data = json.dumps({"password": password}).encode()
+    request = urllib.request.Request(url, data=data, method="POST")
+    urllib.request.urlopen(request, timeout=5)
+
+
+def test_http_json_cannot_connect():
+    secret = stack_helpers.Secret
+    token = secret("Bearer " + os.environ["TEST_TOKEN"])
+    headers = stack_helpers.SecretHeaders({"Authorization": token})
+    body = {"username": "admin", "password": secret(os.environ["TEST_PASSWORD"])}
+    stack_helpers.http_json("POST", URL, body, headers)
+
+
+def test_the_control_cannot_connect():
+    leaky_helper(URL, os.environ["TEST_CONTROL"])
+"""
+
+
+@pytest.mark.parametrize(
+    ("options", "control_leaks"),
+    [
+        pytest.param([], False, id="default"),
+        pytest.param(["-v"], False, id="verbose"),
+        pytest.param(["-vv"], False, id="very-verbose"),
+        pytest.param(["--tb=long"], True, id="long"),
+        pytest.param(["-vv", "--showlocals"], True, id="verbose-with-locals"),
+    ],
+)
+def test_a_failed_request_prints_no_part_of_its_body_under_any_traceback_mode(
+    tmp_path, options, control_leaks
+):
+    # CI runs with -v, and the other modes are what a person may ask for when a test fails.
+    values = {
+        "TEST_PASSWORD": "a-password-that-must-stay-out-of-the-report-4",
+        "TEST_TOKEN": "a-token-that-must-stay-out-of-the-report-5",
+        "TEST_CONTROL": "a-control-value-that-the-report-does-show-6",
+    }
+    (tmp_path / "test_fails_to_connect.py").write_text(FAILING_REQUESTS, encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", *options],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            **values,
+            "TEST_PORT": str(unused_port()),
+            "PYTHONPATH": str(Path(stack_helpers.__file__).parent),
+        },
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    report = result.stdout + result.stderr
+    assert "2 failed" in report, "the tests did not fail as they should"
+    hidden = {"the password": values["TEST_PASSWORD"], "the token": values["TEST_TOKEN"]}
+    assert [label for label, value in hidden.items() if value in report] == []
+    # The error names the method and the path, and nothing of the query.
+    messages = [line for line in report.splitlines() if "ConnectionError: POST" in line]
+    assert messages, "http_json did not raise a ConnectionError that names the request"
+    expected = "ConnectionError: POST /api/session failed: URLError"
+    assert all(line.endswith(expected) for line in messages), messages
+    # The control shows that this check can see a leak where there is one.
+    assert (values["TEST_CONTROL"] in report) is control_leaks
 
 
 def write_env(tmp_path, monkeypatch, text):

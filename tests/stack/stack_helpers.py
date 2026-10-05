@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
@@ -150,6 +152,25 @@ class EnvValues(NamesOnly):
     """The settings of .env, as the env fixture gives them."""
 
 
+def build_request(
+    method: str, url: str, body: Any, headers: dict[str, str] | None
+) -> urllib.request.Request:
+    """The request of http_json, built in a function of its own.
+
+    The encoded body, with a password in it, then lives only in this frame and in the request,
+    whose repr shows no data. A function that holds it in a local and then fails would have it
+    printed: pytest shows the arguments of the frames of a failed test under --tb=long, and their
+    locals under --showlocals.
+    """
+    data = None if body is None else json.dumps(body).encode()
+    return urllib.request.Request(
+        url,
+        data=data,
+        method=method,
+        headers={"Content-Type": "application/json", **(headers or {})},
+    )
+
+
 def http_json(
     method: str,
     url: str,
@@ -157,18 +178,19 @@ def http_json(
     headers: dict[str, str] | None = None,
     timeout: float = 30,
 ) -> tuple[int, Any]:
-    data = None if body is None else json.dumps(body).encode()
-    request = urllib.request.Request(
-        url,
-        data=data,
-        method=method,
-        headers={"Content-Type": "application/json", **(headers or {})},
-    )
+    request = build_request(method, url, body, headers)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            status, raw = response.status, response.read()
-    except urllib.error.HTTPError as error:
-        status, raw = error.code, error.read()
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                status, raw = response.status, response.read()
+        except urllib.error.HTTPError as error:
+            status, raw = error.code, error.read()
+    except (OSError, http.client.HTTPException) as error:
+        # The server could not be reached, or it hung up. The frames of http.client hold the
+        # request, with its body and its headers, so the error is dropped (from None) and a new one
+        # names the call: the method, the path (never the query), and the class of the failure.
+        path = urllib.parse.urlsplit(url).path or "/"
+        raise ConnectionError(f"{method} {path} failed: {type(error).__name__}") from None
     try:
         return status, json.loads(raw) if raw else None
     except json.JSONDecodeError:
