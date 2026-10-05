@@ -38,7 +38,7 @@ Docker reports a little less memory than its VM or machine has, so a machine or 
 
 ## `up`
 
-Runs `init` and `preflight`, starts the stack with `docker compose up --detach`, and waits until every long-running service is healthy and every one-shot setup job has finished. It waits at most 15 minutes and stops early when a service fails, naming it and the command that shows its logs. When the stack is up, it prints the addresses of Airflow and Metabase. Running it again on a running stack keeps the data and the secrets; it runs the one-shot setup jobs again, which is how a changed password reaches PostgreSQL. `--force` is passed to `preflight`.
+Runs `init` and `preflight`, starts the stack with `docker compose up --detach`, and waits until every long-running service is healthy and every one-shot setup job has finished. It waits at most 15 minutes and stops early when a service fails, naming it and the command that shows its logs. When the stack is up, it prints the addresses of Airflow and Metabase. Running it again on a running stack keeps the data and the secrets; it runs the one-shot setup jobs again, which is how a changed password reaches PostgreSQL and Metabase. `--force` is passed to `preflight`.
 
 ## `down`
 
