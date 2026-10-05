@@ -8,10 +8,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 AIRFLOW = ROOT / "airflow"
-BASE = (
-    "apache/airflow:3.3.2-python3.13"
-    "@sha256:e9982ad3f49a60418622e1baf80c34b0daf3fa5091a336cb5ee61f0cdd189371"
-)
+# The shape of the base image, never its tag or digest: Renovate updates both, and Python stays on
+# the version of ADR-0012.
+BASE_IMAGE = r"apache/airflow:[0-9]+\.[0-9]+\.[0-9]+-python3\.13@sha256:[0-9a-f]{64}"
 LOCK_COMMAND = (
     "uv pip compile dbt-requirements.in --universal --python-version 3.13 --generate-hashes "
     "--output-file dbt-requirements.txt"
@@ -43,11 +42,18 @@ def dockerfile() -> str:
 
 
 def test_the_image_starts_from_the_pinned_official_image():
-    assert re.findall(r"^FROM\s+(\S+)", dockerfile(), flags=re.MULTILINE) == [BASE]
+    images = re.findall(r"^FROM\s+(\S+)", dockerfile(), flags=re.MULTILINE)
+    assert len(images) == 1, images
+    assert re.fullmatch(BASE_IMAGE, images[0]), images[0]
 
 
 def test_airflow_gets_dlt_and_cosmos_under_its_constraints():
-    assert pins(AIRFLOW / "requirements.txt") == {"dlt": "1.30.0", "astronomer-cosmos": "1.15.1"}
+    # Renovate updates their versions: the test fixes the names, and pins() requires the ==.
+    requirements = AIRFLOW / "requirements.txt"
+    assert set(pins(requirements)) == {"dlt", "astronomer-cosmos"}
+    # dlt keeps the extra that its postgres destination needs.
+    extra = r"^dlt\[[^\]]*\bpostgres\b[^\]]*\]=="
+    assert re.search(extra, requirements.read_text(encoding="utf-8"), flags=re.MULTILINE)
     text = dockerfile()
     assert '"apache-airflow==${AIRFLOW_VERSION}"' in text  # pip fails rather than move Airflow
     assert '--constraint "${HOME}/constraints.txt"' in text
@@ -55,8 +61,11 @@ def test_airflow_gets_dlt_and_cosmos_under_its_constraints():
 
 
 def test_dbt_has_a_locked_environment_of_its_own():
+    # Renovate moves the patch releases of dbt, and a new minor or major version is a decision
+    # (ADR-0005): the test fixes the names, and requires the lock file to hold the version that the
+    # .in file asks for.
     wanted = pins(AIRFLOW / "dbt-requirements.in")
-    assert wanted == {"dbt-core": "1.12.5", "dbt-postgres": "1.11.0"}
+    assert set(wanted) == {"dbt-core", "dbt-postgres"}
     locked = pins(AIRFLOW / "dbt-requirements.txt")
     assert {name: locked.get(name) for name in wanted} == wanted
     text = dockerfile()

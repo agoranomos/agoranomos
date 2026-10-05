@@ -12,31 +12,19 @@ import sys
 import threading
 
 import pytest
+from services import BASE_AIRFLOW, airflow_services
 from stack_helpers import FILES, rendered, secrets
 
 EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
-AIRFLOW = {
-    "airflow-init",
-    "airflow-apiserver",
-    "airflow-scheduler",
-    "airflow-dag-processor",
-    "airflow-triggerer",
-}
 CELERY_ONLY = {"broker", "airflow-worker"}
 METABASE = {"metabase", "metabase-init"}
 VARIANTS = sorted(FILES)
 
 
-def airflow_services(variant):
-    return {
-        name: service for name, service in rendered(variant).items() if name.startswith("airflow-")
-    }
-
-
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_a_variant_has_the_services_it_needs(variant):
     names = set(rendered(variant))
-    assert {"warehouse-db", "platform-db", "db-init"} | AIRFLOW | METABASE <= names
+    assert {"warehouse-db", "platform-db", "db-init"} | BASE_AIRFLOW | METABASE <= names
     # The broker and the worker belong to the Celery variant, and to no other.
     assert (names >= CELERY_ONLY) == (variant == "celery")
     assert (CELERY_ONLY & names) == (CELERY_ONLY if variant == "celery" else set())

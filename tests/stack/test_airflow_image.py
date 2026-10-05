@@ -7,49 +7,21 @@ They print versions and names, never the environment, which holds secrets.
 import re
 
 import pytest
-from services import LONG_RUNNING
-from stack_helpers import FILES, REPO_ROOT, compose, rendered
+from services import LONG_RUNNING, airflow_services
+from stack_helpers import FILES, REPO_ROOT, compose
 
 IMAGE = "agoranomos-airflow:local"
+DBT = "/opt/airflow/dbt_venv/bin/dbt"
 TELEMETRY = {
     "RUNTIME__DLTHUB_TELEMETRY": "false",
     "DBT_ENGINE_SEND_ANONYMOUS_USAGE_STATS": "False",
     "AIRFLOW__COSMOS__ENABLE_TELEMETRY": "False",
     "DO_NOT_TRACK": "1",
 }
-# Every service named airflow-, by variant. The tests that loop over the services check this set
-# first, so that a loop cannot pass because it found none.
-AIRFLOW_SERVICES = {
-    "local": {
-        "airflow-init",
-        "airflow-apiserver",
-        "airflow-scheduler",
-        "airflow-dag-processor",
-        "airflow-triggerer",
-    },
-    "celery": {
-        "airflow-init",
-        "airflow-apiserver",
-        "airflow-scheduler",
-        "airflow-dag-processor",
-        "airflow-triggerer",
-        "airflow-worker",
-    },
-}
 # The services that parse or run DAGs, and so need dlt, Cosmos and dbt.
 USERS = [
     s for s in ("airflow-dag-processor", "airflow-scheduler", "airflow-worker") if s in LONG_RUNNING
 ]
-
-
-def airflow_services(variant):
-    """The services of a variant whose names start with airflow-, after a check that they are the
-    ones that the variant is meant to have."""
-    services = {
-        name: service for name, service in rendered(variant).items() if name.startswith("airflow-")
-    }
-    assert set(services) == AIRFLOW_SERVICES[variant]
-    return services
 
 
 def pinned(name):
@@ -60,6 +32,14 @@ def pinned(name):
         if match:
             versions[match.group(1)] = match.group(3)
     return versions
+
+
+def airflow_version():
+    """The Airflow version in the tag of the FROM line of airflow/Dockerfile."""
+    dockerfile = (REPO_ROOT / "airflow" / "Dockerfile").read_text(encoding="utf-8")
+    match = re.search(r"^FROM\s+apache/airflow:([0-9.]+)-", dockerfile, flags=re.MULTILINE)
+    assert match, "the FROM line of airflow/Dockerfile has no Airflow version in its tag"
+    return match.group(1)
 
 
 def versions(service, python, *packages):
@@ -100,7 +80,7 @@ def test_compose_turns_telemetry_off_for_every_airflow_service(variant):
 
 @pytest.mark.parametrize("service", USERS)
 def test_airflow_has_the_pinned_dlt_and_cosmos(service):
-    wanted = {"apache-airflow": "3.3.2", **pinned("requirements.txt")}
+    wanted = {"apache-airflow": airflow_version(), **pinned("requirements.txt")}
     assert versions(service, "python", *wanted) == wanted
 
 
@@ -110,6 +90,17 @@ def test_dbt_runs_from_its_own_environment_only(service):
     assert versions(service, "/opt/airflow/dbt_venv/bin/python", *wanted) == wanted
     in_airflow = compose("exec", "-T", service, "python", "-c", "import dbt.version", check=False)
     assert in_airflow.returncode != 0, "dbt is importable in Airflow's environment"
+    # Not any failure of python will do: dbt must be missing. The message holds no secret.
+    assert "No module named 'dbt'" in in_airflow.stderr
+
+
+@pytest.mark.parametrize("service", USERS)
+def test_the_dbt_executable_of_the_image_runs(service):
+    # dbt is not on the PATH of Airflow's environment, so the DAGs that are to run it call this
+    # path. --help works offline; --version asks PyPI for the latest release.
+    result = compose("exec", "-T", service, DBT, "--help", check=False)
+    assert result.returncode == 0, f"{DBT} --help exited with {result.returncode}"
+    assert result.stdout.startswith("Usage:"), result.stdout[:200]
 
 
 @pytest.mark.parametrize("service", USERS)
