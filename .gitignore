@@ -18,7 +18,7 @@ htmlcov/
 site/
 .cache/
 
-# Environment files hold secrets: never commit them. Use .env.example, once it exists, as the template.
+# Environment files hold secrets: never commit them. .env.example is the template that ./agoranomos init copies.
 .env
 .env.*
 !.env.example
@@ -32,3 +32,10 @@ site/
 # Machine-local Claude Code files
 CLAUDE.local.md
 .claude/settings.local.json
+
+# A deployment's own extensions (ADR-0013): the folder belongs to the deployment, not to this repository.
+/extensions/*
+!/extensions/README.md
+
+# Local Compose overrides, for example published database ports for an IDE
+compose.override.yaml

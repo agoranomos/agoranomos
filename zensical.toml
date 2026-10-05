@@ -9,7 +9,11 @@ nav = [
   { "Home" = "index.md" },
   { "Tutorials" = ["tutorials/index.md"] },
   { "How-to guides" = ["how-to/index.md"] },
-  { "Reference" = ["reference/index.md"] },
+  { "Reference" = [
+    "reference/index.md",
+    { "Command line" = "reference/command-line.md" },
+    { "Configuration" = "reference/configuration.md" },
+  ] },
   { "Explanation" = ["explanation/index.md", "explanation/architecture.md"] },
   { "Decisions" = [
     "adr/index.md",
