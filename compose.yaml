@@ -275,6 +275,9 @@ services:
       MB_SITE_URL: http://localhost:${METABASE_PORT:-3000}
       MB_ANON_TRACKING_ENABLED: "false"
       MB_CHECK_FOR_UPDATES: "false"
+      # A new Metabase gets no Sample Database and no Examples collection, which have nothing to do
+      # with marketing data.
+      MB_LOAD_SAMPLE_CONTENT: "false"
       # Metabase 0.63 turns its AI entry points on by default: the built-in MCP server (with the OAuth
       # client registration that goes with it) and the Agent API. They stay off until an ADR decides what
       # AI access may do in Metabase (AGENTS.md). MB_AI_FEATURES_ENABLED is the master switch, which the

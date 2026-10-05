@@ -280,6 +280,15 @@ def test_metabase_publishes_only_its_own_port_on_localhost(variant):
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
+def test_a_new_metabase_gets_no_sample_content(variant):
+    # Without this, a fresh Metabase makes a Sample Database and an Examples collection, which have
+    # nothing to do with marketing data. An instance that exists keeps what it has, and the setting
+    # is not listed by Metabase, so what can be checked is the variable that compose.yaml sets.
+    environment = rendered(variant)["metabase"]["environment"]
+    assert environment.get("MB_LOAD_SAMPLE_CONTENT") == "false"
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
 def test_each_metabase_service_holds_only_the_secrets_it_needs(env, variant):
     # Metabase learns the password of the warehouse from the setup job, through its API, so it has
     # no use for that password or for the one of the admin in its environment; the setup job holds
