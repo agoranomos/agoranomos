@@ -2,9 +2,9 @@
 # Settings and secrets come from .env, which ./agoranomos init creates from .env.example; without it,
 # docker compose stops and asks for ./agoranomos init. .env also sets COMPOSE_PROFILES: core is the whole
 # stack in local mode (ADR-0011). Images are pinned by tag and digest, and Renovate updates them.
-# Airflow runs on an image of its own, built from airflow/Dockerfile.
-# Airflow runs with the LocalExecutor here: the scheduler runs the tasks. compose.celery.yaml adds a broker
-# and a separate worker (CeleryExecutor); select it with COMPOSE_FILE in .env (ADR-0015).
+# Airflow runs on an image of its own, built from airflow/Dockerfile, with the LocalExecutor: the
+# scheduler runs the tasks. compose.celery.yaml adds a broker and a separate worker (CeleryExecutor);
+# select it with COMPOSE_FILE in .env (ADR-0015).
 
 x-logging: &logging
   driver: json-file

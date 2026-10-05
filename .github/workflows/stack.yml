@@ -93,7 +93,8 @@ jobs:
           df -h /var/lib/docker
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /var/lib/docker
-      # The Airflow image is built by ./agoranomos up (pull_policy: build), so pull skips it.
+      # airflow-init builds the Airflow image, and the other Airflow services never pull it, so
+      # pull skips them.
       - name: Pull the images
         run: docker compose pull --quiet --ignore-buildable
       - name: Start the stack
