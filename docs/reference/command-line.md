@@ -30,7 +30,7 @@ Checks that this machine can run the stack. Each problem is reported with what t
 | Free disk for Docker (Linux) | below 10 GB | below 20 GB |
 | Ports `AIRFLOW_PORT` and `METABASE_PORT` | a port is in use and the stack is not running | — |
 
-Ports are checked with `ss`, `netstat` or `lsof`, the first of them that is installed; without any of them, preflight warns that it cannot check the ports.
+Ports are checked with `ss`, `netstat` and `lsof`, whichever of them are installed: a port counts as in use when any of them lists a listener on it. Without any of them, preflight warns that it cannot check the ports.
 
 Docker reports a little less memory than its VM or machine has, so a machine or VM with 8 GB passes without a warning.
 

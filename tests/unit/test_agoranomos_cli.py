@@ -445,20 +445,80 @@ def test_a_port_that_another_user_holds_is_found(cli):
     assert "port 8080 is in use" in result.stderr
 
 
-def test_only_the_first_installed_tool_is_asked(cli):
+@pytest.mark.parametrize(
+    ("tools", "blind"),
+    [
+        ("netstat lsof", "FAKE_NETSTAT_BLIND"),
+        ("lsof netstat", "FAKE_LSOF_BLIND"),
+        ("lsof ss", "FAKE_LSOF_BLIND"),
+    ],
+)
+def test_a_port_is_in_use_when_any_tool_lists_a_listener_on_it(cli, tools, blind):
+    # No tool sees everything: lsof misses the listeners of other users, and netstat has been seen
+    # to list no listener at all in some process contexts on macOS.
+    result = cli.run(
+        "preflight", FAKE_BUSY_PORTS="8080", AGORANOMOS_PORT_TOOLS=tools, **{blind: "1"}
+    )
+    assert result.returncode == 1
+    assert "port 8080 is in use" in result.stderr
+
+
+@pytest.mark.parametrize("only_tool", ["ss", "netstat", "lsof"])
+def test_the_default_tools_are_ss_netstat_and_lsof(cli, only_tool):
+    # Every tool but one lists nothing, so the port is found only if that one is a default.
+    fake = {"FAKE_BUSY_PORTS": "8080"}
+    if only_tool != "ss":
+        cli.stub("ss", "exit 0")
+    if only_tool != "netstat":
+        fake["FAKE_NETSTAT_BLIND"] = "1"
+    if only_tool != "lsof":
+        fake["FAKE_LSOF_BLIND"] = "1"
+    result = cli.run("preflight", **fake)
+    assert result.returncode == 1
+    assert "port 8080 is in use" in result.stderr
+
+
+def test_an_lsof_that_ignores_its_arguments_does_not_make_every_port_busy(cli):
+    # The lsof of busybox (Alpine) lists all open files and exits 0, whatever it is asked.
+    cli.stub("lsof", 'printf "1\\t/bin/busybox\\t0\\t/dev/null\\n"')
+    result = cli.run("preflight", AGORANOMOS_PORT_TOOLS="lsof")
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+
+
+def test_a_port_that_no_tool_lists_is_free(cli):
     result = cli.run(
         "preflight",
         FAKE_BUSY_PORTS="8080",
+        AGORANOMOS_PORT_TOOLS="netstat lsof",
+        FAKE_NETSTAT_BLIND="1",
         FAKE_LSOF_BLIND="1",
-        AGORANOMOS_PORT_TOOLS="lsof ss",
     )
     assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+
+
+def test_the_tools_are_asked_in_order_until_one_lists_the_port(cli, tmp_path):
+    asked = tmp_path / "lsof-was-asked"
+    cli.stub("lsof", f"touch '{asked}'; exit 1")
+    found = cli.run("preflight", FAKE_BUSY_PORTS="8080 3000")  # ss lists both: lsof is not needed
+    assert found.returncode == 1
+    assert not asked.exists()
+    free = cli.run("preflight")  # nothing listens anywhere: every installed tool is asked
+    assert free.returncode == 0, free.stderr
+    assert asked.exists()
 
 
 def test_a_tool_that_is_not_installed_is_skipped(cli):
     result = cli.run("preflight", FAKE_BUSY_PORTS="8080", AGORANOMOS_PORT_TOOLS="no-such-tool lsof")
     assert result.returncode == 1
     assert "port 8080 is in use" in result.stderr
+
+
+def test_preflight_does_not_warn_while_one_tool_is_installed(cli):
+    result = cli.run("preflight", AGORANOMOS_PORT_TOOLS="no-such-tool lsof")
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
 
 
 def test_preflight_warns_once_when_no_tool_can_check_the_ports(cli):

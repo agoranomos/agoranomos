@@ -54,7 +54,9 @@ esac
 # one, address.port, or with FAKE_NETSTAT_STYLE=linux in the one of net-tools, address:port). They
 # also print sockets that are not listening, as netstat does: a connection that is waiting to
 # close on port 8080 and one to a remote port 3000, and for every busy port a connection to that
-# port on a remote host. The script must not count any of these.
+# port on a remote host. The script must not count any of these. FAKE_NETSTAT_BLIND=1 makes netstat
+# list no listening socket at all, which it has been seen to do in some process contexts on macOS:
+# the other lines are still there.
 FAKE_SS = r"""#!/bin/sh
 echo "State     Recv-Q Send-Q Local Address:Port    Peer Address:Port Process"
 echo "TIME-WAIT 0      0          127.0.0.1:8080       127.0.0.1:52001"
@@ -73,8 +75,10 @@ if [ "${FAKE_NETSTAT_STYLE:-bsd}" = "linux" ]; then
   echo "tcp        0      0 127.0.0.1:8080          127.0.0.1:52001         TIME_WAIT"
   echo "tcp        0      0 192.168.1.5:52346       203.0.113.9:3000        ESTABLISHED"
   for port in ${FAKE_BUSY_PORTS:-}; do
-    echo "tcp        0      0 127.0.0.1:$port          0.0.0.0:*               LISTEN"
-    echo "tcp6       0      0 :::$port                 :::*                    LISTEN"
+    if [ -z "${FAKE_NETSTAT_BLIND:-}" ]; then
+      echo "tcp        0      0 127.0.0.1:$port          0.0.0.0:*               LISTEN"
+      echo "tcp6       0      0 :::$port                 :::*                    LISTEN"
+    fi
     echo "tcp        0      0 192.168.1.5:52347       203.0.113.9:$port        ESTABLISHED"
   done
   echo "Active UNIX domain sockets (servers and established)"
@@ -86,22 +90,31 @@ else
   echo "tcp4       0      0  127.0.0.1.8080         127.0.0.1.52001        TIME_WAIT"
   echo "tcp4       0      0  192.168.1.5.52346      203.0.113.9.3000       ESTABLISHED"
   for port in ${FAKE_BUSY_PORTS:-}; do
-    echo "tcp4       0      0  127.0.0.1.$port         *.*                    LISTEN"
-    echo "tcp6       0      0  *.$port                 *.*                    LISTEN"
+    if [ -z "${FAKE_NETSTAT_BLIND:-}" ]; then
+      echo "tcp4       0      0  127.0.0.1.$port         *.*                    LISTEN"
+      echo "tcp6       0      0  *.$port                 *.*                    LISTEN"
+    fi
     echo "tcp4       0      0  192.168.1.5.52347      203.0.113.9.$port       ESTABLISHED"
   done
 fi
 """
 
 # lsof lists only the sockets of the current user. FAKE_LSOF_BLIND=1 models a listener of another
-# user: lsof sees nothing, while ss and netstat still list it.
+# user: lsof sees nothing, while ss and netstat still list it. Like the real one, it prints a
+# COMMAND header and a line for the listener when it finds one, and nothing when it finds none.
 FAKE_LSOF = r"""#!/bin/sh
 [ -z "${FAKE_LSOF_BLIND:-}" ] || exit 1
 port=""
 for arg in "$@"; do
   case "$arg" in -iTCP:*) port=${arg#-iTCP:} ;; esac
 done
-case " ${FAKE_BUSY_PORTS:-} " in *" $port "*) exit 0 ;; esac
+case " ${FAKE_BUSY_PORTS:-} " in
+  *" $port "*)
+    echo "COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME"
+    echo "python3 12345 user    3u  IPv4 0x1234      0t0  TCP 127.0.0.1:$port (LISTEN)"
+    exit 0
+    ;;
+esac
 exit 1
 """
 

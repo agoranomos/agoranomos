@@ -190,43 +190,49 @@ check_x86_64_v2() {
   [ -z "$missing" ] || problem "this x86-64 CPU lacks$missing, which x86-64-v2 needs"
 }
 
-# Print the tool that finds out whether a port is in use: the first one that is installed of ss (Linux
-# and WSL2), netstat (macOS, BSD, and Linux without iproute2) and lsof. Both ss and netstat list every
-# listener. lsof comes last because without privileges it lists only the sockets of the current user,
-# so it misses a port that another user holds, such as docker-proxy of another stack. Print nothing
-# and fail when none is installed. AGORANOMOS_PORT_TOOLS is a hook for the tests: a list of tools to
-# try instead of these three, in that order (empty: none).
-port_tool() {
-  for port_tool_name in ${AGORANOMOS_PORT_TOOLS-ss netstat lsof}; do
-    if command -v "$port_tool_name" > /dev/null 2>&1; then
-      printf '%s' "$port_tool_name"
-      return 0
+# Print, one per line, the tools that can find out whether a port is in use and are installed, in the
+# order to ask them: ss (Linux and WSL2), netstat (macOS, BSD, and Linux without iproute2) and lsof. No
+# tool sees every listener: without privileges lsof lists only the sockets of the current user, so it
+# misses a port that another user holds, such as docker-proxy of another stack, and netstat has been
+# seen to list no listener at all in some process contexts on macOS. So port_in_use asks all of them.
+# AGORANOMOS_PORT_TOOLS is a hook for the tests: a list of tools to try instead of these three, in that
+# order (empty: none).
+port_tools() {
+  for candidate in ${AGORANOMOS_PORT_TOOLS-ss netstat lsof}; do
+    if command -v "$candidate" > /dev/null 2>&1; then
+      printf '%s\n' "$candidate"
     fi
   done
-  return 1
 }
 
-# True when something listens on TCP port $1. The whole port number has to match: 8080 is not 18080.
-# It is false when no tool is installed (cmd_preflight warns about that) or a tool fails, because then
-# nothing can be said. netstat runs with LC_ALL=C because net-tools translates the names of the states.
+# True when any installed tool lists a listener on TCP port $1: the tools are asked in order, and the
+# search stops at the first that finds one. The whole port number has to match: 8080 is not 18080.
+# It is false when no tool lists a listener, which includes the cases that no tool is installed
+# (cmd_preflight warns about that) and that a tool fails, because then nothing can be said. netstat
+# runs with LC_ALL=C because net-tools translates the names of the states. lsof counts only when it
+# prints its COMMAND header, which it does when it finds a listener: the lsof of busybox ignores its
+# options, lists all open files and exits 0, so its exit status alone would make every port busy.
 port_in_use() {
-  case "$(port_tool)" in
-    ss)
-      ss -ltn 2> /dev/null | awk -v port="$1" '
-        $1 == "LISTEN" { n = split($4, parts, ":"); if ((parts[n] "") == (port "")) found = 1 }
-        END { exit !found }'
-      ;;
-    netstat)
-      LC_ALL=C netstat -an 2> /dev/null | awk -v port="$1" '
-        $1 ~ /^tcp/ && $NF == "LISTEN" {
-          n = split($4, parts, /[.:]/)
-          if ((parts[n] "") == (port "")) found = 1
-        }
-        END { exit !found }'
-      ;;
-    lsof) lsof -nP -iTCP:"$1" -sTCP:LISTEN > /dev/null 2>&1 ;;
-    *) return 1 ;;
-  esac
+  for port_tool_name in $(port_tools); do
+    case "$port_tool_name" in
+      ss)
+        ss -ltn 2> /dev/null | awk -v port="$1" '
+          $1 == "LISTEN" { n = split($4, parts, ":"); if ((parts[n] "") == (port "")) found = 1 }
+          END { exit !found }'
+        ;;
+      netstat)
+        LC_ALL=C netstat -an 2> /dev/null | awk -v port="$1" '
+          $1 ~ /^tcp/ && $NF == "LISTEN" {
+            n = split($4, parts, /[.:]/)
+            if ((parts[n] "") == (port "")) found = 1
+          }
+          END { exit !found }'
+        ;;
+      lsof) lsof -nP -iTCP:"$1" -sTCP:LISTEN 2> /dev/null | grep -q '^COMMAND' ;;
+      *) false ;;
+    esac && return 0
+  done
+  return 1
 }
 
 # Print the free space in whole GB of the file system of directory $1, or nothing when it cannot be read.
@@ -293,7 +299,7 @@ EOF
   fi
   # A running stack holds its own ports, so the ports are checked only while it is not running.
   if [ -z "$(compose ps --quiet --status running 2> /dev/null)" ]; then
-    if port_tool > /dev/null; then
+    if [ -n "$(port_tools)" ]; then
       for port_setting in AIRFLOW_PORT:8080 METABASE_PORT:3000; do
         name=${port_setting%%:*}
         port=$(setting "$name" "${port_setting#*:}")
