@@ -207,19 +207,54 @@ def warehouse_details(config: Config) -> dict[str, Any]:
     }
 
 
+def points_at_warehouse(database: Mapping[str, Any], config: Config) -> bool:
+    """Whether a connection of Metabase is the warehouse, judging by its address."""
+    details = database.get("details") or {}
+    return (
+        database.get("engine") == "postgres"
+        and details.get("host") == config.warehouse_host
+        and str(details.get("port")) == str(config.warehouse_port)
+        and details.get("dbname") == config.warehouse_db
+        and details.get("user") == config.warehouse_user
+    )
+
+
+def find_warehouse(databases: list[dict[str, Any]], config: Config) -> dict[str, Any] | None:
+    """The connection that this job keeps up to date: the one with its name, else, because the
+    person may have renamed it in Metabase, one that points at the warehouse. Among several the
+    lowest id wins, and one line says which, with the ids and no detail of any connection."""
+    candidates = [d for d in databases if d.get("name") == WAREHOUSE_NAME]
+    candidates = candidates or [d for d in databases if points_at_warehouse(d, config)]
+    candidates.sort(key=lambda database: database["id"])
+    if len(candidates) > 1:
+        ids = ", ".join(str(database["id"]) for database in candidates)
+        print(
+            f"metabase-init: warning: several connections match the warehouse (ids {ids}); "
+            f"updating {candidates[0]['id']}",
+            file=sys.stderr,
+        )
+    return candidates[0] if candidates else None
+
+
 def ensure_warehouse(metabase: Metabase, config: Config) -> tuple[int, bool]:
-    """Connect the warehouse, or update its connection. Return the id and whether it is new."""
+    """Connect the warehouse, or update its connection. Return the id and whether it is new.
+
+    A connection that exists keeps its name and every detail that the job does not set: the
+    person may have renamed it or added options in Metabase. The job sets the details of
+    warehouse_details, and the password of the list is a mask that is never sent back.
+    """
     response = metabase.call("GET", "/api/database")
     databases = response.get("data", []) if isinstance(response, dict) else response
-    for database in databases:
-        if database.get("name") == WAREHOUSE_NAME:
-            metabase.call(
-                "PUT",
-                f"/api/database/{database['id']}",
-                {"engine": "postgres", "details": warehouse_details(config)},
-                hints={400: WAREHOUSE_HINT},
-            )
-            return database["id"], False
+    found = find_warehouse(databases, config)
+    if found is not None:
+        details = {**(found.get("details") or {}), **warehouse_details(config)}
+        metabase.call(
+            "PUT",
+            f"/api/database/{found['id']}",
+            {"engine": "postgres", "details": details},
+            hints={400: WAREHOUSE_HINT},
+        )
+        return found["id"], False
     created = metabase.call(
         "POST",
         "/api/database",

@@ -491,6 +491,141 @@ def test_a_warehouse_port_that_is_not_a_port_number_is_named(capsys, port):
     assert "Traceback" not in error
 
 
+def connection(database_id: int, name: str, **details: Any) -> dict[str, Any]:
+    """A Postgres connection as the stand-in keeps it: at the address of the warehouse, unless the
+    details say otherwise."""
+    return {
+        "id": database_id,
+        "name": name,
+        "engine": "postgres",
+        "details": {
+            "host": "warehouse-db",
+            "port": 5432,
+            "dbname": "warehouse",
+            "user": "metabase_reader",
+            "password": "old-password",
+            **details,
+        },
+    }
+
+
+def test_a_renamed_connection_is_updated_and_not_created_again(metabase):
+    assert mi.main(env_for(metabase)) == 0
+    metabase.databases[0]["name"] = "Marketing data"  # renamed in the Metabase UI
+    assert mi.main(env_for(metabase, WAREHOUSE_PASSWORD="rotated-password")) == 0
+    [warehouse] = metabase.databases  # no second connection
+    assert warehouse["name"] == "Marketing data"  # the name that the person gave it stays
+    assert warehouse["details"]["password"] == "rotated-password"
+    assert metabase.calls.count(("POST", "/api/database")) == 1  # the first start's
+
+
+def test_the_job_updates_the_details_it_owns_and_keeps_the_others(metabase):
+    assert mi.main(env_for(metabase)) == 0
+    details = metabase.databases[0]["details"]
+    details["additional-options"] = "connectTimeout=5"  # set in the Metabase UI
+    details["ssl"] = True  # the job owns this one
+    assert mi.main(env_for(metabase, WAREHOUSE_PASSWORD="rotated-password")) == 0
+    [warehouse] = metabase.databases
+    assert warehouse["details"]["additional-options"] == "connectTimeout=5"
+    assert warehouse["details"]["ssl"] is False
+    # The list shows the password masked: what the job saves is its own, never the mask.
+    assert warehouse["details"]["password"] == "rotated-password"
+    assert "**MetabasePass**" not in json.dumps(warehouse)
+
+
+def test_an_address_with_the_port_as_text_is_the_same_address(metabase):
+    metabase.databases = [connection(5, "Mine", port="5432")]
+    assert mi.main(env_for(metabase)) == 0
+    [warehouse] = metabase.databases
+    assert warehouse["id"] == 5
+    assert warehouse["details"]["password"] == "reader-password"
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        pytest.param({"host": "another-host"}, id="host"),
+        pytest.param({"port": 5433}, id="port"),
+        pytest.param({"dbname": "another"}, id="database"),
+        pytest.param({"user": "another_user"}, id="user"),
+    ],
+)
+def test_a_connection_with_another_address_is_not_the_warehouse(metabase, other):
+    metabase.databases = [connection(5, "Mine", **other)]
+    assert mi.main(env_for(metabase)) == 0
+    assert [d["id"] for d in metabase.databases] == [5, 2]
+    assert metabase.databases[0]["details"]["password"] == "old-password"  # not touched
+    assert metabase.databases[1]["name"] == "Agoranomos warehouse"
+
+
+def test_connections_of_other_engines_and_without_details_are_left_alone(metabase):
+    sample = {"id": 1, "name": "Sample Database", "engine": "h2", "details": {"db": "file:x"}}
+    odd = {"id": 10, "name": "No details", "engine": "postgres"}
+    mysql = {**connection(11, "A MySQL"), "engine": "mysql"}
+    metabase.databases = [sample, odd, mysql]
+    assert mi.main(env_for(metabase)) == 0
+    assert [d["id"] for d in metabase.databases] == [1, 10, 11, 4]
+    assert metabase.databases[3]["name"] == "Agoranomos warehouse"
+    assert metabase.databases[2]["details"]["password"] == "old-password"
+
+
+def test_the_name_comes_before_the_address(metabase, capsys):
+    # The connection with the name is the job's, even when it points elsewhere, and a connection
+    # of the person that points at the warehouse is not taken for it.
+    metabase.databases = [
+        connection(3, "Agoranomos warehouse", host="an-old-host"),
+        connection(2, "Mine"),
+    ]
+    assert mi.main(env_for(metabase)) == 0
+    by_id = {d["id"]: d for d in metabase.databases}
+    assert by_id[3]["details"]["host"] == "warehouse-db"
+    assert by_id[3]["details"]["password"] == "reader-password"
+    assert by_id[2]["details"]["password"] == "old-password"
+    assert "warehouse connection 3 is up to date" in capsys.readouterr().out
+
+
+def test_two_connections_at_the_address_use_the_lowest_id_and_say_so(metabase, capsys):
+    assert mi.main(env_for(metabase)) == 0
+    capsys.readouterr()
+    metabase.databases[0]["name"] = "Marketing data"
+    # The person made another connection to the same warehouse; the list shows its id first.
+    metabase.databases.insert(0, connection(7, "Copy of the warehouse"))
+    assert mi.main(env_for(metabase, WAREHOUSE_PASSWORD="rotated-password")) == 0
+    output = capsys.readouterr()
+    by_id = {d["id"]: d for d in metabase.databases}
+    assert by_id[1]["details"]["password"] == "rotated-password"
+    assert by_id[7]["details"]["password"] == "old-password"
+    assert "warehouse connection 1 is up to date" in output.out
+    [line] = output.err.splitlines()
+    assert "ids 1, 7" in line
+    assert "updating 1" in line
+    # The ids, and no detail of any connection.
+    for value in ("warehouse-db", "metabase_reader", "rotated-password", "old-password"):
+        assert value not in line
+
+
+def test_two_connections_with_the_name_use_the_lowest_id_too(metabase, capsys):
+    metabase.databases = [
+        connection(4, "Agoranomos warehouse"),
+        connection(2, "Agoranomos warehouse"),
+    ]
+    assert mi.main(env_for(metabase)) == 0
+    output = capsys.readouterr()
+    by_id = {d["id"]: d for d in metabase.databases}
+    assert by_id[2]["details"]["password"] == "reader-password"
+    assert by_id[4]["details"]["password"] == "old-password"
+    [line] = output.err.splitlines()
+    assert "ids 2, 4" in line
+    assert "updating 2" in line
+
+
+def test_one_matching_connection_makes_no_noise(metabase, capsys):
+    assert mi.main(env_for(metabase)) == 0
+    metabase.databases[0]["name"] = "Marketing data"
+    assert mi.main(env_for(metabase)) == 0
+    assert capsys.readouterr().err == ""
+
+
 def test_missing_settings_are_named():
     env = {**ENV, "METABASE_URL": "http://metabase:3000"}
     del env["WAREHOUSE_PASSWORD"]
