@@ -56,6 +56,7 @@ The other options were not chosen for these reasons:
 ## More Information
 
 * **Implementation status, as of October 2026:** planned for v0.1.0. The folder, the two DAG bundles and `./agoranomos init` are being built in Phase 1; this record states what they are to do.
+* Checked in October 2026, with both executors: task code can read the password of the Airflow metadata database from the environment of the process that runs it, so the question above is answered "not as built" ([ADR-0015](0015-run-localexecutor-by-default.md)).
 * Airflow 3 loads DAGs from [DAG bundles](https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/dag-bundles.html). A local bundle always runs the latest code in its folder. A Git bundle records the commit that each DAG run used, which may later suit an extensions folder kept in git.
 * [Home Assistant](https://developers.home-assistant.io/docs/creating_integration_file_structure/) takes a similar approach: the integrations a user adds live in the `custom_components` folder of the configuration directory, apart from the code of Home Assistant itself.
 * The [architecture overview](../explanation/architecture.md) describes the stack, and [ADR-0007](0007-ai-access-via-mcp-read-only.md) covers AI access to it.

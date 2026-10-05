@@ -28,7 +28,7 @@ Each value is used as written: keep it on one line, do not put a comment after i
 | `AGORANOMOS_EXTENSIONS_DIR` | `./extensions` | The folder for the deployment's own extensions ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)). Releases never overwrite it. A relative path starts at the checkout. |
 | `AIRFLOW_PORT` | `8080` | The port of the Airflow UI and API on `127.0.0.1`. |
 | `METABASE_PORT` | `3000` | The port of Metabase on `127.0.0.1`. |
-| `AIRFLOW_PARALLELISM` | `4` | How many Airflow tasks run at the same time. With LocalExecutor, each one is a process in the scheduler container, so more tasks need more memory. |
+| `AIRFLOW_PARALLELISM` | `4` | How many Airflow tasks run at the same time, in the whole stack. With LocalExecutor, each one is a process in the scheduler container, so more tasks need more memory, and a task that runs out of memory can make the scheduler restart (Airflow's documentation warns about this). With CeleryExecutor it caps all workers together: raise it together with `AIRFLOW_WORKER_CONCURRENCY` or the number of workers. |
 | `AIRFLOW_WORKER_CONCURRENCY` | `4` | Only with CeleryExecutor: how many tasks one Airflow worker runs at a time. More tasks need more memory. |
 
 ## Secrets
