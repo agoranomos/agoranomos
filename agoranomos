@@ -1,0 +1,277 @@
+#!/bin/sh
+# Agoranomos command line: set up, check and run the Docker Compose stack (ADR-0014).
+# Usage: ./agoranomos <command> [options]; ./agoranomos help lists the commands.
+# It needs only Docker and the standard tools of macOS, Linux and WSL2, so it stays POSIX sh.
+set -eu
+
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+ENV_FILE="$ROOT/.env"
+ENV_EXAMPLE="$ROOT/.env.example"
+
+# Preflight limits (ADR-0010). Docker reports a little less memory than the machine or VM has, because
+# the kernel keeps some for itself, so the memory limits sit slightly below 6 GB and 8 GB.
+MIN_DOCKER_VERSION=25.0.0
+MIN_COMPOSE_VERSION=2.24.0
+MIN_MEMORY_MB=5632
+RECOMMENDED_MEMORY_MB=7680
+MIN_CPUS=2
+RECOMMENDED_CPUS=4
+MIN_DISK_GB=10
+RECOMMENDED_DISK_GB=20
+
+# The settings that init generates when they are empty.
+SECRET_KEYS="WAREHOUSE_POSTGRES_PASSWORD PLATFORM_POSTGRES_PASSWORD AIRFLOW_DB_PASSWORD
+METABASE_DB_PASSWORD METABASE_READER_PASSWORD VALKEY_PASSWORD AIRFLOW_FERNET_KEY AIRFLOW_JWT_SECRET
+AIRFLOW_API_SECRET_KEY AIRFLOW_ADMIN_PASSWORD METABASE_ENCRYPTION_KEY METABASE_ADMIN_PASSWORD"
+
+say() { printf '%s\n' "$*"; }
+warn() { printf 'warning: %s\n' "$*" >&2; }
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+# Run docker compose in the checkout, where Compose finds compose.yaml and .env.
+compose() { (cd "$ROOT" && docker compose "$@"); }
+
+# Print the value of a setting in .env without quotes around it, or nothing when it is not set.
+env_get() {
+  [ -f "$ENV_FILE" ] || return 0
+  env_value=$(sed -n "s/^$1=//p" "$ENV_FILE" | tail -n 1)
+  case "$env_value" in
+    \"*\") env_value=${env_value#\"} env_value=${env_value%\"} ;;
+    \'*\') env_value=${env_value#\'} env_value=${env_value%\'} ;;
+  esac
+  printf '%s' "$env_value"
+}
+
+# Print a setting from .env, or the default when it is not set or empty.
+setting() {
+  setting_value=$(env_get "$1")
+  printf '%s' "${setting_value:-$2}"
+}
+
+# Set a setting in .env: replace the line that sets it, or add one at the end.
+env_set() {
+  env_tmp="$ENV_FILE.tmp.$$"
+  (
+    umask 077
+    awk -v key="$1" -v value="$2" '
+      index($0, key "=") == 1 { if (!done) print key "=" value; done = 1; next }
+      { print }
+      END { if (!done) print key "=" value }
+    ' "$ENV_FILE" > "$env_tmp"
+  )
+  mv "$env_tmp" "$ENV_FILE"
+}
+
+random_alnum() { LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "$1"; }
+random_from() { LC_ALL=C tr -dc "$1" < /dev/urandom | head -c 1; }
+
+# Admin passwords end with an upper-case letter, a lower-case letter and a digit: Metabase needs a digit.
+random_password() {
+  printf '%s%s%s%s' "$(random_alnum 29)" "$(random_from 'A-Z')" "$(random_from 'a-z')" "$(random_from '0-9')"
+}
+
+# A Fernet key for Airflow: 32 random bytes in URL-safe base64.
+fernet_key() { head -c 32 /dev/urandom | base64 | tr '+/' '-_'; }
+
+generate_secret() {
+  case "$1" in
+    AIRFLOW_FERNET_KEY) fernet_key ;;
+    AIRFLOW_ADMIN_PASSWORD | METABASE_ADMIN_PASSWORD) random_password ;;
+    AIRFLOW_JWT_SECRET | AIRFLOW_API_SECRET_KEY | METABASE_ENCRYPTION_KEY) random_alnum 64 ;;
+    *) random_alnum 32 ;;
+  esac
+}
+
+# The absolute path of the extensions folder (ADR-0013).
+extensions_path() {
+  extensions_dir=$(setting AGORANOMOS_EXTENSIONS_DIR ./extensions)
+  case "$extensions_dir" in
+    /*) printf '%s' "$extensions_dir" ;;
+    *) printf '%s/%s' "$ROOT" "${extensions_dir#./}" ;;
+  esac
+}
+
+cmd_init() {
+  [ "$#" -eq 0 ] || die "init takes no options"
+  [ -f "$ENV_EXAMPLE" ] || die "$ENV_EXAMPLE is missing: run ./agoranomos from an Agoranomos checkout"
+  if [ ! -f "$ENV_FILE" ]; then
+    (umask 077 && cp "$ENV_EXAMPLE" "$ENV_FILE")
+    say "Created .env from .env.example."
+  fi
+  chmod 600 "$ENV_FILE"
+  # Add the settings that .env.example has and .env does not, for example after an upgrade.
+  added=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in '' | '#'*) continue ;; esac
+    key=${line%%=*}
+    if ! grep -q "^$key=" "$ENV_FILE"; then
+      [ -z "$(tail -c 1 "$ENV_FILE")" ] || printf '\n' >> "$ENV_FILE"
+      printf '%s\n' "$line" >> "$ENV_FILE"
+      added="$added $key"
+    fi
+  done < "$ENV_EXAMPLE"
+  [ -z "$added" ] || say "Added new settings to .env:$added"
+  generated=""
+  for key in $SECRET_KEYS; do
+    if grep -q "^$key=" "$ENV_FILE" && [ -z "$(env_get "$key")" ]; then
+      env_set "$key" "$(generate_secret "$key")"
+      generated="$generated $key"
+    fi
+  done
+  if [ -n "$generated" ]; then
+    say "Generated secrets in .env:$generated"
+    say "Keep a copy of .env in a password manager: a restored backup needs its keys to decrypt the saved connections."
+  fi
+  mkdir -p "$(extensions_path)/dags"
+}
+
+# True when version $1 is at least version $2. A leading v and suffixes such as -rc1 are ignored.
+version_ge() {
+  left=${1#v} right=${2#v}
+  while [ -n "$left$right" ]; do
+    left_part=${left%%.*} right_part=${right%%.*}
+    left_part=${left_part%%[!0-9]*} right_part=${right_part%%[!0-9]*}
+    if [ "${left_part:-0}" -gt "${right_part:-0}" ]; then return 0; fi
+    if [ "${left_part:-0}" -lt "${right_part:-0}" ]; then return 1; fi
+    case "$left" in *.*) left=${left#*.} ;; *) left="" ;; esac
+    case "$right" in *.*) right=${right#*.} ;; *) right="" ;; esac
+  done
+  return 0
+}
+
+problem() {
+  printf 'error: %s\n' "$*" >&2
+  problems=$((problems + 1))
+}
+
+# A problem with resources: --force turns it into a warning.
+resource_problem() {
+  if [ "$force" -eq 1 ]; then
+    warn "$* (ignored: --force)"
+  else
+    problem "$*"
+  fi
+}
+
+# The images need x86-64-v2 on x86-64 hardware. Docker Desktop hides the flags of its VM, so on
+# macOS and Windows the check is skipped.
+check_x86_64_v2() {
+  cpuinfo=${AGORANOMOS_CPUINFO:-/proc/cpuinfo}
+  [ -r "$cpuinfo" ] || return 0
+  flags=" $(grep -m 1 '^flags' "$cpuinfo" | sed 's/^flags[[:space:]]*:[[:space:]]*//') "
+  missing=""
+  for flag in cx16 lahf_lm popcnt pni sse4_1 sse4_2 ssse3; do
+    case "$flags" in *" $flag "*) ;; *) missing="$missing $flag" ;; esac
+  done
+  [ -z "$missing" ] || problem "this x86-64 CPU lacks$missing, which x86-64-v2 needs"
+}
+
+port_in_use() {
+  if command -v lsof > /dev/null 2>&1; then
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN > /dev/null 2>&1
+  elif command -v ss > /dev/null 2>&1; then
+    [ -n "$(ss -Hltn "sport = :$1" 2> /dev/null)" ]
+  else
+    return 1
+  fi
+}
+
+cmd_preflight() {
+  force=0
+  for option in "$@"; do
+    case "$option" in
+      --force) force=1 ;;
+      *) die "unknown option: $option" ;;
+    esac
+  done
+  problems=0
+  command -v docker > /dev/null 2>&1 || die "Docker is not installed: see https://docs.docker.com/get-started/get-docker/"
+  info=$(docker info --format '{{.ServerVersion}}|{{.Architecture}}|{{.NCPU}}|{{.MemTotal}}|{{.DockerRootDir}}' 2> /dev/null) || info=""
+  if [ -z "${info%%|*}" ]; then
+    die "Docker is not running, or this user cannot use it: start Docker Desktop, or on Linux add the user to the docker group"
+  fi
+  IFS='|' read -r server_version arch ncpu mem_total docker_root << EOF
+$info
+EOF
+  if ! version_ge "$server_version" "$MIN_DOCKER_VERSION"; then
+    problem "Docker Engine $server_version is older than $MIN_DOCKER_VERSION: update Docker"
+  fi
+  compose_version=$(docker compose version --short 2> /dev/null) || compose_version=""
+  if [ -z "$compose_version" ]; then
+    problem "the Docker Compose plugin is missing: see https://docs.docker.com/compose/install/"
+  elif ! version_ge "$compose_version" "$MIN_COMPOSE_VERSION"; then
+    problem "Docker Compose ${compose_version#v} is older than $MIN_COMPOSE_VERSION: update Docker Compose"
+  fi
+  case "$arch" in
+    aarch64 | arm64) ;;
+    x86_64 | amd64) check_x86_64_v2 ;;
+    *) problem "the CPU architecture $arch is not supported: Agoranomos runs on arm64 and on x86-64 with x86-64-v2" ;;
+  esac
+  mem_mb=$((mem_total / 1048576))
+  if [ "$mem_mb" -lt "$MIN_MEMORY_MB" ]; then
+    resource_problem "Docker has $mem_mb MB of memory, and Agoranomos needs 6 GB (8 GB recommended). In Docker Desktop, raise it in Settings → Resources → Memory."
+  elif [ "$mem_mb" -lt "$RECOMMENDED_MEMORY_MB" ]; then
+    warn "Docker has $mem_mb MB of memory; 8 GB is recommended."
+  fi
+  if [ "$ncpu" -lt "$MIN_CPUS" ]; then
+    resource_problem "Docker has $ncpu CPU, and Agoranomos needs $MIN_CPUS ($RECOMMENDED_CPUS recommended)."
+  elif [ "$ncpu" -lt "$RECOMMENDED_CPUS" ]; then
+    warn "Docker has $ncpu CPUs; $RECOMMENDED_CPUS are recommended."
+  fi
+  # On Linux the data of Docker is on this machine; Docker Desktop keeps it inside its VM.
+  if [ -d "$docker_root" ]; then
+    free_kb=$(df -Pk "$docker_root" | awk 'NR == 2 { print $4 }')
+    free_gb=$((free_kb / 1048576))
+    if [ "$free_gb" -lt "$MIN_DISK_GB" ]; then
+      resource_problem "$free_gb GB of disk is free for Docker ($docker_root), and Agoranomos needs $MIN_DISK_GB GB ($RECOMMENDED_DISK_GB GB recommended)."
+    elif [ "$free_gb" -lt "$RECOMMENDED_DISK_GB" ]; then
+      warn "$free_gb GB of disk is free for Docker ($docker_root); $RECOMMENDED_DISK_GB GB is recommended."
+    fi
+  fi
+  # A running stack holds its own ports, so the ports are checked only while it is not running.
+  if [ -z "$(compose ps --quiet --status running 2> /dev/null)" ]; then
+    for port_setting in AIRFLOW_PORT:8080 METABASE_PORT:3000; do
+      name=${port_setting%%:*}
+      port=$(setting "$name" "${port_setting#*:}")
+      if port_in_use "$port"; then
+        problem "port $port is in use: stop what uses it, or set $name in .env to a free port"
+      fi
+    done
+  fi
+  if [ "$problems" -gt 0 ]; then
+    die "preflight found $problems problem(s)"
+  fi
+  say "Preflight passed: Docker $server_version, Compose ${compose_version#v}, $arch, $ncpu CPUs, $mem_mb MB of memory."
+}
+
+cmd_help() {
+  cat << 'EOF'
+Usage: ./agoranomos <command> [options]
+
+Commands:
+  init          Create .env from .env.example and generate the secrets that are empty
+  preflight     Check that this machine can run the stack (--force: warn about low resources instead of stopping)
+  help          Show this help
+
+Documentation: docs/reference/command-line.md
+EOF
+}
+
+main() {
+  command=${1:-help}
+  if [ "$#" -gt 0 ]; then shift; fi
+  case "$command" in
+    init) cmd_init "$@" ;;
+    preflight) cmd_preflight "$@" ;;
+    help | -h | --help) cmd_help ;;
+    *)
+      cmd_help >&2
+      die "unknown command: $command"
+      ;;
+  esac
+}
+
+main "$@"

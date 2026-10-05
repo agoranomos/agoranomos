@@ -32,3 +32,10 @@ site/
 # Machine-local Claude Code files
 CLAUDE.local.md
 .claude/settings.local.json
+
+# A deployment's own extensions (ADR-0013): the folder belongs to the deployment, not to this repository.
+/extensions/*
+!/extensions/README.md
+
+# Local Compose overrides, for example published database ports for an IDE
+compose.override.yaml
