@@ -48,8 +48,8 @@ Solid arrows show how data moves. Dotted arrows show what Airflow runs.
 |---|---|---|---|---|
 | Runtime | Python | Language of the pipelines and tooling; the version supported by every component | 3.13 | [0012](../adr/0012-python-and-tooling.md) |
 | Ingestion | dlt | Incremental loading, schema evolution, merge | 1.30 | [0004](../adr/0004-ingest-with-dlt.md) |
-| Orchestration | Apache Airflow with CeleryExecutor | Scheduling and orchestration; workers scale out | 3.3 | [0002](../adr/0002-orchestrate-with-airflow-3.md) |
-| | Valkey | Message broker for Celery | 9 | [0002](../adr/0002-orchestrate-with-airflow-3.md) |
+| Orchestration | Apache Airflow | Scheduling and orchestration; by default the LocalExecutor runs tasks in the scheduler, and the CeleryExecutor variant runs them on separate workers | 3.3 | [0002](../adr/0002-orchestrate-with-airflow-3.md), [0015](../adr/0015-run-localexecutor-by-default.md) |
+| | Valkey | Message broker of the CeleryExecutor variant | 9 | [0002](../adr/0002-orchestrate-with-airflow-3.md) |
 | Storage | PostgreSQL | The warehouse and the platform databases | 18 | [0003](../adr/0003-two-postgres-instances.md) |
 | Transformation | dbt Core with dbt-postgres | SQL models, tests and documentation | dbt Core 1.12, dbt-postgres 1.11 | [0005](../adr/0005-transform-with-dbt-core.md) |
 | | Cosmos | Runs dbt models as Airflow tasks | 1.15 | [0005](../adr/0005-transform-with-dbt-core.md) |
@@ -104,13 +104,13 @@ Decision records: [ADR-0003: Run two PostgreSQL instances](../adr/0003-two-postg
 
 ## Orchestrate: Apache Airflow
 
-Airflow 3.3 runs with the CeleryExecutor on the official `apache/airflow` image: API server, scheduler, DAG processor, triggerer and workers. Valkey is the message broker (BSD-licensed, speaking the Redis protocol), Celery results go to the metadata database of Airflow, and workers can be scaled out horizontally. Authentication uses Airflow's FAB auth manager with the Admin, Op and Viewer roles.
+Airflow 3.3 runs on the official `apache/airflow` image as separate services: API server, scheduler, DAG processor and triggerer. By default it uses the LocalExecutor, which runs each task as a process of the scheduler, so there is no broker and no worker container, and a single machine keeps the memory for the pipelines ([ADR-0015](../adr/0015-run-localexecutor-by-default.md)). A deployment that needs separate workers, possibly on other machines, selects the CeleryExecutor variant with `COMPOSE_FILE=compose.yaml:compose.celery.yaml` in `.env`. That variant adds Valkey as the message broker (BSD-licensed, speaking the Redis protocol) and an `airflow-worker` service; Celery results go to the metadata database of Airflow, and workers can be scaled out horizontally. Authentication uses Airflow's FAB auth manager with the Admin, Op and Viewer roles.
 
 Airflow Assets chain the pipeline, so each step starts when the previous one has produced its data: `ingest_<source>`, then `dbt build`, then a Metabase cache refresh. dbt runs through Cosmos, which renders dbt models as Airflow tasks, in its own virtual environment so that dbt's dependencies stay separate from Airflow's.
 
 Agoranomos uses Astronomer's open-source projects (Cosmos and astro-airflow-mcp) but not the Astro CLI or Astro Runtime. The stack stays vendor-neutral and runs on the official Apache Airflow image.
 
-Decision record: [ADR-0002: Orchestrate with Apache Airflow 3](../adr/0002-orchestrate-with-airflow-3.md).
+Decision records: [ADR-0002: Orchestrate with Apache Airflow 3](../adr/0002-orchestrate-with-airflow-3.md) and, for the executor, [ADR-0015: Run LocalExecutor by default](../adr/0015-run-localexecutor-by-default.md).
 
 ## Explore: Metabase
 
@@ -143,9 +143,9 @@ Decision records: [ADR-0007: Give AI clients least-privilege access through MCP]
 
 The stack runs as one Docker Compose project, split into profiles so that you start only what you need:
 
-* `core`: both PostgreSQL instances, the broker, Airflow and Metabase, plus the one-shot jobs that initialize them (database migrations, users and the first Metabase setup).
+* `core`: both PostgreSQL instances, Airflow and Metabase, plus the one-shot jobs that initialize them (database migrations, users and the first Metabase setup). The CeleryExecutor variant of Airflow adds the broker and a worker to it.
 * `ai`: one container with the Airflow, Toolbox and dbt MCP servers, reached over stdio with `docker exec`.
-* `flower`: Celery monitoring.
+* `flower`: Celery monitoring, for the CeleryExecutor variant only.
 
 The stack has two modes, local and server. Both are first-class, and both are to be covered by automated tests. In local mode, ports are published on `127.0.0.1` only. Server mode adds a reverse proxy with TLS (the `server` profile) and scheduled backups (the `ops` profile).
 

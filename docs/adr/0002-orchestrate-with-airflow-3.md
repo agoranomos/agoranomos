@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Orchestrate with Apache Airflow 3
 
+The default executor is set in [ADR-0015](0015-run-localexecutor-by-default.md); the description of the CeleryExecutor below applies to the variant with separate workers.
+
 ## Context and Problem Statement
 
 Agoranomos has to load data from ad platforms on a schedule, build the warehouse models after each load and refresh the dashboards once the models are ready. The steps depend on one another, they have to be retried when they fail, and a failure has to be visible. The stack must also run anywhere from a laptop to a small server, on infrastructure that the user controls.
