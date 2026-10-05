@@ -2,9 +2,13 @@ name: Stack
 
 # Starts the Docker Compose stack with ./agoranomos up and runs the stack tests in tests/stack.
 # ADR-0011 asks for every mode of the stack to be tested in CI: this workflow tests local mode, and
-# server mode is to follow. Pull requests that change the stack run it on amd64.
-# Pushes to main, the weekly schedule and manual runs add arm64 (ADR-0010): in a private repository,
-# arm64 runners use the Actions minutes, so they do not run for every pull request.
+# server mode is to follow. Local mode has two variants of Airflow (ADR-0015): "local", the
+# LocalExecutor that compose.yaml runs by default, and "celery", the CeleryExecutor with a broker
+# and a worker, which compose.celery.yaml adds and COMPOSE_FILE in .env selects.
+# Pull requests that change the stack run the local variant on amd64.
+# Pushes to main, the weekly schedule and manual runs add the celery variant and arm64 (ADR-0010):
+# all four combinations. In a private repository, arm64 runners use the Actions minutes, so they do
+# not run for every pull request.
 # The secrets of the stack are generated anew in every run, so the logs uploaded on failure hold
 # nothing that lives on.
 on:
@@ -12,6 +16,7 @@ on:
     paths:
       - agoranomos
       - compose.yaml
+      - compose.celery.yaml
       - .env.example
       - "postgres/**"
       - "airflow/**"
@@ -24,6 +29,7 @@ on:
     paths:
       - agoranomos
       - compose.yaml
+      - compose.celery.yaml
       - .env.example
       - "postgres/**"
       - "airflow/**"
@@ -43,11 +49,12 @@ concurrency:
 
 jobs:
   local:
-    name: Local mode (${{ matrix.arch }})
+    name: Local mode (${{ matrix.arch }}, ${{ matrix.variant }})
     strategy:
       fail-fast: false
       matrix:
         arch: ${{ fromJSON(github.event_name == 'pull_request' && '["amd64"]' || '["amd64", "arm64"]') }}
+        variant: ${{ fromJSON(github.event_name == 'pull_request' && '["local"]' || '["local", "celery"]') }}
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 30
     permissions:
@@ -69,6 +76,22 @@ jobs:
           grep -q "run ./agoranomos init" compose-error.txt
       - name: Set up .env
         run: ./agoranomos init
+      - name: Select the Celery overlay
+        if: ${{ matrix.variant == 'celery' }}
+        run: |
+          sed -i 's|^COMPOSE_FILE=.*|COMPOSE_FILE=compose.yaml:compose.celery.yaml|' .env
+          grep -qx 'COMPOSE_FILE=compose.yaml:compose.celery.yaml' .env
+      - name: Put a test DAG into the extensions folder
+        run: |
+          mkdir -p extensions/dags
+          cp tests/stack/fixtures/ci_extension_check.py extensions/dags/
+      # The images of the stack take several GB, and ./agoranomos up stops below 10 GB of free disk for
+      # Docker. The runner has toolchains that the stack does not use.
+      - name: Free disk space on the runner
+        run: |
+          df -h /var/lib/docker
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /var/lib/docker
       - name: Pull the images
         run: docker compose pull --quiet
       - name: Start the stack
@@ -93,6 +116,6 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: stack-logs-${{ matrix.arch }}
+          name: stack-logs-${{ matrix.arch }}-${{ matrix.variant }}
           path: stack-logs.txt
           retention-days: 3

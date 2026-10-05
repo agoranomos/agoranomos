@@ -6,7 +6,7 @@ Instructions for AI coding agents that work in this repository. People should st
 
 Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreSQL warehouse → Metabase dashboards → questions asked in Claude or ChatGPT through MCP, started with one command, with the data staying on the user's own infrastructure. The target stack is Apache Airflow 3, dlt, dbt Core, PostgreSQL, Metabase and four MCP servers. [docs/explanation/architecture.md](docs/explanation/architecture.md) describes it.
 
-**Status: pre-alpha.** Today the repository holds the tooling, the documentation, the architecture decision records (ADRs) and `./agoranomos`, the script that sets up, checks and runs the stack, and the first part of the stack: `compose.yaml` with the two PostgreSQL instances. Airflow, Metabase, the pipelines, the dbt project and the MCP configuration are designed but not built yet. Describe planned things as planned, never as existing. The roadmap is in [README.md](README.md).
+**Status: pre-alpha.** Today the repository holds the tooling, the documentation, the architecture decision records (ADRs) and `./agoranomos`, the script that sets up, checks and runs the stack, and the first part of the stack: `compose.yaml` with the two PostgreSQL instances and Airflow (LocalExecutor by default; `compose.celery.yaml` adds the CeleryExecutor variant). Metabase, the pipelines, the dbt project and the MCP configuration are designed but not built yet. Describe planned things as planned, never as existing. The roadmap is in [README.md](README.md).
 
 ## Repository map
 
@@ -14,7 +14,8 @@ Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 - `docs/`: the documentation source, in Markdown, laid out after [Diátaxis](https://diataxis.fr/): `tutorials/`, `how-to/`, `reference/`, `explanation/` (the architecture overview is here) and `adr/` (the decision records and their index).
 - `zensical.toml`: the configuration of the documentation site, including its navigation.
 - `agoranomos`, `.env.example`: the command that sets up, checks and runs the stack, and the template of its settings ([ADR-0014](docs/adr/0014-start-the-stack-with-one-script.md)).
-- `compose.yaml`, `postgres/`: the Docker Compose stack, and the SQL that its one-shot `db-init` job runs on every start.
+- `compose.yaml`, `compose.celery.yaml`, `postgres/`: the Docker Compose stack, its CeleryExecutor overlay ([ADR-0015](docs/adr/0015-run-localexecutor-by-default.md)), and the SQL that the one-shot `db-init` job runs on every start.
+- `airflow/dags/`: the DAGs of the base package, the `agoranomos` DAG bundle.
 - `extensions/`: the folder for a deployment's own additions ([ADR-0013](docs/adr/0013-keep-extensions-apart-from-the-base-package.md)); git tracks only its README.
 - `pyproject.toml`, `uv.lock`, `.python-version`: the development tooling (Python 3.13, ruff, prek, Zensical and pytest). The root is a uv project that is never built or installed.
 - `.pre-commit-config.yaml`: the git hooks and static checks, run by prek. `_typos.toml` is the word list of the spell checker, and `.editorconfig` and `.gitattributes` fix indentation and line endings (LF).

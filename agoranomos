@@ -400,6 +400,7 @@ cmd_up() {
   compose up --detach --remove-orphans ||
     die "docker compose could not start the stack; the error above names the cause, and ./agoranomos status and ./agoranomos logs <service> show more"
   wait_healthy
+  say "Airflow:  http://127.0.0.1:$(setting AIRFLOW_PORT 8080)"
   say "The stack is up. ./agoranomos status shows every service."
 }
 

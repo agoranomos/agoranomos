@@ -2,7 +2,7 @@ import json
 import shlex
 
 from services import LONG_RUNNING, ONE_SHOT
-from stack_helpers import compose, containers, docker
+from stack_helpers import compose, containers, docker, secrets
 
 # The services that must stay on the internal data network only (no route to the internet).
 DATA_ONLY = {"warehouse-db", "platform-db", "db-init", "broker"}
@@ -63,7 +63,8 @@ def test_the_network_that_docker_made_is_internal_and_the_databases_are_only_on_
     [details] = json.loads(docker("network", "inspect", network).stdout)
     assert details["Internal"] is True
     running = containers()
-    for service in ("warehouse-db", "platform-db", "db-init"):
+    # The broker of the Celery variant is on the data network only, as the databases are.
+    for service in ("warehouse-db", "platform-db", "db-init", *sorted({"broker"} & set(running))):
         [container] = json.loads(docker("inspect", running[service]["ID"]).stdout)
         assert set(container["NetworkSettings"]["Networks"]) == {network}, service
 
@@ -83,3 +84,40 @@ def test_db_init_prints_no_notices_when_it_runs_again():
     result = compose("run", "--rm", "--no-deps", "db-init", check=False)
     assert result.returncode == 0, result.stderr
     assert "NOTICE" not in result.stdout + result.stderr
+
+
+def test_no_secret_is_in_the_definition_of_a_container(env):
+    # The command, the entry point and the health check of a container show in docker inspect to
+    # everyone who can use Docker: a secret belongs in the environment, and never there. This looks
+    # at every container, the finished ones too, and names the settings, never their values.
+    values = secrets(env)
+    assert values, "no secrets in .env: run ./agoranomos init"
+    for service, container in containers().items():
+        [details] = json.loads(docker("inspect", container["ID"]).stdout)
+        config = details["Config"]
+        words = [
+            details["Path"],
+            *details["Args"],
+            *(config["Cmd"] or []),
+            *(config["Entrypoint"] or []),
+        ]
+        words += (config.get("Healthcheck") or {}).get("Test") or []
+        leaked = [name for name, value in values.items() if any(value in word for word in words)]
+        assert not leaked, f"{service} has the values of {leaked} in its definition"
+
+
+def test_no_secret_is_in_the_arguments_of_a_running_process(env):
+    # Other users of the host, and every process in a container, can read the arguments of the
+    # processes in /proc. The command that reads them is itself one of the processes that it lists,
+    # so its own words in the output show that the listing worked. A failed assertion prints what it
+    # compares, and a listing can hold the very values that the test looks for: the assertions here
+    # hold a flag and the name of a service, never the listing.
+    values = secrets(env)
+    assert values, "no secrets in .env: run ./agoranomos init"
+    listing = "cat /proc/[0-9]*/cmdline | tr '\\0' ' '"
+    for service in sorted(LONG_RUNNING):
+        result = compose("exec", "-T", service, "sh", "-c", listing, check=False)
+        listed = "cat /proc/" in result.stdout
+        assert listed, f"{service}: the listing did not run"
+        leaked = [name for name, value in values.items() if value in result.stdout]
+        assert not leaked, f"a process of {service} has the values of {leaked} in its arguments"
