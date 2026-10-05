@@ -24,8 +24,9 @@ x-airflow-celery-environment: &airflow-celery-environment
   AIRFLOW__CORE__EXECUTOR: CeleryExecutor
 
 # For the scheduler, which sends the tasks to the broker, and for the worker, which runs them: the broker,
-# the result backend and the size of the worker. No other service uses them. The DAG processor and the
-# triggerer run the code of DAGs, the extensions included, so they must not hold the password of the broker.
+# the result backend and the size of the worker. No other service uses them: the DAG processor parses the
+# extension DAGs, so it must not hold the password of the broker, and the API server, the triggerer and
+# airflow-init have no use for it either.
 x-airflow-celery-queue-environment: &airflow-celery-queue-environment
   AIRFLOW__CELERY__BROKER_URL: redis://:${VALKEY_PASSWORD:?run ./agoranomos init}@broker:6379/0
   AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:?run ./agoranomos init}@platform-db:5432/airflow

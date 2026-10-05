@@ -148,10 +148,10 @@ def test_the_celery_services_wait_for_the_broker_and_the_api_server():
 
 
 def test_the_broker_and_the_result_backend_are_set_only_where_they_are_used():
-    # Only the scheduler and the worker use the broker and the result backend. The DAG processor and
-    # the triggerer run the code of the extension DAGs, so they must not hold the password of the
-    # broker; the API server and airflow-init have no use for it either. The test names settings and
-    # services, never values.
+    # Only the scheduler and the worker use the broker and the result backend. The DAG processor
+    # parses the extension DAGs, so it must not hold the password of the broker; the API server, the
+    # triggerer and airflow-init have no use for it either. The test names settings and services,
+    # never values.
     settings = (
         "AIRFLOW__CELERY__BROKER_URL",
         "AIRFLOW__CELERY__RESULT_BACKEND",
