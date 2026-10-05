@@ -56,7 +56,8 @@ jobs:
         arch: ${{ fromJSON(github.event_name == 'pull_request' && '["amd64"]' || '["amd64", "arm64"]') }}
         variant: ${{ fromJSON(github.event_name == 'pull_request' && '["local"]' || '["local", "celery"]') }}
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
-    timeout-minutes: 30
+    # The first start builds the Airflow image.
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
@@ -92,8 +93,9 @@ jobs:
           df -h /var/lib/docker
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /var/lib/docker
+      # The Airflow image is built by ./agoranomos up (pull_policy: build), so pull skips it.
       - name: Pull the images
-        run: docker compose pull --quiet
+        run: docker compose pull --quiet --ignore-buildable
       - name: Start the stack
         run: ./agoranomos up
       - name: Stack tests
