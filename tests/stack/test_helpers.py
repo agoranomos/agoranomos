@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -270,6 +271,85 @@ def test_every_allowed_switch_has_a_reason_and_is_a_switch():
         assert len(reason.split()) >= 4, f"{name} needs a reason in plain words"
 
 
+# What a pytest that a test starts reads from the environment of the person who runs the tests: the
+# colors and the width of its report, more options and plugins. And the proxy of urllib, which
+# would send what the nested tests request somewhere else. A test of a report must not depend on
+# any of them, so the nested run does not get them.
+NESTED_PYTEST_IGNORES = frozenset(
+    {
+        "COLUMNS",
+        "LINES",
+        "FORCE_COLOR",
+        "NO_COLOR",
+        "PY_COLORS",
+        "PYTEST_ADDOPTS",
+        "PYTEST_PLUGINS",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
+        "PYTEST_THEME",
+        "PYTEST_THEME_MODE",
+    }
+)
+
+
+def nested_pytest(directory: Path, *options: str, **variables: str) -> str:
+    """Run pytest in a process of its own, in directory, and return its report.
+
+    The report is the same on every machine: the process gets the environment of this one without
+    the variables above and without any *_PROXY, it gets --color=no, and it gets exactly the options
+    that the test names. It has no -q: with -q, -v would be quieter than it says, and CI runs -v.
+    The variables of the test go into its environment, and its modules can import stack_helpers.
+    """
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name.upper() not in NESTED_PYTEST_IGNORES and not name.upper().endswith("_PROXY")
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "--color=no", *options],
+        cwd=directory,
+        env={
+            **environment,
+            **variables,
+            "PYTHONPATH": str(Path(stack_helpers.__file__).parent),
+        },
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    return result.stdout + result.stderr
+
+
+def shown_in(value: str, report: str) -> bool:
+    """Whether a report shows the value, also when pytest has wrapped it over several lines.
+
+    With -vv, --showlocals prints a local with pprint, which cuts a long bytes value into literals
+    that follow each other: (b'..."password": "a-password-that-must-stay-out-of-the-repo' on one
+    line and b'rt-4"}') on the next. A plain `value in report` misses that, so the literals are
+    joined first.
+    """
+    joined = re.sub(r"""(['"])\s*\n\s*b?\1""", "", report)
+    return value in report or value in joined
+
+
+@pytest.mark.parametrize(
+    ("report", "shown"),
+    [
+        pytest.param("a log line with a-secret-value-12345 in it", True, id="plain"),
+        pytest.param(
+            "data = (b'{\"p\": \"a-secret-va'\n        b'lue-12345\"}')", True, id="bytes"
+        ),
+        pytest.param("data = ('a-secret-va'\n        'lue-12345')", True, id="text"),
+        pytest.param('data = ("a-secret-va"\n        "lue-12345")', True, id="double-quotes"),
+        pytest.param("nothing of it here", False, id="absent"),
+        pytest.param("a-secret-va\nlue-12345", False, id="a-line-break-that-is-no-join"),
+        pytest.param("(b'a-secret-va'\n b'other-12345')", False, id="another-value"),
+    ],
+)
+def test_shown_in_finds_a_value_that_pytest_wrapped_over_lines(report, shown):
+    assert shown_in("a-secret-value-12345", report) is shown
+
+
 # A test module that fails on purpose, run by a pytest of its own, so that the output is the real
 # one. The values are made up. The env fixture and the comparison hook are those of the real
 # conftest.py, which the test copies next to this module; the token and the headers are what
@@ -349,27 +429,17 @@ def test_pytest_does_not_print_the_secrets_of_a_failing_test(tmp_path, options):
     for placeholder, value in values.items():
         source = source.replace(placeholder, value)
     (tmp_path / "test_fails_on_purpose.py").write_text(source, encoding="utf-8")
-    stack_tests = Path(stack_helpers.__file__).parent
-    shutil.copy(stack_tests / "conftest.py", tmp_path / "conftest.py")
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", *options],
-        cwd=tmp_path,
-        env={**os.environ, "PYTHONPATH": str(stack_tests)},
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-    report = result.stdout + result.stderr
+    shutil.copy(Path(stack_helpers.__file__).parent / "conftest.py", tmp_path / "conftest.py")
+    report = nested_pytest(tmp_path, *options)
     assert "6 failed" in report, "the tests did not fail as they should"
     # The arguments are printed, and show no value.
     assert "Secret('<hidden>')" in report
     assert "EnvValues(" in report
     hidden = {"the token": values["__TOKEN__"], "the password": password}
-    assert [label for label, value in hidden.items() if value in report] == []
-    assert f"Bearer {values['__TOKEN__']}" not in report
+    assert [label for label, value in hidden.items() if shown_in(value, report)] == []
+    assert not shown_in(f"Bearer {values['__TOKEN__']}", report)
     # The control shows that this check can see a leak.
-    assert values["__PLAIN__"] in report
+    assert shown_in(values["__PLAIN__"], report)
 
 
 def unused_port() -> int:
@@ -551,31 +621,22 @@ def test_a_failed_request_prints_no_part_of_its_body_under_any_traceback_mode(
         "TEST_CONTROL": "a-control-value-that-the-report-does-show-6",
     }
     (tmp_path / "test_fails_to_connect.py").write_text(FAILING_REQUESTS, encoding="utf-8")
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", *options],
-        cwd=tmp_path,
-        env={
-            **os.environ,
-            **values,
-            "TEST_PORT": str(unused_port()),
-            "PYTHONPATH": str(Path(stack_helpers.__file__).parent),
-        },
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-    report = result.stdout + result.stderr
+    report = nested_pytest(tmp_path, *options, **values, TEST_PORT=str(unused_port()))
     assert "2 failed" in report, "the tests did not fail as they should"
     hidden = {"the password": values["TEST_PASSWORD"], "the token": values["TEST_TOKEN"]}
-    assert [label for label, value in hidden.items() if value in report] == []
-    # The error names the method and the path, and nothing of the query.
-    messages = [line for line in report.splitlines() if "ConnectionError: POST" in line]
-    assert messages, "http_json did not raise a ConnectionError that names the request"
+    assert [label for label, value in hidden.items() if shown_in(value, report)] == []
+    # The error names the method and the path, and nothing of the query. It is read on the lines of
+    # the traceback that start with E: the short summary line is cut to the width of the terminal.
+    messages = [
+        line.removeprefix("E").strip()
+        for line in report.splitlines()
+        if line.startswith("E ") and "ConnectionError: POST" in line
+    ]
     expected = "ConnectionError: POST /api/session failed: URLError"
-    assert all(line.endswith(expected) for line in messages), messages
+    assert messages, "http_json did not raise a ConnectionError that names the request"
+    assert all(message == expected for message in messages), messages
     # The control shows that this check can see a leak where there is one.
-    assert (values["TEST_CONTROL"] in report) is control_leaks
+    assert shown_in(values["TEST_CONTROL"], report) is control_leaks
 
 
 def write_env(tmp_path, monkeypatch, text):
