@@ -8,6 +8,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
+import ai_switches
 import pytest
 import services
 import stack_helpers
@@ -182,6 +183,88 @@ def test_a_failed_job_is_reported_by_its_exit_code_and_never_by_its_output():
     assert "hunter2" not in message
     assert "db-init" in message
     assert "3" in message
+
+
+@pytest.mark.parametrize(
+    ("name", "is_switch"),
+    [
+        ("ai-features-enabled?", True),
+        ("mcp-enabled?", True),
+        ("agent-api-enabled?", True),
+        ("embedded-metabot-enabled?", True),
+        ("metabot-enabled?", True),
+        ("mcp-execute-sql-enabled", True),
+        ("llm-something-new-enabled?", True),
+        ("ai-sql-fixer-enabled", True),
+        # "ai" is a word part, not a few letters of a longer word.
+        ("airgap-enabled", False),
+        ("email-configured?", False),
+        ("maintenance-enabled?", False),
+        # It has to end in enabled.
+        ("enable-ai-controls?", False),
+        ("llm-metabot-configured?", False),
+        ("show-metabot", False),
+        ("ai-features-enabled-at", False),
+        # It has to have an AI word.
+        ("embedding-enabled?", False),
+        ("enabled", False),
+    ],
+)
+def test_the_sweep_knows_an_ai_switch_by_its_name(name, is_switch):
+    assert ai_switches.is_ai_switch(name) is is_switch
+
+
+def admin_entry(name, value=None, default=None, env=False):
+    """An entry of GET /api/setting: an environment variable hides the value and the default."""
+    return {
+        "key": name,
+        "value": None if env else value,
+        "default": "Using value of env var" if env else default,
+        "is_env_setting": env,
+    }
+
+
+def test_the_sweep_reads_the_public_value_and_the_admin_list_for_what_is_not_public():
+    properties = {"ai-features-enabled?": False, "mcp-enabled?": True, "show-metabot": True}
+    admin = [
+        admin_entry("ai-features-enabled?", env=True),  # public: the public value counts
+        admin_entry("ai-sql-fixer-enabled?", default=True),  # not saved, on by default
+        admin_entry("ai-chat-enabled?", value=False, default=True),
+        admin_entry("agent-thing-enabled?", env=True),  # fixed by the environment
+        admin_entry("llm-unset-enabled?"),  # no value and no default: unset
+        admin_entry("site-name", value="x"),  # not an AI switch
+    ]
+    readings = ai_switches.readings(properties, admin)
+    assert readings == {
+        "ai-features-enabled?": False,
+        "mcp-enabled?": True,
+        "ai-sql-fixer-enabled?": True,
+        "ai-chat-enabled?": False,
+        "agent-thing-enabled?": ai_switches.LOCKED,
+        "llm-unset-enabled?": None,
+    }
+
+
+def test_the_sweep_finds_a_switch_that_is_on_and_that_nothing_allows():
+    readings = {
+        "ai-features-enabled?": False,
+        "mcp-enabled?": True,
+        "ai-sql-fixer-enabled?": True,
+        "agent-thing-enabled?": ai_switches.LOCKED,
+        "llm-unset-enabled?": None,
+        "mcp-execute-sql-enabled": True,
+    }
+    on = ai_switches.switches_on(readings, allowed={"mcp-execute-sql-enabled": "a reason"})
+    assert on == ["ai-sql-fixer-enabled?", "mcp-enabled?"]
+    # Without the allowance the same reading is red, so the allowance is what turns it green.
+    assert "mcp-execute-sql-enabled" in ai_switches.switches_on(readings, allowed={})
+
+
+def test_every_allowed_switch_has_a_reason_and_is_a_switch():
+    assert ai_switches.ALLOWED_ON, "the list starts with the SQL tool of the MCP server"
+    for name, reason in ai_switches.ALLOWED_ON.items():
+        assert ai_switches.is_ai_switch(name), name
+        assert len(reason.split()) >= 4, f"{name} needs a reason in plain words"
 
 
 # A test module that fails on purpose, run by a pytest of its own, so that the output is the real

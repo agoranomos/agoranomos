@@ -7,6 +7,7 @@ again, which the stack does on every start anyway.
 """
 
 import pytest
+from ai_switches import readings, switches_on
 from stack_helpers import Secret, SecretHeaders, compose, http_json, psql, secrets
 
 WAREHOUSE_NAME = "Agoranomos warehouse"
@@ -36,6 +37,9 @@ INITIALIZE = {
         "clientInfo": {"name": "stack-test", "version": "0"},
     },
 }
+# The Anthropic key and the provider of Metabot: /api/llm does not read ai-features-enabled?, it is
+# closed only while no key is saved, and a key saved in the admin UI would open it.
+LLM_SETTINGS = ("llm-anthropic-api-key-configured?", "llm-metabot-configured?")
 
 
 @pytest.fixture(scope="session")
@@ -86,6 +90,27 @@ def test_the_ai_settings_read_false(properties):
     # missing variable of their own: the next test does.
     states = {name: properties.get(name) for name in AI_SETTINGS}
     assert states == dict.fromkeys(AI_SETTINGS, False), states
+
+
+def test_every_ai_switch_of_metabase_reads_false(metabase_url, session, properties):
+    # compose.yaml fixes the three switches that Metabase 0.63 has. A later release can add one that
+    # is on by default: this finds every setting that is named like an AI switch (see ai_switches),
+    # so that a new one turns this test red. The names are printed, and never a value.
+    status, admin_settings = http_json("GET", f"{metabase_url}/api/setting", headers=session)
+    assert status == 200, f"GET /api/setting answered HTTP {status}"
+    found = readings(properties, admin_settings)
+    # Not vacuous: the sweep must see the switches that exist.
+    known = {"ai-features-enabled?", "mcp-enabled?", "agent-api-enabled?"}
+    assert known <= set(found), f"the sweep does not find {sorted(known - set(found))}"
+    on = switches_on(found)
+    assert not on, f"AI switches that read true: {on}"
+
+
+def test_no_llm_key_is_saved(properties):
+    # Metabase answers /api/llm when a key is saved, whatever ai-features-enabled? says, so a key
+    # saved in the admin UI makes an entry point of its own. Public settings, so no session.
+    states = {name: properties.get(name) for name in LLM_SETTINGS}
+    assert states == dict.fromkeys(LLM_SETTINGS, False), states
 
 
 def test_the_settings_that_compose_fixes_come_from_the_environment(metabase_url, session):
