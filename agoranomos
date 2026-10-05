@@ -19,6 +19,11 @@ RECOMMENDED_CPUS=4
 MIN_DISK_GB=10
 RECOMMENDED_DISK_GB=20
 
+# The state that problem and resource_problem work on. cmd_preflight resets it; it is set here so that
+# the two functions also work when another command calls them.
+problems=0
+force=0
+
 # The settings that init generates when they are empty.
 SECRET_KEYS="WAREHOUSE_POSTGRES_PASSWORD PLATFORM_POSTGRES_PASSWORD AIRFLOW_DB_PASSWORD
 METABASE_DB_PASSWORD METABASE_READER_PASSWORD VALKEY_PASSWORD AIRFLOW_FERNET_KEY AIRFLOW_JWT_SECRET
@@ -51,18 +56,31 @@ setting() {
   printf '%s' "${setting_value:-$2}"
 }
 
-# Set a setting in .env: replace the line that sets it, or add one at the end.
+# Set a setting in .env: replace the first line that sets it and drop the later ones, or add a line at
+# the end. The key and the value reach awk in its environment, not in -v options: -v interprets
+# backslash escapes, so a value such as C:\data would be corrupted and \n would start a new line, and
+# the arguments of a process, a secret among them, can be read by other users with ps. A value with a
+# line break is refused: .env keeps one setting on a line, and the second line would be a setting of its own.
 env_set() {
+  newline='
+'
+  case "$2" in
+    *"$newline"*) die "the value of $1 has more than one line: .env keeps each setting on one line" ;;
+  esac
   env_tmp="$ENV_FILE.tmp.$$"
-  (
+  if (
     umask 077
-    awk -v key="$1" -v value="$2" '
+    ENV_SET_KEY=$1 ENV_SET_VALUE=$2 awk '
+      BEGIN { key = ENVIRON["ENV_SET_KEY"]; value = ENVIRON["ENV_SET_VALUE"] }
       index($0, key "=") == 1 { if (!done) print key "=" value; done = 1; next }
       { print }
       END { if (!done) print key "=" value }
     ' "$ENV_FILE" > "$env_tmp"
-  )
-  mv "$env_tmp" "$ENV_FILE"
+  ) && mv "$env_tmp" "$ENV_FILE"; then
+    return 0
+  fi
+  rm -f "$env_tmp"
+  die "could not update $ENV_FILE"
 }
 
 random_alnum() { LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "$1"; }
@@ -117,7 +135,9 @@ cmd_init() {
   generated=""
   for key in $SECRET_KEYS; do
     if grep -q "^$key=" "$ENV_FILE" && [ -z "$(env_get "$key")" ]; then
-      env_set "$key" "$(generate_secret "$key")"
+      secret=$(generate_secret "$key") || secret=""
+      [ -n "$secret" ] || die "could not generate a value for $key: check that /dev/urandom is readable and that tr, head and base64 are installed"
+      env_set "$key" "$secret"
       generated="$generated $key"
     fi
   done
@@ -157,7 +177,8 @@ resource_problem() {
 }
 
 # The images need x86-64-v2 on x86-64 hardware. Docker Desktop hides the flags of its VM, so on
-# macOS and Windows the check is skipped.
+# macOS and Windows the check is skipped. AGORANOMOS_CPUINFO is a hook for the tests: it names a file
+# to read instead of /proc/cpuinfo.
 check_x86_64_v2() {
   cpuinfo=${AGORANOMOS_CPUINFO:-/proc/cpuinfo}
   [ -r "$cpuinfo" ] || return 0
@@ -169,14 +190,52 @@ check_x86_64_v2() {
   [ -z "$missing" ] || problem "this x86-64 CPU lacks$missing, which x86-64-v2 needs"
 }
 
+# Print the tool that finds out whether a port is in use: the first one that is installed of ss (Linux
+# and WSL2), netstat (macOS, BSD, and Linux without iproute2) and lsof. Both ss and netstat list every
+# listener. lsof comes last because without privileges it lists only the sockets of the current user,
+# so it misses a port that another user holds, such as docker-proxy of another stack. Print nothing
+# and fail when none is installed. AGORANOMOS_PORT_TOOLS is a hook for the tests: a list of tools to
+# try instead of these three, in that order (empty: none).
+port_tool() {
+  for port_tool_name in ${AGORANOMOS_PORT_TOOLS-ss netstat lsof}; do
+    if command -v "$port_tool_name" > /dev/null 2>&1; then
+      printf '%s' "$port_tool_name"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# True when something listens on TCP port $1. The whole port number has to match: 8080 is not 18080.
+# It is false when no tool is installed (cmd_preflight warns about that) or a tool fails, because then
+# nothing can be said. netstat runs with LC_ALL=C because net-tools translates the names of the states.
 port_in_use() {
-  if command -v lsof > /dev/null 2>&1; then
-    lsof -nP -iTCP:"$1" -sTCP:LISTEN > /dev/null 2>&1
-  elif command -v ss > /dev/null 2>&1; then
-    [ -n "$(ss -Hltn "sport = :$1" 2> /dev/null)" ]
-  else
-    return 1
-  fi
+  case "$(port_tool)" in
+    ss)
+      ss -ltn 2> /dev/null | awk -v port="$1" '
+        $1 == "LISTEN" { n = split($4, parts, ":"); if ((parts[n] "") == (port "")) found = 1 }
+        END { exit !found }'
+      ;;
+    netstat)
+      LC_ALL=C netstat -an 2> /dev/null | awk -v port="$1" '
+        $1 ~ /^tcp/ && $NF == "LISTEN" {
+          n = split($4, parts, /[.:]/)
+          if ((parts[n] "") == (port "")) found = 1
+        }
+        END { exit !found }'
+      ;;
+    lsof) lsof -nP -iTCP:"$1" -sTCP:LISTEN > /dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Print the free space in whole GB of the file system of directory $1, or nothing when it cannot be read.
+free_disk_gb() {
+  free_kb=$(df -Pk "$1" 2> /dev/null | awk 'NR == 2 { print $4 }')
+  case "$free_kb" in
+    '' | *[!0-9]*) return 0 ;;
+  esac
+  printf '%s' $((free_kb / 1048576))
 }
 
 cmd_preflight() {
@@ -214,32 +273,37 @@ EOF
   if [ "$mem_mb" -lt "$MIN_MEMORY_MB" ]; then
     resource_problem "Docker has $mem_mb MB of memory, and Agoranomos needs 6 GB (8 GB recommended). In Docker Desktop, raise it in Settings → Resources → Memory."
   elif [ "$mem_mb" -lt "$RECOMMENDED_MEMORY_MB" ]; then
-    warn "Docker has $mem_mb MB of memory; 8 GB is recommended."
+    warn "Docker has $mem_mb MB of memory; 8 GB is recommended. In Docker Desktop, raise it in Settings → Resources → Memory."
   fi
   if [ "$ncpu" -lt "$MIN_CPUS" ]; then
-    resource_problem "Docker has $ncpu CPU, and Agoranomos needs $MIN_CPUS ($RECOMMENDED_CPUS recommended)."
+    resource_problem "Docker has $ncpu CPU, and Agoranomos needs $MIN_CPUS ($RECOMMENDED_CPUS recommended). In Docker Desktop, raise it in Settings → Resources → CPUs."
   elif [ "$ncpu" -lt "$RECOMMENDED_CPUS" ]; then
-    warn "Docker has $ncpu CPUs; $RECOMMENDED_CPUS are recommended."
+    warn "Docker has $ncpu CPUs; $RECOMMENDED_CPUS are recommended. In Docker Desktop, raise it in Settings → Resources → CPUs."
   fi
   # On Linux the data of Docker is on this machine; Docker Desktop keeps it inside its VM.
   if [ -d "$docker_root" ]; then
-    free_kb=$(df -Pk "$docker_root" | awk 'NR == 2 { print $4 }')
-    free_gb=$((free_kb / 1048576))
-    if [ "$free_gb" -lt "$MIN_DISK_GB" ]; then
-      resource_problem "$free_gb GB of disk is free for Docker ($docker_root), and Agoranomos needs $MIN_DISK_GB GB ($RECOMMENDED_DISK_GB GB recommended)."
+    free_gb=$(free_disk_gb "$docker_root")
+    if [ -z "$free_gb" ]; then
+      warn "could not read the free disk space for Docker ($docker_root)"
+    elif [ "$free_gb" -lt "$MIN_DISK_GB" ]; then
+      resource_problem "$free_gb GB of disk is free for Docker ($docker_root), and Agoranomos needs $MIN_DISK_GB GB ($RECOMMENDED_DISK_GB GB recommended). Free up disk space on the file system of $docker_root."
     elif [ "$free_gb" -lt "$RECOMMENDED_DISK_GB" ]; then
-      warn "$free_gb GB of disk is free for Docker ($docker_root); $RECOMMENDED_DISK_GB GB is recommended."
+      warn "$free_gb GB of disk is free for Docker ($docker_root); $RECOMMENDED_DISK_GB GB is recommended. Free up disk space on the file system of $docker_root."
     fi
   fi
   # A running stack holds its own ports, so the ports are checked only while it is not running.
   if [ -z "$(compose ps --quiet --status running 2> /dev/null)" ]; then
-    for port_setting in AIRFLOW_PORT:8080 METABASE_PORT:3000; do
-      name=${port_setting%%:*}
-      port=$(setting "$name" "${port_setting#*:}")
-      if port_in_use "$port"; then
-        problem "port $port is in use: stop what uses it, or set $name in .env to a free port"
-      fi
-    done
+    if port_tool > /dev/null; then
+      for port_setting in AIRFLOW_PORT:8080 METABASE_PORT:3000; do
+        name=${port_setting%%:*}
+        port=$(setting "$name" "${port_setting#*:}")
+        if port_in_use "$port"; then
+          problem "port $port is in use: stop what uses it, or set $name in .env to a free port"
+        fi
+      done
+    else
+      warn "cannot check whether the ports are free: install ss (iproute2), netstat or lsof"
+    fi
   fi
   if [ "$problems" -gt 0 ]; then
     die "preflight found $problems problem(s)"

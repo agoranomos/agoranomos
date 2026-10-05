@@ -2,6 +2,10 @@
 
 `./agoranomos`, in the root of the checkout, sets up, checks and runs the stack ([ADR-0014](../adr/0014-start-the-stack-with-one-script.md)). It needs Docker and the standard tools of macOS, Linux or WSL2, and it works from any directory, because it finds the checkout from its own path.
 
+!!! note "Status, as of October 2026"
+
+    The stack is being built during Phase 1. Until it is complete, some of the commands and checks on this page belong to parts of the stack that do not exist yet.
+
 ```bash
 ./agoranomos <command> [options]
 ```
@@ -25,6 +29,8 @@ Checks that this machine can run the stack. Each problem is reported with what t
 | CPUs available to Docker | fewer than 2 | fewer than 4 |
 | Free disk for Docker (Linux) | below 10 GB | below 20 GB |
 | Ports `AIRFLOW_PORT` and `METABASE_PORT` | a port is in use and the stack is not running | — |
+
+Ports are checked with `ss`, `netstat` or `lsof`, the first of them that is installed; without any of them, preflight warns that it cannot check the ports.
 
 Docker reports a little less memory than its VM or machine has, so a machine or VM with 8 GB passes without a warning.
 

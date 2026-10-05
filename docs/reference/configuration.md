@@ -4,7 +4,7 @@ Agoranomos reads its settings from the `.env` file in the root of the checkout. 
 
 !!! note "Status, as of October 2026"
 
-    The stack is being built during Phase 1. Until it is complete, some of these settings configure services that the stack does not have yet.
+    The stack is being built during Phase 1. Until it is complete, some of the settings and commands on this page belong to parts of the stack that do not exist yet.
 
 !!! warning "Keep a copy of `.env`"
 

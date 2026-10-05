@@ -18,7 +18,7 @@ htmlcov/
 site/
 .cache/
 
-# Environment files hold secrets: never commit them. Use .env.example, once it exists, as the template.
+# Environment files hold secrets: never commit them. .env.example is the template that ./agoranomos init copies.
 .env
 .env.*
 !.env.example

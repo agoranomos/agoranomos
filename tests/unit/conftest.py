@@ -1,8 +1,9 @@
 """Fixtures for the unit tests of ./agoranomos.
 
 The cli fixture copies the script and .env.example into a temporary checkout whose path contains a
-space, and puts stand-ins for docker, lsof and df first on PATH. The stand-ins answer from FAKE_*
-environment variables, which a test passes to Cli.run, and the docker stand-in logs every call.
+space, and puts stand-ins for docker, ss, netstat, lsof and df first on PATH. The stand-ins answer
+from FAKE_* environment variables, which a test passes to Cli.run, and the docker stand-in logs
+every call. Cli.stub replaces a stand-in, or adds a tool, for one test.
 """
 
 from __future__ import annotations
@@ -48,7 +49,54 @@ case "$1" in
 esac
 """
 
+# ss -ltn, netstat -an and lsof answer for FAKE_BUSY_PORTS: a space-separated list of ports that
+# have a listener. ss and netstat print it in their real formats (netstat in the macOS and BSD
+# one, address.port, or with FAKE_NETSTAT_STYLE=linux in the one of net-tools, address:port). They
+# also print sockets that are not listening, as netstat does: a connection that is waiting to
+# close on port 8080 and one to a remote port 3000, and for every busy port a connection to that
+# port on a remote host. The script must not count any of these.
+FAKE_SS = r"""#!/bin/sh
+echo "State     Recv-Q Send-Q Local Address:Port    Peer Address:Port Process"
+echo "TIME-WAIT 0      0          127.0.0.1:8080       127.0.0.1:52001"
+echo "ESTAB     0      0        192.168.1.5:52346     203.0.113.9:3000"
+for port in ${FAKE_BUSY_PORTS:-}; do
+  echo "LISTEN    0      4096       127.0.0.1:$port           0.0.0.0:*"
+  echo "LISTEN    0      4096            [::]:$port              [::]:*"
+  echo "ESTAB     0      0        192.168.1.5:52347     203.0.113.9:$port"
+done
+"""
+
+FAKE_NETSTAT = r"""#!/bin/sh
+if [ "${FAKE_NETSTAT_STYLE:-bsd}" = "linux" ]; then
+  echo "Active Internet connections (servers and established)"
+  echo "Proto Recv-Q Send-Q Local Address           Foreign Address         State"
+  echo "tcp        0      0 127.0.0.1:8080          127.0.0.1:52001         TIME_WAIT"
+  echo "tcp        0      0 192.168.1.5:52346       203.0.113.9:3000        ESTABLISHED"
+  for port in ${FAKE_BUSY_PORTS:-}; do
+    echo "tcp        0      0 127.0.0.1:$port          0.0.0.0:*               LISTEN"
+    echo "tcp6       0      0 :::$port                 :::*                    LISTEN"
+    echo "tcp        0      0 192.168.1.5:52347       203.0.113.9:$port        ESTABLISHED"
+  done
+  echo "Active UNIX domain sockets (servers and established)"
+  echo "Proto RefCnt Flags       Type       State         I-Node   Path"
+  echo "unix  2      [ ACC ]     STREAM     LISTENING     12345    /run/docker.sock"
+else
+  echo "Active Internet connections (including servers)"
+  echo "Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)"
+  echo "tcp4       0      0  127.0.0.1.8080         127.0.0.1.52001        TIME_WAIT"
+  echo "tcp4       0      0  192.168.1.5.52346      203.0.113.9.3000       ESTABLISHED"
+  for port in ${FAKE_BUSY_PORTS:-}; do
+    echo "tcp4       0      0  127.0.0.1.$port         *.*                    LISTEN"
+    echo "tcp6       0      0  *.$port                 *.*                    LISTEN"
+    echo "tcp4       0      0  192.168.1.5.52347      203.0.113.9.$port       ESTABLISHED"
+  done
+fi
+"""
+
+# lsof lists only the sockets of the current user. FAKE_LSOF_BLIND=1 models a listener of another
+# user: lsof sees nothing, while ss and netstat still list it.
 FAKE_LSOF = r"""#!/bin/sh
+[ -z "${FAKE_LSOF_BLIND:-}" ] || exit 1
 port=""
 for arg in "$@"; do
   case "$arg" in -iTCP:*) port=${arg#-iTCP:} ;; esac
@@ -92,6 +140,12 @@ class Cli:
             check=False,
         )
 
+    def stub(self, name: str, body: str) -> None:
+        """Put a tool named name, a shell script with this body, first on PATH for this checkout."""
+        path = self.bin / name
+        path.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        path.chmod(0o755)
+
     def read_env(self) -> dict[str, str]:
         values: dict[str, str] = {}
         for line in self.env_path.read_text(encoding="utf-8").splitlines():
@@ -112,7 +166,14 @@ def cli(tmp_path: Path) -> Cli:
         shutil.copy2(REPO_ROOT / name, root / name)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name, body in {"docker": FAKE_DOCKER, "lsof": FAKE_LSOF, "df": FAKE_DF}.items():
+    stand_ins = {
+        "docker": FAKE_DOCKER,
+        "ss": FAKE_SS,
+        "netstat": FAKE_NETSTAT,
+        "lsof": FAKE_LSOF,
+        "df": FAKE_DF,
+    }
+    for name, body in stand_ins.items():
         path = bin_dir / name
         path.write_text(body, encoding="utf-8")
         path.chmod(0o755)

@@ -34,7 +34,7 @@ uv run zensical build --strict  # builds the documentation; a broken link or anc
 uv run pytest                   # the unit tests
 ```
 
-The checks are configured in `.pre-commit-config.yaml` and run by [prek](https://prek.j178.dev/). They cover file hygiene (large files, case conflicts, merge conflict markers, JSON, TOML and YAML syntax, private keys, final newlines, line endings and trailing whitespace), linting and formatting with ruff, spelling with typos, secrets with gitleaks, GitHub Actions workflows, issue forms and the Renovate configuration, and the documentation navigation, which must match the pages.
+The checks are configured in `.pre-commit-config.yaml` and run by [prek](https://prek.j178.dev/). They cover file hygiene (large files, case conflicts, merge conflict markers, JSON, TOML and YAML syntax, private keys, final newlines, line endings and trailing whitespace), linting and formatting with ruff, shell scripts with ShellCheck, spelling with typos, secrets with gitleaks, GitHub Actions workflows, issue forms and the Renovate configuration, and the documentation navigation, which must match the pages.
 
 CI also scans the whole git history for secrets. You can do the same on a full clone (not a shallow one) with:
 
@@ -95,7 +95,7 @@ An accepted record keeps its decision: its status, the implementation status of 
 
 - ruff also formats the `python` code blocks in Markdown files, so `ruff-format` can rewrite a code sample in the documentation. Write samples the way ruff formats them.
 - The merge conflict check rejects a line that begins with the conflict markers `<<<<<<<`, `=======` or `>>>>>>>`, even inside a documentation example. Indent such a line, or mention the markers inside a sentence.
-- The secret scanner blocks anything that looks like a real key or token. Use obvious placeholders such as `<your-token>` in examples, and never commit `.env` files. They are git-ignored, and `.env.example` will be the template once it exists.
+- The secret scanner blocks anything that looks like a real key or token. Use obvious placeholders such as `<your-token>` in examples, and never commit `.env` files. They are git-ignored, and `.env.example` is the template that `./agoranomos init` copies to `.env`.
 - The spell checker, typos, may flag a correct word, such as a product name. Add it to `[default.extend-words]` in `_typos.toml`.
 - Some tool versions are pinned in more than one place: ruff in `pyproject.toml` and `.pre-commit-config.yaml`, and prek in `pyproject.toml` and `.github/workflows/ci.yml`. Once Renovate runs, it updates each pair in one pull request, and a change made by hand has to change both. The uv version is pinned in `.github/workflows/ci.yml`, and the minimum version is set in `pyproject.toml` (`required-version`) and given in this guide.
 
