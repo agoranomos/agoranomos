@@ -2,6 +2,7 @@
 # Settings and secrets come from .env, which ./agoranomos init creates from .env.example; without it,
 # docker compose stops and asks for ./agoranomos init. .env also sets COMPOSE_PROFILES: core is the whole
 # stack in local mode (ADR-0011). Images are pinned by tag and digest, and Renovate updates them.
+# Airflow runs on an image of its own, built from airflow/Dockerfile.
 # Airflow runs with the LocalExecutor here: the scheduler runs the tasks. compose.celery.yaml adds a broker
 # and a separate worker (CeleryExecutor); select it with COMPOSE_FILE in .env (ADR-0015).
 
@@ -14,7 +15,15 @@ x-logging: &logging
 # What every Airflow container shares. Anchors do not cross files, so compose.celery.yaml extends services
 # of this file where it needs the same settings.
 x-airflow: &airflow
-  image: apache/airflow:3.3.2-python3.13@sha256:e9982ad3f49a60418622e1baf80c34b0daf3fa5091a336cb5ee61f0cdd189371
+  # The image of Agoranomos (ADR-0002): the official image with dlt, Cosmos and dbt added. airflow-init
+  # builds it from airflow/Dockerfile on every start, from the cache of Docker after the first time, so
+  # it always matches the checkout, and the other services run it; it is never pulled from or pushed to
+  # a registry. Only one service builds it. With a build in every service, Compose runs one build per
+  # service, in parallel, each puts the name of its service on the image as a label, and which of these
+  # images keeps the tag depends on timing: Compose would find a new image at every start and recreate
+  # the Airflow containers.
+  image: agoranomos-airflow:local
+  pull_policy: never
   profiles: [core]
   restart: unless-stopped
   user: "50000:0"
@@ -40,6 +49,11 @@ x-airflow: &airflow
       "kwargs": {"path": "/opt/agoranomos/dags"}},
       {"name": "extensions", "classpath": "airflow.dag_processing.bundles.local.LocalDagBundle",
       "kwargs": {"path": "/opt/agoranomos/extensions/dags"}}]
+    # No usage telemetry from dlt, dbt and Cosmos; the image sets the same variables.
+    RUNTIME__DLTHUB_TELEMETRY: "false"
+    DBT_ENGINE_SEND_ANONYMOUS_USAGE_STATS: "False"
+    AIRFLOW__COSMOS__ENABLE_TELEMETRY: "False"
+    DO_NOT_TRACK: "1"
   volumes:
     - ./airflow/dags:/opt/agoranomos/dags:ro
     - ${AGORANOMOS_EXTENSIONS_DIR:-./extensions}/dags:/opt/agoranomos/extensions/dags:ro
@@ -147,6 +161,10 @@ services:
   # so a password changed in Airflow stays.
   airflow-init:
     <<: *airflow
+    # The one service that builds the image (see x-airflow).
+    build:
+      context: ./airflow
+    pull_policy: build
     restart: "no"
     command:
       - python

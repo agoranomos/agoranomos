@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import http.client
 import json
 import os
@@ -17,6 +18,9 @@ from typing import Any
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# The variants of the stack (ADR-0015), each with the COMPOSE_FILE that selects it.
+FILES = {"local": "compose.yaml", "celery": "compose.yaml:compose.celery.yaml"}
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -72,6 +76,16 @@ def compose(
         timeout=600,
         env=None if env is None else {**os.environ, **env},
     )
+
+
+@functools.cache
+def rendered(variant: str) -> dict[str, Any]:
+    """The services of a variant, as docker compose config renders them. COMPOSE_FILE is set for
+    the call, so the variant that .env selects does not matter, and no stack has to run. Cached,
+    because the Compose files do not change during a run. The environment of a service holds
+    secrets: compare names, never print values."""
+    result = compose("config", "--format", "json", env={"COMPOSE_FILE": FILES[variant]})
+    return json.loads(result.stdout)["services"]
 
 
 def docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:

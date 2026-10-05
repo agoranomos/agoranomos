@@ -1,0 +1,4 @@
+# Only the files that airflow/Dockerfile copies go to the build; the DAGs are mounted at run time.
+*
+!requirements.txt
+!dbt-requirements.txt

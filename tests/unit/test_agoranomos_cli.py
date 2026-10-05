@@ -741,7 +741,10 @@ def test_up_counts_a_running_service_without_a_health_check_as_ready(cli, tmp_pa
     ps = ps_with("platform-db|running||0")
     result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps), **QUICK)
     assert result.returncode == 0, result.stderr
-    assert "Starting the stack..." in result.stdout
+    # The first start builds the Airflow image (airflow/Dockerfile), and takes minutes: say so.
+    lines = result.stdout.splitlines()
+    [starting] = [line for line in lines if line.startswith("Starting the stack")]
+    assert "builds the Airflow image" in starting
     assert "All services are healthy." in result.stdout
     assert "The stack is up. ./agoranomos status shows every service." in result.stdout
 

@@ -5,7 +5,6 @@ whichever one .env selects, and need no running stack. They compare names, never
 environment of a service holds secrets, and a failed assertion prints what it compares.
 """
 
-import functools
 import http.server
 import json
 import subprocess
@@ -13,9 +12,8 @@ import sys
 import threading
 
 import pytest
-from stack_helpers import compose, secrets
+from stack_helpers import FILES, rendered, secrets
 
-FILES = {"local": "compose.yaml", "celery": "compose.yaml:compose.celery.yaml"}
 EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
 AIRFLOW = {
     "airflow-init",
@@ -27,12 +25,6 @@ AIRFLOW = {
 CELERY_ONLY = {"broker", "airflow-worker"}
 METABASE = {"metabase", "metabase-init"}
 VARIANTS = sorted(FILES)
-
-
-@functools.cache
-def rendered(variant):
-    result = compose("config", "--format", "json", env={"COMPOSE_FILE": FILES[variant]})
-    return json.loads(result.stdout)["services"]
 
 
 def airflow_services(variant):

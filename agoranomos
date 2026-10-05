@@ -395,7 +395,7 @@ cmd_up() {
   done
   cmd_init
   cmd_preflight "$@"
-  say "Starting the stack..."
+  say "Starting the stack. The first start builds the Airflow image, which takes a few minutes..."
   # Without the || a failure would end the script under set -e with only the message of docker compose.
   compose up --detach --remove-orphans ||
     die "docker compose could not start the stack; the error above names the cause, and ./agoranomos status and ./agoranomos logs <service> show more"
