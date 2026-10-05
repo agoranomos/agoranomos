@@ -36,6 +36,22 @@ Docker reports a little less memory than its VM or machine has, so a machine or 
 
 `--force` turns the stops on memory, CPUs and disk into warnings. Use it only if you accept that the stack may run slowly or fail.
 
+## `up`
+
+Runs `init` and `preflight`, starts the stack with `docker compose up --detach`, and waits until every long-running service is healthy and every one-shot setup job has finished. It waits at most 15 minutes and stops early when a service fails, naming it and the command that shows its logs. Running it again on a running stack changes nothing. `--force` is passed to `preflight`.
+
+## `down`
+
+Stops the stack and removes its containers. The data stays in the Docker volumes, and the next `up` starts with it. To delete the data as well, run `docker compose down --volumes`: this cannot be undone.
+
+## `status`
+
+Shows the state and health of every service, including the one-shot setup jobs.
+
+## `logs`
+
+Shows the last 200 lines of the logs of every service. With options or service names, passes them to `docker compose logs`, for example `./agoranomos logs -f db-init`.
+
 ## `help`
 
 Lists the commands.

@@ -3,7 +3,8 @@
 The cli fixture copies the script and .env.example into a temporary checkout whose path contains a
 space, and puts stand-ins for docker, ss, netstat, lsof and df first on PATH. The stand-ins answer
 from FAKE_* environment variables, which a test passes to Cli.run, and the docker stand-in logs
-every call. Cli.stub replaces a stand-in, or adds a tool, for one test.
+every call and the COMPOSE_* settings that every docker compose call got. Cli.stub replaces a
+stand-in, or adds a tool, for one test.
 """
 
 from __future__ import annotations
@@ -32,6 +33,12 @@ case "$1" in
     ;;
   compose)
     shift
+    # What Compose would read from its environment before it reads .env. docker compose version
+    # does not read a project, so it is not recorded.
+    if [ "$1" != version ]; then
+      printf '%s|%s|%s\n' "${COMPOSE_PROJECT_NAME-unset}" "${COMPOSE_PROFILES-unset}" \
+        "${COMPOSE_FILE-unset}" >> "$FAKE_LOG.settings"
+    fi
     case "$1" in
       version)
         if [ -n "${FAKE_NO_COMPOSE:-}" ]; then exit 1; fi
@@ -40,10 +47,28 @@ case "$1" in
       ps)
         case " $* " in
           *" --quiet "*) printf '%s' "${FAKE_RUNNING:-}" ;;
-          *) if [ -n "${FAKE_PS_FILE:-}" ]; then cat "$FAKE_PS_FILE"; fi ;;
+          *)
+            # FAKE_PS_EXIT makes every poll fail. Otherwise FAKE_PS_FILE answers every poll, and
+            # FAKE_PS_FIRST, when set, answers the first poll only.
+            if [ -n "${FAKE_PS_EXIT:-}" ]; then
+              echo "Cannot connect to the Docker daemon" >&2
+              exit "$FAKE_PS_EXIT"
+            fi
+            if [ -n "${FAKE_PS_FIRST:-}" ] && [ ! -e "$FAKE_LOG.polled" ]; then
+              : > "$FAKE_LOG.polled"
+              cat "$FAKE_PS_FIRST"
+            elif [ -n "${FAKE_PS_FILE:-}" ]; then
+              cat "$FAKE_PS_FILE"
+            fi
+            ;;
         esac
         ;;
-      *) exit "${FAKE_COMPOSE_EXIT:-0}" ;;
+      *)
+        # FAKE_COMPOSE_EXIT is the exit status of every other subcommand (up, down, logs), and
+        # FAKE_COMPOSE_ERROR is what it prints on stderr, as a failing docker compose does.
+        if [ -n "${FAKE_COMPOSE_ERROR:-}" ]; then echo "$FAKE_COMPOSE_ERROR" >&2; fi
+        exit "${FAKE_COMPOSE_EXIT:-0}"
+        ;;
     esac
     ;;
 esac
@@ -169,6 +194,14 @@ class Cli:
 
     def docker_calls(self) -> list[str]:
         return self.log.read_text(encoding="utf-8").splitlines() if self.log.exists() else []
+
+    def compose_settings(self) -> list[tuple[str, ...]]:
+        """What each docker compose call (but version) got in COMPOSE_PROJECT_NAME,
+        COMPOSE_PROFILES and COMPOSE_FILE, in call order: "unset" for a variable it did not get."""
+        path = self.log.with_name(f"{self.log.name}.settings")
+        if not path.exists():
+            return []
+        return [tuple(line.split("|")) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
 @pytest.fixture

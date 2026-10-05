@@ -50,7 +50,7 @@ def test_env_example_has_twelve_secrets():
 def test_help_lists_the_commands(cli):
     result = cli.run("help")
     assert result.returncode == 0
-    for command in ("init", "preflight", "help"):
+    for command in ("init", "preflight", "up", "down", "status", "logs", "help"):
         assert re.search(rf"^  {command}\s", result.stdout, flags=re.MULTILINE)
 
 
@@ -532,3 +532,313 @@ def test_preflight_needs_no_port_tool_while_the_stack_runs(cli):
     result = cli.run("preflight", FAKE_RUNNING="abc123\n", AGORANOMOS_PORT_TOOLS="")
     assert result.returncode == 0, result.stderr
     assert "cannot check" not in result.stderr
+
+
+HEALTHY_PS = "db-init|exited||0\nwarehouse-db|running|healthy|0\nplatform-db|running|healthy|0\n"
+
+# Poll quickly, and give up after 20 seconds: a regression that makes up wait for ever then ends in
+# the message of the script, not in the 60 seconds after which Cli.run gives up.
+QUICK = {"AGORANOMOS_WAIT_INTERVAL": "0.1", "AGORANOMOS_WAIT_TIMEOUT": "20"}
+
+
+def ps_file(tmp_path, text, name="ps.txt"):
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def ps_with(line):
+    """HEALTHY_PS with the line of one service replaced: the service is the start of the line."""
+    service = line.split("|")[0]
+    kept = [entry for entry in HEALTHY_PS.splitlines() if not entry.startswith(f"{service}|")]
+    return "\n".join([*kept, line]) + "\n"
+
+
+def set_env(cli, **values):
+    """Change settings of the .env that init made, as a person would edit it."""
+    text = cli.env_path.read_text(encoding="utf-8")
+    for key, value in values.items():
+        text, count = re.subn(
+            rf"^{key}=.*$", lambda _match, key=key, value=value: f"{key}={value}", text, flags=re.M
+        )
+        assert count == 1, key
+    cli.env_path.write_text(text, encoding="utf-8")
+
+
+def compose_calls(cli):
+    """The docker compose calls that go through the script's compose function: all but version."""
+    return [
+        call
+        for call in cli.docker_calls()
+        if call.startswith("compose ") and not call.startswith("compose version")
+    ]
+
+
+def test_up_starts_the_stack_and_waits_until_healthy(cli, tmp_path):
+    result = cli.run(
+        "up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), AGORANOMOS_WAIT_INTERVAL="0.1"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "compose up --detach --remove-orphans" in cli.docker_calls()
+    assert "All services are healthy." in result.stdout
+    assert cli.env_path.exists()
+
+
+def test_up_reports_a_failed_one_shot_job(cli, tmp_path):
+    ps = HEALTHY_PS.replace("db-init|exited||0", "db-init|exited||1")
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps), AGORANOMOS_WAIT_INTERVAL="0.1")
+    assert result.returncode == 1
+    assert "db-init failed: see ./agoranomos logs db-init" in result.stderr
+
+
+def test_up_reports_an_unhealthy_service(cli, tmp_path):
+    ps = HEALTHY_PS.replace("platform-db|running|healthy|0", "platform-db|running|unhealthy|0")
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps), AGORANOMOS_WAIT_INTERVAL="0.1")
+    assert result.returncode == 1
+    assert "platform-db failed" in result.stderr
+
+
+def test_up_gives_up_after_the_timeout(cli, tmp_path):
+    ps = HEALTHY_PS.replace("platform-db|running|healthy|0", "platform-db|running|starting|0")
+    result = cli.run(
+        "up",
+        FAKE_PS_FILE=ps_file(tmp_path, ps),
+        AGORANOMOS_WAIT_TIMEOUT="1",
+        AGORANOMOS_WAIT_INTERVAL="0.2",
+    )
+    assert result.returncode == 1
+    assert "still waiting after 1 seconds for: platform-db" in result.stderr
+
+
+def test_up_does_not_start_when_preflight_fails(cli, tmp_path):
+    result = cli.run("up", FAKE_MEMTOTAL=str(4 * GIB), FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert result.returncode == 1
+    assert "Settings → Resources → Memory" in result.stderr  # it was preflight that stopped it
+    assert not any(call.startswith("compose up") for call in cli.docker_calls())
+
+
+def test_up_passes_force_to_preflight(cli, tmp_path):
+    result = cli.run(
+        "up",
+        "--force",
+        FAKE_MEMTOTAL=str(4 * GIB),
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        AGORANOMOS_WAIT_INTERVAL="0.1",
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_up_rejects_unknown_options_before_it_starts_anything(cli):
+    result = cli.run("up", "--fast")
+    assert result.returncode == 1
+    assert "unknown option: --fast" in result.stderr
+    assert not any(call.startswith("compose up") for call in cli.docker_calls())
+
+
+def test_up_reports_a_failing_docker_compose_up_and_does_not_wait(cli, tmp_path):
+    # A port that was taken after preflight, an image that cannot be pulled and an invalid
+    # compose.yaml all end docker compose up with an error: say what to look at, and stop.
+    result = cli.run(
+        "up",
+        FAKE_COMPOSE_EXIT="1",
+        FAKE_COMPOSE_ERROR="Bind for 127.0.0.1:8080 failed: port is already allocated",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        **QUICK,
+    )
+    assert result.returncode == 1
+    assert "port is already allocated" in result.stderr  # what docker compose said stays visible
+    assert "error: docker compose could not start the stack" in result.stderr
+    assert "./agoranomos status and ./agoranomos logs <service>" in result.stderr
+    assert "Waiting until every service is healthy" not in result.stdout
+    assert "The stack is up" not in result.stdout
+    assert not any(call.startswith("compose ps --all") for call in cli.docker_calls())
+
+
+def test_up_reports_a_failing_docker_compose_ps(cli):
+    # Docker can stop while the script waits: say so, rather than end with docker's message alone.
+    result = cli.run("up", FAKE_PS_EXIT="1", **QUICK)
+    assert result.returncode == 1
+    assert "Cannot connect to the Docker daemon" in result.stderr
+    assert "error: docker compose ps failed" in result.stderr
+    assert "All services are healthy." not in result.stdout
+
+
+def test_up_keeps_waiting_until_the_services_are_healthy(cli, tmp_path):
+    starting = ps_with("platform-db|running|starting|0")
+    result = cli.run(
+        "up",
+        FAKE_PS_FIRST=ps_file(tmp_path, starting, "first.txt"),
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "All services are healthy." in result.stdout
+    polls = [call for call in cli.docker_calls() if call.startswith("compose ps --all")]
+    assert len(polls) == 2  # the first poll found platform-db still starting
+
+
+def test_up_looks_every_five_seconds_for_at_most_fifteen_minutes_by_default(cli, tmp_path):
+    cli.stub("sleep", 'echo "$@" >> "$FAKE_LOG.sleeps"')  # returns at once, and logs its argument
+    result = cli.run(
+        "up",
+        FAKE_PS_FIRST=ps_file(tmp_path, ps_with("platform-db|running|starting|0"), "first.txt"),
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "at most 900 seconds" in result.stdout
+    sleeps = cli.log.with_name(f"{cli.log.name}.sleeps").read_text(encoding="utf-8")
+    assert sleeps.split() == ["5"]
+
+
+def test_up_counts_a_running_service_without_a_health_check_as_ready(cli, tmp_path):
+    ps = ps_with("platform-db|running||0")
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps), **QUICK)
+    assert result.returncode == 0, result.stderr
+    assert "Starting the stack..." in result.stdout
+    assert "All services are healthy." in result.stdout
+    assert "The stack is up. ./agoranomos status shows every service." in result.stdout
+
+
+def test_up_does_not_report_success_before_any_container_exists(cli):
+    # compose up has returned, and ps lists nothing: that is not a healthy stack.
+    result = cli.run("up", AGORANOMOS_WAIT_TIMEOUT="1", AGORANOMOS_WAIT_INTERVAL="0.2")
+    assert result.returncode == 1
+    assert "still waiting after 1 seconds for: (no containers yet)" in result.stderr
+    assert "All services are healthy." not in result.stdout
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["warehouse-db|exited||137", "platform-db|dead||0", "db-init|dead||0"],
+    ids=["database-exited", "database-dead", "job-dead"],
+)
+def test_up_stops_when_a_container_has_exited_or_died(cli, tmp_path, line):
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps_with(line)), **QUICK)
+    service = line.split("|")[0]
+    assert result.returncode == 1
+    assert f"{service} failed: see ./agoranomos logs {service}" in result.stderr
+    assert "error: the stack did not start" in result.stderr
+    assert "The stack is up" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["db-init|running||0", "warehouse-db|created||0", "platform-db|restarting||1"],
+    ids=["job-running", "database-created", "database-restarting"],
+)
+def test_up_keeps_waiting_for_a_service_that_is_not_ready_yet(cli, tmp_path, line):
+    result = cli.run(
+        "up",
+        FAKE_PS_FILE=ps_file(tmp_path, ps_with(line)),
+        AGORANOMOS_WAIT_TIMEOUT="1",
+        AGORANOMOS_WAIT_INTERVAL="0.2",
+    )
+    service = line.split("|")[0]
+    assert result.returncode == 1
+    assert (
+        f"still waiting after 1 seconds for: {service} (see ./agoranomos status)" in result.stderr
+    )
+    assert "failed" not in result.stderr
+
+
+def test_up_names_every_failed_service_and_does_not_wait_for_the_rest(cli, tmp_path):
+    ps = ps_with("db-init|exited||1").replace(
+        "warehouse-db|running|healthy|0", "warehouse-db|running|unhealthy|0"
+    )
+    ps = ps.replace("platform-db|running|healthy|0", "platform-db|running|starting|0")
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps), **QUICK)
+    assert result.returncode == 1
+    assert "db-init failed: see ./agoranomos logs db-init" in result.stderr
+    assert "warehouse-db failed: see ./agoranomos logs warehouse-db" in result.stderr
+    assert "platform-db" not in result.stderr  # still starting: no reason to wait for it
+    assert len([c for c in cli.docker_calls() if c.startswith("compose ps --all")]) == 1
+
+
+def test_up_hands_compose_the_files_of_env_and_never_passes_flags(cli, tmp_path):
+    # COMPOSE_FILE=compose.yaml:compose.celery.yaml adds the Celery overlay. It reaches Compose
+    # through the environment, as COMPOSE_PROFILES does, and never as -f or --profile options.
+    cli.run("init")
+    set_env(cli, COMPOSE_FILE="compose.yaml:compose.celery.yaml")
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
+    assert result.returncode == 0, result.stderr
+    assert "compose up --detach --remove-orphans" in cli.docker_calls()
+    for call in cli.docker_calls():
+        words = call.split()
+        assert not any(word.startswith(("-f", "--file", "--profile")) for word in words), call
+    settings = cli.compose_settings()
+    assert len(settings) == len(compose_calls(cli))
+    assert {files for *_, files in settings} == {"compose.yaml:compose.celery.yaml"}
+
+
+def test_compose_gets_its_settings_from_env_whatever_the_shell_exports(cli, tmp_path):
+    # A COMPOSE_* variable that is still exported from another project would override .env.
+    cli.run("init")
+    set_env(cli, COMPOSE_PROJECT_NAME="my-stack", COMPOSE_PROFILES="core,extra")
+    result = cli.run(
+        "up",
+        COMPOSE_PROJECT_NAME="another-project",
+        COMPOSE_PROFILES="another-profile",
+        COMPOSE_FILE="elsewhere.yaml",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    settings = cli.compose_settings()
+    assert len(settings) == len(compose_calls(cli)) >= 3  # the running check, up and a poll
+    assert set(settings) == {("my-stack", "core,extra", "compose.yaml")}
+
+
+def test_compose_settings_have_defaults_when_env_does_not_set_them(cli):
+    cli.env_path.write_text("AIRFLOW_PORT=8080\n", encoding="utf-8")
+    result = cli.run("status", COMPOSE_FILE="elsewhere.yaml", COMPOSE_PROFILES="another-profile")
+    assert result.returncode == 0, result.stderr
+    assert cli.compose_settings() == [("agoranomos", "core", "compose.yaml")]
+
+
+def test_down_keeps_the_volumes(cli):
+    cli.run("init")
+    assert cli.run("down").returncode == 0
+    [call] = [c for c in cli.docker_calls() if c.startswith("compose down")]
+    assert "--volumes" not in call
+    assert " -v" not in call
+
+
+@pytest.mark.parametrize("command", ["down", "status"])
+@pytest.mark.parametrize("option", ["--volumes", "-v"])
+def test_down_and_status_take_no_options(cli, command, option):
+    # down must never delete the data, whatever it is asked.
+    cli.run("init")
+    result = cli.run(command, option)
+    assert result.returncode == 1
+    assert f"{command} takes no options" in result.stderr
+    assert not any(
+        call.startswith(("compose down", "compose ps --all")) for call in cli.docker_calls()
+    )
+
+
+def test_status_lists_every_service(cli):
+    cli.run("init")
+    assert cli.run("status").returncode == 0
+    assert any(c.startswith("compose ps --all --format") for c in cli.docker_calls())
+
+
+def test_status_asks_only_for_fields_that_have_a_table_header(cli):
+    # As of Compose 5.5.1 (October 2026), a table prints <no value> as the header of the columns
+    # Health and ExitCode. The Status column holds the health of a service, as in Up 5 minutes
+    # (healthy).
+    cli.run("init")
+    assert cli.run("status").returncode == 0
+    [call] = [c for c in cli.docker_calls() if c.startswith("compose ps --all --format table")]
+    assert "{{.Service}}" in call
+    assert "{{.State}}" in call
+    assert "{{.Status}}" in call
+    assert "{{.Health}}" not in call
+    assert "{{.ExitCode}}" not in call
+
+
+def test_logs_passes_its_arguments(cli):
+    cli.run("init")
+    assert cli.run("logs", "-f", "db-init").returncode == 0
+    assert "compose logs -f db-init" in cli.docker_calls()
+    cli.run("logs")
+    assert "compose logs --tail=200" in cli.docker_calls()
