@@ -62,4 +62,4 @@ Agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0012](0012-python-and-tooling.md) | Use Python 3.13 and a pinned toolchain | accepted | 2026-10-02 |
 | [0013](0013-keep-extensions-apart-from-the-base-package.md) | Keep extensions apart from the base package | accepted | 2026-10-05 |
 | [0014](0014-start-the-stack-with-one-script.md) | Start the stack with one script and a generated .env file | accepted | 2026-10-05 |
-| [0015](0015-run-localexecutor-by-default.md) | Run LocalExecutor by default | proposed | 2026-10-05 |
+| [0015](0015-run-localexecutor-by-default.md) | Run LocalExecutor by default | accepted | 2026-10-05 |
