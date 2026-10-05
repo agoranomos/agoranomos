@@ -13,6 +13,7 @@ BASE_LONG_RUNNING = {
     "airflow-scheduler",
     "airflow-dag-processor",
     "airflow-triggerer",
+    "metabase",
 }
 CELERY_LONG_RUNNING = {"broker", "airflow-worker"}
 
@@ -25,4 +26,4 @@ def long_running(variant: str) -> set[str]:
 
 
 LONG_RUNNING = long_running(active_variant())
-ONE_SHOT = {"db-init", "airflow-init"}
+ONE_SHOT = {"db-init", "airflow-init", "metabase-init"}

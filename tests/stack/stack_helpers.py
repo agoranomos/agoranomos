@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
@@ -47,6 +49,16 @@ def secrets(env: dict[str, str]) -> dict[str, str]:
     return {name: env[name] for name, default in example.items() if not default and env.get(name)}
 
 
+def load_env(path: Path) -> EnvValues:
+    """The settings in .env, for the env fixture: its secrets are Secret values, wherever they go
+    (an argument of a helper, a body, an environment), and the dict prints its names only."""
+    values = read_env(path)
+    secret_names = set(secrets(values))
+    return EnvValues(
+        {name: Secret(value) if name in secret_names else value for name, value in values.items()}
+    )
+
+
 def compose(
     *args: str, check: bool = True, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
@@ -85,6 +97,104 @@ def containers() -> dict[str, dict[str, Any]]:
     return {item["Service"]: item for item in items}
 
 
+def process_uids(name: str, proc: str = "/proc") -> str:
+    """A shell command that prints the Uid line of every process whose name is name.
+
+    The images have no ps, so it reads the process files. The loop ends in the status of its last
+    command, which is that of the last entry of the glob, and the glob sorts the process IDs as
+    strings: so the command ends in true, and a test checks what it prints.
+    """
+    return (
+        f"for dir in {proc}/[0-9]*; do "
+        f'[ "$(cat $dir/comm 2>/dev/null)" = {name} ] && grep "^Uid:" $dir/status; '
+        "done; true"
+    )
+
+
+def job_failed(service: str, result: subprocess.CompletedProcess[str]) -> str:
+    """The message of an assertion about a job that failed: its exit code, and how to see why.
+
+    Never its output, because a failed ALTER ROLE shows its statement in the output, and the
+    statement holds the password.
+    """
+    return (
+        f"{service} exited with {result.returncode}: to see why, run it by hand with "
+        f"docker compose run --rm --no-deps {service}"
+    )
+
+
+class Secret(str):
+    """A secret that is still a str, so that it works in headers, request bodies and environments,
+    but whose repr hides the value.
+
+    pytest prints the arguments of the first and the last function of the traceback of a failed
+    test, and of the test itself, with repr(), cut to about 240 characters: a plain str would put
+    most of a token or a password into the report. str() and format() give the value, because a
+    request needs it, so keep a Secret out of f-strings and messages that an assertion prints.
+    """
+
+    def __repr__(self) -> str:
+        return "Secret('<hidden>')"
+
+
+class NamesOnly(dict[str, str]):
+    """A dict that shows its names and never its values, for what pytest prints."""
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({sorted(self)})"
+
+
+class SecretHeaders(NamesOnly):
+    """Request headers that hold a secret, such as a session or a token."""
+
+
+class EnvValues(NamesOnly):
+    """The settings of .env, as the env fixture gives them."""
+
+
+# The stack tests talk to the services that the stack publishes on 127.0.0.1, and to nothing else.
+# urlopen would send each request, with its token or password, to the proxy that HTTP_PROXY names
+# in the environment of a developer machine, loopback included unless NO_PROXY says no. This opener
+# has no proxy and reads no environment, so neither the environment nor the order of the tests can
+# change where a request goes. metabase-init builds the same opener, for the same reason.
+OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def build_request(
+    method: str, url: str, body: Any, headers: dict[str, str] | None
+) -> urllib.request.Request:
+    """The request of http_json, built without its body, which is then set in one expression.
+
+    pytest prints the arguments of the frames of a failed test under --tb=long, and their locals
+    under --showlocals. The encoded body, with a password in it, is therefore never bound to a name
+    and never an argument of a call that can fail. Request() gets no data, so a URL that it cannot
+    parse raises before the body is encoded, and the body is encoded and assigned to request.data
+    in one expression (the setter of request.data only stores it). On every path it lives only in
+    the request, whose repr shows no data.
+    """
+    request = urllib.request.Request(
+        url, method=method, headers={"Content-Type": "application/json", **(headers or {})}
+    )
+    if body is not None:
+        request.data = json.dumps(body).encode()
+    return request
+
+
+def error_classes(error: BaseException) -> str:
+    """The class of an error, and of its reason when urllib wrapped one.
+
+    For a refused connection that is URLError (ConnectionRefusedError), so that it, a name that
+    does not resolve and a server that does not answer in time differ in a CI log. Never the text of
+    the error, which can hold an address or a header. It is the rule of metabase_init.error_classes,
+    and a test checks the two against each other.
+    """
+    name = type(error).__name__
+    reason = getattr(error, "reason", None)
+    if isinstance(reason, BaseException):
+        name += f" ({type(reason).__name__})"
+    return name
+
+
 def http_json(
     method: str,
     url: str,
@@ -92,18 +202,19 @@ def http_json(
     headers: dict[str, str] | None = None,
     timeout: float = 30,
 ) -> tuple[int, Any]:
-    data = None if body is None else json.dumps(body).encode()
-    request = urllib.request.Request(
-        url,
-        data=data,
-        method=method,
-        headers={"Content-Type": "application/json", **(headers or {})},
-    )
+    request = build_request(method, url, body, headers)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            status, raw = response.status, response.read()
-    except urllib.error.HTTPError as error:
-        status, raw = error.code, error.read()
+        try:
+            with OPENER.open(request, timeout=timeout) as response:
+                status, raw = response.status, response.read()
+        except urllib.error.HTTPError as error:
+            status, raw = error.code, error.read()
+    except (OSError, http.client.HTTPException) as error:
+        # The server could not be reached, or it hung up. The frames of http.client hold the
+        # request, with its body and its headers, so the error is dropped (from None) and a new one
+        # names the call: the method, the path (never the query), and the classes of the failure.
+        path = urllib.parse.urlsplit(url).path or "/"
+        raise ConnectionError(f"{method} {path} failed: {error_classes(error)}") from None
     try:
         return status, json.loads(raw) if raw else None
     except json.JSONDecodeError:

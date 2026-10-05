@@ -31,6 +31,12 @@ Each value is used as written: keep it on one line, do not put a comment after i
 | `AIRFLOW_PARALLELISM` | `4` | How many Airflow tasks run at the same time, in the whole stack. With LocalExecutor, each one is a process in the scheduler container, so more tasks need more memory, and a task that runs out of memory can make the scheduler restart (Airflow's documentation warns about this). With CeleryExecutor it caps all workers together: raise it together with `AIRFLOW_WORKER_CONCURRENCY` or the number of workers. |
 | `AIRFLOW_WORKER_CONCURRENCY` | `4` | Only with CeleryExecutor: how many tasks one Airflow worker runs at a time. More tasks need more memory. |
 
+## Settings fixed in `compose.yaml`
+
+Some settings are not in `.env`, because changing them is a decision and not a preference. They are environment variables in `compose.yaml`, and a value from an environment variable wins over any value saved in the application.
+
+The AI switches of Metabase are fixed off in `compose.yaml` until the permissions of AI access are decided ([ADR-0007](../adr/0007-ai-access-via-mcp-read-only.md)): `MB_AI_FEATURES_ENABLED`, `MB_MCP_ENABLED` and `MB_AGENT_API_ENABLED` are all `false`, which keeps the built-in MCP server, the registration of its OAuth clients and the Agent API off. The switch in Admin > AI has no effect while they are. Changing it saves a value that would apply if a variable were removed, so leave it alone.
+
 ## Secrets
 
 `./agoranomos init` generates each of these when it is empty: random letters and digits, and a Fernet key for Airflow.

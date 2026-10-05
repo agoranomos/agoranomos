@@ -260,6 +260,81 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
+  metabase:
+    image: metabase/metabase:v0.63.19@sha256:7324f83713df9851c6c7b6c8247098de14c0924fc3b868202f886df4877cd4ff
+    profiles: [core]
+    restart: unless-stopped
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: platform-db
+      MB_DB_PORT: "5432"
+      MB_DB_DBNAME: metabase
+      MB_DB_USER: metabase
+      MB_DB_PASS: ${METABASE_DB_PASSWORD:?run ./agoranomos init}
+      MB_ENCRYPTION_SECRET_KEY: ${METABASE_ENCRYPTION_KEY:?run ./agoranomos init}
+      MB_SITE_URL: http://localhost:${METABASE_PORT:-3000}
+      MB_ANON_TRACKING_ENABLED: "false"
+      MB_CHECK_FOR_UPDATES: "false"
+      # A new Metabase gets no Sample Database and no Examples collection, which have nothing to do
+      # with marketing data.
+      MB_LOAD_SAMPLE_CONTENT: "false"
+      # Metabase 0.63 turns its AI entry points on by default: the built-in MCP server (with the OAuth
+      # client registration that goes with it) and the Agent API. They stay off until an ADR decides what
+      # AI access may do in Metabase (AGENTS.md). MB_AI_FEATURES_ENABLED is the master switch, which the
+      # other two settings also require; all three are set, so that no one line opens an entry point. A
+      # value from an environment variable wins over any value saved in Metabase, including one changed
+      # in the Metabase UI.
+      MB_AI_FEATURES_ENABLED: "false"
+      MB_MCP_ENABLED: "false"
+      MB_AGENT_API_ENABLED: "false"
+      # Prometheus metrics, for the planned Ops collection. The port is not published, so it is
+      # reachable only from the Compose networks.
+      MB_PROMETHEUS_SERVER_PORT: "9191"
+    ports:
+      - "127.0.0.1:${METABASE_PORT:-3000}:3000"
+    # default for the published port and for metabase-init; data to reach the databases.
+    networks: [default, data]
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --output /dev/null http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 120s
+    depends_on:
+      platform-db:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+  # Sets Metabase up on the first start and keeps the warehouse connection current on every start. Metabase
+  # makes the connection to the warehouse, so this job needs the default network only, to reach Metabase.
+  metabase-init:
+    image: python:3.13.16-slim-trixie@sha256:3dd7cc108ec1493442514f5c2a871af6af0ec31d768ff6e378a93340c3b3db5f
+    profiles: [core]
+    restart: "no"
+    user: "65534:65534"
+    command: ["python", "/opt/agoranomos/metabase/metabase_init.py"]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      METABASE_URL: http://metabase:3000
+      METABASE_SITE_NAME: Agoranomos
+      METABASE_ADMIN_EMAIL: ${AGORANOMOS_ADMIN_EMAIL:-admin@example.com}
+      METABASE_ADMIN_PASSWORD: ${METABASE_ADMIN_PASSWORD:?run ./agoranomos init}
+      WAREHOUSE_HOST: warehouse-db
+      WAREHOUSE_PORT: "5432"
+      WAREHOUSE_DB: warehouse
+      WAREHOUSE_USER: metabase_reader
+      WAREHOUSE_PASSWORD: ${METABASE_READER_PASSWORD:?run ./agoranomos init}
+    volumes:
+      - ./metabase:/opt/agoranomos/metabase:ro
+    depends_on:
+      metabase:
+        condition: service_healthy
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
 networks:
   # The databases have no route to the internet; with CeleryExecutor, the broker joins them here.
   data:

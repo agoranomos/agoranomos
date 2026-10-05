@@ -1,7 +1,7 @@
 """What only the Celery variant has: the broker and the worker (skipped in the local variant)."""
 
 import pytest
-from stack_helpers import active_variant, compose
+from stack_helpers import active_variant, compose, process_uids
 
 pytestmark = pytest.mark.skipif(
     active_variant() != "celery",
@@ -42,13 +42,10 @@ def test_the_broker_keeps_nothing_on_disk(env):
 
 def test_the_broker_server_does_not_run_as_root():
     # The image drops privileges only when its command is valkey-server, and the command here is a
-    # shell, so compose.celery.yaml sets the user. The image has no ps: read the process files.
-    find = (
-        "for dir in /proc/[0-9]*; do "
-        '[ "$(cat $dir/comm 2>/dev/null)" = valkey-server ] && grep "^Uid:" $dir/status; '
-        "done"
-    )
-    result = compose("exec", "-T", "broker", "sh", "-c", find)
+    # shell, so compose.celery.yaml sets the user. The image has no ps: the helper reads the
+    # process files. It always succeeds, so a server that is not there is an empty answer, and
+    # fails here.
+    result = compose("exec", "-T", "broker", "sh", "-c", process_uids("valkey-server"))
     assert result.stdout.split() == ["Uid:", "999", "999", "999", "999"], result.stdout
 
 
