@@ -169,7 +169,8 @@ def build_request(
     under --showlocals. The encoded body, with a password in it, is therefore never bound to a name
     and never an argument of a call that can fail. Request() gets no data, so a URL that it cannot
     parse raises before the body is encoded, and the body is encoded and assigned to request.data
-    in one expression. On every path it lives only in the request, whose repr shows no data.
+    in one expression (the setter of request.data only stores it). On every path it lives only in
+    the request, whose repr shows no data.
     """
     request = urllib.request.Request(
         url, method=method, headers={"Content-Type": "application/json", **(headers or {})}
