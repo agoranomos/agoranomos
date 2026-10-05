@@ -95,6 +95,20 @@ def containers() -> dict[str, dict[str, Any]]:
     return {item["Service"]: item for item in items}
 
 
+def process_uids(name: str, proc: str = "/proc") -> str:
+    """A shell command that prints the Uid line of every process whose name is name.
+
+    The images have no ps, so it reads the process files. The loop ends in the status of its last
+    command, which is that of the last entry of the glob, and the glob sorts the process IDs as
+    strings: so the command ends in true, and a test checks what it prints.
+    """
+    return (
+        f"for dir in {proc}/[0-9]*; do "
+        f'[ "$(cat $dir/comm 2>/dev/null)" = {name} ] && grep "^Uid:" $dir/status; '
+        "done; true"
+    )
+
+
 def job_failed(service: str, result: subprocess.CompletedProcess[str]) -> str:
     """The message of an assertion about a job that failed: its exit code, and how to see why.
 

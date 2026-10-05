@@ -114,6 +114,65 @@ def test_the_airflow_helper_keeps_the_token_out_of_the_headers_that_pytest_print
     assert headers["Authorization"] == f"Bearer {value}"  # the request still carries it
 
 
+def fake_proc(tmp_path, entries):
+    """A folder that looks like /proc: one folder per process ID, with its name and its status."""
+    for pid, (name, uid) in entries.items():
+        folder = tmp_path / "proc" / str(pid)
+        folder.mkdir(parents=True)
+        (folder / "comm").write_text(f"{name}\n", encoding="utf-8")
+        (folder / "status").write_text(f"Name:\t{name}\nUid:\t{uid}\t{uid}\t{uid}\t{uid}\n")
+    return str(tmp_path / "proc")
+
+
+def list_uids(name, proc):
+    return subprocess.run(
+        ["sh", "-c", stack_helpers.process_uids(name, proc)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+
+
+def test_the_process_listing_succeeds_whatever_process_comes_last(tmp_path):
+    # The glob sorts the IDs as strings: 1, 133, 8, 91. The shell that docker compose exec starts
+    # is the last of them here, it is not the server, and the loop used to end in its status, 1.
+    # How early in the life of a container this happens depends on the process IDs.
+    proc = fake_proc(
+        tmp_path,
+        {1: ("tini", 999), 133: ("sh", 999), 8: ("valkey-server", 999), 91: ("sh", 999)},
+    )
+    result = list_uids("valkey-server", proc)
+    assert result.returncode == 0
+    assert result.stdout.split() == ["Uid:", "999", "999", "999", "999"]
+
+
+def test_the_process_listing_prints_nothing_for_a_process_that_is_not_there(tmp_path):
+    # It succeeds, and the test that uses it compares the output, so a missing server fails there,
+    # and says what it saw.
+    proc = fake_proc(tmp_path, {1: ("tini", 999), 8: ("sh", 999)})
+    result = list_uids("valkey-server", proc)
+    assert result.returncode == 0
+    assert result.stdout == ""
+
+
+def test_the_process_listing_runs_in_the_shell_of_the_image(tmp_path):
+    # The images ship dash or busybox sh: the command must not need more than POSIX sh.
+    proc = fake_proc(tmp_path, {1: ("tini", 0), 8: ("valkey-server", 999), 9: ("sh", 0)})
+    for shell in ("/bin/dash", "/bin/sh"):
+        if not Path(shell).exists():
+            continue
+        result = subprocess.run(
+            [shell, "-c", stack_helpers.process_uids("valkey-server", proc)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        assert result.returncode == 0, shell
+        assert result.stdout.split() == ["Uid:", "999", "999", "999", "999"], shell
+
+
 def test_a_failed_job_is_reported_by_its_exit_code_and_never_by_its_output():
     # A failed ALTER ROLE shows its statement, password included, in the output of db-init.
     result = subprocess.CompletedProcess(
