@@ -114,7 +114,7 @@ Decision record: [ADR-0002: Orchestrate with Apache Airflow 3](../adr/0002-orche
 
 ## Explore: Metabase
 
-Metabase OSS reads only the `marts` schema, through the `metabase_reader` role. It comes with ready-made dashboards, metrics and a glossary. A one-shot init job sets Metabase up on first start through its API: it connects the warehouse, creates collections and dashboards from code, and enables the built-in MCP server (available since Metabase 0.60).
+Metabase OSS reads only the `marts` schema, through the `metabase_reader` role. It comes with ready-made dashboards, metrics and a glossary. A one-shot init job sets Metabase up on first start through its API: it connects the warehouse and creates collections and dashboards from code. The built-in MCP server (available since Metabase 0.60) stays off until the permissions of AI access are decided in an ADR, before the AI layer ships.
 
 Decision record: [ADR-0006: Use Metabase as the BI layer](../adr/0006-metabase-as-bi.md).
 
@@ -128,6 +128,8 @@ AI access goes through four MCP servers. Each starts with least-privilege defaul
 | Airflow MCP (astro-airflow-mcp) | Engineers: status, logs, diagnostics | Read-only mode, signed in as a Viewer user | stdio through `docker exec` |
 | Warehouse MCP (MCP Toolbox) | Engineers and analysts: schemas and read-only SQL | The `ai_reader` role: read-only transactions, a statement timeout, `marts` only (plus `staging`) | stdio through `docker exec` |
 | dbt MCP | Analytics engineers: lineage, docs, compile and test | A dev target in a separate schema; production runs only through Airflow | stdio through `docker exec` |
+
+These are the defaults that [ADR-0007](../adr/0007-ai-access-via-mcp-read-only.md) describes. The permissions that AI access gets in each tool are to be set in a record of their own before the AI layer ships, and that record may change them.
 
 Local mode serves coding agents such as Claude Code on the same machine; the desktop and mobile apps of Claude and ChatGPT reach Metabase's MCP server over HTTPS in server mode.
 
