@@ -17,7 +17,7 @@ Contributions that you wrote with the help of an AI assistant are welcome under 
 
 ## Set up your environment
 
-You need `git` and [uv](https://docs.astral.sh/uv/) 0.12.22 or newer (as of October 2026); `pyproject.toml` sets this minimum, and an older uv stops with an error. CI uses the uv version pinned in `.github/workflows/ci.yml`. uv also installs Python 3.13 when it is missing.
+You need `git` and [uv](https://docs.astral.sh/uv/) 0.12.22 or newer (as of October 2026); `pyproject.toml` sets this minimum, and an older uv stops with an error. CI uses the uv version pinned in `.github/workflows/ci.yml` and `.github/workflows/stack.yml`. uv also installs Python 3.13 when it is missing.
 
 ```bash
 git clone https://github.com/agoranomos/agoranomos.git
@@ -44,13 +44,25 @@ uv run prek run gitleaks-history --all-files --hook-stage manual
 
 To preview the documentation while you edit it, run `uv run zensical serve` and open <http://localhost:8000>. If that port is taken, add `--dev-addr 127.0.0.1:8001`. The strict build does not check navigation entries (as of Zensical 0.0.67), so a prek hook does: every navigation entry in `zensical.toml` must point at a page, and every page in `docs/` must be in the navigation.
 
+### Run the stack
+
+The stack needs Docker with at least 6 GB of memory (8 GB recommended). On Docker Desktop, set it in Settings → Resources. Then:
+
+```bash
+./agoranomos up              # set up .env, check the machine, start the stack
+uv run pytest tests/stack    # the stack tests, against the running stack
+./agoranomos down            # stop it; the data stays
+```
+
+CI runs the same stack tests for every pull request that changes the stack.
+
 ## Make a change
 
 1. **Branch.** Start a short-lived branch from an up-to-date `main`, and do not commit to `main` directly. Name the branch after the type of change and a short description. Any Conventional Commits type works as the prefix, for example `feat/...`, `fix/...`, `docs/...`, `chore/...` or `ci/...`, and a branch could be called `docs/explain-attribution-windows`.
 2. **Commit.** Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `type(optional scope): summary`. The accepted types are `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore` and `revert`. Keep the summary short and in the imperative, for example `docs: explain how attribution windows are reloaded`, and use the body to say why the change is needed.
 3. **Sign off.** Every commit needs a DCO sign-off, which `git commit -s` adds (see below).
 4. **Open a pull request** against `main` and fill in the template. Keep it focused on one change.
-5. **Get the checks green.** Five checks run on every pull request: static checks (prek, including the full-history secret scan), the documentation build in strict mode, the unit tests, the Conventional Commits title and the DCO sign-off.
+5. **Get the checks green.** Five checks run on every pull request: static checks (prek, including the full-history secret scan), the documentation build in strict mode, the unit tests, the Conventional Commits title and the DCO sign-off. A pull request that changes the stack also runs the stack tests in CI, as the check "Local mode (amd64)".
 6. **Review and merge.** The maintainer reviews the pull request and squash-merges it. The pull request title becomes the commit title on `main`, so it must follow Conventional Commits as well.
 
 If a hook changes files when you commit (the final-newline fixer or ruff, for example), the commit stops. Review the changes, add them with `git add` and commit again.
@@ -97,7 +109,7 @@ An accepted record keeps its decision: its status, the implementation status of 
 - The merge conflict check rejects a line that begins with the conflict markers `<<<<<<<`, `=======` or `>>>>>>>`, even inside a documentation example. Indent such a line, or mention the markers inside a sentence.
 - The secret scanner blocks anything that looks like a real key or token. Use obvious placeholders such as `<your-token>` in examples, and never commit `.env` files. They are git-ignored, and `.env.example` is the template that `./agoranomos init` copies to `.env`.
 - The spell checker, typos, may flag a correct word, such as a product name. Add it to `[default.extend-words]` in `_typos.toml`.
-- Some tool versions are pinned in more than one place: ruff in `pyproject.toml` and `.pre-commit-config.yaml`, and prek in `pyproject.toml` and `.github/workflows/ci.yml`. Once Renovate runs, it updates each pair in one pull request, and a change made by hand has to change both. The uv version is pinned in `.github/workflows/ci.yml`, and the minimum version is set in `pyproject.toml` (`required-version`) and given in this guide.
+- Some tool versions are pinned in more than one place: ruff in `pyproject.toml` and `.pre-commit-config.yaml`, and prek in `pyproject.toml` and `.github/workflows/ci.yml`. Once Renovate runs, it updates each pair in one pull request, and a change made by hand has to change both. The uv version is pinned in `.github/workflows/ci.yml` and `.github/workflows/stack.yml`, and the minimum version is set in `pyproject.toml` (`required-version`) and given in this guide.
 
 ## License
 

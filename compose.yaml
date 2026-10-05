@@ -1,0 +1,104 @@
+# The Agoranomos stack. Start it with ./agoranomos up (docs/reference/command-line.md).
+# Settings and secrets come from .env, which ./agoranomos init creates from .env.example; without it,
+# docker compose stops and asks for ./agoranomos init. .env also sets COMPOSE_PROFILES: core is the whole
+# stack in local mode (ADR-0011). Images are pinned by tag and digest, and Renovate updates them.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  warehouse-db:
+    image: postgres:18.6-trixie@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
+    profiles: [core]
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${WAREHOUSE_POSTGRES_PASSWORD:?run ./agoranomos init}
+      POSTGRES_DB: warehouse
+    # pg_stat_statements must be loaded at start-up, so it is on from the first start: the Ops collection
+    # reads it later.
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=top
+      - -c
+      - track_io_timing=on
+    volumes:
+      # PostgreSQL 18 images keep their data under /var/lib/postgresql/18/docker (ADR-0003).
+      - warehouse-data:/var/lib/postgresql
+    networks: [data]
+    # The check connects over TCP: on the first start with an empty volume the image runs a temporary
+    # server that listens only on the Unix socket while it initializes, and a check over the socket
+    # could report it ready. Over TCP only the final server answers.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d warehouse"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+  platform-db:
+    image: postgres:18.6-trixie@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
+    profiles: [core]
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${PLATFORM_POSTGRES_PASSWORD:?run ./agoranomos init}
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=top
+      - -c
+      - track_io_timing=on
+    volumes:
+      - platform-data:/var/lib/postgresql
+    networks: [data]
+    # Over TCP, for the reason given at warehouse-db.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+  # Creates or updates the roles, databases and schemas of both instances on every start.
+  db-init:
+    image: postgres:18.6-trixie@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
+    profiles: [core]
+    restart: "no"
+    user: postgres
+    entrypoint: ["/bin/sh", "/opt/agoranomos/postgres/db-init.sh"]
+    environment:
+      WAREHOUSE_POSTGRES_PASSWORD: ${WAREHOUSE_POSTGRES_PASSWORD:?run ./agoranomos init}
+      PLATFORM_POSTGRES_PASSWORD: ${PLATFORM_POSTGRES_PASSWORD:?run ./agoranomos init}
+      AIRFLOW_DB_PASSWORD: ${AIRFLOW_DB_PASSWORD:?run ./agoranomos init}
+      METABASE_DB_PASSWORD: ${METABASE_DB_PASSWORD:?run ./agoranomos init}
+      METABASE_READER_PASSWORD: ${METABASE_READER_PASSWORD:?run ./agoranomos init}
+    volumes:
+      - ./postgres:/opt/agoranomos/postgres:ro
+    networks: [data]
+    depends_on:
+      warehouse-db:
+        condition: service_healthy
+      platform-db:
+        condition: service_healthy
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+networks:
+  # The databases have no route to the internet; with CeleryExecutor, the broker joins them here.
+  data:
+    internal: true
+
+volumes:
+  warehouse-data:
+  platform-data:

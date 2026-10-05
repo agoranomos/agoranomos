@@ -36,8 +36,22 @@ die() {
   exit 1
 }
 
-# Run docker compose in the checkout, where Compose finds compose.yaml and .env.
-compose() { (cd "$ROOT" && docker compose "$@"); }
+# Run docker compose in the checkout, where Compose finds compose.yaml and .env. Compose reads
+# COMPOSE_PROJECT_NAME, COMPOSE_PROFILES and COMPOSE_FILE from its environment before it reads .env,
+# so a variable of the same name that is still exported in this shell, from another project, would
+# win over .env. These three therefore come from .env here, with the defaults of .env.example. The
+# files and the profiles reach Compose through these variables, never through -f and --profile
+# options, so this script and a plain docker compose in the checkout work on the same stack.
+compose() {
+  (
+    cd "$ROOT" || exit 1
+    COMPOSE_PROJECT_NAME=$(setting COMPOSE_PROJECT_NAME agoranomos)
+    COMPOSE_PROFILES=$(setting COMPOSE_PROFILES core)
+    COMPOSE_FILE=$(setting COMPOSE_FILE compose.yaml)
+    export COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_FILE
+    docker compose "$@"
+  )
+}
 
 # Print the value of a setting in .env without quotes around it, or nothing when it is not set.
 env_get() {
@@ -317,6 +331,100 @@ EOF
   say "Preflight passed: Docker $server_version, Compose ${compose_version#v}, $arch, $ncpu CPUs, $mem_mb MB of memory."
 }
 
+# Wait until every long-running service is healthy (or running, if it has no health check) and every
+# one-shot job (its name ends in -init) has exited with 0. A service that is not ready yet is named
+# with what it is doing, as name (state) or name (state, health). AGORANOMOS_WAIT_TIMEOUT and
+# AGORANOMOS_WAIT_INTERVAL, in seconds, are hooks for the tests: how long to wait at most (default 900)
+# and how long to sleep between two looks (default 5).
+wait_healthy() {
+  timeout=${AGORANOMOS_WAIT_TIMEOUT:-900}
+  interval=${AGORANOMOS_WAIT_INTERVAL:-5}
+  started=$(date +%s)
+  say "Waiting until every service is healthy (at most $timeout seconds)..."
+  while :; do
+    states=$(compose ps --all --format '{{.Service}}|{{.State}}|{{.Health}}|{{.ExitCode}}') ||
+      die "docker compose ps failed; the error above names the cause, and Docker may have stopped"
+    pending="" failed=""
+    [ -n "$states" ] || pending=" (no containers yet)"
+    while IFS='|' read -r service state health exit_code; do
+      [ -n "$service" ] || continue
+      case "$service" in
+        *-init)
+          case "$state:$exit_code" in
+            exited:0) ;;
+            exited:* | dead:*) failed="$failed $service" ;;
+            *) pending="${pending:+$pending,} $service ($state${health:+, $health})" ;;
+          esac
+          ;;
+        *)
+          case "$state:$health" in
+            running:healthy | running:) ;;
+            running:unhealthy | exited:* | dead:*) failed="$failed $service" ;;
+            *) pending="${pending:+$pending,} $service ($state${health:+, $health})" ;;
+          esac
+          ;;
+      esac
+    done << EOF
+$states
+EOF
+    if [ -n "$failed" ]; then
+      for service in $failed; do
+        warn "$service failed: see ./agoranomos logs $service"
+      done
+      die "the stack did not start"
+    fi
+    if [ -z "$pending" ]; then
+      say "All services are healthy."
+      return 0
+    fi
+    if [ $(($(date +%s) - started)) -ge "$timeout" ]; then
+      die "still waiting after $timeout seconds for:$pending (see ./agoranomos status)"
+    fi
+    sleep "$interval"
+  done
+}
+
+cmd_up() {
+  # Check the options before init writes .env: an option that preflight would refuse must not leave
+  # a .env behind.
+  for option in "$@"; do
+    case "$option" in
+      --force) ;;
+      *) die "unknown option: $option" ;;
+    esac
+  done
+  cmd_init
+  cmd_preflight "$@"
+  say "Starting the stack..."
+  # Without the || a failure would end the script under set -e with only the message of docker compose.
+  compose up --detach --remove-orphans ||
+    die "docker compose could not start the stack; the error above names the cause, and ./agoranomos status and ./agoranomos logs <service> show more"
+  wait_healthy
+  say "The stack is up. ./agoranomos status shows every service."
+}
+
+cmd_down() {
+  [ "$#" -eq 0 ] || die "down takes no options"
+  compose down --remove-orphans
+  say "The stack is stopped. Its data stays in the Docker volumes."
+}
+
+# The Status column ends in the health of a service, as in Up 5 minutes (healthy). A column of its
+# own for {{.Health}} is not possible: as of Compose 5.5.1 (October 2026), a table has no header
+# for it and prints <no value>.
+cmd_status() {
+  [ "$#" -eq 0 ] || die "status takes no options"
+  compose ps --all --format 'table {{.Service}}\t{{.State}}\t{{.Status}}'
+}
+
+cmd_logs() {
+  if [ "$#" -eq 0 ]; then
+    compose logs --tail=200
+  else
+    compose logs "$@"
+  fi
+}
+
 cmd_help() {
   cat << 'EOF'
 Usage: ./agoranomos <command> [options]
@@ -324,6 +432,10 @@ Usage: ./agoranomos <command> [options]
 Commands:
   init          Create .env from .env.example and generate the secrets that are empty
   preflight     Check that this machine can run the stack (--force: warn about low resources instead of stopping)
+  up            Run init and preflight, start the stack and wait until it is healthy (--force as for preflight)
+  down          Stop the stack; the data stays in its Docker volumes
+  status        Show the state and health of every service
+  logs          Show the logs: the last 200 lines, or pass options and services to docker compose logs
   help          Show this help
 
 Documentation: docs/reference/command-line.md
@@ -336,6 +448,10 @@ main() {
   case "$command" in
     init) cmd_init "$@" ;;
     preflight) cmd_preflight "$@" ;;
+    up) cmd_up "$@" ;;
+    down) cmd_down "$@" ;;
+    status) cmd_status "$@" ;;
+    logs) cmd_logs "$@" ;;
     help | -h | --help) cmd_help ;;
     *)
       cmd_help >&2

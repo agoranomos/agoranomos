@@ -19,7 +19,7 @@ dev = [
 [tool.uv]
 # The root is a workspace for tooling and future packages; it is never built or installed itself.
 package = false
-# The minimum uv version: an older uv stops with an error. CI uses the exact version pinned in ci.yml.
+# The minimum uv version: an older uv stops with an error. CI uses the exact version pinned in ci.yml and stack.yml.
 required-version = ">=0.12.22"
 
 [tool.ruff]
@@ -34,7 +34,8 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF", "S", "PT", "AIR"]
 "tests/**" = ["S101", "S105", "S106", "S310", "S603", "S607"]
 
 [tool.pytest.ini_options]
-# The unit tests in tests/unit run by default.
+# The unit tests in tests/unit run by default. The stack tests in tests/stack need a running
+# stack: start it with ./agoranomos up, then run uv run pytest tests/stack.
 testpaths = ["tests/unit"]
 pythonpath = ["scripts", "metabase"]
 addopts = ["-ra", "--strict-markers", "--strict-config"]
