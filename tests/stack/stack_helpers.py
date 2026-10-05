@@ -163,20 +163,20 @@ OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 def build_request(
     method: str, url: str, body: Any, headers: dict[str, str] | None
 ) -> urllib.request.Request:
-    """The request of http_json, built in a function of its own.
+    """The request of http_json, built without its body, which is then set in one expression.
 
-    The encoded body, with a password in it, then lives only in this frame and in the request,
-    whose repr shows no data. A function that holds it in a local and then fails would have it
-    printed: pytest shows the arguments of the frames of a failed test under --tb=long, and their
-    locals under --showlocals.
+    pytest prints the arguments of the frames of a failed test under --tb=long, and their locals
+    under --showlocals. The encoded body, with a password in it, is therefore never bound to a name
+    and never an argument of a call that can fail. Request() gets no data, so a URL that it cannot
+    parse raises before the body is encoded, and the body is encoded and assigned to request.data
+    in one expression. On every path it lives only in the request, whose repr shows no data.
     """
-    data = None if body is None else json.dumps(body).encode()
-    return urllib.request.Request(
-        url,
-        data=data,
-        method=method,
-        headers={"Content-Type": "application/json", **(headers or {})},
+    request = urllib.request.Request(
+        url, method=method, headers={"Content-Type": "application/json", **(headers or {})}
     )
+    if body is not None:
+        request.data = json.dumps(body).encode()
+    return request
 
 
 def http_json(

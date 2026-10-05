@@ -590,12 +590,15 @@ def test_http_json_names_the_path_of_a_url_that_has_none():
     assert str(raised.value) == "GET / failed: URLError"
 
 
-# A request with a password in its body, to a port where nothing listens, so that the transport
-# fails. The values reach the test through the environment, not as literals: pytest prints the
-# source of the failing test, and a literal would be in the report as text. The control makes the
-# same request with plain urllib in a helper that keeps the body in a local and in an argument:
-# pytest prints those under --tb=long and --showlocals, and the check must see it there, or it
-# could not see a leak at all.
+# A request with a password in its body that cannot be made, in three ways: to a port where nothing
+# listens, so that the transport fails; to a URL that urllib takes for another kind of URL, so that
+# it fails when it opens it (in 127.0.0.1:1/api/session it reads 127.0.0.1 as the scheme); and to a
+# URL that it cannot parse at all, so that Request() itself raises. The values reach the test
+# through the environment, not as literals: pytest prints the source of the failing test, and a
+# literal would be in the report as text. Each case has a control, which makes the same request
+# with plain urllib in a helper that keeps the body in a local and in an argument: pytest prints
+# those under --tb=long and --showlocals, and the check must see it there, or it could not see a
+# leak at all.
 FAILING_REQUESTS = """
 import json
 import os
@@ -603,7 +606,10 @@ import urllib.request
 
 import stack_helpers
 
-URL = "http://127.0.0.1:" + os.environ["TEST_PORT"] + "/api/session?marker=visible-in-the-query"
+PORT = os.environ["TEST_PORT"]
+REFUSED = "http://127.0.0.1:" + PORT + "/api/session?marker=visible-in-the-query"
+HOST_AS_A_SCHEME = "127.0.0.1:" + PORT + "/api/session"
+CANNOT_BE_PARSED = "localhost/api/session"
 
 
 def leaky_helper(url, password):
@@ -612,17 +618,48 @@ def leaky_helper(url, password):
     urllib.request.urlopen(request, timeout=5)
 
 
-def test_http_json_cannot_connect():
+def credentials():
     secret = stack_helpers.Secret
     token = secret("Bearer " + os.environ["TEST_TOKEN"])
-    headers = stack_helpers.SecretHeaders({"Authorization": token})
     body = {"username": "admin", "password": secret(os.environ["TEST_PASSWORD"])}
-    stack_helpers.http_json("POST", URL, body, headers)
+    return stack_helpers.SecretHeaders({"Authorization": token}), body
+
+
+def test_http_json_cannot_connect():
+    headers, body = credentials()
+    stack_helpers.http_json("POST", REFUSED, body, headers)
 
 
 def test_the_control_cannot_connect():
-    leaky_helper(URL, os.environ["TEST_CONTROL"])
+    leaky_helper(REFUSED, os.environ["TEST_CONTROL"])
+
+
+def test_http_json_gets_a_host_as_a_scheme():
+    headers, body = credentials()
+    stack_helpers.http_json("POST", HOST_AS_A_SCHEME, body, headers)
+
+
+def test_the_control_gets_a_host_as_a_scheme():
+    leaky_helper(HOST_AS_A_SCHEME, os.environ["TEST_CONTROL"])
+
+
+def test_http_json_gets_a_url_that_cannot_be_parsed():
+    headers, body = credentials()
+    stack_helpers.http_json("POST", CANNOT_BE_PARSED, body, headers)
+
+
+def test_the_control_gets_a_url_that_cannot_be_parsed():
+    leaky_helper(CANNOT_BE_PARSED, os.environ["TEST_CONTROL"])
 """
+
+
+def error_lines(report: str, test: str) -> list[str]:
+    """The lines of the traceback of one failed test that start with E, without the E."""
+    parts = re.split(r"^_+ (test_\w+) _+$", report, flags=re.MULTILINE)
+    section = dict(zip(parts[1::2], parts[2::2], strict=True))[test]
+    return [
+        line.removeprefix("E").strip() for line in section.splitlines() if line.startswith("E ")
+    ]
 
 
 @pytest.mark.parametrize(
@@ -633,10 +670,12 @@ def test_the_control_cannot_connect():
         pytest.param(["-vv"], False, id="very-verbose"),
         pytest.param(["--tb=long"], True, id="long"),
         pytest.param(["-vv", "--showlocals"], True, id="verbose-with-locals"),
+        pytest.param(["--full-trace", "-l"], True, id="full-trace-with-locals"),
     ],
 )
+@pytest.mark.parametrize("case", ["cannot_connect", "host_as_a_scheme", "cannot_be_parsed"])
 def test_a_failed_request_prints_no_part_of_its_body_under_any_traceback_mode(
-    tmp_path, options, control_leaks
+    tmp_path, options, control_leaks, case
 ):
     # CI runs with -v, and the other modes are what a person may ask for when a test fails.
     values = {
@@ -644,21 +683,32 @@ def test_a_failed_request_prints_no_part_of_its_body_under_any_traceback_mode(
         "TEST_TOKEN": "a-token-that-must-stay-out-of-the-report-5",
         "TEST_CONTROL": "a-control-value-that-the-report-does-show-6",
     }
+    port = unused_port()
     (tmp_path / "test_fails_to_connect.py").write_text(FAILING_REQUESTS, encoding="utf-8")
-    report = nested_pytest(tmp_path, *options, **values, TEST_PORT=str(unused_port()))
+    report = nested_pytest(tmp_path, *options, "-k", case, **values, TEST_PORT=str(port))
     assert "2 failed" in report, "the tests did not fail as they should"
     hidden = {"the password": values["TEST_PASSWORD"], "the token": values["TEST_TOKEN"]}
     assert [label for label, value in hidden.items() if shown_in(value, report)] == []
-    # The error names the method and the path, and nothing of the query. It is read on the lines of
-    # the traceback that start with E: the short summary line is cut to the width of the terminal.
-    messages = [
-        line.removeprefix("E").strip()
-        for line in report.splitlines()
-        if line.startswith("E ") and "ConnectionError: POST" in line
-    ]
-    expected = "ConnectionError: POST /api/session failed: URLError"
-    assert messages, "http_json did not raise a ConnectionError that names the request"
-    assert all(message == expected for message in messages), messages
+    # The error of http_json, as the traceback of the test shows it. A failure of the transport, and
+    # a URL that urllib fails to open, give a ConnectionError that names the method and the path
+    # and nothing of the query. A URL that Request() cannot parse gives the ValueError of urllib,
+    # which is raised before the body is encoded. The lines that start with E are read, as the
+    # summary line is cut to the width of the terminal.
+    subject, expected = {
+        "cannot_connect": (
+            "test_http_json_cannot_connect",
+            "ConnectionError: POST /api/session failed: URLError",
+        ),
+        "host_as_a_scheme": (
+            "test_http_json_gets_a_host_as_a_scheme",
+            f"ConnectionError: POST 127.0.0.1:{port}/api/session failed: URLError",
+        ),
+        "cannot_be_parsed": (
+            "test_http_json_gets_a_url_that_cannot_be_parsed",
+            "ValueError: unknown url type: 'localhost/api/session'",
+        ),
+    }[case]
+    assert error_lines(report, subject) == [expected]
     # The control shows that this check can see a leak where there is one.
     assert shown_in(values["TEST_CONTROL"], report) is control_leaks
 
