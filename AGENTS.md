@@ -13,8 +13,10 @@ Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 - `README.md`, `README.ru.md`: the project overview in English and in Russian. The English text is the reference.
 - `docs/`: the documentation source, in Markdown, laid out after [Diátaxis](https://diataxis.fr/): `tutorials/`, `how-to/`, `reference/`, `explanation/` (the architecture overview is here) and `adr/` (the decision records and their index).
 - `zensical.toml`: the configuration of the documentation site, including its navigation.
-- `pyproject.toml`, `uv.lock`, `.python-version`: the development tooling (Python 3.13, ruff, prek and Zensical). The root is a uv project that is never built or installed.
+- `pyproject.toml`, `uv.lock`, `.python-version`: the development tooling (Python 3.13, ruff, prek, Zensical and pytest). The root is a uv project that is never built or installed.
 - `.pre-commit-config.yaml`: the git hooks and static checks, run by prek. `_typos.toml` is the word list of the spell checker, and `.editorconfig` and `.gitattributes` fix indentation and line endings (LF).
+- `scripts/`: the scripts of the repository's own checks. `check_docs_nav.py` compares the documentation navigation with the pages, and the `check-docs-nav` hook runs it.
+- `tests/unit/`: the unit tests, run by `uv run pytest`.
 - `.github/`: the workflows (`workflows/`: CI, the pull request checks and the daily Renovate run), the issue forms, the pull request template and `CODEOWNERS`.
 - `renovate.json`: the [Renovate](https://docs.renovatebot.com/) configuration for keeping the pinned versions current ([ADR-0012](docs/adr/0012-python-and-tooling.md)).
 - `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`: the community files. `LICENSE` and `NOTICE`: Apache-2.0.
@@ -27,12 +29,13 @@ uv run prek install              # once: run the checks on every commit
 uv run prek run --all-files      # all static checks, as CI runs them
 uv run prek run gitleaks-history --all-files --hook-stage manual   # scan the full git history for secrets
 uv run zensical serve            # preview the documentation at http://localhost:8000
-uv run zensical build --strict   # build the documentation; broken links and anchors fail, navigation entries are not checked yet
+uv run zensical build --strict   # build the documentation; broken links and anchors fail
+uv run pytest                    # the unit tests in tests/unit
 ```
 
-If port 8000 is in use, add `--dev-addr 127.0.0.1:8001` to `zensical serve`. The strict build does not check navigation entries yet (as of Zensical 0.0.67), so check a new page in the navigation with `zensical serve`. Use `uv` for everything, not `pip`, and never edit `uv.lock` by hand.
+If port 8000 is in use, add `--dev-addr 127.0.0.1:8001` to `zensical serve`. The strict build does not check navigation entries (as of Zensical 0.0.67); the `check-docs-nav` hook does. Use `uv` for everything, not `pip`, and never edit `uv.lock` by hand.
 
-There is no code and no test suite yet. CI runs the static checks, the full-history secret scan and the strict documentation build, and it checks the pull request title and the DCO sign-off.
+There is no stack code yet. CI runs the static checks, the full-history secret scan, the strict documentation build and the unit tests in `tests/unit`, and it checks the pull request title and the DCO sign-off. A prek hook (`scripts/check_docs_nav.py`) checks that every navigation entry points at a page and every page is in the navigation.
 
 ## Conventions
 

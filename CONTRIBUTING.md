@@ -22,7 +22,7 @@ You need `git` and [uv](https://docs.astral.sh/uv/) 0.12.22 or newer (as of Octo
 ```bash
 git clone https://github.com/agoranomos/agoranomos.git
 cd agoranomos
-uv sync                 # creates .venv with the pinned tools: ruff, prek and Zensical
+uv sync                 # creates .venv with the pinned tools: ruff, prek, Zensical and pytest
 uv run prek install     # once: runs the checks on every commit
 ```
 
@@ -31,9 +31,10 @@ Then check that everything works:
 ```bash
 uv run prek run --all-files     # every check on the whole repository, as CI runs it
 uv run zensical build --strict  # builds the documentation; a broken link or anchor fails it
+uv run pytest                   # the unit tests
 ```
 
-The checks are configured in `.pre-commit-config.yaml` and run by [prek](https://prek.j178.dev/). They cover file hygiene (large files, case conflicts, merge conflict markers, JSON, TOML and YAML syntax, private keys, final newlines, line endings and trailing whitespace), linting and formatting with ruff, spelling with typos, secrets with gitleaks, and GitHub Actions workflows, issue forms and the Renovate configuration.
+The checks are configured in `.pre-commit-config.yaml` and run by [prek](https://prek.j178.dev/). They cover file hygiene (large files, case conflicts, merge conflict markers, JSON, TOML and YAML syntax, private keys, final newlines, line endings and trailing whitespace), linting and formatting with ruff, spelling with typos, secrets with gitleaks, GitHub Actions workflows, issue forms and the Renovate configuration, and the documentation navigation, which must match the pages.
 
 CI also scans the whole git history for secrets. You can do the same on a full clone (not a shallow one) with:
 
@@ -41,7 +42,7 @@ CI also scans the whole git history for secrets. You can do the same on a full c
 uv run prek run gitleaks-history --all-files --hook-stage manual
 ```
 
-To preview the documentation while you edit it, run `uv run zensical serve` and open <http://localhost:8000>. If that port is taken, add `--dev-addr 127.0.0.1:8001`. The strict build does not check navigation entries yet (as of Zensical 0.0.67): an entry that points at a missing file builds without an error. When you add a page to the navigation, check it in this preview.
+To preview the documentation while you edit it, run `uv run zensical serve` and open <http://localhost:8000>. If that port is taken, add `--dev-addr 127.0.0.1:8001`. The strict build does not check navigation entries (as of Zensical 0.0.67), so a prek hook does: every navigation entry in `zensical.toml` must point at a page, and every page in `docs/` must be in the navigation.
 
 ## Make a change
 
@@ -49,7 +50,7 @@ To preview the documentation while you edit it, run `uv run zensical serve` and 
 2. **Commit.** Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `type(optional scope): summary`. The accepted types are `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore` and `revert`. Keep the summary short and in the imperative, for example `docs: explain how attribution windows are reloaded`, and use the body to say why the change is needed.
 3. **Sign off.** Every commit needs a DCO sign-off, which `git commit -s` adds (see below).
 4. **Open a pull request** against `main` and fill in the template. Keep it focused on one change.
-5. **Get the checks green.** Four checks run on every pull request: static checks (prek, including the full-history secret scan), the documentation build in strict mode, the Conventional Commits title and the DCO sign-off.
+5. **Get the checks green.** Five checks run on every pull request: static checks (prek, including the full-history secret scan), the documentation build in strict mode, the unit tests, the Conventional Commits title and the DCO sign-off.
 6. **Review and merge.** The maintainer reviews the pull request and squash-merges it. The pull request title becomes the commit title on `main`, so it must follow Conventional Commits as well.
 
 If a hook changes files when you commit (the final-newline fixer or ruff, for example), the commit stops. Review the changes, add them with `git add` and commit again.
@@ -74,7 +75,7 @@ Use `--force-with-lease` only on your own branch.
 
 A change that alters what users or contributors see, such as behavior, commands, configuration or the design, updates the documentation in the same pull request.
 
-- The documentation is Markdown in `docs/` and follows [Diátaxis](https://diataxis.fr/): tutorials (learn by doing), how-to guides (recipes for tasks), reference (facts to look up) and explanation (background). Each page has one job. Add a new page to the navigation in `zensical.toml`, and check it with `zensical serve`.
+- The documentation is Markdown in `docs/` and follows [Diátaxis](https://diataxis.fr/): tutorials (learn by doing), how-to guides (recipes for tasks), reference (facts to look up) and explanation (background). Each page has one job. Add a new page to the navigation in `zensical.toml`: the `check-docs-nav` hook fails when the pages and the navigation do not match. Check how the page looks with `zensical serve`.
 - Write in plain English with American spelling. Describe what exists today in the present tense, and say plainly that something is planned when it is not built yet.
 - The English README is the reference. When it changes, update `README.ru.md` as well.
 

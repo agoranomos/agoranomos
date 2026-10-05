@@ -34,7 +34,7 @@ Chosen option: "Zensical, with the Diátaxis structure", because Material for Mk
 
 In practice this means:
 
-* **Tool.** The site is built with Zensical. Its version is pinned in the development dependencies and locked in `uv.lock`, and CI builds the site with `zensical build --strict`, so a broken link or anchor fails the pull request. Navigation entries are not checked yet (as of Zensical 0.0.67), so a new page in the navigation is checked with `zensical serve`.
+* **Tool.** The site is built with Zensical. Its version is pinned in the development dependencies and locked in `uv.lock`, and CI builds the site with `zensical build --strict`, so a broken link or anchor fails the pull request. The strict build does not check navigation entries (as of Zensical 0.0.67), so a prek hook checks that every entry points at a page and every page is in the navigation.
 * **Structure.** The content follows [Diátaxis](https://diataxis.fr/): tutorials, how-to guides, reference and explanation. Each part has one job.
 * **Decision records.** ADRs live in `docs/adr` and are published with the site ([ADR-0001](0001-record-architecture-decisions.md)).
 * **Languages.** English is the primary language. The README (as `README.ru.md`) and the key pages are also to be provided in Russian.
@@ -53,7 +53,7 @@ The other options were not chosen for these reasons:
 * Good, because the strict build catches broken links and anchors before merge.
 * Good, because English as the primary language reaches the widest group of readers.
 * Bad, because Zensical is young (its versions are still 0.0.x). Behavior can change between releases, so the version is pinned and the build is strict, and the content stays plain Markdown that another tool can read.
-* Bad, because the strict build does not check navigation entries yet (as of Zensical 0.0.67): an entry that points at a missing file builds without an error, so a new page in the navigation has to be checked with `zensical serve`.
+* Bad, because the strict build does not check navigation entries (as of Zensical 0.0.67), so the repository needs a check of its own: a prek hook compares the navigation with the pages.
 * Bad, because the Russian README and key pages take effort to maintain and can lag behind the English text, which is the reference when they differ.
 
 ## More Information

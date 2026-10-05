@@ -8,4 +8,4 @@
 - [ ] Every commit has a DCO sign-off (`git commit -s`).
 - [ ] The documentation is updated together with the change.
 - [ ] A significant decision has an ADR in `docs/adr/` (with a navigation entry and an index row), or this change does not need one.
-- [ ] `uv run prek run --all-files` and `uv run zensical build --strict` pass.
+- [ ] `uv run prek run --all-files`, `uv run zensical build --strict` and `uv run pytest` pass.

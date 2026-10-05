@@ -11,6 +11,7 @@ dependencies = []
 [dependency-groups]
 dev = [
     "prek==0.5.4",
+    "pytest==9.1.1",
     "ruff==0.16.10",
     "zensical==0.0.67",
 ]
@@ -29,4 +30,11 @@ target-version = "py313"
 select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF", "S", "PT", "AIR"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]
+# Tests use assert, made-up passwords, local HTTP servers and subprocesses by design.
+"tests/**" = ["S101", "S105", "S106", "S310", "S603", "S607"]
+
+[tool.pytest.ini_options]
+# The unit tests in tests/unit run by default.
+testpaths = ["tests/unit"]
+pythonpath = ["scripts", "metabase"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
