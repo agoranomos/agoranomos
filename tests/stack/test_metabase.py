@@ -36,13 +36,6 @@ INITIALIZE = {
         "clientInfo": {"name": "stack-test", "version": "0"},
     },
 }
-CLIENT_REGISTRATION = {
-    "client_name": "stack-test",
-    "redirect_uris": ["http://127.0.0.1:9/callback"],
-    "grant_types": ["authorization_code"],
-    "response_types": ["code"],
-    "token_endpoint_auth_method": "none",
-}
 
 
 @pytest.fixture(scope="session")
@@ -121,14 +114,16 @@ def test_the_mcp_endpoint_answers_403_to_everyone(metabase_url, session, path):
 
 
 def test_no_oauth_client_can_register(metabase_url):
-    # Dynamic registration follows the MCP setting, and with it on, this request makes a client.
-    status, body = http_json("POST", f"{metabase_url}/oauth/register", CLIENT_REGISTRATION)
-    assert status == 403, f"POST /oauth/register answered HTTP {status}"
-    assert not (isinstance(body, dict) and "client_id" in body), "Metabase registered a client"
-    # The discovery document that MCP clients read does not offer the registration either.
+    # The read-only check comes first, and stops the test when the registration is open: the
+    # discovery document that MCP clients read offers the registration then.
     _, metadata = http_json("GET", f"{metabase_url}/.well-known/oauth-authorization-server")
     offered = isinstance(metadata, dict) and "registration_endpoint" in metadata
     assert not offered, "the discovery document offers the registration of clients"
+    # Only then the POST, with a body that is not a JSON object. An endpoint that is open refuses
+    # it as invalid and makes no client, so even a mistake here leaves nothing in the instance. A
+    # closed one answers 403 before it looks at the body.
+    status, _ = http_json("POST", f"{metabase_url}/oauth/register", [])
+    assert status == 403, f"POST /oauth/register answered HTTP {status}"
 
 
 def test_the_agent_api_is_refused(metabase_url, session):
