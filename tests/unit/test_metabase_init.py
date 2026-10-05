@@ -469,9 +469,11 @@ def test_proxy_variables_do_not_send_the_requests_elsewhere(metabase, monkeypatc
         monkeypatch.setenv(name, dead)
     for name in ("NO_PROXY", "no_proxy"):
         monkeypatch.delenv(name, raising=False)
-    # The control: the plain urlopen goes to the proxy, which is dead, so this check can fail.
+    # The control: a plain opener, built now, reads the variables above and goes to the proxy, which
+    # is dead, so this check can fail. urlopen would not do: it builds its opener once, at its first
+    # use in the process, with the variables of that moment, and keeps it for every later caller.
     with pytest.raises(urllib.error.URLError):
-        urllib.request.urlopen(f"{metabase.url}/api/health", timeout=2)
+        urllib.request.build_opener().open(f"{metabase.url}/api/health", timeout=2)
     client = mi.Metabase(metabase.url, timeout=5)
     assert client.request("GET", "/api/health") == (200, {"status": "ok"})
     assert mi.main(env_for(metabase)) == 0
