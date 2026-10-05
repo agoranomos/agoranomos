@@ -5,7 +5,7 @@ English | [Русский](README.ru.md)
 Open-source marketing BI out of the box: ad platforms → PostgreSQL warehouse → Metabase dashboards → ask anything in Claude or ChatGPT via MCP. One command. Your data stays yours.
 
 > [!WARNING]
-> **Status: pre-alpha.** Agoranomos is under active development: parts of the stack already run in local mode from the main branch, and most of it is still being built. The repository is private until v0.3. What exists today is the project's tooling and its design: the [architecture overview](docs/explanation/architecture.md) and the [decision records](docs/adr/index.md). See [Status and roadmap](#status-and-roadmap).
+> **Status: pre-alpha.** Agoranomos is under active development: parts of the stack already run in local mode from the main branch, and most of it is still being built. The repository is private until v0.3. The design of the whole stack is in the [architecture overview](docs/explanation/architecture.md) and the [decision records](docs/adr/index.md). See [Status and roadmap](#status-and-roadmap).
 
 ## What it is
 
