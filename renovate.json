@@ -33,6 +33,11 @@
       "minimumReleaseAgeBehaviour": "timestamp-optional",
       "schedule": ["* 0-3 * * 1"],
       "pinDigests": false
+    },
+    {
+      "description": "The weekly refresh of uv.lock: Renovate leaves it to uv and cannot check the age of the releases in it, so the three-day wait does not apply (ADR-0012). Without this rule, Renovate (as of 44.132.5, October 2026) marks its pull request with a renovate/stability-days status that never clears (renovatebot/renovate#45236).",
+      "matchUpdateTypes": ["lockFileMaintenance"],
+      "minimumReleaseAge": null
     }
   ]
 }
