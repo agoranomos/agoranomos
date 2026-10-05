@@ -85,6 +85,14 @@ def containers() -> dict[str, dict[str, Any]]:
     return {item["Service"]: item for item in items}
 
 
+class SecretHeaders(dict[str, str]):
+    """Request headers that hold a secret, such as a session. pytest prints the arguments of a
+    failed test, so the repr names the headers and hides their values."""
+
+    def __repr__(self) -> str:
+        return f"SecretHeaders({sorted(self)})"
+
+
 def http_json(
     method: str,
     url: str,

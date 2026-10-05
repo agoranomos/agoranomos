@@ -25,6 +25,7 @@ AIRFLOW = {
     "airflow-triggerer",
 }
 CELERY_ONLY = {"broker", "airflow-worker"}
+METABASE = {"metabase", "metabase-init"}
 VARIANTS = sorted(FILES)
 
 
@@ -43,7 +44,7 @@ def airflow_services(variant):
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_a_variant_has_the_services_it_needs(variant):
     names = set(rendered(variant))
-    assert {"warehouse-db", "platform-db", "db-init"} | AIRFLOW <= names
+    assert {"warehouse-db", "platform-db", "db-init"} | AIRFLOW | METABASE <= names
     # The broker and the worker belong to the Celery variant, and to no other.
     assert (names >= CELERY_ONLY) == (variant == "celery")
     assert (CELERY_ONLY & names) == (CELERY_ONLY if variant == "celery" else set())
@@ -224,6 +225,78 @@ def test_no_service_creates_the_admin_with_the_entrypoint_of_the_image(variant):
             key for key in service.get("environment", {}) if key.startswith("_AIRFLOW_WWW_USER")
         )
         assert not used, f"{name} sets {used}"
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_the_one_shot_jobs_are_the_services_named_init(variant):
+    # ./agoranomos up waits for a service named *-init to exit with 0, and for every other service
+    # to stay running, so a job with another name, or a service named like a job, fails the wait.
+    for name, service in rendered(variant).items():
+        is_one_shot = service.get("restart") == "no"
+        assert is_one_shot == name.endswith("-init"), (
+            f"{name} and the wait of ./agoranomos disagree"
+        )
+
+
+# Metabase 0.63 has these on by default, and compose.yaml switches them off with environment
+# variables until an ADR decides what AI access may do in Metabase (AGENTS.md). The first is the
+# master switch that the other two also require, so the three are checked one by one.
+METABASE_AI_SWITCHES = ("MB_AI_FEATURES_ENABLED", "MB_MCP_ENABLED", "MB_AGENT_API_ENABLED")
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_switches_off_every_ai_entry_point_with_an_environment_variable(variant):
+    # The values are flags, so a failed assertion may print them.
+    environment = rendered(variant)["metabase"]["environment"]
+    states = {name: environment.get(name) for name in METABASE_AI_SWITCHES}
+    assert states == dict.fromkeys(METABASE_AI_SWITCHES, "false"), states
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_reports_nothing_to_its_makers(variant):
+    environment = rendered(variant)["metabase"]["environment"]
+    states = {
+        key: environment.get(key) for key in ("MB_ANON_TRACKING_ENABLED", "MB_CHECK_FOR_UPDATES")
+    }
+    assert states == {"MB_ANON_TRACKING_ENABLED": "false", "MB_CHECK_FOR_UPDATES": "false"}, states
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_and_its_setup_job_get_the_networks_they_need_and_no_more(variant):
+    # Metabase connects to the warehouse and to its own database, so it is on data, and it needs
+    # default for its published port and for the setup job. Metabase makes the connection to the
+    # warehouse, not the setup job, so the job needs default only, to reach Metabase.
+    services = rendered(variant)
+    assert set(services["metabase"]["networks"]) == {"default", "data"}
+    assert set(services["metabase-init"]["networks"]) == {"default"}
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_publishes_only_its_own_port_on_localhost(variant):
+    services = rendered(variant)
+    [port] = services["metabase"]["ports"]
+    assert (port["host_ip"], port["target"]) == ("127.0.0.1", 3000)
+    assert "ports" not in services["metabase-init"]
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_each_metabase_service_holds_only_the_secrets_it_needs(env, variant):
+    # Metabase learns the password of the warehouse from the setup job, through its API, so it has
+    # no use for that password or for the one of the admin in its environment; the setup job holds
+    # the two passwords that it sends, and no key or database password. The test names settings.
+    values = secrets(env)
+    assert values, "no secrets in .env: run ./agoranomos init"
+    services = rendered(variant)
+    needed = {
+        "metabase": {"METABASE_DB_PASSWORD", "METABASE_ENCRYPTION_KEY"},
+        "metabase-init": {"METABASE_ADMIN_PASSWORD", "METABASE_READER_PASSWORD"},
+    }
+    for name, wanted in needed.items():
+        environment = [str(value) for value in services[name]["environment"].values()]
+        held = {
+            key for key, value in values.items() if any(value in entry for entry in environment)
+        }
+        assert held == wanted, f"{name} holds {sorted(held)}, and should hold {sorted(wanted)}"
 
 
 def serve_once(status, body):

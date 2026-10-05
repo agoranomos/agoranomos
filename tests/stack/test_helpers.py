@@ -31,6 +31,16 @@ def test_the_psql_helpers_keep_the_password_out_of_the_arguments(monkeypatch):
         assert options["env"]["PGPASSWORD"] == PASSWORD
 
 
+def test_secret_headers_keep_their_values_out_of_what_pytest_prints():
+    # pytest prints the arguments of a failed test, and headers can hold a session.
+    value = "a-session-that-must-stay-out-of-the-report"
+    headers = stack_helpers.SecretHeaders({"X-Metabase-Session": value})
+    assert "X-Metabase-Session" in repr(headers)
+    assert value not in repr(headers) + str(headers)
+    # They are still headers: http_json copies them into the request.
+    assert {"Content-Type": "application/json", **headers}["X-Metabase-Session"] == value
+
+
 def write_env(tmp_path, monkeypatch, text):
     """Make stack_helpers read a .env with this text, in a checkout of its own."""
     (tmp_path / ".env").write_text(text, encoding="utf-8")
@@ -87,8 +97,9 @@ def test_the_celery_variant_adds_the_broker_and_the_worker_to_the_long_running_s
         "airflow-scheduler",
         "airflow-dag-processor",
         "airflow-triggerer",
+        "metabase",
     } <= local
-    assert {"db-init", "airflow-init"} == services.ONE_SHOT
+    assert {"db-init", "airflow-init", "metabase-init"} == services.ONE_SHOT
     assert services.LONG_RUNNING in (local, celery)
 
 
