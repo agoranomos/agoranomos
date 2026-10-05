@@ -8,19 +8,25 @@
 # To go back to the LocalExecutor, set COMPOSE_FILE=compose.yaml again.
 
 # Anchors do not cross files, so the log limits of compose.yaml are stated again here, and so are the
-# settings that every Airflow service of compose.yaml gets for Celery.
+# settings that the Airflow services of compose.yaml get for Celery.
 x-logging: &logging
   driver: json-file
   options:
     max-size: "10m"
     max-file: "5"
 
-# CONNECTION_CHECK_MAX_COUNT=0 stops the entrypoint of the image from waiting for the broker, when the
-# scheduler and the worker start, with the URL of the broker as an argument of a python process, where other
-# users of a Linux host could read the password. Compose waits for the broker to be healthy anyway.
+# For every Airflow service: the executor, and CONNECTION_CHECK_MAX_COUNT=0, which stops the entrypoint of
+# the image from waiting for the broker, when the scheduler and the worker start, with the URL of the broker
+# as an argument of a python process, where other users of a Linux host could read the password. Compose
+# waits for the broker to be healthy anyway.
 x-airflow-celery-environment: &airflow-celery-environment
   CONNECTION_CHECK_MAX_COUNT: "0"
   AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+
+# For the scheduler, which sends the tasks to the broker, and for the worker, which runs them: the broker,
+# the result backend and the size of the worker. No other service uses them. The DAG processor and the
+# triggerer run the code of DAGs, the extensions included, so they must not hold the password of the broker.
+x-airflow-celery-queue-environment: &airflow-celery-queue-environment
   AIRFLOW__CELERY__BROKER_URL: redis://:${VALKEY_PASSWORD:?run ./agoranomos init}@broker:6379/0
   AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:?run ./agoranomos init}@platform-db:5432/airflow
   AIRFLOW__CELERY__WORKER_CONCURRENCY: ${AIRFLOW_WORKER_CONCURRENCY:-4}
@@ -64,7 +70,8 @@ services:
     environment: *airflow-celery-environment
 
   airflow-scheduler:
-    environment: *airflow-celery-environment
+    environment:
+      <<: [*airflow-celery-environment, *airflow-celery-queue-environment]
     depends_on:
       broker:
         condition: service_healthy
@@ -85,7 +92,7 @@ services:
       service: airflow-scheduler
     command: ["celery", "worker"]
     environment:
-      <<: *airflow-celery-environment
+      <<: [*airflow-celery-environment, *airflow-celery-queue-environment]
       # Lets the Celery worker finish its tasks when it stops (a warm shutdown).
       DUMB_INIT_SETSID: "0"
     healthcheck:

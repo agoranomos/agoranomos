@@ -147,18 +147,32 @@ def test_the_celery_services_wait_for_the_broker_and_the_api_server():
             assert dependency in services[name]["depends_on"], (name, dependency)
 
 
-def test_every_airflow_service_of_the_celery_variant_has_the_celery_settings():
-    keys = (
+def test_the_broker_and_the_result_backend_are_set_only_where_they_are_used():
+    # Only the scheduler and the worker use the broker and the result backend. The DAG processor and
+    # the triggerer run the code of the extension DAGs, so they must not hold the password of the
+    # broker; the API server and airflow-init have no use for it either. The test names settings and
+    # services, never values.
+    settings = (
         "AIRFLOW__CELERY__BROKER_URL",
         "AIRFLOW__CELERY__RESULT_BACKEND",
         "AIRFLOW__CELERY__WORKER_CONCURRENCY",
     )
+    users = {"airflow-scheduler", "airflow-worker"}
+    problems = []
     for name, service in airflow_services("celery").items():
         environment = service["environment"]
-        missing = [key for key in keys if not environment.get(key)]  # a failed assert prints a dict
-        assert not missing, f"{name} lacks {missing}"
-        # The entrypoint of the image would pass the broker URL to python processes as an argument.
-        assert environment["CONNECTION_CHECK_MAX_COUNT"] == "0", name
+        present = sorted(key for key in settings if key in environment)
+        empty = [key for key in present if not environment[key]]
+        wanted = sorted(settings) if name in users else []
+        if present != wanted or empty:
+            problems.append(f"{name} has {present} (empty: {empty}), and should have {wanted}")
+    assert not problems, "; ".join(problems)
+
+
+def test_every_airflow_service_of_the_celery_variant_skips_the_check_of_the_entrypoint():
+    # The entrypoint of the image would pass the broker URL to python processes as an argument.
+    for name, service in airflow_services("celery").items():
+        assert service["environment"]["CONNECTION_CHECK_MAX_COUNT"] == "0", name
 
 
 def test_the_worker_is_set_up_like_the_other_airflow_services():
