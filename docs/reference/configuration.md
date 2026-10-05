@@ -18,6 +18,7 @@ Each value is used as written: keep it on one line, do not put a comment after i
 |---|---|---|
 | `COMPOSE_PROJECT_NAME` | `agoranomos` | The name of the Compose project. It starts the names of the containers, networks and volumes. |
 | `COMPOSE_PROFILES` | `core` | The profiles that run. `core` is the whole stack in local mode. |
+| `COMPOSE_FILE` | `compose.yaml` | The Compose files of the stack. `compose.yaml` runs Airflow with LocalExecutor, which needs no broker. `compose.yaml:compose.celery.yaml` adds the Celery broker and a separate worker (CeleryExecutor). |
 
 ## Stack
 
@@ -27,7 +28,8 @@ Each value is used as written: keep it on one line, do not put a comment after i
 | `AGORANOMOS_EXTENSIONS_DIR` | `./extensions` | The folder for the deployment's own extensions ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)). Releases never overwrite it. A relative path starts at the checkout. |
 | `AIRFLOW_PORT` | `8080` | The port of the Airflow UI and API on `127.0.0.1`. |
 | `METABASE_PORT` | `3000` | The port of Metabase on `127.0.0.1`. |
-| `AIRFLOW_WORKER_CONCURRENCY` | `4` | How many tasks one Airflow worker runs at a time. More tasks need more memory. |
+| `AIRFLOW_PARALLELISM` | `4` | How many Airflow tasks run at the same time. With LocalExecutor, each one is a process in the scheduler container, so more tasks need more memory. |
+| `AIRFLOW_WORKER_CONCURRENCY` | `4` | Only with CeleryExecutor: how many tasks one Airflow worker runs at a time. More tasks need more memory. |
 
 ## Secrets
 
@@ -40,7 +42,7 @@ Each value is used as written: keep it on one line, do not put a comment after i
 | `AIRFLOW_DB_PASSWORD` | The role that owns the metadata database of Airflow | Change it and run `./agoranomos up`: the role gets the new password. |
 | `METABASE_DB_PASSWORD` | The role that owns the application database of Metabase | As for `AIRFLOW_DB_PASSWORD`. |
 | `METABASE_READER_PASSWORD` | The read-only role that Metabase reads the warehouse as | As for `AIRFLOW_DB_PASSWORD`; Metabase's connection is updated too. |
-| `VALKEY_PASSWORD` | The password of the Celery broker | Change it and run `./agoranomos up`. |
+| `VALKEY_PASSWORD` | The password of the Celery broker, used only with CeleryExecutor | Change it and run `./agoranomos up`. |
 | `AIRFLOW_FERNET_KEY` | The key that encrypts the connections and variables saved in Airflow | Do not change it: what Airflow saved could no longer be decrypted. |
 | `AIRFLOW_JWT_SECRET` | The key that signs the API tokens of Airflow | Change it and run `./agoranomos up`; people have to sign in again. |
 | `AIRFLOW_API_SECRET_KEY` | The secret key of the Airflow API server | As for `AIRFLOW_JWT_SECRET`. |
