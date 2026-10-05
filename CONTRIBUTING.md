@@ -2,7 +2,7 @@
 
 Thank you for your interest in Agoranomos. This guide describes how work is done in this repository today.
 
-Agoranomos is pre-alpha, and the repository is private until v0.3, so for now it is open to invited collaborators only. What exists today is the project's tooling, its documentation and the architecture decision records. The stack itself is not built yet; the [README](README.md) has the roadmap.
+Agoranomos is pre-alpha, and the repository is private until v0.3, so for now it is open to invited collaborators only. What exists today is the project's tooling, its documentation and the architecture decision records. The stack is being built: parts of it already run in local mode; the [README](README.md) has the roadmap.
 
 By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). If you found a security vulnerability, do not open an issue: follow the [security policy](SECURITY.md).
 
