@@ -114,9 +114,10 @@ def test_no_llm_key_is_saved(properties):
 
 
 def test_the_settings_that_compose_fixes_come_from_the_environment(metabase_url, session):
-    # A value from the environment cannot be changed in the Metabase UI, which shows the setting
-    # as locked, and it wins over a value saved in Metabase. This sees each variable apart from the
-    # others: with ai-features-enabled? off, the other two AI settings read false without theirs.
+    # A value from the environment wins over a value saved in Metabase, including one changed in the
+    # Metabase UI, which does not lock these switches (0.63.19). This sees each variable apart from
+    # the others: with ai-features-enabled? off, the other two AI settings read false without
+    # theirs.
     expected = {**AI_SETTINGS, **REPORTING_SETTINGS}
     status, settings = http_json("GET", f"{metabase_url}/api/setting", headers=session)
     assert status == 200, f"GET /api/setting answered HTTP {status}"
