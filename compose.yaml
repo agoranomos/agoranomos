@@ -287,7 +287,8 @@ services:
       MB_AI_FEATURES_ENABLED: "false"
       MB_MCP_ENABLED: "false"
       MB_AGENT_API_ENABLED: "false"
-      # Prometheus metrics for the Ops collection, reachable only inside the Compose networks.
+      # Prometheus metrics, for the planned Ops collection. The port is not published, so it is
+      # reachable only from the Compose networks.
       MB_PROMETHEUS_SERVER_PORT: "9191"
     ports:
       - "127.0.0.1:${METABASE_PORT:-3000}:3000"

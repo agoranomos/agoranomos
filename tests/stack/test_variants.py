@@ -274,8 +274,12 @@ def test_metabase_and_its_setup_job_get_the_networks_they_need_and_no_more(varia
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_metabase_publishes_only_its_own_port_on_localhost(variant):
     services = rendered(variant)
-    [port] = services["metabase"]["ports"]
-    assert (port["host_ip"], port["target"]) == ("127.0.0.1", 3000)
+    ports = services["metabase"]["ports"]
+    assert [(port["host_ip"], port["target"]) for port in ports] == [("127.0.0.1", 3000)]
+    # The port of the Prometheus metrics, 9191, is reachable from the Compose networks only.
+    metrics = services["metabase"]["environment"]["MB_PROMETHEUS_SERVER_PORT"]
+    published = {int(port["published"]) for port in ports} | {int(port["target"]) for port in ports}
+    assert int(metrics) not in published
     assert "ports" not in services["metabase-init"]
 
 
@@ -286,6 +290,28 @@ def test_a_new_metabase_gets_no_sample_content(variant):
     # is not listed by Metabase, so what can be checked is the variable that compose.yaml sets.
     environment = rendered(variant)["metabase"]["environment"]
     assert environment.get("MB_LOAD_SAMPLE_CONTENT") == "false"
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_init_keeps_the_constraints_of_a_one_shot_job(variant):
+    # Like the DAG mounts of Airflow: the job runs as nobody, may not gain privileges, sees only
+    # its own folder and cannot change it, and reaches Metabase on the default network and nothing
+    # else (Metabase connects to the warehouse; the job never does).
+    init = rendered(variant)["metabase-init"]
+    assert init["user"] == "65534:65534"
+    assert init["security_opt"] == ["no-new-privileges:true"]
+    assert set(init["networks"]) == {"default"}
+    [mount] = init["volumes"]
+    assert mount["target"] == "/opt/agoranomos/metabase"
+    assert mount["source"].endswith("/metabase")
+    assert mount["read_only"] is True
+    assert init["restart"] == "no"
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_may_not_gain_privileges(variant):
+    metabase = rendered(variant)["metabase"]
+    assert metabase["security_opt"] == ["no-new-privileges:true"]
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
