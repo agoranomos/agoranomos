@@ -61,3 +61,13 @@ repos:
       - id: check-github-issue-forms
       - id: check-github-issue-config
       - id: check-renovate
+
+  - repo: local
+    hooks:
+      - id: check-docs-nav
+        name: Documentation navigation matches the pages
+        entry: python scripts/check_docs_nav.py
+        language: python
+        language_version: "3.13" # the Python of the repository; tomllib needs 3.11 or newer
+        files: ^(zensical\.toml|docs/.+\.md)$
+        pass_filenames: false
