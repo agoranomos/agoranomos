@@ -60,5 +60,5 @@ Agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0010](0010-multi-arch-and-memory-budget.md) | Support amd64 and arm64 within a memory budget | accepted | 2026-10-02 |
 | [0011](0011-local-and-server-modes.md) | Support local and server modes | accepted | 2026-10-02 |
 | [0012](0012-python-and-tooling.md) | Use Python 3.13 and a pinned toolchain | accepted | 2026-10-02 |
-| [0013](0013-keep-extensions-apart-from-the-base-package.md) | Keep extensions apart from the base package | proposed | 2026-10-05 |
-| [0014](0014-start-the-stack-with-one-script.md) | Start the stack with one script and a generated .env file | proposed | 2026-10-05 |
+| [0013](0013-keep-extensions-apart-from-the-base-package.md) | Keep extensions apart from the base package | accepted | 2026-10-05 |
+| [0014](0014-start-the-stack-with-one-script.md) | Start the stack with one script and a generated .env file | accepted | 2026-10-05 |
