@@ -628,11 +628,13 @@ def test_up_passes_force_to_preflight(cli, tmp_path):
     assert result.returncode == 0, result.stderr
 
 
-def test_up_rejects_unknown_options_before_it_starts_anything(cli):
-    result = cli.run("up", "--fast")
+@pytest.mark.parametrize("options", [["--bogus"], ["--force", "--bogus"], ["--bogus", "--force"]])
+def test_up_rejects_unknown_options_before_it_changes_anything(cli, options):
+    result = cli.run("up", *options)
     assert result.returncode == 1
-    assert "unknown option: --fast" in result.stderr
-    assert not any(call.startswith("compose up") for call in cli.docker_calls())
+    assert "unknown option: --bogus" in result.stderr
+    assert not cli.env_path.exists()  # init did not run
+    assert cli.docker_calls() == []  # neither did preflight or compose
 
 
 def test_up_reports_a_failing_docker_compose_up_and_does_not_wait(cli, tmp_path):
@@ -722,23 +724,43 @@ def test_up_stops_when_a_container_has_exited_or_died(cli, tmp_path, line):
 
 
 @pytest.mark.parametrize(
-    "line",
-    ["db-init|running||0", "warehouse-db|created||0", "platform-db|restarting||1"],
+    ("line", "written_as"),
+    [
+        ("db-init|running||0", "db-init (running)"),
+        ("warehouse-db|created||0", "warehouse-db (created)"),
+        ("platform-db|restarting||1", "platform-db (restarting)"),
+    ],
     ids=["job-running", "database-created", "database-restarting"],
 )
-def test_up_keeps_waiting_for_a_service_that_is_not_ready_yet(cli, tmp_path, line):
+def test_up_keeps_waiting_for_a_service_that_is_not_ready_yet(cli, tmp_path, line, written_as):
     result = cli.run(
         "up",
         FAKE_PS_FILE=ps_file(tmp_path, ps_with(line)),
         AGORANOMOS_WAIT_TIMEOUT="1",
         AGORANOMOS_WAIT_INTERVAL="0.2",
     )
-    service = line.split("|")[0]
     assert result.returncode == 1
     assert (
-        f"still waiting after 1 seconds for: {service} (see ./agoranomos status)" in result.stderr
+        f"still waiting after 1 seconds for: {written_as} (see ./agoranomos status)"
+        in result.stderr
     )
     assert "failed" not in result.stderr
+
+
+def test_up_says_what_every_service_it_waits_for_is_doing(cli, tmp_path):
+    # name (state), or name (state, health) when the service has a health check; comma between.
+    ps = "db-init|running||0\nwarehouse-db|created||0\nplatform-db|running|starting|0\n"
+    result = cli.run(
+        "up",
+        FAKE_PS_FILE=ps_file(tmp_path, ps),
+        AGORANOMOS_WAIT_TIMEOUT="1",
+        AGORANOMOS_WAIT_INTERVAL="0.2",
+    )
+    assert result.returncode == 1
+    assert (
+        "still waiting after 1 seconds for: db-init (running), warehouse-db (created), "
+        "platform-db (running, starting) (see ./agoranomos status)" in result.stderr
+    )
 
 
 def test_up_names_every_failed_service_and_does_not_wait_for_the_rest(cli, tmp_path):

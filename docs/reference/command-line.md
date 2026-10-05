@@ -38,7 +38,7 @@ Docker reports a little less memory than its VM or machine has, so a machine or 
 
 ## `up`
 
-Runs `init` and `preflight`, starts the stack with `docker compose up --detach`, and waits until every long-running service is healthy and every one-shot setup job has finished. It waits at most 15 minutes and stops early when a service fails, naming it and the command that shows its logs. Running it again on a running stack changes nothing. `--force` is passed to `preflight`.
+Runs `init` and `preflight`, starts the stack with `docker compose up --detach`, and waits until every long-running service is healthy and every one-shot setup job has finished. It waits at most 15 minutes and stops early when a service fails, naming it and the command that shows its logs. Running it again on a running stack keeps the data and the secrets; it runs the one-shot setup jobs again, which is how a changed password reaches PostgreSQL. `--force` is passed to `preflight`.
 
 ## `down`
 
@@ -50,7 +50,7 @@ Shows the state and health of every service, including the one-shot setup jobs.
 
 ## `logs`
 
-Shows the last 200 lines of the logs of every service. With options or service names, passes them to `docker compose logs`, for example `./agoranomos logs -f db-init`.
+Shows the last 200 lines of the logs of every service. With options or service names, passes them to `docker compose logs`, for example `./agoranomos logs -f warehouse-db` to follow one service, or `./agoranomos logs db-init` for a setup job.
 
 ## `help`
 

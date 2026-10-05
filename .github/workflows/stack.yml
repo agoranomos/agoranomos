@@ -1,7 +1,8 @@
 name: Stack
 
-# Starts the Docker Compose stack with ./agoranomos up and runs the stack tests in tests/stack: every
-# mode of the stack is tested in CI (ADR-0011). Pull requests that change the stack run it on amd64.
+# Starts the Docker Compose stack with ./agoranomos up and runs the stack tests in tests/stack.
+# ADR-0011 asks for every mode of the stack to be tested in CI: this workflow tests local mode, and
+# server mode is to follow. Pull requests that change the stack run it on amd64.
 # Pushes to main, the weekly schedule and manual runs add arm64 (ADR-0010): in a private repository,
 # arm64 runners use the Actions minutes, so they do not run for every pull request.
 # The secrets of the stack are generated anew in every run, so the logs uploaded on failure hold
@@ -66,6 +67,10 @@ jobs:
             exit 1
           fi
           grep -q "run ./agoranomos init" compose-error.txt
+      - name: Set up .env
+        run: ./agoranomos init
+      - name: Pull the images
+        run: docker compose pull --quiet
       - name: Start the stack
         run: ./agoranomos up
       - name: Stack tests
@@ -73,12 +78,17 @@ jobs:
       - name: Start again (nothing changes)
         run: |
           sha256sum .env > env.sha256
+          docker compose ps --quiet --status running | sort > containers-before.txt
           ./agoranomos up
           sha256sum --check env.sha256
+          docker compose ps --quiet --status running | sort > containers-after.txt
+          diff containers-before.txt containers-after.txt
           uv run pytest tests/stack -v
       - name: Collect the logs
         if: ${{ failure() }}
-        run: docker compose logs --no-color --timestamps > stack-logs.txt 2>&1 || true
+        run: |
+          docker compose ps --all > stack-logs.txt 2>&1 || true
+          docker compose logs --no-color --timestamps >> stack-logs.txt 2>&1 || true
       - name: Upload the logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

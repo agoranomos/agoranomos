@@ -1,4 +1,4 @@
-# The Agoranomos stack. Start it with ./agoranomos up (docs/how-to/run-locally.md).
+# The Agoranomos stack. Start it with ./agoranomos up (docs/reference/command-line.md).
 # Settings and secrets come from .env, which ./agoranomos init creates from .env.example; without it,
 # docker compose stops and asks for ./agoranomos init. .env also sets COMPOSE_PROFILES: core is the whole
 # stack in local mode (ADR-0011). Images are pinned by tag and digest, and Renovate updates them.
@@ -95,7 +95,7 @@ services:
     logging: *logging
 
 networks:
-  # The databases and the broker have no route to the internet.
+  # The databases have no route to the internet; with CeleryExecutor, the broker joins them here.
   data:
     internal: true
 

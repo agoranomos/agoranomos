@@ -1,4 +1,4 @@
-from stack_helpers import psql
+from stack_helpers import psql, psql_over_network
 
 
 def test_pg_stat_statements_is_loaded(env):
@@ -50,9 +50,44 @@ def test_metabase_reader_reads_marts_and_cannot_write(env):
         "metabase_reader",
         password,
         "warehouse",
+        "SHOW default_transaction_read_only",
+    )
+    assert result.stdout.strip() == "on", result.stderr
+    result = psql(
+        "warehouse-db",
+        "metabase_reader",
+        password,
+        "warehouse",
         "CREATE TABLE marts.should_not_exist (id integer)",
     )
     assert result.returncode != 0
+    assert "read-only transaction" in result.stderr
+    # The read-only default is a guard against accidents. The barrier itself is that the role has no
+    # write grant: a session that is not read-only is refused too.
+    result = psql(
+        "warehouse-db",
+        "metabase_reader",
+        password,
+        "warehouse",
+        "SET TRANSACTION READ WRITE; CREATE TABLE marts.should_not_exist (id integer)",
+    )
+    assert result.returncode != 0
+    assert "permission denied for schema marts" in result.stderr
+
+
+def test_the_databases_ask_for_the_password_over_the_data_network(env):
+    # Loopback inside a database container is trust, so psql() cannot tell a wrong password from a
+    # right one. From another container the connection crosses the network, where the server asks.
+    right = psql_over_network(
+        "warehouse-db", "metabase_reader", env["METABASE_READER_PASSWORD"], "warehouse", "SELECT 1"
+    )
+    assert right.returncode == 0, right.stderr
+    assert right.stdout.strip() == "1"
+    wrong = psql_over_network(
+        "warehouse-db", "metabase_reader", "not-the-password", "warehouse", "SELECT 1"
+    )
+    assert wrong.returncode != 0
+    assert "password authentication failed" in wrong.stderr
 
 
 def test_role_passwords_stay_out_of_pg_stat_statements(env):

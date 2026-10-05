@@ -332,7 +332,8 @@ EOF
 }
 
 # Wait until every long-running service is healthy (or running, if it has no health check) and every
-# one-shot job (its name ends in -init) has exited with 0. AGORANOMOS_WAIT_TIMEOUT and
+# one-shot job (its name ends in -init) has exited with 0. A service that is not ready yet is named
+# with what it is doing, as name (state) or name (state, health). AGORANOMOS_WAIT_TIMEOUT and
 # AGORANOMOS_WAIT_INTERVAL, in seconds, are hooks for the tests: how long to wait at most (default 900)
 # and how long to sleep between two looks (default 5).
 wait_healthy() {
@@ -352,14 +353,14 @@ wait_healthy() {
           case "$state:$exit_code" in
             exited:0) ;;
             exited:* | dead:*) failed="$failed $service" ;;
-            *) pending="$pending $service" ;;
+            *) pending="${pending:+$pending,} $service ($state${health:+, $health})" ;;
           esac
           ;;
         *)
           case "$state:$health" in
             running:healthy | running:) ;;
             running:unhealthy | exited:* | dead:*) failed="$failed $service" ;;
-            *) pending="$pending $service" ;;
+            *) pending="${pending:+$pending,} $service ($state${health:+, $health})" ;;
           esac
           ;;
       esac
@@ -384,6 +385,14 @@ EOF
 }
 
 cmd_up() {
+  # Check the options before init writes .env: an option that preflight would refuse must not leave
+  # a .env behind.
+  for option in "$@"; do
+    case "$option" in
+      --force) ;;
+      *) die "unknown option: $option" ;;
+    esac
+  done
   cmd_init
   cmd_preflight "$@"
   say "Starting the stack..."
