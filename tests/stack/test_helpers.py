@@ -455,8 +455,13 @@ def unused_port() -> int:
 
 @pytest.fixture
 def http_server():
-    """A local server for http_json: each path answers as its entry in ANSWERS says, and the
-    requests that it got are kept in server.requests as (method, path, headers, body)."""
+    """A local server for http_json.
+
+    The paths of the local dict answers answer as their entries say: status, content type, body.
+    /hangs-up closes the connection, /cut-off ends its answer in the middle of the body, and /sleeps
+    answers too late. The requests that it got are kept in server.requests as
+    (method, path, headers, body).
+    """
     answers = {
         "/ok": (200, "application/json", b'{"answer": [1, 2]}'),
         "/empty": (204, "application/json", b""),
