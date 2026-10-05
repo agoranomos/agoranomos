@@ -152,6 +152,14 @@ class EnvValues(NamesOnly):
     """The settings of .env, as the env fixture gives them."""
 
 
+# The stack tests talk to the services that the stack publishes on 127.0.0.1, and to nothing else.
+# urlopen would send each request, with its token or password, to the proxy that HTTP_PROXY names
+# in the environment of a developer machine, loopback included unless NO_PROXY says no. This opener
+# has no proxy and reads no environment, so neither the environment nor the order of the tests can
+# change where a request goes. metabase-init builds the same opener, for the same reason.
+OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def build_request(
     method: str, url: str, body: Any, headers: dict[str, str] | None
 ) -> urllib.request.Request:
@@ -181,7 +189,7 @@ def http_json(
     request = build_request(method, url, body, headers)
     try:
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with OPENER.open(request, timeout=timeout) as response:
                 status, raw = response.status, response.read()
         except urllib.error.HTTPError as error:
             status, raw = error.code, error.read()

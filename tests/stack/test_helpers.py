@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 import threading
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -558,6 +559,29 @@ def test_http_json_names_the_call_and_the_class_of_a_failure_and_nothing_else(
     # The original error is not kept to be printed: its frames hold the request.
     assert raised.value.__cause__ is None
     assert raised.value.__suppress_context__ is True
+
+
+def test_http_json_sends_no_request_through_a_proxy(http_server, monkeypatch):
+    # A developer machine can export HTTP_PROXY, and urlopen would send every request there, with
+    # its token or password, loopback too unless NO_PROXY says no. The stack tests talk to the
+    # services that the stack publishes on 127.0.0.1 and to nothing else.
+    url, server = http_server
+    dead = f"http://127.0.0.1:{unused_port()}"
+    for name in ("HTTP_PROXY", "http_proxy"):
+        monkeypatch.setenv(name, dead)
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    # urlopen builds its opener at its first use in the process and keeps it. A test that ran
+    # before this one may have built it without the variables above, and then a request through
+    # urlopen would reach the server and hide the problem: so the opener is unset here, and the
+    # order of the tests cannot matter.
+    monkeypatch.setattr(urllib.request, "_opener", None, raising=False)
+    # The control: a plain opener, built now, reads the variables and goes to the proxy, which is
+    # dead, so this check can fail.
+    with pytest.raises(urllib.error.URLError):
+        urllib.request.build_opener().open(f"{url}/ok", timeout=2)
+    assert stack_helpers.http_json("GET", f"{url}/ok") == (200, {"answer": [1, 2]})
+    assert [(method, path) for method, path, _, _ in server.requests] == [("GET", "/ok")]
 
 
 def test_http_json_names_the_path_of_a_url_that_has_none():
