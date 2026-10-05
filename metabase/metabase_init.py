@@ -7,12 +7,13 @@ connection details. Settings that must not change in the Metabase UI, such as th
 being off, are environment variables in compose.yaml instead.
 
 Every secret comes from the environment and goes only into the body of a request. The messages of
-this script name a step and an HTTP status, never what Metabase answered, because an answer can
-repeat what the request carried.
+this script name a step and an HTTP status (or the class of an error), and end in a fixed hint:
+never what Metabase answered, because an answer can repeat what the request carried.
 """
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import sys
@@ -36,6 +37,17 @@ ENV_NAMES = {
     "warehouse_user": "WAREHOUSE_USER",
     "warehouse_password": "WAREHOUSE_PASSWORD",
 }
+
+# The hints that end a message. A step that fails gets the one for its status, or LOGS_HINT.
+LOGS_HINT = "See ./agoranomos logs metabase."
+ADMIN_HINT = (
+    "Check AGORANOMOS_ADMIN_EMAIL and METABASE_ADMIN_PASSWORD in .env. If you changed the admin "
+    "email or password in Metabase, put the same values in .env."
+)
+WAREHOUSE_HINT = (
+    "Check that warehouse-db is running and that METABASE_READER_PASSWORD in .env matches the "
+    "warehouse (./agoranomos up updates it)."
+)
 
 
 class SetupError(RuntimeError):
@@ -63,7 +75,13 @@ class Config:
         url = values["url"].rstrip("/")
         if not url.startswith(("http://", "https://")):
             raise SetupError(f"METABASE_URL must start with http:// or https://, not {url!r}")
-        return cls(**{**values, "url": url, "warehouse_port": int(values["warehouse_port"])})
+        try:
+            port = int(values["warehouse_port"])
+        except ValueError:
+            port = 0
+        if not 0 < port < 65536:
+            raise SetupError("WAREHOUSE_PORT must be a port number, from 1 to 65535")
+        return cls(**{**values, "url": url, "warehouse_port": port})
 
 
 class Metabase:
@@ -73,18 +91,24 @@ class Metabase:
         self.url = url
         self.timeout = timeout
         self.session: str | None = None
+        # This job talks to Metabase inside the Compose network and to nothing else. urllib would
+        # send the requests to the proxy that HTTP_PROXY names, and Docker can put that variable
+        # into every container (the proxy settings of its client), so the opener has no proxy.
+        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     def request(self, method: str, path: str, body: Any = None) -> tuple[int, Any]:
+        """One request. An HTTP error is a status, and failing to talk to Metabase at all raises
+        OSError or http.client.HTTPException: wait_until_healthy retries on them, call explains."""
         data = None if body is None else json.dumps(body).encode()
         headers = {"Content-Type": "application/json"}
         if self.session:
             headers["X-Metabase-Session"] = self.session
+        # Config.from_env allows only http and https URLs, so opening them is safe.
         request = urllib.request.Request(  # noqa: S310
             self.url + path, data=data, headers=headers, method=method
         )
         try:
-            # Config.from_env allows only http and https URLs, so opening them is safe.
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310
+            with self._opener.open(request, timeout=self.timeout) as response:
                 status, raw = response.status, response.read()
         except urllib.error.HTTPError as error:
             status, raw = error.code, error.read()
@@ -94,11 +118,31 @@ class Metabase:
             payload = raw.decode(errors="replace")
         return status, payload
 
-    def call(self, method: str, path: str, body: Any = None) -> Any:
-        status, payload = self.request(method, path, body)
+    def call(
+        self, method: str, path: str, body: Any = None, hints: Mapping[int, str] | None = None
+    ) -> Any:
+        """One request that must succeed. A failure is a SetupError with the step, the status (or
+        the class of the error) and a fixed hint: hints says what to do for a status, by status."""
+        try:
+            status, payload = self.request(method, path, body)
+        except (OSError, http.client.HTTPException) as error:
+            raise SetupError(
+                f"{method} {path} failed: {error_classes(error)}. {LOGS_HINT}"
+            ) from None
         if status >= 400:
-            raise SetupError(f"{method} {path} failed with HTTP {status}")
+            hint = (hints or {}).get(status, LOGS_HINT)
+            raise SetupError(f"{method} {path} failed with HTTP {status}. {hint}")
         return payload
+
+
+def error_classes(error: BaseException) -> str:
+    """The class of an error, and of its reason when urllib wrapped one. Never its text, which can
+    hold an address or a header."""
+    name = type(error).__name__
+    reason = getattr(error, "reason", None)
+    if isinstance(reason, BaseException):
+        name += f" ({type(reason).__name__})"
+    return name
 
 
 def wait_until_healthy(metabase: Metabase, timeout: float = 600, interval: float = 5) -> None:
@@ -108,8 +152,8 @@ def wait_until_healthy(metabase: Metabase, timeout: float = 600, interval: float
             status, payload = metabase.request("GET", "/api/health")
             if status == 200 and isinstance(payload, dict) and payload.get("status") == "ok":
                 return
-        except OSError:
-            pass  # Metabase does not accept connections yet
+        except (OSError, http.client.HTTPException):
+            pass  # Metabase does not accept connections yet, or is still starting its server
         if time.monotonic() >= deadline:
             raise SetupError(
                 f"Metabase at {metabase.url} did not become healthy in {timeout:g} seconds"
@@ -140,16 +184,13 @@ def ensure_admin(metabase: Metabase, config: Config) -> bool:
         )
         metabase.session = result["id"]
         return True
-    status, payload = metabase.request(
-        "POST", "/api/session", {"username": config.admin_email, "password": config.admin_password}
+    result = metabase.call(
+        "POST",
+        "/api/session",
+        {"username": config.admin_email, "password": config.admin_password},
+        hints={401: ADMIN_HINT, 403: ADMIN_HINT},
     )
-    if status >= 400:
-        raise SetupError(
-            f"cannot sign in to Metabase (HTTP {status}) with AGORANOMOS_ADMIN_EMAIL and "
-            "METABASE_ADMIN_PASSWORD from .env. If you changed the admin email or password in "
-            "Metabase, put the same values in .env."
-        )
-    metabase.session = payload["id"]
+    metabase.session = result["id"]
     return False
 
 
@@ -176,12 +217,14 @@ def ensure_warehouse(metabase: Metabase, config: Config) -> tuple[int, bool]:
                 "PUT",
                 f"/api/database/{database['id']}",
                 {"engine": "postgres", "details": warehouse_details(config)},
+                hints={400: WAREHOUSE_HINT},
             )
             return database["id"], False
     created = metabase.call(
         "POST",
         "/api/database",
         {"engine": "postgres", "name": WAREHOUSE_NAME, "details": warehouse_details(config)},
+        hints={400: WAREHOUSE_HINT},
     )
     return created["id"], True
 

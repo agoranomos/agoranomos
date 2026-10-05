@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import ast
+import copy
 import json
 import socket
 import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -53,12 +56,29 @@ class FakeMetabase:
         self.gives_setup_token = True
         self.databases_as_list = False
         self.failures: dict[tuple[str, str], int] = {}
+        # Calls that get no HTTP answer: "close" (the connection ends), "truncate" (it ends in
+        # the middle of the body) or "garbage" (the answer is not HTTP).
+        self.faults: dict[tuple[str, str], str] = {}
+        self.health_faults = 0
         self.admin: dict[str, str] | None = None
         self.databases: list[dict[str, Any]] = []
         self.calls: list[tuple[str, str]] = []
 
+    def listed(self) -> list[dict[str, Any]]:
+        """The databases as GET /api/database shows them: Metabase masks the password."""
+        shown = copy.deepcopy(self.databases)
+        for database in shown:
+            if "password" in database.get("details", {}):
+                database["details"]["password"] = "**MetabasePass**"
+        return shown
+
     def handle(self, method: str, path: str, body: Any, session: str | None) -> tuple[int, Any]:
         self.calls.append((method, path))
+        if (method, path) in self.faults:
+            return 0, self.faults[(method, path)]
+        if (method, path) == ("GET", "/api/health") and self.health_faults > 0:
+            self.health_faults -= 1
+            return 0, "close"
         if (method, path) in self.failures:
             # The worst case for secrets: a server that explains its failure by echoing the request
             # back, with the tokens that it knows.
@@ -93,8 +113,8 @@ class FakeMetabase:
             return 401, "Unauthenticated"
         if (method, path) == ("GET", "/api/database"):
             if self.databases_as_list:
-                return 200, self.databases
-            return 200, {"data": self.databases, "total": len(self.databases)}
+                return 200, self.listed()
+            return 200, {"data": self.listed(), "total": len(self.databases)}
         if (method, path) == ("POST", "/api/database"):
             database = {"id": len(self.databases) + 1, **body}
             self.databases.append(database)
@@ -119,12 +139,27 @@ def metabase():
             status, payload = state.handle(
                 self.command, self.path, body, self.headers.get("X-Metabase-Session")
             )
+            if status == 0:
+                self.break_connection(payload)
+                return
             data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+
+        def break_connection(self, fault: str) -> None:
+            """End the connection as a Metabase that crashes or restarts does."""
+            self.close_connection = True
+            if fault == "truncate":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", "100")
+                self.end_headers()
+                self.wfile.write(b'{"data": [')
+            elif fault == "garbage":
+                self.wfile.write(b"this is not an HTTP answer\r\n\r\n")
 
         do_GET = do_POST = do_PUT = serve
 
@@ -243,7 +278,7 @@ def test_an_array_of_databases_is_understood_as_well_as_an_object(metabase):
 
 
 # A call that fails: the step to fail, whether the first start has to happen before it, and how
-# the message names the step. The sign-in has a message of its own, which says what to do.
+# the message names the step.
 FAILING_STEPS = [
     pytest.param(
         "GET",
@@ -253,7 +288,7 @@ FAILING_STEPS = [
         id="properties",
     ),
     pytest.param("POST", "/api/setup", False, "POST /api/setup failed", id="setup"),
-    pytest.param("POST", "/api/session", True, "cannot sign in to Metabase", id="sign-in"),
+    pytest.param("POST", "/api/session", True, "POST /api/session failed", id="sign-in"),
     pytest.param("GET", "/api/database", False, "GET /api/database failed", id="list-databases"),
     pytest.param("POST", "/api/database", False, "POST /api/database failed", id="connect"),
     pytest.param("PUT", "/api/database/1", True, "PUT /api/database/1 failed", id="update"),
@@ -274,15 +309,186 @@ def test_a_failing_call_names_the_step_and_the_status_and_prints_no_secret(
     output = capsys.readouterr()
     assert step in output.err
     assert "HTTP 500" in output.err
+    assert "./agoranomos logs metabase" in output.err
     assert leaked(output.out + output.err) == []
 
 
-def test_a_failing_call_is_an_error_with_the_step_and_the_status_only(metabase):
+def test_a_failing_call_is_an_error_with_the_step_the_status_and_a_fixed_hint_only(metabase):
     metabase.failures[("GET", "/api/database")] = 503
     client = mi.Metabase(metabase.url)
     with pytest.raises(mi.SetupError) as raised:
         client.call("GET", "/api/database")
-    assert str(raised.value) == "GET /api/database failed with HTTP 503"
+    assert str(raised.value) == (
+        "GET /api/database failed with HTTP 503. See ./agoranomos logs metabase."
+    )
+
+
+WAREHOUSE_HINT = (
+    "Check that warehouse-db is running and that METABASE_READER_PASSWORD in .env matches the "
+    "warehouse (./agoranomos up updates it)."
+)
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "after_first_start"),
+    [
+        pytest.param("POST", "/api/database", False, id="connect"),
+        pytest.param("PUT", "/api/database/1", True, id="update"),
+    ],
+)
+def test_a_400_for_the_warehouse_says_what_to_check(
+    metabase, capsys, method, path, after_first_start
+):
+    # Metabase answers 400 when it cannot connect with the details it was given.
+    if after_first_start:
+        assert mi.main(env_for(metabase)) == 0
+        capsys.readouterr()
+    metabase.failures[(method, path)] = 400
+    assert mi.main(env_for(metabase)) == 1
+    error = capsys.readouterr().err
+    assert f"{method} {path} failed with HTTP 400" in error
+    assert WAREHOUSE_HINT in error
+    assert leaked(error) == []
+
+
+@pytest.mark.parametrize("status", [401, 403, 404, 500, 502])
+def test_the_hint_about_the_warehouse_is_for_a_400_only(metabase, capsys, status):
+    metabase.failures[("POST", "/api/database")] = status
+    assert mi.main(env_for(metabase)) == 1
+    error = capsys.readouterr().err
+    assert f"HTTP {status}" in error
+    assert "METABASE_READER_PASSWORD" not in error
+    assert "./agoranomos logs metabase" in error
+
+
+def test_a_400_from_a_step_that_has_nothing_to_do_with_the_warehouse_does_not_blame_it(
+    metabase, capsys
+):
+    metabase.failures[("GET", "/api/database")] = 400
+    assert mi.main(env_for(metabase)) == 1
+    error = capsys.readouterr().err
+    assert "GET /api/database failed with HTTP 400" in error
+    assert "METABASE_READER_PASSWORD" not in error
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_a_refused_sign_in_points_at_the_admin_settings(metabase, capsys, status):
+    assert mi.main(env_for(metabase)) == 0
+    capsys.readouterr()
+    metabase.failures[("POST", "/api/session")] = status
+    assert mi.main(env_for(metabase)) == 1
+    error = capsys.readouterr().err
+    assert f"HTTP {status}" in error
+    assert "AGORANOMOS_ADMIN_EMAIL" in error
+    assert "METABASE_ADMIN_PASSWORD" in error
+    assert leaked(error) == []
+
+
+@pytest.mark.parametrize("status", [400, 404, 429, 500, 502, 503])
+def test_another_status_at_the_sign_in_is_not_blamed_on_the_password(metabase, capsys, status):
+    assert mi.main(env_for(metabase)) == 0
+    capsys.readouterr()
+    metabase.failures[("POST", "/api/session")] = status
+    assert mi.main(env_for(metabase)) == 1
+    error = capsys.readouterr().err
+    assert f"POST /api/session failed with HTTP {status}" in error
+    assert "./agoranomos logs metabase" in error
+    assert "METABASE_ADMIN_PASSWORD" not in error
+    assert leaked(error) == []
+
+
+def free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+# What a broken connection looks like to the client, and the class that the message names.
+FAULTS = [
+    pytest.param("close", "RemoteDisconnected", id="closed"),
+    pytest.param("truncate", "IncompleteRead", id="cut-off"),
+    pytest.param("garbage", "BadStatusLine", id="not-http"),
+]
+
+
+@pytest.mark.parametrize(("fault", "error_class"), FAULTS)
+@pytest.mark.parametrize(("method", "path", "after_first_start", "step"), FAILING_STEPS)
+def test_a_dropped_connection_is_one_line_with_the_step_and_the_class_of_the_error(
+    metabase, capsys, method, path, after_first_start, step, fault, error_class
+):
+    if after_first_start:
+        assert mi.main(env_for(metabase)) == 0
+        capsys.readouterr()
+    metabase.faults[(method, path)] = fault
+    assert mi.main(env_for(metabase)) == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    [line] = output.err.splitlines()
+    assert line.startswith(f"metabase-init: {step}")
+    assert error_class in line
+    assert "./agoranomos logs metabase" in line
+    assert "Traceback" not in output.err
+    assert leaked(output.err) == []
+
+
+def test_a_call_that_cannot_connect_names_the_step_and_the_classes_of_the_error():
+    client = mi.Metabase(f"http://127.0.0.1:{free_port()}", timeout=1)
+    with pytest.raises(mi.SetupError) as raised:
+        client.call("GET", "/api/database")
+    assert str(raised.value) == (
+        "GET /api/database failed: URLError (ConnectionRefusedError). "
+        "See ./agoranomos logs metabase."
+    )
+
+
+def test_the_health_poll_keeps_retrying_after_a_dropped_connection(metabase):
+    metabase.health_faults = 2
+    mi.wait_until_healthy(mi.Metabase(metabase.url), timeout=5, interval=0.01)
+    assert metabase.calls.count(("GET", "/api/health")) == 3
+
+
+@pytest.mark.parametrize(("fault", "error_class"), FAULTS)
+def test_a_broken_health_answer_is_not_healthy_and_not_a_crash(metabase, fault, error_class):
+    metabase.faults[("GET", "/api/health")] = fault
+    with pytest.raises(mi.SetupError, match="did not become healthy"):
+        mi.wait_until_healthy(mi.Metabase(metabase.url), timeout=0.3, interval=0.01)
+
+
+def test_proxy_variables_do_not_send_the_requests_elsewhere(metabase, monkeypatch):
+    # Docker can put HTTP_PROXY into every container (the proxy settings of its client), and
+    # urllib sends requests there, loopback and Compose names included, unless NO_PROXY says no.
+    dead = f"http://127.0.0.1:{free_port()}"
+    for name in (
+        "HTTP_PROXY",
+        "http_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ):
+        monkeypatch.setenv(name, dead)
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    # The control: the plain urlopen goes to the proxy, which is dead, so this check can fail.
+    with pytest.raises(urllib.error.URLError):
+        urllib.request.urlopen(f"{metabase.url}/api/health", timeout=2)
+    client = mi.Metabase(metabase.url, timeout=5)
+    assert client.request("GET", "/api/health") == (200, {"status": "ok"})
+    assert mi.main(env_for(metabase)) == 0
+
+
+@pytest.mark.parametrize("port", ["five", "54 32", "5432.0", "", "-1", "0", "65536", "99999"])
+def test_a_warehouse_port_that_is_not_a_port_number_is_named(capsys, port):
+    env = {**ENV, "METABASE_URL": "http://metabase:3000", "WAREHOUSE_PORT": port}
+    if port:
+        with pytest.raises(mi.SetupError, match="WAREHOUSE_PORT"):
+            mi.Config.from_env(env)
+    assert mi.main(env) == 1
+    error = capsys.readouterr().err
+    [line] = error.splitlines()
+    assert line.startswith("metabase-init: ")
+    assert "WAREHOUSE_PORT" in line
+    assert "Traceback" not in error
 
 
 def test_missing_settings_are_named():
