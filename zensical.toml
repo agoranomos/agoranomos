@@ -25,6 +25,8 @@ nav = [
     { "ADR-0010: Support amd64 and arm64 within a memory budget" = "adr/0010-multi-arch-and-memory-budget.md" },
     { "ADR-0011: Support local and server modes" = "adr/0011-local-and-server-modes.md" },
     { "ADR-0012: Use Python 3.13 and a pinned toolchain" = "adr/0012-python-and-tooling.md" },
+    { "ADR-0013: Keep extensions apart from the base package" = "adr/0013-keep-extensions-apart-from-the-base-package.md" },
+    { "ADR-0014: Start the stack with one script and a generated .env file" = "adr/0014-start-the-stack-with-one-script.md" },
   ] },
 ]
 
