@@ -179,6 +179,21 @@ def build_request(
     return request
 
 
+def error_classes(error: BaseException) -> str:
+    """The class of an error, and of its reason when urllib wrapped one.
+
+    For a refused connection that is URLError (ConnectionRefusedError), so that it, a name that
+    does not resolve and a server that does not answer in time differ in a CI log. Never the text of
+    the error, which can hold an address or a header. It is the rule of metabase_init.error_classes,
+    and a test checks the two against each other.
+    """
+    name = type(error).__name__
+    reason = getattr(error, "reason", None)
+    if isinstance(reason, BaseException):
+        name += f" ({type(reason).__name__})"
+    return name
+
+
 def http_json(
     method: str,
     url: str,
@@ -196,9 +211,9 @@ def http_json(
     except (OSError, http.client.HTTPException) as error:
         # The server could not be reached, or it hung up. The frames of http.client hold the
         # request, with its body and its headers, so the error is dropped (from None) and a new one
-        # names the call: the method, the path (never the query), and the class of the failure.
+        # names the call: the method, the path (never the query), and the classes of the failure.
         path = urllib.parse.urlsplit(url).path or "/"
-        raise ConnectionError(f"{method} {path} failed: {type(error).__name__}") from None
+        raise ConnectionError(f"{method} {path} failed: {error_classes(error)}") from None
     try:
         return status, json.loads(raw) if raw else None
     except json.JSONDecodeError:

@@ -1,5 +1,6 @@
 """Tests of the helpers themselves: they need neither Docker nor a running stack."""
 
+import http.client
 import json
 import os
 import re
@@ -8,12 +9,14 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import ai_switches
+import metabase_init
 import pytest
 import services
 import stack_helpers
@@ -471,6 +474,10 @@ def http_server():
             if path == "/hangs-up":
                 self.close_connection = True
                 return
+            if path == "/sleeps":
+                self.close_connection = True
+                time.sleep(0.6)  # longer than the timeout of the test, and it writes nothing after
+                return
             if path == "/cut-off":
                 self.close_connection = True
                 self.send_response(200)
@@ -584,10 +591,48 @@ def test_http_json_sends_no_request_through_a_proxy(http_server, monkeypatch):
     assert [(method, path) for method, path, _, _ in server.requests] == [("GET", "/ok")]
 
 
+def test_http_json_tells_a_timeout_from_a_refused_connection(http_server):
+    # In a CI log, "URLError" alone would be the same for a refused connection, a name that does not
+    # resolve and a server that does not answer in time.
+    url, _ = http_server
+    with pytest.raises(ConnectionError) as raised:
+        stack_helpers.http_json("GET", f"{url}/sleeps", timeout=0.2)
+    assert str(raised.value) == "GET /sleeps failed: TimeoutError"
+
+
+@pytest.mark.parametrize(
+    ("error", "name"),
+    [
+        pytest.param(
+            urllib.error.URLError(ConnectionRefusedError(61, "Connection refused")),
+            "URLError (ConnectionRefusedError)",
+            id="a-refused-connection",
+        ),
+        pytest.param(
+            urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided")),
+            "URLError (gaierror)",
+            id="a-name-that-does-not-resolve",
+        ),
+        pytest.param(
+            urllib.error.URLError("unknown url type: x"), "URLError", id="a-reason-that-is-text"
+        ),
+        pytest.param(http.client.RemoteDisconnected("closed"), "RemoteDisconnected", id="hang-up"),
+        pytest.param(http.client.IncompleteRead(b"part", 10), "IncompleteRead", id="cut-off"),
+        pytest.param(TimeoutError("timed out"), "TimeoutError", id="timeout"),
+        pytest.param(OSError(5, "Input/output error"), "OSError", id="plain-os-error"),
+    ],
+)
+def test_the_stack_helpers_name_an_error_by_its_classes_as_metabase_init_does(error, name):
+    # The name is the class of the error and, when urllib wrapped one, the class of its reason:
+    # never the text, which can hold an address or a header.
+    assert stack_helpers.error_classes(error) == name
+    assert metabase_init.error_classes(error) == name
+
+
 def test_http_json_names_the_path_of_a_url_that_has_none():
     with pytest.raises(ConnectionError) as raised:
         stack_helpers.http_json("GET", f"http://127.0.0.1:{unused_port()}")
-    assert str(raised.value) == "GET / failed: URLError"
+    assert str(raised.value) == "GET / failed: URLError (ConnectionRefusedError)"
 
 
 # A request with a password in its body that cannot be made, in three ways: to a port where nothing
@@ -697,7 +742,7 @@ def test_a_failed_request_prints_no_part_of_its_body_under_any_traceback_mode(
     subject, expected = {
         "cannot_connect": (
             "test_http_json_cannot_connect",
-            "ConnectionError: POST /api/session failed: URLError",
+            "ConnectionError: POST /api/session failed: URLError (ConnectionRefusedError)",
         ),
         "host_as_a_scheme": (
             "test_http_json_gets_a_host_as_a_scheme",
