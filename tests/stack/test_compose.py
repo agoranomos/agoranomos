@@ -2,7 +2,7 @@ import json
 import shlex
 
 from services import LONG_RUNNING, ONE_SHOT
-from stack_helpers import compose, containers, docker, secrets
+from stack_helpers import compose, containers, docker, job_failed, secrets
 
 # The services that must stay on the internal data network only (no route to the internet).
 DATA_ONLY = {"warehouse-db", "platform-db", "db-init", "broker"}
@@ -39,7 +39,7 @@ def test_databases_publish_no_ports():
 
 def test_db_init_can_run_again():
     result = compose("run", "--rm", "--no-deps", "db-init", check=False)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, job_failed("db-init", result)
 
 
 def test_no_service_mounts_the_docker_socket():
@@ -82,8 +82,10 @@ def test_the_database_health_checks_connect_over_tcp():
 
 def test_db_init_prints_no_notices_when_it_runs_again():
     result = compose("run", "--rm", "--no-deps", "db-init", check=False)
-    assert result.returncode == 0, result.stderr
-    assert "NOTICE" not in result.stdout + result.stderr
+    assert result.returncode == 0, job_failed("db-init", result)
+    # A flag, not the output: a failed assertion prints what it compares.
+    printed_a_notice = "NOTICE" in result.stdout + result.stderr
+    assert not printed_a_notice, "db-init printed a notice: run it by hand to see it"
 
 
 def test_no_secret_is_in_the_definition_of_a_container(env):

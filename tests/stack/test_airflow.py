@@ -3,7 +3,18 @@ import time
 
 import pytest
 from services import LONG_RUNNING
-from stack_helpers import REPO_ROOT, active_variant, compose, http_json, psql, secrets, wait_for
+from stack_helpers import (
+    REPO_ROOT,
+    Secret,
+    SecretHeaders,
+    active_variant,
+    compose,
+    http_json,
+    job_failed,
+    psql,
+    secrets,
+    wait_for,
+)
 
 SELFCHECK = "agoranomos_selfcheck"
 EXTENSION_CHECK = "ci_extension_check"
@@ -27,11 +38,12 @@ def token(env, airflow_url):
         {"username": "admin", "password": env["AIRFLOW_ADMIN_PASSWORD"]},
     )
     assert status in (200, 201), body
-    return body["access_token"]
+    # pytest prints the arguments of a failed test and of the function that failed: see Secret.
+    return Secret(body["access_token"])
 
 
 def api(airflow_url, token, method, path, body=None, headers=None):
-    headers = {"Authorization": f"Bearer {token}", **(headers or {})}
+    headers = SecretHeaders({"Authorization": Secret(f"Bearer {token}"), **(headers or {})})
     return http_json(method, f"{airflow_url}{path}", body, headers)
 
 
@@ -112,7 +124,7 @@ def test_the_admin_signs_in_with_the_generated_password_only(airflow_url, token)
 def test_airflow_init_can_run_again():
     # An admin that exists is not an error, and the second run does not make another one.
     result = compose("run", "--rm", "--no-deps", "-T", "airflow-init", check=False)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, job_failed("airflow-init", result)
     said_so = "admin already exists in the db" in result.stdout + result.stderr
     assert said_so, "airflow-init did not find the admin that exists"
 

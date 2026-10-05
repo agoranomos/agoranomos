@@ -7,7 +7,7 @@ again, which the stack does on every start anyway.
 """
 
 import pytest
-from stack_helpers import SecretHeaders, compose, http_json, psql, secrets
+from stack_helpers import Secret, SecretHeaders, compose, http_json, psql, secrets
 
 WAREHOUSE_NAME = "Agoranomos warehouse"
 
@@ -62,7 +62,7 @@ def session(env, metabase_url):
         },
     )
     assert status == 200, f"the admin could not sign in: HTTP {status}"
-    return SecretHeaders({"X-Metabase-Session": body["id"]})
+    return SecretHeaders({"X-Metabase-Session": Secret(body["id"])})
 
 
 @pytest.fixture(scope="module")

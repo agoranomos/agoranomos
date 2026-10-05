@@ -47,6 +47,16 @@ def secrets(env: dict[str, str]) -> dict[str, str]:
     return {name: env[name] for name, default in example.items() if not default and env.get(name)}
 
 
+def load_env(path: Path) -> EnvValues:
+    """The settings in .env, for the env fixture: its secrets are Secret values, wherever they go
+    (an argument of a helper, a body, an environment), and the dict prints its names only."""
+    values = read_env(path)
+    secret_names = set(secrets(values))
+    return EnvValues(
+        {name: Secret(value) if name in secret_names else value for name, value in values.items()}
+    )
+
+
 def compose(
     *args: str, check: bool = True, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
@@ -85,12 +95,45 @@ def containers() -> dict[str, dict[str, Any]]:
     return {item["Service"]: item for item in items}
 
 
-class SecretHeaders(dict[str, str]):
-    """Request headers that hold a secret, such as a session. pytest prints the arguments of a
-    failed test, so the repr names the headers and hides their values."""
+def job_failed(service: str, result: subprocess.CompletedProcess[str]) -> str:
+    """The message of an assertion about a job that failed: its exit code, and how to see why.
+
+    Never its output, because a failed ALTER ROLE shows its statement in the output, and the
+    statement holds the password.
+    """
+    return (
+        f"{service} exited with {result.returncode}: to see why, run it by hand with "
+        f"docker compose run --rm --no-deps {service}"
+    )
+
+
+class Secret(str):
+    """A secret that is still a str, so that it works in headers, request bodies and environments,
+    but whose repr hides the value.
+
+    pytest prints the arguments of the first and the last function of the traceback of a failed
+    test, and of the test itself, with repr(), cut to about 240 characters: a plain str would put
+    most of a token or a password into the report. str() and format() give the value, because a
+    request needs it, so keep a Secret out of f-strings and messages that an assertion prints.
+    """
 
     def __repr__(self) -> str:
-        return f"SecretHeaders({sorted(self)})"
+        return "Secret('<hidden>')"
+
+
+class NamesOnly(dict[str, str]):
+    """A dict that shows its names and never its values, for what pytest prints."""
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({sorted(self)})"
+
+
+class SecretHeaders(NamesOnly):
+    """Request headers that hold a secret, such as a session or a token."""
+
+
+class EnvValues(NamesOnly):
+    """The settings of .env, as the env fixture gives them."""
 
 
 def http_json(
