@@ -54,7 +54,7 @@ uv run pytest tests/stack    # the stack tests, against the running stack
 ./agoranomos down            # stop it; the data stays
 ```
 
-CI runs the same stack tests for every pull request that changes the stack.
+CI runs the same stack tests for every pull request that changes the stack. The stack has two variants of Airflow: the LocalExecutor by default, and the CeleryExecutor with a broker and a worker ([ADR-0015](docs/adr/0015-run-localexecutor-by-default.md)). The stack tests follow the variant that `.env` selects. To test the Celery variant, set `COMPOSE_FILE=compose.yaml:compose.celery.yaml` in `.env` before `./agoranomos up`; CI tests both on pushes to `main`.
 
 ## Make a change
 
@@ -62,7 +62,7 @@ CI runs the same stack tests for every pull request that changes the stack.
 2. **Commit.** Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `type(optional scope): summary`. The accepted types are `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore` and `revert`. Keep the summary short and in the imperative, for example `docs: explain how attribution windows are reloaded`, and use the body to say why the change is needed.
 3. **Sign off.** Every commit needs a DCO sign-off, which `git commit -s` adds (see below).
 4. **Open a pull request** against `main` and fill in the template. Keep it focused on one change.
-5. **Get the checks green.** Five checks run on every pull request: static checks (prek, including the full-history secret scan), the documentation build in strict mode, the unit tests, the Conventional Commits title and the DCO sign-off. A pull request that changes the stack also runs the stack tests in CI, as the check "Local mode (amd64)".
+5. **Get the checks green.** Five checks run on every pull request: static checks (prek, including the full-history secret scan), the documentation build in strict mode, the unit tests, the Conventional Commits title and the DCO sign-off. A pull request that changes the stack also runs the stack tests in CI, as the check "Local mode (amd64, local)".
 6. **Review and merge.** The maintainer reviews the pull request and squash-merges it. The pull request title becomes the commit title on `main`, so it must follow Conventional Commits as well.
 
 If a hook changes files when you commit (the final-newline fixer or ruff, for example), the commit stops. Review the changes, add them with `git add` and commit again.

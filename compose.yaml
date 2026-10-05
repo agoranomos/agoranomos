@@ -2,12 +2,56 @@
 # Settings and secrets come from .env, which ./agoranomos init creates from .env.example; without it,
 # docker compose stops and asks for ./agoranomos init. .env also sets COMPOSE_PROFILES: core is the whole
 # stack in local mode (ADR-0011). Images are pinned by tag and digest, and Renovate updates them.
+# Airflow runs with the LocalExecutor here: the scheduler runs the tasks. compose.celery.yaml adds a broker
+# and a separate worker (CeleryExecutor); select it with COMPOSE_FILE in .env (ADR-0015).
 
 x-logging: &logging
   driver: json-file
   options:
     max-size: "10m"
     max-file: "5"
+
+# What every Airflow container shares. Anchors do not cross files, so compose.celery.yaml extends services
+# of this file where it needs the same settings.
+x-airflow: &airflow
+  image: apache/airflow:3.3.2-python3.13@sha256:e9982ad3f49a60418622e1baf80c34b0daf3fa5091a336cb5ee61f0cdd189371
+  profiles: [core]
+  restart: unless-stopped
+  user: "50000:0"
+  environment: &airflow-environment
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    # How many tasks run at the same time; Airflow's own default is 32.
+    AIRFLOW__CORE__PARALLELISM: ${AIRFLOW_PARALLELISM:-4}
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?run ./agoranomos init}
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:?run ./agoranomos init}@platform-db:5432/airflow
+    # Every Airflow container must share these two keys.
+    AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY:?run ./agoranomos init}
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?run ./agoranomos init}
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    # New DAG files appear within a minute (the default is 300 seconds).
+    AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "60"
+    # Two DAG bundles (ADR-0013): the DAGs of the base package and the deployment's own extensions.
+    AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST: >-
+      [{"name": "agoranomos", "classpath": "airflow.dag_processing.bundles.local.LocalDagBundle",
+      "kwargs": {"path": "/opt/agoranomos/dags"}},
+      {"name": "extensions", "classpath": "airflow.dag_processing.bundles.local.LocalDagBundle",
+      "kwargs": {"path": "/opt/agoranomos/extensions/dags"}}]
+  volumes:
+    - ./airflow/dags:/opt/agoranomos/dags:ro
+    - ${AGORANOMOS_EXTENSIONS_DIR:-./extensions}/dags:/opt/agoranomos/extensions/dags:ro
+    - airflow-logs:/opt/airflow/logs
+  networks: [default, data]
+  security_opt: ["no-new-privileges:true"]
+  logging: *logging
+  depends_on: &airflow-depends-on
+    platform-db:
+      condition: service_healthy
+    db-init:
+      condition: service_completed_successfully
 
 services:
   warehouse-db:
@@ -94,6 +138,128 @@ services:
     security_opt: ["no-new-privileges:true"]
     logging: *logging
 
+  # Migrates the metadata database and creates the admin user, on every start. The entrypoint of the image
+  # migrates the database (_AIRFLOW_DB_MIGRATE) and then runs the command. The command creates the admin
+  # with the Airflow CLI, called inside this Python process: the entrypoint's own way,
+  # _AIRFLOW_WWW_USER_CREATE, runs airflow users create --password <the password>, which puts the password
+  # on the command line of a process. Here the arguments exist only in sys.argv, and the command line of the
+  # process holds this code. An admin that exists already is not an error: the command says so and succeeds,
+  # so a password changed in Airflow stays.
+  airflow-init:
+    <<: *airflow
+    restart: "no"
+    command:
+      - python
+      - -c
+      - |
+        import os
+        import sys
+
+        from airflow.__main__ import main
+
+        # The entrypoint carries on when the migration fails, so check that the database is up to date.
+        sys.argv = ["airflow", "db", "check-migrations", "--migration-wait-timeout", "1"]
+        main()
+        # Airflow writes the command into its audit log and hides the password only when the command
+        # starts as airflow users create, with --password <password>: keep this shape.
+        sys.argv = [
+            "airflow",
+            "users",
+            "create",
+            "--role",
+            "Admin",
+            "--username",
+            "admin",
+            "--firstname",
+            "Agoranomos",
+            "--lastname",
+            "Admin",
+            "--email",
+            os.environ["AGORANOMOS_ADMIN_EMAIL"],
+            "--password",
+            os.environ["AIRFLOW_ADMIN_PASSWORD"],
+        ]
+        main()
+    environment:
+      <<: *airflow-environment
+      _AIRFLOW_DB_MIGRATE: "true"
+      AGORANOMOS_ADMIN_EMAIL: ${AGORANOMOS_ADMIN_EMAIL:-admin@example.com}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?run ./agoranomos init}
+
+  airflow-apiserver:
+    <<: *airflow
+    command: ["api-server"]
+    ports:
+      - "127.0.0.1:${AIRFLOW_PORT:-8080}:8080"
+    # Reads the JSON of the health endpoint and requires a healthy metadata database, not only an HTTP
+    # answer. The other components have checks of their own, and the stack tests look at all of them, so
+    # this check does not depend on them.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import json
+          import urllib.request
+
+          url = "http://localhost:8080/api/v2/monitor/health"
+          health = json.load(urllib.request.urlopen(url, timeout=5))
+          raise SystemExit(0 if health["metadatabase"]["status"] == "healthy" else 1)
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # With the LocalExecutor the scheduler also runs the tasks, as processes of its own container, so its
+  # memory and its restarts are shared with them. Airflow's documentation warns that in a container a task
+  # that runs out of memory can restart the scheduler (ADR-0015).
+  airflow-scheduler:
+    <<: *airflow
+    command: ["scheduler"]
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://localhost:8974/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    <<: *airflow
+    command: ["dag-processor"]
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob --hostname \"$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-triggerer:
+    <<: *airflow
+    command: ["triggerer"]
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type TriggererJob --hostname \"$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
 networks:
   # The databases have no route to the internet; with CeleryExecutor, the broker joins them here.
   data:
@@ -102,3 +268,4 @@ networks:
 volumes:
   warehouse-data:
   platform-data:
+  airflow-logs:

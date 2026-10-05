@@ -581,7 +581,38 @@ def test_up_starts_the_stack_and_waits_until_healthy(cli, tmp_path):
     assert result.returncode == 0, result.stderr
     assert "compose up --detach --remove-orphans" in cli.docker_calls()
     assert "All services are healthy." in result.stdout
+    assert "Airflow:  http://127.0.0.1:8080" in result.stdout
     assert cli.env_path.exists()
+
+
+def test_up_prints_the_address_of_airflow_after_the_stack_is_healthy(cli, tmp_path):
+    result = cli.run(
+        "up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), AGORANOMOS_WAIT_INTERVAL="0.1"
+    )
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    healthy = lines.index("All services are healthy.")
+    address = lines.index("Airflow:  http://127.0.0.1:8080")
+    done = next(i for i, line in enumerate(lines) if line.startswith("The stack is up."))
+    assert healthy < address < done
+
+
+def test_the_address_of_airflow_follows_airflow_port_in_env(cli, tmp_path):
+    cli.run("init")
+    set_env(cli, AIRFLOW_PORT="18080")
+    result = cli.run(
+        "up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), AGORANOMOS_WAIT_INTERVAL="0.1"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Airflow:  http://127.0.0.1:18080" in result.stdout
+    assert ":8080" not in result.stdout
+
+
+def test_up_prints_no_address_when_the_stack_did_not_start(cli, tmp_path):
+    ps = HEALTHY_PS.replace("platform-db|running|healthy|0", "platform-db|running|unhealthy|0")
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps), AGORANOMOS_WAIT_INTERVAL="0.1")
+    assert result.returncode == 1
+    assert "Airflow:" not in result.stdout
 
 
 def test_up_reports_a_failed_one_shot_job(cli, tmp_path):

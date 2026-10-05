@@ -1,0 +1,101 @@
+# The Celery overlay (ADR-0015): Airflow with the CeleryExecutor. It adds the Valkey broker and a separate
+# airflow-worker that runs the tasks, and it switches the Airflow services of compose.yaml to Celery.
+# It is not a stack of its own, so it is always used together with compose.yaml. To select it, set this in
+# .env, which ./agoranomos and a plain docker compose both read, and run ./agoranomos up:
+#
+#   COMPOSE_FILE=compose.yaml:compose.celery.yaml
+#
+# To go back to the LocalExecutor, set COMPOSE_FILE=compose.yaml again.
+
+# Anchors do not cross files, so the log limits of compose.yaml are stated again here, and so are the
+# settings that every Airflow service of compose.yaml gets for Celery.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+# CONNECTION_CHECK_MAX_COUNT=0 stops the entrypoint of the image from waiting for the broker, when the
+# scheduler and the worker start, with the URL of the broker as an argument of a python process, where other
+# users of a Linux host could read the password. Compose waits for the broker to be healthy anyway.
+x-airflow-celery-environment: &airflow-celery-environment
+  CONNECTION_CHECK_MAX_COUNT: "0"
+  AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+  AIRFLOW__CELERY__BROKER_URL: redis://:${VALKEY_PASSWORD:?run ./agoranomos init}@broker:6379/0
+  AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:?run ./agoranomos init}@platform-db:5432/airflow
+  AIRFLOW__CELERY__WORKER_CONCURRENCY: ${AIRFLOW_WORKER_CONCURRENCY:-4}
+
+services:
+  broker:
+    image: valkey/valkey:9.1.2-trixie@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd
+    profiles: [core]
+    restart: unless-stopped
+    # The entrypoint of the image drops to this user only when the command is valkey-server. This command
+    # is a shell, so the user is set here.
+    user: valkey
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:?run ./agoranomos init}
+    # The server reads its configuration from standard input (the - argument), so the password is in no
+    # command line: docker inspect and the process list show $VALKEY_PASSWORD, not its value. The broker
+    # keeps nothing on disk: Celery messages live for seconds, and Airflow queues lost tasks again.
+    command:
+      - sh
+      - -c
+      - |
+        exec valkey-server - <<EOF
+        requirepass $$VALKEY_PASSWORD
+        save ""
+        appendonly no
+        EOF
+    networks: [data]
+    # valkey-cli reads the password from VALKEYCLI_AUTH (REDISCLI_AUTH works too, as of 9.1.2), not from -a.
+    healthcheck:
+      test: ["CMD-SHELL", "VALKEYCLI_AUTH=\"$$VALKEY_PASSWORD\" valkey-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+  airflow-init:
+    environment: *airflow-celery-environment
+
+  airflow-apiserver:
+    environment: *airflow-celery-environment
+
+  airflow-scheduler:
+    environment: *airflow-celery-environment
+    depends_on:
+      broker:
+        condition: service_healthy
+
+  airflow-dag-processor:
+    environment: *airflow-celery-environment
+
+  airflow-triggerer:
+    environment: *airflow-celery-environment
+
+  # Runs the tasks. It starts from the scheduler of compose.yaml (extends), which gives it the image, the
+  # user, the volumes, the networks, the logging and the dependencies. extends reads that service from
+  # compose.yaml alone, without the changes above, so the Celery settings and the dependencies on the
+  # broker and on the API server are stated again here.
+  airflow-worker:
+    extends:
+      file: compose.yaml
+      service: airflow-scheduler
+    command: ["celery", "worker"]
+    environment:
+      <<: *airflow-celery-environment
+      # Lets the Celery worker finish its tasks when it stops (a warm shutdown).
+      DUMB_INIT_SETSID: "0"
+    healthcheck:
+      test: ["CMD-SHELL", "celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d \"celery@$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      broker:
+        condition: service_healthy
+      airflow-apiserver:
+        condition: service_healthy

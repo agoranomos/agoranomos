@@ -29,6 +29,24 @@ def read_env(path: Path) -> dict[str, str]:
     return values
 
 
+def active_variant() -> str:
+    """The variant of the stack that .env selects (ADR-0015): "local" or "celery".
+
+    It is "celery" when COMPOSE_FILE in .env lists compose.celery.yaml, and "local" otherwise, also
+    when there is no .env or no COMPOSE_FILE in it: then Compose reads only compose.yaml.
+    """
+    path = REPO_ROOT / ".env"
+    files = read_env(path).get("COMPOSE_FILE", "") if path.exists() else ""
+    names = {Path(file).name for file in files.split(":") if file}
+    return "celery" if "compose.celery.yaml" in names else "local"
+
+
+def secrets(env: dict[str, str]) -> dict[str, str]:
+    """The secrets in .env: the settings that .env.example leaves empty, with their values."""
+    example = read_env(REPO_ROOT / ".env.example")
+    return {name: env[name] for name, default in example.items() if not default and env.get(name)}
+
+
 def compose(
     *args: str, check: bool = True, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
