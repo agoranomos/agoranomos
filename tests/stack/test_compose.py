@@ -109,11 +109,15 @@ def test_no_secret_is_in_the_definition_of_a_container(env):
 def test_no_secret_is_in_the_arguments_of_a_running_process(env):
     # Other users of the host, and every process in a container, can read the arguments of the
     # processes in /proc. The command that reads them is itself one of the processes that it lists,
-    # so its own words in the output show that the listing worked.
+    # so its own words in the output show that the listing worked. A failed assertion prints what it
+    # compares, and a listing can hold the very values that the test looks for: the assertions here
+    # hold a flag and the name of a service, never the listing.
     values = secrets(env)
+    assert values, "no secrets in .env: run ./agoranomos init"
     listing = "cat /proc/[0-9]*/cmdline | tr '\\0' ' '"
     for service in sorted(LONG_RUNNING):
         result = compose("exec", "-T", service, "sh", "-c", listing, check=False)
-        assert "cat /proc/" in result.stdout, f"{service}: {result.stderr}"
+        listed = "cat /proc/" in result.stdout
+        assert listed, f"{service}: the listing did not run"
         leaked = [name for name, value in values.items() if value in result.stdout]
         assert not leaked, f"a process of {service} has the values of {leaked} in its arguments"
