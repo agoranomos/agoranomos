@@ -157,7 +157,8 @@ def test_dag_folders_are_read_only(service, path):
 # The DAG processor runs dbt ls when it parses the transform DAG, and the task runners run dbt.
 @pytest.mark.parametrize("service", ["airflow-dag-processor", *TASK_RUNNERS])
 def test_the_dbt_project_is_read_only(service):
-    # Cosmos runs dbt in a temporary copy, so dbt needs no write into the project.
+    # Cosmos runs dbt in a temporary folder that links to the project, where dbt writes its target
+    # and logs folders: so dbt needs no write into the project.
     result = compose("exec", "-T", service, "touch", f"{DBT_PROJECT}/should-fail", check=False)
     assert result.returncode != 0
     assert "Read-only file system" in result.stderr, result.stderr

@@ -83,7 +83,8 @@ def test_every_airflow_service_shares_the_keys_and_the_database(variant):
 
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_airflow_services_mount_the_dag_folders_and_the_dbt_project_read_only(variant):
-    # Cosmos runs dbt in a temporary copy of the project, so dbt writes nothing into the checkout.
+    # Cosmos runs dbt in a temporary folder that links to the project, where dbt writes its target
+    # and logs folders: so dbt writes nothing into the checkout.
     for name, service in airflow_services(variant).items():
         mounts = {v["target"]: v for v in service["volumes"]}
         for folder in ("/opt/agoranomos/dags", "/opt/agoranomos/extensions/dags"):

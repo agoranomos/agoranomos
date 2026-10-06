@@ -1,6 +1,6 @@
 # The dbt project of Agoranomos (ADR-0005). Airflow runs it through Cosmos, in the DAG
 # agoranomos_demo_transform, as the transformer role. The project is mounted read-only: Cosmos runs
-# dbt in a temporary copy, where dbt writes its target and logs folders.
+# dbt in a temporary folder that links to the project, where dbt writes its target and logs folders.
 name: agoranomos
 version: "0.1.0"
 config-version: 2
