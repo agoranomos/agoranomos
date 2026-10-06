@@ -472,6 +472,67 @@ def test_the_task_helper_gives_each_task_the_sorted_tasks_after_it(monkeypatch):
     assert asked == [("GET", "/api/v2/dags/a_dag/tasks")]
 
 
+def fake_runs_api(monkeypatch, runs, queued_events=0):
+    """Make the API of Airflow answer for the runs of a DAG as Airflow 3.3.2 does: the runs in the
+    states that state lists (any state without it), the oldest first unless order_by says
+    otherwise, 50 to a page unless limit says otherwise and at most 100, with the number of every
+    run that matches in total_entries; and queued_events events that wait for a run. Each run is a
+    state; the fake records the queries."""
+    asked = []
+
+    def fake_http_json(method, url, body=None, headers=None, timeout=30):
+        parts = urllib.parse.urlsplit(url)
+        query = urllib.parse.parse_qs(parts.query)
+        asked.append((parts.path, query))
+        if parts.path.endswith("/assets/queuedEvents"):
+            events = [{"dag_id": "a_dag", "asset_id": 7}] * queued_events
+            return 200, {"queued_events": events, "total_entries": queued_events}
+        assert (method, parts.path) == ("GET", "/api/v2/dags/a_dag/dagRuns"), url
+        found = [
+            {
+                "dag_run_id": f"run_{n:03d}",
+                "run_after": f"2026-10-06T00:{n // 60:02d}:{n % 60:02d}Z",
+                "state": state,
+            }
+            for n, state in enumerate(runs)
+            if state in query.get("state", [state])
+        ]
+        newest_first = query.get("order_by") == ["-run_after"]
+        found.sort(key=lambda run: run["run_after"], reverse=newest_first)
+        page = found[: min(int(query.get("limit", ["50"])[0]), 100)]
+        return 200, {"dag_runs": page, "total_entries": len(found)}
+
+    monkeypatch.setattr(airflow_api, "http_json", fake_http_json)
+    return asked
+
+
+def test_the_run_count_is_the_total_of_the_api_and_not_the_size_of_a_page(monkeypatch):
+    # Airflow keeps every run, also after ./agoranomos down: 120 runs do not fit on one page.
+    asked = fake_runs_api(monkeypatch, ["success"] * 120)
+    assert airflow_api.run_count(URL, "a-token", "a_dag") == 120
+    [(_, query)] = asked
+    assert (query["order_by"], query["limit"]) == (["-run_after"], ["1"])
+
+
+@pytest.mark.parametrize(
+    ("runs", "queued_events", "busy"),
+    [
+        pytest.param(["success"] * 120 + ["running"], 0, True, id="the-newest-runs"),
+        pytest.param(["queued"] + ["success"] * 120, 0, True, id="an-old-queued-run"),
+        pytest.param(["success", "failed"] * 60, 1, True, id="an-event-waits"),
+        pytest.param(["success", "failed"] * 60, 0, False, id="idle"),
+    ],
+)
+def test_a_dag_is_busy_with_a_run_queued_or_running_or_an_event_that_waits(
+    monkeypatch, runs, queued_events, busy
+):
+    asked = fake_runs_api(monkeypatch, runs, queued_events)
+    assert airflow_api.is_busy(URL, "a-token", "a_dag") is busy
+    for path, query in asked:
+        if path.endswith("/dagRuns"):
+            assert (query["order_by"], query["limit"]) == (["-run_after"], ["1"]), query
+
+
 # The value of every Variable that the fake API below holds: a Variable can hold a secret.
 VARIABLE_VALUE = "a-value-of-a-variable-that-must-stay-out-of-the-report"
 
