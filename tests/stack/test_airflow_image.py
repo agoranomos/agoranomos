@@ -4,11 +4,12 @@ The checks of the rendered Compose files need no running stack; the checks insid
 They print versions and names, never the environment, which holds secrets.
 """
 
+import json
 import re
 
 import pytest
 from services import LONG_RUNNING, airflow_services
-from stack_helpers import FILES, REPO_ROOT, compose
+from stack_helpers import FILES, REPO_ROOT, NamesOnly, compose, docker
 
 IMAGE = "agoranomos-airflow:local"
 DBT = "/opt/airflow/dbt_venv/bin/dbt"
@@ -25,6 +26,27 @@ DLT_PROVIDERS = {"PROVIDERS__ENABLE_AIRFLOW_SECRETS": "false"}
 USERS = [
     s for s in ("airflow-dag-processor", "airflow-scheduler", "airflow-worker") if s in LONG_RUNNING
 ]
+# dlt builds its configuration providers in every process that reads its configuration, a task
+# included, and adds the one that reads Airflow Variables when its setting enable_airflow_secrets
+# is on (dlt 1.30.0, dlt/common/configuration/specs/config_providers_context.py). It needs no task
+# for that, only a Variable.get that works, which a process in these containers has through the
+# metadata database: so this probe, a plain process, gets what a task gets. It prints the names of
+# the providers and the value of the setting.
+DLT_PROBE = """
+import json
+
+import dlt
+from dlt.common.configuration.resolve import resolve_configuration
+from dlt.common.configuration.specs.config_providers_context import ConfigProvidersConfiguration
+
+settings = resolve_configuration(ConfigProvidersConfiguration())
+names = [provider.name for provider in dlt.config.config_providers]
+print(json.dumps({"providers": names, "enable_airflow_secrets": settings.enable_airflow_secrets}))
+"""
+# The providers that dlt keeps: its environment variables and its two TOML files, and none that
+# reads Airflow Variables. A provider that a dlt update adds fails the test, so that someone reads
+# what it reads.
+DLT_PROVIDER_NAMES = ["Environment Variables", "secrets.toml", "config.toml"]
 
 
 def pinned(name):
@@ -49,6 +71,21 @@ def versions(service, python, *packages):
     code = "import importlib.metadata as m, sys; print(*(m.version(p) for p in sys.argv[1:]))"
     result = compose("exec", "-T", service, python, "-c", code, *packages)
     return dict(zip(packages, result.stdout.split(), strict=True))
+
+
+def image_environment():
+    """The variables that the image itself sets, as docker image inspect shows them: apart from
+    those that Compose gives a container. They hold no secret, and the dict prints its names
+    only."""
+    result = docker("image", "inspect", IMAGE, "--format", "{{json .Config.Env}}", check=False)
+    # pytest rewrites the assertions of test modules only, so this one carries its own message.
+    assert result.returncode == 0, f"docker image inspect {IMAGE} exited with {result.returncode}"
+    return NamesOnly(item.partition("=")[::2] for item in json.loads(result.stdout))
+
+
+def missing(found, wanted):
+    """The names of the wanted variables that found does not hold with their values."""
+    return sorted(name for name, value in wanted.items() if found.get(name) != value)
 
 
 @pytest.mark.parametrize("variant", sorted(FILES))
@@ -123,3 +160,26 @@ def test_the_running_containers_have_telemetry_off(service):
 def test_the_running_containers_keep_dlt_away_from_airflow_variables(service):
     for name, value in DLT_PROVIDERS.items():
         assert compose("exec", "-T", service, "printenv", name).stdout.strip() == value, name
+
+
+def test_the_image_itself_turns_telemetry_off():
+    # A container gets the same variables from compose.yaml, so only the image shows that the
+    # Dockerfile sets them.
+    wrong = missing(image_environment(), TELEMETRY)
+    assert not wrong, f"the image {IMAGE} does not set {wrong} as the Dockerfile does"
+
+
+def test_the_image_itself_keeps_dlt_away_from_airflow_variables():
+    wrong = missing(image_environment(), DLT_PROVIDERS)
+    assert not wrong, f"the image {IMAGE} does not set {wrong} as the Dockerfile does"
+
+
+@pytest.mark.parametrize("service", USERS)
+def test_dlt_itself_builds_no_provider_that_reads_airflow_variables(service):
+    # The pins above check the name and the value of the switch. This asks dlt what it builds: if
+    # an update of dlt renamed or moved the switch, the provider would be back, and this would fail.
+    result = compose("exec", "-T", service, "python", "-c", DLT_PROBE, check=False)
+    assert result.returncode == 0, f"the probe of dlt exited with {result.returncode}"
+    found = json.loads(result.stdout.strip().splitlines()[-1])
+    assert found["enable_airflow_secrets"] is False, "dlt has enable_airflow_secrets on"
+    assert found["providers"] == DLT_PROVIDER_NAMES, f"dlt has the providers {found['providers']}"

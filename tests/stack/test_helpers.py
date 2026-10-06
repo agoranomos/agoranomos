@@ -404,6 +404,15 @@ def test_the_asset_helper_returns_the_newest_event_first(monkeypatch):
     assert airflow_api.asset_events(URL, "a-token", ASSET, source_dag_id="a_dag") == events[::-1]
 
 
+def test_the_asset_helper_takes_a_full_page_that_holds_every_event(monkeypatch):
+    # A page can be full and still hold every event: total_entries tells, not the size of the page.
+    events = runs_of("a_dag", airflow_api.EVENTS_PER_PAGE)
+    fake_asset_events_api(monkeypatch, events)
+    found = airflow_api.asset_events(URL, "a-token", ASSET, source_dag_id="a_dag")
+    assert len(found) == airflow_api.EVENTS_PER_PAGE
+    assert found == events[::-1]
+
+
 def test_the_asset_helper_fails_when_the_events_do_not_fit_on_one_page(monkeypatch):
     # A page that the limit cut would hide events: the helper fails, and says why.
     fake_asset_events_api(monkeypatch, runs_of("a_dag", 150))

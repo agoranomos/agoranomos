@@ -22,7 +22,9 @@ END = date(2026, 9, 27)
 class StandInPipeline:
     """What the stand-in of dlt.pipeline() returns: it keeps its options and, for each run, the rows
     that it got and whether its working folder was there. Like dlt, it counts the rows of each
-    table in the trace of its last run, the state of the pipeline included."""
+    table in the trace of its last run, the state of the pipeline included. Its count for the
+    table is one less than the rows that it got, so that a test can tell the count of dlt from a
+    count that the module makes itself."""
 
     def __init__(self, options):
         self.options = options
@@ -32,7 +34,7 @@ class StandInPipeline:
     def run(self, data):
         rows = list(data)
         self.runs.append((rows, Path(self.options["pipelines_dir"]).is_dir()))
-        counts = {"ad_stats_daily": len(rows), "_dlt_pipeline_state": 1}
+        counts = {"ad_stats_daily": len(rows) - 1, "_dlt_pipeline_state": 1}
         self.last_trace = types.SimpleNamespace(
             last_normalize_info=types.SimpleNamespace(row_counts=counts)
         )
@@ -109,14 +111,32 @@ def test_the_load_takes_eight_weeks_up_to_the_day_into_raw_demo_as_the_loader_ro
 
 def test_the_load_logs_how_many_rows_of_which_days_it_loaded(demo_source, caplog):
     # The log of the task says what the load did, in counts and dates, which hold no secret. The
-    # count is the one that dlt reports for the table.
+    # count is the one that dlt reports for the table: the stand-in reports 167 of the 168 rows
+    # that it got, and a line that counted the rows itself would say 168.
     module, _, _ = demo_source
     with caplog.at_level(logging.INFO, logger=module.__name__):
         module.load(END)
     assert [record.getMessage() for record in caplog.records] == [
-        "Loaded 168 rows of 2026-08-03 to 2026-09-27 into raw_demo.ad_stats_daily"
+        "Loaded 167 rows of 2026-08-03 to 2026-09-27 into raw_demo.ad_stats_daily"
     ]
     assert "a-password-for-the-test" not in caplog.text
+
+
+def test_a_load_that_fails_logs_no_rows_as_loaded(demo_source, caplog, monkeypatch):
+    # The line follows the load: when dlt raises, the error fails the task, and the log does not
+    # say that anything was loaded.
+    module, _, _ = demo_source
+
+    def run(self, data):
+        raise RuntimeError("the destination refused the load")
+
+    monkeypatch.setattr(StandInPipeline, "run", run)
+    with (
+        caplog.at_level(logging.INFO, logger=module.__name__),
+        pytest.raises(RuntimeError, match="refused the load"),
+    ):
+        module.load(END)
+    assert not [record for record in caplog.records if record.getMessage().startswith("Loaded")]
 
 
 def test_the_rows_merge_on_their_natural_key_with_money_in_numeric_12_2(demo_source):
