@@ -9,9 +9,9 @@ import pytest
 from stack_helpers import LogEntries, Secret, SecretHeaders, http_json, wait_for
 
 FINISHED = ("success", "failed")
-# The most events that the API of Airflow gives on one page ([api] maximum_page_limit, 100 by
+# The most items that the API of Airflow gives on one page ([api] maximum_page_limit, 100 by
 # default in Airflow 3.3.2).
-EVENTS_PER_PAGE = 100
+PER_PAGE = 100
 
 
 def api(airflow_url, token, method, path, body=None, headers=None):
@@ -105,18 +105,24 @@ def asset_events(airflow_url, token, uri, **filters):
     would be missing once there are more. So the helper asks for the newest first, as many as one
     page can hold, and fails when total_entries says that there are more than the page holds,
     rather than return a part of them. Ask for the event of one run with source_run_id.
+
+    The API lists only the active assets unless it is told otherwise. An asset that a task adds to
+    an alias as it runs, as Cosmos does, becomes active only at the next check of the scheduler,
+    up to [scheduler] parsing_cleanup_interval (60 seconds by default) after its first event. So
+    the helper asks for every asset, and fails unless exactly one has the URI.
     """
-    status, body = api(airflow_url, token, "GET", f"/api/v2/assets?uri_pattern={quote(uri)}")
+    path = f"/api/v2/assets?uri_pattern={quote(uri)}&only_active=false"
+    status, body = api(airflow_url, token, "GET", path)
     assert status == 200, body
-    matching = [asset for asset in body["assets"] if asset["uri"] == uri]
-    assert matching, f"Airflow has no asset {uri}"
+    matching = [asset["id"] for asset in body["assets"] if asset["uri"] == uri]
+    assert len(matching) == 1, f"Airflow has {len(matching)} assets with the URI {uri}"
     query = "&".join(
         f"{key}={quote(str(value))}"
         for key, value in {
-            "asset_id": matching[0]["id"],
+            "asset_id": matching[0],
             **filters,
             "order_by": "-timestamp",
-            "limit": EVENTS_PER_PAGE,
+            "limit": PER_PAGE,
         }.items()
     )
     status, body = api(airflow_url, token, "GET", f"/api/v2/assets/events?{query}")
@@ -128,3 +134,27 @@ def asset_events(airflow_url, token, uri, **filters):
         f"holds {len(events)}: narrow the filters, for example with source_run_id"
     )
     return events
+
+
+def variable_names(airflow_url, token, prefix):
+    """The names of the Airflow Variables whose names start with prefix, sorted: names, never
+    values, as a Variable can hold a secret.
+
+    The API matches the prefix with LIKE, where _ stands for any letter, so the names are checked
+    again here. Like asset_events, the helper fails when total_entries says that there are more
+    Variables than one page holds. The answer, with the values, is dropped before any check.
+    """
+    query = f"variable_key_prefix_pattern={quote(prefix)}&order_by=key&limit={PER_PAGE}"
+    status, body = api(airflow_url, token, "GET", f"/api/v2/variables?{query}")
+    names, total = (
+        ([item["key"] for item in body["variables"]], body["total_entries"])
+        if status == 200
+        else (None, None)
+    )
+    del body
+    # pytest rewrites the assertions of test modules only, so these carry their own messages.
+    assert status == 200, f"GET /api/v2/variables answered HTTP {status}"
+    assert total <= len(names), (
+        f"Airflow has {total} Variables that start with {prefix!r}, and one page holds {len(names)}"
+    )
+    return sorted(name for name in names if name.startswith(prefix))
