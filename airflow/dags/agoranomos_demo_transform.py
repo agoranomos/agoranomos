@@ -5,7 +5,9 @@ the staging model stg_demo__ad_stats_daily and then the mart marts.ad_spend_dail
 its tests, and a failed test of the staging model keeps the mart as it was. Each successful run of
 agoranomos_demo_load updates the asset of the raw table, and that starts this DAG. A repeat is
 safe: dbt rebuilds the models. The DAG starts paused, and a load starts it only while it is
-unpaused: unpause it in the Airflow UI before you trigger the load, or trigger it there yourself.
+unpaused. With the demo profile, the one-shot demo-init job unpauses both demo DAGs on the first
+start and triggers the load; without it, unpause this DAG in the Airflow UI before you trigger the
+load, or trigger it there yourself.
 """
 
 from __future__ import annotations

@@ -472,6 +472,85 @@ def test_the_task_helper_gives_each_task_the_sorted_tasks_after_it(monkeypatch):
     assert asked == [("GET", "/api/v2/dags/a_dag/tasks")]
 
 
+def fake_runs_api(monkeypatch, runs, queued_events=0):
+    """Make the API of Airflow answer for the runs of a DAG as Airflow 3.3.2 does: the runs in the
+    states that state lists and of the types that run_type lists (any, without them), the oldest
+    first unless order_by says otherwise, 50 to a page unless limit says otherwise and at most 100,
+    with the number of every run that matches in total_entries; and queued_events events that wait
+    for a run. Each run is a state, or a state and a run type (manual unless given); the fake
+    records the queries."""
+    asked = []
+
+    def fake_http_json(method, url, body=None, headers=None, timeout=30):
+        parts = urllib.parse.urlsplit(url)
+        query = urllib.parse.parse_qs(parts.query)
+        asked.append((parts.path, query))
+        if parts.path.endswith("/assets/queuedEvents"):
+            events = [{"dag_id": "a_dag", "asset_id": 7}] * queued_events
+            return 200, {"queued_events": events, "total_entries": queued_events}
+        assert (method, parts.path) == ("GET", "/api/v2/dags/a_dag/dagRuns"), url
+        typed = [run if isinstance(run, tuple) else (run, "manual") for run in runs]
+        found = [
+            {
+                "dag_run_id": f"run_{n:03d}",
+                "run_after": f"2026-10-06T00:{n // 60:02d}:{n % 60:02d}Z",
+                "state": state,
+                "run_type": run_type,
+            }
+            for n, (state, run_type) in enumerate(typed)
+            if state in query.get("state", [state])
+            and run_type in query.get("run_type", [run_type])
+        ]
+        newest_first = query.get("order_by") == ["-run_after"]
+        found.sort(key=lambda run: run["run_after"], reverse=newest_first)
+        page = found[: min(int(query.get("limit", ["50"])[0]), 100)]
+        return 200, {"dag_runs": page, "total_entries": len(found)}
+
+    monkeypatch.setattr(airflow_api, "http_json", fake_http_json)
+    return asked
+
+
+def test_the_run_count_is_the_total_of_the_api_and_not_the_size_of_a_page(monkeypatch):
+    # Airflow keeps every run, also after ./agoranomos down: 120 runs do not fit on one page.
+    asked = fake_runs_api(monkeypatch, ["success"] * 120)
+    assert airflow_api.run_count(URL, "a-token", "a_dag") == 120
+    [(_, query)] = asked
+    assert (query["order_by"], query["limit"]) == (["-run_after"], ["1"])
+
+
+def test_the_run_count_counts_the_runs_of_the_states_and_types_that_it_names(monkeypatch):
+    runs = (
+        [("success", "asset_triggered")] * 3 + ["success"] * 120 + [("failed", "asset_triggered")]
+    )
+    asked = fake_runs_api(monkeypatch, runs)
+    found = airflow_api.run_count(
+        URL, "a-token", "a_dag", states=("success",), run_types=("asset_triggered",)
+    )
+    assert found == 3
+    [(_, query)] = asked
+    assert (query["state"], query["run_type"]) == (["success"], ["asset_triggered"])
+    assert (query["order_by"], query["limit"]) == (["-run_after"], ["1"])
+
+
+@pytest.mark.parametrize(
+    ("runs", "queued_events", "busy"),
+    [
+        pytest.param(["success"] * 120 + ["running"], 0, True, id="the-newest-runs"),
+        pytest.param(["queued"] + ["success"] * 120, 0, True, id="an-old-queued-run"),
+        pytest.param(["success", "failed"] * 60, 1, True, id="an-event-waits"),
+        pytest.param(["success", "failed"] * 60, 0, False, id="idle"),
+    ],
+)
+def test_a_dag_is_busy_with_a_run_queued_or_running_or_an_event_that_waits(
+    monkeypatch, runs, queued_events, busy
+):
+    asked = fake_runs_api(monkeypatch, runs, queued_events)
+    assert airflow_api.is_busy(URL, "a-token", "a_dag") is busy
+    for path, query in asked:
+        if path.endswith("/dagRuns"):
+            assert (query["order_by"], query["limit"]) == (["-run_after"], ["1"]), query
+
+
 # The value of every Variable that the fake API below holds: a Variable can hold a secret.
 VARIABLE_VALUE = "a-value-of-a-variable-that-must-stay-out-of-the-report"
 
@@ -1288,6 +1367,57 @@ def test_active_variant_takes_the_last_setting_as_docker_compose_does(tmp_path, 
     assert stack_helpers.active_variant() == "local"
 
 
+def write_example(tmp_path, text="COMPOSE_PROFILES=core,demo\n"):
+    """The .env.example of the checkout of write_env: where active_profiles takes its default."""
+    (tmp_path / ".env.example").write_text(text, encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("setting", "profiles"),
+    [
+        ("COMPOSE_PROFILES=core,demo", {"core", "demo"}),
+        ("COMPOSE_PROFILES=core", {"core"}),
+        ('COMPOSE_PROFILES="demo,core"', {"core", "demo"}),
+        ("COMPOSE_PROFILES='core, demo'", {"core", "demo"}),
+        ("COMPOSE_PROFILES=core,,demo,", {"core", "demo"}),
+        ("COMPOSE_PROFILES=core,demonstration", {"core", "demonstration"}),
+    ],
+)
+def test_active_profiles_follow_compose_profiles_in_env(tmp_path, monkeypatch, setting, profiles):
+    write_env(tmp_path, monkeypatch, f"COMPOSE_PROJECT_NAME=agoranomos\n{setting}\n")
+    write_example(tmp_path, "COMPOSE_PROFILES=example\n")
+    assert stack_helpers.active_profiles() == profiles
+
+
+@pytest.mark.parametrize("text", ["COMPOSE_FILE=compose.yaml\n", "COMPOSE_PROFILES=\n"])
+def test_active_profiles_are_those_of_the_example_when_env_sets_none(tmp_path, monkeypatch, text):
+    # ./agoranomos hands Compose the profiles of .env.example then, as it does without a .env.
+    write_env(tmp_path, monkeypatch, text)
+    write_example(tmp_path)
+    assert stack_helpers.active_profiles() == {"core", "demo"}
+
+
+def test_active_profiles_are_those_of_the_example_without_an_env_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(stack_helpers, "REPO_ROOT", tmp_path)
+    write_example(tmp_path)
+    assert stack_helpers.active_profiles() == {"core", "demo"}
+
+
+def test_active_profiles_take_the_last_setting_as_docker_compose_does(tmp_path, monkeypatch):
+    write_env(tmp_path, monkeypatch, "COMPOSE_PROFILES=core,demo\nCOMPOSE_PROFILES=core\n")
+    write_example(tmp_path)
+    assert stack_helpers.active_profiles() == {"core"}
+
+
+def test_the_demo_profile_adds_demo_init_to_the_one_shot_jobs():
+    # services.py takes the profiles of the .env in the checkout when it is imported; this tests
+    # the function that it calls, so the result does not depend on that file.
+    base = {"db-init", "airflow-init", "metabase-init"}
+    assert services.one_shot(demo=False) == base
+    assert services.one_shot(demo=True) == base | {"demo-init"}
+    assert services.one_shot(demo=services.DEMO) == services.ONE_SHOT
+
+
 def test_the_celery_variant_adds_the_broker_and_the_worker_to_the_long_running_services():
     # services.py takes the variant of the .env in the checkout when it is imported; this tests the
     # function that it calls, so the result does not depend on that file.
@@ -1304,7 +1434,7 @@ def test_the_celery_variant_adds_the_broker_and_the_worker_to_the_long_running_s
         "airflow-triggerer",
         "metabase",
     } <= local
-    assert {"db-init", "airflow-init", "metabase-init"} == services.ONE_SHOT
+    assert services.one_shot(demo=False) == {"db-init", "airflow-init", "metabase-init"}
     assert services.LONG_RUNNING in (local, celery)
 
 
@@ -1316,8 +1446,9 @@ def test_the_celery_variant_adds_the_worker_to_the_airflow_services():
     assert all(name.startswith("airflow-") for name in celery)
     # The literal lists of services.py agree: airflow-init is the one-shot job, and the other
     # Airflow services of the base stack run all the time.
-    assert local & services.ONE_SHOT == {"airflow-init"}
-    assert local - services.ONE_SHOT <= services.long_running("local")
+    jobs = services.one_shot(demo=True)
+    assert local & jobs == {"airflow-init"}
+    assert local - jobs <= services.long_running("local")
 
 
 def rendered_with(*names):

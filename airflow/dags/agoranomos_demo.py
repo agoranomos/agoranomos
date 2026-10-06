@@ -3,8 +3,9 @@
 agoranomos_demo_load loads eight weeks of one fictional ad account, up to yesterday (UTC), into
 raw_demo with dlt, as the loader role. Its success updates the asset of the raw table. A repeat is
 safe: dlt merges on the natural key. Run it again to add the days since the last load, up to eight
-weeks back. The DAG has no schedule and starts paused: unpause and trigger it in the Airflow UI.
-Its asset also starts agoranomos_demo_transform, once that DAG is unpaused.
+weeks back. Its asset also starts agoranomos_demo_transform, once that DAG is unpaused. The DAG has
+no schedule and starts paused. With the demo profile, the one-shot demo-init job unpauses both demo
+DAGs on the first start and triggers this one; without it, unpause and trigger it in the Airflow UI.
 """
 
 from __future__ import annotations

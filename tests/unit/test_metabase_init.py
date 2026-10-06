@@ -41,8 +41,22 @@ SECRETS = {
 
 
 def leaked(text: str, secrets: dict[str, str] = SECRETS) -> list[str]:
-    """The labels of the secrets that are in the text."""
-    return [label for label, value in secrets.items() if value in text]
+    """The labels of the secrets that are in the text, as they are or as JSON writes them inside a
+    string, where a quote and a backslash are escaped: the stand-in echoes a request as JSON."""
+    return [
+        label
+        for label, value in secrets.items()
+        if value in text or json.dumps(value)[1:-1] in text
+    ]
+
+
+def test_the_scan_finds_a_secret_in_the_json_of_an_echo():
+    # JSON escapes a quote and a backslash, so a password with one would hide from a scan of the
+    # value as it is in what the stand-in echoes.
+    secrets = {"a password with a quote": 'pass"word', "one with a backslash": "pass\\word"}
+    echo = json.dumps({"body": {"password": 'pass"word', "other": "pass\\word"}})
+    assert not any(value in echo for value in secrets.values())
+    assert leaked(echo, secrets) == ["a password with a quote", "one with a backslash"]
 
 
 class FakeMetabase:
@@ -313,6 +327,34 @@ def test_a_failing_call_names_the_step_and_the_status_and_prints_no_secret(
     assert leaked(output.out + output.err) == []
 
 
+@pytest.mark.parametrize(
+    ("method", "path", "after_first_start"),
+    [
+        pytest.param("POST", "/api/setup", False, id="setup"),
+        pytest.param("POST", "/api/session", True, id="sign-in"),
+        pytest.param("POST", "/api/database", False, id="connect"),
+    ],
+)
+def test_an_answer_of_an_unexpected_shape_ends_in_one_line(
+    metabase, capsys, method, path, after_first_start
+):
+    # A success status with an echo of the request, the setup token and a password in it: the job
+    # looks for an id that is not there. The line names the class of the error, never the answer.
+    if after_first_start:
+        assert mi.main(env_for(metabase)) == 0
+        capsys.readouterr()
+    metabase.failures[(method, path)] = 200
+    assert mi.main(env_for(metabase)) == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "Traceback" not in output.err
+    assert output.err.splitlines() == [
+        "metabase-init: an answer of Metabase had an unexpected shape (KeyError). "
+        "See ./agoranomos logs metabase."
+    ]
+    assert leaked(output.err) == []
+
+
 def test_a_failing_call_is_an_error_with_the_step_the_status_and_a_fixed_hint_only(metabase):
     metabase.failures[("GET", "/api/database")] = 503
     client = mi.Metabase(metabase.url)
@@ -321,6 +363,56 @@ def test_a_failing_call_is_an_error_with_the_step_the_status_and_a_fixed_hint_on
     assert str(raised.value) == (
         "GET /api/database failed with HTTP 503. See ./agoranomos logs metabase."
     )
+
+
+def test_a_call_that_may_find_nothing_gives_none_for_a_404_only(metabase):
+    # demo-init waits for the DAGs of Airflow this way: a 404 means not there yet.
+    client = mi.Metabase(metabase.url)
+    client.session = "session-from-login"
+    assert client.call("GET", "/api/not-there", missing_ok=True) is None
+    metabase.failures[("GET", "/api/not-there")] = 403
+    with pytest.raises(mi.SetupError, match=r"^GET /api/not-there failed with HTTP 403\. "):
+        client.call("GET", "/api/not-there", missing_ok=True)
+
+
+def test_a_client_of_another_api_ends_a_failure_with_its_own_hint(metabase):
+    class Other(mi.ApiClient):
+        logs_hint = "See ./agoranomos logs another-service."
+
+    metabase.failures[("GET", "/api/database")] = 500
+    with pytest.raises(mi.SetupError) as raised:
+        Other(metabase.url).call("GET", "/api/database")
+    assert str(raised.value) == (
+        "GET /api/database failed with HTTP 500. See ./agoranomos logs another-service."
+    )
+    with pytest.raises(mi.SetupError) as raised:
+        Other(f"http://127.0.0.1:{free_port()}", timeout=1).send("GET", "/api/database")
+    assert str(raised.value) == (
+        "GET /api/database failed: URLError (ConnectionRefusedError). "
+        "See ./agoranomos logs another-service."
+    )
+
+
+@pytest.mark.parametrize(
+    ("response", "items"),
+    [
+        pytest.param({"data": [{"id": 1}], "total": 1}, [{"id": 1}], id="object"),
+        pytest.param([{"id": 1}], [{"id": 1}], id="bare"),
+        pytest.param({"total": 0}, [], id="object-without-data"),
+    ],
+)
+def test_a_list_comes_bare_or_as_the_data_of_an_object(response, items):
+    assert mi.items_of(response) == items
+
+
+def test_the_warehouse_can_be_found_without_a_warning(capsys):
+    # demo-init uses the connection that metabase-init keeps up to date, whose log names it.
+    config = mi.Config.from_env({**ENV, "METABASE_URL": "http://metabase:3000"})
+    databases = [connection(7, "Copy"), connection(3, "Mine")]
+    assert mi.find_warehouse(databases, config, warn=False)["id"] == 3
+    assert capsys.readouterr().err == ""
+    assert mi.find_warehouse(databases, config)["id"] == 3
+    assert "ids 3, 7" in capsys.readouterr().err
 
 
 WAREHOUSE_HINT = (

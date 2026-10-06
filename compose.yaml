@@ -1,7 +1,8 @@
 # The Agoranomos stack. Start it with ./agoranomos up (docs/reference/command-line.md).
 # Settings and secrets come from .env, which ./agoranomos init creates from .env.example; without it,
 # docker compose stops and asks for ./agoranomos init. .env also sets COMPOSE_PROFILES: core is the whole
-# stack in local mode (ADR-0011). Images are pinned by tag and digest, and Renovate updates them.
+# stack in local mode (ADR-0011), and demo adds the demo-init job. Images are pinned by tag and digest,
+# and Renovate updates them.
 # Airflow runs on an image of its own, built from airflow/Dockerfile, with the LocalExecutor: the
 # scheduler runs the tasks. compose.celery.yaml adds a broker and a separate worker (CeleryExecutor);
 # select it with COMPOSE_FILE in .env (ADR-0015).
@@ -371,6 +372,42 @@ services:
     depends_on:
       metabase:
         condition: service_healthy
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+  # Makes the demo ready on every start (the demo profile, which .env turns on by default): it runs the
+  # demo pipeline once, then syncs the warehouse in Metabase and creates the demo collection, its
+  # questions and its dashboard. It holds the passwords of both admins, which no Airflow task gets.
+  # COMPOSE_PROFILES=core in .env turns the demo off.
+  demo-init:
+    image: python:3.13.16-slim-trixie@sha256:3dd7cc108ec1493442514f5c2a871af6af0ec31d768ff6e378a93340c3b3db5f
+    profiles: [demo]
+    restart: "no"
+    user: "65534:65534"
+    command: ["python", "/opt/agoranomos/metabase/demo_init.py"]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      AIRFLOW_URL: http://airflow-apiserver:8080
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?run ./agoranomos init}
+      METABASE_URL: http://metabase:3000
+      METABASE_ADMIN_EMAIL: ${AGORANOMOS_ADMIN_EMAIL:-admin@example.com}
+      METABASE_ADMIN_PASSWORD: ${METABASE_ADMIN_PASSWORD:?run ./agoranomos init}
+      # Where the warehouse is, to find its connection in Metabase; no password.
+      WAREHOUSE_HOST: warehouse-db
+      WAREHOUSE_PORT: "5432"
+      WAREHOUSE_DB: warehouse
+      WAREHOUSE_USER: metabase_reader
+    volumes:
+      - ./metabase:/opt/agoranomos/metabase:ro
+    depends_on:
+      airflow-apiserver:
+        condition: service_healthy
+      airflow-scheduler:
+        condition: service_healthy
+      airflow-dag-processor:
+        condition: service_healthy
+      metabase-init:
+        condition: service_completed_successfully
     security_opt: ["no-new-privileges:true"]
     logging: *logging
 

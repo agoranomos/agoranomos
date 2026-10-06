@@ -8,7 +8,7 @@ copyright = "Copyright &copy; 2026 Andrei Gromov and Agoranomos contributors. Ap
 nav = [
   { "Home" = "index.md" },
   { "Tutorials" = ["tutorials/index.md"] },
-  { "How-to guides" = ["how-to/index.md"] },
+  { "How-to guides" = ["how-to/index.md", { "See the demo" = "how-to/see-the-demo.md" }] },
   { "Reference" = [
     "reference/index.md",
     { "Command line" = "reference/command-line.md" },

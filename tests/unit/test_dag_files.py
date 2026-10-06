@@ -41,3 +41,21 @@ def test_no_dag_file_imports_another():
 def test_both_demo_dags_take_the_asset_of_the_raw_table_from_the_shared_package():
     for name in ("agoranomos_demo.py", "agoranomos_demo_transform.py"):
         assert ("agoranomos_pipelines.assets", ["RAW_DEMO"]) in imports(DAGS / name), name
+
+
+def test_the_demo_dags_start_paused():
+    # Without the demo profile no job unpauses the demo DAGs, and the docs say that they stay
+    # paused: Airflow pauses a new DAG (compose.yaml says so too), unless the DAG says otherwise.
+    for name in ("agoranomos_demo.py", "agoranomos_demo_transform.py"):
+        tree = ast.parse((DAGS / name).read_text(encoding="utf-8"))
+        overrides = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.keyword) and node.arg == "is_paused_upon_creation"
+        ]
+        unpaused = [
+            node
+            for node in overrides
+            if not (isinstance(node.value, ast.Constant) and node.value.value is True)
+        ]
+        assert not unpaused, f"{name} sets is_paused_upon_creation to something other than True"

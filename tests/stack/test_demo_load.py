@@ -12,7 +12,12 @@ from datetime import date, datetime, timedelta
 import pytest
 from agoranomos_pipelines.demo_data import CAMPAIGNS, DAYS, rows
 from airflow_api import asset_events, run_dag, task_instances, task_log, wait_for_dag
+from services import DEMO
 from stack_helpers import leaked, secrets, totals, warehouse_output
+
+pytestmark = pytest.mark.skipif(
+    not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
+)
 
 LOAD = "agoranomos_demo_load"
 RAW_ASSET = "postgres://warehouse-db:5432/warehouse/raw_demo/ad_stats_daily"

@@ -54,7 +54,7 @@ uv run pytest tests/stack    # the stack tests, against the running stack
 ./agoranomos down            # stop it; the data stays
 ```
 
-CI runs the same stack tests for every pull request that changes the stack. The stack has two variants of Airflow: the LocalExecutor by default, and the CeleryExecutor with a broker and a worker ([ADR-0015](docs/adr/0015-run-localexecutor-by-default.md)). The stack tests follow the variant that `.env` selects. To test the Celery variant, set `COMPOSE_FILE=compose.yaml:compose.celery.yaml` in `.env` before `./agoranomos up`; CI tests both on pushes to `main`.
+CI runs the same stack tests for every pull request that changes the stack. The stack has two variants of Airflow: the LocalExecutor by default, and the CeleryExecutor with a broker and a worker ([ADR-0015](docs/adr/0015-run-localexecutor-by-default.md)). The stack tests follow the variant that `.env` selects, and the tests of the demo skip when `COMPOSE_PROFILES` in `.env` does not list `demo`. To test the Celery variant, set `COMPOSE_FILE=compose.yaml:compose.celery.yaml` in `.env` before `./agoranomos up`; CI tests both on pushes to `main`.
 
 ## Make a change
 

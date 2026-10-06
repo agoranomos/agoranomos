@@ -68,6 +68,32 @@ def dag_runs(airflow_url, token, dag_id, limit=20):
     return body["dag_runs"]
 
 
+def run_count(airflow_url, token, dag_id, states=(), run_types=()):
+    """How many runs a DAG has in the states and of the run types (any, when none are given):
+    total_entries, which counts them all. Airflow keeps every run, also after ./agoranomos down,
+    so the runs can fill a page, and its length would count no more than the page holds."""
+    query = "&".join(
+        [
+            *(f"state={state}" for state in states),
+            *(f"run_type={run_type}" for run_type in run_types),
+            "order_by=-run_after",
+            "limit=1",
+        ]
+    )
+    status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}/dagRuns?{query}")
+    assert status == 200, body
+    return body["total_entries"]
+
+
+def is_busy(airflow_url, token, dag_id):
+    """Whether a DAG has a run queued or running, or an asset event that waits for a run."""
+    if run_count(airflow_url, token, dag_id, states=("queued", "running")):
+        return True
+    status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}/assets/queuedEvents")
+    assert status == 200, body
+    return body["total_entries"] > 0
+
+
 def downstream_task_ids(airflow_url, token, dag_id):
     """The tasks of the latest version of a DAG, each with the sorted ids of the tasks that run
     after it: the order of the tasks, as the DAG declares it."""

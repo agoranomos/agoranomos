@@ -68,7 +68,7 @@ dlt takes care of incremental loading, schema evolution, merging and name normal
 * **Explicit retries.** How failed requests are retried is set explicitly, not left to library defaults.
 * **Loud failures.** If an account fails, the run fails or raises an alert that lists the affected accounts and the original API error.
 
-The planned sources are ad platform APIs (for example Google, Meta, TikTok, Yandex and VK), GA4, CRM systems and files. A demo source needs no keys: it generates eight weeks of statistics of one fictional ad account with three campaigns, up to yesterday, and the DAG `agoranomos_demo_load` loads them into `raw_demo` as the `loader` role. Demo data for more platforms is planned.
+The planned sources are ad platform APIs (for example Google, Meta, TikTok, Yandex and VK), GA4, CRM systems and files. A demo source needs no keys: it generates eight weeks of statistics of one fictional ad account with three campaigns, up to yesterday, and the DAG `agoranomos_demo_load` loads them into `raw_demo` as the `loader` role. On the first start, `demo-init` runs it. Demo data for more platforms is planned.
 
 Decision record: [ADR-0004: Ingest data with dlt](../adr/0004-ingest-with-dlt.md).
 
@@ -117,7 +117,7 @@ Decision records: [ADR-0002: Orchestrate with Apache Airflow 3](../adr/0002-orch
 
 ## Explore: Metabase
 
-Metabase OSS reads only the `marts` schema, through the `metabase_reader` role. It comes with ready-made dashboards, metrics and a glossary. A one-shot init job sets Metabase up on first start through its API: it connects the warehouse and creates collections and dashboards from code. The built-in MCP server (available since Metabase 0.60) stays off until the permissions of AI access are decided in an ADR, before the AI layer ships.
+Metabase OSS reads only the `marts` schema, through the `metabase_reader` role. It comes with ready-made dashboards, metrics and a glossary. Two one-shot jobs set Metabase up through its API: `metabase-init` creates the admin and connects the warehouse, and, with the demo profile, `demo-init` creates the demo collection, its questions and its dashboard from code after it runs the demo pipeline once ([See the demo](../how-to/see-the-demo.md)). The built-in MCP server (available since Metabase 0.60) stays off until the permissions of AI access are decided in an ADR, before the AI layer ships.
 
 Decision record: [ADR-0006: Use Metabase as the BI layer](../adr/0006-metabase-as-bi.md).
 
@@ -147,6 +147,7 @@ Decision records: [ADR-0007: Give AI clients least-privilege access through MCP]
 The stack runs as one Docker Compose project, split into profiles so that you start only what you need:
 
 * `core`: both PostgreSQL instances, Airflow and Metabase, plus the one-shot jobs that initialize them (database migrations, users and the first Metabase setup). The CeleryExecutor variant of Airflow adds the broker and a worker to it.
+* `demo`: the one-shot `demo-init` job, which makes the demo ready on the first start; `.env` turns it on by default ([See the demo](../how-to/see-the-demo.md)).
 * `ai`: one container with the Airflow, Toolbox and dbt MCP servers, reached over stdio with `docker exec`.
 * `flower`: Celery monitoring, for the CeleryExecutor variant only.
 

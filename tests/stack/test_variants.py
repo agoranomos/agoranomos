@@ -15,11 +15,14 @@ from typing import Any
 
 import pytest
 from services import BASE_AIRFLOW, airflow_services
-from stack_helpers import FILES, REPO_ROOT, NamesOnly, rendered, secrets
+from stack_helpers import FILES, REPO_ROOT, NamesOnly, compose, rendered, secrets
 
 EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
 CELERY_ONLY = {"broker", "airflow-worker"}
 METABASE = {"metabase", "metabase-init"}
+# The settings of metabase-init and demo-init that say where the warehouse is: demo-init finds the
+# connection that metabase-init made by them.
+WAREHOUSE_ADDRESS = ("WAREHOUSE_HOST", "WAREHOUSE_PORT", "WAREHOUSE_DB", "WAREHOUSE_USER")
 VARIANTS = sorted(FILES)
 # The settings of .env that hold the passwords of the warehouse roles of the pipelines.
 WAREHOUSE_PASSWORDS = ("WAREHOUSE_LOADER_PASSWORD", "WAREHOUSE_TRANSFORMER_PASSWORD")
@@ -32,7 +35,8 @@ TASK_RUNNER = {"local": "airflow-scheduler", "celery": "airflow-worker"}
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_a_variant_has_the_services_it_needs(variant):
     names = set(rendered(variant))
-    assert {"warehouse-db", "platform-db", "db-init"} | BASE_AIRFLOW | METABASE <= names
+    expected = {"warehouse-db", "platform-db", "db-init", "demo-init"} | BASE_AIRFLOW | METABASE
+    assert expected <= names
     # The broker and the worker belong to the Celery variant, and to no other.
     assert (names >= CELERY_ONLY) == (variant == "celery")
     assert (CELERY_ONLY & names) == (CELERY_ONLY if variant == "celery" else set())
@@ -57,6 +61,16 @@ def test_the_local_variant_has_no_celery_settings():
         environment = service.get("environment", {})
         celery = sorted(key for key in environment if "CELERY" in key or key == "VALKEY_PASSWORD")
         assert not celery, f"{name} has Celery settings in the local variant: {celery}"
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_every_airflow_service_pauses_a_new_dag(variant):
+    # Without the demo profile no job unpauses the demo DAGs, so they stay paused, as the docs
+    # say. Airflow pauses a new DAG by default, and compose.yaml says so too: a flag, so a failed
+    # assertion may print it.
+    for name, service in airflow_services(variant).items():
+        value = service["environment"].get("AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION", "true")
+        assert str(value).lower() == "true", name
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
@@ -362,6 +376,60 @@ def test_metabase_init_keeps_the_constraints_of_a_one_shot_job(variant):
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
+def test_demo_init_has_only_what_its_job_needs(variant):
+    # Like metabase-init: nobody, no new privileges, its own folder read-only, the default network
+    # to reach Airflow and Metabase, and no port. The environment holds secrets, so the service
+    # is looked at without it, and its settings are compared by name or as flags.
+    service = {
+        key: value for key, value in rendered(variant)["demo-init"].items() if key != "environment"
+    }
+    assert service["profiles"] == ["demo"]
+    assert service["restart"] == "no"
+    assert service["user"] == "65534:65534"
+    assert service["security_opt"] == ["no-new-privileges:true"]
+    assert set(service.get("networks") or {"default": None}) == {"default"}
+    assert "ports" not in service
+    assert service["image"] == rendered(variant)["metabase-init"]["image"]
+    assert service["command"] == ["python", "/opt/agoranomos/metabase/demo_init.py"]
+    [volume] = service["volumes"]
+    assert (volume["target"], volume.get("read_only")) == ("/opt/agoranomos/metabase", True)
+    assert volume["source"] == str(REPO_ROOT / "metabase")
+    waits_for = {
+        "airflow-apiserver": "service_healthy",
+        "airflow-scheduler": "service_healthy",
+        "airflow-dag-processor": "service_healthy",
+        "metabase-init": "service_completed_successfully",
+    }
+    if variant == "celery":
+        waits_for["airflow-worker"] = "service_healthy"
+    conditions = {name: needed["condition"] for name, needed in service["depends_on"].items()}
+    assert conditions == waits_for
+    # It finds the warehouse connection by the address that metabase-init gives it.
+    environments = {
+        name: NamesOnly(
+            {key: str(value) for key, value in rendered(variant)[name]["environment"].items()}
+        )
+        for name in ("demo-init", "metabase-init")
+    }
+    same_address = all(
+        environments["demo-init"][key] == environments["metabase-init"][key]
+        for key in WAREHOUSE_ADDRESS
+    )
+    assert same_address, "demo-init and metabase-init give different addresses of the warehouse"
+    urls = {key: environments["demo-init"][key] for key in ("AIRFLOW_URL", "METABASE_URL")}
+    assert urls == {
+        "AIRFLOW_URL": "http://airflow-apiserver:8080",
+        "METABASE_URL": "http://metabase:3000",
+    }
+
+
+def test_without_the_demo_profile_there_is_no_demo_init():
+    for profiles, present in (("core", False), ("core,demo", True)):
+        result = compose("config", "--services", env={"COMPOSE_PROFILES": profiles})
+        assert ("demo-init" in result.stdout.split()) is present, profiles
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
 def test_metabase_may_not_gain_privileges(variant):
     metabase = rendered(variant)["metabase"]
     assert metabase["security_opt"] == ["no-new-privileges:true"]
@@ -371,13 +439,15 @@ def test_metabase_may_not_gain_privileges(variant):
 def test_each_metabase_service_holds_only_the_secrets_it_needs(env, variant):
     # Metabase learns the password of the warehouse from the setup job, through its API, so it has
     # no use for that password or for the one of the admin in its environment; the setup job holds
-    # the two passwords that it sends, and no key or database password. The test names settings.
+    # the two passwords that it sends, and no key or database password. demo-init signs in to
+    # Airflow and to Metabase as their admins, and to nothing else. The test names settings.
     values = secrets(env)
     assert values, "no secrets in .env: run ./agoranomos init"
     services = rendered(variant)
     needed = {
         "metabase": {"METABASE_DB_PASSWORD", "METABASE_ENCRYPTION_KEY"},
         "metabase-init": {"METABASE_ADMIN_PASSWORD", "METABASE_READER_PASSWORD"},
+        "demo-init": {"AIRFLOW_ADMIN_PASSWORD", "METABASE_ADMIN_PASSWORD"},
     }
     for name, wanted in needed.items():
         environment = [str(value) for value in services[name]["environment"].values()]

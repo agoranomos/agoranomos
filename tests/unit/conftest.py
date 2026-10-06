@@ -45,6 +45,20 @@ case "$1" in
         if [ -n "${FAKE_NO_COMPOSE:-}" ]; then exit 1; fi
         echo "${FAKE_COMPOSE_VERSION:-5.6.0}"
         ;;
+      config)
+        # docker compose config --services: the services of the active profiles. FAKE_SERVICES
+        # lists them; without it, they are the services that FAKE_PS_FILE lists. FAKE_CONFIG_EXIT
+        # makes it fail.
+        if [ -n "${FAKE_CONFIG_EXIT:-}" ]; then
+          echo "service demo-init depends on undefined service" >&2
+          exit "$FAKE_CONFIG_EXIT"
+        fi
+        if [ -n "${FAKE_SERVICES+set}" ]; then
+          for service in $FAKE_SERVICES; do printf '%s\n' "$service"; done
+        elif [ -n "${FAKE_PS_FILE:-}" ]; then
+          cut -d '|' -f 1 "$FAKE_PS_FILE"
+        fi
+        ;;
       ps)
         case " $* " in
           *" --quiet "*) printf '%s' "${FAKE_RUNNING:-}" ;;

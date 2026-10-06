@@ -8,10 +8,9 @@ import json
 
 import pytest
 from airflow_api import (
-    api,
     asset_events,
-    dag_runs,
     downstream_task_ids,
+    is_busy,
     run_dag,
     task_instances,
     task_log,
@@ -20,7 +19,12 @@ from airflow_api import (
     wait_for_dag,
     wait_for_run,
 )
+from services import DEMO
 from stack_helpers import leaked, secrets, totals, wait_for, warehouse_output
+
+pytestmark = pytest.mark.skipif(
+    not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
+)
 
 LOAD = "agoranomos_demo_load"
 TRANSFORM = "agoranomos_demo_transform"
@@ -51,16 +55,6 @@ def said(entries, text):
     return any(text in json.loads(entry).get("event", "") for entry in entries)
 
 
-def transform_is_busy(airflow_url, token):
-    """Whether a run of the transform is queued or running, or an asset event waits for one."""
-    runs = dag_runs(airflow_url, token, TRANSFORM)
-    if any(run["state"] in ("queued", "running") for run in runs):
-        return True
-    status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{TRANSFORM}/assets/queuedEvents")
-    assert status == 200, body
-    return body["total_entries"] > 0
-
-
 def assert_no_secret_in_the_logs(env, airflow_url, token, run):
     """Every try of every dbt task of the run, each entry whole: names are printed, never values.
     The log is read where it is used, so that no frame of a failed test holds it."""
@@ -86,7 +80,7 @@ def transform_run(env, airflow_url, token):
     # to the first one that waited: a later event starts no run of its own. So the load of this
     # fixture waits until the transform is idle, and its event then starts a run.
     wait_for(
-        lambda: not transform_is_busy(airflow_url, token),
+        lambda: not is_busy(airflow_url, token, TRANSFORM),
         600,
         interval=5,
         message="the runs of the transform DAG that earlier loads started did not end",

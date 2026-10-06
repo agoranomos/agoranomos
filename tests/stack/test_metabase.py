@@ -8,7 +8,8 @@ again, which the stack does on every start anyway.
 
 import pytest
 from ai_switches import readings, switches_on
-from stack_helpers import Secret, SecretHeaders, compose, http_json, leaked, psql, secrets
+from services import DEMO
+from stack_helpers import compose, http_json, leaked, psql, secrets
 
 WAREHOUSE_NAME = "Agoranomos warehouse"
 
@@ -40,26 +41,6 @@ INITIALIZE = {
 # The Anthropic key and the provider of Metabot: /api/llm does not read ai-features-enabled?, it is
 # closed only while no key is saved, and a key saved in the admin UI would open it.
 LLM_SETTINGS = ("llm-anthropic-api-key-configured?", "llm-metabot-configured?")
-
-
-@pytest.fixture(scope="session")
-def metabase_url(env):
-    return f"http://127.0.0.1:{env.get('METABASE_PORT') or '3000'}"
-
-
-@pytest.fixture(scope="session")
-def session(env, metabase_url):
-    # The password goes in the body of the request and nowhere else; a failure prints the status.
-    status, body = http_json(
-        "POST",
-        f"{metabase_url}/api/session",
-        {
-            "username": env.get("AGORANOMOS_ADMIN_EMAIL") or "admin@example.com",
-            "password": env["METABASE_ADMIN_PASSWORD"],
-        },
-    )
-    assert status == 200, f"the admin could not sign in: HTTP {status}"
-    return SecretHeaders({"X-Metabase-Session": Secret(body["id"])})
 
 
 @pytest.fixture(scope="module")
@@ -229,7 +210,19 @@ def test_the_connection_details_are_encrypted_in_the_application_database(env):
     assert not found, f"the details of the connection are saved in clear: {found}"
 
 
-@pytest.mark.parametrize("service", ["metabase", "metabase-init"])
+@pytest.mark.parametrize(
+    "service",
+    [
+        "metabase",
+        "metabase-init",
+        pytest.param(
+            "demo-init",
+            marks=pytest.mark.skipif(
+                not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
+            ),
+        ),
+    ],
+)
 def test_no_secret_is_in_the_logs(env, service):
     # The log of a container is kept, and shown by ./agoranomos logs. The names of the settings are
     # printed, never the values. The log is read where it is used, so that no frame of a failed

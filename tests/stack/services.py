@@ -1,12 +1,13 @@
-"""The services that the stack tests expect, by variant of the stack (ADR-0015).
+"""The services that the stack tests expect, by variant of the stack (ADR-0015) and by profile.
 
 The default variant runs Airflow with the LocalExecutor, inside the scheduler. The Celery variant,
 which .env selects with COMPOSE_FILE=compose.yaml:compose.celery.yaml, adds the broker and a worker.
+The demo profile, which COMPOSE_PROFILES in .env lists by default, adds the one-shot demo-init.
 """
 
 from typing import Any
 
-from stack_helpers import active_variant, rendered
+from stack_helpers import active_profiles, active_variant, rendered
 
 BASE_LONG_RUNNING = {
     "warehouse-db",
@@ -18,6 +19,7 @@ BASE_LONG_RUNNING = {
     "metabase",
 }
 CELERY_LONG_RUNNING = {"broker", "airflow-worker"}
+BASE_ONE_SHOT = {"db-init", "airflow-init", "metabase-init"}
 # The Airflow services of the base stack: airflow-init, a one-shot job, and the four that stay up.
 BASE_AIRFLOW = {
     "airflow-init",
@@ -33,6 +35,12 @@ def long_running(variant: str) -> set[str]:
     if variant == "celery":
         return BASE_LONG_RUNNING | CELERY_LONG_RUNNING
     return set(BASE_LONG_RUNNING)
+
+
+def one_shot(demo: bool) -> set[str]:
+    """The one-shot jobs: those of the base stack, and demo-init, which makes the demo ready on the
+    first start, with the demo profile."""
+    return BASE_ONE_SHOT | ({"demo-init"} if demo else set())
 
 
 def airflow_names(variant: str) -> set[str]:
@@ -59,5 +67,7 @@ def airflow_services(variant: str) -> dict[str, Any]:
     return airflow
 
 
+# Whether .env selects the demo profile: the tests of the demo skip without it.
+DEMO = "demo" in active_profiles()
 LONG_RUNNING = long_running(active_variant())
-ONE_SHOT = {"db-init", "airflow-init", "metabase-init"}
+ONE_SHOT = one_shot(DEMO)
