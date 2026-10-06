@@ -1,5 +1,5 @@
 import pytest
-from stack_helpers import WAREHOUSE_ROLES, psql, psql_over_network, warehouse
+from stack_helpers import WAREHOUSE_ROLES, leaked, psql, psql_over_network, warehouse
 
 
 def test_pg_stat_statements_is_loaded(env):
@@ -69,10 +69,23 @@ def test_each_role_of_the_warehouse_signs_in_with_its_password_and_with_no_other
     assert "password authentication failed" in wrong.stderr
 
 
+def kept_in_pg_stat_statements(
+    env: dict[str, str], service: str, superuser: str, database: str, names: tuple[str, ...]
+) -> tuple[int, str, list[str]]:
+    """Read the statements that pg_stat_statements keeps on a database server, as its superuser:
+    the exit code of psql, the error that it printed, and the names of the secrets that the
+    statements hold. The statements stay in this frame, which has ended before the test checks
+    anything; the error of this SELECT holds no secret."""
+    result = psql(
+        service, "postgres", env[superuser], database, "SELECT query FROM pg_stat_statements"
+    )
+    return result.returncode, result.stderr, leaked({n: env[n] for n in names}, result.stdout)
+
+
 def test_role_passwords_stay_out_of_pg_stat_statements(env):
     # ALTER ROLE ... PASSWORD carries the password in its text. pg_stat_statements, which is for the
     # planned Ops collection, keeps the text of utility statements unless db-init leaves them out.
-    for service, superuser, database, secrets in (
+    for service, superuser, database, names in (
         (
             "platform-db",
             "PLATFORM_POSTGRES_PASSWORD",
@@ -90,11 +103,8 @@ def test_role_passwords_stay_out_of_pg_stat_statements(env):
             ),
         ),
     ):
-        result = psql(
-            service, "postgres", env[superuser], database, "SELECT query FROM pg_stat_statements"
-        )
-        assert result.returncode == 0, result.stderr
-        kept = [key for key in secrets if env[key] in result.stdout]  # names only, never values
+        code, error, kept = kept_in_pg_stat_statements(env, service, superuser, database, names)
+        assert code == 0, error
         assert not kept, f"pg_stat_statements on {service} holds the values of {kept}"
 
 

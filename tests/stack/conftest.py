@@ -1,6 +1,6 @@
 import pytest
 import stack_helpers
-from stack_helpers import Secret, SecretHeaders, http_json, load_env
+from stack_helpers import NamesOnly, Secret, SecretHeaders, http_json, load_env
 
 
 @pytest.fixture(scope="session")
@@ -52,11 +52,24 @@ def session(env, metabase_url):
 
 
 def pytest_assertrepr_compare(op: str, left: object, right: object) -> list[str] | None:
-    """Explain a failed comparison that holds a Secret without showing it.
+    """Explain a failed comparison that holds a Secret or a NamesOnly dict without showing a value.
 
     For two strings, pytest prints a diff of their contents, and for "not in" the text that holds
-    the term: with a Secret on one side that would put its value into the report.
+    the term: with a Secret on one side that would put its value into the report. For == of two
+    dicts it prints the items that differ, values included, so a comparison with a NamesOnly dict,
+    such as a rendered service or its environment, names the keys that differ, never their values.
+    Every other comparison with a NamesOnly dict prints it with its repr, which holds names only.
     """
     if isinstance(left, Secret) or isinstance(right, Secret):
         return [f"a comparison with a Secret ({op}) failed: pytest does not show its value"]
+    if op == "==" and (isinstance(left, NamesOnly) or isinstance(right, NamesOnly)):
+        explanation = [f"a comparison with names only ({op}) failed: pytest does not show values"]
+        if isinstance(left, dict) and isinstance(right, dict):
+            differ = [key for key in left.keys() & right.keys() if left[key] != right[key]]
+            explanation += [
+                f"keys on the left only: {sorted(map(str, left.keys() - right.keys()))}",
+                f"keys on the right only: {sorted(map(str, right.keys() - left.keys()))}",
+                f"keys whose values differ: {sorted(map(str, differ))}",
+            ]
+        return explanation
     return None

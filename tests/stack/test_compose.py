@@ -2,10 +2,48 @@ import json
 import shlex
 
 from services import LONG_RUNNING, ONE_SHOT
-from stack_helpers import compose, containers, docker, job_failed, secrets
+from stack_helpers import (
+    LogEntries,
+    NamesOnly,
+    compose,
+    containers,
+    docker,
+    job_failed,
+    leaked,
+    secrets,
+)
 
 # The services that must stay on the internal data network only (no route to the internet).
 DATA_ONLY = {"warehouse-db", "platform-db", "db-init", "broker"}
+# Prints the arguments of every process of a container, from the process files.
+LISTING = "cat /proc/[0-9]*/cmdline | tr '\\0' ' '"
+
+
+def definition(container_id: str) -> LogEntries:
+    """The words of the command, the entry point and the health check of a container, as docker
+    inspect shows them to everyone who can use Docker. The definition holds the environment of the
+    container too, secrets included: its objects are read as NamesOnly dicts and the words come as
+    LogEntries, so that a frame of a failed test that holds them shows no value."""
+    [details] = json.loads(docker("inspect", container_id).stdout, object_hook=NamesOnly)
+    config = details["Config"]
+    return LogEntries(
+        [
+            details["Path"],
+            *details["Args"],
+            *(config["Cmd"] or []),
+            *(config["Entrypoint"] or []),
+            *((config.get("Healthcheck") or {}).get("Test") or []),
+        ]
+    )
+
+
+def arguments_of_the_processes(service: str, values: dict[str, str]) -> tuple[bool, list[str]]:
+    """List the arguments of every process of a running service: whether the listing ran, and the
+    names of the secrets in it. The command that reads the arguments is itself one of the processes
+    that it lists, so its own words show that the listing worked. The listing stays in this frame,
+    which has ended before the test checks anything."""
+    result = compose("exec", "-T", service, "sh", "-c", LISTING, check=False)
+    return "cat /proc/" in result.stdout, leaked(values, result.stdout)
 
 
 def test_long_running_services_are_healthy():
@@ -91,35 +129,24 @@ def test_db_init_prints_no_notices_when_it_runs_again():
 def test_no_secret_is_in_the_definition_of_a_container(env):
     # The command, the entry point and the health check of a container show in docker inspect to
     # everyone who can use Docker: a secret belongs in the environment, and never there. This looks
-    # at every container, the finished ones too, and names the settings, never their values.
+    # at every container, the finished ones too, and names the settings, never their values. The
+    # words are scanned where they are read, and the loop holds the ID of a container only.
     values = secrets(env)
     assert values, "no secrets in .env: run ./agoranomos init"
-    for service, container in containers().items():
-        [details] = json.loads(docker("inspect", container["ID"]).stdout)
-        config = details["Config"]
-        words = [
-            details["Path"],
-            *details["Args"],
-            *(config["Cmd"] or []),
-            *(config["Entrypoint"] or []),
-        ]
-        words += (config.get("Healthcheck") or {}).get("Test") or []
-        leaked = [name for name, value in values.items() if any(value in word for word in words)]
-        assert not leaked, f"{service} has the values of {leaked} in its definition"
+    ids = {service: container["ID"] for service, container in containers().items()}
+    for service, container_id in ids.items():
+        found = leaked(values, definition(container_id))
+        assert not found, f"{service} has the values of {found} in its definition"
 
 
 def test_no_secret_is_in_the_arguments_of_a_running_process(env):
     # Other users of the host, and every process in a container, can read the arguments of the
-    # processes in /proc. The command that reads them is itself one of the processes that it lists,
-    # so its own words in the output show that the listing worked. A failed assertion prints what it
-    # compares, and a listing can hold the very values that the test looks for: the assertions here
-    # hold a flag and the name of a service, never the listing.
+    # processes in /proc. A failed assertion prints what it compares, and a listing can hold the
+    # very values that the test looks for: the assertions here hold a flag and the name of a
+    # service, never the listing.
     values = secrets(env)
     assert values, "no secrets in .env: run ./agoranomos init"
-    listing = "cat /proc/[0-9]*/cmdline | tr '\\0' ' '"
     for service in sorted(LONG_RUNNING):
-        result = compose("exec", "-T", service, "sh", "-c", listing, check=False)
-        listed = "cat /proc/" in result.stdout
+        listed, found = arguments_of_the_processes(service, values)
         assert listed, f"{service}: the listing did not run"
-        leaked = [name for name, value in values.items() if value in result.stdout]
-        assert not leaked, f"a process of {service} has the values of {leaked} in its arguments"
+        assert not found, f"a process of {service} has the values of {found} in its arguments"

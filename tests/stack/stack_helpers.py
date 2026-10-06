@@ -95,15 +95,21 @@ def rendered(variant: str) -> dict[str, Any]:
     """The services of a variant, as docker compose config renders them. COMPOSE_FILE and
     COMPOSE_PROFILES are set for the call, so neither the variant nor the profiles that .env
     selects matter, and no stack has to run: every service of the variant is there, demo-init
-    too. Cached, because the Compose files do not change during a run. The environment of a
-    service holds secrets: compare names, never print values."""
-    result = compose(
-        "config",
-        "--format",
-        "json",
-        env={"COMPOSE_FILE": FILES[variant], "COMPOSE_PROFILES": "core,demo"},
-    )
-    return json.loads(result.stdout)["services"]
+    too. Cached, because the Compose files do not change during a run.
+
+    The rendered services hold secrets, so every object of the JSON becomes a NamesOnly dict, which
+    pytest prints by its names: a frame or an assertion of a failed test that holds a service, or
+    its environment, shows no value. The lists and the texts in them stay plain, so compare names,
+    and bind no name to a text that can hold a secret."""
+    return json.loads(
+        compose(
+            "config",
+            "--format",
+            "json",
+            env={"COMPOSE_FILE": FILES[variant], "COMPOSE_PROFILES": "core,demo"},
+        ).stdout,
+        object_hook=NamesOnly,
+    )["services"]
 
 
 def docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -169,8 +175,10 @@ class Secret(str):
         return "Secret('<hidden>')"
 
 
-class NamesOnly(dict[str, str]):
-    """A dict that shows its names and never its values, for what pytest prints."""
+class NamesOnly(dict[str, Any]):
+    """A dict that shows its names and never its values, for what pytest prints: its repr, which
+    pytest and pprint use for the locals and the arguments of a frame, and, through the hook of
+    conftest.py, the explanation of a failed comparison."""
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({sorted(self)})"
