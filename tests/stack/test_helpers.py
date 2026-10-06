@@ -491,8 +491,8 @@ def http_server():
 
     The paths of the local dict answers answer as their entries say: status, content type, body.
     /hangs-up closes the connection, /cut-off ends its answer in the middle of the body, and /sleeps
-    answers too late. The requests that it got are kept in server.requests as
-    (method, path, headers, body).
+    waits longer than the timeout of its test and then closes the connection without an answer.
+    The requests that it got are kept in server.requests as (method, path, headers, body).
     """
     answers = {
         "/ok": (200, "application/json", b'{"answer": [1, 2]}'),
