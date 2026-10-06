@@ -5,7 +5,7 @@ English | [Русский](README.ru.md)
 Open-source marketing BI out of the box: ad platforms → PostgreSQL warehouse → Metabase dashboards → ask anything in Claude or ChatGPT via MCP. One command. Your data stays yours.
 
 > [!WARNING]
-> **Status: pre-alpha.** Agoranomos is under active development: parts of the stack already run in local mode from the main branch, and most of it is still being built. The repository is private until v0.3. The design of the whole stack is in the [architecture overview](docs/explanation/architecture.md) and the [decision records](docs/adr/index.md). See [Status and roadmap](#status-and-roadmap).
+> **Status: pre-alpha.** Agoranomos is under active development: parts of the stack already run in local mode from the main branch, and the demo goes end to end, from a demo source to a dashboard. Most of the stack is still being built. The repository is private until v0.3. The design of the whole stack is in the [architecture overview](docs/explanation/architecture.md) and the [decision records](docs/adr/index.md). See [Status and roadmap](#status-and-roadmap).
 
 ## What it is
 
@@ -39,13 +39,13 @@ Data moves in one direction, from ad platforms to dashboards and AI clients, and
 
 ```mermaid
 flowchart TB
-    sources["<b>Sources</b><br/>ad platform APIs, GA4, CRM, files,<br/>demo data generator"]
+    sources["<b>Sources</b><br/>ad platform APIs, GA4, CRM, files,<br/>demo source (full demo generator in v0.2.0)"]
     dlt["<b>dlt</b><br/>incremental load"]
     airflow["<b>Apache Airflow</b><br/>schedules loads, dbt builds<br/>and Metabase refreshes"]
 
     subgraph warehouse["PostgreSQL warehouse"]
         direction LR
-        raw["raw_#lt;source#gt;"] -->|dbt| staging --> intermediate --> marts
+        raw["raw_#lt;source#gt;"] -->|dbt| staging --> marts
     end
 
     metabase["<b>Metabase</b><br/>dashboards, metrics, glossary"]
@@ -80,13 +80,13 @@ The design rests on a few principles:
 
 ## Status and roadmap
 
-Agoranomos is **pre-alpha**. Phase 0, the foundation, is complete: the repository has its tooling, CI, documentation skeleton and the first decision records. Phase 1, the platform, is in progress, and parts of the stack already run in local mode from the main branch. The repository is private until v0.3.
+Agoranomos is **pre-alpha**. Phase 0, the foundation, is complete: the repository has its tooling, CI, documentation skeleton and the first decision records. Phase 1, the platform, is in progress: parts of the stack already run in local mode from the main branch, and the demo goes end to end, from a demo source to a dashboard. The repository is private until v0.3.
 
 | Phase | Release | What it delivers |
 |---|---|---|
 | 0. Foundation | none | The name, repository, license and structure, the tooling (uv, ruff, prek), the CI and documentation skeletons, and the first architecture decision records. Complete. |
-| 1. Platform | v0.1.0 | A Docker Compose stack with two PostgreSQL instances, Airflow 3.3 (the LocalExecutor by default; the CeleryExecutor variant adds a Valkey broker and a separate worker) and Metabase, in local and server modes, both covered by CI (server mode adds Caddy with automatic TLS and scheduled backups); secrets initialization; preflight checks; every service healthy, with a smoke test in CI. |
-| 2. End to end on demo data | v0.2.0 | A demo source (dlt) → raw → dbt (through Cosmos) → marts → Metabase dashboards created from code. |
+| 1. Platform | v0.1.0 | A Docker Compose stack with two PostgreSQL instances, Airflow 3.3 (the LocalExecutor by default; the CeleryExecutor variant adds a Valkey broker and a separate worker) and Metabase, in local and server modes, both covered by CI (server mode adds Caddy with automatic TLS and scheduled backups); secrets initialization; preflight checks; every service healthy, with a smoke test in CI; and one path end to end on demo data: a demo source (dlt) → raw → dbt (through Cosmos) → marts → a Metabase dashboard created from code. |
+| 2. Data model on demo data | v0.2.0 | The full demo generator, with several fictional platforms; the unified model of advertising statistics in marts; and the Ops collection of dashboards about the stack itself. |
 | 3. AI layer | v0.3.0 | The four MCP servers, among them the Metabase MCP server over HTTPS with OAuth for the Claude and ChatGPT apps; database roles; a ready-made `.mcp.json`; skills for coding agents; and the guide "Talk to your data". The candidate for the first public release. |
 | 4. Real connectors | v0.4 and later | One data source per minor release, together with the unified model and FX rates. |
 | 5. Operations | v0.x | Verified restores, an upgrade runbook, and observability with elementary. |
@@ -96,7 +96,7 @@ The roadmap gives the order of the work, not dates. Versions are 0.x until the c
 
 ## Documentation
 
-The documentation is Markdown in [`docs/`](docs/), built with [Zensical](https://zensical.org/) and organized after [Diátaxis](https://diataxis.fr/): tutorials, how-to guides, reference and explanation, plus the [architecture decision records](docs/adr/index.md). English is its primary language. The README is also available in Russian, and the key pages are to follow. Start with the [architecture overview](docs/explanation/architecture.md).
+The documentation is Markdown in [`docs/`](docs/), built with [Zensical](https://zensical.org/) and organized after [Diátaxis](https://diataxis.fr/): tutorials, how-to guides, reference and explanation, plus the [architecture decision records](docs/adr/index.md). English is its primary language. The README is also available in Russian, and the key pages are to follow. Start with the [architecture overview](docs/explanation/architecture.md). To see what already runs, read [See the demo](docs/how-to/see-the-demo.md).
 
 The site will be published when the repository goes public. Until then, read it locally. You need [uv](https://docs.astral.sh/uv/):
 
