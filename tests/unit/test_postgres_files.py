@@ -36,11 +36,17 @@ def code(name: str) -> str:
     return "".join(line for line in lines if not line.startswith("--"))
 
 
-def statements(name: str) -> str:
+def normalized(name: str) -> str:
     """The file without its comments, and with each run of whitespace as one space: a statement
-    reads the same however it is indented or split over lines. Match it with re.IGNORECASE. The
-    files have no -- inside a string, where this would cut the string."""
+    reads the same however it is indented or split over lines. Match it with re.IGNORECASE, and
+    without ^ or $: a statement ends in ;. The files have no -- inside a string, where this would
+    cut the string."""
     return " ".join(re.sub(r"--[^\n]*", "", read(name)).split())
+
+
+def runs(text: str, statement: str) -> bool:
+    """Whether normalized text has the statement, in upper or lower case."""
+    return re.search(rf"\b{re.escape(statement)}", text, re.IGNORECASE) is not None
 
 
 def test_db_init_gives_psql_no_variable_but_on_error_stop():
@@ -87,29 +93,38 @@ def test_warehouse_sql_gives_a_warehouse_of_an_earlier_version_what_a_new_one_ge
     # privileges cover every table, since all are new. CI starts from a new volume, so no stack test
     # there notices if the lines that bring an existing warehouse to the same state go: an existing
     # schema keeps its owner, and its existing tables get no default privilege.
-    statements = code("warehouse.sql")
-    lines = statements.splitlines()
+    text = normalized("warehouse.sql")
     created = re.findall(
-        r"^CREATE SCHEMA IF NOT EXISTS (\w+) AUTHORIZATION (\w+);$", statements, re.MULTILINE
+        r"\bCREATE SCHEMA IF NOT EXISTS (\w+) AUTHORIZATION (\w+);", text, re.IGNORECASE
     )
     defaults = re.findall(
-        r"^ALTER DEFAULT PRIVILEGES FOR ROLE \w+ IN SCHEMA (\w+) GRANT SELECT ON TABLES TO (\w+);$",
-        statements,
-        re.MULTILINE,
+        r"\bALTER DEFAULT PRIVILEGES FOR ROLE \w+ IN SCHEMA (\w+) GRANT SELECT ON TABLES TO (\w+);",
+        text,
+        re.IGNORECASE,
     )
     # The loops below must have something to check, and every statement of each kind is in them.
+    # The first GRANT or REVOKE after ALTER DEFAULT PRIVILEGES tells a grant from a revoke.
     assert created, "warehouse.sql creates no schema with CREATE SCHEMA IF NOT EXISTS"
     assert defaults, "warehouse.sql gives no default privilege"
-    assert len(created) == statements.count("CREATE SCHEMA")
-    assert len(defaults) == len(
-        re.findall(r"^ALTER DEFAULT PRIVILEGES .* GRANT ", statements, re.MULTILINE)
+    assert len(created) == len(re.findall(r"\bCREATE SCHEMA\b", text, re.IGNORECASE)), (
+        "warehouse.sql creates a schema in a form that this test does not read"
+    )
+    kinds = re.findall(r"\bALTER DEFAULT PRIVILEGES\b[^;]*?\b(GRANT|REVOKE)\b", text, re.IGNORECASE)
+    assert len(defaults) == [kind.upper() for kind in kinds].count("GRANT"), (
+        "warehouse.sql gives a default privilege in a form that this test does not read"
     )
     for schema, owner in created:
         handover = f"ALTER SCHEMA {schema} OWNER TO {owner};"
-        assert handover in lines, f"warehouse.sql must also run {handover}"
+        assert runs(text, handover), f"warehouse.sql must also run {handover}"
     for schema, grantee in defaults:
         existing = f"GRANT SELECT ON ALL TABLES IN SCHEMA {schema} TO {grantee};"
-        assert existing in lines, f"warehouse.sql must also run {existing}"
+        assert runs(text, existing), f"warehouse.sql must also run {existing}"
+    # An earlier version of this file granted the same default privilege as postgres.
+    dropped = (
+        "ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA marts "
+        "REVOKE SELECT ON TABLES FROM metabase_reader;"
+    )
+    assert runs(text, dropped), f"warehouse.sql must also run {dropped}"
 
 
 # The attributes that warehouse.sql gives each of its roles on every start.
@@ -129,7 +144,7 @@ def test_warehouse_sql_names_every_attribute_of_its_roles_on_every_start():
     # no stack test there notices if one of these goes.
     altered = re.findall(
         r"\bALTER ROLE (\w+) WITH ((?:\w+ )+)PASSWORD %L",
-        statements("warehouse.sql"),
+        normalized("warehouse.sql"),
         re.IGNORECASE,
     )
     attributes = {role.lower(): set(words.upper().split()) for role, words in altered}

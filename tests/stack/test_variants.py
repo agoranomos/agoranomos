@@ -10,6 +10,8 @@ import json
 import subprocess
 import sys
 import threading
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from services import BASE_AIRFLOW, airflow_services
@@ -156,11 +158,26 @@ def test_the_broker_and_the_result_backend_are_set_only_where_they_are_used():
     assert not problems, "; ".join(problems)
 
 
+def strings(node: Any) -> Iterator[str]:
+    """Every key and every value of a rendered service, as strings, at any depth."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield str(key)
+            yield from strings(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from strings(item)
+    else:
+        yield str(node)
+
+
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_only_the_service_that_runs_tasks_gets_the_passwords_of_the_warehouse_roles(env, variant):
-    # Judged by value, so that a password under another name, or inside a URL, counts too. The
-    # environments hold secrets, so they are NamesOnly, which pytest prints by their names, and
-    # the messages name services and settings.
+    # Judged by value, so that a password under another name, or inside a URL, counts too, and in
+    # the whole service: the environment, the command, the entry point, the health check and the
+    # labels. The rendered services hold secrets, so the test binds no name to one, the
+    # environments are NamesOnly, which pytest prints by their names, and the messages name
+    # services and settings.
     values = secrets(env)
     passwords = {key: values.get(key) for key in WAREHOUSE_PASSWORDS}
     assert all(passwords.values()), "no passwords of the warehouse roles in .env: run init"
@@ -175,10 +192,15 @@ def test_only_the_service_that_runs_tasks_gets_the_passwords_of_the_warehouse_ro
     for key, password in passwords.items():
         holders = sorted(
             name
-            for name, environment in environments.items()
-            if any(password in value for value in environment.values())
+            for name, service in rendered(variant).items()
+            if any(password in text for text in strings(service))
         )
         assert holders == wanted, f"the value of {key} is held by {holders}, not {wanted}"
+    # warehouse.sql reads the passwords from the environment of db-init under these names.
+    db_init = environments["db-init"]
+    for key in WAREHOUSE_PASSWORDS:
+        holds_its_password = db_init.get(key) == passwords[key]
+        assert holds_its_password, f"{key} of db-init is not the password of its role"
     # Each tool gets the password of its own role. The values are secrets, so the test compares
     # them into flags, and a failed assertion prints the flag.
     runner = environments[TASK_RUNNER[variant]]
