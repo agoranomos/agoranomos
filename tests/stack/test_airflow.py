@@ -125,8 +125,8 @@ def test_a_dag_in_the_extensions_folder_runs(env, airflow_url, token):
 
 def test_the_dag_processor_reports_no_import_error(airflow_url, token):
     # The errors of the DAGs of the base package: the extensions folder belongs to the deployment.
-    # Its DAGs are waited for first, so that the DAG processor has parsed the bundle whatever ran
-    # before this test.
+    # The DAGs of the base bundle are waited for first, so that the DAG processor has parsed it,
+    # whatever ran before this test.
     for dag_id in (SELFCHECK, DEMO_LOAD):
         wait_for_dag(airflow_url, token, dag_id)
     status, body = api(airflow_url, token, "GET", "/api/v2/importErrors?bundle_name=agoranomos")

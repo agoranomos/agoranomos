@@ -37,6 +37,8 @@ Some settings are not in `.env`, because changing them is a decision and not a p
 
 The AI switches of Metabase are fixed off in `compose.yaml` until the permissions of AI access are decided ([ADR-0007](../adr/0007-ai-access-via-mcp-read-only.md)): `MB_AI_FEATURES_ENABLED`, `MB_MCP_ENABLED` and `MB_AGENT_API_ENABLED` are all `false`, which keeps the built-in MCP server, the registration of its OAuth clients and the Agent API off. The switch in Admin > AI has no effect while they are. Changing it saves a value that would apply if a variable were removed, so leave it alone.
 
+dlt reads no settings or secrets from Airflow Variables: `PROVIDERS__ENABLE_AIRFLOW_SECRETS=false` is set in `compose.yaml`, and in the Airflow image too. Inside an Airflow task, dlt would otherwise also take its settings from Variables, and a person who may edit them, such as a user with the Op role of Airflow, could redirect a pipeline: for example, send the connection of a load, with its password, to another host. So a DAG in the extensions folder ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)) that follows dlt's guide for Airflow cannot keep its settings in a `dlt_secrets_toml` Variable, which dlt ignores here: the pipeline takes them from environment variables instead.
+
 ## Secrets
 
 `./agoranomos init` generates each of these when it is empty: random letters and digits, and a Fernet key for Airflow.

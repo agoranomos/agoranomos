@@ -1,8 +1,10 @@
 """Tests of the dlt source of the demo (airflow/dags/agoranomos_pipelines/demo_source.py).
 
 dlt is installed in the Airflow image and not in the development environment, so these tests
-import the module with a stand-in for dlt, which records the pipelines that the module makes and
-loads nothing. The stack tests load the demo with dlt itself.
+import the module with a stand-in for dlt, which loads nothing. The stand-in records the pipelines
+that the module makes and the hints that the module gives the decorators of dlt, and each pipeline
+keeps a trace of its last run with the number of rows of each table, in the shape of the trace of
+dlt. The stack tests load the demo with dlt itself.
 """
 
 import importlib.util
