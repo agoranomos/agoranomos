@@ -1,0 +1,4 @@
+# Airflow's own environment in the image of Agoranomos: airflow/Dockerfile installs these with the
+# constraints of the base image. dbt is not here: it has an environment of its own.
+dlt[postgres]==1.30.0
+astronomer-cosmos==1.15.1

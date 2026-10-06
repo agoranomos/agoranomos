@@ -23,12 +23,14 @@ Checks that this machine can run the stack. Each problem is reported with what t
 | Check | Stops when | Warns when |
 |---|---|---|
 | Docker Engine | it is missing, not running, or older than 25.0 | — |
-| Docker Compose | the plugin is missing or older than 2.24 | — |
+| Docker Compose | the plugin is missing or older than 2.24 | it is 2.37 or 2.38, or older than 5.4 with the containerd image store |
 | CPU architecture | it is neither arm64 nor x86-64 with x86-64-v2 | — |
 | Memory available to Docker | below 6 GB | below 8 GB |
 | CPUs available to Docker | fewer than 2 | fewer than 4 |
 | Free disk for Docker (Linux) | below 10 GB | below 20 GB |
 | Ports `AIRFLOW_PORT` and `METABASE_PORT` | a port is in use and the stack is not running | — |
+
+A Docker Compose that is 2.37 or 2.38, or older than 5.4 with the containerd image store, does not keep track of the image that `./agoranomos up` builds for Airflow ([docker/compose#13047](https://github.com/docker/compose/issues/13047), [docker/compose#13636](https://github.com/docker/compose/issues/13636)). The Airflow containers then restart at every start, or get an updated image only at the next one. The stack works, so preflight only warns: update Docker Compose to 5.4 or newer.
 
 Ports are checked with `ss`, `netstat` and `lsof`, whichever of them are installed: a port counts as in use when any of them lists a listener on it. Without any of them, preflight warns that it cannot check the ports.
 
@@ -38,7 +40,7 @@ Docker reports a little less memory than its VM or machine has, so a machine or 
 
 ## `up`
 
-Runs `init` and `preflight`, starts the stack with `docker compose up --detach`, and waits until every long-running service is healthy and every one-shot setup job has finished. It waits at most 15 minutes and stops early when a service fails, naming it and the command that shows its logs. When the stack is up, it prints the addresses of Airflow and Metabase. Running it again on a running stack keeps the data and the secrets; it runs the one-shot setup jobs again, which is how a changed password reaches PostgreSQL and Metabase. `--force` is passed to `preflight`.
+Runs `init` and `preflight`, starts the stack with `docker compose up --detach`, and waits until every long-running service is healthy and every one-shot setup job has finished. It builds the Airflow image from `airflow/Dockerfile` first: the first start downloads the base image and the Python packages, from PyPI and GitHub, and takes a few minutes, and later starts take the image from the cache of Docker in seconds. It waits at most 15 minutes and stops early when a service fails, naming it and the command that shows its logs. When the stack is up, it prints the addresses of Airflow and Metabase. Running it again on a running stack keeps the data and the secrets; it runs the one-shot setup jobs again, which is how a changed password reaches PostgreSQL and Metabase. `--force` is passed to `preflight`.
 
 ## `down`
 

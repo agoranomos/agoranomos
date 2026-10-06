@@ -56,13 +56,24 @@ jobs:
         arch: ${{ fromJSON(github.event_name == 'pull_request' && '["amd64"]' || '["amd64", "arm64"]') }}
         variant: ${{ fromJSON(github.event_name == 'pull_request' && '["local"]' || '["local", "celery"]') }}
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
-    timeout-minutes: 30
+    # The first start builds the Airflow image.
+    timeout-minutes: 45
     permissions:
       contents: read
+    env:
+      # renovate: datasource=github-releases depName=docker/compose
+      COMPOSE_VERSION: v5.6.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The Docker Compose of the runner image (2.38.2 as of October 2026) loses the digest of an image
+      # that it builds (docker/compose#13047), so the second start would recreate the Airflow
+      # containers. CI therefore installs a pinned version.
+      - uses: docker/setup-compose-action@54042514f505b273907334ae2b9cdbb9a0213c1a # v2.4.0
+        with:
+          version: ${{ env.COMPOSE_VERSION }}
+          cache-binary: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.22"
@@ -92,8 +103,10 @@ jobs:
           df -h /var/lib/docker
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /var/lib/docker
+      # airflow-init builds the Airflow image, and the other Airflow services never pull it, so
+      # pull skips them.
       - name: Pull the images
-        run: docker compose pull --quiet
+        run: docker compose pull --quiet --ignore-buildable
       - name: Start the stack
         run: ./agoranomos up
       - name: Stack tests

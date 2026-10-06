@@ -324,6 +324,7 @@ def test_preflight_asks_docker_for_exactly_the_fields_it_reads(cli):
     assert (
         "info --format {{.ServerVersion}}|{{.Architecture}}|{{.NCPU}}|{{.MemTotal}}"
         "|{{.DockerRootDir}}"
+        '|{{range .DriverStatus}}{{if eq (index . 0) "driver-type"}}{{index . 1}}{{end}}{{end}}'
     ) in cli.docker_calls()
 
 
@@ -331,6 +332,73 @@ def test_preflight_is_silent_on_a_good_machine(cli):
     result = cli.run("preflight")
     assert result.returncode == 0
     assert result.stderr == ""
+
+
+# What docker info reports as the type of the image store when it is the containerd image store; on
+# the classic store it reports nothing.
+CONTAINERD = "io.containerd.snapshotter.v1"
+
+
+@pytest.mark.parametrize(
+    ("compose_version", "image_store"),
+    [
+        ("2.37.0", ""),
+        ("2.38.2", ""),
+        ("5.3.1", CONTAINERD),
+        ("v2.40.3-desktop.1", CONTAINERD),
+    ],
+    ids=["2.37.0-classic", "2.38.2-classic", "5.3.1-containerd", "2.40.3-desktop.1-containerd"],
+)
+def test_preflight_warns_when_compose_loses_track_of_the_image_it_builds(
+    cli, compose_version, image_store
+):
+    result = cli.run(
+        "preflight", FAKE_COMPOSE_VERSION=compose_version, FAKE_IMAGE_STORE=image_store
+    )
+    # A warning: the stack works, so preflight still passes.
+    assert result.returncode == 0, result.stderr
+    assert "Preflight passed" in result.stdout
+    assert result.stderr.count("warning:") == 1, result.stderr
+    # It names the version, says what happens and what to do.
+    shown = compose_version.removeprefix("v")
+    assert (
+        f"warning: Docker Compose {shown} does not keep track of the Airflow image" in result.stderr
+    )
+    assert "restart at every start" in result.stderr
+    assert "an updated image only at the next start" in result.stderr
+    assert "docker/compose#13047" in result.stderr
+    assert "docker/compose#13636" in result.stderr
+    assert "Update Docker Compose to 5.4.0 or newer" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "fake",
+    [
+        {"FAKE_COMPOSE_VERSION": "2.36.2"},
+        {"FAKE_COMPOSE_VERSION": "2.39.0"},
+        {"FAKE_COMPOSE_VERSION": "5.3.1"},
+        {"FAKE_COMPOSE_VERSION": "5.4.0", "FAKE_IMAGE_STORE": CONTAINERD},
+        {},
+    ],
+    ids=[
+        "2.36.2-classic",
+        "2.39.0-classic",
+        "5.3.1-classic",
+        "5.4.0-containerd",
+        "default-machine",
+    ],
+)
+def test_preflight_does_not_warn_about_the_other_compose_versions(cli, fake):
+    result = cli.run("preflight", **fake)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+
+
+def test_a_compose_that_stops_preflight_gets_no_warning_about_the_image(cli):
+    result = cli.run("preflight", FAKE_COMPOSE_VERSION="2.20.3", FAKE_IMAGE_STORE=CONTAINERD)
+    assert result.returncode == 1
+    assert "Docker Compose 2.20.3 is older than 2.24.0" in result.stderr
+    assert "does not keep track" not in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -662,6 +730,18 @@ def test_up_does_not_start_when_preflight_fails(cli, tmp_path):
     assert not any(call.startswith("compose up") for call in cli.docker_calls())
 
 
+def test_up_goes_on_after_the_warning_about_compose(cli, tmp_path):
+    result = cli.run(
+        "up", FAKE_COMPOSE_VERSION="2.38.2", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    assert (
+        "warning: Docker Compose 2.38.2 does not keep track of the Airflow image" in result.stderr
+    )
+    assert any(call.startswith("compose up") for call in cli.docker_calls())
+    assert "The stack is up" in result.stdout
+
+
 def test_up_passes_force_to_preflight(cli, tmp_path):
     result = cli.run(
         "up",
@@ -741,7 +821,10 @@ def test_up_counts_a_running_service_without_a_health_check_as_ready(cli, tmp_pa
     ps = ps_with("platform-db|running||0")
     result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps), **QUICK)
     assert result.returncode == 0, result.stderr
-    assert "Starting the stack..." in result.stdout
+    # The first start builds the Airflow image (airflow/Dockerfile), and takes minutes: say so.
+    lines = result.stdout.splitlines()
+    [starting] = [line for line in lines if line.startswith("Starting the stack")]
+    assert "builds the Airflow image" in starting
     assert "All services are healthy." in result.stdout
     assert "The stack is up. ./agoranomos status shows every service." in result.stdout
 

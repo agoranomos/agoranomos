@@ -825,6 +825,67 @@ def test_the_celery_variant_adds_the_broker_and_the_worker_to_the_long_running_s
     assert services.LONG_RUNNING in (local, celery)
 
 
+def test_the_celery_variant_adds_the_worker_to_the_airflow_services():
+    local = services.airflow_names("local")
+    celery = services.airflow_names("celery")
+    assert "airflow-worker" not in local
+    assert celery == local | {"airflow-worker"}
+    assert all(name.startswith("airflow-") for name in celery)
+    # The literal lists of services.py agree: airflow-init is the one-shot job, and the other
+    # Airflow services of the base stack run all the time.
+    assert local & services.ONE_SHOT == {"airflow-init"}
+    assert local - services.ONE_SHOT <= services.long_running("local")
+
+
+def rendered_with(*names):
+    """A stand-in for stack_helpers.rendered, whose services are the given names."""
+    return lambda variant: {name: {"image": "stand-in"} for name in names}
+
+
+def test_airflow_services_are_the_rendered_services_named_airflow(monkeypatch):
+    names = services.airflow_names("celery")
+    monkeypatch.setattr(
+        services, "rendered", rendered_with("db-init", "broker", "metabase", *names)
+    )
+    assert set(services.airflow_services("celery")) == names
+
+
+@pytest.mark.parametrize(
+    ("variant", "rendered_names", "odd"),
+    [
+        pytest.param("local", [], "airflow-init", id="none-at-all"),
+        pytest.param(
+            "local",
+            sorted(services.BASE_AIRFLOW - {"airflow-triggerer"}),
+            "airflow-triggerer",
+            id="one-missing",
+        ),
+        pytest.param(
+            "local", [*services.BASE_AIRFLOW, "airflow-extra"], "airflow-extra", id="one-extra"
+        ),
+        pytest.param(
+            "local",
+            [*services.BASE_AIRFLOW, "airflow-worker"],
+            "airflow-worker",
+            id="worker-in-local",
+        ),
+        pytest.param(
+            "celery", sorted(services.BASE_AIRFLOW), "airflow-worker", id="no-worker-in-celery"
+        ),
+    ],
+)
+def test_airflow_services_fail_when_the_rendered_names_differ_from_the_expected_ones(
+    monkeypatch, variant, rendered_names, odd
+):
+    # A loop over the Airflow services must not pass on an empty or an incomplete set, and an extra
+    # service is noticed. The message names the variant and the services, and holds no value.
+    monkeypatch.setattr(services, "rendered", rendered_with("db-init", "metabase", *rendered_names))
+    with pytest.raises(AssertionError) as raised:
+        services.airflow_services(variant)
+    assert variant in str(raised.value)
+    assert odd in str(raised.value)
+
+
 def test_secrets_are_the_settings_that_the_example_leaves_empty(tmp_path, monkeypatch):
     (tmp_path / ".env.example").write_text(
         "# a comment\nPORT=8080\nVALKEY_PASSWORD=\nAIRFLOW_FERNET_KEY=\nNOT_SET_YET=\n",

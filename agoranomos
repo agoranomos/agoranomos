@@ -258,6 +258,17 @@ free_disk_gb() {
   printf '%s' $((free_kb / 1048576))
 }
 
+# Docker Compose loses track of the image that it builds, in 2.37.0 to 2.38.x (docker/compose#13047) and
+# on the containerd image store before 5.4.0 (docker/compose#13636): it then recreates the Airflow
+# containers at every start, or gives them an updated image one start late. The stack works, so this
+# only warns. $1 is the Compose version, $2 the type of the image store (empty for the classic one).
+check_compose_tracks_images() {
+  if { version_ge "$1" 2.37.0 && ! version_ge "$1" 2.39.0; } ||
+    { [ "$2" = io.containerd.snapshotter.v1 ] && ! version_ge "$1" 5.4.0; }; then
+    warn "Docker Compose ${1#v} does not keep track of the Airflow image that it builds: the Airflow containers can restart at every start, or get an updated image only at the next start (docker/compose#13047, docker/compose#13636). Update Docker Compose to 5.4.0 or newer."
+  fi
+}
+
 cmd_preflight() {
   force=0
   for option in "$@"; do
@@ -268,11 +279,13 @@ cmd_preflight() {
   done
   problems=0
   command -v docker > /dev/null 2>&1 || die "Docker is not installed: see https://docs.docker.com/get-started/get-docker/"
-  info=$(docker info --format '{{.ServerVersion}}|{{.Architecture}}|{{.NCPU}}|{{.MemTotal}}|{{.DockerRootDir}}' 2> /dev/null) || info=""
+  # The last field is the type of the image store: io.containerd.snapshotter.v1 on the containerd image
+  # store, and nothing on the classic one.
+  info=$(docker info --format '{{.ServerVersion}}|{{.Architecture}}|{{.NCPU}}|{{.MemTotal}}|{{.DockerRootDir}}|{{range .DriverStatus}}{{if eq (index . 0) "driver-type"}}{{index . 1}}{{end}}{{end}}' 2> /dev/null) || info=""
   if [ -z "${info%%|*}" ]; then
     die "Docker is not running, or this user cannot use it: start Docker Desktop, or on Linux add the user to the docker group"
   fi
-  IFS='|' read -r server_version arch ncpu mem_total docker_root << EOF
+  IFS='|' read -r server_version arch ncpu mem_total docker_root image_store << EOF
 $info
 EOF
   if ! version_ge "$server_version" "$MIN_DOCKER_VERSION"; then
@@ -283,6 +296,8 @@ EOF
     problem "the Docker Compose plugin is missing: see https://docs.docker.com/compose/install/"
   elif ! version_ge "$compose_version" "$MIN_COMPOSE_VERSION"; then
     problem "Docker Compose ${compose_version#v} is older than $MIN_COMPOSE_VERSION: update Docker Compose"
+  else
+    check_compose_tracks_images "$compose_version" "$image_store"
   fi
   case "$arch" in
     aarch64 | arm64) ;;
@@ -395,7 +410,7 @@ cmd_up() {
   done
   cmd_init
   cmd_preflight "$@"
-  say "Starting the stack..."
+  say "Starting the stack. The first start builds the Airflow image, which takes a few minutes..."
   # Without the || a failure would end the script under set -e with only the message of docker compose.
   compose up --detach --remove-orphans ||
     die "docker compose could not start the stack; the error above names the cause, and ./agoranomos status and ./agoranomos logs <service> show more"

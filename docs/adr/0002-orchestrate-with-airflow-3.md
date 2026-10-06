@@ -63,7 +63,7 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** planned for v0.1.0. The stack is being built in Phase 1 on the official image as it is; the layer of its own is to be added when the stack first runs pipelines.
+* **Implementation status, as of October 2026:** being built in Phase 1, for v0.1.0. The layer of its own is in place: `airflow/Dockerfile` adds dlt and Cosmos to the official image and dbt in a virtual environment of its own, and `./agoranomos up` builds it.
 * Versions as of October 2026: Airflow 3.3 (3.3.2) and Valkey 9 (the latest release is 9.1.2, and the 9.0 line still gets patch releases, the latest being 9.0.6). Airflow 3.3 supports Python 3.10 to 3.14 and PostgreSQL 14 to 18, which covers the choices in [ADR-0003](0003-two-postgres-instances.md) and [ADR-0012](0012-python-and-tooling.md).
 * The memory use of the full stack is still to be measured. If it does not fit the budget, a `lite` profile is added, with a new record if that changes this decision.
 * The [Celery executor documentation](https://airflow.apache.org/docs/apache-airflow-providers-celery/stable/celery_executor.html) describes the executor and its broker settings. [Valkey](https://valkey.io/) is the broker project.
