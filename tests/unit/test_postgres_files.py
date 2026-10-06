@@ -73,3 +73,33 @@ def test_the_sql_files_print_no_notices_when_they_run_again(name):
     quiet = "SET client_min_messages = warning;\n"
     assert quiet in statements
     assert statements.index(quiet) < statements.index("CREATE EXTENSION")
+
+
+def test_warehouse_sql_gives_a_warehouse_of_an_earlier_version_what_a_new_one_gets():
+    # On a new volume, CREATE SCHEMA ... AUTHORIZATION gives a schema its owner, and the default
+    # privileges cover every table, since all are new. CI starts from a new volume, so no stack test
+    # there notices if the lines that bring an existing warehouse to the same state go: an existing
+    # schema keeps its owner, and its existing tables get no default privilege.
+    statements = code("warehouse.sql")
+    lines = statements.splitlines()
+    created = re.findall(
+        r"^CREATE SCHEMA IF NOT EXISTS (\w+) AUTHORIZATION (\w+);$", statements, re.MULTILINE
+    )
+    defaults = re.findall(
+        r"^ALTER DEFAULT PRIVILEGES FOR ROLE \w+ IN SCHEMA (\w+) GRANT SELECT ON TABLES TO (\w+);$",
+        statements,
+        re.MULTILINE,
+    )
+    # The loops below must have something to check, and every statement of each kind is in them.
+    assert created, "warehouse.sql creates no schema with CREATE SCHEMA IF NOT EXISTS"
+    assert defaults, "warehouse.sql gives no default privilege"
+    assert len(created) == statements.count("CREATE SCHEMA")
+    assert len(defaults) == len(
+        re.findall(r"^ALTER DEFAULT PRIVILEGES .* GRANT ", statements, re.MULTILINE)
+    )
+    for schema, owner in created:
+        handover = f"ALTER SCHEMA {schema} OWNER TO {owner};"
+        assert handover in lines, f"warehouse.sql must also run {handover}"
+    for schema, grantee in defaults:
+        existing = f"GRANT SELECT ON ALL TABLES IN SCHEMA {schema} TO {grantee};"
+        assert existing in lines, f"warehouse.sql must also run {existing}"

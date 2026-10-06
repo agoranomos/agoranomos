@@ -24,10 +24,9 @@ import stack_helpers
 PASSWORD = "a-password-that-must-stay-out-of-the-arguments"
 
 
-def test_the_psql_helpers_keep_the_password_out_of_the_arguments(monkeypatch):
-    # The arguments of a process can be read by the other users of the host (ps, /proc). The
-    # environment of the docker process is not, and -e PGPASSWORD, with no value, hands the variable
-    # on to the container.
+@pytest.fixture
+def subprocess_calls(monkeypatch):
+    """The calls of the helpers to subprocess.run, recorded as (arguments, options) and not run."""
     calls = []
 
     def run(args, **options):
@@ -35,12 +34,19 @@ def test_the_psql_helpers_keep_the_password_out_of_the_arguments(monkeypatch):
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
     monkeypatch.setattr(stack_helpers.subprocess, "run", run)
+    return calls
+
+
+def test_the_psql_helpers_keep_the_password_out_of_the_arguments(subprocess_calls):
+    # The arguments of a process can be read by the other users of the host (ps, /proc). The
+    # environment of the docker process is not, and -e PGPASSWORD, with no value, hands the variable
+    # on to the container.
     stack_helpers.psql("warehouse-db", "metabase_reader", PASSWORD, "warehouse", "SELECT 1")
     stack_helpers.psql_over_network(
         "warehouse-db", "metabase_reader", PASSWORD, "warehouse", "SELECT 1"
     )
-    assert len(calls) == 2
-    for args, options in calls:
+    assert len(subprocess_calls) == 2
+    for args, options in subprocess_calls:
         assert not any(PASSWORD in argument for argument in args), args
         assert args[args.index("-e") + 1] == "PGPASSWORD"
         assert options["env"]["PGPASSWORD"] == PASSWORD
@@ -56,19 +62,14 @@ WAREHOUSE_SETTINGS = {
 
 
 @pytest.mark.parametrize("role", sorted(WAREHOUSE_SETTINGS))
-def test_the_warehouse_helper_runs_as_the_role_with_the_password_of_its_setting(monkeypatch, role):
+def test_the_warehouse_helper_runs_as_the_role_with_the_password_of_its_setting(
+    subprocess_calls, role
+):
     # Loopback is trust, so no stack test would notice a password taken from the wrong setting.
-    calls = []
-
-    def run(args, **options):
-        calls.append((args, options))
-        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
-
-    monkeypatch.setattr(stack_helpers.subprocess, "run", run)
     env = {setting: f"the password in {setting}" for setting in WAREHOUSE_SETTINGS.values()}
     # The superuser is the default role.
     stack_helpers.warehouse(env, "SELECT 1", *(() if role == "postgres" else (role,)))
-    [(args, options)] = calls
+    [(args, options)] = subprocess_calls
     assert "warehouse-db" in args
     assert args[args.index("-U") + 1] == role
     assert args[args.index("-d") + 1] == "warehouse"

@@ -13,13 +13,15 @@ import threading
 
 import pytest
 from services import BASE_AIRFLOW, airflow_services
-from stack_helpers import FILES, rendered, secrets
+from stack_helpers import FILES, NamesOnly, rendered, secrets
 
 EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
 CELERY_ONLY = {"broker", "airflow-worker"}
 METABASE = {"metabase", "metabase-init"}
 VARIANTS = sorted(FILES)
-# The passwords of the warehouse roles that Airflow tasks use: dlt reads the first, dbt the second.
+# The settings of .env that hold the passwords of the warehouse roles of the pipelines.
+WAREHOUSE_PASSWORDS = ("WAREHOUSE_LOADER_PASSWORD", "WAREHOUSE_TRANSFORMER_PASSWORD")
+# The variables that give Airflow tasks those passwords: the first is for dlt, the second for dbt.
 WAREHOUSE_CREDENTIALS = ("WAREHOUSE_LOADER_PASSWORD", "DBT_ENV_SECRET_WAREHOUSE_PASSWORD")
 # The service whose processes run the tasks.
 TASK_RUNNER = {"local": "airflow-scheduler", "celery": "airflow-worker"}
@@ -155,24 +157,38 @@ def test_the_broker_and_the_result_backend_are_set_only_where_they_are_used():
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
-def test_only_the_service_that_runs_tasks_gets_the_passwords_of_the_warehouse_roles(variant):
-    holders = sorted(
-        name
+def test_only_the_service_that_runs_tasks_gets_the_passwords_of_the_warehouse_roles(env, variant):
+    # Judged by value, so that a password under another name, or inside a URL, counts too. The
+    # environments hold secrets, so they are NamesOnly, which pytest prints by their names, and
+    # the messages name services and settings.
+    values = secrets(env)
+    passwords = {key: values.get(key) for key in WAREHOUSE_PASSWORDS}
+    assert all(passwords.values()), "no passwords of the warehouse roles in .env: run init"
+    environments = {
+        name: NamesOnly(
+            {key: str(value) for key, value in (service.get("environment") or {}).items()}
+        )
         for name, service in rendered(variant).items()
-        if any((service.get("environment") or {}).get(key) for key in WAREHOUSE_CREDENTIALS)
-    )
+    }
     # db-init sets the passwords of the roles, so it has them too.
-    assert holders == sorted({TASK_RUNNER[variant], "db-init"})
-    db_init = rendered(variant)["db-init"]["environment"]
-    for key in ("WAREHOUSE_LOADER_PASSWORD", "WAREHOUSE_TRANSFORMER_PASSWORD"):
-        assert db_init.get(key), key
+    wanted = sorted({TASK_RUNNER[variant], "db-init"})
+    for key, password in passwords.items():
+        holders = sorted(
+            name
+            for name, environment in environments.items()
+            if any(password in value for value in environment.values())
+        )
+        assert holders == wanted, f"the value of {key} is held by {holders}, not {wanted}"
     # Each tool gets the password of its own role. The values are secrets, so the test compares
     # them into flags, and a failed assertion prints the flag.
-    runner = rendered(variant)[TASK_RUNNER[variant]]["environment"]
-    dlt_gets_loader = runner["WAREHOUSE_LOADER_PASSWORD"] == db_init["WAREHOUSE_LOADER_PASSWORD"]
+    runner = environments[TASK_RUNNER[variant]]
+    dlt_gets_loader = (
+        runner.get("WAREHOUSE_LOADER_PASSWORD") == passwords["WAREHOUSE_LOADER_PASSWORD"]
+    )
     assert dlt_gets_loader, "WAREHOUSE_LOADER_PASSWORD is not the password of loader"
     dbt_gets_transformer = (
-        runner["DBT_ENV_SECRET_WAREHOUSE_PASSWORD"] == db_init["WAREHOUSE_TRANSFORMER_PASSWORD"]
+        runner.get("DBT_ENV_SECRET_WAREHOUSE_PASSWORD")
+        == passwords["WAREHOUSE_TRANSFORMER_PASSWORD"]
     )
     assert dbt_gets_transformer, (
         "DBT_ENV_SECRET_WAREHOUSE_PASSWORD is not the password of transformer"

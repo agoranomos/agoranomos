@@ -37,56 +37,34 @@ def test_application_roles_cannot_open_each_others_database(env):
 
 
 def test_metabase_reader_reads_marts_and_cannot_write(env):
-    password = env["METABASE_READER_PASSWORD"]
-    result = psql(
-        "warehouse-db",
-        "metabase_reader",
-        password,
-        "warehouse",
-        "SELECT has_schema_privilege('marts', 'USAGE')",
-    )
+    result = warehouse(env, "SELECT has_schema_privilege('marts', 'USAGE')", "metabase_reader")
     assert result.stdout.strip() == "t", result.stderr
-    result = psql(
-        "warehouse-db",
-        "metabase_reader",
-        password,
-        "warehouse",
-        "SHOW default_transaction_read_only",
-    )
+    result = warehouse(env, "SHOW default_transaction_read_only", "metabase_reader")
     assert result.stdout.strip() == "on", result.stderr
-    result = psql(
-        "warehouse-db",
-        "metabase_reader",
-        password,
-        "warehouse",
-        "CREATE TABLE marts.should_not_exist (id integer)",
-    )
+    result = warehouse(env, "CREATE TABLE marts.should_not_exist (id integer)", "metabase_reader")
     assert result.returncode != 0
     assert "read-only transaction" in result.stderr
     # The read-only default is a guard against accidents. The barrier itself is that the role has no
     # write grant: a session that is not read-only is refused too.
-    result = psql(
-        "warehouse-db",
-        "metabase_reader",
-        password,
-        "warehouse",
+    result = warehouse(
+        env,
         "SET TRANSACTION READ WRITE; CREATE TABLE marts.should_not_exist (id integer)",
+        "metabase_reader",
     )
     assert result.returncode != 0
     assert "permission denied for schema marts" in result.stderr
 
 
-def test_the_databases_ask_for_the_password_over_the_data_network(env):
+@pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))
+def test_each_role_of_the_warehouse_signs_in_with_its_password_and_with_no_other(env, role):
     # Loopback inside a database container is trust, so psql() cannot tell a wrong password from a
     # right one. From another container the connection crosses the network, where the server asks.
     right = psql_over_network(
-        "warehouse-db", "metabase_reader", env["METABASE_READER_PASSWORD"], "warehouse", "SELECT 1"
+        "warehouse-db", role, env[WAREHOUSE_ROLES[role]], "warehouse", "SELECT 1"
     )
     assert right.returncode == 0, right.stderr
     assert right.stdout.strip() == "1"
-    wrong = psql_over_network(
-        "warehouse-db", "metabase_reader", "not-the-password", "warehouse", "SELECT 1"
-    )
+    wrong = psql_over_network("warehouse-db", role, "not-the-password", "warehouse", "SELECT 1")
     assert wrong.returncode != 0
     assert "password authentication failed" in wrong.stderr
 
@@ -185,6 +163,39 @@ def test_the_default_privileges_are_those_of_the_roles_that_create_the_tables(en
     ]
 
 
+# What each role of the layers is, beyond its grants: no attribute but LOGIN, a member of no role,
+# and neither CREATE nor TEMPORARY on the warehouse database. pg_roles shows the attributes.
+ROLE_ATTRIBUTES = {
+    "superuser": "f",
+    "createdb": "f",
+    "createrole": "f",
+    "replication": "f",
+    "bypassrls": "f",
+    "login": "t",
+    "member of": "",
+    "create on warehouse": "f",
+    "temporary on warehouse": "f",
+}
+
+
+def test_the_roles_of_the_layers_sign_in_and_have_no_other_power(env):
+    result = warehouse(
+        env,
+        "SELECT rolname, rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls, "
+        "rolcanlogin, (SELECT string_agg(pg_get_userbyid(roleid), ',' ORDER BY roleid) "
+        "FROM pg_auth_members WHERE member = pg_roles.oid), "
+        "has_database_privilege(rolname, 'warehouse', 'CREATE'), "
+        "has_database_privilege(rolname, 'warehouse', 'TEMP') "
+        "FROM pg_roles WHERE rolname IN ('loader', 'transformer', 'metabase_reader')",
+    )
+    assert result.returncode == 0, result.stderr
+    found = {}
+    for line in result.stdout.splitlines():
+        role, *values = line.split("|")
+        found[role] = dict(zip(ROLE_ATTRIBUTES, values, strict=True))
+    assert found == dict.fromkeys(WAREHOUSE_ROLES, ROLE_ATTRIBUTES)
+
+
 @pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))
 def test_no_role_of_the_layers_creates_a_schema(env, role):
     # The sessions of metabase_reader start read-only, and PostgreSQL refuses a write in a read-only
@@ -215,15 +226,6 @@ def test_data_moves_through_the_layers_as_the_roles_allow(env):
         assert result.stdout.strip() == "1"
     finally:
         warehouse(env, "DROP TABLE IF EXISTS marts.layers_check, raw_demo.layers_check")
-
-
-@pytest.mark.parametrize("role", ["loader", "transformer"])
-def test_the_roles_of_the_pipelines_sign_in_with_their_passwords(env, role):
-    result = psql_over_network(
-        "warehouse-db", role, env[WAREHOUSE_ROLES[role]], "warehouse", "SELECT 1"
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "1"
 
 
 @pytest.mark.parametrize("database", ["postgres", "template1"])
