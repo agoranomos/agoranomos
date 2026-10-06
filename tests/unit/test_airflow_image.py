@@ -21,6 +21,9 @@ TELEMETRY = {
     "AIRFLOW__COSMOS__ENABLE_TELEMETRY": "False",
     "DO_NOT_TRACK": "1",
 }
+# The configuration providers of dlt: none of them reads Airflow Variables. Not telemetry, so a
+# constant of its own.
+DLT_PROVIDERS = {"PROVIDERS__ENABLE_AIRFLOW_SECRETS": "false"}
 
 
 def pins(path: Path) -> dict[str, str]:
@@ -92,6 +95,14 @@ def test_the_lock_file_names_the_command_that_made_it():
 def test_the_image_turns_telemetry_off():
     text = dockerfile()
     for name, value in TELEMETRY.items():
+        assert re.search(rf"\b{name}={re.escape(value)}\b", text), name
+
+
+def test_the_image_keeps_dlt_away_from_airflow_variables():
+    # Inside a task, dlt would take its settings from Airflow Variables, which the Op role may
+    # create, and one of them could send the connection of a load somewhere else.
+    text = dockerfile()
+    for name, value in DLT_PROVIDERS.items():
         assert re.search(rf"\b{name}={re.escape(value)}\b", text), name
 
 

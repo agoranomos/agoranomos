@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from airflow.sdk import Asset, dag, task
+from airflow.sdk.log import mask_secret
 
 # The asset of the raw table, in the form that Airflow 3 requires for PostgreSQL:
 # postgres://<host>:<port>/<database>/<schema>/<table>.
@@ -23,8 +24,13 @@ START = datetime(2026, 1, 1, tzinfo=UTC)
     start_date=START,
     catchup=False,
     max_active_runs=1,
-    # Retries are explicit, as the contract of the sources asks (ADR-0004).
-    default_args={"retries": 2, "retry_delay": timedelta(minutes=1)},
+    default_args={
+        # Retries are explicit, as the contract of the sources asks (ADR-0004).
+        "retries": 2,
+        "retry_delay": timedelta(minutes=1),
+        # A load takes seconds: one that hangs fails after ten minutes, and is tried again.
+        "execution_timeout": timedelta(minutes=10),
+    },
     tags=["agoranomos", "demo"],
     doc_md=__doc__,
 )
@@ -34,6 +40,9 @@ def agoranomos_demo_load():
         # dlt is imported here and not at the top: the DAG processor parses this file often.
         from agoranomos_pipelines import demo_source
 
+        # Should anything write the password of the loader into the log, Airflow shows *** instead.
+        # Only the task reads the password: the DAG processor, which parses this file, has none.
+        mask_secret(demo_source.credentials()["password"])
         # Data is final up to yesterday.
         demo_source.load(datetime.now(UTC).date() - timedelta(days=1))
 

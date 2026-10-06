@@ -18,6 +18,9 @@ TELEMETRY = {
     "AIRFLOW__COSMOS__ENABLE_TELEMETRY": "False",
     "DO_NOT_TRACK": "1",
 }
+# The configuration providers of dlt: none of them reads Airflow Variables, which the Op role may
+# create. Not telemetry, so a constant of its own.
+DLT_PROVIDERS = {"PROVIDERS__ENABLE_AIRFLOW_SECRETS": "false"}
 # The services that parse or run DAGs, and so need dlt, Cosmos and dbt.
 USERS = [
     s for s in ("airflow-dag-processor", "airflow-scheduler", "airflow-worker") if s in LONG_RUNNING
@@ -78,6 +81,13 @@ def test_compose_turns_telemetry_off_for_every_airflow_service(variant):
         assert {key: environment.get(key) for key in TELEMETRY} == TELEMETRY, name
 
 
+@pytest.mark.parametrize("variant", sorted(FILES))
+def test_compose_keeps_dlt_away_from_airflow_variables_in_every_airflow_service(variant):
+    for name, service in airflow_services(variant).items():
+        environment = service["environment"]
+        assert {key: environment.get(key) for key in DLT_PROVIDERS} == DLT_PROVIDERS, name
+
+
 @pytest.mark.parametrize("service", USERS)
 def test_airflow_has_the_pinned_dlt_and_cosmos(service):
     wanted = {"apache-airflow": airflow_version(), **pinned("requirements.txt")}
@@ -106,4 +116,10 @@ def test_the_dbt_executable_of_the_image_runs(service):
 @pytest.mark.parametrize("service", USERS)
 def test_the_running_containers_have_telemetry_off(service):
     for name, value in TELEMETRY.items():
+        assert compose("exec", "-T", service, "printenv", name).stdout.strip() == value, name
+
+
+@pytest.mark.parametrize("service", USERS)
+def test_the_running_containers_keep_dlt_away_from_airflow_variables(service):
+    for name, value in DLT_PROVIDERS.items():
         assert compose("exec", "-T", service, "printenv", name).stdout.strip() == value, name

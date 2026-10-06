@@ -6,6 +6,7 @@ loads nothing. The stack tests load the demo with dlt itself.
 """
 
 import importlib.util
+import logging
 import sys
 import types
 from datetime import date
@@ -20,14 +21,21 @@ END = date(2026, 9, 27)
 
 class StandInPipeline:
     """What the stand-in of dlt.pipeline() returns: it keeps its options and, for each run, the rows
-    that it got and whether its working folder was there."""
+    that it got and whether its working folder was there. Like dlt, it counts the rows of each
+    table in the trace of its last run, the state of the pipeline included."""
 
     def __init__(self, options):
         self.options = options
         self.runs = []
+        self.last_trace = None
 
     def run(self, data):
-        self.runs.append((list(data), Path(self.options["pipelines_dir"]).is_dir()))
+        rows = list(data)
+        self.runs.append((rows, Path(self.options["pipelines_dir"]).is_dir()))
+        counts = {"ad_stats_daily": len(rows), "_dlt_pipeline_state": 1}
+        self.last_trace = types.SimpleNamespace(
+            last_normalize_info=types.SimpleNamespace(row_counts=counts)
+        )
 
 
 @pytest.fixture
@@ -83,3 +91,15 @@ def test_the_load_takes_eight_weeks_up_to_the_day_into_raw_demo_as_the_loader_ro
     [(rows, _)] = pipeline.runs
     assert len(rows) == 56 * 3
     assert (rows[0]["date"], rows[-1]["date"]) == (date(2026, 8, 3), END)
+
+
+def test_the_load_logs_how_many_rows_of_which_days_it_loaded(demo_source, caplog):
+    # The log of the task says what the load did, in counts and dates, which hold no secret. The
+    # count is the one that dlt reports for the table.
+    module, _ = demo_source
+    with caplog.at_level(logging.INFO, logger=module.__name__):
+        module.load(END)
+    assert [record.getMessage() for record in caplog.records] == [
+        "Loaded 168 rows of 2026-08-03 to 2026-09-27 into raw_demo.ad_stats_daily"
+    ]
+    assert "a-password-for-the-test" not in caplog.text

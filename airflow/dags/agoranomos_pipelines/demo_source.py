@@ -7,10 +7,11 @@ itself, so its local working folder is a temporary one.
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 from collections.abc import Iterator
-from datetime import date
+from datetime import date, timedelta
 
 import dlt
 
@@ -18,10 +19,13 @@ from agoranomos_pipelines import demo_data
 
 PIPELINE_NAME = "agoranomos_demo"
 DATASET = "raw_demo"
+TABLE = "ad_stats_daily"
+
+log = logging.getLogger(__name__)
 
 
 @dlt.resource(
-    name="ad_stats_daily",
+    name=TABLE,
     write_disposition="merge",
     primary_key=("account_id", "campaign_id", "date"),
     columns={
@@ -51,7 +55,8 @@ def credentials() -> dict[str, object]:
 
 
 def load(end_date: date, days: int = demo_data.DAYS) -> None:
-    """Load the days that end with end_date into raw_demo.ad_stats_daily."""
+    """Load the days that end with end_date into raw_demo.ad_stats_daily, and log what was loaded:
+    the number of rows that dlt reports for the table, and the days, which hold no secret."""
     with tempfile.TemporaryDirectory(prefix="dlt-") as workdir:
         pipeline = dlt.pipeline(
             pipeline_name=PIPELINE_NAME,
@@ -60,3 +65,6 @@ def load(end_date: date, days: int = demo_data.DAYS) -> None:
             dataset_name=DATASET,
         )
         pipeline.run(demo(end_date, days))
+        rows = pipeline.last_trace.last_normalize_info.row_counts.get(TABLE, 0)
+    first = end_date - timedelta(days=days - 1)
+    log.info("Loaded %d rows of %s to %s into %s.%s", rows, first, end_date, DATASET, TABLE)
