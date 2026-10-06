@@ -188,7 +188,8 @@ def test_leaked_finds_a_secret_as_it_is_and_as_json_writes_it():
     entry = json.dumps({"event": f"connecting with {value}"}, ensure_ascii=False)
     assert value not in entry  # the check below needs the escaped form
     assert stack_helpers.leaked(values, [entry]) == ["API_PASSWORD"]
-    # As it is, in a plain text such as the log of a container, and with ä written as ä.
+    # As it is, in a plain text such as the log of a container, and in JSON that escapes the
+    # letters that are not ASCII, as json.dumps does by default.
     assert stack_helpers.leaked(values, [f"plain {value} text"]) == ["API_PASSWORD"]
     assert stack_helpers.leaked(values, [json.dumps({"event": value})]) == ["API_PASSWORD"]
     # A text without it, or with a part of it, holds no secret.
