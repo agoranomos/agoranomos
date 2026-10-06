@@ -29,9 +29,9 @@ USERS = [
 # dlt builds its configuration providers in every process that reads its configuration, a task
 # included, and adds the one that reads Airflow Variables when its setting enable_airflow_secrets
 # is on (dlt 1.30.0, dlt/common/configuration/specs/config_providers_context.py). It needs no task
-# for that, only a Variable.get that works, which a process in these containers has through the
-# metadata database: so this probe, a plain process, gets what a task gets. It prints the names of
-# the providers and the value of the setting.
+# for that, and no metadata database either, only an Airflow that it can import: with the setting
+# on, a plain process gets the provider even when no database answers. So this probe, a plain
+# process, gets what a task gets. It prints the names of the providers and the value of the setting.
 DLT_PROBE = """
 import json
 
@@ -78,7 +78,6 @@ def image_environment():
     those that Compose gives a container. They hold no secret, and the dict prints its names
     only."""
     result = docker("image", "inspect", IMAGE, "--format", "{{json .Config.Env}}", check=False)
-    # pytest rewrites the assertions of test modules only, so this one carries its own message.
     assert result.returncode == 0, f"docker image inspect {IMAGE} exited with {result.returncode}"
     return NamesOnly(item.partition("=")[::2] for item in json.loads(result.stdout))
 
