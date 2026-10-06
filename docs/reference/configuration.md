@@ -17,7 +17,7 @@ Each value is used as written: keep it on one line, do not put a comment after i
 | Setting | Default | What it does |
 |---|---|---|
 | `COMPOSE_PROJECT_NAME` | `agoranomos` | The name of the Compose project. It starts the names of the containers, networks and volumes. |
-| `COMPOSE_PROFILES` | `core` | The profiles that run. `core` is the whole stack in local mode. |
+| `COMPOSE_PROFILES` | `core,demo` | The profiles that run. `core` is the whole stack in local mode, and `demo` adds the demo: on the first start, the one-shot `demo-init` job runs the demo pipeline and creates a demo dashboard in Metabase ([See the demo](../how-to/see-the-demo.md)). Set `core` to start without it. |
 | `COMPOSE_FILE` | `compose.yaml` | The Compose files of the stack. `compose.yaml` runs Airflow with LocalExecutor, which needs no broker. `compose.yaml:compose.celery.yaml` adds the Celery broker and a separate worker (CeleryExecutor). |
 
 ## Stack
@@ -62,9 +62,9 @@ A DAG in the extensions folder should not use two features of Cosmos that still 
 | `AIRFLOW_FERNET_KEY` | The key that encrypts the connections and variables saved in Airflow | Do not change it: what Airflow saved could no longer be decrypted. |
 | `AIRFLOW_JWT_SECRET` | The key that signs the API tokens of Airflow | Change it and run `./agoranomos up`; people have to sign in again. |
 | `AIRFLOW_API_SECRET_KEY` | The secret key of the Airflow API server | As for `AIRFLOW_JWT_SECRET`. |
-| `AIRFLOW_ADMIN_PASSWORD` | The password of the Airflow user `admin`, set on the first start | Change the password in Airflow; this value is not applied again. |
+| `AIRFLOW_ADMIN_PASSWORD` | The password of the Airflow user `admin`, set on the first start | With the `demo` profile, `demo-init` signs in with it on every start. If you change the password in Airflow, put the same value here. |
 | `METABASE_ENCRYPTION_KEY` | The key that encrypts the connection details saved in Metabase | Do not change it: Metabase could no longer read its saved connections. |
-| `METABASE_ADMIN_PASSWORD` | The password of the Metabase admin account | The first-start setup signs in with it on every start. If you change the password in Metabase, put the same value here. |
+| `METABASE_ADMIN_PASSWORD` | The password of the Metabase admin account | The first-start setup signs in with it on every start, and so does `demo-init`. If you change the password in Metabase, put the same value here. |
 
 On every start, the setup job `db-init` sets each role of the warehouse (`loader`, `transformer` and `metabase_reader`) to `LOGIN`, with no `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION` or `BYPASSRLS` attribute, and gives it the password from `.env`. So if you give one of these roles such a power by hand, the next `./agoranomos up` takes it back. It also gives `loader` and `transformer` a lock timeout of one minute: a statement that waits longer for a lock fails with `canceling statement due to lock timeout`. A load then fails and is tried again instead of waiting without end. A dbt run fails too, and the mart keeps its data: dbt renames a table that it rebuilds, which waits for the queries that read the table, and the queries that come later, such as those of Metabase, wait behind it.
 

@@ -1,6 +1,6 @@
 import pytest
 import stack_helpers
-from stack_helpers import Secret, http_json, load_env
+from stack_helpers import Secret, SecretHeaders, http_json, load_env
 
 
 @pytest.fixture(scope="session")
@@ -28,6 +28,27 @@ def token(env, airflow_url):
     assert status in (200, 201), body
     # pytest prints the arguments of a failed test and of the function that failed: see Secret.
     return Secret(body["access_token"])
+
+
+@pytest.fixture(scope="session")
+def metabase_url(env):
+    return f"http://127.0.0.1:{env.get('METABASE_PORT') or '3000'}"
+
+
+@pytest.fixture(scope="session")
+def session(env, metabase_url):
+    """The headers that sign a request to Metabase in as the admin."""
+    # The password goes in the body of the request and nowhere else; a failure prints the status.
+    status, body = http_json(
+        "POST",
+        f"{metabase_url}/api/session",
+        {
+            "username": env.get("AGORANOMOS_ADMIN_EMAIL") or "admin@example.com",
+            "password": env["METABASE_ADMIN_PASSWORD"],
+        },
+    )
+    assert status == 200, f"the admin could not sign in: HTTP {status}"
+    return SecretHeaders({"X-Metabase-Session": Secret(body["id"])})
 
 
 def pytest_assertrepr_compare(op: str, left: object, right: object) -> list[str] | None:

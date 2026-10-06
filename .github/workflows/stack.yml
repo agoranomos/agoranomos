@@ -58,7 +58,7 @@ jobs:
         arch: ${{ fromJSON(github.event_name == 'pull_request' && '["amd64"]' || '["amd64", "arm64"]') }}
         variant: ${{ fromJSON(github.event_name == 'pull_request' && '["local"]' || '["local", "celery"]') }}
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
-    # The first start builds the Airflow image.
+    # The first start builds the Airflow image and makes the demo ready.
     timeout-minutes: 45
     permissions:
       contents: read

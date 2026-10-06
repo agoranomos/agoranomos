@@ -112,3 +112,9 @@ services:
         condition: service_healthy
       airflow-apiserver:
         condition: service_healthy
+
+  # With CeleryExecutor the tasks of the demo run on the worker.
+  demo-init:
+    depends_on:
+      airflow-worker:
+        condition: service_healthy

@@ -1,0 +1,35 @@
+# See the demo
+
+Agoranomos comes with a demo: eight weeks of statistics of one fictional ad account with three campaigns. On the first start the demo data goes all the way through the stack, so you can see what each part does before you connect a real ad platform.
+
+## What happens on the first start
+
+1. `./agoranomos up` starts the stack, and the one-shot job `demo-init` starts once Airflow and Metabase are ready.
+2. `demo-init` unpauses the DAGs `agoranomos_demo_load` and `agoranomos_demo_transform` in Airflow and runs the load: dlt loads the demo data, up to yesterday, into the `raw_demo` schema of the warehouse.
+3. The load updates the asset of the raw table, and that starts the DAG `agoranomos_demo_transform`: dbt, through Cosmos, builds the staging model and then `marts.ad_spend_daily`. The tests of each model run right after it, and a failed test stops the models that read it.
+4. `demo-init` syncs the warehouse in Metabase and creates the collection **Agoranomos demo**, with three questions and the dashboard **Ad spend (demo)**.
+
+`up` waits for `demo-init`, so the first start takes a few minutes longer. `demo-init` gives up after 10 minutes. When it fails, `up` says so, and `./agoranomos logs demo-init` shows one line that names the step that failed or ran out of time, and for a step of the pipeline the DAG to look at in Airflow. Fix the cause and run `./agoranomos up` again: the next start does what is not done yet.
+
+## Look at it
+
+- **Metabase**, at the address that `up` prints: sign in with `AGORANOMOS_ADMIN_EMAIL` and `METABASE_ADMIN_PASSWORD` from `.env`, and open the collection **Agoranomos demo**. The dashboard shows the spend of the last seven days that have data, in total and by campaign, and the spend of every day.
+- **Airflow**, at the address that `up` prints: sign in as `admin` with `AIRFLOW_ADMIN_PASSWORD` from `.env`, and open the DAGs `agoranomos_demo_load` and `agoranomos_demo_transform`, their runs and the asset between them.
+
+## What later starts do
+
+`demo-init` runs on every start, and each step looks at what is there first.
+
+- Once a run of `agoranomos_demo_transform` has succeeded, the pipeline does not run again, and `demo-init` leaves both DAGs as they are: if you pause them, they stay paused.
+- `demo-init` finds the collection, its questions and its dashboard by name. What it finds stays as it is, with your edits. What it does not find, it creates again: a question, the dashboard or the collection that you delete or rename comes back on the next start, and a renamed one stays as well. A dashboard that has no question on it gets the three back.
+- To keep a version of your own, duplicate the question or the dashboard and change the copy, rather than rename the original. To stop all of this, turn the demo off.
+
+## Bring the demo up to date
+
+The demo data ends on the day before the first start. To add the days since, trigger `agoranomos_demo_load` in Airflow. It loads the eight weeks up to yesterday again and merges them on the natural key, so no row is duplicated, and the transform follows on its own.
+
+## Turn the demo off
+
+Set `COMPOSE_PROFILES=core` in `.env` before the first start, and `up` makes no demo: the demo DAGs stay paused in Airflow. After the first start the same setting only stops `demo-init`, whose container from its last run stays in `./agoranomos status`. The demo data stays in the warehouse and the collection stays in Metabase, and you can delete the collection there.
+
+`./agoranomos init` never changes a setting that is in `.env` already, so a `.env` from before the demo keeps `COMPOSE_PROFILES=core`. To turn the demo on there, set `COMPOSE_PROFILES=core,demo`.

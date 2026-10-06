@@ -948,7 +948,7 @@ def test_compose_settings_have_defaults_when_env_does_not_set_them(cli):
     cli.env_path.write_text("AIRFLOW_PORT=8080\n", encoding="utf-8")
     result = cli.run("status", COMPOSE_FILE="elsewhere.yaml", COMPOSE_PROFILES="another-profile")
     assert result.returncode == 0, result.stderr
-    assert cli.compose_settings() == [("agoranomos", "core", "compose.yaml")]
+    assert cli.compose_settings() == [("agoranomos", "core,demo", "compose.yaml")]
 
 
 def test_down_keeps_the_volumes(cli):

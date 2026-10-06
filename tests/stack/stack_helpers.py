@@ -50,6 +50,15 @@ def active_variant() -> str:
     return "celery" if "compose.celery.yaml" in names else "local"
 
 
+def active_profiles() -> set[str]:
+    """The Compose profiles that .env selects (COMPOSE_PROFILES), or, when .env sets none, those
+    of .env.example, which ./agoranomos hands Compose then."""
+    path = REPO_ROOT / ".env"
+    value = read_env(path).get("COMPOSE_PROFILES", "") if path.exists() else ""
+    value = value or read_env(REPO_ROOT / ".env.example")["COMPOSE_PROFILES"]
+    return {profile.strip() for profile in value.split(",") if profile.strip()}
+
+
 def secrets(env: dict[str, str]) -> dict[str, str]:
     """The secrets in .env: the settings that .env.example leaves empty, with their values."""
     example = read_env(REPO_ROOT / ".env.example")
@@ -83,11 +92,17 @@ def compose(
 
 @functools.cache
 def rendered(variant: str) -> dict[str, Any]:
-    """The services of a variant, as docker compose config renders them. COMPOSE_FILE is set for
-    the call, so the variant that .env selects does not matter, and no stack has to run. Cached,
-    because the Compose files do not change during a run. The environment of a service holds
-    secrets: compare names, never print values."""
-    result = compose("config", "--format", "json", env={"COMPOSE_FILE": FILES[variant]})
+    """The services of a variant, as docker compose config renders them. COMPOSE_FILE and
+    COMPOSE_PROFILES are set for the call, so neither the variant nor the profiles that .env
+    selects matter, and no stack has to run: every service of the variant is there, demo-init
+    too. Cached, because the Compose files do not change during a run. The environment of a
+    service holds secrets: compare names, never print values."""
+    result = compose(
+        "config",
+        "--format",
+        "json",
+        env={"COMPOSE_FILE": FILES[variant], "COMPOSE_PROFILES": "core,demo"},
+    )
     return json.loads(result.stdout)["services"]
 
 

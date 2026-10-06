@@ -1349,6 +1349,57 @@ def test_active_variant_takes_the_last_setting_as_docker_compose_does(tmp_path, 
     assert stack_helpers.active_variant() == "local"
 
 
+def write_example(tmp_path, text="COMPOSE_PROFILES=core,demo\n"):
+    """The .env.example of the checkout of write_env: where active_profiles takes its default."""
+    (tmp_path / ".env.example").write_text(text, encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("setting", "profiles"),
+    [
+        ("COMPOSE_PROFILES=core,demo", {"core", "demo"}),
+        ("COMPOSE_PROFILES=core", {"core"}),
+        ('COMPOSE_PROFILES="demo,core"', {"core", "demo"}),
+        ("COMPOSE_PROFILES='core, demo'", {"core", "demo"}),
+        ("COMPOSE_PROFILES=core,,demo,", {"core", "demo"}),
+        ("COMPOSE_PROFILES=core,demonstration", {"core", "demonstration"}),
+    ],
+)
+def test_active_profiles_follow_compose_profiles_in_env(tmp_path, monkeypatch, setting, profiles):
+    write_env(tmp_path, monkeypatch, f"COMPOSE_PROJECT_NAME=agoranomos\n{setting}\n")
+    write_example(tmp_path, "COMPOSE_PROFILES=example\n")
+    assert stack_helpers.active_profiles() == profiles
+
+
+@pytest.mark.parametrize("text", ["COMPOSE_FILE=compose.yaml\n", "COMPOSE_PROFILES=\n"])
+def test_active_profiles_are_those_of_the_example_when_env_sets_none(tmp_path, monkeypatch, text):
+    # ./agoranomos hands Compose the profiles of .env.example then, as it does without a .env.
+    write_env(tmp_path, monkeypatch, text)
+    write_example(tmp_path)
+    assert stack_helpers.active_profiles() == {"core", "demo"}
+
+
+def test_active_profiles_are_those_of_the_example_without_an_env_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(stack_helpers, "REPO_ROOT", tmp_path)
+    write_example(tmp_path)
+    assert stack_helpers.active_profiles() == {"core", "demo"}
+
+
+def test_active_profiles_take_the_last_setting_as_docker_compose_does(tmp_path, monkeypatch):
+    write_env(tmp_path, monkeypatch, "COMPOSE_PROFILES=core,demo\nCOMPOSE_PROFILES=core\n")
+    write_example(tmp_path)
+    assert stack_helpers.active_profiles() == {"core"}
+
+
+def test_the_demo_profile_adds_demo_init_to_the_one_shot_jobs():
+    # services.py takes the profiles of the .env in the checkout when it is imported; this tests
+    # the function that it calls, so the result does not depend on that file.
+    base = {"db-init", "airflow-init", "metabase-init"}
+    assert services.one_shot(demo=False) == base
+    assert services.one_shot(demo=True) == base | {"demo-init"}
+    assert services.one_shot(demo=services.DEMO) == services.ONE_SHOT
+
+
 def test_the_celery_variant_adds_the_broker_and_the_worker_to_the_long_running_services():
     # services.py takes the variant of the .env in the checkout when it is imported; this tests the
     # function that it calls, so the result does not depend on that file.
@@ -1365,7 +1416,7 @@ def test_the_celery_variant_adds_the_broker_and_the_worker_to_the_long_running_s
         "airflow-triggerer",
         "metabase",
     } <= local
-    assert {"db-init", "airflow-init", "metabase-init"} == services.ONE_SHOT
+    assert services.one_shot(demo=False) == {"db-init", "airflow-init", "metabase-init"}
     assert services.LONG_RUNNING in (local, celery)
 
 
@@ -1377,8 +1428,9 @@ def test_the_celery_variant_adds_the_worker_to_the_airflow_services():
     assert all(name.startswith("airflow-") for name in celery)
     # The literal lists of services.py agree: airflow-init is the one-shot job, and the other
     # Airflow services of the base stack run all the time.
-    assert local & services.ONE_SHOT == {"airflow-init"}
-    assert local - services.ONE_SHOT <= services.long_running("local")
+    jobs = services.one_shot(demo=True)
+    assert local & jobs == {"airflow-init"}
+    assert local - jobs <= services.long_running("local")
 
 
 def rendered_with(*names):

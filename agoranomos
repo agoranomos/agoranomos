@@ -47,7 +47,7 @@ compose() {
   (
     cd "$ROOT" || exit 1
     COMPOSE_PROJECT_NAME=$(setting COMPOSE_PROJECT_NAME agoranomos)
-    COMPOSE_PROFILES=$(setting COMPOSE_PROFILES core)
+    COMPOSE_PROFILES=$(setting COMPOSE_PROFILES core,demo)
     COMPOSE_FILE=$(setting COMPOSE_FILE compose.yaml)
     export COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_FILE
     docker compose "$@"
