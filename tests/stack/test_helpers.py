@@ -1,6 +1,7 @@
 """Tests of the helpers themselves: they need neither Docker nor a running stack."""
 
 import http.client
+import importlib.util
 import json
 import os
 import re
@@ -626,6 +627,21 @@ def test_http_json_sends_no_request_through_a_proxy(http_server, monkeypatch):
         urllib.request.build_opener().open(f"{url}/ok", timeout=2)
     assert stack_helpers.http_json("GET", f"{url}/ok") == (200, {"answer": [1, 2]})
     assert [(method, path) for method, path, _, _ in server.requests] == [("GET", "/ok")]
+    # The request alone does not catch an opener that build_opener() made without a ProxyHandler of
+    # its own: that opener reads the variables when its module is imported, and stack_helpers was
+    # imported before they were set. So every ProxyHandler of the opener must have no proxy, in
+    # stack_helpers and in a copy of it imported now, with the variables set. They are compared by
+    # scheme, because a proxy URL can hold a user name and a password.
+    spec = importlib.util.spec_from_file_location("stack_helpers_now", stack_helpers.__file__)
+    imported_now = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(imported_now)
+    for module in (stack_helpers, imported_now):
+        schemes = [
+            sorted(handler.proxies)
+            for handler in module.OPENER.handlers
+            if isinstance(handler, urllib.request.ProxyHandler)
+        ]
+        assert all(not names for names in schemes), f"the opener has proxies for {schemes}"
 
 
 def test_http_json_tells_a_timeout_from_a_refused_connection(http_server):
