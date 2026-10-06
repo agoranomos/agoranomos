@@ -313,6 +313,34 @@ def test_a_failing_call_names_the_step_and_the_status_and_prints_no_secret(
     assert leaked(output.out + output.err) == []
 
 
+@pytest.mark.parametrize(
+    ("method", "path", "after_first_start"),
+    [
+        pytest.param("POST", "/api/setup", False, id="setup"),
+        pytest.param("POST", "/api/session", True, id="sign-in"),
+        pytest.param("POST", "/api/database", False, id="connect"),
+    ],
+)
+def test_an_answer_of_an_unexpected_shape_ends_in_one_line(
+    metabase, capsys, method, path, after_first_start
+):
+    # A success status with an echo of the request, the setup token and a password in it: the job
+    # looks for an id that is not there. The line names the class of the error, never the answer.
+    if after_first_start:
+        assert mi.main(env_for(metabase)) == 0
+        capsys.readouterr()
+    metabase.failures[(method, path)] = 200
+    assert mi.main(env_for(metabase)) == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "Traceback" not in output.err
+    assert output.err.splitlines() == [
+        "metabase-init: an answer of Metabase had an unexpected shape (KeyError). "
+        "See ./agoranomos logs metabase."
+    ]
+    assert leaked(output.err) == []
+
+
 def test_a_failing_call_is_an_error_with_the_step_the_status_and_a_fixed_hint_only(metabase):
     metabase.failures[("GET", "/api/database")] = 503
     client = mi.Metabase(metabase.url)

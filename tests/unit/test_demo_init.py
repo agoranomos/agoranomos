@@ -686,6 +686,8 @@ def test_an_airflow_that_cannot_be_reached_is_named_with_the_class_of_the_error(
 @pytest.mark.parametrize(
     ("side", "call"),
     [
+        # The answer echoes the request, with the password of the admin of Airflow in it.
+        ("airflow", ("POST", "/auth/token")),
         ("airflow", ("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns")),
         ("airflow", ("PATCH", f"/api/v2/dags/{di.LOAD_DAG}")),
         ("airflow", ("GET", f"/api/v2/dags/{di.TRANSFORM_DAG}/dagRuns")),
@@ -704,6 +706,28 @@ def test_a_failed_call_names_the_step_and_prints_no_secret(airflow, metabase, ca
     line = one_line(capsys)
     assert f"{call[0]} {call[1]}" in line
     assert "HTTP 500" in line
+
+
+@pytest.mark.parametrize(
+    ("side", "call", "server"),
+    [
+        ("airflow", ("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns"), "Airflow"),
+        ("airflow", ("GET", f"/api/v2/dags/{di.TRANSFORM_DAG}/dagRuns"), "Airflow"),
+        ("metabase", ("POST", "/api/session"), "Metabase"),
+        ("metabase", ("POST", "/api/card"), "Metabase"),
+    ],
+)
+def test_an_answer_of_an_unexpected_shape_ends_in_one_line(
+    airflow, metabase, capsys, side, call, server
+):
+    # A success status with an echo of the request, credentials included: the job looks for what
+    # is not there. The line names the class of the error and where to look, never the answer.
+    (airflow if side == "airflow" else metabase).failures[call] = 200
+    assert di.main(env_for(airflow, metabase)) == 1
+    line = one_line(capsys)
+    assert f"an answer of {server} had an unexpected shape (KeyError)" in line
+    hint = "airflow-apiserver" if server == "Airflow" else "metabase"
+    assert line.endswith(f"See ./agoranomos logs {hint}.")
 
 
 def test_a_renamed_warehouse_connection_is_found_by_its_address(airflow, metabase):

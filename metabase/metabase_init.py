@@ -55,6 +55,18 @@ class SetupError(RuntimeError):
     """A problem that stops the setup, explained for the person who runs the stack."""
 
 
+# What reading an answer of an unexpected shape raises, such as an echo of the request with a
+# success status. The jobs then end with one line that names the class of the error, and never a
+# value of the answer, which can repeat what the request carried.
+SHAPE_ERRORS = (KeyError, TypeError, AttributeError, IndexError)
+
+
+def unexpected_shape(server: str, error: BaseException, hint: str) -> str:
+    """The message of an answer of an unexpected shape: the server, the class of the error and a
+    fixed hint."""
+    return f"an answer of {server} had an unexpected shape ({type(error).__name__}). {hint}"
+
+
 def read_settings(
     env: Mapping[str, str], names: Mapping[str, str], urls: Collection[str]
 ) -> dict[str, Any]:
@@ -340,6 +352,9 @@ def main(env: Mapping[str, str] | None = None) -> int:
         database_id, database_created = ensure_warehouse(metabase, config)
     except SetupError as error:
         print(f"metabase-init: {error}", file=sys.stderr)
+        return 1
+    except SHAPE_ERRORS as error:
+        print(f"metabase-init: {unexpected_shape('Metabase', error, LOGS_HINT)}", file=sys.stderr)
         return 1
     print(
         f"metabase-init: the admin account {'is created' if admin_created else 'exists'}, and the "

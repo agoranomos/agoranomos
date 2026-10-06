@@ -14,8 +14,9 @@ The whole job has one deadline, DEADLINE seconds from its start, which every wai
 step that runs out of time names itself; ./agoranomos up waits longer than that for the stack.
 
 It runs in a plain Python image and uses the client of metabase_init.py. Like metabase-init, it
-takes every secret from the environment, sends it only in the body of a request, and its messages
-name a step and an HTTP status, never what a server answered.
+takes every secret from the environment, sends it only in the body of a request, and ends a failure
+with one line that names a step and an HTTP status, or the class of an error, never what a server
+answered.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from metabase_init import (
+    SHAPE_ERRORS,
     ApiClient,
     Metabase,
     SetupError,
@@ -37,6 +39,7 @@ from metabase_init import (
     list_databases,
     read_settings,
     sign_in,
+    unexpected_shape,
 )
 
 LOAD_DAG = "agoranomos_demo_load"
@@ -380,6 +383,8 @@ def ensure_dashboard(metabase: Metabase, collection_id: int, cards: Mapping[str,
 
 
 def main(env: Mapping[str, str] | None = None) -> int:
+    # The server whose answers the job reads, for the line of an answer of an unexpected shape.
+    server, hint = "Airflow", Airflow.logs_hint
     try:
         deadline = Deadline(DEADLINE)
         config = Config.from_env(os.environ if env is None else env)
@@ -387,6 +392,7 @@ def main(env: Mapping[str, str] | None = None) -> int:
         sign_in_to_airflow(airflow, config.airflow_password)
         wait_for_dags(airflow, deadline)
         ran = run_demo_pipeline(airflow, deadline)
+        server, hint = "Metabase", Metabase.logs_hint
         metabase = Metabase(config.metabase_url)
         sign_in(metabase, config.admin_email, config.admin_password)
         # The connection that metabase-init keeps up to date; its log names it when several match.
@@ -401,6 +407,9 @@ def main(env: Mapping[str, str] | None = None) -> int:
         dashboard_id = ensure_dashboard(metabase, collection_id, cards)
     except SetupError as error:
         print(f"demo-init: {error}", file=sys.stderr)
+        return 1
+    except SHAPE_ERRORS as error:
+        print(f"demo-init: {unexpected_shape(server, error, hint)}", file=sys.stderr)
         return 1
     print(
         f"demo-init: the demo pipeline {'ran now' if ran else 'ran before'}, and the dashboard "
