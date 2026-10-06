@@ -68,6 +68,14 @@ def dag_runs(airflow_url, token, dag_id, limit=20):
     return body["dag_runs"]
 
 
+def downstream_task_ids(airflow_url, token, dag_id):
+    """The tasks of the latest version of a DAG, each with the sorted ids of the tasks that run
+    after it: the order of the tasks, as the DAG declares it."""
+    status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}/tasks")
+    assert status == 200, body
+    return {task["task_id"]: sorted(task["downstream_task_ids"] or []) for task in body["tasks"]}
+
+
 def task_instances(airflow_url, token, run):
     path = f"/api/v2/dags/{run['dag_id']}/dagRuns/{run['dag_run_id']}/taskInstances"
     status, body = api(airflow_url, token, "GET", path)
@@ -140,9 +148,10 @@ def variable_names(airflow_url, token, prefix):
     """The names of the Airflow Variables whose names start with prefix, sorted: names, never
     values, as a Variable can hold a secret.
 
-    The API matches the prefix with LIKE, where _ stands for any letter, so the names are checked
-    again here. Like asset_events, the helper fails when total_entries says that there are more
-    Variables than one page holds. The answer, with the values, is dropped before any check.
+    The API matches the prefix by a range of keys, after it strips the characters at its end that
+    are not letters or digits, so cosmos_cache__ also matches cosmos_cache_other: the names are
+    checked again here. Like asset_events, the helper fails when total_entries says that there are
+    more Variables than one page holds. The answer, with the values, is dropped before any check.
     """
     query = f"variable_key_prefix_pattern={quote(prefix)}&order_by=key&limit={PER_PAGE}"
     status, body = api(airflow_url, token, "GET", f"/api/v2/variables?{query}")

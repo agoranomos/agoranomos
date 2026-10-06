@@ -11,6 +11,7 @@ from airflow_api import (
     api,
     asset_events,
     dag_runs,
+    downstream_task_ids,
     run_dag,
     task_instances,
     task_log,
@@ -92,6 +93,8 @@ def transform_run(env, airflow_url, token):
     )
     load = run_dag(airflow_url, token, LOAD)
     assert load["state"] == "success", load["state"]
+    # The tests of the mart compare it with raw_demo, and two empty tables would be equal.
+    assert totals(env, RAW_TABLE)["rows"] > 0, "the demo load wrote no rows"
 
     def started_by_the_load():
         # The event of this load lists the runs that it started.
@@ -115,6 +118,13 @@ def test_the_asset_of_the_raw_table_starts_the_transform(transform_run):
 
 
 def test_cosmos_runs_each_model_and_then_its_tests(airflow_url, token, transform_run):
+    # One chain: each model, then its tests, and the mart only after the tests of the staging model.
+    assert downstream_task_ids(airflow_url, token, TRANSFORM) == {
+        STAGING_RUN: [STAGING_TEST],
+        STAGING_TEST: [MART_RUN],
+        MART_RUN: [MART_TEST],
+        MART_TEST: [],
+    }
     states = {i["task_id"]: i["state"] for i in task_instances(airflow_url, token, transform_run)}
     assert states == dict.fromkeys(DBT_TASKS, "success")
 

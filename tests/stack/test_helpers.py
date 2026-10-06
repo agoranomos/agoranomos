@@ -453,15 +453,68 @@ def test_the_log_helper_reads_nothing_for_a_task_that_never_ran(monkeypatch):
     assert airflow_api.task_log("http://127.0.0.1:8080", "a-token", instance) == []
 
 
+def test_the_task_helper_gives_each_task_the_sorted_tasks_after_it(monkeypatch):
+    # Airflow 3.3.2 gives downstream_task_ids as a list in no set order, or None (TaskResponse).
+    asked = []
+
+    def fake_http_json(method, url, body=None, headers=None, timeout=30):
+        asked.append((method, url.removeprefix(URL)))
+        tasks = [
+            {"task_id": "b", "downstream_task_ids": None},
+            {"task_id": "a", "downstream_task_ids": ["c", "b"]},
+            {"task_id": "c", "downstream_task_ids": []},
+        ]
+        return 200, {"tasks": tasks, "total_entries": len(tasks)}
+
+    monkeypatch.setattr(airflow_api, "http_json", fake_http_json)
+    found = airflow_api.downstream_task_ids(URL, "a-token", "a_dag")
+    assert found == {"a": ["b", "c"], "b": [], "c": []}
+    assert asked == [("GET", "/api/v2/dags/a_dag/tasks")]
+
+
 # The value of every Variable that the fake API below holds: a Variable can hold a secret.
 VARIABLE_VALUE = "a-value-of-a-variable-that-must-stay-out-of-the-report"
+
+
+def prefix_range(term):
+    """The range of keys [lower, upper) that Airflow 3.3.2 searches for a prefix, as
+    _PrefixPatternParam of api_fastapi/common/parameters.py computes it: first it strips the
+    characters at the end of the term that are not letters or digits; then the upper bound bumps
+    the last character, and when the bump is no letter or digit it drops that character and bumps
+    the one before. upper is None when nothing is left to bump."""
+
+    def stripped(text):
+        while text and not text[-1].isalnum():
+            text = text[:-1]
+        return text
+
+    def upper(text):
+        text = stripped(text)
+        if not text:
+            return None
+        bumped = chr(ord(text[-1]) + 1)
+        return text[:-1] + bumped if bumped.isalnum() else upper(text[:-1])
+
+    return stripped(term), upper(term)
+
+
+def test_the_fake_searches_a_prefix_in_the_range_that_airflow_gives():
+    # The bounds that the class of Airflow 3.3.2 gives for these terms, computed with it.
+    assert [prefix_range(term) for term in ("cosmos_cache__", "test_", "c9", "abZ", "z", "__")] == [
+        ("cosmos_cache", "cosmos_cachf"),
+        ("test", "tesu"),
+        ("c9", "d"),
+        ("abZ", "ac"),
+        ("z", None),
+        ("", None),
+    ]
 
 
 def fake_variables_api(monkeypatch, names, status=200):
     """Make the API of Airflow answer for Variables with these names as Airflow 3.3.2 does.
 
-    It matches variable_key_prefix_pattern with LIKE, where _ stands for any letter, sorts by name,
-    gives at most 100 to a page, and counts all the matches in total_entries. Every Variable has
+    It gives the names in the range of keys of variable_key_prefix_pattern (prefix_range), sorted
+    by name, at most 100 to a page, and counts all of them in total_entries. Every Variable has
     VARIABLE_VALUE. It records the queries.
     """
     asked = []
@@ -473,8 +526,8 @@ def fake_variables_api(monkeypatch, names, status=200):
         asked.append(query)
         if status != 200:
             return status, {"detail": f"refused, and the value is {VARIABLE_VALUE}"}
-        like = re.escape(query["variable_key_prefix_pattern"]).replace("_", ".")
-        found = sorted(name for name in names if re.match(like, name))
+        lower, upper = prefix_range(query["variable_key_prefix_pattern"])
+        found = sorted(name for name in names if lower <= name and (upper is None or name < upper))
         page = [{"key": name, "value": VARIABLE_VALUE} for name in found[: int(query["limit"])]]
         return 200, {"variables": page[:100], "total_entries": len(found)}
 
@@ -483,8 +536,9 @@ def fake_variables_api(monkeypatch, names, status=200):
 
 
 def test_the_variables_helper_returns_the_names_that_start_with_the_prefix(monkeypatch):
-    # LIKE takes cosmosXcacheYZother for cosmos_cache__ too: the helper checks the names again.
-    names = ["cosmos_cache__a_dag__dbt", "cosmosXcacheYZother", "dlt_secrets_toml"]
+    # The API strips the underscores at the end of cosmos_cache__, so it gives cosmos_cache_other
+    # too: the helper checks the names again.
+    names = ["cosmos_cache__a_dag__dbt", "cosmos_cache_other", "dlt_secrets_toml"]
     asked = fake_variables_api(monkeypatch, names)
     found = airflow_api.variable_names(URL, "a-token", "cosmos_cache__")
     assert found == ["cosmos_cache__a_dag__dbt"]
