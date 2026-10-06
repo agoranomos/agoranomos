@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:best-practices", ":semanticCommits", ":gitSignOff"],
+  "extends": ["config:best-practices", ":semanticCommits", ":gitSignOff", "customManagers:githubActionsVersions"],
   "pre-commit": {
     "enabled": true
   },
