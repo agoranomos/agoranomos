@@ -17,7 +17,7 @@ Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 - `compose.yaml`, `compose.celery.yaml`, `postgres/`: the Docker Compose stack, its CeleryExecutor overlay ([ADR-0015](docs/adr/0015-run-localexecutor-by-default.md)), and the SQL that the one-shot `db-init` job runs on every start.
 - `airflow/Dockerfile`, `airflow/requirements.txt`, `airflow/dbt-requirements.in`, `airflow/dbt-requirements.txt`: the Airflow image of the stack ([ADR-0002](docs/adr/0002-orchestrate-with-airflow-3.md)), which `./agoranomos up` builds: dlt and Cosmos in Airflow's environment, and dbt in a virtual environment of its own, from a lock file with hashes.
 - `airflow/dags/`: the DAGs of the base package, the `agoranomos` DAG bundle.
-- `airflow/dags/agoranomos_pipelines/`: the code that the DAGs of the base package share, such as the demo source (dlt); `.airflowignore` keeps the DAG processor out of it.
+- `airflow/dags/agoranomos_pipelines/`: the code that the DAGs of the base package share, such as the demo source (dlt) and the asset of the raw table; `.airflowignore` keeps the DAG processor out of it.
 - `dbt/`: the dbt project ([ADR-0005](docs/adr/0005-transform-with-dbt-core.md)), which Airflow runs through Cosmos as the `transformer` role, read-only from the checkout.
 - `metabase/`: the one-shot `metabase-init` job, which creates the admin and connects the warehouse on the first start.
 - `extensions/`: the folder for a deployment's own additions ([ADR-0013](docs/adr/0013-keep-extensions-apart-from-the-base-package.md)); git tracks only its README.
