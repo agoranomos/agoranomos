@@ -710,6 +710,46 @@ def test_up_reports_a_failed_one_shot_job(cli, tmp_path):
     assert "db-init failed: see ./agoranomos logs db-init" in result.stderr
 
 
+@pytest.mark.parametrize(
+    ("services", "outcome"),
+    [
+        pytest.param("db-init warehouse-db platform-db", 0, id="profile-off"),
+        pytest.param("db-init warehouse-db platform-db demo-init", 1, id="profile-on"),
+    ],
+)
+def test_up_waits_only_for_the_services_of_the_active_profiles(cli, tmp_path, services, outcome):
+    # docker compose ps lists every container of the project: after COMPOSE_PROFILES=core, also
+    # the demo-init that failed on an earlier start with the demo profile, which no longer runs.
+    ps = HEALTHY_PS + "demo-init|exited||1\n"
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps), FAKE_SERVICES=services, **QUICK)
+    assert result.returncode == outcome, result.stderr
+    assert ("demo-init failed: see ./agoranomos logs demo-init" in result.stderr) == bool(outcome)
+    assert "compose config --services" in cli.docker_calls()
+
+
+def test_the_active_services_only_filter_the_containers_that_up_waits_for(cli, tmp_path):
+    # up waits for the containers that ps lists, as before: an active service without one, such
+    # as metabase here, is not waited for.
+    result = cli.run(
+        "up",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_SERVICES="db-init warehouse-db platform-db metabase",
+        AGORANOMOS_WAIT_TIMEOUT="1",
+        AGORANOMOS_WAIT_INTERVAL="0.2",
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_up_reports_a_failing_docker_compose_config(cli, tmp_path):
+    result = cli.run(
+        "up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), FAKE_CONFIG_EXIT="1", **QUICK
+    )
+    assert result.returncode == 1
+    assert "service demo-init depends on undefined service" in result.stderr
+    assert "error: docker compose config failed" in result.stderr
+    assert "All services are healthy." not in result.stdout
+
+
 def test_up_reports_an_unhealthy_service(cli, tmp_path):
     ps = HEALTHY_PS.replace("platform-db|running|healthy|0", "platform-db|running|unhealthy|0")
     result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps), AGORANOMOS_WAIT_INTERVAL="0.1")
