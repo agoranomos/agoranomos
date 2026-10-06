@@ -48,6 +48,8 @@ The AI switches of Metabase are fixed off in `compose.yaml` until the permission
 | `AIRFLOW_DB_PASSWORD` | The role that owns the metadata database of Airflow | Change it and run `./agoranomos up`: the role gets the new password. |
 | `METABASE_DB_PASSWORD` | The role that owns the application database of Metabase | As for `AIRFLOW_DB_PASSWORD`. |
 | `METABASE_READER_PASSWORD` | The read-only role that Metabase reads the warehouse as | As for `AIRFLOW_DB_PASSWORD`; Metabase's connection is updated too. |
+| `WAREHOUSE_LOADER_PASSWORD` | The role for loading data into the raw schemas of the warehouse (dlt) | As for `AIRFLOW_DB_PASSWORD`. |
+| `WAREHOUSE_TRANSFORMER_PASSWORD` | The role for building the staging and marts schemas of the warehouse (dbt) | As for `AIRFLOW_DB_PASSWORD`. |
 | `VALKEY_PASSWORD` | The password of the Celery broker, used only with CeleryExecutor | Change it and run `./agoranomos up`. |
 | `AIRFLOW_FERNET_KEY` | The key that encrypts the connections and variables saved in Airflow | Do not change it: what Airflow saved could no longer be decrypted. |
 | `AIRFLOW_JWT_SECRET` | The key that signs the API tokens of Airflow | Change it and run `./agoranomos up`; people have to sign in again. |
@@ -55,5 +57,7 @@ The AI switches of Metabase are fixed off in `compose.yaml` until the permission
 | `AIRFLOW_ADMIN_PASSWORD` | The password of the Airflow user `admin`, set on the first start | Change the password in Airflow; this value is not applied again. |
 | `METABASE_ENCRYPTION_KEY` | The key that encrypts the connection details saved in Metabase | Do not change it: Metabase could no longer read its saved connections. |
 | `METABASE_ADMIN_PASSWORD` | The password of the Metabase admin account | The first-start setup signs in with it on every start. If you change the password in Metabase, put the same value here. |
+
+On every start, the setup job `db-init` sets each role of the warehouse (`loader`, `transformer` and `metabase_reader`) to `LOGIN`, with no `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION` or `BYPASSRLS` attribute, and gives it the password from `.env`. So if you give one of these roles such a power by hand, the next `./agoranomos up` takes it back.
 
 `AIRFLOW_DB_PASSWORD` and `VALKEY_PASSWORD` are written into connection URLs. If you choose them yourself instead of letting `init` generate them, use letters and digits only: a character such as `@`, `/` or `:` breaks the URL.

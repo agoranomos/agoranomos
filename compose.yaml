@@ -141,6 +141,8 @@ services:
       AIRFLOW_DB_PASSWORD: ${AIRFLOW_DB_PASSWORD:?run ./agoranomos init}
       METABASE_DB_PASSWORD: ${METABASE_DB_PASSWORD:?run ./agoranomos init}
       METABASE_READER_PASSWORD: ${METABASE_READER_PASSWORD:?run ./agoranomos init}
+      WAREHOUSE_LOADER_PASSWORD: ${WAREHOUSE_LOADER_PASSWORD:?run ./agoranomos init}
+      WAREHOUSE_TRANSFORMER_PASSWORD: ${WAREHOUSE_TRANSFORMER_PASSWORD:?run ./agoranomos init}
     volumes:
       - ./postgres:/opt/agoranomos/postgres:ro
     networks: [data]
@@ -239,6 +241,14 @@ services:
   airflow-scheduler:
     <<: *airflow
     command: ["scheduler"]
+    environment:
+      <<: *airflow-environment
+      # The tasks run here with LocalExecutor, and on the worker with CeleryExecutor, which extends this
+      # service. Only they get the passwords of the warehouse roles: the DAG processor parses the DAGs
+      # of the extensions folder, so it gets none. The first is for dlt and the second for dbt, which
+      # hides the values of DBT_ENV_SECRET_ variables in its logs.
+      WAREHOUSE_LOADER_PASSWORD: ${WAREHOUSE_LOADER_PASSWORD:?run ./agoranomos init}
+      DBT_ENV_SECRET_WAREHOUSE_PASSWORD: ${WAREHOUSE_TRANSFORMER_PASSWORD:?run ./agoranomos init}
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://localhost:8974/health"]
       interval: 10s
