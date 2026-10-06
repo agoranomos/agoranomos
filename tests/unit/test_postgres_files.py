@@ -36,17 +36,49 @@ def code(name: str) -> str:
     return "".join(line for line in lines if not line.startswith("--"))
 
 
+BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+
 def normalized(name: str) -> str:
     """The file without its comments, and with each run of whitespace as one space: a statement
     reads the same however it is indented or split over lines. Match it with re.IGNORECASE, and
-    without ^ or $: a statement ends in ;. The files have no -- inside a string, where this would
-    cut the string."""
-    return " ".join(re.sub(r"--[^\n]*", "", read(name)).split())
+    without ^ or $: a statement ends in ;.
+
+    Block comments go first, each from /* to the first */ after it, so a -- inside one goes with
+    it; then -- comments, each to the end of its line. A nested block comment would end at its
+    first */, and a -- or /* inside a string, or a /* inside a -- comment, would cut text that is
+    not a comment: test_the_sql_files_hold_nothing_that_normalized_misreads refuses them."""
+    text = BLOCK_COMMENT.sub(" ", read(name))
+    return " ".join(re.sub(r"--[^\n]*", "", text).split())
 
 
 def runs(text: str, statement: str) -> bool:
     """Whether normalized text has the statement, in upper or lower case."""
     return re.search(rf"\b{re.escape(statement)}", text, re.IGNORECASE) is not None
+
+
+# A string in single quotes, a -- comment or a block comment. findall reads a file from its start,
+# as SQL does, so a ' inside a comment starts no string and a -- inside a string starts no
+# comment. Unlike SQL, it does not nest block comments.
+LEXEMES = re.compile(rf"'(?:[^']|'')*'|--[^\n]*|{BLOCK_COMMENT.pattern}", re.DOTALL)
+
+
+@pytest.mark.parametrize("name", sorted(ROLE_PASSWORDS))
+def test_the_sql_files_hold_nothing_that_normalized_misreads(name):
+    text = read(name)
+    lexemes = LEXEMES.findall(text)
+    strings = [lexeme for lexeme in lexemes if lexeme.startswith("'")]
+    line_comments = [lexeme for lexeme in lexemes if lexeme.startswith("--")]
+    assert strings, f"{name} has no string for this test to read"
+    assert line_comments, f"{name} has no -- comment for this test to read"
+    # A nested block comment leaves its last */ behind when the first */ ends it.
+    assert "*/" not in BLOCK_COMMENT.sub(" ", text), (
+        f"{name} has a */ that ends no block comment, as a nested block comment does"
+    )
+    cut = [lexeme for lexeme in strings if "--" in lexeme or "/*" in lexeme]
+    assert not cut, f"{name} has a -- or /* inside a string: {cut}"
+    opened = [lexeme for lexeme in line_comments if "/*" in lexeme]
+    assert not opened, f"{name} has a /* inside a -- comment: {opened}"
 
 
 def test_db_init_gives_psql_no_variable_but_on_error_stop():
