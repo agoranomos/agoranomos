@@ -9,7 +9,7 @@ Agoranomos comes with a demo: eight weeks of statistics of one fictional ad acco
 3. The load updates the asset of the raw table, and that starts the DAG `agoranomos_demo_transform`: dbt, through Cosmos, builds the staging model and then `marts.ad_spend_daily`. The tests of each model run right after it, and a failed test stops the models that read it.
 4. `demo-init` syncs the warehouse in Metabase and creates the collection **Agoranomos demo**, with three questions and the dashboard **Ad spend (demo)**.
 
-`up` waits for `demo-init`, which adds about half a minute to the first start: 27 seconds, from the moment that Airflow and Metabase were ready (measured on an arm64 machine). `demo-init` gives up after 10 minutes. When it fails, `up` says so, and `./agoranomos logs demo-init` shows one line that names the step that failed or ran out of time, and for a step of the pipeline the DAG to look at in Airflow. Fix the cause and run `./agoranomos up` again: the next start does what is not done yet.
+`up` waits for `demo-init`, which adds about half a minute to the first start: 27 seconds, from the moment that Airflow and Metabase were ready (measured on an arm64 machine). `demo-init` gives up after 10 minutes. When it fails, `up` still waits for the rest of the stack, prints the addresses of Airflow and Metabase, says that the stack is up and the demo is not ready, and exits with 1. `./agoranomos logs demo-init` shows one line that names the step that failed or ran out of time, and for a step of the pipeline the DAG to look at in Airflow. Fix the cause and run `./agoranomos up` again: the next start does what is not done yet.
 
 ## Look at it
 

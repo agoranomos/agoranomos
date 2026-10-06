@@ -796,6 +796,71 @@ def test_up_waits_only_for_the_services_of_the_active_profiles(cli, tmp_path, se
     assert "compose config --services" in cli.docker_calls()
 
 
+FAILED_DEMO = "demo-init|exited||1\n"
+
+
+def test_up_says_that_the_stack_is_up_and_the_demo_is_not_ready_when_only_demo_init_failed(
+    cli, tmp_path
+):
+    # Airflow and Metabase run, and the line of demo-init names what to look at in Airflow: so up
+    # gives the addresses, and still fails, as CI needs.
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS + FAILED_DEMO), **QUICK)
+    assert result.returncode == 1
+    assert "warning: demo-init failed: see ./agoranomos logs demo-init" in result.stderr
+    assert result.stderr.splitlines()[-1] == "error: the stack is up, but the demo is not ready"
+    assert "the stack did not start" not in result.stderr
+    lines = result.stdout.splitlines()
+    assert "Airflow:  http://127.0.0.1:8080" in lines
+    assert "Metabase: http://127.0.0.1:3000" in lines
+    assert "All services are healthy." not in lines
+    assert not any(line.startswith("The stack is up.") for line in lines)
+
+
+def test_up_waits_for_the_rest_of_the_stack_when_only_demo_init_failed(cli, tmp_path):
+    starting = ps_with("platform-db|running|starting|0") + FAILED_DEMO
+    result = cli.run(
+        "up",
+        FAKE_PS_FIRST=ps_file(tmp_path, starting, "first.txt"),
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS + FAILED_DEMO),
+        **QUICK,
+    )
+    assert result.returncode == 1
+    assert result.stderr.splitlines()[-1] == "error: the stack is up, but the demo is not ready"
+    assert "Metabase: http://127.0.0.1:3000" in result.stdout
+    polls = [call for call in cli.docker_calls() if call.startswith("compose ps --all")]
+    assert len(polls) == 2  # the first poll found platform-db still starting
+
+
+def test_up_says_that_the_stack_did_not_start_when_another_service_failed_with_demo_init(
+    cli, tmp_path
+):
+    ps = ps_with("db-init|exited||1") + FAILED_DEMO
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps), **QUICK)
+    assert result.returncode == 1
+    assert "db-init failed: see ./agoranomos logs db-init" in result.stderr
+    assert "demo-init failed: see ./agoranomos logs demo-init" in result.stderr
+    assert "error: the stack did not start" in result.stderr
+    assert "the demo is not ready" not in result.stderr
+    assert "Airflow:" not in result.stdout
+
+
+def test_up_that_gives_up_on_the_stack_names_a_failed_demo_init_too(cli, tmp_path):
+    ps = ps_with("platform-db|running|starting|0") + FAILED_DEMO
+    result = cli.run(
+        "up",
+        FAKE_PS_FILE=ps_file(tmp_path, ps),
+        AGORANOMOS_WAIT_TIMEOUT="1",
+        AGORANOMOS_WAIT_INTERVAL="0.2",
+    )
+    assert result.returncode == 1
+    assert "demo-init failed: see ./agoranomos logs demo-init" in result.stderr
+    assert (
+        "still waiting after 1 seconds for: platform-db (running, starting) "
+        "(see ./agoranomos status)" in result.stderr
+    )
+    assert "Airflow:" not in result.stdout
+
+
 def test_the_active_services_only_filter_the_containers_that_up_waits_for(cli, tmp_path):
     # up waits for the containers that ps lists, as before: an active service without one, such
     # as metabase here, is not waited for.
