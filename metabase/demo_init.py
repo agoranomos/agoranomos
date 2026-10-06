@@ -62,6 +62,15 @@ AIRFLOW_ADMIN_HINT = (
     "Check AIRFLOW_ADMIN_PASSWORD in .env. If you changed the password of admin in Airflow, put "
     "the same value in .env."
 )
+# Where to look when no sync finds the table of the mart. After a run of the pipeline, Metabase is
+# the suspect. When the pipeline ran before and not now, Airflow has kept its runs, and the
+# warehouse may have lost the table since, as after a reset of the warehouse volume alone.
+SYNC_HINT = "see ./agoranomos logs metabase"
+RAN_BEFORE_HINT = (
+    "the demo pipeline ran before, so the table may be gone from the warehouse, as after a reset "
+    f"of its volume: trigger {LOAD_DAG} in Airflow, and the transform that follows it builds the "
+    "table again"
+)
 
 # The questions of the demo dashboard, in the order of the dashboard, with their place on its grid
 # of 24 columns.
@@ -244,6 +253,11 @@ def wait_for_transform(airflow: Airflow, since: str, deadline: Deadline) -> None
             return True
         failed = count_runs(airflow, TRANSFORM_DAG, "failed", since=since)
         if failed and not transform_is_busy(airflow):
+            # The run that the load started can succeed between the first count and the look at
+            # whether the transform is busy, while a failed run of a person counts: so the
+            # successes are counted once more before the job gives up.
+            if count_runs(airflow, TRANSFORM_DAG, "success", since=since):
+                return True
             raise SetupError(
                 f"the DAG {TRANSFORM_DAG} failed after the demo load: see it in Airflow; a failed "
                 "dbt test there means that dbt found broken data"
@@ -289,15 +303,23 @@ def run_demo_pipeline(airflow: Airflow, deadline: Deadline) -> bool:
 
 
 def mart_is_synced(metabase: Metabase, database_id: int) -> bool:
-    metadata = metabase.call("GET", f"/api/database/{database_id}/metadata?skip_fields=true")
+    """Whether Metabase knows the table of the mart. A person may have hidden it in Admin > Table
+    Metadata, and the metadata of a database leaves a hidden table out unless the request passes
+    include_hidden=true (Metabase 0.63.19); a sync does not show it again."""
+    metadata = metabase.call(
+        "GET", f"/api/database/{database_id}/metadata?skip_fields=true&include_hidden=true"
+    )
     return any(
         table.get("schema") == MART_SCHEMA and table.get("name") == MART_TABLE
         for table in metadata.get("tables", [])
     )
 
 
-def ensure_synced(metabase: Metabase, database_id: int, deadline: Deadline) -> bool:
-    """Make Metabase know the table of the mart; True if a sync was needed."""
+def ensure_synced(
+    metabase: Metabase, database_id: int, deadline: Deadline, hint: str = SYNC_HINT
+) -> bool:
+    """Make Metabase know the table of the mart; True if a sync was needed. hint says where to look
+    when no sync finds the table."""
     if mart_is_synced(metabase, database_id):
         return False
     metabase.call("POST", f"/api/database/{database_id}/sync_schema")
@@ -305,7 +327,7 @@ def ensure_synced(metabase: Metabase, database_id: int, deadline: Deadline) -> b
         lambda: mart_is_synced(metabase, database_id),
         deadline,
         f"Metabase did not find {MART_SCHEMA}.{MART_TABLE} after a sync of the warehouse",
-        "see ./agoranomos logs metabase",
+        hint,
     )
     return True
 
@@ -401,7 +423,7 @@ def main(env: Mapping[str, str] | None = None) -> int:
             raise SetupError(
                 "Metabase has no connection to the warehouse: see ./agoranomos logs metabase-init"
             )
-        ensure_synced(metabase, database["id"], deadline)
+        ensure_synced(metabase, database["id"], deadline, SYNC_HINT if ran else RAN_BEFORE_HINT)
         collection_id = ensure_collection(metabase)
         cards = ensure_questions(metabase, collection_id, database["id"])
         dashboard_id = ensure_dashboard(metabase, collection_id, cards)

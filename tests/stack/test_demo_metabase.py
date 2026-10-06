@@ -110,8 +110,12 @@ def test_metabase_knows_the_mart(metabase_url, session):
     databases = get(metabase_url, session, "/api/database")
     databases = databases.get("data", databases) if isinstance(databases, dict) else databases
     [warehouse] = [d for d in databases if d.get("name") == WAREHOUSE_NAME]
+    # As demo-init asks: a table that a person hid in Metabase counts, and Metabase 0.63.19 leaves
+    # it out unless the request passes include_hidden=true.
     metadata = get(
-        metabase_url, session, f"/api/database/{warehouse['id']}/metadata?skip_fields=true"
+        metabase_url,
+        session,
+        f"/api/database/{warehouse['id']}/metadata?skip_fields=true&include_hidden=true",
     )
     tables = {(table["schema"], table["name"]) for table in metadata["tables"]}
     assert ("marts", "ad_spend_daily") in tables

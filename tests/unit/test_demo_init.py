@@ -267,7 +267,10 @@ def public(run: dict[str, Any]) -> dict[str, Any]:
 class FakeMetabase:
     """What demo-init can see of Metabase 0.63: the warehouse, its metadata and the content.
 
-    A sync of the schema finds the mart sync_seconds later on the fake clock. The list of
+    A sync of the schema finds the mart sync_seconds later on the fake clock. A person can hide the
+    table of the mart (mart_hidden), as Admin > Table Metadata does: the metadata of the database
+    then leaves it out unless the request passes include_hidden=true, as Metabase 0.63.19 does with
+    every table that has a visibility type, and a sync does not show it again. The list of
     collections holds the root collection and a personal one, and leaves out the archived ones, as
     Metabase does; so do the items of a collection.
     """
@@ -277,6 +280,7 @@ class FakeMetabase:
         self.url = ""
         self.databases = [copy.deepcopy(SAMPLE), copy.deepcopy(WAREHOUSE)]
         self.mart_known = False
+        self.mart_hidden = False
         self.sync_seconds = 10.0
         self.synced_at: float | None = None
         self.items_as_list = False
@@ -300,10 +304,13 @@ class FakeMetabase:
         self.next_id += 1
         return self.next_id
 
-    def tables(self) -> list[dict[str, Any]]:
+    def tables(self, include_hidden: bool) -> list[dict[str, Any]]:
         if self.synced_at is not None and self.clock.now >= self.synced_at:
             self.mart_known = True
-        return [{"schema": "marts", "name": "ad_spend_daily"}] if self.mart_known else []
+        visibility = "hidden" if self.mart_hidden else None
+        known = [{"schema": "marts", "name": "ad_spend_daily", "visibility_type": visibility}]
+        tables = known if self.mart_known else []
+        return [t for t in tables if include_hidden or not t["visibility_type"]]
 
     def items(self, collection_id: int, model: str) -> Any:
         source = self.cards if model == "card" else self.dashboards
@@ -338,7 +345,8 @@ class FakeMetabase:
         if (method, path) == ("GET", "/api/database"):
             return 200, {"data": self.databases, "total": len(self.databases)}
         if (method, path) == ("GET", f"/api/database/{warehouse_id}/metadata"):
-            return 200, {"id": warehouse_id, "tables": self.tables()}
+            include_hidden = query.get("include_hidden") == ["true"]
+            return 200, {"id": warehouse_id, "tables": self.tables(include_hidden)}
         if (method, path) == ("POST", f"/api/database/{warehouse_id}/sync_schema"):
             if self.synced_at is None:
                 self.synced_at = self.clock.now + self.sync_seconds
@@ -383,12 +391,15 @@ class FakeMetabase:
 
 
 def serve(state: Any, header: str) -> ThreadingHTTPServer:
+    """Serve a stand-in on a free local port. It answers with the JSON of what its handle gives,
+    or with the bytes themselves, which stand for a page that is not JSON."""
+
     class Handler(BaseHTTPRequestHandler):
         def serve(self) -> None:
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(length)) if length else None
             status, payload = state.handle(self.command, self.path, body, self.headers.get(header))
-            data = json.dumps(payload).encode()
+            data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
@@ -591,12 +602,15 @@ def test_an_event_that_waits_makes_the_transform_busy(airflow, metabase):
 
 
 def test_a_failed_run_of_a_person_does_not_stop_the_job_while_the_run_of_the_load_waits(
-    airflow, metabase, capsys
+    airflow, metabase, capsys, monkeypatch
 ):
     # A person triggers the transform in the Airflow UI while the load runs, and that run fails,
     # with a run_after after the start of the load. The event of the load waits for that run to
     # end and becomes a run a loop later. The failed run ends at 35 s, when demo-init looks: the
     # event still waits then, so the transform is busy, and the job waits for the run of the load.
+    # The look at 35 s needs a poll every 5 s: with another interval the job would never look in
+    # that one loop, and the test would pass without the waiting event counting as busy.
+    monkeypatch.setattr(di, "POLL_INTERVAL", 5.0)
     airflow.triggers = [(5.0, di.TRANSFORM_DAG, "failed")]
     assert di.main(env_for(airflow, metabase)) == 0
     [load] = airflow.runs_of(di.LOAD_DAG)
@@ -605,6 +619,33 @@ def test_a_failed_run_of_a_person_does_not_stop_the_job_while_the_run_of_the_loa
     assert person["run_after"] > load["start_date"]
     assert person["end_date"] == stamp(35)
     assert (of_the_load["run_type"], of_the_load["state"]) == ("asset_triggered", "success")
+    assert "the demo pipeline ran now" in capsys.readouterr().out
+
+
+def test_a_run_of_the_load_that_succeeds_while_the_job_looks_at_a_failed_one_counts(
+    airflow, metabase, capsys
+):
+    # A failed run of a person, as above, and the run of the event of the load ends with success
+    # between the count of the successes and the look at whether the transform is busy: the
+    # transform is idle then, and the run that the job waited for has succeeded.
+    airflow.triggers = [(5.0, di.TRANSFORM_DAG, "failed")]
+    handle = airflow.handle
+    ended = []
+
+    def racing(method, url, body, auth):
+        parts = urlsplit(url)
+        busy_check = parse_qs(parts.query).get("state") == ["queued", "running"]
+        if busy_check and parts.path == f"/api/v2/dags/{di.TRANSFORM_DAG}/dagRuns":
+            airflow.catch_up()
+            for run in airflow.runs_of(di.TRANSFORM_DAG):
+                if (run["run_type"], run["state"]) == ("asset_triggered", "running"):
+                    run.update(state="success", end_date=stamp(airflow.clock.now))
+                    ended.append(run)
+        return handle(method, url, body, auth)
+
+    airflow.handle = racing
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert ended, "the run of the load never ended between the two looks"
     assert "the demo pipeline ran now" in capsys.readouterr().out
 
 
@@ -753,23 +794,29 @@ def test_a_failed_call_names_the_step_and_prints_no_secret(airflow, metabase, ca
 
 
 @pytest.mark.parametrize(
-    ("side", "call", "server"),
+    ("side", "call", "server", "function"),
     [
-        ("airflow", ("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns"), "Airflow"),
-        ("airflow", ("GET", f"/api/v2/dags/{di.TRANSFORM_DAG}/dagRuns"), "Airflow"),
-        ("metabase", ("POST", "/api/session"), "Metabase"),
-        ("metabase", ("POST", "/api/card"), "Metabase"),
+        (
+            "airflow",
+            ("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns"),
+            "Airflow",
+            "run_demo_pipeline",
+        ),
+        ("airflow", ("GET", f"/api/v2/dags/{di.TRANSFORM_DAG}/dagRuns"), "Airflow", "count_runs"),
+        ("metabase", ("POST", "/api/session"), "Metabase", "sign_in"),
+        ("metabase", ("POST", "/api/card"), "Metabase", "ensure_questions"),
     ],
 )
 def test_an_answer_of_an_unexpected_shape_ends_in_one_line(
-    airflow, metabase, capsys, side, call, server
+    airflow, metabase, capsys, side, call, server, function
 ):
     # A success status with an echo of the request, credentials included: the job looks for what
-    # is not there. The line names the class of the error and where to look, never the answer.
+    # is not there. The line names the class of the error, the function that read the answer and
+    # where to look, never the answer.
     (airflow if side == "airflow" else metabase).failures[call] = 200
     assert di.main(env_for(airflow, metabase)) == 1
     line = one_line(capsys)
-    assert f"an answer of {server} had an unexpected shape (KeyError)" in line
+    assert f"an answer of {server} had an unexpected shape (KeyError in {function})" in line
     hint = "airflow-apiserver" if server == "Airflow" else "metabase"
     assert line.endswith(f"See ./agoranomos logs {hint}.")
 
@@ -787,8 +834,36 @@ def test_a_page_with_a_success_status_ends_in_one_line(airflow, metabase, capsys
     airflow.handle = page
     assert di.main(env_for(airflow, metabase)) == 1
     line = one_line(capsys)
-    assert "an answer of Airflow had an unexpected shape (TypeError)" in line
+    assert "an answer of Airflow had an unexpected shape (TypeError in run_demo_pipeline)" in line
     assert line.endswith("See ./agoranomos logs airflow-apiserver.")
+
+
+# A page in Latin-1, which is not UTF-8, as a proxy in front of Airflow or Metabase can send.
+LATIN_1_PAGE = "<html><body>Passerelle indisponible, réessayez</body></html>".encode("latin-1")
+
+
+@pytest.mark.parametrize(
+    ("side", "call", "hint"),
+    [
+        ("airflow", ("POST", "/auth/token"), "airflow-apiserver"),
+        ("metabase", ("GET", "/api/database"), "metabase"),
+    ],
+)
+def test_a_page_that_is_not_utf_8_ends_in_one_line(airflow, metabase, capsys, side, call, hint):
+    state = airflow if side == "airflow" else metabase
+    handle = state.handle
+
+    def page(method, url, body, header):
+        if (method, urlsplit(url).path) == call:
+            return 502, LATIN_1_PAGE
+        return handle(method, url, body, header)
+
+    state.handle = page
+    assert di.main(env_for(airflow, metabase)) == 1
+    line = one_line(capsys)
+    assert line == (
+        f"demo-init: {call[0]} {call[1]} failed with HTTP 502. See ./agoranomos logs {hint}."
+    )
 
 
 def test_a_renamed_warehouse_connection_is_found_by_its_address(airflow, metabase):
@@ -809,6 +884,39 @@ def test_a_mart_that_metabase_knows_is_not_synced_again(airflow, metabase):
     metabase.mart_known = True
     assert di.main(env_for(airflow, metabase)) == 0
     assert ("POST", "/api/database/2/sync_schema") not in metabase.calls
+
+
+def test_a_mart_that_is_gone_after_an_earlier_run_names_the_cause_and_the_load(
+    airflow, metabase, clock, capsys
+):
+    # A reset of the warehouse volume alone drops the mart, and Airflow keeps its runs: the start
+    # finds the successful transform, runs no pipeline, and no sync finds the table. It still asks
+    # for a sync and waits until the deadline, and its line says what to do.
+    assert di.main(env_for(airflow, metabase)) == 0
+    metabase.mart_known, metabase.synced_at, metabase.sync_seconds = False, None, math.inf
+    calls, started = len(metabase.calls), clock.now
+    capsys.readouterr()
+    assert di.main(env_for(airflow, metabase)) == 1
+    line = one_line(capsys)
+    assert "Metabase did not find marts.ad_spend_daily after a sync of the warehouse" in line
+    assert "the demo pipeline ran before" in line
+    assert f"trigger {di.LOAD_DAG} in Airflow" in line
+    assert "./agoranomos logs metabase" not in line
+    assert metabase.calls[calls:].count(("POST", "/api/database/2/sync_schema")) == 1
+    assert di.DEADLINE <= clock.now - started < di.DEADLINE + di.POLL_INTERVAL
+
+
+def test_a_mart_that_a_person_hid_in_metabase_counts_as_synced(airflow, metabase, clock, capsys):
+    # Hiding the table in Admin > Table Metadata is a normal edit, and the dashboard keeps working:
+    # its questions are SQL. The next start finds the table and waits for nothing.
+    assert di.main(env_for(airflow, metabase)) == 0
+    metabase.mart_hidden = True
+    calls, started = len(metabase.calls), clock.now
+    capsys.readouterr()
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert ("POST", "/api/database/2/sync_schema") not in metabase.calls[calls:]
+    assert clock.now == started
+    assert capsys.readouterr().out.startswith("demo-init: the demo pipeline ran before")
 
 
 def test_a_collection_of_the_same_name_elsewhere_is_not_the_demo_collection(airflow, metabase):

@@ -283,9 +283,11 @@ def http_json(
         # names the call: the method, the path (never the query), and the classes of the failure.
         path = urllib.parse.urlsplit(url).path or "/"
         raise ConnectionError(f"{method} {path} failed: {error_classes(error)}") from None
+    # An answer that is no JSON is a text: json.loads raises JSONDecodeError, or UnicodeDecodeError
+    # for a page that is not UTF-8, and both are a ValueError.
     try:
         return status, json.loads(raw) if raw else None
-    except json.JSONDecodeError:
+    except ValueError:
         return status, raw.decode(errors="replace")
 
 

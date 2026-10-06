@@ -993,6 +993,10 @@ def test_pytest_does_not_print_the_secrets_of_a_failing_test(tmp_path, options):
     assert shown_in(values["__PLAIN__"], report)
 
 
+# A page in Latin-1, which is not UTF-8, as a proxy in front of a service can send.
+LATIN_1_PAGE = "<html><body>Passerelle indisponible, réessayez</body></html>".encode("latin-1")
+
+
 def unused_port() -> int:
     """A port on loopback where nothing listens: a socket binds it and lets it go."""
     with socket.socket() as probe:
@@ -1015,6 +1019,7 @@ def http_server():
         "/text": (200, "text/plain", b"not json"),
         "/denied": (401, "application/json", b'{"detail": "Not authenticated"}'),
         "/missing": (404, "text/plain", b"nothing here"),
+        "/latin-1": (502, "text/html; charset=iso-8859-1", LATIN_1_PAGE),
     }
 
     class Handler(BaseHTTPRequestHandler):
@@ -1089,6 +1094,9 @@ def test_http_json_sends_no_body_when_it_has_none(http_server):
         pytest.param("/text", (200, "not json"), id="not-json"),
         pytest.param("/denied", (401, {"detail": "Not authenticated"}), id="a-status-of-401"),
         pytest.param("/missing", (404, "nothing here"), id="a-status-of-404-that-is-text"),
+        pytest.param(
+            "/latin-1", (502, LATIN_1_PAGE.decode(errors="replace")), id="a-page-that-is-not-utf-8"
+        ),
     ],
 )
 def test_http_json_returns_every_answer_of_the_server_as_a_status_and_a_body(
