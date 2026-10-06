@@ -68,11 +68,18 @@ def dag_runs(airflow_url, token, dag_id, limit=20):
     return body["dag_runs"]
 
 
-def run_count(airflow_url, token, dag_id, states=()):
-    """How many runs a DAG has in the states (in any state when none is given): total_entries,
-    which counts them all. Airflow keeps every run, also after ./agoranomos down, so the runs can
-    fill a page, and its length would count no more than the page holds."""
-    query = "&".join([*(f"state={state}" for state in states), "order_by=-run_after", "limit=1"])
+def run_count(airflow_url, token, dag_id, states=(), run_types=()):
+    """How many runs a DAG has in the states and of the run types (any, when none are given):
+    total_entries, which counts them all. Airflow keeps every run, also after ./agoranomos down,
+    so the runs can fill a page, and its length would count no more than the page holds."""
+    query = "&".join(
+        [
+            *(f"state={state}" for state in states),
+            *(f"run_type={run_type}" for run_type in run_types),
+            "order_by=-run_after",
+            "limit=1",
+        ]
+    )
     status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}/dagRuns?{query}")
     assert status == 200, body
     return body["total_entries"]

@@ -41,8 +41,22 @@ SECRETS = {
 
 
 def leaked(text: str, secrets: dict[str, str] = SECRETS) -> list[str]:
-    """The labels of the secrets that are in the text."""
-    return [label for label, value in secrets.items() if value in text]
+    """The labels of the secrets that are in the text, as they are or as JSON writes them inside a
+    string, where a quote and a backslash are escaped: the stand-in echoes a request as JSON."""
+    return [
+        label
+        for label, value in secrets.items()
+        if value in text or json.dumps(value)[1:-1] in text
+    ]
+
+
+def test_the_scan_finds_a_secret_in_the_json_of_an_echo():
+    # JSON escapes a quote and a backslash, so a password with one would hide from a scan of the
+    # value as it is in what the stand-in echoes.
+    secrets = {"a password with a quote": 'pass"word', "one with a backslash": "pass\\word"}
+    echo = json.dumps({"body": {"password": 'pass"word', "other": "pass\\word"}})
+    assert not any(value in echo for value in secrets.values())
+    assert leaked(echo, secrets) == ["a password with a quote", "one with a backslash"]
 
 
 class FakeMetabase:

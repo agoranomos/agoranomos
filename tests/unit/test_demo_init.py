@@ -92,13 +92,16 @@ class FakeClock:
 class FakeAirflow:
     """What demo-init can see of Airflow 3.3.2: two DAGs, their runs, and the asset between them.
 
-    A scheduler runs on the fake clock, one step a second. A queued run of an unpaused DAG starts
-    when no other run of its DAG is running (max_active_runs=1), and a running one ends after the
-    duration of its DAG, with its result. A load that succeeds updates the asset of the raw table a
-    second before its run ends: while the transform is unpaused, that queues an event for it, unless
-    one is queued already, in which case it is dropped (ON CONFLICT DO NOTHING). A queued event
-    becomes a run of the transform, whose run_after is the time of the event, once the transform
-    has no run queued or running.
+    A scheduler runs on the fake clock, one loop a second, in the order of the loop of Airflow:
+    first a run for an event that waits, then the queued runs start, then the running ones end.
+    A queued run of an unpaused DAG starts when no other run of its DAG is running
+    (max_active_runs=1), and a running one ends after the duration of its DAG, with its result.
+    The task of a load that succeeds updates the asset of the raw table a loop before its run
+    ends: while the transform is unpaused, that queues an event for it, unless one is queued
+    already, in which case it is dropped (ON CONFLICT DO NOTHING). The event becomes a run of the
+    transform, whose run_after is the time of the event, on a later loop, once the transform has
+    no run queued or running. triggers are the runs that a person triggers in the Airflow UI, at a
+    time.
 
     The list of runs answers as the API does: the oldest first unless order_by says otherwise, 50
     to a page unless limit says otherwise and at most 100, and total_entries counts every run that
@@ -114,6 +117,7 @@ class FakeAirflow:
         self.results = {di.LOAD_DAG: "success", di.TRANSFORM_DAG: "success"}
         self.runs: list[dict[str, Any]] = []
         self.queued_event: float | None = None
+        self.triggers: list[tuple[float, str, str]] = []  # (time, DAG, result)
         self.scheduled = 0.0
         self.failures: dict[tuple[str, str], int] = {}
         self.calls: list[tuple[str, str]] = []
@@ -153,19 +157,12 @@ class FakeAirflow:
         return any(run["state"] in ("queued", "running") for run in self.runs_of(dag_id))
 
     def step(self, moment: float) -> None:
-        for run in self.runs:
-            if run["state"] != "running":
-                continue
-            result = run["result"] or self.results[run["dag_id"]]
-            # The task of a load updates the asset when it ends, a second before the scheduler
-            # marks its run as done: as on the stand, the event is older than the end of the run.
-            emits = run["dag_id"] == di.LOAD_DAG and result == "success" and not run["emitted"]
-            if emits and moment >= run["ends_at"] - 1:
-                run["emitted"] = True
-                self.update_raw_asset(moment)
-            if moment >= run["ends_at"]:
-                run["state"] = result
-                run["end_date"] = stamp(moment)
+        """One loop of the scheduler. In Airflow, the end of a task writes the queued row of its
+        event, and a later loop makes the run: a loop makes the runs for the events that wait,
+        then starts the queued runs, then updates the running ones."""
+        for at, dag_id, result in self.triggers:
+            if at == moment:
+                self.add_run(dag_id, "queued", at=moment, result=result)
         transform = di.TRANSFORM_DAG
         waiting = self.queued_event is not None and not self.paused[transform]
         if waiting and not self.active(transform):
@@ -182,6 +179,19 @@ class FakeAirflow:
                     start_date=stamp(moment),
                     ends_at=moment + self.durations[dag_id],
                 )
+        for run in self.runs:
+            if run["state"] != "running":
+                continue
+            result = run["result"] or self.results[run["dag_id"]]
+            # The task of a load updates the asset when it ends, a loop before the scheduler marks
+            # its run as done: as on a running stack, the event is older than the end of the run.
+            emits = run["dag_id"] == di.LOAD_DAG and result == "success" and not run["emitted"]
+            if emits and moment >= run["ends_at"] - 1:
+                run["emitted"] = True
+                self.update_raw_asset(moment)
+            if moment >= run["ends_at"]:
+                run["state"] = result
+                run["end_date"] = stamp(moment)
 
     def update_raw_asset(self, moment: float) -> None:
         if not self.paused[di.TRANSFORM_DAG] and self.queued_event is None:
@@ -562,6 +572,40 @@ def test_the_load_starts_only_once_the_transform_is_idle(airflow, metabase):
         run for run in airflow.runs_of(di.TRANSFORM_DAG) if run["run_after"] >= load["start_date"]
     ]
     assert (after_the_load["run_type"], after_the_load["state"]) == ("asset_triggered", "success")
+
+
+def test_an_event_that_waits_makes_the_transform_busy(airflow, metabase):
+    # An event of the raw asset waits, and the scheduler has not made its run yet: no run is
+    # queued or running. The transform is busy all the same, and the load waits until the run of
+    # that event has ended, since its own event would find the waiting one and be dropped.
+    airflow.paused = {di.LOAD_DAG: False, di.TRANSFORM_DAG: False}
+    airflow.queued_event = 0.0
+    client = di.Airflow(airflow.url)
+    di.sign_in_to_airflow(client, ENV["AIRFLOW_ADMIN_PASSWORD"])
+    assert di.count_runs(client, di.TRANSFORM_DAG, "queued", "running") == 0
+    assert di.transform_is_busy(client) is True
+    assert di.main(env_for(airflow, metabase)) == 0
+    [waiting] = [run for run in airflow.runs_of(di.TRANSFORM_DAG) if run["run_after"] == stamp(0)]
+    [load] = airflow.runs_of(di.LOAD_DAG)
+    assert load["run_after"] >= waiting["end_date"]
+
+
+def test_a_failed_run_of_a_person_does_not_stop_the_job_while_the_run_of_the_load_waits(
+    airflow, metabase, capsys
+):
+    # A person triggers the transform in the Airflow UI while the load runs, and that run fails,
+    # with a run_after after the start of the load. The event of the load waits for that run to
+    # end and becomes a run a loop later. The failed run ends at 35 s, when demo-init looks: the
+    # event still waits then, so the transform is busy, and the job waits for the run of the load.
+    airflow.triggers = [(5.0, di.TRANSFORM_DAG, "failed")]
+    assert di.main(env_for(airflow, metabase)) == 0
+    [load] = airflow.runs_of(di.LOAD_DAG)
+    person, of_the_load = sorted(airflow.runs_of(di.TRANSFORM_DAG), key=lambda run: run["id"])
+    assert (person["run_type"], person["state"]) == ("manual", "failed")
+    assert person["run_after"] > load["start_date"]
+    assert person["end_date"] == stamp(35)
+    assert (of_the_load["run_type"], of_the_load["state"]) == ("asset_triggered", "success")
+    assert "the demo pipeline ran now" in capsys.readouterr().out
 
 
 def test_a_load_that_is_running_is_awaited_and_not_started_again(airflow, metabase):

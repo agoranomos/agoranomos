@@ -10,7 +10,7 @@ from decimal import Decimal
 
 import pytest
 from agoranomos_pipelines.demo_data import rows
-from airflow_api import api, is_busy, run_count
+from airflow_api import is_busy, run_count
 from services import DEMO
 from stack_helpers import compose, http_json, leaked, secrets, wait_for, warehouse_output
 
@@ -22,7 +22,9 @@ COLLECTION = "Agoranomos demo"
 DASHBOARD = "Ad spend (demo)"
 QUESTIONS = {"Spend, last 7 days", "Spend by campaign, last 7 days", "Spend by day"}
 WAREHOUSE_NAME = "Agoranomos warehouse"
-DAGS = ("agoranomos_demo_load", "agoranomos_demo_transform")
+LOAD = "agoranomos_demo_load"
+TRANSFORM = "agoranomos_demo_transform"
+DAGS = (LOAD, TRANSFORM)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -85,6 +87,7 @@ def test_the_dashboard_shows_the_three_questions(metabase_url, session):
     [(_, dashboard_id)] = content["dashboard"]
     dashboard = get(metabase_url, session, f"/api/dashboard/{dashboard_id}")
     shown = sorted(dashcard["card_id"] for dashcard in dashboard["dashcards"])
+    assert len(shown) == len(QUESTIONS)
     assert shown == sorted(card_id for _, card_id in content["card"])
 
 
@@ -114,11 +117,15 @@ def test_metabase_knows_the_mart(metabase_url, session):
     assert ("marts", "ad_spend_daily") in tables
 
 
-def test_the_demo_dags_are_unpaused(airflow_url, token):
-    for dag_id in DAGS:
-        status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}")
-        assert status == 200, f"GET /api/v2/dags/{dag_id} answered HTTP {status}"
-        assert body["is_paused"] is False, dag_id
+def test_the_first_start_ran_the_demo_pipeline(airflow_url, token):
+    # What the first start did, whatever a person did since, such as a pause, which demo-init
+    # keeps: the load ran, and its asset started a run of the transform that succeeded. Counted by
+    # total_entries, as Airflow keeps every run.
+    assert run_count(airflow_url, token, LOAD) > 0, f"{LOAD} has no run"
+    succeeded = run_count(
+        airflow_url, token, TRANSFORM, states=("success",), run_types=("asset_triggered",)
+    )
+    assert succeeded > 0, f"{TRANSFORM} has no successful run that the asset of the load started"
 
 
 def test_demo_init_runs_again_without_a_change(env, airflow_url, token, metabase_url, session):

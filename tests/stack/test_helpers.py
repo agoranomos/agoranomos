@@ -474,10 +474,11 @@ def test_the_task_helper_gives_each_task_the_sorted_tasks_after_it(monkeypatch):
 
 def fake_runs_api(monkeypatch, runs, queued_events=0):
     """Make the API of Airflow answer for the runs of a DAG as Airflow 3.3.2 does: the runs in the
-    states that state lists (any state without it), the oldest first unless order_by says
-    otherwise, 50 to a page unless limit says otherwise and at most 100, with the number of every
-    run that matches in total_entries; and queued_events events that wait for a run. Each run is a
-    state; the fake records the queries."""
+    states that state lists and of the types that run_type lists (any, without them), the oldest
+    first unless order_by says otherwise, 50 to a page unless limit says otherwise and at most 100,
+    with the number of every run that matches in total_entries; and queued_events events that wait
+    for a run. Each run is a state, or a state and a run type (manual unless given); the fake
+    records the queries."""
     asked = []
 
     def fake_http_json(method, url, body=None, headers=None, timeout=30):
@@ -488,14 +489,17 @@ def fake_runs_api(monkeypatch, runs, queued_events=0):
             events = [{"dag_id": "a_dag", "asset_id": 7}] * queued_events
             return 200, {"queued_events": events, "total_entries": queued_events}
         assert (method, parts.path) == ("GET", "/api/v2/dags/a_dag/dagRuns"), url
+        typed = [run if isinstance(run, tuple) else (run, "manual") for run in runs]
         found = [
             {
                 "dag_run_id": f"run_{n:03d}",
                 "run_after": f"2026-10-06T00:{n // 60:02d}:{n % 60:02d}Z",
                 "state": state,
+                "run_type": run_type,
             }
-            for n, state in enumerate(runs)
+            for n, (state, run_type) in enumerate(typed)
             if state in query.get("state", [state])
+            and run_type in query.get("run_type", [run_type])
         ]
         newest_first = query.get("order_by") == ["-run_after"]
         found.sort(key=lambda run: run["run_after"], reverse=newest_first)
@@ -511,6 +515,20 @@ def test_the_run_count_is_the_total_of_the_api_and_not_the_size_of_a_page(monkey
     asked = fake_runs_api(monkeypatch, ["success"] * 120)
     assert airflow_api.run_count(URL, "a-token", "a_dag") == 120
     [(_, query)] = asked
+    assert (query["order_by"], query["limit"]) == (["-run_after"], ["1"])
+
+
+def test_the_run_count_counts_the_runs_of_the_states_and_types_that_it_names(monkeypatch):
+    runs = (
+        [("success", "asset_triggered")] * 3 + ["success"] * 120 + [("failed", "asset_triggered")]
+    )
+    asked = fake_runs_api(monkeypatch, runs)
+    found = airflow_api.run_count(
+        URL, "a-token", "a_dag", states=("success",), run_types=("asset_triggered",)
+    )
+    assert found == 3
+    [(_, query)] = asked
+    assert (query["state"], query["run_type"]) == (["success"], ["asset_triggered"])
     assert (query["order_by"], query["limit"]) == (["-run_after"], ["1"])
 
 
