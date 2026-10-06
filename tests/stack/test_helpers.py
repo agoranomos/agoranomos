@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import ai_switches
+import airflow_api
 import metabase_init
 import pytest
 import services
@@ -140,8 +141,6 @@ def test_load_env_makes_secrets_of_the_settings_that_the_example_leaves_empty(
 def test_the_airflow_helper_keeps_the_token_out_of_the_headers_that_pytest_prints(monkeypatch):
     # api() builds the headers of every Airflow request, and its own arguments are printed when
     # a request fails inside it.
-    import test_airflow
-
     value = "a-token-that-must-stay-out-of-the-report"
     seen = {}
 
@@ -149,8 +148,8 @@ def test_the_airflow_helper_keeps_the_token_out_of_the_headers_that_pytest_print
         seen["headers"] = headers
         return 200, {}
 
-    monkeypatch.setattr(test_airflow, "http_json", fake_http_json)
-    test_airflow.api("http://127.0.0.1:8080", stack_helpers.Secret(value), "GET", "/api/v2/dags")
+    monkeypatch.setattr(airflow_api, "http_json", fake_http_json)
+    airflow_api.api("http://127.0.0.1:8080", stack_helpers.Secret(value), "GET", "/api/v2/dags")
     headers = seen["headers"]
     assert value not in repr(headers) + repr(list(headers.values()))
     assert headers["Authorization"] == f"Bearer {value}"  # the request still carries it
@@ -389,9 +388,10 @@ def test_shown_in_finds_a_value_that_pytest_wrapped_over_lines(report, shown):
 
 # A test module that fails on purpose, run by a pytest of its own, so that the output is the real
 # one. The values are made up. The env fixture and the comparison hook are those of the real
-# conftest.py, which the test copies next to this module; the token and the headers are what
-# test_airflow.py builds. The control takes a plain str, and the report must show it: a check that
-# cannot see a leak would pass too.
+# conftest.py, which the test copies next to this module. The token and the headers are what the
+# token fixture of conftest.py and api() of airflow_api.py build; the module has a token fixture of
+# its own, which overrides the real one, so that nothing signs in to Airflow. The control takes a
+# plain str, and the report must show it: a check that cannot see a leak would pass too.
 FAILING_TESTS = """
 from pathlib import Path
 

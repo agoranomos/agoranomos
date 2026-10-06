@@ -1,19 +1,16 @@
 import shutil
-import time
 
 import pytest
+from airflow_api import run_dag, task_instances, task_log, wait_for_dag
 from services import LONG_RUNNING
 from stack_helpers import (
     REPO_ROOT,
-    Secret,
-    SecretHeaders,
     active_variant,
     compose,
     http_json,
     job_failed,
     psql,
     secrets,
-    wait_for,
 )
 
 SELFCHECK = "agoranomos_selfcheck"
@@ -23,72 +20,6 @@ EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
 DAG_FOLDERS = ("/opt/agoranomos/dags", "/opt/agoranomos/extensions/dags")
 # The services that run tasks: with the LocalExecutor the scheduler, with Celery also the worker.
 TASK_RUNNERS = [s for s in ("airflow-scheduler", "airflow-worker") if s in LONG_RUNNING]
-
-
-@pytest.fixture(scope="session")
-def airflow_url(env):
-    return f"http://127.0.0.1:{env.get('AIRFLOW_PORT') or '8080'}"
-
-
-@pytest.fixture(scope="session")
-def token(env, airflow_url):
-    status, body = http_json(
-        "POST",
-        f"{airflow_url}/auth/token",
-        {"username": "admin", "password": env["AIRFLOW_ADMIN_PASSWORD"]},
-    )
-    assert status in (200, 201), body
-    # pytest prints the arguments of a failed test and of the function that failed: see Secret.
-    return Secret(body["access_token"])
-
-
-def api(airflow_url, token, method, path, body=None, headers=None):
-    headers = SecretHeaders({"Authorization": Secret(f"Bearer {token}"), **(headers or {})})
-    return http_json(method, f"{airflow_url}{path}", body, headers)
-
-
-def wait_for_dag(airflow_url, token, dag_id, timeout=180):
-    def fetch():
-        status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}")
-        return body if status == 200 else None
-
-    return wait_for(fetch, timeout, interval=5, message=f"Airflow did not load the DAG {dag_id}")
-
-
-def run_dag(airflow_url, token, dag_id, timeout=300):
-    """Unpause a DAG, run it once and wait for the end of the run: returns the finished run."""
-    status, body = api(airflow_url, token, "PATCH", f"/api/v2/dags/{dag_id}", {"is_paused": False})
-    assert status == 200, body
-    status, run = api(
-        airflow_url, token, "POST", f"/api/v2/dags/{dag_id}/dagRuns", {"logical_date": None}
-    )
-    assert status in (200, 201), run
-    run_id = run["dag_run_id"]
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        status, run = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}/dagRuns/{run_id}")
-        if run["state"] in ("success", "failed"):
-            return run
-        time.sleep(2)
-    pytest.fail(f"the DAG run {run_id} of {dag_id} did not finish in {timeout} seconds")
-
-
-def task_instances(airflow_url, token, run):
-    path = f"/api/v2/dags/{run['dag_id']}/dagRuns/{run['dag_run_id']}/taskInstances"
-    status, body = api(airflow_url, token, "GET", path)
-    assert status == 200, body
-    return body["task_instances"]
-
-
-def task_log(airflow_url, token, instance):
-    """The events of the log of a task instance, as text."""
-    path = (
-        f"/api/v2/dags/{instance['dag_id']}/dagRuns/{instance['dag_run_id']}"
-        f"/taskInstances/{instance['task_id']}/logs/{instance['try_number']}"
-    )
-    status, body = api(airflow_url, token, "GET", path, headers={"Accept": "application/json"})
-    assert status == 200, body
-    return [entry.get("event", "") for entry in body["content"]]
 
 
 @pytest.fixture(scope="module")

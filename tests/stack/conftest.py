@@ -1,6 +1,6 @@
 import pytest
 import stack_helpers
-from stack_helpers import Secret, load_env
+from stack_helpers import Secret, http_json, load_env
 
 
 @pytest.fixture(scope="session")
@@ -11,6 +11,23 @@ def env() -> dict[str, str]:
     if not path.exists():
         pytest.fail("there is no .env: start the stack with ./agoranomos up first")
     return load_env(path)
+
+
+@pytest.fixture(scope="session")
+def airflow_url(env):
+    return f"http://127.0.0.1:{env.get('AIRFLOW_PORT') or '8080'}"
+
+
+@pytest.fixture(scope="session")
+def token(env, airflow_url):
+    status, body = http_json(
+        "POST",
+        f"{airflow_url}/auth/token",
+        {"username": "admin", "password": env["AIRFLOW_ADMIN_PASSWORD"]},
+    )
+    assert status in (200, 201), body
+    # pytest prints the arguments of a failed test and of the function that failed: see Secret.
+    return Secret(body["access_token"])
 
 
 def pytest_assertrepr_compare(op: str, left: object, right: object) -> list[str] | None:
