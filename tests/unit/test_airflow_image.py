@@ -27,6 +27,11 @@ TELEMETRY = {
 # The configuration providers of dlt: none of them reads Airflow Variables. Not telemetry, so a
 # constant of its own.
 DLT_PROVIDERS = {"PROVIDERS__ENABLE_AIRFLOW_SECRETS": "false"}
+# The caches that Cosmos would keep in Airflow Variables: both off.
+COSMOS_CACHES = {
+    "AIRFLOW__COSMOS__ENABLE_CACHE_DBT_LS": "False",
+    "AIRFLOW__COSMOS__ENABLE_CACHE_DBT_YAML_SELECTORS": "False",
+}
 
 
 def pins(path: Path) -> dict[str, str]:
@@ -173,6 +178,13 @@ def test_the_image_keeps_dlt_away_from_airflow_variables():
     # create, and one of them could send the connection of a load somewhere else.
     found = environment(dockerfile())
     assert {name: found.get(name) for name in DLT_PROVIDERS} == DLT_PROVIDERS
+
+
+def test_the_image_keeps_the_caches_of_cosmos_out_of_airflow_variables():
+    # Cosmos would keep the output of dbt ls in an Airflow Variable, which the Op role may edit, and
+    # render the tasks of dbt and their arguments from it.
+    found = environment(dockerfile())
+    assert {name: found.get(name) for name in COSMOS_CACHES} == COSMOS_CACHES
 
 
 def test_the_build_context_holds_only_what_the_dockerfile_copies():

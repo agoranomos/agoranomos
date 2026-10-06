@@ -57,6 +57,11 @@ x-airflow: &airflow
     # dlt takes no settings from Airflow Variables, which the Op role may create: one could send the
     # connection of a load, with its password, to another host. The image sets the same.
     PROVIDERS__ENABLE_AIRFLOW_SECRETS: "false"
+    # Cosmos keeps no cache in Airflow Variables, which the Op role may edit: it renders the tasks of
+    # dbt and their arguments from the cache of dbt ls, so one could change what a dbt task runs.
+    # The image sets the same.
+    AIRFLOW__COSMOS__ENABLE_CACHE_DBT_LS: "False"
+    AIRFLOW__COSMOS__ENABLE_CACHE_DBT_YAML_SELECTORS: "False"
   volumes:
     - ./airflow/dags:/opt/agoranomos/dags:ro
     - ${AGORANOMOS_EXTENSIONS_DIR:-./extensions}/dags:/opt/agoranomos/extensions/dags:ro

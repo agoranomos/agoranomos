@@ -39,6 +39,8 @@ The AI switches of Metabase are fixed off in `compose.yaml` until the permission
 
 dlt reads no settings or secrets from Airflow Variables: `PROVIDERS__ENABLE_AIRFLOW_SECRETS=false` is set in `compose.yaml`, and in the Airflow image too. Inside an Airflow task, dlt would otherwise also take its settings from Variables, and a person who may edit them, such as a user with the Op role of Airflow, could redirect a pipeline: for example, send the connection of a load, with its password, to another host. So a DAG in the extensions folder ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)) that follows dlt's guide for Airflow cannot keep its settings in a `dlt_secrets_toml` Variable, which dlt ignores here: the pipeline takes them from environment variables instead.
 
+Cosmos keeps no cache in Airflow Variables either: `AIRFLOW__COSMOS__ENABLE_CACHE_DBT_LS=False` and `AIRFLOW__COSMOS__ENABLE_CACHE_DBT_YAML_SELECTORS=False` are set in `compose.yaml`, and in the Airflow image too. By default Cosmos saves the output of `dbt ls`, from which it renders the tasks of dbt and their arguments, in a Variable named `cosmos_cache__<DAG>__<task group>`, and the YAML selectors of a dbt project the same way: a person who may edit Variables could then change what a dbt task runs. So the DAG processor runs `dbt ls` each time that it parses a DAG of Cosmos, which takes a few seconds for the demo project. A `cosmos_cache__` Variable that was saved before is no longer read, and you can delete it.
+
 ## Secrets
 
 `./agoranomos init` generates each of these when it is empty: random letters and digits, and a Fernet key for Airflow.
