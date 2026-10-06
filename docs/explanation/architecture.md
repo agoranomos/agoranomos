@@ -2,7 +2,7 @@
 
 !!! warning "Target design"
 
-    Agoranomos is pre-alpha. This page describes the architecture the project is being built toward, and components arrive release by release. You will be able to run the stack locally with demo data from v0.2.0; see [Tutorials](../tutorials/index.md).
+    Agoranomos is pre-alpha. This page describes the architecture the project is being built toward, and components arrive release by release. One demo path, from a demo source to a dashboard, ships in v0.1.0 and already runs in local mode from the main branch ([See the demo](../how-to/see-the-demo.md)). The full demo generator comes in v0.2.0.
 
 Marketing data moves through Agoranomos in one direction, from ad platforms to dashboards and AI clients, and every step is code that runs on infrastructure you control.
 
@@ -16,7 +16,7 @@ Marketing data moves through Agoranomos in one direction, from ad platforms to d
 
 ```mermaid
 flowchart TB
-    sources["<b>Sources</b><br/>ad platform APIs, GA4, CRM, files,<br/>demo data generator"]
+    sources["<b>Sources</b><br/>ad platform APIs, GA4, CRM, files,<br/>demo source (v0.1.0; full demo generator in v0.2.0)"]
     dlt["<b>dlt</b><br/>incremental load"]
     airflow["<b>Apache Airflow</b><br/>schedules loads,<br/>dbt builds and<br/>Metabase refreshes"]
 
@@ -88,13 +88,13 @@ Inside the warehouse, data moves through layers, each in its own schema:
 | `raw_<source>` | Data as loaded, one schema per source |
 | `raw_<source>_staging` | The rows of a load on their way into `raw_<source>`: dlt merges through it. `loader` owns it, and no other role reads it |
 | `staging` | Standardized source data |
-| `intermediate` | Shared transformation steps |
+| `intermediate` (planned) | Shared transformation steps |
 | `marts` | Final models for dashboards and AI access |
-| `ops` | Operational data: run metadata and data quality results |
+| `ops` (planned) | Operational data: run metadata and data quality results |
 
-Access is split by role. dlt loads the `raw_<source>` schemas as the `loader` role, and dbt builds `staging`, `intermediate` and `marts` as the `transformer` role. Metabase connects as the `metabase_reader` role, which sees only `marts`, and the warehouse MCP server connects as the read-only `ai_reader` role.
+Access is split by role. dlt loads the `raw_<source>` schemas as the `loader` role, and dbt builds `staging` and `marts`, and `intermediate` once the project has shared steps, as the `transformer` role. Metabase connects as the `metabase_reader` role, which sees only `marts`, and the warehouse MCP server connects as the read-only `ai_reader` role.
 
-Today the dbt project in `dbt/` builds the demo data: the staging model `stg_demo__ad_stats_daily` and the mart `marts.ad_spend_daily`, by day and campaign. The tests of the staging model guard the mart: when one of them fails, the mart is not rebuilt and keeps its last good data.
+Today the dbt project in `dbt/` builds the demo data: the staging model `stg_demo__ad_stats_daily` and the mart `marts.ad_spend_daily`, by day and campaign. The demo has one source and no shared steps, so the mart reads the staging model directly, and the `intermediate` schema does not exist yet. The tests of the staging model guard the mart: when one of them fails, the mart is not rebuilt and keeps its last good data.
 
 dbt Core with dbt-postgres does the transformations, with tests from the first day and an elementary report for observability. The marts layer is a single advertising-statistics model that spans all platforms:
 
@@ -109,7 +109,7 @@ Decision records: [ADR-0003: Run two PostgreSQL instances](../adr/0003-two-postg
 
 Airflow 3.3 runs as separate services (API server, scheduler, DAG processor and triggerer) on an image of its own, built from the official `apache/airflow` image: `airflow/Dockerfile` adds dlt and Cosmos to Airflow's environment and dbt in a virtual environment of its own. By default it uses the LocalExecutor, which runs each task as a process of the scheduler, so there is no broker and no worker container, and a single machine keeps the memory for the pipelines ([ADR-0015](../adr/0015-run-localexecutor-by-default.md)). The tasks share the memory of the scheduler container, and Airflow's documentation warns that in a container a task that runs out of memory can restart the scheduler. A deployment that needs separate workers, possibly on other machines, selects the CeleryExecutor variant with `COMPOSE_FILE=compose.yaml:compose.celery.yaml` in `.env`. That variant adds Valkey as the message broker (BSD-licensed, speaking the Redis protocol) and an `airflow-worker` service; Celery results go to the metadata database of Airflow, and workers can be scaled out horizontally. `AIRFLOW_PARALLELISM` caps the tasks of the whole stack in both variants, so it rises together with the workers. Authentication uses Airflow's FAB auth manager with the Admin, Op and Viewer roles.
 
-Airflow Assets chain the pipeline, so each step starts when the previous one has produced its data: `ingest_<source>`, then `dbt build`, then a Metabase cache refresh. Today the demo runs this way: `agoranomos_demo_load` updates the asset of `raw_demo.ad_stats_daily`, and that starts `agoranomos_demo_transform`. dbt runs through Cosmos, which renders dbt models as Airflow tasks, in its own virtual environment so that dbt's dependencies stay separate from Airflow's.
+Airflow Assets chain the pipeline, so each step starts when the previous one has produced its data: `ingest_<source>`, then `dbt build`, then a Metabase cache refresh. Today the demo chains the first two steps this way: `agoranomos_demo_load` updates the asset of `raw_demo.ad_stats_daily`, and that starts `agoranomos_demo_transform`. The Metabase refresh is planned. dbt runs through Cosmos, which renders dbt models as Airflow tasks, in its own virtual environment so that dbt's dependencies stay separate from Airflow's.
 
 Agoranomos uses Astronomer's open-source projects (Cosmos and astro-airflow-mcp) but not the Astro CLI or Astro Runtime. The stack stays vendor-neutral and builds on the official Apache Airflow image.
 
