@@ -36,6 +36,13 @@ def code(name: str) -> str:
     return "".join(line for line in lines if not line.startswith("--"))
 
 
+def statements(name: str) -> str:
+    """The file without its comments, and with each run of whitespace as one space: a statement
+    reads the same however it is indented or split over lines. Match it with re.IGNORECASE. The
+    files have no -- inside a string, where this would cut the string."""
+    return " ".join(re.sub(r"--[^\n]*", "", read(name)).split())
+
+
 def test_db_init_gives_psql_no_variable_but_on_error_stop():
     # The arguments of a process can be read by the other users of a Linux host, through /proc. A
     # password given with --set, --variable or -v would be in them, so none is: psql reads the
@@ -103,3 +110,30 @@ def test_warehouse_sql_gives_a_warehouse_of_an_earlier_version_what_a_new_one_ge
     for schema, grantee in defaults:
         existing = f"GRANT SELECT ON ALL TABLES IN SCHEMA {schema} TO {grantee};"
         assert existing in lines, f"warehouse.sql must also run {existing}"
+
+
+# The attributes that warehouse.sql gives each of its roles on every start.
+ROLE_ATTRIBUTES = {
+    "LOGIN",
+    "NOSUPERUSER",
+    "NOCREATEDB",
+    "NOCREATEROLE",
+    "NOREPLICATION",
+    "NOBYPASSRLS",
+}
+
+
+def test_warehouse_sql_names_every_attribute_of_its_roles_on_every_start():
+    # ALTER ROLE keeps every attribute that it does not name, so one given by hand stays unless the
+    # file names it. A new role has none of the powers anyway, and CI starts from a new volume, so
+    # no stack test there notices if one of these goes.
+    altered = re.findall(
+        r"\bALTER ROLE (\w+) WITH ((?:\w+ )+)PASSWORD %L",
+        statements("warehouse.sql"),
+        re.IGNORECASE,
+    )
+    attributes = {role.lower(): set(words.upper().split()) for role, words in altered}
+    assert sorted(attributes) == ["loader", "metabase_reader", "transformer"]
+    for role, given in attributes.items():
+        missing, extra = sorted(ROLE_ATTRIBUTES - given), sorted(given - ROLE_ATTRIBUTES)
+        assert given == ROLE_ATTRIBUTES, f"{role} lacks {missing} and gets {extra}"

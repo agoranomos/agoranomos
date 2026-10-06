@@ -70,8 +70,8 @@ def test_each_role_of_the_warehouse_signs_in_with_its_password_and_with_no_other
 
 
 def test_role_passwords_stay_out_of_pg_stat_statements(env):
-    # ALTER ROLE ... PASSWORD carries the password in its text. pg_stat_statements keeps the text of
-    # utility statements, and the Ops collection reads it, unless db-init leaves them out.
+    # ALTER ROLE ... PASSWORD carries the password in its text. pg_stat_statements, which is for the
+    # planned Ops collection, keeps the text of utility statements unless db-init leaves them out.
     for service, superuser, database, secrets in (
         (
             "platform-db",
@@ -267,3 +267,55 @@ def test_the_superuser_reads_the_statistics_of_the_statements(env, sql):
     result = warehouse(env, sql)
     assert result.returncode == 0, result.stderr
     assert not result.stderr
+
+
+# Every member of pg_stat_statements that is a view or a function, as pg_depend ties it to the
+# extension, and whether PUBLIC holds a privilege on it, or on a column of it. A NULL ACL means the
+# default (acldefault), which gives PUBLIC EXECUTE on a function and nothing on a relation.
+EXTENSION_MEMBERS_OPEN_TO_PUBLIC = """
+SELECT pg_describe_object(d.classid, d.objid, 0),
+  CASE d.classid
+    WHEN 'pg_class'::regclass THEN (
+      SELECT EXISTS (
+        SELECT FROM aclexplode(coalesce(c.relacl, acldefault(
+          (CASE c.relkind WHEN 'S' THEN 's' ELSE 'r' END)::"char", c.relowner
+        )))
+        WHERE grantee = 0
+      ) OR EXISTS (
+        SELECT FROM pg_attribute AS a, aclexplode(a.attacl) AS acl
+        WHERE a.attrelid = c.oid AND acl.grantee = 0
+      )
+      FROM pg_class AS c WHERE c.oid = d.objid
+    )
+    ELSE (
+      SELECT EXISTS (
+        SELECT FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) WHERE grantee = 0
+      )
+      FROM pg_proc AS p WHERE p.oid = d.objid
+    )
+  END
+FROM pg_depend AS d
+WHERE d.deptype = 'e'
+  AND d.refclassid = 'pg_extension'::regclass
+  AND d.refobjid = (SELECT oid FROM pg_extension WHERE extname = 'pg_stat_statements')
+  AND d.classid IN ('pg_class'::regclass, 'pg_proc'::regclass)
+ORDER BY 1
+"""
+
+
+def test_no_member_of_pg_stat_statements_is_open_to_public(env):
+    # warehouse.sql revokes PUBLIC's access to the objects of version 1.12 by name, and a later
+    # version of the extension could add a member that nothing revokes: so every member is checked.
+    result = warehouse(env, EXTENSION_MEMBERS_OPEN_TO_PUBLIC)
+    assert result.returncode == 0, result.stderr
+    members = dict(line.split("|") for line in result.stdout.splitlines())
+    # The query finds the objects that warehouse.sql names, so it looks where they are.
+    named = {
+        "view pg_stat_statements",
+        "view pg_stat_statements_info",
+        "function pg_stat_statements(boolean)",
+        "function pg_stat_statements_info()",
+    }
+    assert named <= set(members), f"the members found are {sorted(members)}"
+    open_to_public = sorted(name for name, is_open in members.items() if is_open == "t")
+    assert not open_to_public, f"PUBLIC holds a privilege on {open_to_public}"

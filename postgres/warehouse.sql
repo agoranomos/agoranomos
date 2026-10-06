@@ -30,14 +30,26 @@ FROM PUBLIC;
 REVOKE ALL ON DATABASE warehouse FROM PUBLIC;
 REVOKE ALL ON DATABASE postgres, template1 FROM PUBLIC;
 
+-- ALTER ROLE keeps every attribute that it does not name, so the statements below name LOGIN and
+-- each attribute that would give a role more power: one given by hand, such as CREATEDB, is gone
+-- after the next start.
 SELECT 'CREATE ROLE loader' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'loader') \gexec
-SELECT format('ALTER ROLE loader WITH LOGIN PASSWORD %L', :'loader_password') \gexec
+SELECT format(
+  'ALTER ROLE loader WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+  :'loader_password'
+) \gexec
 SELECT 'CREATE ROLE transformer'
 WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'transformer') \gexec
-SELECT format('ALTER ROLE transformer WITH LOGIN PASSWORD %L', :'transformer_password') \gexec
+SELECT format(
+  'ALTER ROLE transformer WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+  :'transformer_password'
+) \gexec
 SELECT 'CREATE ROLE metabase_reader'
 WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'metabase_reader') \gexec
-SELECT format('ALTER ROLE metabase_reader WITH LOGIN PASSWORD %L', :'metabase_reader_password') \gexec
+SELECT format(
+  'ALTER ROLE metabase_reader WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+  :'metabase_reader_password'
+) \gexec
 GRANT CONNECT ON DATABASE warehouse TO loader, transformer, metabase_reader;
 
 -- raw_demo is for the demo data, and dlt is to merge into it through raw_demo_staging. loader owns
