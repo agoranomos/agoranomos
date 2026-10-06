@@ -45,7 +45,7 @@ flowchart TB
 
     subgraph warehouse["PostgreSQL warehouse"]
         direction LR
-        raw["raw_#lt;source#gt;"] -->|dbt| staging --> marts
+        raw["raw_#lt;source#gt;"] -->|dbt| staging --> intermediate --> marts
     end
 
     metabase["<b>Metabase</b><br/>dashboards, metrics, glossary"]

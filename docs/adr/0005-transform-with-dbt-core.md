@@ -57,7 +57,7 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** dbt Core 1.12.5 and dbt-postgres 1.11.0 run from a virtual environment of their own in the Airflow image, through Cosmos 1.15.1 (the DAG `agoranomos_demo_transform`). The project in `dbt/` builds `staging` and `marts` from the demo data as the `transformer` role, with tests from the first model. elementary and the `ops` schema are planned.
+* **Implementation status, as of October 2026:** dbt Core 1.12.5 and dbt-postgres 1.11.0 run from a virtual environment of their own in the Airflow image, through Cosmos 1.15.1 (the DAG `agoranomos_demo_transform`). The project in `dbt/` builds `staging` and `marts` from the demo data as the `transformer` role, with tests from the first model. The `intermediate` layer, elementary and the `ops` schema are planned.
 * Versions as of October 2026: dbt Core 1.12.5, dbt-postgres 1.11.0, Cosmos 1.15 (which supports Airflow 3.3 and dbt 1.12) and elementary 0.26 (which needs Python below 3.14, see [ADR-0012](0012-python-and-tooling.md)). The Rust-based dbt v2 is at 2.0.5.
 * [dbt-labs/dbt#13123](https://github.com/dbt-labs/dbt/issues/13123) tracks PostgreSQL adapter support in dbt v2. This decision is revisited when it ships.
 * The design of the marts layer is not part of this decision.

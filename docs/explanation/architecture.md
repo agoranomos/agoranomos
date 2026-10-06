@@ -22,7 +22,7 @@ flowchart TB
 
     subgraph warehouse["PostgreSQL warehouse"]
         direction TB
-        raw["raw_#lt;source#gt;"] -->|dbt| staging --> marts
+        raw["raw_#lt;source#gt;"] -->|dbt| staging --> intermediate --> marts
     end
 
     metabase["<b>Metabase</b><br/>dashboards, metrics, glossary"]
@@ -88,12 +88,13 @@ Inside the warehouse, data moves through layers, each in its own schema:
 | `raw_<source>` | Data as loaded, one schema per source |
 | `raw_<source>_staging` | The rows of a load on their way into `raw_<source>`: dlt merges through it. `loader` owns it, and no other role reads it |
 | `staging` | Standardized source data |
+| `intermediate` (planned) | Shared transformation steps |
 | `marts` | Final models for dashboards and AI access |
 | `ops` (planned) | Operational data: run metadata and data quality results |
 
-Access is split by role. dlt loads the `raw_<source>` schemas as the `loader` role, and dbt builds `staging` and `marts` as the `transformer` role. Metabase connects as the `metabase_reader` role, which sees only `marts`, and the warehouse MCP server connects as the read-only `ai_reader` role.
+Access is split by role. dlt loads the `raw_<source>` schemas as the `loader` role, and dbt builds `staging` and `marts`, and `intermediate` once the project has shared steps, as the `transformer` role. Metabase connects as the `metabase_reader` role, which sees only `marts`, and the warehouse MCP server connects as the read-only `ai_reader` role.
 
-Today the dbt project in `dbt/` builds the demo data: the staging model `stg_demo__ad_stats_daily` and the mart `marts.ad_spend_daily`, by day and campaign. The tests of the staging model guard the mart: when one of them fails, the mart is not rebuilt and keeps its last good data.
+Today the dbt project in `dbt/` builds the demo data: the staging model `stg_demo__ad_stats_daily` and the mart `marts.ad_spend_daily`, by day and campaign. The demo has one source and no shared steps, so the mart reads the staging model directly, and the `intermediate` schema does not exist yet. The tests of the staging model guard the mart: when one of them fails, the mart is not rebuilt and keeps its last good data.
 
 dbt Core with dbt-postgres does the transformations, with tests from the first day and an elementary report for observability. The marts layer is a single advertising-statistics model that spans all platforms:
 
