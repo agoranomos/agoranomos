@@ -190,7 +190,8 @@ def test_compose_keeps_the_caches_of_cosmos_out_of_airflow_variables_in_every_ai
 
 
 @pytest.mark.parametrize("service", USERS)
-def test_airflow_has_the_pinned_dlt_and_cosmos(service):
+def test_airflow_has_the_pinned_packages(service):
+    # dlt, Cosmos, and the dependencies of dlt that the constraints of Airflow leave open.
     wanted = {"apache-airflow": airflow_version(), **pinned("requirements.txt")}
     assert versions(service, "python", *wanted) == wanted
 

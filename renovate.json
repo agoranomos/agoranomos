@@ -57,7 +57,7 @@
       "schedule": ["* 0-3 * * 1"]
     },
     {
-      "description": "metabase-init runs on the Python version chosen in ADR-0012, so a new Python minor or major version of the python image is a decision, not a routine update.",
+      "description": "metabase-init and demo-init run on the Python version chosen in ADR-0012, so a new Python minor or major version of the python image is a decision, not a routine update.",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["python"],
       "matchUpdateTypes": ["major", "minor"],
