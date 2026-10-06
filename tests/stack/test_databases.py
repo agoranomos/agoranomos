@@ -168,6 +168,23 @@ def test_each_role_has_exactly_its_privileges_on_the_schemas_of_the_layers(env):
     assert found == SCHEMA_PRIVILEGES
 
 
+def test_the_default_privileges_are_those_of_the_roles_that_create_the_tables(env):
+    # A layer gets the new tables of the one before it through the default privileges of the role
+    # that creates them. An earlier warehouse.sql also gave one as postgres in marts: a warehouse
+    # set up by it must end as a new one does.
+    result = warehouse(
+        env,
+        "SELECT format('%s:%s:%s:%s', pg_get_userbyid(defaclrole), nspname, defaclobjtype, "
+        "defaclacl) FROM pg_default_acl "
+        "LEFT JOIN pg_namespace ON pg_namespace.oid = defaclnamespace ORDER BY 1",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == [
+        "loader:raw_demo:r:{transformer=r/loader}",
+        "transformer:marts:r:{metabase_reader=r/transformer}",
+    ]
+
+
 @pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))
 def test_no_role_of_the_layers_creates_a_schema(env, role):
     # The sessions of metabase_reader start read-only, and PostgreSQL refuses a write in a read-only
@@ -207,3 +224,44 @@ def test_the_roles_of_the_pipelines_sign_in_with_their_passwords(env, role):
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "1"
+
+
+@pytest.mark.parametrize("database", ["postgres", "template1"])
+@pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))
+def test_the_roles_of_the_layers_connect_to_the_warehouse_database_only(env, role, database):
+    # PUBLIC gets no CONNECT on the other databases of the instance; template0 takes no connections.
+    result = psql("warehouse-db", role, env[WAREHOUSE_ROLES[role]], database, "SELECT 1")
+    assert result.returncode != 0
+    assert f'permission denied for database "{database}"' in result.stderr
+
+
+# A query of each view of pg_stat_statements and of each function behind them, with the error that
+# a role gets. They show the calls and the timings of every statement, so only the superuser reads
+# them: the views are denied first, and the functions also on their own.
+STATEMENT_STATISTICS = {
+    "SELECT 1 FROM pg_stat_statements LIMIT 1": "permission denied for view pg_stat_statements",
+    "SELECT 1 FROM pg_stat_statements(true) LIMIT 1": (
+        "permission denied for function pg_stat_statements"
+    ),
+    "SELECT 1 FROM pg_stat_statements_info LIMIT 1": (
+        "permission denied for view pg_stat_statements_info"
+    ),
+    "SELECT 1 FROM pg_stat_statements_info() LIMIT 1": (
+        "permission denied for function pg_stat_statements_info"
+    ),
+}
+
+
+@pytest.mark.parametrize("sql", sorted(STATEMENT_STATISTICS))
+@pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))
+def test_the_roles_of_the_layers_cannot_read_the_statistics_of_the_statements(env, role, sql):
+    result = warehouse(env, sql, role)
+    assert result.returncode != 0
+    assert STATEMENT_STATISTICS[sql] in result.stderr
+
+
+@pytest.mark.parametrize("sql", sorted(STATEMENT_STATISTICS))
+def test_the_superuser_reads_the_statistics_of_the_statements(env, sql):
+    result = warehouse(env, sql)
+    assert result.returncode == 0, result.stderr
+    assert not result.stderr
