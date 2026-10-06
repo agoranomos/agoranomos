@@ -1,7 +1,8 @@
+import json
 import shutil
 
 import pytest
-from airflow_api import run_dag, task_instances, task_log, wait_for_dag
+from airflow_api import api, run_dag, task_instances, task_log, wait_for_dag
 from services import LONG_RUNNING
 from stack_helpers import (
     REPO_ROOT,
@@ -103,13 +104,22 @@ def test_a_dag_in_the_extensions_folder_runs(env, airflow_url, token):
     assert dag["bundle_name"] == "extensions", dag
     run = run_dag(airflow_url, token, EXTENSION_CHECK)
     assert run["state"] == "success", run
-    # The task also records what task code can see. The log must say it, and must hold no secret.
+    # The task also records what task code can see. The log must say it, and no entry of it may
+    # hold a secret, in any field.
     [instance] = task_instances(airflow_url, token, run)
-    events = task_log(airflow_url, token, instance)
+    log = task_log(airflow_url, token, instance)
+    events = [json.loads(entry).get("event", "") for entry in log]
     for prefix in ("environment variables: ", "metadata database, task environment: "):
         assert any(event.startswith(prefix) for event in events), prefix
-    leaked = [name for name, value in secrets(env).items() if any(value in e for e in events)]
+    leaked = [name for name, value in secrets(env).items() if any(value in e for e in log)]
     assert not leaked, f"the log of the task holds the values of {leaked}"  # names, never values
+
+
+def test_the_dag_processor_reports_no_import_error(airflow_url, token):
+    # The errors of the DAGs of the base package: the extensions folder belongs to the deployment.
+    status, body = api(airflow_url, token, "GET", "/api/v2/importErrors?bundle_name=agoranomos")
+    assert status == 200, body
+    assert body["total_entries"] == 0, [error["filename"] for error in body["import_errors"]]
 
 
 @pytest.mark.parametrize("path", DAG_FOLDERS)

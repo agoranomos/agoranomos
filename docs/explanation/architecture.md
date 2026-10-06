@@ -68,7 +68,7 @@ dlt takes care of incremental loading, schema evolution, merging and name normal
 * **Explicit retries.** How failed requests are retried is set explicitly, not left to library defaults.
 * **Loud failures.** If an account fails, the run fails or raises an alert that lists the affected accounts and the original API error.
 
-The planned sources are ad platform APIs (for example Google, Meta, TikTok, Yandex and VK), GA4, CRM systems and files. A demo data generator produces realistic synthetic data for several fictional platforms. It needs no keys and fills the dashboards on first start.
+The planned sources are ad platform APIs (for example Google, Meta, TikTok, Yandex and VK), GA4, CRM systems and files. A demo source needs no keys: it generates eight weeks of statistics of one fictional ad account with three campaigns, up to yesterday, and the DAG `agoranomos_demo_load` loads them into `raw_demo` as the `loader` role. Demo data for more platforms is planned.
 
 Decision record: [ADR-0004: Ingest data with dlt](../adr/0004-ingest-with-dlt.md).
 

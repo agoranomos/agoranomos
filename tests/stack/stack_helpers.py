@@ -12,6 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -318,6 +319,39 @@ def warehouse(
     password: this checks what the role may do. psql_over_network checks the passwords."""
     setting = "WAREHOUSE_POSTGRES_PASSWORD" if role == "postgres" else WAREHOUSE_ROLES[role]
     return psql("warehouse-db", role, env[setting], "warehouse", sql)
+
+
+def warehouse_output(env: dict[str, str], sql: str, role: str = "postgres") -> str:
+    """The output of SQL that must succeed, run as warehouse() runs it, without the blanks around
+    it. A failure stops the test with the error that psql printed, which can quote the SQL: so the
+    SQL must hold no secret."""
+    result = warehouse(env, sql, role)
+    # pytest rewrites the assertions of test modules only, so this one carries its own message.
+    assert result.returncode == 0, f"psql exited with {result.returncode}: {result.stderr.strip()}"
+    return result.stdout.strip()
+
+
+# The number of rows of a table of ad statistics and the sums of its measures; totals() adds the
+# table. The sums of no rows are NULL, and coalesce makes them 0.
+TOTALS = (
+    "SELECT count(*), coalesce(sum(impressions), 0), coalesce(sum(clicks), 0), "
+    "coalesce(sum(spend), 0), coalesce(sum(conversions), 0) FROM"
+)
+
+
+def totals(env: dict[str, str], table: str, where: str = "") -> dict[str, int | Decimal]:
+    """The number of rows of a table of ad statistics and the sums of its measures, in the types
+    of the demo generator: counts as int, money and conversions as Decimal. where narrows the
+    rows, for example WHERE date <= DATE '2026-09-27'. The sums of no rows are 0."""
+    output = warehouse_output(env, f"{TOTALS} {table} {where}".rstrip())
+    count, impressions, clicks, spend, conversions = output.split("|")
+    return {
+        "rows": int(count),
+        "impressions": int(impressions),
+        "clicks": int(clicks),
+        "spend": Decimal(spend),
+        "conversions": Decimal(conversions),
+    }
 
 
 def wait_for(

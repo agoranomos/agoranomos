@@ -1,0 +1,2 @@
+# Airflow looks for DAGs in every Python file of the bundle; the package of shared code holds none.
+agoranomos_pipelines/

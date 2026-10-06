@@ -13,6 +13,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -78,6 +79,57 @@ def test_the_warehouse_helper_runs_as_the_role_with_the_password_of_its_setting(
     password = env[WAREHOUSE_SETTINGS[role]]
     assert options["env"]["PGPASSWORD"] == password
     assert not any(password in argument for argument in args), args
+
+
+def answering_warehouse(monkeypatch, returncode, stdout="", stderr=""):
+    """Make warehouse() answer every statement with this result, and record (sql, role)."""
+    statements = []
+
+    def warehouse(env, sql, role="postgres"):
+        statements.append((sql, role))
+        return subprocess.CompletedProcess(["psql"], returncode, stdout=stdout, stderr=stderr)
+
+    monkeypatch.setattr(stack_helpers, "warehouse", warehouse)
+    return statements
+
+
+def test_the_checked_warehouse_helper_returns_the_output_without_the_blanks(monkeypatch):
+    statements = answering_warehouse(monkeypatch, 0, stdout="  42\n")
+    assert stack_helpers.warehouse_output({}, "SELECT 42", "loader") == "42"
+    assert statements == [("SELECT 42", "loader")]
+
+
+def test_the_checked_warehouse_helper_fails_with_the_error_of_psql(monkeypatch):
+    error = 'ERROR:  relation "raw_demo.missing" does not exist'
+    answering_warehouse(monkeypatch, 1, stderr=f"{error}\n")
+    with pytest.raises(AssertionError) as raised:
+        stack_helpers.warehouse_output({}, "SELECT 1 FROM raw_demo.missing")
+    assert error in str(raised.value)
+
+
+def test_totals_reads_the_count_and_the_sums_in_the_types_of_the_generator(monkeypatch):
+    statements = answering_warehouse(monkeypatch, 0, stdout="168|7388494|81459|53390.56|4054.41\n")
+    found = stack_helpers.totals({}, "raw_demo.ad_stats_daily", "WHERE date <= DATE '2026-09-27'")
+    assert found == {
+        "rows": 168,
+        "impressions": 7_388_494,
+        "clicks": 81_459,
+        "spend": Decimal("53390.56"),
+        "conversions": Decimal("4054.41"),
+    }
+    assert [type(value) for value in found.values()] == [int, int, int, Decimal, Decimal]
+    [(sql, role)] = statements
+    assert sql.endswith(" FROM raw_demo.ad_stats_daily WHERE date <= DATE '2026-09-27'"), sql
+    assert role == "postgres"
+
+
+def test_totals_of_an_empty_table_are_zero(monkeypatch):
+    # The sums of no rows are NULL in SQL: totals() reads them as 0, so that a comparison fails on
+    # the numbers, and not on a value that it cannot parse.
+    statements = answering_warehouse(monkeypatch, 0, stdout="0|0|0|0|0\n")
+    assert set(stack_helpers.totals({}, "marts.ad_spend_daily").values()) == {0}
+    [(sql, _)] = statements
+    assert sql.count("coalesce(sum(") == 4, sql
 
 
 def test_secret_headers_keep_their_values_out_of_what_pytest_prints():
@@ -153,6 +205,43 @@ def test_the_airflow_helper_keeps_the_token_out_of_the_headers_that_pytest_print
     headers = seen["headers"]
     assert value not in repr(headers) + repr(list(headers.values()))
     assert headers["Authorization"] == f"Bearer {value}"  # the request still carries it
+
+
+def test_the_log_helper_reads_every_try_and_each_entry_whole(monkeypatch):
+    # A secret can be in another field than the event of an entry, such as the detail of an error,
+    # and in an earlier try than the last one: the log of a task is read whole, every try of it.
+    tries = {
+        1: [
+            {"event": "Task failed with exception", "level": "error"},
+            {"event": "", "error_detail": [{"exc_value": "marker-in-the-detail-of-an-error"}]},
+        ],
+        2: [{"event": "Done", "level": "info", "extra": "marker-in-another-field"}],
+    }
+    asked = []
+
+    def fake_http_json(method, url, body=None, headers=None, timeout=30):
+        path = url.removeprefix("http://127.0.0.1:8080")
+        asked.append((method, path, headers["Accept"]))
+        return 200, {"content": tries[int(path.rsplit("/", 1)[1])]}
+
+    monkeypatch.setattr(airflow_api, "http_json", fake_http_json)
+    instance = {"dag_id": "a_dag", "dag_run_id": "a_run", "task_id": "load", "try_number": 2}
+    log = airflow_api.task_log("http://127.0.0.1:8080", stack_helpers.Secret("a-token"), instance)
+    logs = "/api/v2/dags/a_dag/dagRuns/a_run/taskInstances/load/logs"
+    assert asked == [("GET", f"{logs}/{n}", "application/json") for n in (1, 2)]
+    assert [json.loads(entry) for entry in log] == tries[1] + tries[2]
+    for marker in ("marker-in-the-detail-of-an-error", "marker-in-another-field"):
+        assert any(marker in entry for entry in log), marker
+
+
+def test_the_log_helper_reads_nothing_for_a_task_that_never_ran(monkeypatch):
+    # A task that never started, such as one whose upstream failed, has try number 0.
+    def fake_http_json(method, url, body=None, headers=None, timeout=30):
+        pytest.fail(f"the helper asked for {url}")
+
+    monkeypatch.setattr(airflow_api, "http_json", fake_http_json)
+    instance = {"dag_id": "a_dag", "dag_run_id": "a_run", "task_id": "load", "try_number": 0}
+    assert airflow_api.task_log("http://127.0.0.1:8080", "a-token", instance) == []
 
 
 def fake_proc(tmp_path, entries):
