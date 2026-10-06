@@ -28,8 +28,9 @@ case "$1" in
       echo "Cannot connect to the Docker daemon" >&2
       exit 1
     fi
-    printf '%s|%s|%s|%s|%s\n' "${FAKE_SERVER_VERSION:-29.0.0}" "${FAKE_ARCH:-aarch64}" \
-      "${FAKE_NCPU:-8}" "${FAKE_MEMTOTAL:-10737418240}" "${FAKE_DOCKER_ROOT:-/nonexistent}"
+    printf '%s|%s|%s|%s|%s|%s\n' "${FAKE_SERVER_VERSION:-29.0.0}" "${FAKE_ARCH:-aarch64}" \
+      "${FAKE_NCPU:-8}" "${FAKE_MEMTOTAL:-10737418240}" "${FAKE_DOCKER_ROOT:-/nonexistent}" \
+      "${FAKE_IMAGE_STORE:-}"
     ;;
   compose)
     shift
