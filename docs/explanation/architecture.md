@@ -86,6 +86,7 @@ Inside the warehouse, data moves through layers, each in its own schema:
 | Schema | Holds |
 |---|---|
 | `raw_<source>` | Data as loaded, one schema per source |
+| `raw_<source>_staging` | The rows of a load on their way into `raw_<source>`: dlt merges through it. `loader` owns it, and no other role reads it |
 | `staging` | Standardized source data |
 | `intermediate` | Shared transformation steps |
 | `marts` | Final models for dashboards and AI access |

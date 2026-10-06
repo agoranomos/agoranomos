@@ -1,7 +1,7 @@
 """Tests of the demo data generator (airflow/dags/agoranomos_pipelines/demo_data.py).
 
 The generator is deterministic, so its totals are exact numbers: the stack tests compare the
-warehouse and the dashboard with what it generates.
+warehouse with what it generates.
 """
 
 from datetime import date, timedelta
@@ -57,8 +57,8 @@ def test_the_spend_of_the_last_seven_days_and_of_each_campaign():
     }
 
 
-def test_four_weeks_match_the_totals_of_the_research():
-    # The same generator with 28 days gave these totals on Python 3.12, 3.13 and 3.14.
+def test_four_weeks_have_exact_totals():
+    # 28 days: these totals were checked on Python 3.12, 3.13 and 3.14.
     assert totals(list(demo_data.rows(END, 28))) == {
         "rows": 84,
         "impressions": 3_682_107,

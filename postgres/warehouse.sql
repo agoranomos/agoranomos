@@ -52,8 +52,8 @@ SELECT format(
 ) \gexec
 GRANT CONNECT ON DATABASE warehouse TO loader, transformer, metabase_reader;
 
--- raw_demo is for the demo data, and dlt is to merge into it through raw_demo_staging. loader owns
--- both, so that it can create its tables there; transformer may read raw_demo.
+-- raw_demo holds the demo data, and dlt merges into it through raw_demo_staging. loader owns both,
+-- so that it can create its tables there; transformer may read raw_demo.
 CREATE SCHEMA IF NOT EXISTS raw_demo AUTHORIZATION loader;
 CREATE SCHEMA IF NOT EXISTS raw_demo_staging AUTHORIZATION loader;
 ALTER SCHEMA raw_demo OWNER TO loader;
