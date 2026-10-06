@@ -2,10 +2,10 @@
 
 agoranomos_demo_transform runs the dbt project through Cosmos, as the transformer role. It builds
 the staging model stg_demo__ad_stats_daily and then the mart marts.ad_spend_daily, each followed by
-its tests, and a failed test of the staging model keeps the mart as it was. The asset of the raw
-table starts it, which each successful run of agoranomos_demo_load updates, and a repeat is safe:
-dbt rebuilds the models. The DAG starts paused, and a load starts it only while it is unpaused:
-unpause it in the Airflow UI before you trigger the load, or trigger it there yourself.
+its tests, and a failed test of the staging model keeps the mart as it was. Each successful run of
+agoranomos_demo_load updates the asset of the raw table, and that starts this DAG. A repeat is
+safe: dbt rebuilds the models. The DAG starts paused, and a load starts it only while it is
+unpaused: unpause it in the Airflow UI before you trigger the load, or trigger it there yourself.
 """
 
 from __future__ import annotations
