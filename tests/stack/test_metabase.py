@@ -8,7 +8,7 @@ again, which the stack does on every start anyway.
 
 import pytest
 from ai_switches import readings, switches_on
-from stack_helpers import Secret, SecretHeaders, compose, http_json, psql, secrets
+from stack_helpers import Secret, SecretHeaders, compose, http_json, leaked, psql, secrets
 
 WAREHOUSE_NAME = "Agoranomos warehouse"
 
@@ -232,10 +232,11 @@ def test_the_connection_details_are_encrypted_in_the_application_database(env):
 @pytest.mark.parametrize("service", ["metabase", "metabase-init"])
 def test_no_secret_is_in_the_logs(env, service):
     # The log of a container is kept, and shown by ./agoranomos logs. The names of the settings are
-    # printed, never the values.
+    # printed, never the values. The log is read where it is used, so that no frame of a failed
+    # test holds it.
     values = secrets(env)
     assert values, "no secrets in .env: run ./agoranomos init"
-    logs = compose("logs", "--no-color", service).stdout
-    assert logs.strip(), f"{service} has no log, so there is nothing to look in"
-    leaked = [name for name, value in values.items() if value in logs]
-    assert not leaked, f"the log of {service} holds the values of {leaked}"
+    has_log = bool(compose("logs", "--no-color", service).stdout.strip())
+    assert has_log, f"{service} has no log, so there is nothing to look in"
+    found = leaked(values, compose("logs", "--no-color", service).stdout)
+    assert not found, f"the log of {service} holds the values of {found}"

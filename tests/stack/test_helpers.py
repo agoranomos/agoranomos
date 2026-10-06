@@ -4,6 +4,7 @@ import http.client
 import importlib.util
 import json
 import os
+import pprint
 import re
 import shutil
 import socket
@@ -12,7 +13,9 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+from datetime import date
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -109,7 +112,7 @@ def test_the_checked_warehouse_helper_fails_with_the_error_of_psql(monkeypatch):
 
 def test_totals_reads_the_count_and_the_sums_in_the_types_of_the_generator(monkeypatch):
     statements = answering_warehouse(monkeypatch, 0, stdout="168|7388494|81459|53390.56|4054.41\n")
-    found = stack_helpers.totals({}, "raw_demo.ad_stats_daily", "WHERE date <= DATE '2026-09-27'")
+    found = stack_helpers.totals({}, "raw_demo.ad_stats_daily", until=date(2026, 9, 27))
     assert found == {
         "rows": 168,
         "impressions": 7_388_494,
@@ -130,6 +133,91 @@ def test_totals_of_an_empty_table_are_zero(monkeypatch):
     assert set(stack_helpers.totals({}, "marts.ad_spend_daily").values()) == {0}
     [(sql, _)] = statements
     assert sql.count("coalesce(sum(") == 4, sql
+
+
+def answering_warehouse_output(monkeypatch, output):
+    """Make warehouse_output() answer every statement with this output, and record the SQL."""
+    statements = []
+
+    def warehouse_output(env, sql, role="postgres"):
+        statements.append(sql)
+        return output
+
+    monkeypatch.setattr(stack_helpers, "warehouse_output", warehouse_output)
+    return statements
+
+
+def test_totals_until_a_day_keeps_the_rows_up_to_that_day(monkeypatch):
+    statements = answering_warehouse_output(monkeypatch, "1|2|3|4.00|5.00")
+    stack_helpers.totals({}, "raw_demo.ad_stats_daily", until=date(2026, 9, 27))
+    stack_helpers.totals({}, "marts.ad_spend_daily")
+    assert [sql.removeprefix(stack_helpers.TOTALS) for sql in statements] == [
+        " raw_demo.ad_stats_daily WHERE date <= DATE '2026-09-27'",
+        " marts.ad_spend_daily",
+    ]
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        pytest.param("ad_stats_daily", id="no-schema"),
+        pytest.param("raw_demo.ad_stats_daily.extra", id="three-parts"),
+        pytest.param("raw_demo.ad_stats_daily WHERE 1 = 1", id="more-sql"),
+        pytest.param("raw_demo.ad_stats_daily; DROP TABLE raw_demo.x", id="another-statement"),
+        pytest.param("raw_demo.ad_stats_daily\n", id="a-line-break-at-the-end"),
+        pytest.param('"raw_demo".ad_stats_daily', id="quoted"),
+        pytest.param("Raw_Demo.ad_stats_daily", id="capitals"),
+        pytest.param("raw_demo.ad-stats", id="a-dash"),
+        pytest.param("1raw.ad_stats_daily", id="a-digit-first"),
+        pytest.param("", id="empty"),
+    ],
+)
+def test_totals_refuses_anything_but_a_plain_schema_and_table(monkeypatch, table):
+    # The name goes into the SQL as it is, so it is a schema and a table in the lower-case names
+    # that dlt and dbt give, and nothing more: no statement runs otherwise.
+    statements = answering_warehouse_output(monkeypatch, "0|0|0|0|0")
+    with pytest.raises(ValueError, match=r"schema\.table"):
+        stack_helpers.totals({}, table)
+    assert statements == []
+
+
+def test_leaked_finds_a_secret_as_it_is_and_as_json_writes_it():
+    # task_log() gives each entry of a log as JSON text, where a quote and a backslash are escaped.
+    value = 'a "quoted" pass\\word with ä'
+    values = {"API_PASSWORD": value}
+    entry = json.dumps({"event": f"connecting with {value}"}, ensure_ascii=False)
+    assert value not in entry  # the check below needs the escaped form
+    assert stack_helpers.leaked(values, [entry]) == ["API_PASSWORD"]
+    # As it is, in a plain text such as the log of a container, and with ä written as ä.
+    assert stack_helpers.leaked(values, [f"plain {value} text"]) == ["API_PASSWORD"]
+    assert stack_helpers.leaked(values, [json.dumps({"event": value})]) == ["API_PASSWORD"]
+    # A text without it, or with a part of it, holds no secret.
+    assert stack_helpers.leaked(values, ["nothing here", value[:-1]]) == []
+
+
+def test_leaked_returns_names_only():
+    values = {
+        "B_PASSWORD": "value-of-b-12345",
+        "A_TOKEN": "value-of-a-12345",
+        "C_KEY": "value-of-c-12345",
+    }
+    found = stack_helpers.leaked(values, ["x value-of-b-12345 y", "value-of-a-12345"])
+    assert found == ["A_TOKEN", "B_PASSWORD"]
+    assert not any(value in repr(found) for value in values.values())
+    # A whole log in one text is one text, not a list of letters.
+    assert stack_helpers.leaked(values, "a log with value-of-c-12345 in it") == ["C_KEY"]
+    # An empty value is in every text, and it is no secret to look for.
+    assert stack_helpers.leaked({"EMPTY": ""}, ["any text"]) == []
+
+
+def test_a_log_shows_only_its_number_of_entries():
+    # pytest prints the locals of a failed test with repr(), or with pprint under -vv, and the
+    # assertions show what a call returned: a log can hold the secret that a test looks for.
+    value = "a-secret-that-must-stay-out-of-the-report"
+    log = stack_helpers.LogEntries([json.dumps({"event": value}), "another entry"])
+    assert repr(log) == "LogEntries(2 entries)"
+    assert value not in repr(log) + str(log) + pprint.pformat(log) + pprint.pformat([log])
+    assert log[0] == json.dumps({"event": value})  # still the entries themselves
 
 
 def test_secret_headers_keep_their_values_out_of_what_pytest_prints():
@@ -215,7 +303,7 @@ def test_the_log_helper_reads_every_try_and_each_entry_whole(monkeypatch):
             {"event": "Task failed with exception", "level": "error"},
             {"event": "", "error_detail": [{"exc_value": "marker-in-the-detail-of-an-error"}]},
         ],
-        2: [{"event": "Done", "level": "info", "extra": "marker-in-another-field"}],
+        2: [{"event": "Done", "level": "info", "extra": "marker-in-another-field, Grüße"}],
     }
     asked = []
 
@@ -230,8 +318,96 @@ def test_the_log_helper_reads_every_try_and_each_entry_whole(monkeypatch):
     logs = "/api/v2/dags/a_dag/dagRuns/a_run/taskInstances/load/logs"
     assert asked == [("GET", f"{logs}/{n}", "application/json") for n in (1, 2)]
     assert [json.loads(entry) for entry in log] == tries[1] + tries[2]
-    for marker in ("marker-in-the-detail-of-an-error", "marker-in-another-field"):
+    for marker in ("marker-in-the-detail-of-an-error", "marker-in-another-field, Grüße"):
         assert any(marker in entry for entry in log), marker
+    # The entries print as their number only, as a log can hold the secret that a test looks for.
+    assert isinstance(log, stack_helpers.LogEntries)
+    assert repr(log) == "LogEntries(3 entries)"
+
+
+URL = "http://127.0.0.1:8080"
+ASSET = "postgres://warehouse-db:5432/warehouse/raw_demo/ad_stats_daily"
+
+
+def fake_asset_events_api(monkeypatch, events):
+    """Make the API of Airflow answer for one asset and these events as Airflow 3.3.2 does.
+
+    It gives the events whose fields match the filters, sorted by timestamp, the oldest first
+    unless order_by is -timestamp, 50 to a page unless limit says otherwise, and at most 100, with
+    the number of all the events that match in total_entries. It records the queries of the events.
+    """
+    asked = []
+
+    def fake_http_json(method, url, body=None, headers=None, timeout=30):
+        parts = urllib.parse.urlsplit(url)
+        query = dict(urllib.parse.parse_qsl(parts.query))
+        if parts.path == "/api/v2/assets":
+            return 200, {"assets": [{"id": 7, "uri": query["uri_pattern"]}], "total_entries": 1}
+        assert (method, parts.path) == ("GET", "/api/v2/assets/events"), url
+        asked.append(query)
+        found = [
+            event
+            for event in events
+            if all(
+                str(event[key]) == value
+                for key, value in query.items()
+                if key.startswith("source_") or key == "asset_id"
+            )
+        ]
+        newest_first = query.get("order_by") == "-timestamp"
+        found.sort(key=lambda event: event["timestamp"], reverse=newest_first)
+        page = found[: min(int(query.get("limit", 50)), 100)]
+        return 200, {"asset_events": page, "total_entries": len(found)}
+
+    monkeypatch.setattr(airflow_api, "http_json", fake_http_json)
+    return asked
+
+
+def runs_of(dag_id, count):
+    """The events of count runs of a DAG, a minute apart, the oldest first."""
+    return [
+        {
+            "asset_id": 7,
+            "source_dag_id": dag_id,
+            "source_run_id": f"manual__2026-10-06T{hour:02d}:{minute:02d}:00+00:00",
+            "timestamp": f"2026-10-06T{hour:02d}:{minute:02d}:00.5+00:00",
+        }
+        for hour, minute in (divmod(n, 60) for n in range(count))
+    ]
+
+
+def test_the_asset_helper_asks_for_the_newest_events_of_a_run(monkeypatch):
+    # Airflow keeps the events of every run, also after ./agoranomos down, and its API gives the
+    # oldest 50 unless it is told otherwise, which would leave out the event of the newest run.
+    events = runs_of("a_dag", 60)
+    asked = fake_asset_events_api(monkeypatch, events)
+    newest = events[-1]["source_run_id"]
+    found = airflow_api.asset_events(
+        URL, "a-token", ASSET, source_dag_id="a_dag", source_run_id=newest
+    )
+    assert found == [events[-1]]
+    assert asked == [
+        {
+            "asset_id": "7",
+            "source_dag_id": "a_dag",
+            "source_run_id": newest,
+            "order_by": "-timestamp",
+            "limit": "100",
+        }
+    ]
+
+
+def test_the_asset_helper_returns_the_newest_event_first(monkeypatch):
+    events = runs_of("a_dag", 60)
+    fake_asset_events_api(monkeypatch, events)
+    assert airflow_api.asset_events(URL, "a-token", ASSET, source_dag_id="a_dag") == events[::-1]
+
+
+def test_the_asset_helper_fails_when_the_events_do_not_fit_on_one_page(monkeypatch):
+    # A page that the limit cut would hide events: the helper fails, and says why.
+    fake_asset_events_api(monkeypatch, runs_of("a_dag", 150))
+    with pytest.raises(AssertionError, match=r"150 events .* 100"):
+        airflow_api.asset_events(URL, "a-token", ASSET, source_dag_id="a_dag")
 
 
 def test_the_log_helper_reads_nothing_for_a_task_that_never_ran(monkeypatch):
@@ -482,6 +658,7 @@ def test_shown_in_finds_a_value_that_pytest_wrapped_over_lines(report, shown):
 # its own, which overrides the real one, so that nothing signs in to Airflow. The control takes a
 # plain str, and the report must show it: a check that cannot see a leak would pass too.
 FAILING_TESTS = """
+import json
 from pathlib import Path
 
 import pytest
@@ -530,6 +707,22 @@ def test_a_text_that_holds_a_secret_fails(env, token, headers):
     assert env["API_PASSWORD"] not in f"some log text with {env['API_PASSWORD']} in the middle"
 
 
+def a_log(env):
+    # What task_log() gives: the entries of a log, here one that holds the password.
+    entry = {"event": "connecting with " + env["API_PASSWORD"]}
+    return stack_helpers.LogEntries([json.dumps(entry)])
+
+
+def test_a_scan_of_a_log_fails(env, token, headers):
+    found = stack_helpers.leaked(stack_helpers.secrets(env), a_log(env))
+    assert not found, f"the log holds the values of {found}"
+
+
+def test_a_scan_of_a_log_in_a_local_fails(env, token, headers):
+    log = a_log(env)
+    assert not stack_helpers.leaked(stack_helpers.secrets(env), log), "the log holds a secret"
+
+
 def test_the_control_fails(plain):
     assert plain == "something else", "deliberate failure"
 """
@@ -557,7 +750,9 @@ def test_pytest_does_not_print_the_secrets_of_a_failing_test(tmp_path, options):
     (tmp_path / "test_fails_on_purpose.py").write_text(source, encoding="utf-8")
     shutil.copy(Path(stack_helpers.__file__).parent / "conftest.py", tmp_path / "conftest.py")
     report = nested_pytest(tmp_path, *options)
-    assert "6 failed" in report, "the tests did not fail as they should"
+    assert "8 failed" in report, "the tests did not fail as they should"
+    # The scans of a log fail on the password, and say so by its name.
+    assert report.count("the log holds the values of ['API_PASSWORD']") >= 1
     # The arguments are printed, and show no value.
     assert "Secret('<hidden>')" in report
     assert "EnvValues(" in report

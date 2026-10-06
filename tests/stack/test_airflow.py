@@ -10,11 +10,14 @@ from stack_helpers import (
     compose,
     http_json,
     job_failed,
+    leaked,
     psql,
     secrets,
 )
 
 SELFCHECK = "agoranomos_selfcheck"
+# The other DAG of the base bundle, the demo load.
+DEMO_LOAD = "agoranomos_demo_load"
 EXTENSION_CHECK = "ci_extension_check"
 FIXTURE = REPO_ROOT / "tests" / "stack" / "fixtures" / f"{EXTENSION_CHECK}.py"
 EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
@@ -105,18 +108,27 @@ def test_a_dag_in_the_extensions_folder_runs(env, airflow_url, token):
     run = run_dag(airflow_url, token, EXTENSION_CHECK)
     assert run["state"] == "success", run
     # The task also records what task code can see. The log must say it, and no entry of it may
-    # hold a secret, in any field.
+    # hold a secret, in any field. The log is read where it is used, so that no frame of a failed
+    # test holds it, and only the prefixes and the names of the secrets are printed.
     [instance] = task_instances(airflow_url, token, run)
-    log = task_log(airflow_url, token, instance)
-    events = [json.loads(entry).get("event", "") for entry in log]
-    for prefix in ("environment variables: ", "metadata database, task environment: "):
-        assert any(event.startswith(prefix) for event in events), prefix
-    leaked = [name for name, value in secrets(env).items() if any(value in e for e in log)]
-    assert not leaked, f"the log of the task holds the values of {leaked}"  # names, never values
+    prefixes = {"environment variables: ", "metadata database, task environment: "}
+    said = {
+        prefix
+        for entry in task_log(airflow_url, token, instance)
+        for prefix in prefixes
+        if json.loads(entry).get("event", "").startswith(prefix)
+    }
+    assert said == prefixes, f"the log of the task does not say {sorted(prefixes - said)}"
+    found = leaked(secrets(env), task_log(airflow_url, token, instance))
+    assert not found, f"the log of the task holds the values of {found}"
 
 
 def test_the_dag_processor_reports_no_import_error(airflow_url, token):
     # The errors of the DAGs of the base package: the extensions folder belongs to the deployment.
+    # Its DAGs are waited for first, so that the DAG processor has parsed the bundle whatever ran
+    # before this test.
+    for dag_id in (SELFCHECK, DEMO_LOAD):
+        wait_for_dag(airflow_url, token, dag_id)
     status, body = api(airflow_url, token, "GET", "/api/v2/importErrors?bundle_name=agoranomos")
     assert status == 200, body
     assert body["total_entries"] == 0, [error["filename"] for error in body["import_errors"]]

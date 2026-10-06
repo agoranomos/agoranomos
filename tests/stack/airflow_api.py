@@ -6,9 +6,12 @@ import time
 from urllib.parse import quote
 
 import pytest
-from stack_helpers import Secret, SecretHeaders, http_json, wait_for
+from stack_helpers import LogEntries, Secret, SecretHeaders, http_json, wait_for
 
 FINISHED = ("success", "failed")
+# The most events that the API of Airflow gives on one page ([api] maximum_page_limit, 100 by
+# default in Airflow 3.3.2).
+EVENTS_PER_PAGE = 100
 
 
 def api(airflow_url, token, method, path, body=None, headers=None):
@@ -77,9 +80,11 @@ def task_log(airflow_url, token, instance):
 
     An entry of the structured log holds its event and other fields, such as the detail of an
     error, and a search for a value has to see all of them: so each text is the whole entry, as
-    JSON. A task that never started has no try, and no log.
+    JSON, with the letters that are not ASCII as they are. The list shows only the number of its
+    entries, as stack_helpers.leaked() looks in them for secrets. A task that never started has no
+    try, and no log.
     """
-    entries = []
+    entries = LogEntries()
     for try_number in range(1, instance["try_number"] + 1):
         path = (
             f"/api/v2/dags/{instance['dag_id']}/dagRuns/{instance['dag_run_id']}"
@@ -87,21 +92,39 @@ def task_log(airflow_url, token, instance):
         )
         status, body = api(airflow_url, token, "GET", path, headers={"Accept": "application/json"})
         assert status == 200, body
-        entries.extend(json.dumps(entry) for entry in body["content"])
+        entries.extend(json.dumps(entry, ensure_ascii=False) for entry in body["content"])
     return entries
 
 
 def asset_events(airflow_url, token, uri, **filters):
-    """The events of the asset with this URI; filters are fields of the events API, such as
-    source_dag_id."""
+    """The events of the asset with this URI, the newest first. filters are fields of the events
+    API, such as source_dag_id and source_run_id.
+
+    Airflow keeps the events of every run, also after ./agoranomos down, and its API sorts them by
+    timestamp, the oldest first, and gives 50 unless it is told otherwise: the event of a new run
+    would be missing once there are more. So the helper asks for the newest first, as many as one
+    page can hold, and fails when total_entries says that there are more than the page holds,
+    rather than return a part of them. Ask for the event of one run with source_run_id.
+    """
     status, body = api(airflow_url, token, "GET", f"/api/v2/assets?uri_pattern={quote(uri)}")
     assert status == 200, body
     matching = [asset for asset in body["assets"] if asset["uri"] == uri]
     assert matching, f"Airflow has no asset {uri}"
     query = "&".join(
         f"{key}={quote(str(value))}"
-        for key, value in {"asset_id": matching[0]["id"], **filters}.items()
+        for key, value in {
+            "asset_id": matching[0]["id"],
+            **filters,
+            "order_by": "-timestamp",
+            "limit": EVENTS_PER_PAGE,
+        }.items()
     )
     status, body = api(airflow_url, token, "GET", f"/api/v2/assets/events?{query}")
     assert status == 200, body
-    return body["asset_events"]
+    events = body["asset_events"]
+    # pytest rewrites the assertions of test modules only, so this one carries its own message.
+    assert body["total_entries"] <= len(events), (
+        f"Airflow has {body['total_entries']} events of {uri} for {sorted(filters)}, and one page "
+        f"holds {len(events)}: narrow the filters, for example with source_run_id"
+    )
+    return events

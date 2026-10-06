@@ -6,12 +6,14 @@ import functools
 import http.client
 import json
 import os
+import re
 import subprocess
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -165,6 +167,42 @@ class SecretHeaders(NamesOnly):
 
 class EnvValues(NamesOnly):
     """The settings of .env, as the env fixture gives them."""
+
+
+class LogEntries(list[str]):
+    """The entries of a log, each a text, in a list that shows only their number, for what pytest
+    prints: a log can hold the very secret that a test looks for."""
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({len(self)} entries)"
+
+
+def leaked(values: dict[str, str], texts: Iterable[str] | str) -> list[str]:
+    """The names of the secrets whose value is in one of the texts, sorted: names, never values.
+
+    A value counts as it is, and as JSON writes it inside a string, where a quote and a backslash
+    are escaped, with the letters that are not ASCII as they are or escaped too: the entries of the
+    log of a task are JSON. A single text, such as the output of docker compose logs, is one text.
+    Pass the texts straight from the call that reads them, such as task_log(...) or
+    compose("logs", ...).stdout, so that no frame of a failed test holds them, and keep the call
+    out of the assert statement itself, whose message would show what the call got.
+    """
+    texts = LogEntries([texts] if isinstance(texts, str) else texts)
+    return sorted(
+        name
+        for name, value in values.items()
+        if value and any(form in text for form in json_forms(value) for text in texts)
+    )
+
+
+def json_forms(value: str) -> set[Secret]:
+    """A value as it is, and as JSON writes it inside a string: with the letters that are not ASCII
+    as they are, and escaped. Secret values, so that no frame of a traceback shows them."""
+    return {
+        Secret(value),
+        Secret(json.dumps(value, ensure_ascii=False)[1:-1]),
+        Secret(json.dumps(value)[1:-1]),
+    }
 
 
 # The stack tests talk to the services that the stack publishes on 127.0.0.1, and to nothing else.
@@ -337,13 +375,20 @@ TOTALS = (
     "SELECT count(*), coalesce(sum(impressions), 0), coalesce(sum(clicks), 0), "
     "coalesce(sum(spend), 0), coalesce(sum(conversions), 0) FROM"
 )
+# A table of the warehouse as schema.table, in the lower-case names that dlt and dbt give: the only
+# form that totals() puts into its SQL.
+TABLE_NAME = re.compile(r"[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*")
 
 
-def totals(env: dict[str, str], table: str, where: str = "") -> dict[str, int | Decimal]:
+def totals(env: dict[str, str], table: str, until: date | None = None) -> dict[str, int | Decimal]:
     """The number of rows of a table of ad statistics and the sums of its measures, in the types
-    of the demo generator: counts as int, money and conversions as Decimal. where narrows the
-    rows, for example WHERE date <= DATE '2026-09-27'. The sums of no rows are 0."""
-    output = warehouse_output(env, f"{TOTALS} {table} {where}".rstrip())
+    of the demo generator: counts as int, money and conversions as Decimal. table is schema.table,
+    and anything else fails; until keeps the rows of the days up to that one. The sums of no rows
+    are 0."""
+    if not TABLE_NAME.fullmatch(table):
+        raise ValueError(f"totals() takes a table as schema.table, not {table!r}")
+    condition = "" if until is None else f" WHERE date <= DATE '{until.isoformat()}'"
+    output = warehouse_output(env, f"{TOTALS} {table}{condition}")
     count, impressions, clicks, spend, conversions = output.split("|")
     return {
         "rows": int(count),

@@ -40,16 +40,30 @@ class StandInPipeline:
 
 @pytest.fixture
 def demo_source(monkeypatch):
-    """The module, imported with a stand-in for dlt, and the list of the pipelines that it makes."""
+    """The module, imported with a stand-in for dlt; the list of the pipelines that it makes; and
+    the hints that it gives the decorators of dlt, by decorator and function."""
     pipelines = []
+    hints = {}
 
     def pipeline(**options):
         pipelines.append(StandInPipeline(options))
         return pipelines[-1]
 
+    def decorator(kind):
+        # dlt.resource(**hints) and dlt.source(**hints) give a decorator: the stand-in keeps the
+        # hints and leaves the function as it is.
+        def with_hints(**given):
+            def decorate(function):
+                hints[kind, function.__name__] = given
+                return function
+
+            return decorate
+
+        return with_hints
+
     dlt = types.ModuleType("dlt")
-    dlt.resource = lambda **hints: lambda function: function
-    dlt.source = lambda **hints: lambda function: function
+    dlt.resource = decorator("resource")
+    dlt.source = decorator("source")
     dlt.destinations = types.SimpleNamespace(postgres=lambda credentials: credentials)
     dlt.pipeline = pipeline
     monkeypatch.setitem(sys.modules, "dlt", dlt)
@@ -59,13 +73,13 @@ def demo_source(monkeypatch):
     spec = importlib.util.spec_from_file_location("demo_source", MODULE)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module, pipelines
+    return module, pipelines, hints
 
 
 def test_dlt_works_in_a_temporary_folder_outside_the_dag_folder(demo_source):
     # The DAG folder is mounted read-only into the containers, and dlt keeps the state of the
     # pipeline in raw_demo, so its working folder is a temporary one, elsewhere.
-    module, pipelines = demo_source
+    module, pipelines, _ = demo_source
     module.load(END)
     [pipeline] = pipelines
     assert "pipelines_dir" in pipeline.options, "dlt would work in a folder of its own choice"
@@ -77,7 +91,7 @@ def test_dlt_works_in_a_temporary_folder_outside_the_dag_folder(demo_source):
 
 
 def test_the_load_takes_eight_weeks_up_to_the_day_into_raw_demo_as_the_loader_role(demo_source):
-    module, pipelines = demo_source
+    module, pipelines, _ = demo_source
     module.load(END)
     [pipeline] = pipelines
     assert pipeline.options["dataset_name"] == "raw_demo"
@@ -96,10 +110,29 @@ def test_the_load_takes_eight_weeks_up_to_the_day_into_raw_demo_as_the_loader_ro
 def test_the_load_logs_how_many_rows_of_which_days_it_loaded(demo_source, caplog):
     # The log of the task says what the load did, in counts and dates, which hold no secret. The
     # count is the one that dlt reports for the table.
-    module, _ = demo_source
+    module, _, _ = demo_source
     with caplog.at_level(logging.INFO, logger=module.__name__):
         module.load(END)
     assert [record.getMessage() for record in caplog.records] == [
         "Loaded 168 rows of 2026-08-03 to 2026-09-27 into raw_demo.ad_stats_daily"
     ]
     assert "a-password-for-the-test" not in caplog.text
+
+
+def test_the_rows_merge_on_their_natural_key_with_money_in_numeric_12_2(demo_source):
+    # The hints make a repeat safe and money exact: dlt merges on the primary key, and it creates
+    # numeric(12,2) columns. The stack tests check the table that dlt makes from them.
+    _, _, hints = demo_source
+    assert hints == {
+        ("resource", "ad_stats_daily"): {
+            "name": "ad_stats_daily",
+            "write_disposition": "merge",
+            "primary_key": ("account_id", "campaign_id", "date"),
+            "columns": {
+                "date": {"data_type": "date"},
+                "spend": {"data_type": "decimal", "precision": 12, "scale": 2},
+                "conversions": {"data_type": "decimal", "precision": 12, "scale": 2},
+            },
+        },
+        ("source", "demo"): {"name": "demo"},
+    }
