@@ -323,6 +323,56 @@ def test_a_failing_call_is_an_error_with_the_step_the_status_and_a_fixed_hint_on
     )
 
 
+def test_a_call_that_may_find_nothing_gives_none_for_a_404_only(metabase):
+    # demo-init waits for the DAGs of Airflow this way: a 404 means not there yet.
+    client = mi.Metabase(metabase.url)
+    client.session = "session-from-login"
+    assert client.call("GET", "/api/not-there", missing_ok=True) is None
+    metabase.failures[("GET", "/api/not-there")] = 403
+    with pytest.raises(mi.SetupError, match=r"^GET /api/not-there failed with HTTP 403\. "):
+        client.call("GET", "/api/not-there", missing_ok=True)
+
+
+def test_a_client_of_another_api_ends_a_failure_with_its_own_hint(metabase):
+    class Other(mi.ApiClient):
+        logs_hint = "See ./agoranomos logs another-service."
+
+    metabase.failures[("GET", "/api/database")] = 500
+    with pytest.raises(mi.SetupError) as raised:
+        Other(metabase.url).call("GET", "/api/database")
+    assert str(raised.value) == (
+        "GET /api/database failed with HTTP 500. See ./agoranomos logs another-service."
+    )
+    with pytest.raises(mi.SetupError) as raised:
+        Other(f"http://127.0.0.1:{free_port()}", timeout=1).send("GET", "/api/database")
+    assert str(raised.value) == (
+        "GET /api/database failed: URLError (ConnectionRefusedError). "
+        "See ./agoranomos logs another-service."
+    )
+
+
+@pytest.mark.parametrize(
+    ("response", "items"),
+    [
+        pytest.param({"data": [{"id": 1}], "total": 1}, [{"id": 1}], id="object"),
+        pytest.param([{"id": 1}], [{"id": 1}], id="bare"),
+        pytest.param({"total": 0}, [], id="object-without-data"),
+    ],
+)
+def test_a_list_comes_bare_or_as_the_data_of_an_object(response, items):
+    assert mi.items_of(response) == items
+
+
+def test_the_warehouse_can_be_found_without_a_warning(capsys):
+    # demo-init uses the connection that metabase-init keeps up to date, whose log names it.
+    config = mi.Config.from_env({**ENV, "METABASE_URL": "http://metabase:3000"})
+    databases = [connection(7, "Copy"), connection(3, "Mine")]
+    assert mi.find_warehouse(databases, config, warn=False)["id"] == 3
+    assert capsys.readouterr().err == ""
+    assert mi.find_warehouse(databases, config)["id"] == 3
+    assert "ids 3, 7" in capsys.readouterr().err
+
+
 WAREHOUSE_HINT = (
     "Check that warehouse-db is running and that METABASE_READER_PASSWORD in .env matches the "
     "warehouse (./agoranomos up updates it)."
