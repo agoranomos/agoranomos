@@ -47,6 +47,29 @@ print(json.dumps({"providers": names, "enable_airflow_secrets": settings.enable_
 # reads Airflow Variables. A provider that a dlt update adds fails the test, so that someone reads
 # what it reads.
 DLT_PROVIDER_NAMES = ["Environment Variables", "secrets.toml", "config.toml"]
+# The caches that Cosmos would keep in Airflow Variables, which the Op role may edit: the output of
+# dbt ls, from which Cosmos renders the tasks of dbt and their arguments, and the YAML selectors of
+# a project. Both off.
+COSMOS_CACHES = {
+    "AIRFLOW__COSMOS__ENABLE_CACHE_DBT_LS": "False",
+    "AIRFLOW__COSMOS__ENABLE_CACHE_DBT_YAML_SELECTORS": "False",
+}
+# Cosmos 1.15.1 decides in DbtGraph whether to read and write each cache in a Variable
+# (cosmos/dbt/graph.py), from its settings and the cache key that every DAG of Cosmos has. The
+# probe asks a graph with a cache key, as the DAG processor builds one, so it gets the answer that
+# a parse gets; a renamed setting or method fails it. It prints two flags.
+COSMOS_PROBE = """
+import json
+
+from cosmos import ProjectConfig
+from cosmos.dbt.graph import DbtGraph
+
+graph = DbtGraph(project=ProjectConfig(), cache_identifier="probe")
+print(json.dumps({
+    "dbt_ls": graph.should_use_dbt_ls_cache(),
+    "yaml_selectors": graph.should_use_yaml_selectors_cache(),
+}))
+"""
 
 
 def pinned(name):
@@ -124,6 +147,15 @@ def test_compose_keeps_dlt_away_from_airflow_variables_in_every_airflow_service(
         assert {key: environment.get(key) for key in DLT_PROVIDERS} == DLT_PROVIDERS, name
 
 
+@pytest.mark.parametrize("variant", sorted(FILES))
+def test_compose_keeps_the_caches_of_cosmos_out_of_airflow_variables_in_every_airflow_service(
+    variant,
+):
+    for name, service in airflow_services(variant).items():
+        environment = service["environment"]
+        assert {key: environment.get(key) for key in COSMOS_CACHES} == COSMOS_CACHES, name
+
+
 @pytest.mark.parametrize("service", USERS)
 def test_airflow_has_the_pinned_dlt_and_cosmos(service):
     wanted = {"apache-airflow": airflow_version(), **pinned("requirements.txt")}
@@ -161,6 +193,13 @@ def test_the_running_containers_keep_dlt_away_from_airflow_variables(service):
         assert compose("exec", "-T", service, "printenv", name).stdout.strip() == value, name
 
 
+@pytest.mark.parametrize("service", USERS)
+def test_the_running_containers_keep_the_caches_of_cosmos_out_of_airflow_variables(service):
+    for name, value in COSMOS_CACHES.items():
+        result = compose("exec", "-T", service, "printenv", name, check=False)
+        assert result.stdout.strip() == value, name
+
+
 def test_the_image_itself_turns_telemetry_off():
     # A container gets the same variables from compose.yaml, so only the image shows that the
     # Dockerfile sets them.
@@ -173,6 +212,11 @@ def test_the_image_itself_keeps_dlt_away_from_airflow_variables():
     assert not wrong, f"the image {IMAGE} does not set {wrong} as the Dockerfile does"
 
 
+def test_the_image_itself_keeps_the_caches_of_cosmos_out_of_airflow_variables():
+    wrong = missing(image_environment(), COSMOS_CACHES)
+    assert not wrong, f"the image {IMAGE} does not set {wrong} as the Dockerfile does"
+
+
 @pytest.mark.parametrize("service", USERS)
 def test_dlt_itself_builds_no_provider_that_reads_airflow_variables(service):
     # The pins above check the name and the value of the switch. This asks dlt what it builds: if
@@ -182,3 +226,14 @@ def test_dlt_itself_builds_no_provider_that_reads_airflow_variables(service):
     found = json.loads(result.stdout.strip().splitlines()[-1])
     assert found["enable_airflow_secrets"] is False, "dlt has enable_airflow_secrets on"
     assert found["providers"] == DLT_PROVIDER_NAMES, f"dlt has the providers {found['providers']}"
+
+
+@pytest.mark.parametrize("service", USERS)
+def test_cosmos_itself_keeps_no_cache_in_airflow_variables(service):
+    # The pins above check the names and the values of the switches. This asks Cosmos what it does
+    # with them: if an update of Cosmos renamed a setting, the cache would be back, and this would
+    # fail.
+    result = compose("exec", "-T", service, "python", "-c", COSMOS_PROBE, check=False)
+    assert result.returncode == 0, f"the probe of Cosmos exited with {result.returncode}"
+    found = json.loads(result.stdout.strip().splitlines()[-1])
+    assert found == {"dbt_ls": False, "yaml_selectors": False}, f"Cosmos uses the caches {found}"

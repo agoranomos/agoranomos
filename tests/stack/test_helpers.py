@@ -330,12 +330,14 @@ URL = "http://127.0.0.1:8080"
 ASSET = "postgres://warehouse-db:5432/warehouse/raw_demo/ad_stats_daily"
 
 
-def fake_asset_events_api(monkeypatch, events):
-    """Make the API of Airflow answer for one asset and these events as Airflow 3.3.2 does.
+def fake_asset_events_api(monkeypatch, events, assets=((7, True),)):
+    """Make the API of Airflow answer for the assets and these events as Airflow 3.3.2 does.
 
-    It gives the events whose fields match the filters, sorted by timestamp, the oldest first
-    unless order_by is -timestamp, 50 to a page unless limit says otherwise, and at most 100, with
-    the number of all the events that match in total_entries. It records the queries of the events.
+    assets are (id, active) pairs, each an asset with the URI that the helper asks for. The API
+    lists only the active ones unless only_active is false. It gives the events whose fields match
+    the filters, sorted by timestamp, the oldest first unless order_by is -timestamp, 50 to a page
+    unless limit says otherwise, and at most 100, with the number of all the events that match in
+    total_entries. It records the queries of the events.
     """
     asked = []
 
@@ -343,7 +345,13 @@ def fake_asset_events_api(monkeypatch, events):
         parts = urllib.parse.urlsplit(url)
         query = dict(urllib.parse.parse_qsl(parts.query))
         if parts.path == "/api/v2/assets":
-            return 200, {"assets": [{"id": 7, "uri": query["uri_pattern"]}], "total_entries": 1}
+            every = query.get("only_active") == "false"
+            listed = [
+                {"id": asset_id, "uri": query["uri_pattern"]}
+                for asset_id, active in assets
+                if active or every
+            ]
+            return 200, {"assets": listed, "total_entries": len(listed)}
         assert (method, parts.path) == ("GET", "/api/v2/assets/events"), url
         asked.append(query)
         found = [
@@ -406,10 +414,10 @@ def test_the_asset_helper_returns_the_newest_event_first(monkeypatch):
 
 def test_the_asset_helper_takes_a_full_page_that_holds_every_event(monkeypatch):
     # A page can be full and still hold every event: total_entries tells, not the size of the page.
-    events = runs_of("a_dag", airflow_api.EVENTS_PER_PAGE)
+    events = runs_of("a_dag", airflow_api.PER_PAGE)
     fake_asset_events_api(monkeypatch, events)
     found = airflow_api.asset_events(URL, "a-token", ASSET, source_dag_id="a_dag")
-    assert len(found) == airflow_api.EVENTS_PER_PAGE
+    assert len(found) == airflow_api.PER_PAGE
     assert found == events[::-1]
 
 
@@ -417,6 +425,21 @@ def test_the_asset_helper_fails_when_the_events_do_not_fit_on_one_page(monkeypat
     # A page that the limit cut would hide events: the helper fails, and says why.
     fake_asset_events_api(monkeypatch, runs_of("a_dag", 150))
     with pytest.raises(AssertionError, match=r"150 events .* 100"):
+        airflow_api.asset_events(URL, "a-token", ASSET, source_dag_id="a_dag")
+
+
+def test_the_asset_helper_finds_an_asset_that_the_scheduler_has_not_activated_yet(monkeypatch):
+    # A task of Cosmos adds the asset of its model to an alias as it runs. Airflow makes the asset
+    # with its first event, but lists it as active only after the next check of the scheduler.
+    events = runs_of("a_dag", 1)
+    fake_asset_events_api(monkeypatch, events, assets=((7, False),))
+    assert airflow_api.asset_events(URL, "a-token", ASSET, source_dag_id="a_dag") == events
+
+
+@pytest.mark.parametrize("assets", [(), ((7, True), (8, False))], ids=["none", "two"])
+def test_the_asset_helper_fails_unless_one_asset_has_the_uri(monkeypatch, assets):
+    fake_asset_events_api(monkeypatch, runs_of("a_dag", 1), assets=assets)
+    with pytest.raises(AssertionError, match=rf"Airflow has {len(assets)} assets with the URI"):
         airflow_api.asset_events(URL, "a-token", ASSET, source_dag_id="a_dag")
 
 
@@ -428,6 +451,124 @@ def test_the_log_helper_reads_nothing_for_a_task_that_never_ran(monkeypatch):
     monkeypatch.setattr(airflow_api, "http_json", fake_http_json)
     instance = {"dag_id": "a_dag", "dag_run_id": "a_run", "task_id": "load", "try_number": 0}
     assert airflow_api.task_log("http://127.0.0.1:8080", "a-token", instance) == []
+
+
+def test_the_task_helper_gives_each_task_the_sorted_tasks_after_it(monkeypatch):
+    # Airflow 3.3.2 gives downstream_task_ids as a list in no set order, or None (TaskResponse).
+    asked = []
+
+    def fake_http_json(method, url, body=None, headers=None, timeout=30):
+        asked.append((method, url.removeprefix(URL)))
+        tasks = [
+            {"task_id": "b", "downstream_task_ids": None},
+            {"task_id": "a", "downstream_task_ids": ["c", "b"]},
+            {"task_id": "c", "downstream_task_ids": []},
+        ]
+        return 200, {"tasks": tasks, "total_entries": len(tasks)}
+
+    monkeypatch.setattr(airflow_api, "http_json", fake_http_json)
+    found = airflow_api.downstream_task_ids(URL, "a-token", "a_dag")
+    assert found == {"a": ["b", "c"], "b": [], "c": []}
+    assert asked == [("GET", "/api/v2/dags/a_dag/tasks")]
+
+
+# The value of every Variable that the fake API below holds: a Variable can hold a secret.
+VARIABLE_VALUE = "a-value-of-a-variable-that-must-stay-out-of-the-report"
+
+
+def prefix_range(term):
+    """The range of keys [lower, upper) that Airflow 3.3.2 searches for a prefix, as
+    _PrefixPatternParam of api_fastapi/common/parameters.py computes it: first it strips the
+    characters at the end of the term that are not letters or digits; then the upper bound bumps
+    the last character, and when the bump is no letter or digit it drops that character and bumps
+    the one before. upper is None when nothing is left to bump."""
+
+    def stripped(text):
+        while text and not text[-1].isalnum():
+            text = text[:-1]
+        return text
+
+    def upper(text):
+        text = stripped(text)
+        if not text:
+            return None
+        bumped = chr(ord(text[-1]) + 1)
+        return text[:-1] + bumped if bumped.isalnum() else upper(text[:-1])
+
+    return stripped(term), upper(term)
+
+
+def test_the_fake_searches_a_prefix_in_the_range_that_airflow_gives():
+    # The bounds that the class of Airflow 3.3.2 gives for these terms, computed with it.
+    assert [prefix_range(term) for term in ("cosmos_cache__", "test_", "c9", "abZ", "z", "__")] == [
+        ("cosmos_cache", "cosmos_cachf"),
+        ("test", "tesu"),
+        ("c9", "d"),
+        ("abZ", "ac"),
+        ("z", None),
+        ("", None),
+    ]
+
+
+def fake_variables_api(monkeypatch, names, status=200):
+    """Make the API of Airflow answer for Variables with these names as Airflow 3.3.2 does.
+
+    It gives the names in the range of keys of variable_key_prefix_pattern (prefix_range), sorted
+    by name, at most 100 to a page, and counts all of them in total_entries. Every Variable has
+    VARIABLE_VALUE. It records the queries.
+    """
+    asked = []
+
+    def fake_http_json(method, url, body=None, headers=None, timeout=30):
+        parts = urllib.parse.urlsplit(url)
+        assert (method, parts.path) == ("GET", "/api/v2/variables"), url
+        query = dict(urllib.parse.parse_qsl(parts.query))
+        asked.append(query)
+        if status != 200:
+            return status, {"detail": f"refused, and the value is {VARIABLE_VALUE}"}
+        lower, upper = prefix_range(query["variable_key_prefix_pattern"])
+        found = sorted(name for name in names if lower <= name and (upper is None or name < upper))
+        page = [{"key": name, "value": VARIABLE_VALUE} for name in found[: int(query["limit"])]]
+        return 200, {"variables": page[:100], "total_entries": len(found)}
+
+    monkeypatch.setattr(airflow_api, "http_json", fake_http_json)
+    return asked
+
+
+def test_the_variables_helper_returns_the_names_that_start_with_the_prefix(monkeypatch):
+    # The API strips the underscores at the end of cosmos_cache__, so it gives cosmos_cache_other
+    # too: the helper checks the names again.
+    names = ["cosmos_cache__a_dag__dbt", "cosmos_cache_other", "dlt_secrets_toml"]
+    asked = fake_variables_api(monkeypatch, names)
+    found = airflow_api.variable_names(URL, "a-token", "cosmos_cache__")
+    assert found == ["cosmos_cache__a_dag__dbt"]
+    assert asked == [
+        {"variable_key_prefix_pattern": "cosmos_cache__", "order_by": "key", "limit": "100"}
+    ]
+
+
+def test_the_variables_helper_takes_a_full_page_that_holds_every_name(monkeypatch):
+    # A page can be full and still hold every name: total_entries tells, not the size of the page.
+    names = [f"cosmos_cache__dag_{n:03d}" for n in range(airflow_api.PER_PAGE)]
+    fake_variables_api(monkeypatch, names)
+    assert airflow_api.variable_names(URL, "a-token", "cosmos_cache__") == names
+
+
+def test_the_variables_helper_fails_when_the_names_do_not_fit_on_one_page(monkeypatch):
+    fake_variables_api(monkeypatch, [f"cosmos_cache__dag_{n:03d}" for n in range(150)])
+    with pytest.raises(AssertionError, match=r"150 Variables .* holds 100") as raised:
+        airflow_api.variable_names(URL, "a-token", "cosmos_cache__")
+    # The frame of the helper, which pytest prints under --showlocals, holds no value.
+    [helper] = [e for e in raised.traceback if e.frame.code.name == "variable_names"]
+    assert VARIABLE_VALUE not in repr(helper.frame.f_locals)
+
+
+def test_the_variables_helper_names_the_status_of_a_refused_request(monkeypatch):
+    fake_variables_api(monkeypatch, ["cosmos_cache__a_dag__dbt"], status=403)
+    with pytest.raises(AssertionError, match=r"HTTP 403$") as raised:
+        airflow_api.variable_names(URL, "a-token", "cosmos_cache__")
+    [helper] = [e for e in raised.traceback if e.frame.code.name == "variable_names"]
+    assert VARIABLE_VALUE not in repr(helper.frame.f_locals) + str(raised.value)
 
 
 def fake_proc(tmp_path, entries):

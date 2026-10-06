@@ -1,0 +1,9 @@
+sources:
+  - name: raw_demo
+    description: >
+      The demo data that the DAG agoranomos_demo_load loads with dlt: one fictional ad account with
+      three campaigns.
+    schema: raw_demo
+    tables:
+      - name: ad_stats_daily
+        description: One row per campaign and day. dlt merges it on account_id, campaign_id and date.

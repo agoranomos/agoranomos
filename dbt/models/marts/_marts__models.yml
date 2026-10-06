@@ -1,0 +1,32 @@
+models:
+  - name: ad_spend_daily
+    description: >
+      Advertising spend and results by day and campaign, for dashboards and AI access. Today it holds
+      the demo account; the sources of real ad platforms are planned.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [report_date, account_id, campaign_id]
+    columns:
+      - name: report_date
+        description: The day of the statistics, in the time zone of the ad account.
+        data_tests: [not_null]
+      - name: account_id
+        description: The ad account.
+        data_tests: [not_null]
+      - name: campaign_id
+        description: The campaign, unique within its account.
+        data_tests: [not_null]
+      - name: campaign_name
+        description: The name of the campaign.
+      - name: currency
+        description: The currency of the account, as an ISO 4217 code. Sums are only meaningful within one currency.
+      - name: impressions
+        description: How many times the ads were shown.
+      - name: clicks
+        description: How many times the ads were clicked.
+      - name: spend
+        description: The spend, in the currency of the account.
+        data_tests: [not_null]
+      - name: conversions
+        description: The conversions that the ad platform attributes to the campaign; they can be fractional.

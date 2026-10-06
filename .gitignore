@@ -39,3 +39,8 @@ CLAUDE.local.md
 
 # Local Compose overrides, for example published database ports for an IDE
 compose.override.yaml
+
+# dbt run by hand in dbt/
+/dbt/target/
+/dbt/logs/
+/dbt/dbt_packages/

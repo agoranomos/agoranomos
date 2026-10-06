@@ -4,18 +4,17 @@ agoranomos_demo_load loads eight weeks of one fictional ad account, up to yester
 raw_demo with dlt, as the loader role. Its success updates the asset of the raw table. A repeat is
 safe: dlt merges on the natural key. Run it again to add the days since the last load, up to eight
 weeks back. The DAG has no schedule and starts paused: unpause and trigger it in the Airflow UI.
+Its asset also starts agoranomos_demo_transform, once that DAG is unpaused.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from airflow.sdk import Asset, dag, task
+from agoranomos_pipelines.assets import RAW_DEMO
+from airflow.sdk import dag, task
 from airflow.sdk.log import mask_secret
 
-# The asset of the raw table, in the form that Airflow 3 requires for PostgreSQL:
-# postgres://<host>:<port>/<database>/<schema>/<table>.
-RAW_DEMO = Asset("postgres://warehouse-db:5432/warehouse/raw_demo/ad_stats_daily")
 START = datetime(2026, 1, 1, tzinfo=UTC)
 
 

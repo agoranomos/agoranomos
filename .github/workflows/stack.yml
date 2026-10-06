@@ -20,6 +20,7 @@ on:
       - .env.example
       - "postgres/**"
       - "airflow/**"
+      - "dbt/**"
       - "metabase/**"
       - "tests/stack/**"
       - scripts/memory_report.py
@@ -33,6 +34,7 @@ on:
       - .env.example
       - "postgres/**"
       - "airflow/**"
+      - "dbt/**"
       - "metabase/**"
       - "tests/stack/**"
       - scripts/memory_report.py

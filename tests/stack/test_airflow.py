@@ -2,7 +2,7 @@ import json
 import shutil
 
 import pytest
-from airflow_api import api, run_dag, task_instances, task_log, wait_for_dag
+from airflow_api import api, run_dag, task_instances, task_log, variable_names, wait_for_dag
 from services import LONG_RUNNING
 from stack_helpers import (
     REPO_ROOT,
@@ -16,12 +16,14 @@ from stack_helpers import (
 )
 
 SELFCHECK = "agoranomos_selfcheck"
-# The other DAG of the base bundle, the demo load.
+# The other DAGs of the base bundle: the demo load and the demo transform.
 DEMO_LOAD = "agoranomos_demo_load"
+DEMO_TRANSFORM = "agoranomos_demo_transform"
 EXTENSION_CHECK = "ci_extension_check"
 FIXTURE = REPO_ROOT / "tests" / "stack" / "fixtures" / f"{EXTENSION_CHECK}.py"
 EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
 DAG_FOLDERS = ("/opt/agoranomos/dags", "/opt/agoranomos/extensions/dags")
+DBT_PROJECT = "/opt/agoranomos/dbt"
 # The services that run tasks: with the LocalExecutor the scheduler, with Celery also the worker.
 TASK_RUNNERS = [s for s in ("airflow-scheduler", "airflow-worker") if s in LONG_RUNNING]
 
@@ -127,17 +129,37 @@ def test_the_dag_processor_reports_no_import_error(airflow_url, token):
     # The errors of the DAGs of the base package: the extensions folder belongs to the deployment.
     # The DAGs of the base bundle are waited for first, so that the DAG processor has parsed it,
     # whatever ran before this test.
-    for dag_id in (SELFCHECK, DEMO_LOAD):
+    for dag_id in (SELFCHECK, DEMO_LOAD, DEMO_TRANSFORM):
         wait_for_dag(airflow_url, token, dag_id)
     status, body = api(airflow_url, token, "GET", "/api/v2/importErrors?bundle_name=agoranomos")
     assert status == 200, body
     assert body["total_entries"] == 0, [error["filename"] for error in body["import_errors"]]
 
 
+def test_the_dag_processor_keeps_no_cache_of_cosmos_in_airflow_variables(airflow_url, token):
+    # By default Cosmos saves the output of dbt ls, from which it renders the tasks of dbt and their
+    # arguments, in a Variable named cosmos_cache__<DAG>__<task group>, which the Op role may edit.
+    # It saves it while it parses the DAG, before Airflow has the DAG, so the Variable would be
+    # there once Airflow has it. Names are printed, never values.
+    wait_for_dag(airflow_url, token, DEMO_TRANSFORM)
+    names = variable_names(airflow_url, token, "cosmos_cache__")
+    assert names == [], f"Cosmos keeps a cache in the Airflow Variables {names}"
+
+
 @pytest.mark.parametrize("path", DAG_FOLDERS)
 @pytest.mark.parametrize("service", TASK_RUNNERS)
 def test_dag_folders_are_read_only(service, path):
     result = compose("exec", "-T", service, "touch", f"{path}/should-fail", check=False)
+    assert result.returncode != 0
+    assert "Read-only file system" in result.stderr, result.stderr
+
+
+# The DAG processor runs dbt ls when it parses the transform DAG, and the task runners run dbt.
+@pytest.mark.parametrize("service", ["airflow-dag-processor", *TASK_RUNNERS])
+def test_the_dbt_project_is_read_only(service):
+    # Cosmos runs dbt in a temporary folder that links to the project, where dbt writes its target
+    # and logs folders: so dbt needs no write into the project.
+    result = compose("exec", "-T", service, "touch", f"{DBT_PROJECT}/should-fail", check=False)
     assert result.returncode != 0
     assert "Read-only file system" in result.stderr, result.stderr
 

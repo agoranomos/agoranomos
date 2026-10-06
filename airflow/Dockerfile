@@ -15,6 +15,14 @@ ENV RUNTIME__DLTHUB_TELEMETRY=false \
 # compose.yaml sets the same.
 ENV PROVIDERS__ENABLE_AIRFLOW_SECRETS=false
 
+# The two caches from which Cosmos renders the tasks of dbt stay out of Airflow Variables, which the
+# Op role may edit. Cosmos would keep the output of dbt ls there and render the tasks of dbt and
+# their arguments from it, so such a Variable could change what a dbt task runs. Instead, dbt ls
+# runs each time that the DAG processor parses a DAG of Cosmos, and again when each task of that
+# DAG starts, since a task parses the file of its DAG first; compose.yaml sets the same.
+ENV AIRFLOW__COSMOS__ENABLE_CACHE_DBT_LS=False \
+    AIRFLOW__COSMOS__ENABLE_CACHE_DBT_YAML_SELECTORS=False
+
 # dlt and Cosmos go into Airflow's environment, under the constraints that the base image was built
 # with, and with apache-airflow in the same command, so that pip fails instead of moving Airflow.
 COPY requirements.txt /tmp/agoranomos/requirements.txt
