@@ -48,6 +48,8 @@ The AI switches of Metabase are fixed off in `compose.yaml` until the permission
 | `AIRFLOW_DB_PASSWORD` | The role that owns the metadata database of Airflow | Change it and run `./agoranomos up`: the role gets the new password. |
 | `METABASE_DB_PASSWORD` | The role that owns the application database of Metabase | As for `AIRFLOW_DB_PASSWORD`. |
 | `METABASE_READER_PASSWORD` | The read-only role that Metabase reads the warehouse as | As for `AIRFLOW_DB_PASSWORD`; Metabase's connection is updated too. |
+| `WAREHOUSE_LOADER_PASSWORD` | The role that loads data into the raw schemas of the warehouse (dlt) | As for `AIRFLOW_DB_PASSWORD`. |
+| `WAREHOUSE_TRANSFORMER_PASSWORD` | The role that builds the staging and marts schemas of the warehouse (dbt) | As for `AIRFLOW_DB_PASSWORD`. |
 | `VALKEY_PASSWORD` | The password of the Celery broker, used only with CeleryExecutor | Change it and run `./agoranomos up`. |
 | `AIRFLOW_FERNET_KEY` | The key that encrypts the connections and variables saved in Airflow | Do not change it: what Airflow saved could no longer be decrypted. |
 | `AIRFLOW_JWT_SECRET` | The key that signs the API tokens of Airflow | Change it and run `./agoranomos up`; people have to sign in again. |

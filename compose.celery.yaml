@@ -73,6 +73,11 @@ services:
   airflow-scheduler:
     environment:
       <<: [*airflow-celery-environment, *airflow-celery-queue-environment]
+      # With CeleryExecutor the scheduler runs no task, so the worker alone gets the passwords of the
+      # warehouse roles: it extends the scheduler of compose.yaml, which has them, and these empty
+      # values apply to the scheduler only.
+      WAREHOUSE_LOADER_PASSWORD: ""
+      DBT_ENV_SECRET_WAREHOUSE_PASSWORD: ""
     depends_on:
       broker:
         condition: service_healthy

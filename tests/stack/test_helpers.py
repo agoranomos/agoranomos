@@ -46,6 +46,37 @@ def test_the_psql_helpers_keep_the_password_out_of_the_arguments(monkeypatch):
         assert options["env"]["PGPASSWORD"] == PASSWORD
 
 
+# Literal on purpose: taken from WAREHOUSE_ROLES, the test would compare the map with itself.
+WAREHOUSE_SETTINGS = {
+    "postgres": "WAREHOUSE_POSTGRES_PASSWORD",
+    "loader": "WAREHOUSE_LOADER_PASSWORD",
+    "transformer": "WAREHOUSE_TRANSFORMER_PASSWORD",
+    "metabase_reader": "METABASE_READER_PASSWORD",
+}
+
+
+@pytest.mark.parametrize("role", sorted(WAREHOUSE_SETTINGS))
+def test_the_warehouse_helper_runs_as_the_role_with_the_password_of_its_setting(monkeypatch, role):
+    # Loopback is trust, so no stack test would notice a password taken from the wrong setting.
+    calls = []
+
+    def run(args, **options):
+        calls.append((args, options))
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(stack_helpers.subprocess, "run", run)
+    env = {setting: f"the password in {setting}" for setting in WAREHOUSE_SETTINGS.values()}
+    # The superuser is the default role.
+    stack_helpers.warehouse(env, "SELECT 1", *(() if role == "postgres" else (role,)))
+    [(args, options)] = calls
+    assert "warehouse-db" in args
+    assert args[args.index("-U") + 1] == role
+    assert args[args.index("-d") + 1] == "warehouse"
+    password = env[WAREHOUSE_SETTINGS[role]]
+    assert options["env"]["PGPASSWORD"] == password
+    assert not any(password in argument for argument in args), args
+
+
 def test_secret_headers_keep_their_values_out_of_what_pytest_prints():
     # pytest prints the arguments of a failed test, and headers can hold a session.
     value = "a-session-that-must-stay-out-of-the-report"

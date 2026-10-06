@@ -18,7 +18,11 @@ ROLE_PASSWORDS = {
         "airflow_password": "AIRFLOW_DB_PASSWORD",
         "metabase_password": "METABASE_DB_PASSWORD",
     },
-    "warehouse.sql": {"metabase_reader_password": "METABASE_READER_PASSWORD"},
+    "warehouse.sql": {
+        "loader_password": "WAREHOUSE_LOADER_PASSWORD",
+        "transformer_password": "WAREHOUSE_TRANSFORMER_PASSWORD",
+        "metabase_reader_password": "METABASE_READER_PASSWORD",
+    },
 }
 
 

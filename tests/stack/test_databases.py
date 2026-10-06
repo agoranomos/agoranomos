@@ -1,4 +1,5 @@
-from stack_helpers import psql, psql_over_network
+import pytest
+from stack_helpers import WAREHOUSE_ROLES, psql, psql_over_network, warehouse
 
 
 def test_pg_stat_statements_is_loaded(env):
@@ -100,7 +101,16 @@ def test_role_passwords_stay_out_of_pg_stat_statements(env):
             "postgres",
             ("AIRFLOW_DB_PASSWORD", "METABASE_DB_PASSWORD"),
         ),
-        ("warehouse-db", "WAREHOUSE_POSTGRES_PASSWORD", "warehouse", ("METABASE_READER_PASSWORD",)),
+        (
+            "warehouse-db",
+            "WAREHOUSE_POSTGRES_PASSWORD",
+            "warehouse",
+            (
+                "METABASE_READER_PASSWORD",
+                "WAREHOUSE_LOADER_PASSWORD",
+                "WAREHOUSE_TRANSFORMER_PASSWORD",
+            ),
+        ),
     ):
         result = psql(
             service, "postgres", env[superuser], database, "SELECT query FROM pg_stat_statements"
@@ -108,3 +118,92 @@ def test_role_passwords_stay_out_of_pg_stat_statements(env):
         assert result.returncode == 0, result.stderr
         kept = [key for key in secrets if env[key] in result.stdout]  # names only, never values
         assert not kept, f"pg_stat_statements on {service} holds the values of {kept}"
+
+
+# What each role may do in each schema of the layers, as (USAGE, CREATE): loader writes the raw
+# schemas, transformer reads raw_demo and builds staging and marts, metabase_reader reads marts.
+SCHEMA_PRIVILEGES = {
+    ("loader", "raw_demo"): (True, True),
+    ("loader", "raw_demo_staging"): (True, True),
+    ("loader", "staging"): (False, False),
+    ("loader", "marts"): (False, False),
+    ("transformer", "raw_demo"): (True, False),
+    ("transformer", "raw_demo_staging"): (False, False),
+    ("transformer", "staging"): (True, True),
+    ("transformer", "marts"): (True, True),
+    ("metabase_reader", "raw_demo"): (False, False),
+    ("metabase_reader", "raw_demo_staging"): (False, False),
+    ("metabase_reader", "staging"): (False, False),
+    ("metabase_reader", "marts"): (True, False),
+}
+
+
+def test_each_schema_of_the_layers_has_its_owner(env):
+    result = warehouse(
+        env,
+        "SELECT nspname || ':' || pg_get_userbyid(nspowner) FROM pg_namespace "
+        "WHERE nspname IN ('raw_demo', 'raw_demo_staging', 'staging', 'marts') ORDER BY 1",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == [
+        "marts:transformer",
+        "raw_demo:loader",
+        "raw_demo_staging:loader",
+        "staging:transformer",
+    ]
+
+
+def test_each_role_has_exactly_its_privileges_on_the_schemas_of_the_layers(env):
+    result = warehouse(
+        env,
+        "SELECT r, s, has_schema_privilege(r, s, 'USAGE'), has_schema_privilege(r, s, 'CREATE') "
+        "FROM unnest(ARRAY['loader', 'transformer', 'metabase_reader']) AS r, "
+        "unnest(ARRAY['raw_demo', 'raw_demo_staging', 'staging', 'marts']) AS s",
+    )
+    assert result.returncode == 0, result.stderr
+    found = {}
+    for line in result.stdout.split():
+        role, schema, usage, create = line.split("|")
+        found[(role, schema)] = (usage == "t", create == "t")
+    assert found == SCHEMA_PRIVILEGES
+
+
+@pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))
+def test_no_role_of_the_layers_creates_a_schema(env, role):
+    # The sessions of metabase_reader start read-only, and PostgreSQL refuses a write in a read-only
+    # transaction before it checks the permission: the transaction is made read-write first, so that
+    # the permission decides, for every role.
+    result = warehouse(env, "SET TRANSACTION READ WRITE; CREATE SCHEMA should_not_exist", role)
+    assert result.returncode != 0
+    assert "permission denied for database warehouse" in result.stderr
+
+
+def test_data_moves_through_the_layers_as_the_roles_allow(env):
+    # loader writes raw_demo; transformer reads it and builds marts, and cannot write raw_demo;
+    # metabase_reader reads what transformer built, through the default privileges of transformer.
+    try:
+        result = warehouse(env, "CREATE TABLE raw_demo.layers_check AS SELECT 1 AS id", "loader")
+        assert result.returncode == 0, result.stderr
+        result = warehouse(env, "INSERT INTO raw_demo.layers_check VALUES (2)", "transformer")
+        assert result.returncode != 0
+        assert "permission denied for table layers_check" in result.stderr
+        result = warehouse(
+            env,
+            "CREATE TABLE marts.layers_check AS SELECT id FROM raw_demo.layers_check",
+            "transformer",
+        )
+        assert result.returncode == 0, result.stderr
+        result = warehouse(env, "SELECT id FROM marts.layers_check", "metabase_reader")
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "1"
+    finally:
+        warehouse(env, "DROP TABLE IF EXISTS marts.layers_check, raw_demo.layers_check")
+
+
+@pytest.mark.parametrize("role", ["loader", "transformer"])
+def test_the_roles_of_the_pipelines_sign_in_with_their_passwords(env, role):
+    result = psql_over_network(
+        "warehouse-db", role, env[WAREHOUSE_ROLES[role]], "warehouse", "SELECT 1"
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "1"

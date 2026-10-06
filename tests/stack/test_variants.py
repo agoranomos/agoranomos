@@ -19,6 +19,10 @@ EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
 CELERY_ONLY = {"broker", "airflow-worker"}
 METABASE = {"metabase", "metabase-init"}
 VARIANTS = sorted(FILES)
+# The passwords of the warehouse roles that Airflow tasks use: dlt reads the first, dbt the second.
+WAREHOUSE_CREDENTIALS = ("WAREHOUSE_LOADER_PASSWORD", "DBT_ENV_SECRET_WAREHOUSE_PASSWORD")
+# The service whose processes run the tasks.
+TASK_RUNNER = {"local": "airflow-scheduler", "celery": "airflow-worker"}
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
@@ -150,6 +154,31 @@ def test_the_broker_and_the_result_backend_are_set_only_where_they_are_used():
     assert not problems, "; ".join(problems)
 
 
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_only_the_service_that_runs_tasks_gets_the_passwords_of_the_warehouse_roles(variant):
+    holders = sorted(
+        name
+        for name, service in rendered(variant).items()
+        if any((service.get("environment") or {}).get(key) for key in WAREHOUSE_CREDENTIALS)
+    )
+    # db-init sets the passwords of the roles, so it has them too.
+    assert holders == sorted({TASK_RUNNER[variant], "db-init"})
+    db_init = rendered(variant)["db-init"]["environment"]
+    for key in ("WAREHOUSE_LOADER_PASSWORD", "WAREHOUSE_TRANSFORMER_PASSWORD"):
+        assert db_init.get(key), key
+    # Each tool gets the password of its own role. The values are secrets, so the test compares
+    # them into flags, and a failed assertion prints the flag.
+    runner = rendered(variant)[TASK_RUNNER[variant]]["environment"]
+    dlt_gets_loader = runner["WAREHOUSE_LOADER_PASSWORD"] == db_init["WAREHOUSE_LOADER_PASSWORD"]
+    assert dlt_gets_loader, "WAREHOUSE_LOADER_PASSWORD is not the password of loader"
+    dbt_gets_transformer = (
+        runner["DBT_ENV_SECRET_WAREHOUSE_PASSWORD"] == db_init["WAREHOUSE_TRANSFORMER_PASSWORD"]
+    )
+    assert dbt_gets_transformer, (
+        "DBT_ENV_SECRET_WAREHOUSE_PASSWORD is not the password of transformer"
+    )
+
+
 def test_every_airflow_service_of_the_celery_variant_skips_the_check_of_the_entrypoint():
     # The entrypoint of the image would pass the broker URL to python processes as an argument.
     for name, service in airflow_services("celery").items():
@@ -168,7 +197,9 @@ def test_the_worker_is_set_up_like_the_other_airflow_services():
         for k in scheduler["environment"]
         if worker["environment"][k] != scheduler["environment"][k]
     ]
-    assert not differing, f"the worker and the scheduler differ in {differing}"
+    assert sorted(differing) == sorted(WAREHOUSE_CREDENTIALS), (
+        f"the worker and the scheduler differ in {differing}"
+    )
     assert worker["environment"]["DUMB_INIT_SETSID"] == "0"
     assert worker["command"] == ["celery", "worker"]
     assert "inspect ping" in " ".join(worker["healthcheck"]["test"])

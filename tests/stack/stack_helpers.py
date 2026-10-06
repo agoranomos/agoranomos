@@ -302,6 +302,24 @@ def psql_over_network(
     )
 
 
+# The roles of the data layers in the warehouse, and the setting of .env that holds the password of
+# each.
+WAREHOUSE_ROLES = {
+    "loader": "WAREHOUSE_LOADER_PASSWORD",
+    "transformer": "WAREHOUSE_TRANSFORMER_PASSWORD",
+    "metabase_reader": "METABASE_READER_PASSWORD",
+}
+
+
+def warehouse(
+    env: dict[str, str], sql: str, role: str = "postgres"
+) -> subprocess.CompletedProcess[str]:
+    """Run SQL in the warehouse as a role, over loopback, where the server does not ask for the
+    password: this checks what the role may do. psql_over_network checks the passwords."""
+    setting = "WAREHOUSE_POSTGRES_PASSWORD" if role == "postgres" else WAREHOUSE_ROLES[role]
+    return psql("warehouse-db", role, env[setting], "warehouse", sql)
+
+
 def wait_for(
     predicate: Callable[[], Any], timeout: float, interval: float = 2, message: str = ""
 ) -> Any:
