@@ -29,7 +29,9 @@ START = datetime(2026, 1, 1, tzinfo=UTC)
         # Retries are explicit, as the contract of the sources asks (ADR-0004).
         "retries": 2,
         "retry_delay": timedelta(minutes=1),
-        # A load takes seconds: one that hangs fails after ten minutes, and is tried again.
+        # A load takes seconds. The timeout ends a try that runs too long in Python, which is then
+        # tried again, but it cannot interrupt a statement that waits in PostgreSQL: a statement
+        # that waits on a lock is bounded by the lock timeout of the loader role (warehouse.sql).
         "execution_timeout": timedelta(minutes=10),
     },
     tags=["agoranomos", "demo"],

@@ -61,6 +61,8 @@ ALTER SCHEMA raw_demo_staging OWNER TO loader;
 GRANT USAGE ON SCHEMA raw_demo TO transformer;
 GRANT SELECT ON ALL TABLES IN SCHEMA raw_demo TO transformer;
 ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_demo GRANT SELECT ON TABLES TO transformer;
+-- loader waits at most a minute for a lock, so a blocked load fails, and is tried again (ADR-0004).
+ALTER ROLE loader SET lock_timeout = '1min';
 
 -- transformer owns staging and marts, the schemas that dbt is to build.
 CREATE SCHEMA IF NOT EXISTS staging AUTHORIZATION transformer;

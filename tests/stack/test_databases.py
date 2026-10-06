@@ -194,6 +194,10 @@ def test_the_roles_of_the_layers_sign_in_and_have_no_other_power(env):
         role, *values = line.split("|")
         found[role] = dict(zip(ROLE_ATTRIBUTES, values, strict=True))
     assert found == dict.fromkeys(WAREHOUSE_ROLES, ROLE_ATTRIBUTES)
+    # A session of loader waits at most a minute for a lock, so a load that is blocked fails and is
+    # tried again: the timeout of the task cannot interrupt a statement that waits in PostgreSQL.
+    result = warehouse(env, "SHOW lock_timeout", "loader")
+    assert result.stdout.strip() == "1min", result.stderr
 
 
 @pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))
