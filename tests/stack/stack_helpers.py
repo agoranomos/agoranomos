@@ -408,8 +408,9 @@ TABLE_NAME = re.compile(r"[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*")
 def totals(env: dict[str, str], table: str, until: date | None = None) -> dict[str, int | Decimal]:
     """The number of rows of a table of ad statistics and the sums of its measures, in the types
     of the demo generator: counts as int, money and conversions as Decimal. table is schema.table,
-    and anything else fails; until keeps the rows of the days up to that one. The sums of no rows
-    are 0."""
+    and anything else fails. until keeps the rows of the days up to that one, by the column date,
+    which the raw tables of dlt have: so until is for a raw table only, as a mart names that column
+    report_date. The sums of no rows are 0."""
     if not TABLE_NAME.fullmatch(table):
         raise ValueError(f"totals() takes a table as schema.table, not {table!r}")
     condition = "" if until is None else f" WHERE date <= DATE '{until.isoformat()}'"

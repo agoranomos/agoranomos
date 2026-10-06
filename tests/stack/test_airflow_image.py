@@ -1,7 +1,8 @@
 """The Airflow image of the stack: built from airflow/Dockerfile and run by every Airflow service.
 
-The checks of the rendered Compose files need no running stack; the checks inside the containers do.
-They print versions and names, never the environment, which holds secrets.
+The checks of the rendered Compose files and of the reader of the pins need no running stack; the
+checks inside the containers do. They print versions and names, never the environment, which holds
+secrets.
 """
 
 import json
@@ -72,14 +73,46 @@ print(json.dumps({
 """
 
 
-def pinned(name):
-    """The versions that airflow/requirements.txt and airflow/dbt-requirements.in pin."""
+def pins_of(path):
+    """The packages of a requirements file, name -> version, as pins() of the unit tests reads
+    them: any extras, a comment or a marker after a pin, and no line that is not a pin with ==.
+    Such a line fails here, rather than drop out of the check of the installed versions."""
     versions = {}
-    for line in (REPO_ROOT / "airflow" / name).read_text(encoding="utf-8").splitlines():
-        match = re.fullmatch(r"([a-z0-9-]+)(\[[a-z]+\])?==(\S+)", line.strip())
-        if match:
-            versions[match.group(1)] = match.group(3)
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip().removesuffix("\\").strip()
+        if not line or line.startswith("--"):
+            continue
+        requirement = line.split(";", 1)[0].strip()
+        match = re.fullmatch(r"([A-Za-z0-9_.-]+)(\[[^\]]+\])?==(\S+)", requirement)
+        assert match, f"{path.name}: not pinned with ==: {requirement}"
+        versions[match.group(1).lower()] = match.group(3)
     return versions
+
+
+def pinned(name):
+    """The versions that airflow/requirements.txt or airflow/dbt-requirements.in pins."""
+    return pins_of(REPO_ROOT / "airflow" / name)
+
+
+def test_the_pins_are_read_with_any_extras_and_a_line_that_is_no_pin_fails(tmp_path):
+    # A pin that the reader dropped would leave the check of its installed version out, silently.
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text(
+        "# a comment\n\n"
+        "dlt[postgres,parquet]==1.30.0  # two extras, and a comment\n"
+        "Astronomer-Cosmos==1.15.1\n"
+        "semver==3.1.0 ; python_version >= '3.10'\n",
+        encoding="utf-8",
+    )
+    assert pins_of(requirements) == {
+        "dlt": "1.30.0",
+        "astronomer-cosmos": "1.15.1",
+        "semver": "3.1.0",
+    }
+    for line in ("dlt>=1.30.0", "dlt", "dlt[postgres]"):
+        requirements.write_text(f"{line}\n", encoding="utf-8")
+        with pytest.raises(AssertionError, match="not pinned with =="):
+            pins_of(requirements)
 
 
 def airflow_version():

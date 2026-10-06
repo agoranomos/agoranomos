@@ -1492,16 +1492,18 @@ def test_the_celery_variant_adds_the_worker_to_the_airflow_services():
 
 
 def rendered_with(*names):
-    """A stand-in for stack_helpers.rendered, whose services are the given names."""
-    return lambda variant: {name: {"image": "stand-in"} for name in names}
+    """A stand-in for stack_helpers.rendered, whose services are the given names, each with a
+    definition of its own."""
+    return lambda variant: {name: {"image": f"the image of {name}"} for name in names}
 
 
 def test_airflow_services_are_the_rendered_services_named_airflow(monkeypatch):
     names = services.airflow_names("celery")
-    monkeypatch.setattr(
-        services, "rendered", rendered_with("db-init", "broker", "metabase", *names)
-    )
-    assert set(services.airflow_services("celery")) == names
+    stand_in = rendered_with("db-init", "broker", "metabase", *names)
+    monkeypatch.setattr(services, "rendered", stand_in)
+    # The services themselves, each with its own definition, and not only their names.
+    wanted = {name: service for name, service in stand_in("celery").items() if name in names}
+    assert services.airflow_services("celery") == wanted
 
 
 @pytest.mark.parametrize(
