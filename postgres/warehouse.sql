@@ -64,14 +64,18 @@ ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_demo GRANT SELECT ON TABL
 -- loader waits at most a minute for a lock, so a blocked load fails, and is tried again (ADR-0004).
 ALTER ROLE loader SET lock_timeout = '1min';
 
--- transformer owns staging and marts, the schemas that dbt is to build.
+-- transformer owns staging and marts, the schemas that dbt builds.
 CREATE SCHEMA IF NOT EXISTS staging AUTHORIZATION transformer;
 CREATE SCHEMA IF NOT EXISTS marts AUTHORIZATION transformer;
 ALTER SCHEMA staging OWNER TO transformer;
 ALTER SCHEMA marts OWNER TO transformer;
+-- dbt renames a table that it rebuilds, which waits for its readers, and the readers that come later
+-- wait behind it. transformer waits at most a minute for a lock, so a blocked run fails and the mart
+-- keeps its data.
+ALTER ROLE transformer SET lock_timeout = '1min';
 
 -- Metabase reads marts only. Its sessions start read-only, against accidental writes; the barrier itself
--- is that the role has no write grant. dbt is to create the tables of marts as transformer, so the
+-- is that the role has no write grant. dbt creates the tables of marts as transformer, so the
 -- default privileges that give Metabase the new tables are those of transformer.
 ALTER ROLE metabase_reader SET default_transaction_read_only = on;
 GRANT USAGE ON SCHEMA marts TO metabase_reader;

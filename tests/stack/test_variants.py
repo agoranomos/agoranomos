@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 from services import BASE_AIRFLOW, airflow_services
-from stack_helpers import FILES, NamesOnly, rendered, secrets
+from stack_helpers import FILES, REPO_ROOT, NamesOnly, rendered, secrets
 
 EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
 CELERY_ONLY = {"broker", "airflow-worker"}
@@ -82,11 +82,14 @@ def test_every_airflow_service_shares_the_keys_and_the_database(variant):
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
-def test_airflow_services_mount_the_dag_folders_read_only(variant):
+def test_airflow_services_mount_the_dag_folders_and_the_dbt_project_read_only(variant):
+    # Cosmos runs dbt in a temporary copy of the project, so dbt writes nothing into the checkout.
     for name, service in airflow_services(variant).items():
         mounts = {v["target"]: v for v in service["volumes"]}
         for folder in ("/opt/agoranomos/dags", "/opt/agoranomos/extensions/dags"):
             assert mounts[folder]["read_only"] is True, (name, folder)
+        dbt = mounts["/opt/agoranomos/dbt"]
+        assert (dbt["source"], dbt["read_only"]) == (str(REPO_ROOT / "dbt"), True), name
         assert mounts["/opt/airflow/logs"]["source"] == "airflow-logs", name
 
 

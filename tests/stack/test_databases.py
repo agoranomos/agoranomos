@@ -198,6 +198,11 @@ def test_the_roles_of_the_layers_sign_in_and_have_no_other_power(env):
     # tried again: the timeout of the task cannot interrupt a statement that waits in PostgreSQL.
     result = warehouse(env, "SHOW lock_timeout", "loader")
     assert result.stdout.strip() == "1min", result.stderr
+    # dbt renames a table that it rebuilds, which waits for every reader of the table, and the
+    # readers that come later wait behind it. A session of transformer waits at most a minute, so
+    # a blocked run fails and the mart keeps its data, instead of holding up Metabase.
+    result = warehouse(env, "SHOW lock_timeout", "transformer")
+    assert result.stdout.strip() == "1min", result.stderr
 
 
 @pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))

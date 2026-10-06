@@ -94,6 +94,8 @@ Inside the warehouse, data moves through layers, each in its own schema:
 
 Access is split by role. dlt loads the `raw_<source>` schemas as the `loader` role, and dbt builds `staging`, `intermediate` and `marts` as the `transformer` role. Metabase connects as the `metabase_reader` role, which sees only `marts`, and the warehouse MCP server connects as the read-only `ai_reader` role.
 
+Today the dbt project in `dbt/` builds the demo data: the staging model `stg_demo__ad_stats_daily` and the mart `marts.ad_spend_daily`, by day and campaign. The tests of the staging model guard the mart: when one of them fails, the mart is not rebuilt and keeps its last good data.
+
 dbt Core with dbt-postgres does the transformations, with tests from the first day and an elementary report for observability. The marts layer is a single advertising-statistics model that spans all platforms:
 
 * Additive metrics are stored at daily grain: date, account, campaign, ad group and ad.
@@ -107,7 +109,7 @@ Decision records: [ADR-0003: Run two PostgreSQL instances](../adr/0003-two-postg
 
 Airflow 3.3 runs as separate services (API server, scheduler, DAG processor and triggerer) on an image of its own, built from the official `apache/airflow` image: `airflow/Dockerfile` adds dlt and Cosmos to Airflow's environment and dbt in a virtual environment of its own. By default it uses the LocalExecutor, which runs each task as a process of the scheduler, so there is no broker and no worker container, and a single machine keeps the memory for the pipelines ([ADR-0015](../adr/0015-run-localexecutor-by-default.md)). The tasks share the memory of the scheduler container, and Airflow's documentation warns that in a container a task that runs out of memory can restart the scheduler. A deployment that needs separate workers, possibly on other machines, selects the CeleryExecutor variant with `COMPOSE_FILE=compose.yaml:compose.celery.yaml` in `.env`. That variant adds Valkey as the message broker (BSD-licensed, speaking the Redis protocol) and an `airflow-worker` service; Celery results go to the metadata database of Airflow, and workers can be scaled out horizontally. `AIRFLOW_PARALLELISM` caps the tasks of the whole stack in both variants, so it rises together with the workers. Authentication uses Airflow's FAB auth manager with the Admin, Op and Viewer roles.
 
-Airflow Assets chain the pipeline, so each step starts when the previous one has produced its data: `ingest_<source>`, then `dbt build`, then a Metabase cache refresh. dbt runs through Cosmos, which renders dbt models as Airflow tasks, in its own virtual environment so that dbt's dependencies stay separate from Airflow's.
+Airflow Assets chain the pipeline, so each step starts when the previous one has produced its data: `ingest_<source>`, then `dbt build`, then a Metabase cache refresh. Today the demo runs this way: `agoranomos_demo_load` updates the asset of `raw_demo.ad_stats_daily`, and that starts `agoranomos_demo_transform`. dbt runs through Cosmos, which renders dbt models as Airflow tasks, in its own virtual environment so that dbt's dependencies stay separate from Airflow's.
 
 Agoranomos uses Astronomer's open-source projects (Cosmos and astro-airflow-mcp) but not the Astro CLI or Astro Runtime. The stack stays vendor-neutral and builds on the official Apache Airflow image.
 
