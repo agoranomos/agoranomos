@@ -774,6 +774,23 @@ def test_an_answer_of_an_unexpected_shape_ends_in_one_line(
     assert line.endswith(f"See ./agoranomos logs {hint}.")
 
 
+def test_a_page_with_a_success_status_ends_in_one_line(airflow, metabase, capsys):
+    # A proxy in front of Airflow can answer with a page of its own and a success status: the job
+    # gets a text where it reads an object, a TypeError, and stops with one line.
+    handle = airflow.handle
+
+    def page(method, url, body, auth):
+        if (method, urlsplit(url).path) == ("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns"):
+            return 200, "<html><body>Sign in to the proxy</body></html>"
+        return handle(method, url, body, auth)
+
+    airflow.handle = page
+    assert di.main(env_for(airflow, metabase)) == 1
+    line = one_line(capsys)
+    assert "an answer of Airflow had an unexpected shape (TypeError)" in line
+    assert line.endswith("See ./agoranomos logs airflow-apiserver.")
+
+
 def test_a_renamed_warehouse_connection_is_found_by_its_address(airflow, metabase):
     metabase.databases[1]["name"] = "Marketing data"  # renamed in the Metabase UI
     assert di.main(env_for(airflow, metabase)) == 0
