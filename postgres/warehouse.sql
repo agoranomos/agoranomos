@@ -52,8 +52,8 @@ SELECT format(
 ) \gexec
 GRANT CONNECT ON DATABASE warehouse TO loader, transformer, metabase_reader;
 
--- raw_demo is for the demo data, and dlt is to merge into it through raw_demo_staging. loader owns
--- both, so that it can create its tables there; transformer may read raw_demo.
+-- raw_demo holds the demo data, and dlt merges into it through raw_demo_staging. loader owns both,
+-- so that it can create its tables there; transformer may read raw_demo.
 CREATE SCHEMA IF NOT EXISTS raw_demo AUTHORIZATION loader;
 CREATE SCHEMA IF NOT EXISTS raw_demo_staging AUTHORIZATION loader;
 ALTER SCHEMA raw_demo OWNER TO loader;
@@ -61,6 +61,8 @@ ALTER SCHEMA raw_demo_staging OWNER TO loader;
 GRANT USAGE ON SCHEMA raw_demo TO transformer;
 GRANT SELECT ON ALL TABLES IN SCHEMA raw_demo TO transformer;
 ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_demo GRANT SELECT ON TABLES TO transformer;
+-- loader waits at most a minute for a lock, so a blocked load fails, and is tried again (ADR-0004).
+ALTER ROLE loader SET lock_timeout = '1min';
 
 -- transformer owns staging and marts, the schemas that dbt is to build.
 CREATE SCHEMA IF NOT EXISTS staging AUTHORIZATION transformer;

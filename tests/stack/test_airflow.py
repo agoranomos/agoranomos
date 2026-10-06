@@ -1,94 +1,29 @@
+import json
 import shutil
-import time
 
 import pytest
+from airflow_api import api, run_dag, task_instances, task_log, wait_for_dag
 from services import LONG_RUNNING
 from stack_helpers import (
     REPO_ROOT,
-    Secret,
-    SecretHeaders,
     active_variant,
     compose,
     http_json,
     job_failed,
+    leaked,
     psql,
     secrets,
-    wait_for,
 )
 
 SELFCHECK = "agoranomos_selfcheck"
+# The other DAG of the base bundle, the demo load.
+DEMO_LOAD = "agoranomos_demo_load"
 EXTENSION_CHECK = "ci_extension_check"
 FIXTURE = REPO_ROOT / "tests" / "stack" / "fixtures" / f"{EXTENSION_CHECK}.py"
 EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
 DAG_FOLDERS = ("/opt/agoranomos/dags", "/opt/agoranomos/extensions/dags")
 # The services that run tasks: with the LocalExecutor the scheduler, with Celery also the worker.
 TASK_RUNNERS = [s for s in ("airflow-scheduler", "airflow-worker") if s in LONG_RUNNING]
-
-
-@pytest.fixture(scope="session")
-def airflow_url(env):
-    return f"http://127.0.0.1:{env.get('AIRFLOW_PORT') or '8080'}"
-
-
-@pytest.fixture(scope="session")
-def token(env, airflow_url):
-    status, body = http_json(
-        "POST",
-        f"{airflow_url}/auth/token",
-        {"username": "admin", "password": env["AIRFLOW_ADMIN_PASSWORD"]},
-    )
-    assert status in (200, 201), body
-    # pytest prints the arguments of a failed test and of the function that failed: see Secret.
-    return Secret(body["access_token"])
-
-
-def api(airflow_url, token, method, path, body=None, headers=None):
-    headers = SecretHeaders({"Authorization": Secret(f"Bearer {token}"), **(headers or {})})
-    return http_json(method, f"{airflow_url}{path}", body, headers)
-
-
-def wait_for_dag(airflow_url, token, dag_id, timeout=180):
-    def fetch():
-        status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}")
-        return body if status == 200 else None
-
-    return wait_for(fetch, timeout, interval=5, message=f"Airflow did not load the DAG {dag_id}")
-
-
-def run_dag(airflow_url, token, dag_id, timeout=300):
-    """Unpause a DAG, run it once and wait for the end of the run: returns the finished run."""
-    status, body = api(airflow_url, token, "PATCH", f"/api/v2/dags/{dag_id}", {"is_paused": False})
-    assert status == 200, body
-    status, run = api(
-        airflow_url, token, "POST", f"/api/v2/dags/{dag_id}/dagRuns", {"logical_date": None}
-    )
-    assert status in (200, 201), run
-    run_id = run["dag_run_id"]
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        status, run = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}/dagRuns/{run_id}")
-        if run["state"] in ("success", "failed"):
-            return run
-        time.sleep(2)
-    pytest.fail(f"the DAG run {run_id} of {dag_id} did not finish in {timeout} seconds")
-
-
-def task_instances(airflow_url, token, run):
-    path = f"/api/v2/dags/{run['dag_id']}/dagRuns/{run['dag_run_id']}/taskInstances"
-    status, body = api(airflow_url, token, "GET", path)
-    assert status == 200, body
-    return body["task_instances"]
-
-
-def task_log(airflow_url, token, instance):
-    """The events of the log of a task instance, as text."""
-    path = (
-        f"/api/v2/dags/{instance['dag_id']}/dagRuns/{instance['dag_run_id']}"
-        f"/taskInstances/{instance['task_id']}/logs/{instance['try_number']}"
-    )
-    status, body = api(airflow_url, token, "GET", path, headers={"Accept": "application/json"})
-    assert status == 200, body
-    return [entry.get("event", "") for entry in body["content"]]
 
 
 @pytest.fixture(scope="module")
@@ -172,13 +107,31 @@ def test_a_dag_in_the_extensions_folder_runs(env, airflow_url, token):
     assert dag["bundle_name"] == "extensions", dag
     run = run_dag(airflow_url, token, EXTENSION_CHECK)
     assert run["state"] == "success", run
-    # The task also records what task code can see. The log must say it, and must hold no secret.
+    # The task also records what task code can see. The log must say it, and no entry of it may
+    # hold a secret, in any field. The log is read where it is used, so that no frame of a failed
+    # test holds it, and only the prefixes and the names of the secrets are printed.
     [instance] = task_instances(airflow_url, token, run)
-    events = task_log(airflow_url, token, instance)
-    for prefix in ("environment variables: ", "metadata database, task environment: "):
-        assert any(event.startswith(prefix) for event in events), prefix
-    leaked = [name for name, value in secrets(env).items() if any(value in e for e in events)]
-    assert not leaked, f"the log of the task holds the values of {leaked}"  # names, never values
+    prefixes = {"environment variables: ", "metadata database, task environment: "}
+    said = {
+        prefix
+        for entry in task_log(airflow_url, token, instance)
+        for prefix in prefixes
+        if json.loads(entry).get("event", "").startswith(prefix)
+    }
+    assert said == prefixes, f"the log of the task does not say {sorted(prefixes - said)}"
+    found = leaked(secrets(env), task_log(airflow_url, token, instance))
+    assert not found, f"the log of the task holds the values of {found}"
+
+
+def test_the_dag_processor_reports_no_import_error(airflow_url, token):
+    # The errors of the DAGs of the base package: the extensions folder belongs to the deployment.
+    # The DAGs of the base bundle are waited for first, so that the DAG processor has parsed it,
+    # whatever ran before this test.
+    for dag_id in (SELFCHECK, DEMO_LOAD):
+        wait_for_dag(airflow_url, token, dag_id)
+    status, body = api(airflow_url, token, "GET", "/api/v2/importErrors?bundle_name=agoranomos")
+    assert status == 200, body
+    assert body["total_entries"] == 0, [error["filename"] for error in body["import_errors"]]
 
 
 @pytest.mark.parametrize("path", DAG_FOLDERS)

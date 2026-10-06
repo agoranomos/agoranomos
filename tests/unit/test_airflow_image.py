@@ -4,7 +4,10 @@ The stack tests check the built image; these check the files, without Docker.
 """
 
 import re
+import shlex
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 AIRFLOW = ROOT / "airflow"
@@ -21,6 +24,9 @@ TELEMETRY = {
     "AIRFLOW__COSMOS__ENABLE_TELEMETRY": "False",
     "DO_NOT_TRACK": "1",
 }
+# The configuration providers of dlt: none of them reads Airflow Variables. Not telemetry, so a
+# constant of its own.
+DLT_PROVIDERS = {"PROVIDERS__ENABLE_AIRFLOW_SECRETS": "false"}
 
 
 def pins(path: Path) -> dict[str, str]:
@@ -39,6 +45,74 @@ def pins(path: Path) -> dict[str, str]:
 
 def dockerfile() -> str:
     return (AIRFLOW / "Dockerfile").read_text(encoding="utf-8")
+
+
+# A backslash at the end of a line, maybe followed by blanks: the instruction goes on in the next.
+CONTINUATION = re.compile(r"\\[ \t]*$")
+
+
+def instructions(text: str) -> list[tuple[str, str]]:
+    """The instructions of a Dockerfile as Docker reads them: (keyword in upper case, arguments).
+
+    A comment line or a blank line is left out, also inside an instruction, and the lines of an
+    instruction are joined as they are, once the backslash at the end of each is gone."""
+    found, current = [], ""
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        current += line if current else line.lstrip()
+        if CONTINUATION.search(current):
+            current = CONTINUATION.sub("", current)
+            continue
+        keyword, *arguments = current.split(maxsplit=1)
+        found.append((keyword.upper(), arguments[0] if arguments else ""))
+        current = ""
+    return found
+
+
+def environment(text: str) -> dict[str, str]:
+    """The variables that the ENV instructions of a Dockerfile set, with their values: each ENV
+    holds NAME=value pairs, which shlex splits with the quotes that Docker reads. A mention of a
+    variable anywhere else, such as in a comment or a RUN, sets nothing."""
+    found = {}
+    for keyword, arguments in instructions(text):
+        if keyword == "ENV":
+            for pair in shlex.split(arguments):
+                name, equals, value = pair.partition("=")
+                assert equals, f"ENV {name}: this test reads only the form NAME=value"
+                found[name] = value
+    return found
+
+
+def test_the_environment_of_a_dockerfile_is_what_its_env_instructions_set():
+    text = (
+        "FROM base\n"
+        "ENV A=1 \\\n"
+        "    # a comment inside the instruction\n"
+        '    B="two words" \\\n'
+        "\n"
+        "    C=three\n"
+        "RUN echo D=4 \\\n"
+        "    && true\n"
+        "ENV\tE=5\n"
+    )
+    assert environment(text) == {"A": "1", "B": "two words", "C": "three", "E": "5"}
+
+
+# Dockerfiles that name the switch of dlt but do not set it to exactly false in an ENV instruction.
+NOT_SET = {
+    "commented out": "FROM base\n# ENV PROVIDERS__ENABLE_AIRFLOW_SECRETS=false\n",
+    "commented out inside an instruction": (
+        "FROM base\nENV A=1 \\\n#    PROVIDERS__ENABLE_AIRFLOW_SECRETS=false \\\n    B=2\n"
+    ),
+    "a value with a suffix": "FROM base\nENV PROVIDERS__ENABLE_AIRFLOW_SECRETS=false-x\n",
+    "in a RUN": "FROM base\nRUN echo PROVIDERS__ENABLE_AIRFLOW_SECRETS=false\n",
+}
+
+
+@pytest.mark.parametrize("text", NOT_SET.values(), ids=NOT_SET)
+def test_a_variable_that_no_env_instruction_sets_exactly_is_not_set(text):
+    assert environment(text).get("PROVIDERS__ENABLE_AIRFLOW_SECRETS") != "false"
 
 
 def test_the_image_starts_from_the_pinned_official_image():
@@ -90,9 +164,15 @@ def test_the_lock_file_names_the_command_that_made_it():
 
 
 def test_the_image_turns_telemetry_off():
-    text = dockerfile()
-    for name, value in TELEMETRY.items():
-        assert re.search(rf"\b{name}={re.escape(value)}\b", text), name
+    found = environment(dockerfile())
+    assert {name: found.get(name) for name in TELEMETRY} == TELEMETRY
+
+
+def test_the_image_keeps_dlt_away_from_airflow_variables():
+    # Inside a task, dlt would take its settings from Airflow Variables, which the Op role may
+    # create, and one of them could send the connection of a load somewhere else.
+    found = environment(dockerfile())
+    assert {name: found.get(name) for name in DLT_PROVIDERS} == DLT_PROVIDERS
 
 
 def test_the_build_context_holds_only_what_the_dockerfile_copies():

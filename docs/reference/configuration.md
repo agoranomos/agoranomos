@@ -37,6 +37,8 @@ Some settings are not in `.env`, because changing them is a decision and not a p
 
 The AI switches of Metabase are fixed off in `compose.yaml` until the permissions of AI access are decided ([ADR-0007](../adr/0007-ai-access-via-mcp-read-only.md)): `MB_AI_FEATURES_ENABLED`, `MB_MCP_ENABLED` and `MB_AGENT_API_ENABLED` are all `false`, which keeps the built-in MCP server, the registration of its OAuth clients and the Agent API off. The switch in Admin > AI has no effect while they are. Changing it saves a value that would apply if a variable were removed, so leave it alone.
 
+dlt reads no settings or secrets from Airflow Variables: `PROVIDERS__ENABLE_AIRFLOW_SECRETS=false` is set in `compose.yaml`, and in the Airflow image too. Inside an Airflow task, dlt would otherwise also take its settings from Variables, and a person who may edit them, such as a user with the Op role of Airflow, could redirect a pipeline: for example, send the connection of a load, with its password, to another host. So a DAG in the extensions folder ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)) that follows dlt's guide for Airflow cannot keep its settings in a `dlt_secrets_toml` Variable, which dlt ignores here: the pipeline takes them from environment variables instead.
+
 ## Secrets
 
 `./agoranomos init` generates each of these when it is empty: random letters and digits, and a Fernet key for Airflow.
@@ -58,6 +60,6 @@ The AI switches of Metabase are fixed off in `compose.yaml` until the permission
 | `METABASE_ENCRYPTION_KEY` | The key that encrypts the connection details saved in Metabase | Do not change it: Metabase could no longer read its saved connections. |
 | `METABASE_ADMIN_PASSWORD` | The password of the Metabase admin account | The first-start setup signs in with it on every start. If you change the password in Metabase, put the same value here. |
 
-On every start, the setup job `db-init` sets each role of the warehouse (`loader`, `transformer` and `metabase_reader`) to `LOGIN`, with no `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION` or `BYPASSRLS` attribute, and gives it the password from `.env`. So if you give one of these roles such a power by hand, the next `./agoranomos up` takes it back.
+On every start, the setup job `db-init` sets each role of the warehouse (`loader`, `transformer` and `metabase_reader`) to `LOGIN`, with no `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION` or `BYPASSRLS` attribute, and gives it the password from `.env`. So if you give one of these roles such a power by hand, the next `./agoranomos up` takes it back. It also gives `loader` a lock timeout of one minute: a statement of a load that waits longer for a lock fails with `canceling statement due to lock timeout`, so the load fails and is tried again instead of waiting without end.
 
 `AIRFLOW_DB_PASSWORD` and `VALKEY_PASSWORD` are written into connection URLs. If you choose them yourself instead of letting `init` generate them, use letters and digits only: a character such as `@`, `/` or `:` breaks the URL.

@@ -6,7 +6,7 @@ Instructions for AI coding agents that work in this repository. People should st
 
 Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreSQL warehouse → Metabase dashboards → questions asked in Claude or ChatGPT through MCP, started with one command, with the data staying on the user's own infrastructure. The target stack is Apache Airflow 3, dlt, dbt Core, PostgreSQL, Metabase and four MCP servers. [docs/explanation/architecture.md](docs/explanation/architecture.md) describes it.
 
-**Status: pre-alpha.** Today the repository holds the tooling, the documentation, the architecture decision records (ADRs) and `./agoranomos`, the script that sets up, checks and runs the stack, and the first part of the stack: `compose.yaml` with the two PostgreSQL instances, Airflow (LocalExecutor by default; `compose.celery.yaml` adds the CeleryExecutor variant) and Metabase. The pipelines, the dbt project and the MCP configuration are designed but not built yet. Describe planned things as planned, never as existing. The roadmap is in [README.md](README.md).
+**Status: pre-alpha.** Today the repository holds the tooling, the documentation, the architecture decision records (ADRs) and `./agoranomos`, the script that sets up, checks and runs the stack, and the first part of the stack: `compose.yaml` with the two PostgreSQL instances, Airflow (LocalExecutor by default; `compose.celery.yaml` adds the CeleryExecutor variant) and Metabase. The demo source loads demo data into the warehouse (the DAG `agoranomos_demo_load`); the connectors to real sources, the dbt project and the MCP configuration are designed but not built yet. Describe planned things as planned, never as existing. The roadmap is in [README.md](README.md).
 
 ## Repository map
 
@@ -17,6 +17,7 @@ Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 - `compose.yaml`, `compose.celery.yaml`, `postgres/`: the Docker Compose stack, its CeleryExecutor overlay ([ADR-0015](docs/adr/0015-run-localexecutor-by-default.md)), and the SQL that the one-shot `db-init` job runs on every start.
 - `airflow/Dockerfile`, `airflow/requirements.txt`, `airflow/dbt-requirements.in`, `airflow/dbt-requirements.txt`: the Airflow image of the stack ([ADR-0002](docs/adr/0002-orchestrate-with-airflow-3.md)), which `./agoranomos up` builds: dlt and Cosmos in Airflow's environment, and dbt in a virtual environment of its own, from a lock file with hashes.
 - `airflow/dags/`: the DAGs of the base package, the `agoranomos` DAG bundle.
+- `airflow/dags/agoranomos_pipelines/`: the code that the DAGs of the base package share, such as the demo source (dlt); `.airflowignore` keeps the DAG processor out of it.
 - `metabase/`: the one-shot `metabase-init` job, which creates the admin and connects the warehouse on the first start.
 - `extensions/`: the folder for a deployment's own additions ([ADR-0013](docs/adr/0013-keep-extensions-apart-from-the-base-package.md)); git tracks only its README.
 - `pyproject.toml`, `uv.lock`, `.python-version`: the development tooling (Python 3.13, ruff, prek, Zensical and pytest). The root is a uv project that is never built or installed.

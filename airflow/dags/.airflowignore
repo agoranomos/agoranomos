@@ -1,0 +1,5 @@
+# With dag_discovery_safe_mode on, the default, the DAG processor imports every Python file of the
+# bundle that mentions "airflow" and "dag" (or "asset") to look for DAGs. A file of the shared
+# package can mention both, as its __init__.py does, and the package holds no DAG: so the
+# processor skips it.
+agoranomos_pipelines/

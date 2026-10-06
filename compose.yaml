@@ -54,6 +54,9 @@ x-airflow: &airflow
     DBT_ENGINE_SEND_ANONYMOUS_USAGE_STATS: "False"
     AIRFLOW__COSMOS__ENABLE_TELEMETRY: "False"
     DO_NOT_TRACK: "1"
+    # dlt takes no settings from Airflow Variables, which the Op role may create: one could send the
+    # connection of a load, with its password, to another host. The image sets the same.
+    PROVIDERS__ENABLE_AIRFLOW_SECRETS: "false"
   volumes:
     - ./airflow/dags:/opt/agoranomos/dags:ro
     - ${AGORANOMOS_EXTENSIONS_DIR:-./extensions}/dags:/opt/agoranomos/extensions/dags:ro

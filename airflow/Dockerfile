@@ -9,6 +9,12 @@ ENV RUNTIME__DLTHUB_TELEMETRY=false \
     AIRFLOW__COSMOS__ENABLE_TELEMETRY=False \
     DO_NOT_TRACK=1
 
+# Inside an Airflow task, dlt also takes its settings from Airflow Variables, which the Op role may
+# create: such a Variable could send the connection of a load, with its password, to another host.
+# The loads hand dlt their connection themselves and need no Variable, so dlt reads none;
+# compose.yaml sets the same.
+ENV PROVIDERS__ENABLE_AIRFLOW_SECRETS=false
+
 # dlt and Cosmos go into Airflow's environment, under the constraints that the base image was built
 # with, and with apache-airflow in the same command, so that pip fails instead of moving Airflow.
 COPY requirements.txt /tmp/agoranomos/requirements.txt

@@ -37,5 +37,5 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF", "S", "PT", "AIR"]
 # The unit tests in tests/unit run by default. The stack tests in tests/stack need a running
 # stack: start it with ./agoranomos up, then run uv run pytest tests/stack.
 testpaths = ["tests/unit"]
-pythonpath = ["scripts", "metabase"]
+pythonpath = ["scripts", "metabase", "airflow/dags"]
 addopts = ["-ra", "--strict-markers", "--strict-config"]

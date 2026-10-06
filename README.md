@@ -65,7 +65,7 @@ flowchart TB
 
 Solid arrows show how data moves. Dotted arrows show what Airflow runs.
 
-1. **Load.** [dlt](https://dlthub.com/) pulls data from ad platform APIs, web analytics, CRM systems and files into PostgreSQL. The planned sources include ad platforms such as Google, Meta, TikTok, Yandex and VK, and GA4. A demo data generator, which needs no accounts or keys, is planned as well.
+1. **Load.** [dlt](https://dlthub.com/) pulls data from ad platform APIs, web analytics, CRM systems and files into PostgreSQL. The planned sources include ad platforms such as Google, Meta, TikTok, Yandex and VK, and GA4. A demo source, which needs no accounts or keys, loads synthetic statistics of a fictional ad account.
 2. **Transform.** [dbt](https://docs.getdbt.com/) turns the raw tables into one unified model of advertising statistics.
 3. **Orchestrate.** [Apache Airflow](https://airflow.apache.org/) schedules the loads and the dbt build, and refreshes Metabase afterwards.
 4. **Explore.** [Metabase](https://www.metabase.com/) serves dashboards, metrics and a glossary from the final layer of the warehouse.
