@@ -10,6 +10,7 @@ stand-in, or adds a tool, for one test.
 from __future__ import annotations
 
 import os
+import pty
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -174,23 +175,65 @@ class Cli:
     def env_path(self) -> Path:
         return self.root / ".env"
 
-    def run(
-        self, *args: str, cwd: Path | None = None, **fake: str
-    ) -> subprocess.CompletedProcess[str]:
-        environment = {
+    def environment(self, fake: dict[str, str]) -> dict[str, str]:
+        return {
             "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
             "HOME": str(self.root),
             "FAKE_LOG": str(self.log),
             **fake,
         }
+
+    def run(
+        self, *args: str, cwd: Path | None = None, **fake: str
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [str(self.root / "agoranomos"), *args],
             cwd=cwd or self.root,
-            env=environment,
+            env=self.environment(fake),
             capture_output=True,
             text=True,
             timeout=60,
             check=False,
+        )
+
+    def run_on_terminal(self, *args: str, **fake: str) -> subprocess.CompletedProcess[str]:
+        """Like run, with a pseudo-terminal as the standard output, as when a person runs it.
+
+        The terminal turns every newline into a carriage return and a newline; the result has plain
+        newlines, so that it compares with the output of run.
+        """
+        leader, follower = pty.openpty()
+        output = bytearray()
+        try:
+            with subprocess.Popen(
+                [str(self.root / "agoranomos"), *args],
+                cwd=self.root,
+                env=self.environment(fake),
+                stdin=subprocess.DEVNULL,
+                stdout=follower,
+                stderr=subprocess.PIPE,
+                text=True,
+            ) as process:
+                os.close(follower)
+                follower = -1
+                while True:
+                    try:
+                        chunk = os.read(leader, 65536)
+                    except OSError:  # Linux: EIO once the script has closed its end
+                        break
+                    if not chunk:  # macOS: end of file instead
+                        break
+                    output.extend(chunk)
+                _, stderr = process.communicate(timeout=60)
+        finally:
+            if follower != -1:
+                os.close(follower)
+            os.close(leader)
+        return subprocess.CompletedProcess(
+            [str(self.root / "agoranomos"), *args],
+            process.returncode,
+            output.decode("utf-8").replace("\r\n", "\n"),
+            stderr,
         )
 
     def stub(self, name: str, body: str) -> None:

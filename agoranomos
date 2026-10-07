@@ -37,6 +37,88 @@ die() {
   exit 1
 }
 
+# The banner that up and help print: AGORANOMOS in the FIGlet font Slant, 65 columns, ASCII only, so
+# that every terminal and every log shows it. print_banner paints it with a gradient on a terminal
+# that has color, and prints the plain text everywhere else: into a log or a pipe, when NO_COLOR is
+# set (https://no-color.org) or when TERM is dumb.
+BANNER='    ___   __________  ____  ___    _   ______  __  _______  _____
+   /   | / ____/ __ \/ __ \/   |  / | / / __ \/  |/  / __ \/ ___/
+  / /| |/ / __/ / / / /_/ / /| | /  |/ / / / / /|_/ / / / /\__ \
+ / ___ / /_/ / /_/ / _, _/ ___ |/ /|  / /_/ / /  / / /_/ /___/ /
+/_/  |_\____/\____/_/ |_/_/  |_/_/ |_/\____/_/  /_/\____//____/'
+TAGLINE='marketing BI out of the box'
+
+# Set colors to how many colors the banner may use on standard output: 0 (none), 8, 256 or 24
+# (24-bit color). It sets a variable rather than printing the number, because inside $(...) the
+# standard output is a pipe, and the test for a terminal would always fail there.
+detect_colors() {
+  colors=0
+  if [ ! -t 1 ] || [ -n "${NO_COLOR:-}" ] || [ "${TERM:-dumb}" = dumb ]; then
+    return 0
+  fi
+  case "${COLORTERM:-}" in
+    truecolor | 24bit)
+      colors=24
+      return 0
+      ;;
+  esac
+  colors=$(tput colors 2> /dev/null) || colors=0
+  if [ "$colors" -ge 256 ] 2> /dev/null; then
+    colors=256
+  elif [ "$colors" -ge 8 ] 2> /dev/null; then
+    colors=8
+  else
+    colors=0
+  fi
+}
+
+# Paint standard input with a gradient from violet to teal, left to right over $2 columns: 24-bit
+# colors when $1 is 24, the nearest colors of the 256-color palette when it is 256, and plain cyan
+# when it is 8. Every line ends with a reset, so the colors never leak into what follows.
+paint_gradient() {
+  awk -v mode="$1" -v width="$2" '
+    BEGIN { esc = "\033" }
+    {
+      out = ""
+      last = ""
+      for (i = 1; i <= length($0); i++) {
+        ch = substr($0, i, 1)
+        if (ch == " ") {
+          out = out ch
+          continue
+        }
+        t = width > 1 ? (i - 1) / (width - 1) : 0
+        r = int(139 + (45 - 139) * t + 0.5)
+        g = int(92 + (212 - 92) * t + 0.5)
+        b = int(246 + (191 - 246) * t + 0.5)
+        if (mode == 24) {
+          code = esc "[38;2;" r ";" g ";" b "m"
+        } else if (mode == 256) {
+          code = esc "[38;5;" (16 + 36 * int(r / 51 + 0.5) + 6 * int(g / 51 + 0.5) + int(b / 51 + 0.5)) "m"
+        } else {
+          code = esc "[36m"
+        }
+        if (code != last) {
+          out = out code
+          last = code
+        }
+        out = out ch
+      }
+      print out esc "[0m"
+    }'
+}
+
+print_banner() {
+  detect_colors
+  if [ "$colors" -eq 0 ]; then
+    printf '%s\n\n%s\n\n' "$BANNER" "$TAGLINE"
+    return 0
+  fi
+  width=$(printf '%s\n' "$BANNER" | awk '{ if (length($0) > w) w = length($0) } END { print w }')
+  printf '%s\n' "$BANNER" | paint_gradient "$colors" "$width"
+  printf '\n\033[2m%s\033[0m\n\n' "$TAGLINE"
+}
+
 # Run docker compose in the checkout, where Compose finds compose.yaml and .env. Compose reads
 # COMPOSE_PROJECT_NAME, COMPOSE_PROFILES and COMPOSE_FILE from its environment before it reads .env,
 # so a variable of the same name that is still exported in this shell, from another project, would
@@ -416,6 +498,7 @@ cmd_up() {
       *) die "unknown option: $option" ;;
     esac
   done
+  print_banner
   cmd_init
   cmd_preflight "$@"
   say "Starting the stack. The first start builds the Airflow image, which takes a few minutes..."
@@ -451,6 +534,11 @@ cmd_logs() {
 }
 
 cmd_help() {
+  print_banner
+  usage
+}
+
+usage() {
   cat << 'EOF'
 Usage: ./agoranomos <command> [options]
 
@@ -479,7 +567,7 @@ main() {
     logs) cmd_logs "$@" ;;
     help | -h | --help) cmd_help ;;
     *)
-      cmd_help >&2
+      usage >&2
       die "unknown command: $command"
       ;;
   esac

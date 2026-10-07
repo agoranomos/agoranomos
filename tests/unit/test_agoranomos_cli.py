@@ -47,6 +47,74 @@ def test_env_example_has_fourteen_secrets():
     assert len(SECRET_KEYS) == 14
 
 
+BANNER_FIRST_LINE = "    ___   __________  ____  ___    _   ______  __  _______  _____"
+TAGLINE = "marketing BI out of the box"
+SGR = re.compile(r"\x1b\[[0-9;]*m")  # a color or a reset
+
+
+def test_help_starts_with_the_banner(cli):
+    result = cli.run("help")
+    assert result.returncode == 0
+    lines = result.stdout.splitlines()
+    assert lines[0] == BANNER_FIRST_LINE
+    assert lines.index(TAGLINE) < lines.index("Usage: ./agoranomos <command> [options]")
+
+
+def test_the_banner_is_plain_text_when_the_output_is_not_a_terminal(cli):
+    result = cli.run("help", TERM="xterm-256color", COLORTERM="truecolor")
+    assert "\x1b[" not in result.stdout
+
+
+def test_unknown_command_shows_the_usage_without_the_banner(cli):
+    result = cli.run("launch")
+    assert "Usage: ./agoranomos <command> [options]" in result.stderr
+    assert BANNER_FIRST_LINE not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("terminal", "code"),
+    [
+        pytest.param(
+            {"TERM": "xterm-256color", "COLORTERM": "truecolor"}, "\x1b[38;2;", id="24-bit"
+        ),
+        pytest.param({"TERM": "xterm-256color", "COLORTERM": "24bit"}, "\x1b[38;2;", id="24bit"),
+        pytest.param({"TERM": "xterm-256color"}, "\x1b[38;5;", id="256-colors"),
+        pytest.param({"TERM": "xterm"}, "\x1b[36m", id="8-colors"),
+    ],
+)
+def test_the_banner_gets_colors_on_a_terminal(cli, terminal, code):
+    result = cli.run_on_terminal("help", **terminal)
+    assert result.returncode == 0, result.stderr
+    assert code in result.stdout
+    # The colors change nothing but the colors: without them, the output is the plain banner.
+    plain = SGR.sub("", result.stdout)
+    assert plain == cli.run("help").stdout
+    # The gradient runs over the columns of the banner, violet on the left and teal on the right,
+    # and every line ends with a reset.
+    lines = result.stdout.splitlines()
+    if code == "\x1b[38;2;":
+        assert lines[4].startswith("\x1b[38;2;139;92;246m/")
+        assert "\x1b[38;2;45;212;191m_" in lines[0]
+    assert all(line.endswith("\x1b[0m") for line in lines[:5])
+
+
+@pytest.mark.parametrize(
+    "terminal",
+    [
+        pytest.param(
+            {"TERM": "xterm-256color", "COLORTERM": "truecolor", "NO_COLOR": "1"}, id="no-color"
+        ),
+        pytest.param({"TERM": "dumb", "COLORTERM": "truecolor"}, id="dumb"),
+        pytest.param({"COLORTERM": "truecolor"}, id="no-term"),
+    ],
+)
+def test_the_banner_stays_plain_when_the_terminal_wants_no_color(cli, terminal):
+    result = cli.run_on_terminal("help", **terminal)
+    assert result.returncode == 0, result.stderr
+    assert "\x1b[" not in result.stdout
+    assert result.stdout == cli.run("help").stdout
+
+
 def test_help_lists_the_commands(cli):
     result = cli.run("help")
     assert result.returncode == 0
@@ -654,6 +722,7 @@ def test_up_starts_the_stack_and_waits_until_healthy(cli, tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert "compose up --detach --remove-orphans" in cli.docker_calls()
+    assert result.stdout.splitlines()[0] == BANNER_FIRST_LINE
     assert "All services are healthy." in result.stdout
     assert "Airflow:  http://127.0.0.1:8080" in result.stdout
     assert "Metabase: http://127.0.0.1:3000" in result.stdout
