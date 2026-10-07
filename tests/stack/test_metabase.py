@@ -118,8 +118,9 @@ def test_no_llm_provider_is_saved(metabase_url, session):
 
 @pytest.mark.parametrize("write", PROVIDER_WRITES)
 def test_the_llm_providers_cannot_be_changed_through_the_api(metabase_url, session, write):
-    # compose.yaml sets MB_LLM_PROVIDERS to an empty list, and an admin cannot add a provider to it,
-    # in Admin > AI or through the API. The answer holds a message, which is not a secret.
+    # compose.yaml sets MB_LLM_PROVIDERS to an empty list, and an admin cannot add a provider to the
+    # list that Metabase uses, in Admin > AI or through the provider API. The answer holds a
+    # message, which is not a secret.
     method, path, body = PROVIDER_WRITES[write]
     status, answer = http_json(method, f"{metabase_url}{path}", body, headers=session)
     message = answer.get("message") if isinstance(answer, dict) else answer

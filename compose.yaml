@@ -329,9 +329,11 @@ services:
       MB_AGENT_API_ENABLED: "false"
       # Metabase 0.64 keeps the keys of LLM providers in a list that an admin can add to whatever the three
       # switches say. An empty list here puts the list under the control of the environment, and Metabase
-      # then refuses to change it through its API and Admin > AI. Like the switches, the variable wins
-      # over what is saved: the older setting of the Anthropic key still saves a key, which has no effect
-      # while the variable is set.
+      # then refuses to change it through its provider API and Admin > AI. The older per-provider
+      # settings, such as that of the Anthropic key, still save a value into the stored list, which has no
+      # effect, and which no one can see or clear through the API, while the variable is set. It applies
+      # as soon as the variable is removed, so a change that removes it checks Admin > AI at the first
+      # start without it.
       MB_LLM_PROVIDERS: "[]"
       # Prometheus metrics, for the planned Ops collection. The port is not published, so it is
       # reachable only from the Compose networks.

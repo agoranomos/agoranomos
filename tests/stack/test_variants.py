@@ -459,7 +459,8 @@ def test_metabase_switches_off_every_ai_entry_point_with_an_environment_variable
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_metabase_keeps_its_list_of_llm_providers_empty_with_an_environment_variable(variant):
     # Metabase 0.64 lets an admin save the key of an LLM provider whatever the switches above say.
-    # An empty list in MB_LLM_PROVIDERS keeps that list empty and refuses changes to it.
+    # An empty list in MB_LLM_PROVIDERS keeps the list that Metabase uses empty, and its provider
+    # API refuses changes to it.
     environment = rendered(variant)["metabase"]["environment"]
     assert environment.get("MB_LLM_PROVIDERS") == "[]"
 
