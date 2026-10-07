@@ -40,7 +40,7 @@ Docker reports a little less memory than its VM or machine has, so a machine or 
 
 ## `up`
 
-Runs `init` and `preflight`, starts the stack with `docker compose up --detach`, and waits until every long-running service is healthy and every one-shot setup job has finished. It builds the Airflow image from `airflow/Dockerfile` first: the first start downloads the base image and the Python packages, from PyPI and GitHub, and takes a few minutes, and later starts take the image from the cache of Docker in seconds. With the `demo` profile, it also waits for the one-shot `demo-init` job, which runs the demo pipeline on the first start and creates the demo dashboard: 27 seconds more (measured on an arm64 machine). It waits at most 15 minutes and stops early when a service fails, naming it and the command that shows its logs. When the stack is up, it prints the addresses of Airflow and Metabase. Running it again on a running stack keeps the data and the secrets; it runs the one-shot setup jobs again, which is how a changed password reaches PostgreSQL and Metabase. It waits only for the services of the profiles in `COMPOSE_PROFILES`: the container that a service of another profile left behind, such as `demo-init` after you set `COMPOSE_PROFILES=core`, does not count, and `status` still shows it; `down` with that profile on removes it. `--force` is passed to `preflight`.
+Prints [the banner](#the-banner), runs `init` and `preflight`, starts the stack with `docker compose up --detach`, and waits until every long-running service is healthy and every one-shot setup job has finished. It builds the Airflow image from `airflow/Dockerfile` first: the first start downloads the base image and the Python packages, from PyPI and GitHub, and takes a few minutes, and later starts take the image from the cache of Docker in seconds. With the `demo` profile, it also waits for the one-shot `demo-init` job, which runs the demo pipeline on the first start and creates the demo dashboard: 27 seconds more (measured on an arm64 machine). It waits at most 15 minutes and stops early when a service fails, naming it and the command that shows its logs. When the stack is up, it prints the addresses of Airflow and Metabase. Running it again on a running stack keeps the data and the secrets; it runs the one-shot setup jobs again, which is how a changed password reaches PostgreSQL and Metabase. It waits only for the services of the profiles in `COMPOSE_PROFILES`: the container that a service of another profile left behind, such as `demo-init` after you set `COMPOSE_PROFILES=core`, does not count, and `status` still shows it; `down` with that profile on removes it. `--force` is passed to `preflight`.
 
 ## `down`
 
@@ -56,4 +56,8 @@ Shows the last 200 lines of the logs of every service. With options or service n
 
 ## `help`
 
-Lists the commands.
+Prints the banner and lists the commands. `./agoranomos` without a command does the same.
+
+## The banner
+
+`up` and `help` start with the name of the project in large letters, the FIGlet font Slant, 65 columns wide and in plain ASCII, so that every terminal and every log shows it. On a terminal, the letters get a gradient from violet to teal: in 24-bit color when `COLORTERM` is `truecolor` or `24bit`, with the nearest colors of the 256-color palette when `tput colors` reports 256 or more, and in one color on a terminal with 8. The banner stays plain text when the output is not a terminal, such as a pipe or a log, when `NO_COLOR` is set to anything ([no-color.org](https://no-color.org/)), and when `TERM` is `dumb` or not set.
