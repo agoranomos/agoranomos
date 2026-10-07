@@ -196,6 +196,35 @@ def test_airflow_has_the_pinned_packages(service):
     assert versions(service, "python", *wanted) == wanted
 
 
+# The packages of Airflow's environment that neither the constraints of the base image nor
+# airflow/requirements.txt pin: Airflow itself, which the base image installs, and pip.
+UNPINNED = {"apache-airflow", "apache-airflow-core", "apache-airflow-task-sdk", "pip"}
+# The names of the installed packages and of the packages that the constraints pin, normalized as
+# pip compares them.
+ENVIRONMENT_PROBE = """
+import importlib.metadata as m, json, os, re
+
+def name(raw):
+    return re.sub(r"[-_.]+", "-", raw).lower()
+
+with open(os.path.expanduser("~/constraints.txt"), encoding="utf-8") as constraints:
+    constrained = {name(line.split("==", 1)[0]) for line in constraints if "==" in line}
+installed = {name(dist.metadata["Name"]) for dist in m.distributions()}
+print(json.dumps({"installed": sorted(installed), "constrained": sorted(constrained)}))
+"""
+
+
+@pytest.mark.parametrize("service", USERS)
+def test_every_package_of_airflow_is_pinned(service):
+    # A new dependency that an update of dlt or Cosmos brings, and that the constraints of Airflow
+    # leave open, would be resolved again on every machine that builds the image. This fails until
+    # it is pinned in airflow/requirements.txt.
+    found = json.loads(compose("exec", "-T", service, "python", "-c", ENVIRONMENT_PROBE).stdout)
+    ours = {re.sub(r"[-_.]+", "-", name) for name in pinned("requirements.txt")}
+    open_ = set(found["installed"]) - set(found["constrained"]) - ours - UNPINNED
+    assert not open_, f"pinned by neither the constraints nor requirements.txt: {sorted(open_)}"
+
+
 @pytest.mark.parametrize("service", USERS)
 def test_dbt_runs_from_its_own_environment_only(service):
     wanted = pinned("dbt-requirements.in")
