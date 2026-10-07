@@ -20,6 +20,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import demo_init as di
+import metadata as md
 import pytest
 from metabase_stand_in import SAMPLE, FakeMetabase, free_port, metadata_env, serve
 from metabase_stand_in import leaked as leaked_in
@@ -288,13 +289,18 @@ def env_for(airflow: FakeAirflow, metabase: FakeMetabase, **overrides: str) -> d
     }
 
 
+# The lines that demo-init prints for the metadata, each as soon as its write is done.
+METADATA_LINES = tuple(f"demo-init: {kind}: " for kind in (md.FIRST, md.UPDATE, md.REVERT))
+
+
 def one_line(capsys: pytest.CaptureFixture[str]) -> str:
     """The line that demo-init prints when it fails: one line on standard error, which names the
-    step, with no traceback and no secret."""
+    step, with no traceback and no secret. Standard output holds no more than the lines of the
+    metadata that it applied before the failure."""
     output = capsys.readouterr()
-    assert output.out == ""
+    assert all(line.startswith(METADATA_LINES) for line in output.out.splitlines()), output.out
     assert "Traceback" not in output.err
-    assert not leaked(output.err), leaked(output.err)
+    assert not leaked(output.out + output.err), leaked(output.out + output.err)
     [line] = output.err.splitlines()
     assert line.startswith("demo-init: ")
     return line
@@ -944,3 +950,47 @@ def test_demo_init_applies_the_metadata_after_its_sync(airflow, metabase, capsys
     assert field_puts
     assert min(field_puts) > sync
     assert metabase.field("conversions")["display_name"] == "Conversions"
+
+
+def test_a_later_step_that_fails_leaves_the_lines_of_the_metadata_in_the_log(
+    airflow, metabase, capsys
+):
+    # demo-init applies the metadata before it makes the demo content. The next start finds nothing
+    # to change in the metadata, so the lines of what it applied, with the values that they
+    # replaced, must be in the log when a later step fails.
+    metabase.failures[("POST", "/api/collection")] = 500
+    assert di.main(env_for(airflow, metabase)) == 1
+    output = capsys.readouterr()
+    applied = output.out.splitlines()
+    assert applied[0] == (
+        'demo-init: first fill: marts.ad_spend_daily display_name: "Ad Spend Daily" -> '
+        '"Ad Spend by Day"'
+    )
+    assert all(line.startswith("demo-init: first fill: ") for line in applied), applied
+    [line] = output.err.splitlines()
+    assert line.startswith("demo-init: POST /api/collection failed with HTTP 500")
+    assert metabase.mart_table()["display_name"] == "Ad Spend by Day"
+    assert not leaked(output.out + output.err)
+
+
+def test_the_lines_of_the_metadata_reach_the_log_of_a_process_before_its_error(airflow, metabase):
+    # As a container runs it, with its standard output a pipe that Python buffers: each line is
+    # flushed as it is printed, so the log has the lines of the metadata before the line of the
+    # error. The pipeline ran before and Metabase knows the mart, so the process waits for nothing.
+    airflow.add_run(di.TRANSFORM_DAG, "success", at=-10)
+    metabase.mart_known = True
+    metabase.failures[("POST", "/api/collection")] = 500
+    result = subprocess.run(
+        [sys.executable, str(Path(di.__file__))],
+        env=env_for(airflow, metabase),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 1
+    *applied, error = result.stdout.splitlines()
+    assert applied, "no line of the metadata before the error"
+    assert all(line.startswith("demo-init: first fill: ") for line in applied), applied
+    assert error.startswith("demo-init: POST /api/collection failed with HTTP 500")
+    assert not leaked(result.stdout)

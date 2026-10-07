@@ -95,13 +95,16 @@ Waiter = Callable[[Callable[[], Any], str], Any]
 
 @dataclass(frozen=True)
 class Column:
-    """A column of a mart, with the properties that the code gives its field in Metabase."""
+    """A column of a mart, with the properties that the code gives its field in Metabase. A
+    semantic type of None is declared as none when semantic_type_declared is true, which clears the
+    type that Metabase shows, and is not declared at all otherwise, which leaves it as it is."""
 
     name: str
     display_name: str | None
     description: str | None
     semantic_type: str | None
     currency: str | None
+    semantic_type_declared: bool = True
 
 
 @dataclass(frozen=True)
@@ -249,13 +252,26 @@ def previous_path(path: str | Path) -> Path:
     return Path(path).with_suffix(".previous.json")
 
 
+def unchanged(target: Path, text: str) -> bool:
+    """Whether the export in target is this text already."""
+    try:
+        return target.read_text(encoding="utf-8") == text
+    except (OSError, ValueError):
+        return False
+
+
 def write_export(document: Mapping[str, Any], output: str | Path) -> None:
-    """Write the export, and keep the one that was there as the previous export. Each file is
-    replaced in one step, so a reader never sees half of one."""
+    """Write the export, and keep the one that was there as the previous export, when the two
+    differ. An export that did not change leaves both files as they are: a start that stops before
+    the jobs apply a new release, and the start after it, still have the release before as the
+    previous export. Each file is replaced in one step, so a reader never sees half of one."""
     target = Path(output)
+    text = json.dumps(document, indent=2, ensure_ascii=False) + "\n"
+    if unchanged(target, text):
+        return
     temporary = target.with_name(f".{target.name}.tmp")
     try:
-        temporary.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", "utf-8")
+        temporary.write_text(text, "utf-8")
         if target.exists():
             os.replace(target, previous_path(target))
         os.replace(temporary, target)
@@ -355,6 +371,7 @@ def base_tables(document: Mapping[str, Any]) -> Tables:
                     description=text_or_none(column.get("description")),
                     semantic_type=text_or_none(meta.get("semantic_type")),
                     currency=text_or_none(meta.get("currency")),
+                    semantic_type_declared="semantic_type" in meta,
                 )
             )
         tables[(model["schema"], model["name"])] = Table(
@@ -392,6 +409,11 @@ def read_overrides(path: str | Path) -> dict[str, Any]:
         raise MetadataError(f"{file.name}: the file is not UTF-8") from None
     except tomllib.TOMLDecodeError as error:
         raise MetadataError(f"{file.name}: the file is not valid TOML: {error}") from None
+    except RecursionError:
+        # tomllib reads a value in a value by recursion: a deep nesting ends Python's.
+        raise MetadataError(
+            f"{file.name}: the file is not valid TOML: it is nested too deeply"
+        ) from None
     except OSError as error:
         raise MetadataError(f"{file.name}: cannot read the file: {type(error).__name__}") from None
 
@@ -648,6 +670,9 @@ def make_plan(metadata: Metadata, database: Mapping[str, Any]) -> Plan:
                 "semantic_type": column.semantic_type,
                 "currency": column.currency,
             }
+            if not column.semantic_type_declared:
+                # The code says nothing of the type: Metabase keeps the one that it shows.
+                del wanted["semantic_type"]
             body, changes = changes_of(field_path, column.name, current, wanted, earlier)
             if "currency" in body:
                 # PUT /api/field/:id replaces the whole map of settings: the settings that Metabase
@@ -674,7 +699,14 @@ def warehouse_tables(metabase: Client, database_id: int) -> set[tuple[str, str]]
         raise MetadataError(
             "Metabase could not list the tables of the warehouse: see ./agoranomos logs metabase"
         )
-    return {(schema, name) for schema, name in answer["data"]["rows"]}
+    found = set()
+    for row in answer["data"]["rows"]:
+        # A row is [schema, name]. One of another shape is an answer of an unexpected shape, which
+        # the jobs end in one line that names this function, as they end a KeyError.
+        if not isinstance(row, list) or len(row) != 2:
+            raise TypeError("a row of the tables of the warehouse is not a pair")
+        found.add((row[0], row[1]))
+    return found
 
 
 def waiter(seconds: float, hint: str) -> Waiter:
@@ -694,10 +726,24 @@ def waiter(seconds: float, hint: str) -> Waiter:
     return wait
 
 
-def apply(metabase: Client, database_id: int, metadata: Metadata, wait: Waiter) -> list[str]:
+def ignore(line: str) -> None:
+    """A log that keeps nothing: apply() still returns the lines."""
+
+
+def apply(
+    metabase: Client,
+    database_id: int,
+    metadata: Metadata,
+    wait: Waiter,
+    log: Callable[[str], None] = ignore,
+) -> list[str]:
     """Make Metabase show the effective metadata of the marts, and return the lines that say what
     changed. A table that the warehouse has and Metabase does not show yet gets one sync, waited for
-    with wait; a table that the warehouse does not have yet is a note."""
+    with wait; a table that the warehouse does not have yet is a note.
+
+    Each line goes to log as soon as its write is done, and the notes go at the end: a write or a
+    later step of the job that fails leaves the lines of the writes before it in the log, with the
+    values that they replaced, which the next start could no longer tell."""
     database = metadata_of(metabase, database_id)
     plan = make_plan(metadata, database)
     notes = []
@@ -722,8 +768,13 @@ def apply(metabase: Client, database_id: int, metadata: Metadata, wait: Waiter) 
     lines = []
     for request in plan.requests:
         metabase.call("PUT", request.path, request.body)
-        lines += [describe(change) for change in request.changes]
-    return lines + list(plan.notes) + notes
+        for change in request.changes:
+            lines.append(describe(change))
+            log(lines[-1])
+    for note in (*plan.notes, *notes):
+        lines.append(note)
+        log(note)
+    return lines
 
 
 def main(argv: list[str]) -> int:

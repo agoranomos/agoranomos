@@ -26,7 +26,7 @@ import time
 import traceback
 import urllib.error
 import urllib.request
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -35,6 +35,11 @@ import metadata
 WAREHOUSE_NAME = "Agoranomos warehouse"
 # How long the job waits for a sync that adds a table of the marts to Metabase, in seconds.
 METADATA_SYNC_TIMEOUT = 120.0
+# The exit codes of the dry run: nothing to change, the check could not run, and a plan to apply.
+# A plan is 3, and not 1, because docker compose run exits with 1 when it fails itself (Compose
+# 5.5.1), and ./agoranomos metadata diff, which runs the dry run with it, must tell the two apart:
+# it turns 3 into the 1 of its own.
+DIFF_NOTHING, DIFF_FAILED, DIFF_CHANGES = 0, 2, 3
 
 ENV_NAMES = {
     "url": "METABASE_URL",
@@ -376,10 +381,22 @@ def ensure_warehouse(metabase: Metabase, config: Config) -> tuple[int, bool]:
     return created["id"], True
 
 
+def logged(job: str) -> Callable[[str], None]:
+    """The log of a job for metadata.apply(): each line printed with the name of the job, and
+    flushed at once, so that a failure later in the job leaves it in the log of the container,
+    before the line of the error. Standard output is a pipe there, which Python buffers."""
+
+    def log(line: str) -> None:
+        print(f"{job}: {line}", flush=True)
+
+    return log
+
+
 def diff(env: Mapping[str, str]) -> int:
     """The dry run of the metadata of the marts, for ./agoranomos metadata diff: the plan that the
     job would apply, printed, with nothing written. It exits with 0 when Metabase shows what the
-    code says, with 1 when the plan is not empty, and with 2 when the check could not run."""
+    code says, with 3 when the plan is not empty, and with 2 when the check could not run
+    (DIFF_NOTHING, DIFF_CHANGES, DIFF_FAILED)."""
     try:
         config = Config.from_env(env)
         marts = metadata.load(config.metadata_export, config.metadata_overrides)
@@ -395,10 +412,10 @@ def diff(env: Mapping[str, str]) -> int:
         plan = metadata.make_plan(marts, metadata.metadata_of(metabase, database["id"]))
     except (SetupError, metadata.MetadataError) as error:
         print(f"metadata diff: {error}", file=sys.stderr)
-        return 2
+        return DIFF_FAILED
     except SHAPE_ERRORS as error:
         print(f"metadata diff: {unexpected_shape('Metabase', error, LOGS_HINT)}", file=sys.stderr)
-        return 2
+        return DIFF_FAILED
     for change in plan.changes:
         print(metadata.describe(change))
     for schema, name in plan.unknown:
@@ -407,9 +424,9 @@ def diff(env: Mapping[str, str]) -> int:
         print(f"note: {note}")
     if plan.changes:
         print(f"{metadata.counted(len(plan.changes), 'change')} to apply: run ./agoranomos up")
-        return 1
+        return DIFF_CHANGES
     print("Metabase shows the metadata of the code: nothing to change")
-    return 0
+    return DIFF_NOTHING
 
 
 def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> int:
@@ -429,15 +446,13 @@ def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> in
         admin_created = ensure_admin(metabase, config)
         database_id, database_created = ensure_warehouse(metabase, config)
         wait = metadata.waiter(METADATA_SYNC_TIMEOUT, "see ./agoranomos logs metabase")
-        changes = metadata.apply(metabase, database_id, marts, wait)
+        metadata.apply(metabase, database_id, marts, wait, log=logged("metabase-init"))
     except (SetupError, metadata.MetadataError) as error:
         print(f"metabase-init: {error}", file=sys.stderr)
         return 1
     except SHAPE_ERRORS as error:
         print(f"metabase-init: {unexpected_shape('Metabase', error, LOGS_HINT)}", file=sys.stderr)
         return 1
-    for line in changes:
-        print(f"metabase-init: {line}")
     print(
         f"metabase-init: the admin account {'is created' if admin_created else 'exists'}, and the "
         f"warehouse connection {database_id} is {'created' if database_created else 'up to date'}"

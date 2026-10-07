@@ -1199,17 +1199,45 @@ DIFF = (
 )
 
 
-@pytest.mark.parametrize("code", [0, 1, 2])
-def test_metadata_diff_runs_the_dry_run_of_metabase_init_and_passes_on_its_exit_code(
-    cli, tmp_path, code
+@pytest.mark.parametrize(
+    ("job", "code"),
+    [
+        pytest.param(0, 0, id="nothing-to-change"),
+        pytest.param(3, 1, id="a-plan-to-apply"),
+        pytest.param(2, 2, id="the-check-could-not-run"),
+    ],
+)
+def test_metadata_diff_runs_the_dry_run_of_metabase_init_and_passes_on_its_answer(
+    cli, tmp_path, job, code
 ):
-    # 0: Metabase shows what the code says; 1: the plan is not empty; 2: the check could not run.
+    # The job answers 0 when Metabase shows what the code says, 3 when the plan is not empty, and
+    # 2 when the check could not run; the command turns its 3 into 1.
     cli.run("init")
     result = cli.run(
-        "metadata", "diff", FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP), FAKE_COMPOSE_EXIT=str(code)
+        "metadata", "diff", FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP), FAKE_COMPOSE_EXIT=str(job)
     )
     assert result.returncode == code, result.stderr
     assert DIFF in cli.docker_calls()
+
+
+@pytest.mark.parametrize("compose_code", [1, 125])
+def test_metadata_diff_says_when_compose_itself_fails(cli, tmp_path, compose_code):
+    # docker compose run exits with 1 when it fails itself, such as when Docker stops after the
+    # look at Metabase or an image is missing (Compose 5.5.1): that is a check that could not run,
+    # and never the 1 of a plan to apply. So is any other code that the job does not give.
+    cli.run("init")
+    result = cli.run(
+        "metadata",
+        "diff",
+        FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP),
+        FAKE_COMPOSE_EXIT=str(compose_code),
+        FAKE_COMPOSE_ERROR="Error response from daemon: No such image",
+    )
+    assert result.returncode == 2
+    assert result.stderr.splitlines()[-1] == (
+        f"error: the dry run did not finish (exit code {compose_code}); "
+        "the error above names the cause"
+    )
 
 
 def test_metadata_diff_needs_a_running_metabase(cli, tmp_path):

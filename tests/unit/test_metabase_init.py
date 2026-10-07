@@ -742,7 +742,9 @@ def test_the_dry_run_prints_the_plan_and_writes_nothing(metabase, capsys):
     started_with_an_edit(metabase)
     capsys.readouterr()
     writes = len(metabase.bodies)
-    assert mi.main(env_for(metabase), ["diff"]) == 1
+    # 3, and not 1, which docker compose run gives when it fails itself: ./agoranomos metadata
+    # diff turns it into the 1 of its own.
+    assert mi.main(env_for(metabase), ["diff"]) == 3
     assert capsys.readouterr().out.splitlines() == [
         'revert of an edit: marts.ad_spend_daily.conversions display_name: "Leads" -> '
         '"Conversions"',
@@ -835,3 +837,81 @@ def test_a_failed_step_of_the_metadata_is_one_line_with_no_secret(
     assert "failed with HTTP 500. See ./agoranomos logs metabase." in line
     assert "Traceback" not in output.err
     assert leaked(output.out + output.err) == []
+
+
+def edited_in_the_ui(metabase: FakeMetabase) -> None:
+    """A first start that applied the metadata, then edits in the Metabase UI of the name of the
+    table and of two fields, and a Metabase that refuses the write of the last of them, spend."""
+    metabase.mart_in_warehouse = True
+    assert mi.main(env_for(metabase)) == 0
+    metabase.mart_table()["display_name"] = "Edited table"
+    metabase.field("account_id")["display_name"] = "Edited account"
+    metabase.field("spend")["display_name"] = "Edited spend"
+    metabase.failures[("PUT", f"/api/field/{metabase.field('spend')['id']}")] = 500
+
+
+# The lines of the two writes that the job makes before the write of spend fails.
+REVERTED = [
+    'metabase-init: revert of an edit: marts.ad_spend_daily display_name: "Edited table" -> '
+    '"Ad Spend by Day"',
+    "metabase-init: revert of an edit: marts.ad_spend_daily.account_id display_name: "
+    '"Edited account" -> "Account ID"',
+]
+
+
+def test_a_write_that_fails_leaves_the_lines_of_the_writes_before_it(metabase, capsys):
+    # The table and account_id are set back before the write of spend fails. The next start finds
+    # nothing to change for them, so their lines, with the values that they replaced, must be in
+    # the log now, or the edits would be lost without a word.
+    edited_in_the_ui(metabase)
+    capsys.readouterr()
+    assert mi.main(env_for(metabase)) == 1
+    output = capsys.readouterr()
+    assert output.out.splitlines() == REVERTED
+    [line] = output.err.splitlines()
+    assert line.startswith("metabase-init: PUT /api/field/")
+    assert "failed with HTTP 500" in line
+    assert metabase.field("account_id")["display_name"] == "Account ID"
+    assert leaked(output.out + output.err) == []
+
+
+def test_the_lines_reach_the_log_of_a_process_before_its_error(metabase):
+    # In a container, standard output is a pipe, which Python buffers until the process ends: each
+    # line is flushed as it is printed, so that the log, which holds both streams, has the lines of
+    # the writes before the line of the error, in the order of what happened.
+    edited_in_the_ui(metabase)
+    result = subprocess.run(
+        [sys.executable, str(Path(mi.__file__))],
+        env=env_for(metabase),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 1
+    *lines, error = result.stdout.splitlines()
+    assert lines == REVERTED
+    assert error.startswith("metabase-init: PUT /api/field/")
+    assert leaked(result.stdout) == []
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        pytest.param(["marts"], id="short"),
+        pytest.param(["marts", "ad_spend_daily", "x"], id="long"),
+        pytest.param("marts", id="text"),
+    ],
+)
+def test_rows_of_the_warehouse_that_are_not_pairs_end_in_one_line(metabase, capsys, row):
+    # The tables of the warehouse come as rows of two values, the schema and the name. An answer of
+    # another shape is one line that names the function, as every answer of an unexpected shape.
+    answer = {"status": "completed", "data": {"rows": [row]}}
+    metabase.pages[("POST", "/api/dataset")] = (202, json.dumps(answer).encode())
+    assert mi.main(env_for(metabase)) == 1
+    output = capsys.readouterr()
+    assert output.err.splitlines() == [
+        "metabase-init: an answer of Metabase had an unexpected shape (TypeError in "
+        "warehouse_tables). See ./agoranomos logs metabase."
+    ]
+    assert "Traceback" not in output.err

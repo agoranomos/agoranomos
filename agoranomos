@@ -571,8 +571,17 @@ cmd_metadata() {
     check_failed "usage: ./agoranomos metadata diff"
   fi
   metabase_is_up || check_failed "Metabase is not running: start the stack with ./agoranomos up"
+  # The job answers 0, 3 for a plan to apply, or 2. docker compose run exits with 1 when it fails
+  # itself (Compose 5.5.1), so the job keeps 1 out of its answers, and any code that it does not
+  # give is a check that could not run.
+  code=0
   compose run --rm --no-deps -T metabase-init \
-    python /opt/agoranomos/metabase/metabase_init.py diff || exit $?
+    python /opt/agoranomos/metabase/metabase_init.py diff || code=$?
+  case "$code" in
+    0 | 2) exit "$code" ;;
+    3) exit 1 ;;
+    *) check_failed "the dry run did not finish (exit code $code); the error above names the cause" ;;
+  esac
 }
 
 cmd_help() {

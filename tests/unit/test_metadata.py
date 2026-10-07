@@ -7,7 +7,9 @@ import ast
 import copy
 import json
 import math
+import os
 import stat
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -172,6 +174,20 @@ def test_the_export_keeps_the_models_and_sources_with_their_columns_in_order(tmp
 def test_each_export_keeps_the_one_before_it(tmp_path):
     output = tmp_path / "metadata.json"
     md.write_export({"format": 1, "models": [], "sources": [], "n": 1}, output)
+    md.write_export({"format": 1, "models": [], "sources": [], "n": 2}, output)
+    assert json.loads(output.read_text())["n"] == 2
+    assert json.loads(md.previous_path(output).read_text())["n"] == 1
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["metadata.json", "metadata.previous.json"]
+
+
+def test_an_export_that_did_not_change_keeps_the_one_before_it(tmp_path):
+    # A start after an upgrade can stop before metabase-init applies anything, as when an override
+    # names a column that the release renamed: the start after the fix exports the same again, and
+    # the previous export must still be the release before, or its improvements would read as
+    # reverts of edits.
+    output = tmp_path / "metadata.json"
+    md.write_export({"format": 1, "models": [], "sources": [], "n": 1}, output)
+    md.write_export({"format": 1, "models": [], "sources": [], "n": 2}, output)
     md.write_export({"format": 1, "models": [], "sources": [], "n": 2}, output)
     assert json.loads(output.read_text())["n"] == 2
     assert json.loads(md.previous_path(output).read_text())["n"] == 1
@@ -405,16 +421,36 @@ def test_two_columns_may_not_share_a_display_name(tmp_path):
     )
 
 
-def test_an_override_in_another_language_is_kept_and_logged_as_written(tmp_path):
-    marts = loaded(
-        tmp_path, overrides="[marts.ad_spend_daily.columns.spend]\ndisplay_name = 'Расход'\n"
+def test_an_override_in_another_language_is_kept_and_logged_as_written(tmp_path, metabase):
+    # End to end: metabase-init runs as its container runs it, with its output a pipe, and the
+    # words of the deployment reach Metabase and the log as they are written, not escaped.
+    overrides = "[marts.ad_spend_daily.columns.spend]\ndisplay_name = 'Расход'\n"
+    env = {
+        "METABASE_URL": metabase.url,
+        "METABASE_SITE_NAME": "Agoranomos",
+        "METABASE_ADMIN_EMAIL": "admin@example.com",
+        "METABASE_ADMIN_PASSWORD": SECRETS["the admin password"],
+        "WAREHOUSE_HOST": "warehouse-db",
+        "WAREHOUSE_PORT": "5432",
+        "WAREHOUSE_DB": "warehouse",
+        "WAREHOUSE_USER": "metabase_reader",
+        "WAREHOUSE_PASSWORD": "reader-password",
+        **metadata_env(tmp_path, overrides=overrides),
+    }
+    result = subprocess.run(
+        [sys.executable, str(Path(mi.__file__))],
+        env=env,
+        capture_output=True,
+        timeout=60,
+        check=False,
     )
-    [spend] = [c for c in marts.effective[MART].columns if c.name == "spend"]
-    assert spend.display_name == "Расход"
-    change = md.Change(md.FIRST, "marts.ad_spend_daily.spend", "display_name", "Spend", "Расход")
-    assert md.describe(change) == (
-        'first fill: marts.ad_spend_daily.spend display_name: "Spend" -> "Расход"'
-    )
+    assert result.returncode == 0
+    assert metabase.field("spend")["display_name"] == "Расход"
+    printed = result.stdout.decode("utf-8").splitlines()
+    assert (
+        'metabase-init: update from code: marts.ad_spend_daily.spend display_name: "Spend" -> '
+        '"Расход"'
+    ) in printed
 
 
 def test_a_file_with_a_byte_order_mark_is_read(tmp_path):
@@ -435,6 +471,24 @@ def test_a_file_that_is_not_utf_8_is_named(tmp_path):
         md.load(env["METADATA_EXPORT"], env["METADATA_OVERRIDES"])
 
 
+@pytest.mark.parametrize(
+    "nested",
+    [
+        pytest.param("a = " + "[" * 100_000 + "]" * 100_000, id="arrays"),
+        pytest.param("a = " + "{b = " * 40_000 + "1" + "}" * 40_000, id="inline-tables"),
+    ],
+)
+def test_a_file_nested_too_deeply_is_one_line(tmp_path, nested):
+    # tomllib reads a value in a value by recursion, so a deep nesting, well within the limit of
+    # the size of the file, would end in a traceback of Python's recursion.
+    assert len(nested) < md.OVERRIDES_LIMIT
+    with pytest.raises(md.MetadataError) as raised:
+        loaded(tmp_path, overrides=nested + "\n")
+    assert str(raised.value) == (
+        "overrides.toml: the file is not valid TOML: it is nested too deeply"
+    )
+
+
 def test_a_file_that_is_gone_when_it_is_read_is_no_file(tmp_path, monkeypatch):
     # A bind mount of Docker Desktop on macOS can show a file for a moment after it is deleted: its
     # size can be read, and then it cannot be opened. The file is gone, so the base applies.
@@ -446,6 +500,44 @@ def test_a_file_that_is_gone_when_it_is_read_is_no_file(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "read_bytes", gone)
     marts = md.load(env["METADATA_EXPORT"], env["METADATA_OVERRIDES"])
     assert marts.effective == md.base_tables(EXPORT)
+
+
+def make_a_folder(path: Path) -> None:
+    path.mkdir()
+
+
+def make_an_unreadable_file(path: Path) -> None:
+    path.write_text("[marts.ad_spend_daily]\ndisplay_name = 'Ours'\n", encoding="utf-8")
+    path.chmod(0)
+
+
+@pytest.mark.parametrize(
+    ("make", "error"),
+    [
+        pytest.param(make_a_folder, "IsADirectoryError", id="folder"),
+        pytest.param(
+            make_an_unreadable_file,
+            "PermissionError",
+            id="unreadable",
+            marks=pytest.mark.skipif(
+                os.geteuid() == 0, reason="root reads a file whatever its permissions"
+            ),
+        ),
+    ],
+)
+def test_an_overrides_path_that_cannot_be_read_is_one_line(tmp_path, make, error):
+    # Only a file that is gone counts as no file: anything else at the path stops the job, as a
+    # mistake in the file does, so that no override is dropped without a word.
+    env = metadata_env(tmp_path)
+    path = Path(env["METADATA_OVERRIDES"])
+    make(path)
+    try:
+        with pytest.raises(md.MetadataError) as raised:
+            md.load(env["METADATA_EXPORT"], env["METADATA_OVERRIDES"])
+    finally:
+        if path.is_file():
+            path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    assert str(raised.value) == f"overrides.toml: cannot read the file: {error}"
 
 
 def test_a_file_over_the_limit_is_refused_before_it_is_read(tmp_path):
@@ -596,6 +688,24 @@ def test_a_semantic_type_that_the_code_declares_none_is_cleared(tmp_path, metaba
     ) in lines
     assert metabase.field("report_date")["semantic_type"] is None
     assert md.apply(client(metabase), 2, marts, md.waiter(120, "x")) == []
+
+
+def test_a_column_that_does_not_declare_a_semantic_type_keeps_the_one_of_metabase(
+    tmp_path, metabase
+):
+    # Only a declared null clears a type. A column whose meta has no semantic_type leaves its type
+    # to Metabase, as the jobs leave everything that the code does not declare.
+    export = copy.deepcopy(EXPORT)
+    report_date = export["models"][0]["columns"][0]
+    assert report_date["name"] == "report_date"
+    del report_date["meta"]["metabase"]["semantic_type"]
+    metabase.field("report_date")["semantic_type"] = "type/CreationDate"
+    marts = loaded(tmp_path, export=export)
+    lines = md.apply(client(metabase), 2, marts, md.waiter(120, "x"))
+    assert metabase.field("report_date")["semantic_type"] == "type/CreationDate"
+    assert not any("report_date semantic_type" in line for line in lines), lines
+    path = f"/api/field/{metabase.field('report_date')['id']}"
+    assert all("semantic_type" not in body for put, body in puts(metabase) if put == path)
 
 
 def test_hidden_tables_and_fields_get_their_metadata_and_stay_hidden(tmp_path, metabase):

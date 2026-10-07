@@ -43,6 +43,7 @@ from metabase_init import (
     find_warehouse,
     items_of,
     list_databases,
+    logged,
     read_settings,
     sign_in,
     unexpected_shape,
@@ -502,11 +503,12 @@ def main(env: Mapping[str, str] | None = None) -> int:
                 "Metabase has no connection to the warehouse: see ./agoranomos logs metabase-init"
             )
         ensure_synced(metabase, database["id"], deadline, SYNC_HINT if ran else RAN_BEFORE_HINT)
-        changes = metadata.apply(
+        metadata.apply(
             metabase,
             database["id"],
             marts,
             lambda check, what: wait_until(check, deadline, what, SYNC_HINT),
+            log=logged("demo-init"),
         )
         collection_id = ensure_collection(metabase)
         cards = ensure_questions(metabase, collection_id, database["id"], column_titles(marts))
@@ -517,8 +519,6 @@ def main(env: Mapping[str, str] | None = None) -> int:
     except SHAPE_ERRORS as error:
         print(f"demo-init: {unexpected_shape(server, error, hint)}", file=sys.stderr)
         return 1
-    for line in changes:
-        print(f"demo-init: {line}")
     print(
         f"demo-init: the demo pipeline {'ran now' if ran else 'ran before'}, and the dashboard "
         f"{DASHBOARD!r} ({dashboard_id}) is in the collection {COLLECTION!r}"

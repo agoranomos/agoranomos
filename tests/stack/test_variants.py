@@ -7,6 +7,7 @@ environment of a service holds secrets, and a failed assertion prints what it co
 
 import http.server
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -376,12 +377,21 @@ def test_the_one_shot_jobs_are_the_services_named_init_or_export(variant):
         )
 
 
+def extensions_folder() -> str:
+    """The extensions folder that .env names (AGORANOMOS_EXTENSIONS_DIR, ./extensions by default),
+    as Compose renders the source of a mount: a relative path starts at the checkout."""
+    path = REPO_ROOT / ".env"
+    values = read_env(path) if path.exists() else {}
+    folder = values.get("AGORANOMOS_EXTENSIONS_DIR") or "./extensions"
+    return os.path.normpath(REPO_ROOT / folder)
+
+
 # The mounts of the jobs that sign in to Metabase as the admin: their code, the export of the
 # metadata and the overrides of the deployment, all read-only: (source, target).
 JOB_MOUNTS = {
     (str(REPO_ROOT / "metabase"), "/opt/agoranomos/metabase"),
     ("metadata-export", "/opt/agoranomos/metadata"),
-    (str(REPO_ROOT / "extensions" / "metadata"), "/opt/agoranomos/extensions/metadata"),
+    (os.path.join(extensions_folder(), "metadata"), "/opt/agoranomos/extensions/metadata"),
 }
 
 

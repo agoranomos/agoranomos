@@ -135,6 +135,8 @@ def test_metabase_shows_the_effective_metadata_of_the_marts(metabase_url, sessio
             current = {**field, "currency": (field.get("settings") or {}).get("currency")}
             if column.currency is not None:
                 wanted["currency"] = column.currency
+            if not column.semantic_type_declared:
+                del wanted["semantic_type"]  # Metabase keeps its own
             wrong += [
                 f"{table.name}.{column.name} {prop}"
                 for prop, value in wanted.items()
@@ -200,7 +202,10 @@ def test_a_hidden_field_gets_its_metadata_and_stays_hidden(env, metabase_url, se
         assert after["display_name"] == spend.display_name
         assert after["visibility_type"] == "hidden"
     finally:
-        put_field(metabase_url, session, field["id"], {"visibility_type": field["visibility_type"]})
+        # Both properties that the test edited go back, also when it failed before the job set the
+        # name back.
+        before = {key: field[key] for key in ("visibility_type", "display_name")}
+        put_field(metabase_url, session, field["id"], before)
 
 
 @needs_the_demo
