@@ -5,6 +5,7 @@ How-to guides are short recipes for people who already have Agoranomos running a
 ## Guides
 
 - [See the demo](see-the-demo.md): what the demo shows, and how to bring it up to date or turn it off.
+- [Rename a field or add your own definitions](rename-a-field.md): give the tables and fields of the marts names, descriptions and notes of your deployment's own.
 
 ## Planned guides
 

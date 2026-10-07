@@ -19,7 +19,7 @@ BASE_LONG_RUNNING = {
     "metabase",
 }
 CELERY_LONG_RUNNING = {"broker", "airflow-worker"}
-BASE_ONE_SHOT = {"db-init", "airflow-init", "metabase-init"}
+BASE_ONE_SHOT = {"db-init", "airflow-init", "metadata-export", "metabase-init"}
 # The Airflow services of the base stack: airflow-init, a one-shot job, and the four that stay up.
 BASE_AIRFLOW = {
     "airflow-init",

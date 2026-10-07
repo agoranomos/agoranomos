@@ -300,3 +300,24 @@ def test_cosmos_itself_keeps_no_cache_in_airflow_variables(service):
     assert result.returncode == 0, f"the probe of Cosmos exited with {result.returncode}"
     found = json.loads(result.stdout.strip().splitlines()[-1])
     assert found == {"dbt_ls": False, "yaml_selectors": False}, f"Cosmos uses the caches {found}"
+
+
+def test_the_image_has_the_folder_of_the_export_of_nobody_and_the_user_of_airflow():
+    # metadata-export runs this image as nobody and writes a named volume that is mounted on this
+    # folder (compose.yaml); the Airflow services run it as the user of the official image.
+    result = docker(
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--entrypoint",
+        "stat",
+        IMAGE,
+        "-c",
+        "%u:%g %a",
+        "/opt/agoranomos/metadata",
+        check=False,
+    )
+    assert (result.returncode, result.stdout.strip()) == (0, "65534:65534 755"), result.stderr
+    user = docker("image", "inspect", IMAGE, "--format", "{{.Config.User}}").stdout.strip()
+    assert user == "50000"

@@ -8,7 +8,11 @@ copyright = "Copyright &copy; 2026 Andrei Gromov and Agoranomos contributors. Ap
 nav = [
   { "Home" = "index.md" },
   { "Tutorials" = ["tutorials/index.md"] },
-  { "How-to guides" = ["how-to/index.md", { "See the demo" = "how-to/see-the-demo.md" }] },
+  { "How-to guides" = [
+    "how-to/index.md",
+    { "See the demo" = "how-to/see-the-demo.md" },
+    { "Rename a field or add your own definitions" = "how-to/rename-a-field.md" },
+  ] },
   { "Reference" = [
     "reference/index.md",
     { "Command line" = "reference/command-line.md" },
@@ -33,6 +37,7 @@ nav = [
     { "ADR-0013: Keep extensions apart from the base package" = "adr/0013-keep-extensions-apart-from-the-base-package.md" },
     { "ADR-0014: Start the stack with one script and a generated .env file" = "adr/0014-start-the-stack-with-one-script.md" },
     { "ADR-0015: Run LocalExecutor by default" = "adr/0015-run-localexecutor-by-default.md" },
+    { "ADR-0016: Keep the metadata of the marts as code, with a deployment's overrides in extensions" = "adr/0016-keep-the-metadata-of-the-marts-as-code.md" },
   ] },
 ]
 

@@ -118,7 +118,7 @@ def test_the_banner_stays_plain_when_the_terminal_wants_no_color(cli, terminal):
 def test_help_lists_the_commands(cli):
     result = cli.run("help")
     assert result.returncode == 0
-    for command in ("init", "preflight", "up", "down", "status", "logs", "help"):
+    for command in ("init", "preflight", "up", "down", "status", "logs", "metadata", "help"):
         assert re.search(rf"^  {command}\s", result.stdout, flags=re.MULTILINE)
 
 
@@ -227,6 +227,8 @@ def test_init_adds_settings_that_a_new_release_brings(cli):
 def test_init_creates_the_extensions_folder(cli):
     cli.run("init")
     assert (cli.root / "extensions" / "dags").is_dir()
+    # The folder of the overrides of the metadata: Docker would make a missing one as root.
+    assert (cli.root / "extensions" / "metadata").is_dir()
 
 
 def test_runs_from_another_directory(cli, tmp_path):
@@ -1172,3 +1174,85 @@ def test_logs_passes_its_arguments(cli):
     assert "compose logs -f db-init" in cli.docker_calls()
     cli.run("logs")
     assert "compose logs --tail=200" in cli.docker_calls()
+
+
+@pytest.mark.parametrize(
+    ("line", "outcome"),
+    [
+        pytest.param("metadata-export|exited||0", 0, id="done"),
+        pytest.param("metadata-export|exited||1", 1, id="failed"),
+    ],
+)
+def test_up_waits_for_metadata_export_as_for_a_one_shot_job(cli, tmp_path, line, outcome):
+    ps = HEALTHY_PS + line + "\n"
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps), **QUICK)
+    assert result.returncode == outcome, result.stderr
+    failed = "metadata-export failed: see ./agoranomos logs metadata-export" in result.stderr
+    assert failed is bool(outcome)
+
+
+METABASE_UP = HEALTHY_PS + "metabase|running|healthy|0\n"
+# The dry run: metabase-init, in a container of its own, with the argument diff.
+DIFF = (
+    "compose run --rm --no-deps -T metabase-init "
+    "python /opt/agoranomos/metabase/metabase_init.py diff"
+)
+
+
+@pytest.mark.parametrize(
+    ("job", "code"),
+    [
+        pytest.param(0, 0, id="nothing-to-change"),
+        pytest.param(3, 1, id="a-plan-to-apply"),
+        pytest.param(2, 2, id="the-check-could-not-run"),
+    ],
+)
+def test_metadata_diff_runs_the_dry_run_of_metabase_init_and_passes_on_its_answer(
+    cli, tmp_path, job, code
+):
+    # The job answers 0 when Metabase shows what the code says, 3 when the plan is not empty, and
+    # 2 when the check could not run; the command turns its 3 into 1.
+    cli.run("init")
+    result = cli.run(
+        "metadata", "diff", FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP), FAKE_COMPOSE_EXIT=str(job)
+    )
+    assert result.returncode == code, result.stderr
+    assert DIFF in cli.docker_calls()
+
+
+@pytest.mark.parametrize("compose_code", [1, 125])
+def test_metadata_diff_says_when_compose_itself_fails(cli, tmp_path, compose_code):
+    # docker compose run exits with 1 when it fails itself, such as when Docker stops after the
+    # look at Metabase or an image is missing (Compose 5.5.1): that is a check that could not run,
+    # and never the 1 of a plan to apply. So is any other code that the job does not give.
+    cli.run("init")
+    result = cli.run(
+        "metadata",
+        "diff",
+        FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP),
+        FAKE_COMPOSE_EXIT=str(compose_code),
+        FAKE_COMPOSE_ERROR="Error response from daemon: No such image",
+    )
+    assert result.returncode == 2
+    assert result.stderr.splitlines()[-1] == (
+        f"error: the dry run did not finish (exit code {compose_code}); "
+        "the error above names the cause"
+    )
+
+
+def test_metadata_diff_needs_a_running_metabase(cli, tmp_path):
+    # A check that cannot run exits with 2, so that it never looks like the 1 of a plan to apply.
+    cli.run("init")
+    ps = HEALTHY_PS + "metabase|running|starting|0\n"
+    result = cli.run("metadata", "diff", FAKE_PS_FILE=ps_file(tmp_path, ps))
+    assert result.returncode == 2
+    assert "Metabase is not running: start the stack with ./agoranomos up" in result.stderr
+    assert not any(call.startswith("compose run") for call in cli.docker_calls())
+
+
+@pytest.mark.parametrize("arguments", [[], ["apply"], ["diff", "--all"]])
+def test_metadata_takes_the_subcommand_diff_only(cli, arguments):
+    result = cli.run("metadata", *arguments)
+    assert result.returncode == 2
+    assert "usage: ./agoranomos metadata diff" in result.stderr
+    assert cli.docker_calls() == []

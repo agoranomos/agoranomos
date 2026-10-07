@@ -201,3 +201,19 @@ def test_the_build_context_holds_only_what_the_dockerfile_copies():
     ]
     copied = re.findall(r"^COPY\s+(\S+)\s", dockerfile(), flags=re.MULTILINE)
     assert sorted(copied) == ["dbt-requirements.txt", "requirements.txt"]
+
+
+def test_the_image_gives_the_folder_of_the_export_to_nobody_and_keeps_its_user():
+    # A new named volume takes the owner of the folder that it is first mounted on: without a
+    # folder of nobody, the volume of metadata-export would belong to root, and the job, which runs
+    # as nobody, could not write it. The image then goes back to the user of the official image.
+    found = instructions(dockerfile())
+    users = [arguments for keyword, arguments in found if keyword == "USER"]
+    assert users == ["root", "${AIRFLOW_UID}"]
+    assert ("RUN", "install -d -o 65534 -g 65534 -m 0755 /opt/agoranomos/metadata") in found
+    root = found.index(("USER", "root"))
+    assert found[root + 1] == (
+        "RUN",
+        "install -d -o 65534 -g 65534 -m 0755 /opt/agoranomos/metadata",
+    )
+    assert found[root + 2] == ("USER", "${AIRFLOW_UID}")

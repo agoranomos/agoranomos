@@ -7,6 +7,7 @@ environment of a service holds secrets, and a failed assertion prints what it co
 
 import http.server
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -44,7 +45,8 @@ TASK_RUNNER = {"local": "airflow-scheduler", "celery": "airflow-worker"}
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_a_variant_has_the_services_it_needs(variant):
     names = set(rendered(variant))
-    expected = {"warehouse-db", "platform-db", "db-init", "demo-init"} | BASE_AIRFLOW | METABASE
+    expected = {"warehouse-db", "platform-db", "db-init", "demo-init", "metadata-export"}
+    expected |= BASE_AIRFLOW | METABASE
     assert expected <= names
     # The broker and the worker belong to the Celery variant, and to no other.
     assert (names >= CELERY_ONLY) == (variant == "celery")
@@ -364,14 +366,80 @@ def test_no_service_creates_the_admin_with_the_entrypoint_of_the_image(variant):
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
-def test_the_one_shot_jobs_are_the_services_named_init(variant):
-    # ./agoranomos up waits for a service named *-init to exit with 0, and for every other service
-    # to stay running, so a job with another name, or a service named like a job, fails the wait.
+def test_the_one_shot_jobs_are_the_services_named_init_or_export(variant):
+    # ./agoranomos up waits for a service named *-init or *-export to exit with 0, and for every
+    # other service to stay running, so a job with another name, or a service named like a job,
+    # fails the wait.
     for name, service in rendered(variant).items():
         is_one_shot = service.get("restart") == "no"
-        assert is_one_shot == name.endswith("-init"), (
+        assert is_one_shot == name.endswith(("-init", "-export")), (
             f"{name} and the wait of ./agoranomos disagree"
         )
+
+
+def extensions_folder() -> str:
+    """The extensions folder that .env names (AGORANOMOS_EXTENSIONS_DIR, ./extensions by default),
+    as Compose renders the source of a mount: a relative path starts at the checkout."""
+    path = REPO_ROOT / ".env"
+    values = read_env(path) if path.exists() else {}
+    folder = values.get("AGORANOMOS_EXTENSIONS_DIR") or "./extensions"
+    return os.path.normpath(REPO_ROOT / folder)
+
+
+# The mounts of the jobs that sign in to Metabase as the admin: their code, the export of the
+# metadata and the overrides of the deployment, all read-only: (source, target).
+JOB_MOUNTS = {
+    (str(REPO_ROOT / "metabase"), "/opt/agoranomos/metabase"),
+    ("metadata-export", "/opt/agoranomos/metadata"),
+    (os.path.join(extensions_folder(), "metadata"), "/opt/agoranomos/extensions/metadata"),
+}
+
+
+def job_mounts(service: dict[str, Any]) -> set[tuple[str, str]]:
+    """The mounts of a service as (source, target), after a check that each is read-only."""
+    mounts = service["volumes"]
+    writable = [mount["target"] for mount in mounts if not mount.get("read_only")]
+    assert not writable, f"these mounts are writable: {writable}"
+    return {(mount["source"], mount["target"]) for mount in mounts}
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_metadata_export_holds_no_secret_and_has_no_network(variant):
+    # Its environment holds no secret (see the table of holders above), so a failed assertion may
+    # print it. dbt ls needs neither a database nor the internet.
+    service = rendered(variant)["metadata-export"]
+    assert service["image"] == "agoranomos-airflow:local"
+    assert service["pull_policy"] == "never"
+    assert service["profiles"] == ["core"]
+    assert service["restart"] == "no"
+    assert service["user"] == "65534:65534"
+    assert service["network_mode"] == "none"
+    assert "networks" not in service
+    assert "ports" not in service
+    assert service["security_opt"] == ["no-new-privileges:true"]
+    assert service["entrypoint"] == ["python", "/opt/agoranomos/metabase/metadata.py", "export"]
+    assert service["tmpfs"] == ["/tmp"]  # noqa: S108 (a tmpfs in the container, for dbt)
+    assert "depends_on" not in service
+    mounts = {(m["source"], m["target"], bool(m.get("read_only"))) for m in service["volumes"]}
+    assert mounts == {
+        (str(REPO_ROOT / "dbt"), "/opt/agoranomos/dbt", True),
+        (str(REPO_ROOT / "metabase"), "/opt/agoranomos/metabase", True),
+        ("metadata-export", "/opt/agoranomos/metadata", False),
+    }
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_only_metadata_export_can_write_the_export(variant):
+    # The jobs that hold the admin password apply what the export says, so no other service may
+    # write it, and no Airflow service, which runs the code of the DAGs of the extensions folder,
+    # mounts it at all.
+    readers, writers = set(), set()
+    for name, service in rendered(variant).items():
+        for mount in service.get("volumes") or []:
+            if mount.get("source") == "metadata-export":
+                (readers if mount.get("read_only") else writers).add(name)
+    assert writers == {"metadata-export"}
+    assert readers == {"metabase-init", "demo-init"}
 
 
 # Metabase 0.63 has these on by default, and compose.yaml switches them off with environment
@@ -437,11 +505,13 @@ def test_metabase_init_keeps_the_constraints_of_a_one_shot_job(variant):
     assert init["user"] == "65534:65534"
     assert init["security_opt"] == ["no-new-privileges:true"]
     assert set(init["networks"]) == {"default"}
-    [mount] = init["volumes"]
-    assert mount["target"] == "/opt/agoranomos/metabase"
-    assert mount["source"].endswith("/metabase")
-    assert mount["read_only"] is True
+    assert job_mounts(init) == JOB_MOUNTS
     assert init["restart"] == "no"
+    conditions = {name: needed["condition"] for name, needed in init["depends_on"].items()}
+    assert conditions == {
+        "metabase": "service_healthy",
+        "metadata-export": "service_completed_successfully",
+    }
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
@@ -460,9 +530,7 @@ def test_demo_init_has_only_what_its_job_needs(variant):
     assert "ports" not in service
     assert service["image"] == rendered(variant)["metabase-init"]["image"]
     assert service["command"] == ["python", "/opt/agoranomos/metabase/demo_init.py"]
-    [volume] = service["volumes"]
-    assert (volume["target"], volume.get("read_only")) == ("/opt/agoranomos/metabase", True)
-    assert volume["source"] == str(REPO_ROOT / "metabase")
+    assert job_mounts(service) == JOB_MOUNTS
     waits_for = {
         "airflow-apiserver": "service_healthy",
         "airflow-scheduler": "service_healthy",

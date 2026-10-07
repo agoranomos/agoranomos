@@ -12,18 +12,18 @@ import ast
 import copy
 import json
 import math
-import socket
 import subprocess
 import sys
-import threading
 from datetime import UTC, datetime, timedelta
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import demo_init as di
+import metadata as md
 import pytest
+from metabase_stand_in import SAMPLE, FakeMetabase, free_port, metadata_env, serve
+from metabase_stand_in import leaked as leaked_in
 
 ENV = {
     # A quote and a backslash, which JSON escapes: the scan for secrets must find both forms.
@@ -34,6 +34,9 @@ ENV = {
     "WAREHOUSE_PORT": "5432",
     "WAREHOUSE_DB": "warehouse",
     "WAREHOUSE_USER": "metabase_reader",
+    # The files of the metadata: env_for points these at files that the fixture writes.
+    "METADATA_EXPORT": "/nonexistent/metadata.json",
+    "METADATA_OVERRIDES": "/nonexistent/overrides.toml",
 }
 # What demo-init must never print: the passwords that the tests pass in, and the tokens that the
 # stand-ins hand out. The assertions name them by label.
@@ -41,34 +44,15 @@ SECRETS = {
     "the Airflow password": ENV["AIRFLOW_ADMIN_PASSWORD"],
     "the Metabase password": ENV["METABASE_ADMIN_PASSWORD"],
     "the Airflow token": "airflow-token-1",
-    "the Metabase session": "metabase-session-1",
+    "the Metabase session": "session-from-login",
 }
-WAREHOUSE = {
-    "id": 2,
-    "name": "Agoranomos warehouse",
-    "engine": "postgres",
-    "details": {
-        "host": "warehouse-db",
-        "port": 5432,
-        "dbname": "warehouse",
-        "user": "metabase_reader",
-        "password": "**MetabasePass**",
-    },
-}
-SAMPLE = {"id": 1, "name": "Sample Database", "engine": "sqlite", "details": {"db": "sample"}}
 FINISHED = ("success", "failed")
 # The moment that 0 on the fake clock stands for, in the times that Airflow gives.
 START = datetime(2026, 10, 5, 6, 0, tzinfo=UTC)
 
 
 def leaked(text: str) -> list[str]:
-    """The labels of the secrets that are in the text, as they are or as JSON writes them inside a
-    string, where a quote and a backslash are escaped: a stand-in echoes a request as JSON."""
-    return [
-        label
-        for label, value in SECRETS.items()
-        if value in text or json.dumps(value)[1:-1] in text
-    ]
+    return leaked_in(text, SECRETS)
 
 
 def stamp(seconds: float) -> str:
@@ -264,162 +248,6 @@ def public(run: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in run.items() if key not in hidden}
 
 
-class FakeMetabase:
-    """What demo-init can see of Metabase 0.63: the warehouse, its metadata and the content.
-
-    A sync of the schema finds the mart sync_seconds later on the fake clock. A person can hide the
-    table of the mart (mart_hidden), as Admin > Table Metadata does: the metadata of the database
-    then leaves it out unless the request passes include_hidden=true, as Metabase 0.63.19 does with
-    every table that has a visibility type, and a sync does not show it again. The list of
-    collections holds the root collection and a personal one, and leaves out the archived ones, as
-    Metabase does; so do the items of a collection.
-    """
-
-    def __init__(self, clock: FakeClock) -> None:
-        self.clock = clock
-        self.url = ""
-        self.databases = [copy.deepcopy(SAMPLE), copy.deepcopy(WAREHOUSE)]
-        self.mart_known = False
-        self.mart_hidden = False
-        self.sync_seconds = 10.0
-        self.synced_at: float | None = None
-        self.items_as_list = False
-        self.collections: list[dict[str, Any]] = [
-            {"id": "root", "name": "Our analytics", "can_write": True},
-            {
-                "id": 3,
-                "name": "Agoranomos Admin's Personal Collection",
-                "location": "/",
-                "personal_owner_id": 1,
-                "archived": False,
-            },
-        ]
-        self.cards: dict[int, dict[str, Any]] = {}
-        self.dashboards: dict[int, dict[str, Any]] = {}
-        self.failures: dict[tuple[str, str], int] = {}
-        self.calls: list[tuple[str, str]] = []
-        self.next_id = 10
-
-    def new_id(self) -> int:
-        self.next_id += 1
-        return self.next_id
-
-    def tables(self, include_hidden: bool) -> list[dict[str, Any]]:
-        if self.synced_at is not None and self.clock.now >= self.synced_at:
-            self.mart_known = True
-        visibility = "hidden" if self.mart_hidden else None
-        known = [{"schema": "marts", "name": "ad_spend_daily", "visibility_type": visibility}]
-        tables = known if self.mart_known else []
-        return [t for t in tables if include_hidden or not t["visibility_type"]]
-
-    def items(self, collection_id: int, model: str) -> Any:
-        source = self.cards if model == "card" else self.dashboards
-        items = [
-            {"id": item_id, "name": item["name"], "model": model}
-            for item_id, item in source.items()
-            if item["collection_id"] == collection_id and not item.get("archived")
-        ]
-        return items if self.items_as_list else {"data": items, "total": len(items)}
-
-    def handle(self, method: str, url: str, body: Any, session: str | None) -> tuple[int, Any]:
-        path = urlsplit(url).path
-        query = parse_qs(urlsplit(url).query)
-        self.calls.append((method, path))
-        for (failing_method, failing_path), status in self.failures.items():
-            # A failing path that ends with a slash stands for every path under it.
-            prefix = failing_path.endswith("/") and path.startswith(failing_path)
-            if method == failing_method and (path == failing_path or prefix):
-                echo = {"body": body, "session": session, "token": "metabase-session-1"}
-                return status, echo
-        if (method, path) == ("POST", "/api/session"):
-            expected = {
-                "username": ENV["METABASE_ADMIN_EMAIL"],
-                "password": ENV["METABASE_ADMIN_PASSWORD"],
-            }
-            if body == expected:
-                return 200, {"id": "metabase-session-1"}
-            return 401, {"errors": {"password": "did not match stored password"}}
-        if session != "metabase-session-1":
-            return 401, "Unauthenticated"
-        warehouse_id = WAREHOUSE["id"]
-        if (method, path) == ("GET", "/api/database"):
-            return 200, {"data": self.databases, "total": len(self.databases)}
-        if (method, path) == ("GET", f"/api/database/{warehouse_id}/metadata"):
-            include_hidden = query.get("include_hidden") == ["true"]
-            return 200, {"id": warehouse_id, "tables": self.tables(include_hidden)}
-        if (method, path) == ("POST", f"/api/database/{warehouse_id}/sync_schema"):
-            if self.synced_at is None:
-                self.synced_at = self.clock.now + self.sync_seconds
-            return 200, {"status": "ok"}
-        if (method, path) == ("GET", "/api/collection"):
-            return 200, [c for c in self.collections if not c.get("archived")]
-        if (method, path) == ("POST", "/api/collection"):
-            collection = {
-                "id": self.new_id(),
-                "location": "/",
-                "personal_owner_id": None,
-                "archived": False,
-                **body,
-            }
-            self.collections.append(collection)
-            return 200, collection
-        if method == "GET" and path.startswith("/api/collection/") and path.endswith("/items"):
-            [model] = query["models"]
-            return 200, self.items(int(path.split("/")[3]), model)
-        if (method, path) == ("POST", "/api/card"):
-            card_id = self.new_id()
-            self.cards[card_id] = copy.deepcopy(body)
-            return 200, {"id": card_id, **body}
-        if (method, path) == ("POST", "/api/dashboard"):
-            dashboard_id = self.new_id()
-            self.dashboards[dashboard_id] = {**copy.deepcopy(body), "dashcards": []}
-            return 200, {"id": dashboard_id, **body}
-        if path.startswith("/api/dashboard/"):
-            dashboard_id = int(path.split("/")[3])
-            if dashboard_id in self.dashboards:
-                dashboard = self.dashboards[dashboard_id]
-                if method == "GET":
-                    return 200, {"id": dashboard_id, **dashboard}
-                if method == "PUT":
-                    # Metabase gives each new dashcard (a negative id) an id of its own.
-                    dashboard["dashcards"] = [
-                        {**dashcard, "id": self.new_id()} if dashcard["id"] < 0 else dashcard
-                        for dashcard in body["dashcards"]
-                    ]
-                    return 200, {"id": dashboard_id, **dashboard}
-        return 404, "Not found"
-
-
-def serve(state: Any, header: str) -> ThreadingHTTPServer:
-    """Serve a stand-in on a free local port. It answers with the JSON of what its handle gives,
-    or with the bytes themselves, which stand for a page that is not JSON."""
-
-    class Handler(BaseHTTPRequestHandler):
-        def serve(self) -> None:
-            length = int(self.headers.get("Content-Length") or 0)
-            body = json.loads(self.rfile.read(length)) if length else None
-            status, payload = state.handle(self.command, self.path, body, self.headers.get(header))
-            data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-
-        do_GET = do_POST = do_PUT = do_PATCH = serve
-
-        def log_message(self, *args: object) -> None:
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(
-        target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
-    )
-    thread.start()
-    state.url = f"http://127.0.0.1:{server.server_address[1]}"
-    return server
-
-
 @pytest.fixture(autouse=True)
 def clock(monkeypatch):
     fake = FakeClock()
@@ -438,8 +266,13 @@ def airflow(clock):
 
 
 @pytest.fixture
-def metabase(clock):
+def metabase(clock, tmp_path):
+    # A Metabase that metabase-init has set up, and a warehouse in which the demo pipeline has
+    # built the mart, which Metabase knows after a sync.
     state = FakeMetabase(clock)
+    state.set_up(ENV["METABASE_ADMIN_EMAIL"], ENV["METABASE_ADMIN_PASSWORD"])
+    state.mart_in_warehouse = True
+    state.files = metadata_env(tmp_path)
     server = serve(state, "X-Metabase-Session")
     yield state
     server.shutdown()
@@ -447,25 +280,43 @@ def metabase(clock):
 
 
 def env_for(airflow: FakeAirflow, metabase: FakeMetabase, **overrides: str) -> dict[str, str]:
-    return {**ENV, "AIRFLOW_URL": airflow.url, "METABASE_URL": metabase.url, **overrides}
+    return {
+        **ENV,
+        "AIRFLOW_URL": airflow.url,
+        "METABASE_URL": metabase.url,
+        **metabase.files,
+        **overrides,
+    }
 
 
-def one_line(capsys: pytest.CaptureFixture[str]) -> str:
+# The lines that demo-init prints for the metadata, each as soon as its write is done.
+METADATA_LINES = tuple(f"demo-init: {kind}: " for kind in (md.FIRST, md.UPDATE, md.REVERT))
+
+
+# The calls that demo-init makes after it applied the metadata of the marts: a failure of one of
+# them comes after the lines of the changes that apply() made.
+AFTER_APPLY = {
+    ("PUT", "/api/field/"),
+    ("POST", "/api/card"),
+    ("PUT", "/api/dashboard/"),
+    ("POST", "/api/collection"),
+}
+
+
+def one_line(capsys: pytest.CaptureFixture[str], *, after_apply: bool = False) -> str:
     """The line that demo-init prints when it fails: one line on standard error, which names the
-    step, with no traceback and no secret."""
+    step, with no traceback and no secret. Standard output is empty, or, for a failure after the
+    metadata was applied, holds no more than the lines of the changes that it made."""
     output = capsys.readouterr()
-    assert output.out == ""
+    if after_apply:
+        assert all(line.startswith(METADATA_LINES) for line in output.out.splitlines()), output.out
+    else:
+        assert output.out == "", output.out
     assert "Traceback" not in output.err
-    assert not leaked(output.err), leaked(output.err)
+    assert not leaked(output.out + output.err), leaked(output.out + output.err)
     [line] = output.err.splitlines()
     assert line.startswith("demo-init: ")
     return line
-
-
-def free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
 
 
 def test_the_scan_finds_a_secret_in_the_json_of_an_echo():
@@ -502,8 +353,10 @@ def test_a_first_start_runs_the_pipeline_and_creates_the_demo(airflow, metabase,
     )
     out = capsys.readouterr()
     assert out.err == ""
-    [line] = out.out.splitlines()
+    *metadata_lines, line = out.out.splitlines()
     assert line.startswith("demo-init: the demo pipeline ran now")
+    # The metadata of the mart, applied after the sync: one line for each change.
+    assert "demo-init: first fill: marts.ad_spend_daily display_name: " in metadata_lines[0]
     assert not leaked(out.out + out.err)
 
 
@@ -761,7 +614,12 @@ def test_a_wrong_metabase_password_names_the_settings(airflow, metabase, capsys)
 
 
 def test_an_airflow_that_cannot_be_reached_is_named_with_the_class_of_the_error(metabase, capsys):
-    env = {**ENV, "AIRFLOW_URL": f"http://127.0.0.1:{free_port()}", "METABASE_URL": metabase.url}
+    env = {
+        **ENV,
+        "AIRFLOW_URL": f"http://127.0.0.1:{free_port()}",
+        "METABASE_URL": metabase.url,
+        **metabase.files,
+    }
     assert di.main(env) == 1
     line = one_line(capsys)
     assert "POST /auth/token failed: URLError (ConnectionRefusedError)" in line
@@ -779,6 +637,7 @@ def test_an_airflow_that_cannot_be_reached_is_named_with_the_class_of_the_error(
         ("airflow", ("GET", f"/api/v2/dags/{di.TRANSFORM_DAG}/assets/queuedEvents")),
         ("metabase", ("POST", "/api/session")),
         ("metabase", ("POST", "/api/database/2/sync_schema")),
+        ("metabase", ("PUT", "/api/field/")),
         ("metabase", ("POST", "/api/card")),
         ("metabase", ("PUT", "/api/dashboard/")),
         ("metabase", ("POST", "/api/collection")),
@@ -788,7 +647,7 @@ def test_a_failed_call_names_the_step_and_prints_no_secret(airflow, metabase, ca
     # The stand-ins answer a failure by echoing the request with its credentials, the worst case.
     (airflow if side == "airflow" else metabase).failures[call] = 500
     assert di.main(env_for(airflow, metabase)) == 1
-    line = one_line(capsys)
+    line = one_line(capsys, after_apply=call in AFTER_APPLY)
     assert f"{call[0]} {call[1]}" in line
     assert "HTTP 500" in line
 
@@ -815,7 +674,7 @@ def test_an_answer_of_an_unexpected_shape_ends_in_one_line(
     # where to look, never the answer.
     (airflow if side == "airflow" else metabase).failures[call] = 200
     assert di.main(env_for(airflow, metabase)) == 1
-    line = one_line(capsys)
+    line = one_line(capsys, after_apply=call in AFTER_APPLY)
     assert f"an answer of {server} had an unexpected shape (KeyError in {function})" in line
     hint = "airflow-apiserver" if server == "Airflow" else "metabase"
     assert line.endswith(f"See ./agoranomos logs {hint}.")
@@ -1021,7 +880,7 @@ def test_the_script_runs_as_compose_runs_it():
     assert "Traceback" not in result.stderr
 
 
-def test_the_module_imports_only_the_standard_library_and_metabase_init():
+def test_the_module_imports_only_the_standard_library_and_the_other_jobs():
     tree = ast.parse(Path(di.__file__).read_text(encoding="utf-8"))
     imported: set[str] = set()
     for node in ast.walk(tree):
@@ -1029,5 +888,122 @@ def test_the_module_imports_only_the_standard_library_and_metabase_init():
             imported |= {alias.name.split(".")[0] for alias in node.names}
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             imported.add(node.module.split(".")[0])
-    allowed = set(sys.stdlib_module_names) | {"metabase_init"}
+    allowed = set(sys.stdlib_module_names) | {"metabase_init", "metadata"}
     assert imported <= allowed, sorted(imported - allowed)
+
+
+def settings_of(metabase: FakeMetabase, name: str) -> dict[str, Any]:
+    [card] = [card for card in metabase.cards.values() if card["name"] == name]
+    return card["visualization_settings"]
+
+
+def test_new_questions_get_the_titles_of_their_columns_and_axes(airflow, metabase):
+    assert di.main(env_for(airflow, metabase)) == 0
+    by_campaign = settings_of(metabase, "Spend by campaign, last 7 days")
+    assert by_campaign["column_settings"] == {
+        '["name","campaign_name"]': {"column_title": "Campaign Name"},
+        '["name","spend"]': {"column_title": "Spend"},
+    }
+    assert by_campaign["graph.x_axis.title_text"] == "Campaign Name"
+    assert by_campaign["graph.y_axis.title_text"] == "Spend"
+    assert settings_of(metabase, "Spend by day")["graph.x_axis.title_text"] == "Report Date"
+    # A number has no axes.
+    assert settings_of(metabase, "Spend, last 7 days") == {
+        "column_settings": {'["name","spend"]': {"column_title": "Spend"}}
+    }
+
+
+def test_the_titles_come_from_the_overrides_of_the_deployment(airflow, metabase, tmp_path):
+    overrides = "[marts.ad_spend_daily.columns.spend]\ndisplay_name = 'Cost'\n"
+    metabase.files = metadata_env(tmp_path, overrides=overrides)
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert settings_of(metabase, "Spend by day")["graph.y_axis.title_text"] == "Cost"
+    assert metabase.field("spend")["display_name"] == "Cost"
+
+
+def test_a_question_that_exists_gets_only_the_titles_that_it_lacks(airflow, metabase):
+    assert di.main(env_for(airflow, metabase)) == 0
+    settings = settings_of(metabase, "Spend by day")
+    settings["graph.x_axis.title_text"] = "Day"  # a title of a person
+    del settings["graph.y_axis.title_text"]  # as on a question made before the titles
+    spend = settings["column_settings"]['["name","spend"]']
+    del spend["column_title"]
+    spend["decimals"] = 0  # a format of a person
+    assert di.main(env_for(airflow, metabase)) == 0
+    settings = settings_of(metabase, "Spend by day")
+    assert settings["graph.x_axis.title_text"] == "Day"
+    assert settings["graph.y_axis.title_text"] == "Spend"
+    assert settings["column_settings"]['["name","spend"]'] == {
+        "decimals": 0,
+        "column_title": "Spend",
+    }
+    assert settings["graph.dimensions"] == ["report_date"]
+
+
+def test_a_mistake_in_the_overrides_stops_demo_init_before_it_writes(
+    airflow, metabase, tmp_path, capsys
+):
+    metabase.files = metadata_env(tmp_path, overrides="[marts.ad_spend_daily]\ndisplay_name = 7\n")
+    assert di.main(env_for(airflow, metabase)) == 1
+    line = one_line(capsys)
+    assert line == (
+        "demo-init: overrides.toml: marts.ad_spend_daily.display_name: a text in quotes is "
+        "expected, not int"
+    )
+    assert airflow.calls == []
+    assert metabase.calls == []
+
+
+def test_demo_init_applies_the_metadata_after_its_sync(airflow, metabase, capsys):
+    assert di.main(env_for(airflow, metabase)) == 0
+    sync = metabase.calls.index(("POST", "/api/database/2/sync_schema"))
+    field_puts = [
+        i for i, call in enumerate(metabase.calls) if call[0] == "PUT" and "/api/field/" in call[1]
+    ]
+    assert field_puts
+    assert min(field_puts) > sync
+    assert metabase.field("conversions")["display_name"] == "Conversions"
+
+
+def test_a_later_step_that_fails_leaves_the_lines_of_the_metadata_in_the_log(
+    airflow, metabase, capsys
+):
+    # demo-init applies the metadata before it makes the demo content. The next start finds nothing
+    # to change in the metadata, so the lines of what it applied, with the values that they
+    # replaced, must be in the log when a later step fails.
+    metabase.failures[("POST", "/api/collection")] = 500
+    assert di.main(env_for(airflow, metabase)) == 1
+    output = capsys.readouterr()
+    applied = output.out.splitlines()
+    assert applied[0] == (
+        'demo-init: first fill: marts.ad_spend_daily display_name: "Ad Spend Daily" -> '
+        '"Ad Spend by Day"'
+    )
+    assert all(line.startswith("demo-init: first fill: ") for line in applied), applied
+    [line] = output.err.splitlines()
+    assert line.startswith("demo-init: POST /api/collection failed with HTTP 500")
+    assert metabase.mart_table()["display_name"] == "Ad Spend by Day"
+    assert not leaked(output.out + output.err)
+
+
+def test_the_lines_of_the_metadata_reach_the_log_of_a_process_before_its_error(airflow, metabase):
+    # As a container runs it, with its standard output a pipe that Python buffers: each line is
+    # flushed as it is printed, so the log has the lines of the metadata before the line of the
+    # error. The pipeline ran before and Metabase knows the mart, so the process waits for nothing.
+    airflow.add_run(di.TRANSFORM_DAG, "success", at=-10)
+    metabase.mart_known = True
+    metabase.failures[("POST", "/api/collection")] = 500
+    result = subprocess.run(
+        [sys.executable, str(Path(di.__file__))],
+        env=env_for(airflow, metabase),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 1
+    *applied, error = result.stdout.splitlines()
+    assert applied, "no line of the metadata before the error"
+    assert all(line.startswith("demo-init: first fill: ") for line in applied), applied
+    assert error.startswith("demo-init: POST /api/collection failed with HTTP 500")
+    assert not leaked(result.stdout)

@@ -119,7 +119,7 @@ Decision records: [ADR-0002: Orchestrate with Apache Airflow 3](../adr/0002-orch
 
 ## Explore: Metabase
 
-Metabase OSS reads only the `marts` schema, through the `metabase_reader` role. It comes with ready-made dashboards, metrics and a glossary. Two one-shot jobs set Metabase up through its API: `metabase-init` creates the admin and connects the warehouse, and, with the demo profile, `demo-init` creates the demo collection, its questions and its dashboard from code after it runs the demo pipeline once ([See the demo](../how-to/see-the-demo.md)). The built-in MCP server (available since Metabase 0.60) stays off until the permissions of AI access are decided in an ADR, before the AI layer ships.
+Metabase OSS reads only the `marts` schema, through the `metabase_reader` role. It comes with ready-made dashboards, metrics and a glossary. Two one-shot jobs set Metabase up through its API: `metabase-init` creates the admin and connects the warehouse, and, with the demo profile, `demo-init` creates the demo collection, its questions and its dashboard from code after it runs the demo pipeline once ([See the demo](../how-to/see-the-demo.md)). On every start, `metabase-init` also applies the metadata of the marts: the display names, descriptions and semantic types that the one-shot `metadata-export` job reads from the dbt project with `dbt ls`, and the overrides of a deployment in `extensions/metadata/overrides.toml` ([Rename a field or add your own definitions](../how-to/rename-a-field.md)). The code always wins: an edit of these in the Metabase UI is reverted at the next start, and the log of the job says so ([ADR-0016](../adr/0016-keep-the-metadata-of-the-marts-as-code.md)). `demo-init` applies them as well, after its sync, and gives the demo questions the titles of their columns. The built-in MCP server (available since Metabase 0.60) stays off until the permissions of AI access are decided in an ADR, before the AI layer ships.
 
 Decision record: [ADR-0006: Use Metabase as the BI layer](../adr/0006-metabase-as-bi.md).
 
@@ -148,7 +148,7 @@ Decision records: [ADR-0007: Give AI clients least-privilege access through MCP]
 
 The stack runs as one Docker Compose project, split into profiles so that you start only what you need:
 
-* `core`: both PostgreSQL instances, Airflow and Metabase, plus the one-shot jobs that initialize them (database migrations, users and the first Metabase setup). The CeleryExecutor variant of Airflow adds the broker and a worker to it.
+* `core`: both PostgreSQL instances, Airflow and Metabase, plus the one-shot jobs that initialize them (database migrations, users, the first Metabase setup, and the export and application of the metadata of the marts). The CeleryExecutor variant of Airflow adds the broker and a worker to it.
 * `demo`: the one-shot `demo-init` job, which makes the demo ready on the first start; `.env` turns it on by default ([See the demo](../how-to/see-the-demo.md)).
 * `ai`: one container with the Airflow, Toolbox and dbt MCP servers, reached over stdio with `docker exec`.
 * `flower`: Celery monitoring, for the CeleryExecutor variant only.

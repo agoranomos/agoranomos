@@ -242,7 +242,7 @@ cmd_init() {
     say "Generated secrets in .env:$generated"
     say "Keep a copy of .env in a password manager: a restored backup needs its keys to decrypt the saved connections."
   fi
-  mkdir -p "$(extensions_path)/dags"
+  mkdir -p "$(extensions_path)/dags" "$(extensions_path)/metadata"
 }
 
 # True when version $1 is at least version $2. A leading v and suffixes such as -rc1 are ignored.
@@ -430,12 +430,12 @@ EOF
 }
 
 # Wait until every long-running service is healthy (or running, if it has no health check) and every
-# one-shot job (its name ends in -init) has exited with 0. A service that is not ready yet is named
-# with what it is doing, as name (state) or name (state, health). Only the services of the active
-# profiles count: docker compose ps lists every container of the project, also one that a start with
-# another profile left behind, such as a failed demo-init after COMPOSE_PROFILES=core. A failed
-# demo-init alone does not stop the wait: the rest of the stack works without the demo, so the wait
-# goes on until the rest is ready, and then sets demo_failed=1 for cmd_up.
+# one-shot job (its name ends in -init or -export) has exited with 0. A service that is not ready
+# yet is named with what it is doing, as name (state) or name (state, health). Only the services of
+# the active profiles count: docker compose ps lists every container of the project, also one that a
+# start with another profile left behind, such as a failed demo-init after COMPOSE_PROFILES=core. A
+# failed demo-init alone does not stop the wait: the rest of the stack works without the demo, so
+# the wait goes on until the rest is ready, and then sets demo_failed=1 for cmd_up.
 # AGORANOMOS_WAIT_TIMEOUT and AGORANOMOS_WAIT_INTERVAL, in seconds, are hooks for the tests: how long
 # to wait at most (default 900) and how long to sleep between two looks (default 5).
 wait_healthy() {
@@ -456,7 +456,7 @@ wait_healthy() {
       case "$active" in *" $service "*) ;; *) continue ;; esac
       seen=1
       case "$service" in
-        *-init)
+        *-init | *-export)
           case "$state:$exit_code" in
             exited:0) ;;
             exited:* | dead:*) failed="$failed $service" ;;
@@ -550,6 +550,40 @@ cmd_logs() {
   fi
 }
 
+# True when the container of Metabase runs and is healthy.
+metabase_is_up() {
+  compose ps --all --format '{{.Service}}|{{.State}}|{{.Health}}|{{.ExitCode}}' 2> /dev/null |
+    grep -q '^metabase|running|healthy|'
+}
+
+# Stop the dry run with 2, the code of a check that could not run: a failure of metadata diff never
+# looks like the 1 of a plan that is not empty.
+check_failed() {
+  printf 'error: %s\n' "$*" >&2
+  exit 2
+}
+
+# The dry run of the metadata of the marts: metabase-init, in a container of its own, prints what it
+# would change in Metabase, and changes nothing. It exits with 0 when Metabase shows what the code
+# says, with 1 when the plan is not empty, and with 2 when the check could not run.
+cmd_metadata() {
+  if [ "$#" -ne 1 ] || [ "$1" != diff ]; then
+    check_failed "usage: ./agoranomos metadata diff"
+  fi
+  metabase_is_up || check_failed "Metabase is not running: start the stack with ./agoranomos up"
+  # The job answers 0, 3 for a plan to apply, or 2. docker compose run exits with 1 when it fails
+  # itself (Compose 5.5.1), so the job keeps 1 out of its answers, and any code that it does not
+  # give is a check that could not run.
+  code=0
+  compose run --rm --no-deps -T metabase-init \
+    python /opt/agoranomos/metabase/metabase_init.py diff || code=$?
+  case "$code" in
+    0 | 2) exit "$code" ;;
+    3) exit 1 ;;
+    *) check_failed "the dry run did not finish (exit code $code); the error above names the cause" ;;
+  esac
+}
+
 cmd_help() {
   print_banner
   usage
@@ -566,6 +600,7 @@ Commands:
   down          Stop the stack; the data stays in its Docker volumes
   status        Show the state and health of every service
   logs          Show the logs: the last 200 lines, or pass options and services to docker compose logs
+  metadata      metadata diff: show what up would change in the metadata of the marts in Metabase
   help          Show this help
 
 Documentation: docs/reference/command-line.md
@@ -582,6 +617,7 @@ main() {
     down) cmd_down "$@" ;;
     status) cmd_status "$@" ;;
     logs) cmd_logs "$@" ;;
+    metadata) cmd_metadata "$@" ;;
     help | -h | --help) cmd_help ;;
     *)
       usage >&2
