@@ -29,9 +29,10 @@ The tables and columns go by their names in the warehouse, the ones that a SQL q
 - Each value is a text in quotes. A display name is one line of at most 100 characters, a description or a note at most 2,000 characters, and the file at most 256 KiB.
 - A mistake stops `metabase-init` before it writes anything, with one line that names the entry, and `up` fails: fix the file and run `up` again. The same happens after an upgrade that renames or removes a column that your file names: rename the entry, or delete it.
 - To go back to the name or the description of the release, delete the entry and run `up`.
+- A change or the removal of an entry shows in the log as the `revert of an edit`, with the value of the entry before: the jobs keep no copy of the earlier file, so they cannot tell it from an edit in the Metabase UI.
 - Two columns of a table cannot get one display name.
 - Metabase OSS shows one name for each field, to everyone, so names in another language are for the whole deployment. Keep the English word in a note, so that a question asked in English still finds the field.
-- It changes Metabase only: SQL clients and AI clients that read the warehouse see the comments of the release.
+- It changes Metabase only: SQL clients, and the planned AI access to the warehouse, see the comments of the release.
 
 A description is not an instruction: write facts about the data, and never copy text from an ad platform into the file, because anyone can write that text.
 

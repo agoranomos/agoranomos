@@ -60,7 +60,7 @@ The marts declare them under `config: meta: metabase:`, with the key names of [d
 | Money, when the whole table has one currency and tests assert it | `type/Currency`, with `currency` | `spend` |
 | Any other number, such as a count that can be fractional | `null` | `conversions` |
 
-`type/Quantity` is for whole numbers: Metabase defines it under its integer types (as of Metabase 0.63.19). `null` declares that the column has no type of its own: the jobs that apply the metadata then clear a type that Metabase guessed, or that someone set in its UI.
+`type/Quantity` is for whole numbers: Metabase defines it under its integer types (as of Metabase 0.63.19). `null` declares that the column has no type of its own: the jobs that apply the metadata then clear a type that Metabase guessed, or that someone set in its UI. A column without the key would keep the type that Metabase shows, and the tests require the key on every column of a mart.
 
 **Money and its currency.** `type/Currency` and the types under it, such as `type/Cost`, go together with `currency`, and only in a mart whose column `currency` has an `accepted_values` test with that one code and a `not_null` test: `accepted_values` lets NULL through. The demo is in USD only. In a mart that mixes currencies, the columns of money stay plain numbers, and their descriptions name the column of the currency.
 

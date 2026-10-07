@@ -46,7 +46,7 @@ Prints [the banner](#the-banner), runs `init` and `preflight`, starts the stack 
 
 `./agoranomos metadata diff` shows what the next `up` would change in the metadata of the marts in Metabase: the display names, descriptions and semantic types that the dbt project and the overrides of the deployment give the tables and fields of the marts ([Configuration](configuration.md#the-metadata-of-the-marts)). It runs `metabase-init` in a container of its own, which prints one line for each change, and changes nothing. It needs Metabase to be running, and it reads the export that the last `up` made: after a change to the dbt project, run `up` first.
 
-It exits with 0 when Metabase shows what the code says, with 1 when there is something to change, and with 2 when the check could not run, with one line that says why.
+It exits with 0 when Metabase shows what the code says, with 1 when there is something to change, and with 2 when the check could not run, also when Docker Compose could not start its container, with one line that says why.
 
 ## `down`
 
