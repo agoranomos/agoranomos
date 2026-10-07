@@ -313,5 +313,6 @@ def test_demo_init_gives_a_question_the_title_that_it_lacks(env, metabase_url, s
         assert settings.get("graph.y_axis.title_text") == spend.display_name
         assert settings["graph.dimensions"] == ["report_date"]
     finally:
-        status, _ = http_json("PUT", card_path, {"visualization_settings": before}, headers=session)
-        assert status == 200, f"PUT /api/card/{card_id} answered HTTP {status} on the way back"
+        # No assert here: it would hide the failure of the test when the way back fails too.
+        back, _ = http_json("PUT", card_path, {"visualization_settings": before}, headers=session)
+    assert back == 200, f"PUT /api/card/{card_id} answered HTTP {back} on the way back"

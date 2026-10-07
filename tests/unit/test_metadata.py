@@ -743,6 +743,24 @@ def test_a_table_that_metabase_shows_without_its_fields_is_waited_for(tmp_path, 
     assert not any("does not show this column" in line for line in lines), lines
 
 
+def test_a_column_that_the_warehouse_does_not_have_yet_needs_no_sync(tmp_path):
+    # After a release that adds a column, the warehouse keeps the old table until dbt rebuilds the
+    # mart. A table that Metabase shows with a field for every column that the warehouse has needs
+    # no sync and no wait: otherwise every start would wait for a column that no sync can bring.
+    marts = loaded(tmp_path)
+    columns = [c.name for c in marts.effective[MART].columns if c.name != "conversions"]
+    fields = [{"id": 90 + i, "name": name, "parent_id": None} for i, name in enumerate(columns)]
+    table = {"id": 9, "schema": "marts", "name": "ad_spend_daily", "fields": fields}
+
+    class Warehouse:
+        def call(self, method: str, path: str, body: Any = None) -> Any:
+            assert (method, path) == ("POST", "/api/dataset")
+            rows = [["marts", "ad_spend_daily", name] for name in columns]
+            return {"status": "completed", "data": {"rows": rows}}
+
+    assert md.sync_needed(Warehouse(), 2, marts, {"tables": [table]}) == md.Sync(tables={})
+
+
 def test_a_column_that_metabase_does_not_show_is_a_note_that_says_when_it_comes(tmp_path):
     # As after a release that adds or renames a column: the warehouse keeps the old table until dbt
     # rebuilds the mart, and Metabase shows the new column only after the sync that follows.
