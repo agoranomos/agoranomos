@@ -53,7 +53,7 @@ In practice this means:
 * Bad, because an edit in the Metabase UI does not last, which surprises a person who did not read the docs. The log and the dry run make it visible; they cannot make it impossible, as Metabase OSS has no lock.
 * Bad, because an override hides later improvements of the base for its property. A `note` does not, so the docs advise it for descriptions.
 * Bad, because the overrides reach Metabase only: the comments of the warehouse and dbt keep the words of the base.
-* Bad, because a mart, or a column that a release adds or renames, that a DAG run creates after a start gets its descriptions at the next sync of Metabase, from the comments, and its display names and types only at the next start.
+* Bad, because a mart that a DAG run creates after a start, or a column that a release adds or renames once dbt rebuilds the mart, gets its descriptions at the next sync of Metabase, from the comments, and its display names and types only at the next start.
 * Bad, because Metabase OSS has one display name for each field, so a deployment that uses its own language uses it for everyone.
 
 ## More Information
