@@ -18,7 +18,7 @@ flags:
 models:
   agoranomos:
     # dbt writes the descriptions into the comments of the tables, views and columns that it
-    # builds, for SQL clients and AI access (docs/reference/describe-the-marts.md).
+    # builds, for SQL clients and the planned AI access (docs/reference/describe-the-marts.md).
     +persist_docs:
       relation: true
       columns: true

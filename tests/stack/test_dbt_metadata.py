@@ -38,6 +38,7 @@ KEYS = (
     "test_metadata",
 )
 # The layers whose models and columns all need a description, and the one that Metabase shows.
+# Every check below takes the layers from here, the check of the comments too.
 LAYERS = ("staging", "marts")
 MARTS = "marts"
 # The semantic types that Metabase shows as money: type/Currency and the types under it.
@@ -70,18 +71,19 @@ SMALL_WORDS = {
 ABBREVIATIONS = {"ID", "CTR", "CPC", "CPM", "CPA", "ROAS", "ISO"}
 LOAD = "agoranomos_demo_load"
 TRANSFORM = "agoranomos_demo_transform"
-# The comments of the relations of the layers, and of their columns, as one JSON document:
-# [schema, relation, column or null, comment or null]. A comment may hold any character.
+# The comments of the tables and views of the warehouse outside the catalogs of PostgreSQL, and of
+# their columns, as one JSON document: [schema, relation, column or null, comment or null]. A
+# comment may hold any character. comment_problems keeps the relations that dbt builds in LAYERS.
 COMMENTS = """
 SELECT coalesce(json_agg(item), '[]') FROM (
   SELECT json_build_array(n.nspname, c.relname, NULL, obj_description(c.oid, 'pg_class')) AS item
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE n.nspname IN ('staging', 'marts') AND c.relkind IN ('r', 'v')
+  WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND c.relkind IN ('r', 'v')
   UNION ALL
   SELECT json_build_array(n.nspname, c.relname, a.attname, col_description(c.oid, a.attnum))
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
   JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
-  WHERE n.nspname IN ('staging', 'marts') AND c.relkind IN ('r', 'v')
+  WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND c.relkind IN ('r', 'v')
 ) AS comments
 """
 PRIMARY_KEY = (
@@ -213,14 +215,18 @@ def different_descriptions(nodes: list[dict[str, Any]]) -> list[str]:
 
 def currency_problems(nodes: list[dict[str, Any]]) -> list[str]:
     """The mart columns that are money in Metabase without one currency for the whole table: a
-    currency type and a currency code go together, and an accepted_values test of the column
-    currency of the model must allow that one code and no other."""
-    tested = {}
+    currency type and a currency code go together, an accepted_values test of the column currency
+    of the model must allow that one code and no other, and a not_null test of that column must
+    go with it, as accepted_values lets NULL through."""
+    allowed, not_null = {}, set()
     for node in nodes:
         test = node.get("test_metadata") or {}
-        is_one_of = node["resource_type"] == "test" and test.get("name") == "accepted_values"
-        if is_one_of and node.get("column_name") == "currency":
-            tested[node["attached_node"]] = list((test.get("kwargs") or {}).get("values") or [])
+        if node["resource_type"] != "test" or node.get("column_name") != "currency":
+            continue
+        if test.get("name") == "accepted_values":
+            allowed[node["attached_node"]] = list((test.get("kwargs") or {}).get("values") or [])
+        elif test.get("name") == "not_null":
+            not_null.add(node["attached_node"])
     problems = []
     for node in models(nodes, (MARTS,)):
         for column in node["columns"].values():
@@ -231,8 +237,11 @@ def currency_problems(nodes: list[dict[str, Any]]) -> list[str]:
                 continue
             if is_money != (code is not None):
                 problems.append(f"{where}: a currency type and a currency code go together")
-            elif tested.get(node["unique_id"]) != [code]:
+                continue
+            if allowed.get(node["unique_id"]) != [code]:
                 problems.append(f"{where}: no accepted_values test allows only {code}")
+            if node["unique_id"] not in not_null:
+                problems.append(f"{where}: no not_null test keeps currency from being NULL")
     return problems
 
 
@@ -286,34 +295,78 @@ def contract_problems(nodes: list[dict[str, Any]]) -> list[str]:
     return problems
 
 
+def wanted_comments(nodes: list[dict[str, Any]]) -> dict[tuple[str, str, str | None], str]:
+    """The comment that each relation of a model of the layers, and each column that dbt declares
+    for it, should carry: its description, by (schema, relation, column or None)."""
+    wanted: dict[tuple[str, str, str | None], str] = {}
+    for node in models(nodes):
+        wanted[(node["schema"], node["name"], None)] = node["description"]
+        for name, column in node["columns"].items():
+            wanted[(node["schema"], node["name"], name)] = column["description"]
+    return wanted
+
+
+def dotted(key: tuple[str, str, str | None]) -> str:
+    """schema.relation, or schema.relation.column."""
+    return ".".join(part for part in key if part)
+
+
+def comment_problems(
+    stored: dict[tuple[str, str, str | None], str | None],
+    wanted: dict[tuple[str, str, str | None], str],
+) -> list[str]:
+    """What the warehouse holds against what dbt declares, for each relation that dbt builds in the
+    layers: a relation or a declared column that the warehouse lacks, a column of the warehouse
+    that dbt does not declare, so that it has no description, and a comment that is empty or is not
+    the description. A relation that no model builds is not dbt's to describe."""
+    relations = {key[:2] for key in wanted}
+    physical = {key for key in stored if key[:2] in relations}
+    lacking, undeclared = wanted.keys() - physical, physical - wanted.keys()
+    problems = [f"{dotted(key)}: the warehouse does not have it" for key in lacking]
+    problems += [f"{dotted(key)}: dbt does not declare it" for key in undeclared]
+    for key in physical & wanted.keys():
+        if not (stored[key] or "").strip():
+            problems.append(f"{dotted(key)}: no comment")
+        elif stored[key] != wanted[key]:
+            problems.append(f"{dotted(key)}: the comment is not the description")
+    return sorted(problems)
+
+
 def test_every_model_column_and_source_table_has_a_description(nodes):
-    assert not missing_descriptions(nodes), missing_descriptions(nodes)
+    problems = missing_descriptions(nodes)
+    assert not problems, problems
 
 
 def test_no_description_starts_or_ends_with_white_space(nodes):
     # A multi-line description is folded with >-, which leaves no line break at its end.
-    assert not ragged_descriptions(nodes), ragged_descriptions(nodes)
+    problems = ragged_descriptions(nodes)
+    assert not problems, problems
 
 
 def test_every_mart_and_its_columns_have_a_display_name_and_a_semantic_type(nodes):
-    assert not missing_metabase_metadata(nodes), missing_metabase_metadata(nodes)
+    problems = missing_metabase_metadata(nodes)
+    assert not problems, problems
 
 
 def test_columns_with_the_same_name_have_the_same_description(nodes):
     # A column of more than one model takes its description from the doc block of its name.
-    assert not different_descriptions(nodes), different_descriptions(nodes)
+    problems = different_descriptions(nodes)
+    assert not problems, problems
 
 
 def test_a_column_is_money_only_where_a_test_allows_one_currency(nodes):
-    assert not currency_problems(nodes), currency_problems(nodes)
+    problems = currency_problems(nodes)
+    assert not problems, problems
 
 
 def test_the_display_names_follow_the_style(nodes):
-    assert not style_problems(nodes), style_problems(nodes)
+    problems = style_problems(nodes)
+    assert not problems, problems
 
 
 def test_every_mart_has_an_enforced_contract(nodes):
-    assert not contract_problems(nodes), contract_problems(nodes)
+    problems = contract_problems(nodes)
+    assert not problems, problems
 
 
 def column(name: str, description: str = "A text.", **metabase: str) -> dict[str, Any]:
@@ -335,7 +388,8 @@ def test_the_checks_find_what_they_look_for():
         "name": "mart",
         "description": "A mart.\n",
         "config": {"contract": {"enforced": False}},
-        "meta": {"metabase": {"display_name": "A Mart"}},
+        # No display name for the table.
+        "meta": {},
         "columns": {
             "spend": column("spend", display_name="Spend", semantic_type="type/Currency"),
             "cost": column("cost", "", display_name="Account Id", currency="EUR"),
@@ -343,6 +397,8 @@ def test_the_checks_find_what_they_look_for():
             "budget": column(
                 "budget", display_name="Budget", semantic_type="type/Cost", currency="USD"
             ),
+            # No display name, and a semantic type that is not one of Metabase.
+            "reach": column("reach", semantic_type="Quantity"),
         },
     }
     staging = {
@@ -370,18 +426,30 @@ def test_the_checks_find_what_they_look_for():
         "column_name": "currency",
         "test_metadata": {"name": "accepted_values", "kwargs": {"values": ["USD", "EUR"]}},
     }
-    planted = [mart, staging, source, test]
+    # A not_null test of another column, so currency can still be NULL.
+    not_null = {
+        "unique_id": "test.x.not_null",
+        "resource_type": "test",
+        "attached_node": "model.x.mart",
+        "column_name": "spend",
+        "test_metadata": {"name": "not_null", "kwargs": {}},
+    }
+    planted = [mart, staging, source, test, not_null]
     assert missing_descriptions(planted) == ["mart.cost", "source.x.raw.table", "staging"]
     assert ragged_descriptions(planted) == ["mart"]
     assert missing_metabase_metadata(planted) == [
+        "mart: display_name",
         "mart.cost: semantic_type",
         "mart.clicks: semantic_type",
+        "mart.reach: display_name",
+        "mart.reach: semantic_type is not a type of Metabase",
     ]
     assert different_descriptions(planted) == ["clicks"]
     assert currency_problems(planted) == [
         "mart.spend: a currency type and a currency code go together",
         "mart.cost: a currency type and a currency code go together",
         "mart.budget: no accepted_values test allows only USD",
+        "mart.budget: no not_null test keeps currency from being NULL",
     ]
     assert style_problems(planted) == [
         "mart.cost: 'Account Id'",
@@ -390,6 +458,25 @@ def test_the_checks_find_what_they_look_for():
     assert contract_problems(planted) == [
         "mart: the contract is not enforced",
         "mart.clicks: data_type",
+    ]
+    # The warehouse has a column that dbt does not declare, lacks a declared column and a relation,
+    # and holds a missing and a stale comment; a relation that no model builds is left alone.
+    stored = {
+        ("marts", "mart", None): "A mart.\n",
+        ("marts", "mart", "spend"): "A text.",
+        ("marts", "mart", "cost"): None,
+        ("marts", "mart", "clicks"): "An older text.",
+        ("marts", "mart", "reach"): "A text.",
+        ("marts", "mart", "extra"): None,
+        ("marts", "by_hand", None): None,
+    }
+    assert comment_problems(stored, wanted_comments(planted)) == [
+        "marts.mart.budget: the warehouse does not have it",
+        "marts.mart.clicks: the comment is not the description",
+        "marts.mart.cost: no comment",
+        "marts.mart.extra: dbt does not declare it",
+        "staging.staging.clicks: the warehouse does not have it",
+        "staging.staging: the warehouse does not have it",
     ]
     assert title_case("Ad Spend by Day")
     assert title_case("Cost per Click")
@@ -419,23 +506,14 @@ def fresh_build(airflow_url, token):
 
 @needs_the_demo
 def test_the_comments_of_the_warehouse_are_the_descriptions_of_dbt(env, nodes, fresh_build):
+    # Every relation of a model has exactly the columns that dbt declares, and each of them, like
+    # the relation, carries its description as its comment.
     stored = {
         (schema, relation, column): comment
         for schema, relation, column, comment in json.loads(warehouse_output(env, COMMENTS))
     }
-    wanted = {}
-    for node in models(nodes):
-        wanted[(node["schema"], node["name"], None)] = node["description"]
-        for name, column in node["columns"].items():
-            wanted[(node["schema"], node["name"], name)] = column["description"]
-    # Every relation of a model, and every column that it has, carries the comment of dbt.
-    relations = {(schema, relation) for schema, relation, _ in wanted}
-    physical = {key for key in stored if key[:2] in relations}
-    assert set(wanted) <= set(stored), sorted(map(str, set(wanted) - set(stored)))
-    differ = sorted(
-        ".".join(filter(None, key)) for key in physical if stored[key] != wanted.get(key)
-    )
-    assert not differ, f"the comments of these differ from the descriptions of dbt: {differ}"
+    problems = comment_problems(stored, wanted_comments(nodes))
+    assert not problems, problems
 
 
 @needs_the_demo

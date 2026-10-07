@@ -24,6 +24,7 @@ models:
       - name: currency
         description: '{{ doc("currency") }}'
         data_tests:
+          - not_null
           - accepted_values:
               arguments:
                 values: ["USD"]

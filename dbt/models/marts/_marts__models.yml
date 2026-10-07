@@ -1,10 +1,9 @@
 models:
   - name: ad_spend_daily
     description: >-
-      Advertising spend and results by day and campaign, for dashboards and AI access. One row is
-      one campaign of one ad account on one day: report_date, account_id and campaign_id together
-      are its key. Today it holds the demo account, from raw_demo; the sources of real ad platforms
-      are planned.
+      Advertising spend and results by day and campaign. One row is one campaign of one ad account
+      on one day: report_date, account_id and campaign_id together are its key. Today it holds the
+      demo account, from raw_demo; the sources of real ad platforms are planned.
     config:
       # The table that dbt builds has exactly these columns, with these types, or the build fails.
       contract:
@@ -61,8 +60,10 @@ models:
       - name: currency
         data_type: text
         description: '{{ doc("currency") }}'
-        # One currency in the whole table: the condition for spend to be a currency in Metabase.
+        # One currency in the whole table, and never NULL, which accepted_values lets through: the
+        # condition for spend to be a currency in Metabase.
         data_tests:
+          - not_null
           - accepted_values:
               arguments:
                 values: ["USD"]

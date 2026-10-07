@@ -68,21 +68,40 @@ def test_the_project_writes_its_descriptions_into_the_warehouse():
     assert re.search(pattern, project, flags=re.MULTILINE)
 
 
+# An item of a list of YAML in block style: its indentation, its first line after the dash, and the
+# lines below it that are deeper than the dash. The lookahead also finds the items inside an item.
+LIST_ITEM = re.compile(r"^(?=( *)- (.*)\n((?:\1  .*\n)*))", flags=re.MULTILINE)
+
+
+def list_items(text: str) -> list[dict[str, str]]:
+    """The keys of every item of a list in a YAML file, with their values, in any order: those on
+    the line of the dash and those two spaces deeper, not the keys of the items nested in it."""
+    items = []
+    for match in LIST_ITEM.finditer(text):
+        depth = len(match.group(1)) + 2
+        lines = [match.group(2), *(line[depth:] for line in match.group(3).splitlines())]
+        items.append(
+            {
+                key.strip(): value.strip().strip("'\"")
+                for key, _, value in (line.partition(":") for line in lines)
+                if key and not key.startswith((" ", "#"))
+            }
+        )
+    return items
+
+
 def test_a_key_of_a_contract_has_no_name():
     # dbt builds a table under a temporary name and renames it, and the index of a key keeps the
     # name that it got: a named key collides with itself on the next run ("relation ... already
     # exists"), while PostgreSQL gives an unnamed one a free name each time.
     keys = [
-        (path.name, match.group(2))
+        (path.name, item)
         for path in yaml_files()
-        for match in re.finditer(
-            r"^( +)- type: primary_key\n((?:\1  .*\n)*)",
-            path.read_text(encoding="utf-8"),
-            flags=re.MULTILINE,
-        )
+        for item in list_items(path.read_text(encoding="utf-8"))
+        if item.get("type") == "primary_key"
     ]
     assert keys, "no model declares a primary key"
-    named = [name for name, block in keys if re.search(r"^ +name:", block, flags=re.MULTILINE)]
+    named = [name for name, item in keys if "name" in item]
     assert not named, f"a primary key has a name in {named}"
 
 
@@ -91,7 +110,7 @@ def test_a_description_over_several_lines_ends_without_a_line_break():
     # >- drops it. A literal block, |, keeps every line break.
     for path in yaml_files():
         text = path.read_text(encoding="utf-8")
-        found = re.findall(r"^ *description: *([>|][+0-9]*)$", text, flags=re.MULTILINE)
+        found = re.findall(r"^ *description: *([>|][-+0-9]*)$", text, flags=re.MULTILINE)
         assert set(found) <= {">-"}, f"{path.name}: write descriptions as >-, not {found}"
 
 
