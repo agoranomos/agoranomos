@@ -256,13 +256,16 @@ def test_the_demo_questions_have_the_titles_of_their_columns_and_axes(metabase_u
 
 
 @needs_the_demo
-def test_metabase_lists_the_tables_of_the_warehouse_through_its_connection(metabase_url, session):
-    # The jobs ask this when Metabase does not show a mart, to tell a mart that dbt has not built
-    # yet from one that waits for a sync: the answer of Metabase 0.63.19 to a native query.
+def test_metabase_lists_the_columns_of_the_warehouse_through_its_connection(
+    metabase_url, session, marts
+):
+    # The jobs ask this when Metabase does not show a mart with the fields of its columns: to tell
+    # a mart that dbt has not built yet from one that waits for a sync, and to know which fields
+    # to wait for. The answer of Metabase 0.63.19 to a native query, one row a column.
     status, databases = http_json("GET", f"{metabase_url}/api/database", headers=session)
     assert status == 200, f"GET /api/database answered HTTP {status}"
     [warehouse] = [d for d in databases["data"] if d.get("name") == WAREHOUSE_NAME]
-    query = {"type": "native", "native": {"query": metadata.WAREHOUSE_TABLES}}
+    query = {"type": "native", "native": {"query": metadata.WAREHOUSE_COLUMNS}}
     status, answer = http_json(
         "POST",
         f"{metabase_url}/api/dataset",
@@ -270,13 +273,17 @@ def test_metabase_lists_the_tables_of_the_warehouse_through_its_connection(metab
         headers=session,
     )
     assert (status, answer.get("status")) in {(200, "completed"), (202, "completed")}, status
-    assert ["marts", "ad_spend_daily"] in answer["data"]["rows"]
+    rows = {tuple(row) for row in answer["data"]["rows"]}
+    declared = {(*MART, column.name) for column in marts.effective[MART].columns}
+    assert declared <= rows, sorted(declared - rows)
 
 
 @needs_the_demo
-def test_demo_init_gives_a_question_the_title_that_it_lacks(env, metabase_url, session):
-    # A question made before the titles: the next start adds the title, and leaves the rest. The
-    # body of the PUT has the settings only, as the one of demo-init has.
+def test_demo_init_gives_a_question_the_title_that_it_lacks(env, metabase_url, session, marts):
+    # A question made before the titles: the next start adds the title of the code, and leaves the
+    # rest. The body of the PUT has the settings only, as the one of demo-init has. The settings
+    # of the card go back as they were, a title that a person set included, also when it fails.
+    [spend] = [c for c in marts.effective[MART].columns if c.name == "spend"]
     status, collections = http_json("GET", f"{metabase_url}/api/collection", headers=session)
     assert status == 200, f"GET /api/collection answered HTTP {status}"
     [collection] = [
@@ -289,14 +296,22 @@ def test_demo_init_gives_a_question_the_title_that_it_lacks(env, metabase_url, s
     card_path = f"{metabase_url}/api/card/{card_id}"
     status, card = http_json("GET", card_path, headers=session)
     assert status == 200, f"GET /api/card/{card_id} answered HTTP {status}"
-    settings = card["visualization_settings"]
-    title = settings.pop("graph.y_axis.title_text")
-    status, _ = http_json("PUT", card_path, {"visualization_settings": settings}, headers=session)
-    assert status == 200, f"PUT /api/card/{card_id} answered HTTP {status}"
-    result = compose("run", "--rm", "--no-deps", "-T", "demo-init", check=False)
-    found = leaked(secrets(env), [result.stdout, result.stderr])
-    assert not found, f"the output of demo-init holds the values of {found}"
-    assert result.returncode == 0, f"demo-init exited with {result.returncode}"
-    status, card = http_json("GET", card_path, headers=session)
-    assert card["visualization_settings"].get("graph.y_axis.title_text") == title
-    assert card["visualization_settings"]["graph.dimensions"] == ["report_date"]
+    before = card["visualization_settings"]
+    lacking = {key: value for key, value in before.items() if key != "graph.y_axis.title_text"}
+    try:
+        status, _ = http_json(
+            "PUT", card_path, {"visualization_settings": lacking}, headers=session
+        )
+        assert status == 200, f"PUT /api/card/{card_id} answered HTTP {status}"
+        result = compose("run", "--rm", "--no-deps", "-T", "demo-init", check=False)
+        found = leaked(secrets(env), [result.stdout, result.stderr])
+        assert not found, f"the output of demo-init holds the values of {found}"
+        assert result.returncode == 0, f"demo-init exited with {result.returncode}"
+        status, card = http_json("GET", card_path, headers=session)
+        assert status == 200, f"GET /api/card/{card_id} answered HTTP {status}"
+        settings = card["visualization_settings"]
+        assert settings.get("graph.y_axis.title_text") == spend.display_name
+        assert settings["graph.dimensions"] == ["report_date"]
+    finally:
+        status, _ = http_json("PUT", card_path, {"visualization_settings": before}, headers=session)
+        assert status == 200, f"PUT /api/card/{card_id} answered HTTP {status} on the way back"

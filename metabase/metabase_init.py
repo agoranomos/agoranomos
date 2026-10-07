@@ -396,7 +396,11 @@ def diff(env: Mapping[str, str]) -> int:
     """The dry run of the metadata of the marts, for ./agoranomos metadata diff: the plan that the
     job would apply, printed, with nothing written. It exits with 0 when Metabase shows what the
     code says, with 3 when the plan is not empty, and with 2 when the check could not run
-    (DIFF_NOTHING, DIFF_CHANGES, DIFF_FAILED)."""
+    (DIFF_NOTHING, DIFF_CHANGES, DIFF_FAILED).
+
+    A table that the warehouse has and Metabase does not show with its columns yet is a change: up
+    syncs it and applies its metadata, which the dry run cannot plan before the sync. To tell it
+    from a table that no dbt run built, it asks the warehouse with a query that only reads."""
     try:
         config = Config.from_env(env)
         marts = metadata.load(config.metadata_export, config.metadata_overrides)
@@ -406,24 +410,34 @@ def diff(env: Mapping[str, str]) -> int:
                 f"Metabase does not answer at {config.url}: start the stack with ./agoranomos up"
             )
         sign_in(metabase, config.admin_email, config.admin_password)
-        database = find_warehouse(list_databases(metabase), config, warn=False)
-        if database is None:
+        warehouse = find_warehouse(list_databases(metabase), config, warn=False)
+        if warehouse is None:
             raise SetupError("Metabase has no connection to the warehouse: run ./agoranomos up")
-        plan = metadata.make_plan(marts, metadata.metadata_of(metabase, database["id"]))
+        shown = metadata.metadata_of(metabase, warehouse["id"])
+        sync = metadata.sync_needed(metabase, warehouse["id"], marts, shown)
+        # The tables that wait for a sync are the sync line; the plan is of the others.
+        ready = {key: t for key, t in marts.effective.items() if key not in sync.tables}
+        plan = metadata.make_plan(metadata.Metadata(ready, marts.earlier), shown)
     except (SetupError, metadata.MetadataError) as error:
         print(f"metadata diff: {error}", file=sys.stderr)
         return DIFF_FAILED
     except SHAPE_ERRORS as error:
         print(f"metadata diff: {unexpected_shape('Metabase', error, LOGS_HINT)}", file=sys.stderr)
         return DIFF_FAILED
+    for schema, name in sync.tables:
+        print(
+            f"would sync: {schema}.{name}: the warehouse has it, and Metabase does not show it "
+            "with its columns yet; up syncs it and applies its metadata"
+        )
     for change in plan.changes:
         print(metadata.describe(change))
-    for schema, name in plan.unknown:
-        print(f"note: {schema}.{name}: Metabase does not show this table yet")
+    for key in sync.absent:
+        print(f"note: {metadata.absent_note(key)}")
     for note in plan.notes:
         print(f"note: {note}")
-    if plan.changes:
-        print(f"{metadata.counted(len(plan.changes), 'change')} to apply: run ./agoranomos up")
+    count = len(sync.tables) + len(plan.changes)
+    if count:
+        print(f"{metadata.counted(count, 'change')} to apply: run ./agoranomos up")
         return DIFF_CHANGES
     print("Metabase shows the metadata of the code: nothing to change")
     return DIFF_NOTHING

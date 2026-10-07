@@ -764,14 +764,34 @@ def test_the_dry_run_of_a_metabase_that_shows_the_code_exits_with_0(metabase, ca
     ]
 
 
-def test_the_dry_run_notes_a_mart_that_metabase_does_not_show(metabase, capsys):
+def test_the_dry_run_notes_a_mart_that_the_warehouse_does_not_have(metabase, capsys):
+    # As with the demo off: dbt declares the mart, and no run built it. up would change nothing.
     assert mi.main(env_for(metabase)) == 0
     capsys.readouterr()
     assert mi.main(env_for(metabase), ["diff"]) == 0
     assert capsys.readouterr().out.splitlines() == [
-        "note: marts.ad_spend_daily: Metabase does not show this table yet",
+        "note: marts.ad_spend_daily: not in the warehouse yet; the start after the dbt run that "
+        "builds it applies its metadata",
         "Metabase shows the metadata of the code: nothing to change",
     ]
+
+
+def test_the_dry_run_counts_a_mart_that_a_sync_would_show_as_a_change(metabase, capsys):
+    # A run of dbt built the mart after the last start, and Metabase has not synced it yet: up
+    # would sync it and apply its metadata, so the dry run has something to change. It asks the
+    # warehouse with a query that reads, and writes nothing.
+    assert mi.main(env_for(metabase)) == 0
+    metabase.mart_in_warehouse = True
+    capsys.readouterr()
+    writes = len(metabase.bodies)
+    assert mi.main(env_for(metabase), ["diff"]) == 3
+    assert capsys.readouterr().out.splitlines() == [
+        "would sync: marts.ad_spend_daily: the warehouse has it, and Metabase does not show it "
+        "with its columns yet; up syncs it and applies its metadata",
+        "1 change to apply: run ./agoranomos up",
+    ]
+    assert [path for _, path, _ in metabase.bodies[writes:]] == ["/api/session", "/api/dataset"]
+    assert ("POST", "/api/database/1/sync_schema") not in metabase.calls
 
 
 def test_the_dry_run_with_metabase_down_says_so_at_once(tmp_path, capsys):
@@ -898,14 +918,15 @@ def test_the_lines_reach_the_log_of_a_process_before_its_error(metabase):
 @pytest.mark.parametrize(
     "row",
     [
-        pytest.param(["marts"], id="short"),
-        pytest.param(["marts", "ad_spend_daily", "x"], id="long"),
+        pytest.param(["marts", "ad_spend_daily"], id="short"),
+        pytest.param(["marts", "ad_spend_daily", "spend", "x"], id="long"),
         pytest.param("marts", id="text"),
     ],
 )
-def test_rows_of_the_warehouse_that_are_not_pairs_end_in_one_line(metabase, capsys, row):
-    # The tables of the warehouse come as rows of two values, the schema and the name. An answer of
-    # another shape is one line that names the function, as every answer of an unexpected shape.
+def test_rows_of_the_warehouse_of_another_shape_end_in_one_line(metabase, capsys, row):
+    # The columns of the warehouse come as rows of three values: the schema, the table and the
+    # column. An answer of another shape is one line that names the function, as every answer of
+    # an unexpected shape.
     answer = {"status": "completed", "data": {"rows": [row]}}
     metabase.pages[("POST", "/api/dataset")] = (202, json.dumps(answer).encode())
     assert mi.main(env_for(metabase)) == 1

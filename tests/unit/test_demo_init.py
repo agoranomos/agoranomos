@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import demo_init as di
 import metadata as md
 import pytest
-from metabase_stand_in import SAMPLE, FakeMetabase, free_port, metadata_env, serve
+from metabase_stand_in import SAMPLE, FakeClock, FakeMetabase, free_port, metadata_env, serve
 from metabase_stand_in import leaked as leaked_in
 
 ENV = {
@@ -58,19 +58,6 @@ def leaked(text: str) -> list[str]:
 def stamp(seconds: float) -> str:
     """A moment on the fake clock as Airflow writes it: in UTC, with microseconds and a Z."""
     return (START + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-
-
-class FakeClock:
-    """The clock of the waits of demo-init: a pause moves it on at once."""
-
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def monotonic(self) -> float:
-        return self.now
-
-    def sleep(self, seconds: float) -> None:
-        self.now += seconds
 
 
 class FakeAirflow:
@@ -745,24 +732,43 @@ def test_a_mart_that_metabase_knows_is_not_synced_again(airflow, metabase):
     assert ("POST", "/api/database/2/sync_schema") not in metabase.calls
 
 
+@pytest.mark.parametrize("left", ["no-table", "an-inactive-table"])
 def test_a_mart_that_is_gone_after_an_earlier_run_names_the_cause_and_the_load(
-    airflow, metabase, clock, capsys
+    airflow, metabase, clock, capsys, left
 ):
     # A reset of the warehouse volume alone drops the mart, and Airflow keeps its runs: the start
-    # finds the successful transform, runs no pipeline, and no sync finds the table. It still asks
-    # for a sync and waits until the deadline, and its line says what to do.
+    # finds the successful transform and runs no pipeline. Metabase shows no table, or, after its
+    # next sync, the old one as inactive: neither counts. The warehouse has none, so the start
+    # stops at once, with no sync and no wait, and its line says what to do.
     assert di.main(env_for(airflow, metabase)) == 0
-    metabase.mart_known, metabase.synced_at, metabase.sync_seconds = False, None, math.inf
+    metabase.mart_in_warehouse = False
+    if left == "no-table":
+        metabase.mart_known = False
+    else:
+        metabase.mart_table()["active"] = False
     calls, started = len(metabase.calls), clock.now
     capsys.readouterr()
     assert di.main(env_for(airflow, metabase)) == 1
     line = one_line(capsys)
-    assert "Metabase did not find marts.ad_spend_daily after a sync of the warehouse" in line
-    assert "the demo pipeline ran before" in line
+    assert line.startswith(
+        "demo-init: Metabase finds no marts.ad_spend_daily in the warehouse: the demo pipeline "
+        "ran before"
+    )
     assert f"trigger {di.LOAD_DAG} in Airflow" in line
-    assert "./agoranomos logs metabase" not in line
-    assert metabase.calls[calls:].count(("POST", "/api/database/2/sync_schema")) == 1
-    assert di.DEADLINE <= clock.now - started < di.DEADLINE + di.POLL_INTERVAL
+    assert ("POST", "/api/database/2/sync_schema") not in metabase.calls[calls:]
+    assert clock.now == started
+
+
+def test_a_first_start_waits_for_the_fields_of_the_mart_and_not_its_table_alone(
+    airflow, metabase, clock, capsys
+):
+    # A sync of Metabase makes the row of a new table before its fields: the start waits for the
+    # fields, so that apply() sets the metadata of every column, and none is a note.
+    metabase.fields_seconds = 15.0
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert clock.now >= metabase.synced_at + metabase.fields_seconds
+    assert "does not show this column" not in capsys.readouterr().out
+    assert metabase.field("spend")["semantic_type"] == "type/Currency"
 
 
 def test_a_mart_that_a_person_hid_in_metabase_counts_as_synced(airflow, metabase, clock, capsys):

@@ -29,7 +29,7 @@ import json
 import os
 import sys
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -69,15 +69,17 @@ AIRFLOW_ADMIN_HINT = (
     "Check AIRFLOW_ADMIN_PASSWORD in .env. If you changed the password of admin in Airflow, put "
     "the same value in .env."
 )
-# Where to look when no sync finds the table of the mart. After a run of the pipeline, Metabase is
-# the suspect. When the pipeline ran before and not now, Airflow has kept its runs, and the
-# warehouse may have lost the table since, as after a reset of the warehouse volume alone.
+# Where to look when Metabase does not show the table of the mart. When the warehouse has it and
+# no sync shows it, Metabase is the suspect. When the warehouse does not have it and the pipeline
+# ran before and not now, Airflow has kept its runs, and the warehouse has lost the table since, as
+# after a reset of the warehouse volume alone. When the pipeline ran now, its transform is.
 SYNC_HINT = "see ./agoranomos logs metabase"
 RAN_BEFORE_HINT = (
-    "the demo pipeline ran before, so the table may be gone from the warehouse, as after a reset "
-    f"of its volume: trigger {LOAD_DAG} in Airflow, and the transform that follows it builds the "
-    "table again"
+    "the demo pipeline ran before, and the table is gone from the warehouse since, as after a "
+    f"reset of its volume: trigger {LOAD_DAG} in Airflow, and the transform that follows it builds "
+    "the table again"
 )
+RAN_NOW_HINT = f"see the last run of {TRANSFORM_DAG} in Airflow"
 
 # The settings of a chart that hold the titles of its axes.
 AXIS_TITLES = ("graph.x_axis.title_text", "graph.y_axis.title_text")
@@ -320,32 +322,39 @@ def run_demo_pipeline(airflow: Airflow, deadline: Deadline) -> bool:
     return True
 
 
-def mart_is_synced(metabase: Metabase, database_id: int) -> bool:
-    """Whether Metabase knows the table of the mart. A person may have hidden it in Admin > Table
-    Metadata, and the metadata of a database leaves a hidden table out unless the request passes
-    include_hidden=true (Metabase 0.63.19); a sync does not show it again."""
-    answer = metabase.call(
-        "GET", f"/api/database/{database_id}/metadata?skip_fields=true&include_hidden=true"
-    )
-    return any(
-        table.get("schema") == MART_SCHEMA and table.get("name") == MART_TABLE
-        for table in answer.get("tables", [])
-    )
+def mart_is_synced(
+    metabase: Metabase, database_id: int, table: metadata.Table, columns: Iterable[str]
+) -> bool:
+    """Whether Metabase shows the table of the mart, active, with the fields of these columns, by
+    the rule of metadata.shows(). A person may have hidden the table in Admin > Table Metadata,
+    and the metadata of a database leaves a hidden table out unless the request passes
+    include_hidden=true (Metabase 0.63.19); a sync does not show it again. A table that a sync
+    marked inactive, as after a reset of the warehouse, does not count."""
+    return metadata.shows(metadata.metadata_of(metabase, database_id), table, columns)
 
 
 def ensure_synced(
-    metabase: Metabase, database_id: int, deadline: Deadline, hint: str = SYNC_HINT
+    metabase: Metabase, database_id: int, table: metadata.Table, deadline: Deadline, ran: bool
 ) -> bool:
-    """Make Metabase know the table of the mart; True if a sync was needed. hint says where to look
-    when no sync finds the table."""
-    if mart_is_synced(metabase, database_id):
+    """Make Metabase show the table of the mart with the fields of its columns; True if a sync was
+    needed. When Metabase does not show it so, the warehouse is asked through the connection of
+    Metabase: a warehouse without the table stops the job at once, with what to do (ran says
+    whether the pipeline ran now), and a table that it has gets a sync, waited for until Metabase
+    shows its fields, which come after the table."""
+    key = (table.schema, table.name)
+    shown = metadata.metadata_of(metabase, database_id)
+    sync = metadata.sync_needed(metabase, database_id, metadata.Metadata({key: table}), shown)
+    if sync.absent:
+        cause = RAN_NOW_HINT if ran else RAN_BEFORE_HINT
+        raise SetupError(f"Metabase finds no {MART_SCHEMA}.{MART_TABLE} in the warehouse: {cause}")
+    if not sync.tables:
         return False
     metabase.call("POST", f"/api/database/{database_id}/sync_schema")
     wait_until(
-        lambda: mart_is_synced(metabase, database_id),
+        lambda: mart_is_synced(metabase, database_id, table, sync.tables[key]),
         deadline,
         f"Metabase did not find {MART_SCHEMA}.{MART_TABLE} after a sync of the warehouse",
-        hint,
+        SYNC_HINT,
     )
     return True
 
@@ -372,6 +381,17 @@ def collection_items(metabase: Metabase, collection_id: int, model: str) -> dict
     """The ids of the items of a model in a collection, by name."""
     response = metabase.call("GET", f"/api/collection/{collection_id}/items?models={model}")
     return {item["name"]: item["id"] for item in items_of(response) if item.get("model") == model}
+
+
+def demo_mart(marts: metadata.Metadata) -> metadata.Table:
+    """The table of the mart of the demo in the effective metadata: the dbt project declares it."""
+    table = marts.effective.get((MART_SCHEMA, MART_TABLE))
+    if table is None:
+        raise SetupError(
+            f"the dbt project declares no {MART_SCHEMA}.{MART_TABLE}: see ./agoranomos logs "
+            "metadata-export"
+        )
+    return table
 
 
 def column_titles(marts: metadata.Metadata) -> dict[str, str]:
@@ -489,6 +509,7 @@ def main(env: Mapping[str, str] | None = None) -> int:
         # The metadata is read and checked first: a mistake in the overrides of the deployment
         # stops the job before it writes anything, in Airflow or in Metabase.
         marts = metadata.load(config.metadata_export, config.metadata_overrides)
+        mart = demo_mart(marts)
         airflow = Airflow(config.airflow_url)
         sign_in_to_airflow(airflow, config.airflow_password)
         wait_for_dags(airflow, deadline)
@@ -502,7 +523,7 @@ def main(env: Mapping[str, str] | None = None) -> int:
             raise SetupError(
                 "Metabase has no connection to the warehouse: see ./agoranomos logs metabase-init"
             )
-        ensure_synced(metabase, database["id"], deadline, SYNC_HINT if ran else RAN_BEFORE_HINT)
+        ensure_synced(metabase, database["id"], mart, deadline, ran)
         metadata.apply(
             metabase,
             database["id"],
