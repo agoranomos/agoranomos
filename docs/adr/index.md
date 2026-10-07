@@ -63,4 +63,4 @@ Agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0013](0013-keep-extensions-apart-from-the-base-package.md) | Keep extensions apart from the base package | accepted | 2026-10-05 |
 | [0014](0014-start-the-stack-with-one-script.md) | Start the stack with one script and a generated .env file | accepted | 2026-10-05 |
 | [0015](0015-run-localexecutor-by-default.md) | Run LocalExecutor by default | accepted | 2026-10-05 |
-| [0016](0016-keep-the-metadata-of-the-marts-as-code.md) | Keep the metadata of the marts as code, with a deployment's overrides in extensions | proposed | 2026-10-07 |
+| [0016](0016-keep-the-metadata-of-the-marts-as-code.md) | Keep the metadata of the marts as code, with a deployment's overrides in extensions | accepted | 2026-10-07 |
