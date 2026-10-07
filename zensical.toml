@@ -13,6 +13,7 @@ nav = [
     "reference/index.md",
     { "Command line" = "reference/command-line.md" },
     { "Configuration" = "reference/configuration.md" },
+    { "Describe the marts" = "reference/describe-the-marts.md" },
   ] },
   { "Explanation" = ["explanation/index.md", "explanation/architecture.md"] },
   { "Decisions" = [

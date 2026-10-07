@@ -1,40 +1,42 @@
 models:
   - name: stg_demo__ad_stats_daily
-    description: >
-      The demo statistics, one row per campaign and day. Its tests guard the marts layer: when one of
-      them fails, dbt does not rebuild the models that read this one.
+    description: >-
+      The demo statistics of ads from raw_demo, one row for each campaign and day, with the column
+      names of the marts layer. Its tests guard the marts layer: when one of them fails, dbt does
+      not rebuild the models that read this one.
     data_tests:
       - unique_combination:
           arguments:
             columns: [report_date, account_id, campaign_id]
     columns:
       - name: report_date
-        description: The day of the statistics, in the time zone of the ad account (UTC in the demo).
+        description: '{{ doc("report_date") }}'
         data_tests: [not_null]
       - name: account_id
-        description: The ad account.
+        description: '{{ doc("account_id") }}'
         data_tests: [not_null]
       - name: campaign_id
-        description: The campaign, unique within its account.
+        description: '{{ doc("campaign_id") }}'
         data_tests: [not_null]
       - name: campaign_name
-        description: The name of the campaign.
+        description: '{{ doc("campaign_name") }}'
         data_tests: [not_null]
       - name: currency
-        description: The currency of the account, as an ISO 4217 code.
+        description: '{{ doc("currency") }}'
         data_tests:
+          - not_null
           - accepted_values:
               arguments:
                 values: ["USD"]
       - name: impressions
-        description: How many times the ads were shown.
+        description: '{{ doc("impressions") }}'
         data_tests: [not_null, non_negative]
       - name: clicks
-        description: How many times the ads were clicked.
+        description: '{{ doc("clicks") }}'
         data_tests: [not_null, non_negative]
       - name: spend
-        description: The spend, in the currency of the account.
+        description: '{{ doc("spend") }}'
         data_tests: [not_null, non_negative]
       - name: conversions
-        description: The conversions that the ad platform attributes to the campaign; they can be fractional.
+        description: '{{ doc("conversions") }}'
         data_tests: [not_null, non_negative]

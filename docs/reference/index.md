@@ -6,6 +6,7 @@ Reference pages are technical descriptions to look things up in, not to read fro
 
 - [Command line](command-line.md): the `./agoranomos` commands that set up, check and run the stack.
 - [Configuration](configuration.md): every setting in the `.env` file, with its default.
+- [Describe the marts](describe-the-marts.md): the rules for the descriptions of the dbt models, the display names of the marts and the semantic types of their columns, and how the tests check them.
 
 ## Planned reference pages
 

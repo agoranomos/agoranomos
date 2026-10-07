@@ -96,6 +96,8 @@ Access is split by role. dlt loads the `raw_<source>` schemas as the `loader` ro
 
 Today the dbt project in `dbt/` builds the demo data: the staging model `stg_demo__ad_stats_daily` and the mart `marts.ad_spend_daily`, by day and campaign. The demo has one source and no shared steps, so the mart reads the staging model directly, and the `intermediate` schema does not exist yet. The tests of the staging model guard the mart: when one of them fails, the mart is not rebuilt and keeps its last good data.
 
+Every model, column and source table of the project has a description. Every mart also has a display name for Metabase, and each of its columns a display name and a semantic type ([Describe the marts](../reference/describe-the-marts.md)). dbt writes the descriptions into the comments of the tables, views and columns that it builds, so SQL clients read them in the warehouse, and so will the planned AI access. Each mart has an enforced contract: its columns, their types and its primary key are fixed in its YAML, and a build that would change them fails.
+
 dbt Core with dbt-postgres does the transformations, with tests from the first day and an elementary report for observability. The marts layer is a single advertising-statistics model that spans all platforms:
 
 * Additive metrics are stored at daily grain: date, account, campaign, ad group and ad.
