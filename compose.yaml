@@ -348,8 +348,40 @@ services:
     security_opt: ["no-new-privileges:true"]
     logging: *logging
 
+  # Exports the metadata of the dbt project on every start (ADR-0016): dbt ls reads the project, which
+  # is mounted read-only, and metadata.py writes the descriptions, the meta and the columns of the models
+  # and sources as JSON into the metadata-export volume, for metabase-init and demo-init. It is the one
+  # service that can write that volume, and no Airflow service mounts it, so the code of a DAG cannot
+  # change what the jobs with the admin password apply. It holds no secret and has no network. It runs
+  # the Airflow image for its dbt, as nobody, with neither the entrypoint of Airflow nor its settings.
+  metadata-export:
+    image: agoranomos-airflow:local
+    pull_policy: never
+    profiles: [core]
+    restart: "no"
+    user: "65534:65534"
+    entrypoint: ["python", "/opt/agoranomos/metabase/metadata.py", "export"]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      # No usage telemetry from dbt; the image sets the same.
+      DBT_ENGINE_SEND_ANONYMOUS_USAGE_STATS: "False"
+      DO_NOT_TRACK: "1"
+    volumes:
+      - ./dbt:/opt/agoranomos/dbt:ro
+      - ./metabase:/opt/agoranomos/metabase:ro
+      # The folder of the image that this volume is mounted on belongs to nobody, so the new volume
+      # does too (airflow/Dockerfile).
+      - metadata-export:/opt/agoranomos/metadata
+    # dbt writes its target and logs folders under /tmp, and they go with the container.
+    tmpfs:
+      - /tmp
+    network_mode: none
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
   # Sets Metabase up on the first start and keeps the warehouse connection current on every start. Metabase
   # makes the connection to the warehouse, so this job needs the default network only, to reach Metabase.
+  # Then it applies the metadata of the marts: the export and this deployment's overrides, both read-only.
   metabase-init:
     image: python:3.13.16-slim-trixie@sha256:3dd7cc108ec1493442514f5c2a871af6af0ec31d768ff6e378a93340c3b3db5f
     profiles: [core]
@@ -367,11 +399,17 @@ services:
       WAREHOUSE_DB: warehouse
       WAREHOUSE_USER: metabase_reader
       WAREHOUSE_PASSWORD: ${METABASE_READER_PASSWORD:?run ./agoranomos init}
+      METADATA_EXPORT: /opt/agoranomos/metadata/metadata.json
+      METADATA_OVERRIDES: /opt/agoranomos/extensions/metadata/overrides.toml
     volumes:
       - ./metabase:/opt/agoranomos/metabase:ro
+      - metadata-export:/opt/agoranomos/metadata:ro
+      - ${AGORANOMOS_EXTENSIONS_DIR:-./extensions}/metadata:/opt/agoranomos/extensions/metadata:ro
     depends_on:
       metabase:
         condition: service_healthy
+      metadata-export:
+        condition: service_completed_successfully
     security_opt: ["no-new-privileges:true"]
     logging: *logging
 
@@ -397,8 +435,12 @@ services:
       WAREHOUSE_PORT: "5432"
       WAREHOUSE_DB: warehouse
       WAREHOUSE_USER: metabase_reader
+      METADATA_EXPORT: /opt/agoranomos/metadata/metadata.json
+      METADATA_OVERRIDES: /opt/agoranomos/extensions/metadata/overrides.toml
     volumes:
       - ./metabase:/opt/agoranomos/metabase:ro
+      - metadata-export:/opt/agoranomos/metadata:ro
+      - ${AGORANOMOS_EXTENSIONS_DIR:-./extensions}/metadata:/opt/agoranomos/extensions/metadata:ro
     depends_on:
       airflow-apiserver:
         condition: service_healthy
@@ -420,3 +462,5 @@ volumes:
   warehouse-data:
   platform-data:
   airflow-logs:
+  # The export of metadata-export: only that job writes it.
+  metadata-export:

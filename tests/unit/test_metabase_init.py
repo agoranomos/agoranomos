@@ -1,22 +1,22 @@
-"""Tests of metabase/metabase_init.py against a stand-in for the Metabase REST API."""
+"""Tests of metabase/metabase_init.py against the stand-in for the Metabase REST API."""
 
 from __future__ import annotations
 
 import ast
-import copy
 import json
 import socket
 import subprocess
 import sys
-import threading
+import time
 import urllib.error
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
 import metabase_init as mi
 import pytest
+from metabase_stand_in import FakeMetabase, free_port, metadata_env, serve
+from metabase_stand_in import leaked as leaked_in
 
 ENV = {
     "METABASE_SITE_NAME": "Agoranomos",
@@ -27,6 +27,9 @@ ENV = {
     "WAREHOUSE_DB": "warehouse",
     "WAREHOUSE_USER": "metabase_reader",
     "WAREHOUSE_PASSWORD": "reader-password",
+    # The files of the metadata: env_for points these at files that the fixture writes.
+    "METADATA_EXPORT": "/nonexistent/metadata.json",
+    "METADATA_OVERRIDES": "/nonexistent/overrides.toml",
 }
 
 # What metabase-init must never print: the values that these tests pass in, and the tokens that the
@@ -41,13 +44,7 @@ SECRETS = {
 
 
 def leaked(text: str, secrets: dict[str, str] = SECRETS) -> list[str]:
-    """The labels of the secrets that are in the text, as they are or as JSON writes them inside a
-    string, where a quote and a backslash are escaped: the stand-in echoes a request as JSON."""
-    return [
-        label
-        for label, value in secrets.items()
-        if value in text or json.dumps(value)[1:-1] in text
-    ]
+    return leaked_in(text, secrets)
 
 
 def test_the_scan_finds_a_secret_in_the_json_of_an_echo():
@@ -59,145 +56,18 @@ def test_the_scan_finds_a_secret_in_the_json_of_an_echo():
     assert leaked(echo, secrets) == ["a password with a quote", "one with a backslash"]
 
 
-class FakeMetabase:
-    """What metabase-init can see of a Metabase instance."""
-
-    def __init__(self) -> None:
-        self.url = ""
-        self.unhealthy_polls = 0
-        self.raw_health: bytes | None = None
-        self.has_user_setup = False
-        self.gives_setup_token = True
-        self.databases_as_list = False
-        self.failures: dict[tuple[str, str], int] = {}
-        # Calls that get no HTTP answer: "close" (the connection ends), "truncate" (it ends in
-        # the middle of the body) or "garbage" (the answer is not HTTP).
-        self.faults: dict[tuple[str, str], str] = {}
-        # Calls that get a page of their own, as (status, body in bytes), such as a proxy sends.
-        self.pages: dict[tuple[str, str], tuple[int, bytes]] = {}
-        self.health_faults = 0
-        self.admin: dict[str, str] | None = None
-        self.databases: list[dict[str, Any]] = []
-        self.calls: list[tuple[str, str]] = []
-
-    def listed(self) -> list[dict[str, Any]]:
-        """The databases as GET /api/database shows them: Metabase masks the password."""
-        shown = copy.deepcopy(self.databases)
-        for database in shown:
-            if "password" in database.get("details", {}):
-                database["details"]["password"] = "**MetabasePass**"
-        return shown
-
-    def handle(self, method: str, path: str, body: Any, session: str | None) -> tuple[int, Any]:
-        self.calls.append((method, path))
-        if (method, path) in self.faults:
-            return 0, self.faults[(method, path)]
-        if (method, path) in self.pages:
-            return self.pages[(method, path)]
-        if (method, path) == ("GET", "/api/health") and self.health_faults > 0:
-            self.health_faults -= 1
-            return 0, "close"
-        if (method, path) in self.failures:
-            # The worst case for secrets: a server that explains its failure by echoing the request
-            # back, with the tokens that it knows.
-            echo = {"body": body, "session": session, "setup-token": "setup-token-1"}
-            return self.failures[(method, path)], echo
-        if (method, path) == ("GET", "/api/health"):
-            if self.raw_health is not None:
-                return 200, self.raw_health
-            if self.unhealthy_polls > 0:
-                self.unhealthy_polls -= 1
-                return 503, {"status": "initializing"}
-            return 200, {"status": "ok"}
-        if (method, path) == ("GET", "/api/session/properties"):
-            token = "setup-token-1" if self.gives_setup_token and not self.has_user_setup else None
-            return 200, {"has-user-setup": self.has_user_setup, "setup-token": token}
-        if (method, path) == ("POST", "/api/setup"):
-            if self.has_user_setup or body.get("token") != "setup-token-1":
-                return 403, "The setup token is not valid"
-            if not body.get("prefs", {}).get("site_name"):
-                return 400, "site_name is required"
-            self.has_user_setup = True
-            self.admin = {"email": body["user"]["email"], "password": body["user"]["password"]}
-            return 200, {"id": "session-from-setup"}
-        if (method, path) == ("POST", "/api/session"):
-            if self.admin and body == {
-                "username": self.admin["email"],
-                "password": self.admin["password"],
-            }:
-                return 200, {"id": "session-from-login"}
-            return 401, {"errors": {"password": "did not match stored password"}}
-        if session not in ("session-from-setup", "session-from-login"):
-            return 401, "Unauthenticated"
-        if (method, path) == ("GET", "/api/database"):
-            if self.databases_as_list:
-                return 200, self.listed()
-            return 200, {"data": self.listed(), "total": len(self.databases)}
-        if (method, path) == ("POST", "/api/database"):
-            database = {"id": len(self.databases) + 1, **body}
-            self.databases.append(database)
-            return 200, database
-        if method == "PUT" and path.startswith("/api/database/"):
-            database_id = int(path.rsplit("/", 1)[1])
-            for database in self.databases:
-                if database["id"] == database_id:
-                    database.update(body)
-                    return 200, database
-        return 404, "Not found"
-
-
 @pytest.fixture
-def metabase():
+def metabase(tmp_path):
     state = FakeMetabase()
-
-    class Handler(BaseHTTPRequestHandler):
-        def serve(self) -> None:
-            length = int(self.headers.get("Content-Length") or 0)
-            body = json.loads(self.rfile.read(length)) if length else None
-            status, payload = state.handle(
-                self.command, self.path, body, self.headers.get("X-Metabase-Session")
-            )
-            if status == 0:
-                self.break_connection(payload)
-                return
-            data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-
-        def break_connection(self, fault: str) -> None:
-            """End the connection as a Metabase that crashes or restarts does."""
-            self.close_connection = True
-            if fault == "truncate":
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", "100")
-                self.end_headers()
-                self.wfile.write(b'{"data": [')
-            elif fault == "garbage":
-                self.wfile.write(b"this is not an HTTP answer\r\n\r\n")
-
-        do_GET = do_POST = do_PUT = serve
-
-        def log_message(self, *args: object) -> None:
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    # A short poll interval, so that shutdown() does not wait half a second for every test.
-    serving = threading.Thread(
-        target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
-    )
-    serving.start()
-    state.url = f"http://127.0.0.1:{server.server_address[1]}"
+    state.files = metadata_env(tmp_path)
+    server = serve(state, "X-Metabase-Session")
     yield state
     server.shutdown()
     server.server_close()
 
 
 def env_for(metabase: FakeMetabase, **overrides: str) -> dict[str, str]:
-    return {**ENV, "METABASE_URL": metabase.url, **overrides}
+    return {**ENV, "METABASE_URL": metabase.url, **metabase.files, **overrides}
 
 
 def test_first_start_creates_the_admin_and_the_warehouse_connection(metabase):
@@ -550,12 +420,6 @@ def test_another_status_at_the_sign_in_is_not_blamed_on_the_password(metabase, c
     assert leaked(error) == []
 
 
-def free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
 # What a broken connection looks like to the client, and the class that the message names.
 FAULTS = [
     pytest.param("close", "RemoteDisconnected", id="closed"),
@@ -817,8 +681,9 @@ def test_the_script_runs_as_compose_runs_it():
     assert "Traceback" not in result.stderr
 
 
-def test_the_module_imports_only_the_standard_library():
-    # metabase-init runs in a plain python image: it has the standard library and nothing else.
+def test_the_module_imports_only_the_standard_library_and_metadata():
+    # metabase-init runs in a plain python image: it has the standard library, and metadata.py
+    # from the same folder, which imports nothing of this module.
     tree = ast.parse(Path(mi.__file__).read_text(encoding="utf-8"))
     imported: set[str] = set()
     for node in ast.walk(tree):
@@ -826,5 +691,147 @@ def test_the_module_imports_only_the_standard_library():
             imported |= {alias.name.split(".")[0] for alias in node.names}
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             imported.add(node.module.split(".")[0])
-    assert imported
-    assert imported <= set(sys.stdlib_module_names), sorted(imported - set(sys.stdlib_module_names))
+    allowed = set(sys.stdlib_module_names) | {"metadata"}
+    assert "metadata" in imported
+    assert imported <= allowed, sorted(imported - allowed)
+
+
+def test_every_start_applies_the_metadata_of_the_marts(metabase, capsys):
+    metabase.mart_in_warehouse = True  # the demo pipeline built the mart
+    assert mi.main(env_for(metabase)) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == (
+        'metabase-init: first fill: marts.ad_spend_daily display_name: "Ad Spend Daily" -> '
+        '"Ad Spend by Day"'
+    )
+    assert lines[-1].startswith("metabase-init: the admin account is created")
+    assert metabase.field("spend")["semantic_type"] == "type/Currency"
+
+
+def test_a_first_start_before_the_mart_exists_notes_it_and_waits_for_nothing(metabase, capsys):
+    # metabase-init runs before the demo pipeline on the first start: demo-init applies it then.
+    assert mi.main(env_for(metabase)) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == (
+        "metabase-init: marts.ad_spend_daily: not in the warehouse yet; the start after the dbt "
+        "run that builds it applies its metadata"
+    )
+    assert ("POST", "/api/database/1/sync_schema") not in metabase.calls
+
+
+def test_a_mistake_in_the_overrides_stops_the_job_before_it_writes(metabase, tmp_path, capsys):
+    metabase.files = metadata_env(tmp_path, overrides="[marts.ad_spend_daily]\nlabel = 'X'\n")
+    assert mi.main(env_for(metabase)) == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err.splitlines() == [
+        "metabase-init: overrides.toml: marts.ad_spend_daily.label: unknown property; use "
+        "display_name, description, note"
+    ]
+    assert metabase.calls == []
+
+
+def started_with_an_edit(metabase: FakeMetabase) -> None:
+    """A first start that applied the metadata, and an edit of a display name in the UI since."""
+    metabase.mart_in_warehouse = True
+    assert mi.main(env_for(metabase)) == 0
+    metabase.field("conversions")["display_name"] = "Leads"
+
+
+def test_the_dry_run_prints_the_plan_and_writes_nothing(metabase, capsys):
+    started_with_an_edit(metabase)
+    capsys.readouterr()
+    writes = len(metabase.bodies)
+    assert mi.main(env_for(metabase), ["diff"]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        'revert of an edit: marts.ad_spend_daily.conversions display_name: "Leads" -> '
+        '"Conversions"',
+        "1 change to apply: run ./agoranomos up",
+    ]
+    assert [path for _, path, _ in metabase.bodies[writes:]] == ["/api/session"]
+    assert metabase.field("conversions")["display_name"] == "Leads"
+
+
+def test_the_dry_run_of_a_metabase_that_shows_the_code_exits_with_0(metabase, capsys):
+    metabase.mart_in_warehouse = True
+    assert mi.main(env_for(metabase)) == 0
+    capsys.readouterr()
+    assert mi.main(env_for(metabase), ["diff"]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "Metabase shows the metadata of the code: nothing to change"
+    ]
+
+
+def test_the_dry_run_notes_a_mart_that_metabase_does_not_show(metabase, capsys):
+    assert mi.main(env_for(metabase)) == 0
+    capsys.readouterr()
+    assert mi.main(env_for(metabase), ["diff"]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "note: marts.ad_spend_daily: Metabase does not show this table yet",
+        "Metabase shows the metadata of the code: nothing to change",
+    ]
+
+
+def test_the_dry_run_with_metabase_down_says_so_at_once(tmp_path, capsys):
+    url = f"http://127.0.0.1:{free_port()}"
+    env = {**ENV, "METABASE_URL": url, **metadata_env(tmp_path)}
+    started = time.monotonic()
+    assert mi.main(env, ["diff"]) == 2
+    assert time.monotonic() - started < 15  # no wait for a Metabase that is not there
+    assert capsys.readouterr().err.splitlines() == [
+        f"metadata diff: Metabase does not answer at {url}: start the stack with ./agoranomos up"
+    ]
+
+
+def test_the_dry_run_names_a_mistake_in_the_overrides(metabase, tmp_path, capsys):
+    metabase.files = metadata_env(tmp_path, overrides="[marts.nothing]\nnote = 'X'\n")
+    assert mi.main(env_for(metabase), ["diff"]) == 2
+    assert capsys.readouterr().err.splitlines() == [
+        "metadata diff: overrides.toml: [marts.nothing]: dbt has no such table in marts"
+    ]
+    assert metabase.calls == []
+
+
+def test_an_unknown_argument_is_a_usage_error(capsys):
+    assert mi.main({}, ["apply"]) == 2
+    assert capsys.readouterr().err == "metabase-init: usage: metabase_init.py [diff]\n"
+
+
+def test_the_dry_run_runs_as_the_command_line_runs_it():
+    # ./agoranomos metadata diff runs the file with the argument diff, in an environment of its own.
+    result = subprocess.run(
+        [sys.executable, str(Path(mi.__file__)), "diff"],
+        env={},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 2
+    assert result.stderr.startswith("metadata diff: missing environment variables: METABASE_URL")
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "in_warehouse"),
+    [
+        pytest.param("GET", "/api/database/1/metadata", False, id="read"),
+        pytest.param("POST", "/api/dataset", False, id="list-the-warehouse"),
+        pytest.param("POST", "/api/database/1/sync_schema", True, id="sync"),
+        pytest.param("PUT", "/api/table/", True, id="table"),
+        pytest.param("PUT", "/api/field/", True, id="field"),
+    ],
+)
+def test_a_failed_step_of_the_metadata_is_one_line_with_no_secret(
+    metabase, capsys, method, path, in_warehouse
+):
+    # The stand-in answers the failing step with 500 and echoes the request, the session and the
+    # setup token back; a path that ends with a slash stands for every table or field.
+    metabase.mart_in_warehouse = in_warehouse
+    metabase.failures[(method, path)] = 500
+    assert mi.main(env_for(metabase)) == 1
+    output = capsys.readouterr()
+    [line] = output.err.splitlines()
+    assert line.startswith(f"metabase-init: {method} {path}")
+    assert "failed with HTTP 500. See ./agoranomos logs metabase." in line
+    assert "Traceback" not in output.err
+    assert leaked(output.out + output.err) == []

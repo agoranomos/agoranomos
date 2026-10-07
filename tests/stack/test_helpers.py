@@ -1452,7 +1452,7 @@ def test_active_profiles_take_the_last_setting_as_docker_compose_does(tmp_path, 
 def test_the_demo_profile_adds_demo_init_to_the_one_shot_jobs():
     # services.py takes the profiles of the .env in the checkout when it is imported; this tests
     # the function that it calls, so the result does not depend on that file.
-    base = {"db-init", "airflow-init", "metabase-init"}
+    base = {"db-init", "airflow-init", "metadata-export", "metabase-init"}
     assert services.one_shot(demo=False) == base
     assert services.one_shot(demo=True) == base | {"demo-init"}
     assert services.one_shot(demo=services.DEMO) == services.ONE_SHOT
@@ -1474,7 +1474,12 @@ def test_the_celery_variant_adds_the_broker_and_the_worker_to_the_long_running_s
         "airflow-triggerer",
         "metabase",
     } <= local
-    assert services.one_shot(demo=False) == {"db-init", "airflow-init", "metabase-init"}
+    assert services.one_shot(demo=False) == {
+        "db-init",
+        "airflow-init",
+        "metadata-export",
+        "metabase-init",
+    }
     assert services.LONG_RUNNING in (local, celery)
 
 

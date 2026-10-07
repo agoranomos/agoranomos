@@ -220,6 +220,7 @@ def test_the_connection_details_are_encrypted_in_the_application_database(env):
     "service",
     [
         "metabase",
+        "metadata-export",
         "metabase-init",
         pytest.param(
             "demo-init",

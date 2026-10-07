@@ -3,12 +3,15 @@ profile.
 
 It runs the demo pipeline once: agoranomos_demo_load, and then agoranomos_demo_transform, which the
 asset of the raw table starts. Then it makes the demo visible in Metabase: it syncs the schema of
-the warehouse and creates the demo collection, its questions and its dashboard.
+the warehouse, applies the metadata of the marts (metadata.py), as metabase-init does, and creates
+the demo collection, its questions and its dashboard. The questions get the titles of their columns
+and axes from the display names of the metadata.
 
 Each step looks at the current state first. A start that finds a successful run of the transform
 does not run the pipeline again and leaves the pause state of both DAGs as it is. The content of
 Metabase is found by name: what is there stays as it is, edits included, and what is missing is
-created again, so a deleted or renamed question, dashboard or collection comes back.
+created again, so a deleted or renamed question, dashboard or collection comes back. A question
+that exists gets only the titles that it lacks.
 
 The whole job has one deadline, DEADLINE seconds from its start, which every wait shares, and a
 step that runs out of time names itself; ./agoranomos up waits longer than that for the stack.
@@ -21,6 +24,8 @@ answered.
 
 from __future__ import annotations
 
+import copy
+import json
 import os
 import sys
 import time
@@ -29,6 +34,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlencode
 
+import metadata
 from metabase_init import (
     SHAPE_ERRORS,
     ApiClient,
@@ -72,13 +78,18 @@ RAN_BEFORE_HINT = (
     "table again"
 )
 
+# The settings of a chart that hold the titles of its axes.
+AXIS_TITLES = ("graph.x_axis.title_text", "graph.y_axis.title_text")
+
 # The questions of the demo dashboard, in the order of the dashboard, with their place on its grid
-# of 24 columns.
+# of 24 columns. columns are the columns of the answer, which are columns of the mart, so that the
+# titles come from their display names.
 QUESTIONS: tuple[dict[str, Any], ...] = (
     {
         "name": "Spend, last 7 days",
         "description": "The spend of the last seven days that have data.",
         "display": "scalar",
+        "columns": ("spend",),
         "visualization_settings": {},
         "query": f"SELECT sum(spend) AS spend\nFROM marts.ad_spend_daily\nWHERE {LAST_7_DAYS}",
         "layout": {"row": 0, "col": 0, "size_x": 6, "size_y": 4},
@@ -87,6 +98,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "name": "Spend by campaign, last 7 days",
         "description": "The spend of each campaign in the last seven days that have data.",
         "display": "row",
+        "columns": ("campaign_name", "spend"),
         "visualization_settings": {
             "graph.dimensions": ["campaign_name"],
             "graph.metrics": ["spend"],
@@ -101,6 +113,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "name": "Spend by day",
         "description": "The spend of every day that has data.",
         "display": "line",
+        "columns": ("report_date", "spend"),
         "visualization_settings": {"graph.dimensions": ["report_date"], "graph.metrics": ["spend"]},
         "query": (
             "SELECT report_date, sum(spend) AS spend\nFROM marts.ad_spend_daily\n"
@@ -120,6 +133,8 @@ ENV_NAMES = {
     "warehouse_port": "WAREHOUSE_PORT",
     "warehouse_db": "WAREHOUSE_DB",
     "warehouse_user": "WAREHOUSE_USER",
+    "metadata_export": "METADATA_EXPORT",
+    "metadata_overrides": "METADATA_OVERRIDES",
 }
 
 
@@ -134,6 +149,8 @@ class Config:
     warehouse_port: int
     warehouse_db: str
     warehouse_user: str
+    metadata_export: str
+    metadata_overrides: str
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
@@ -306,12 +323,12 @@ def mart_is_synced(metabase: Metabase, database_id: int) -> bool:
     """Whether Metabase knows the table of the mart. A person may have hidden it in Admin > Table
     Metadata, and the metadata of a database leaves a hidden table out unless the request passes
     include_hidden=true (Metabase 0.63.19); a sync does not show it again."""
-    metadata = metabase.call(
+    answer = metabase.call(
         "GET", f"/api/database/{database_id}/metadata?skip_fields=true&include_hidden=true"
     )
     return any(
         table.get("schema") == MART_SCHEMA and table.get("name") == MART_TABLE
-        for table in metadata.get("tables", [])
+        for table in answer.get("tables", [])
     )
 
 
@@ -356,11 +373,69 @@ def collection_items(metabase: Metabase, collection_id: int, model: str) -> dict
     return {item["name"]: item["id"] for item in items_of(response) if item.get("model") == model}
 
 
-def ensure_questions(metabase: Metabase, collection_id: int, database_id: int) -> dict[str, int]:
-    """Create the questions that the collection lacks; return the id of every question by name."""
+def column_titles(marts: metadata.Metadata) -> dict[str, str]:
+    """The display names of the columns of the mart, by name, in the effective metadata."""
+    table = marts.effective.get((MART_SCHEMA, MART_TABLE))
+    columns = table.columns if table is not None else ()
+    return {column.name: column.display_name for column in columns if column.display_name}
+
+
+def column_key(name: str) -> str:
+    """The key of a column in the column settings of a card, as the frontend of Metabase writes it:
+    JSON.stringify(["name", <column name>]), with no blank."""
+    return json.dumps(["name", name], separators=(",", ":"))
+
+
+def visualization_settings(question: Mapping[str, Any], titles: Mapping[str, str]) -> dict:
+    """The settings of a question, with the titles of its columns and, for a chart, of its axes.
+    A native question takes no title from the fields of the mart, so the titles are its own."""
+    settings = copy.deepcopy(question["visualization_settings"])
+    columns = {
+        column_key(name): {"column_title": titles[name]}
+        for name in question["columns"]
+        if name in titles
+    }
+    if columns:
+        settings["column_settings"] = columns
+    dimensions = settings.get("graph.dimensions") or [None]
+    metrics = settings.get("graph.metrics") or [None]
+    for key, name in zip(AXIS_TITLES, (dimensions[0], metrics[0]), strict=True):
+        if name in titles:
+            settings[key] = titles[name]
+    return settings
+
+
+def with_missing_titles(current: Mapping[str, Any], wanted: Mapping[str, Any]) -> dict | None:
+    """The settings of a card that exists, with the titles of wanted that it lacks, or None when it
+    lacks none: a title that is there, also one that a person changed, stays as it is."""
+    settings = copy.deepcopy(dict(current))
+    added = False
+    for key in AXIS_TITLES:
+        if key in wanted and key not in settings:
+            settings[key] = wanted[key]
+            added = True
+    for key, entry in (wanted.get("column_settings") or {}).items():
+        column = settings.setdefault("column_settings", {}).setdefault(key, {})
+        if "column_title" not in column:
+            column["column_title"] = entry["column_title"]
+            added = True
+    return settings if added else None
+
+
+def ensure_questions(
+    metabase: Metabase, collection_id: int, database_id: int, titles: Mapping[str, str]
+) -> dict[str, int]:
+    """Create the questions that the collection lacks, with their titles, and give the questions
+    that it has the titles that they lack; return the id of every question by name."""
     cards = collection_items(metabase, collection_id, "card")
     for question in QUESTIONS:
+        settings = visualization_settings(question, titles)
         if question["name"] in cards:
+            card_id = cards[question["name"]]
+            card = metabase.call("GET", f"/api/card/{card_id}")
+            added = with_missing_titles(card.get("visualization_settings") or {}, settings)
+            if added is not None:
+                metabase.call("PUT", f"/api/card/{card_id}", {"visualization_settings": added})
             continue
         card = metabase.call(
             "POST",
@@ -369,7 +444,7 @@ def ensure_questions(metabase: Metabase, collection_id: int, database_id: int) -
                 "name": question["name"],
                 "description": question["description"],
                 "display": question["display"],
-                "visualization_settings": question["visualization_settings"],
+                "visualization_settings": settings,
                 "collection_id": collection_id,
                 "dataset_query": {
                     "database": database_id,
@@ -410,6 +485,9 @@ def main(env: Mapping[str, str] | None = None) -> int:
     try:
         deadline = Deadline(DEADLINE)
         config = Config.from_env(os.environ if env is None else env)
+        # The metadata is read and checked first: a mistake in the overrides of the deployment
+        # stops the job before it writes anything, in Airflow or in Metabase.
+        marts = metadata.load(config.metadata_export, config.metadata_overrides)
         airflow = Airflow(config.airflow_url)
         sign_in_to_airflow(airflow, config.airflow_password)
         wait_for_dags(airflow, deadline)
@@ -424,15 +502,23 @@ def main(env: Mapping[str, str] | None = None) -> int:
                 "Metabase has no connection to the warehouse: see ./agoranomos logs metabase-init"
             )
         ensure_synced(metabase, database["id"], deadline, SYNC_HINT if ran else RAN_BEFORE_HINT)
+        changes = metadata.apply(
+            metabase,
+            database["id"],
+            marts,
+            lambda check, what: wait_until(check, deadline, what, SYNC_HINT),
+        )
         collection_id = ensure_collection(metabase)
-        cards = ensure_questions(metabase, collection_id, database["id"])
+        cards = ensure_questions(metabase, collection_id, database["id"], column_titles(marts))
         dashboard_id = ensure_dashboard(metabase, collection_id, cards)
-    except SetupError as error:
+    except (SetupError, metadata.MetadataError) as error:
         print(f"demo-init: {error}", file=sys.stderr)
         return 1
     except SHAPE_ERRORS as error:
         print(f"demo-init: {unexpected_shape(server, error, hint)}", file=sys.stderr)
         return 1
+    for line in changes:
+        print(f"demo-init: {line}")
     print(
         f"demo-init: the demo pipeline {'ran now' if ran else 'ran before'}, and the dashboard "
         f"{DASHBOARD!r} ({dashboard_id}) is in the collection {COLLECTION!r}"

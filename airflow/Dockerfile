@@ -40,3 +40,11 @@ RUN python -m venv /opt/airflow/dbt_venv \
     && /opt/airflow/dbt_venv/bin/pip install --no-cache-dir --require-hashes \
         -r /tmp/agoranomos/dbt-requirements.txt \
     && /opt/airflow/dbt_venv/bin/pip check
+
+# The folder that the metadata-export service writes the export into, as nobody (65534): a new named
+# volume takes the owner of the folder that it is first mounted on, and without this folder Docker
+# would give the volume to root, and the job could not write it (compose.yaml). It comes last, so
+# that the layers above stay in the cache of Docker. The image then runs as the user of the base.
+USER root
+RUN install -d -o 65534 -g 65534 -m 0755 /opt/agoranomos/metadata
+USER ${AIRFLOW_UID}

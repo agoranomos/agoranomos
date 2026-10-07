@@ -4,7 +4,10 @@ It waits until Metabase is healthy, creates the admin account when Metabase is n
 and connects the warehouse as the read-only metabase_reader role, showing only the marts schema.
 Each step looks at the current state first, so running it again changes nothing but the
 connection details. Settings that must not change in the Metabase UI, such as the AI features
-being off, are environment variables in compose.yaml instead.
+being off, are environment variables in compose.yaml instead. Then it applies the metadata of the
+marts (metadata.py): the names, descriptions and types that dbt and the overrides of the
+deployment give the tables and fields of the marts, with one line for each change. Run with the
+argument diff, as ./agoranomos metadata diff does, it prints that plan and applies nothing.
 
 Every secret comes from the environment and goes only into the body of a request. The messages of
 this script name a step and an HTTP status, or the class of an error (and, for an answer of an
@@ -27,7 +30,11 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+import metadata
+
 WAREHOUSE_NAME = "Agoranomos warehouse"
+# How long the job waits for a sync that adds a table of the marts to Metabase, in seconds.
+METADATA_SYNC_TIMEOUT = 120.0
 
 ENV_NAMES = {
     "url": "METABASE_URL",
@@ -39,6 +46,8 @@ ENV_NAMES = {
     "warehouse_db": "WAREHOUSE_DB",
     "warehouse_user": "WAREHOUSE_USER",
     "warehouse_password": "WAREHOUSE_PASSWORD",
+    "metadata_export": "METADATA_EXPORT",
+    "metadata_overrides": "METADATA_OVERRIDES",
 }
 
 # The hints that end a message. A step that fails gets the one for its status, or LOGS_HINT.
@@ -119,6 +128,8 @@ class Config:
     warehouse_db: str
     warehouse_user: str
     warehouse_password: str
+    metadata_export: str
+    metadata_overrides: str
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
@@ -225,15 +236,20 @@ def error_classes(error: BaseException) -> str:
     return name
 
 
+def healthy(metabase: Metabase) -> bool:
+    """One look: whether Metabase answers that it is healthy."""
+    try:
+        status, payload = metabase.request("GET", "/api/health")
+    except (OSError, http.client.HTTPException):
+        return False  # Metabase does not accept connections yet, or is still starting its server
+    return status == 200 and isinstance(payload, dict) and payload.get("status") == "ok"
+
+
 def wait_until_healthy(metabase: Metabase, timeout: float = 600, interval: float = 5) -> None:
     deadline = time.monotonic() + timeout
     while True:
-        try:
-            status, payload = metabase.request("GET", "/api/health")
-            if status == 200 and isinstance(payload, dict) and payload.get("status") == "ok":
-                return
-        except (OSError, http.client.HTTPException):
-            pass  # Metabase does not accept connections yet, or is still starting its server
+        if healthy(metabase):
+            return
         if time.monotonic() >= deadline:
             raise SetupError(
                 f"Metabase at {metabase.url} did not become healthy in {timeout:g} seconds"
@@ -360,19 +376,68 @@ def ensure_warehouse(metabase: Metabase, config: Config) -> tuple[int, bool]:
     return created["id"], True
 
 
-def main(env: Mapping[str, str] | None = None) -> int:
+def diff(env: Mapping[str, str]) -> int:
+    """The dry run of the metadata of the marts, for ./agoranomos metadata diff: the plan that the
+    job would apply, printed, with nothing written. It exits with 0 when Metabase shows what the
+    code says, with 1 when the plan is not empty, and with 2 when the check could not run."""
     try:
-        config = Config.from_env(os.environ if env is None else env)
+        config = Config.from_env(env)
+        marts = metadata.load(config.metadata_export, config.metadata_overrides)
+        metabase = Metabase(config.url, timeout=10)
+        if not healthy(metabase):
+            raise SetupError(
+                f"Metabase does not answer at {config.url}: start the stack with ./agoranomos up"
+            )
+        sign_in(metabase, config.admin_email, config.admin_password)
+        database = find_warehouse(list_databases(metabase), config, warn=False)
+        if database is None:
+            raise SetupError("Metabase has no connection to the warehouse: run ./agoranomos up")
+        plan = metadata.make_plan(marts, metadata.metadata_of(metabase, database["id"]))
+    except (SetupError, metadata.MetadataError) as error:
+        print(f"metadata diff: {error}", file=sys.stderr)
+        return 2
+    except SHAPE_ERRORS as error:
+        print(f"metadata diff: {unexpected_shape('Metabase', error, LOGS_HINT)}", file=sys.stderr)
+        return 2
+    for change in plan.changes:
+        print(metadata.describe(change))
+    for schema, name in plan.unknown:
+        print(f"note: {schema}.{name}: Metabase does not show this table yet")
+    for note in plan.notes:
+        print(f"note: {note}")
+    if plan.changes:
+        print(f"{metadata.counted(len(plan.changes), 'change')} to apply: run ./agoranomos up")
+        return 1
+    print("Metabase shows the metadata of the code: nothing to change")
+    return 0
+
+
+def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> int:
+    environment = os.environ if env is None else env
+    if list(argv) == ["diff"]:
+        return diff(environment)
+    if argv:
+        print("metabase-init: usage: metabase_init.py [diff]", file=sys.stderr)
+        return 2
+    try:
+        config = Config.from_env(environment)
+        # The metadata is read and checked first: a mistake in the overrides of the deployment
+        # stops the job before it writes anything.
+        marts = metadata.load(config.metadata_export, config.metadata_overrides)
         metabase = Metabase(config.url)
         wait_until_healthy(metabase)
         admin_created = ensure_admin(metabase, config)
         database_id, database_created = ensure_warehouse(metabase, config)
-    except SetupError as error:
+        wait = metadata.waiter(METADATA_SYNC_TIMEOUT, "see ./agoranomos logs metabase")
+        changes = metadata.apply(metabase, database_id, marts, wait)
+    except (SetupError, metadata.MetadataError) as error:
         print(f"metabase-init: {error}", file=sys.stderr)
         return 1
     except SHAPE_ERRORS as error:
         print(f"metabase-init: {unexpected_shape('Metabase', error, LOGS_HINT)}", file=sys.stderr)
         return 1
+    for line in changes:
+        print(f"metabase-init: {line}")
     print(
         f"metabase-init: the admin account {'is created' if admin_created else 'exists'}, and the "
         f"warehouse connection {database_id} is {'created' if database_created else 'up to date'}"
@@ -381,4 +446,4 @@ def main(env: Mapping[str, str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(argv=sys.argv[1:]))
