@@ -54,7 +54,7 @@ Solid arrows show how data moves. Dotted arrows show what Airflow runs.
 | Transformation | dbt Core with dbt-postgres | SQL models, tests and documentation | dbt Core 1.12, dbt-postgres 1.11 | [0005](../adr/0005-transform-with-dbt-core.md) |
 | | Cosmos | Runs dbt models as Airflow tasks | 1.15 | [0005](../adr/0005-transform-with-dbt-core.md) |
 | Data quality | dbt tests and elementary | Tests from day one and an observability report | elementary 0.26 | [0005](../adr/0005-transform-with-dbt-core.md) |
-| BI | Metabase OSS | Dashboards, metrics, glossary and a built-in MCP server | 0.63 | [0006](../adr/0006-metabase-as-bi.md) |
+| BI | Metabase OSS | Dashboards, metrics, glossary and a built-in MCP server | 0.64 | [0006](../adr/0006-metabase-as-bi.md) |
 | AI access | astro-airflow-mcp | MCP server for Airflow | 0.9 | [0007](../adr/0007-ai-access-via-mcp-read-only.md) |
 | | MCP Toolbox for Databases | Curated SQL tools for the warehouse | 1.13 | [0007](../adr/0007-ai-access-via-mcp-read-only.md) |
 | | dbt-mcp | Lineage, docs, compile and test on a dev target | 2.5 | [0007](../adr/0007-ai-access-via-mcp-read-only.md) |
