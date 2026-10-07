@@ -49,6 +49,8 @@ The marts declare them under `config: meta: metabase:`, with the key names of [d
 
 **Names are in Title Case.** After the first word, a, an, and, as, at, by, for, in, of, on, or, per, the and to stay in lower case, and these abbreviations are in capitals: ID, CTR, CPC, CPM, CPA, ROAS and ISO. Two columns of one table never share a display name.
 
+The jobs that apply the metadata never send a display name of `null`, which the two versions treat differently: Metabase 0.64.1 then clears the name that someone gave the field and shows the one of its sync, where 0.63.19 ignores it.
+
 **Semantic types**, by the kind of column:
 
 | Kind of column | `semantic_type` | In the demo |
