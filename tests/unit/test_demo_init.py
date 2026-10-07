@@ -293,12 +293,25 @@ def env_for(airflow: FakeAirflow, metabase: FakeMetabase, **overrides: str) -> d
 METADATA_LINES = tuple(f"demo-init: {kind}: " for kind in (md.FIRST, md.UPDATE, md.REVERT))
 
 
-def one_line(capsys: pytest.CaptureFixture[str]) -> str:
+# The calls that demo-init makes after it applied the metadata of the marts: a failure of one of
+# them comes after the lines of the changes that apply() made.
+AFTER_APPLY = {
+    ("PUT", "/api/field/"),
+    ("POST", "/api/card"),
+    ("PUT", "/api/dashboard/"),
+    ("POST", "/api/collection"),
+}
+
+
+def one_line(capsys: pytest.CaptureFixture[str], *, after_apply: bool = False) -> str:
     """The line that demo-init prints when it fails: one line on standard error, which names the
-    step, with no traceback and no secret. Standard output holds no more than the lines of the
-    metadata that it applied before the failure."""
+    step, with no traceback and no secret. Standard output is empty, or, for a failure after the
+    metadata was applied, holds no more than the lines of the changes that it made."""
     output = capsys.readouterr()
-    assert all(line.startswith(METADATA_LINES) for line in output.out.splitlines()), output.out
+    if after_apply:
+        assert all(line.startswith(METADATA_LINES) for line in output.out.splitlines()), output.out
+    else:
+        assert output.out == "", output.out
     assert "Traceback" not in output.err
     assert not leaked(output.out + output.err), leaked(output.out + output.err)
     [line] = output.err.splitlines()
@@ -634,7 +647,7 @@ def test_a_failed_call_names_the_step_and_prints_no_secret(airflow, metabase, ca
     # The stand-ins answer a failure by echoing the request with its credentials, the worst case.
     (airflow if side == "airflow" else metabase).failures[call] = 500
     assert di.main(env_for(airflow, metabase)) == 1
-    line = one_line(capsys)
+    line = one_line(capsys, after_apply=call in AFTER_APPLY)
     assert f"{call[0]} {call[1]}" in line
     assert "HTTP 500" in line
 
@@ -661,7 +674,7 @@ def test_an_answer_of_an_unexpected_shape_ends_in_one_line(
     # where to look, never the answer.
     (airflow if side == "airflow" else metabase).failures[call] = 200
     assert di.main(env_for(airflow, metabase)) == 1
-    line = one_line(capsys)
+    line = one_line(capsys, after_apply=call in AFTER_APPLY)
     assert f"an answer of {server} had an unexpected shape (KeyError in {function})" in line
     hint = "airflow-apiserver" if server == "Airflow" else "metabase"
     assert line.endswith(f"See ./agoranomos logs {hint}.")
