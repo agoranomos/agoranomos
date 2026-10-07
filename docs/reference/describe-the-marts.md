@@ -2,7 +2,7 @@
 
 Every model and column of the dbt project, and every table of its sources, has a description. Every mart also has a display name for Metabase, and each of its columns a display name and a semantic type. People read the descriptions in SQL clients and in Metabase, and the planned AI access through MCP ([ADR-0007](../adr/0007-ai-access-via-mcp-read-only.md)) is to take its context from them, so they follow the rules on this page. Tests check them ([How the rules are checked](#how-the-rules-are-checked)).
 
-Metabase gets them on every start: the one-shot job `metadata-export` exports them from dbt, and `metabase-init` applies them, with the overrides of a deployment ([A deployment's own words](#a-deployments-own-words)).
+Metabase gets them on every start: the one-shot job `metadata-export` exports them from dbt, and `metabase-init` applies them, with the overrides of a deployment, as `demo-init` does for the mart of the demo once the demo pipeline has built it ([A deployment's own words](#a-deployments-own-words)).
 
 ## What a description says
 
