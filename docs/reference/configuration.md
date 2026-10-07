@@ -122,8 +122,8 @@ To go back, stop Metabase first, so that nothing is connected to its database, a
 ```bash
 docker compose stop metabase
 docker compose exec -T platform-db pg_restore --username=postgres --clean --if-exists --create --exit-on-error --dbname=postgres < ../metabase-before-upgrade.dump
-# Return the checkout to the release that you came from, then:
+# Only when pg_restore ended without an error: return the checkout to the release that you came from, then:
 ./agoranomos up
 ```
 
-If Metabase, or anything else, is still connected to the database, the restore stops at once with `database "metabase" is being accessed by other users` and changes nothing, because PostgreSQL does not drop a database that has connections: stop what is connected, such as Metabase, and run the restore again. `--exit-on-error` makes it stop at the first error; without it, `pg_restore` goes on after an error, and would restore what it can into the database that is still there. Everything that Metabase saved after the backup is lost.
+If Metabase, or anything else, is still connected to the database, the restore stops at once with `database "metabase" is being accessed by other users` and changes nothing, because PostgreSQL does not drop a database that has connections: stop what is connected, such as Metabase, and run the restore again. `--exit-on-error` makes it stop at the first error; without it, `pg_restore` goes on after an error, and would restore what it can into the database that is still there. If the restore stops on any other error, after it dropped the database, do not start the stack: Metabase would start on an empty database. Fix the cause and run the restore again. Everything that Metabase saved after the backup is lost.
