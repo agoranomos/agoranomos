@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Keep extensions apart from the base package
 
+The overrides of the metadata of the marts in `extensions/metadata/`, an extension point that is data and not code, are decided in [ADR-0016](0016-keep-the-metadata-of-the-marts-as-code.md).
+
 ## Context and Problem Statement
 
 Each release of Agoranomos is to ship a base package: the Compose stack, the pipelines, the dbt models and the dashboards. The people who run it, and the AI agents they work with, add their own work on top: DAGs for their own jobs, dbt models for their own metrics and, later, data sources that the base package does not have. A release must be able to replace the base package without overwriting that work, and an AI agent must know where its changes belong. This record covers code only: the questions and dashboards that people make in Metabase are saved in Metabase's own database.

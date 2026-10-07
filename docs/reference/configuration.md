@@ -25,7 +25,7 @@ Each value is used as written: keep it on one line, do not put a comment after i
 | Setting | Default | What it does |
 |---|---|---|
 | `AGORANOMOS_ADMIN_EMAIL` | `admin@example.com` | The email of the admin account of Metabase and Airflow (user name `admin` in Airflow), created on the first start. Change it before the first start. |
-| `AGORANOMOS_EXTENSIONS_DIR` | `./extensions` | The folder for the deployment's own extensions ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)). Releases never overwrite it. A relative path starts at the checkout. |
+| `AGORANOMOS_EXTENSIONS_DIR` | `./extensions` | The folder for the deployment's own extensions ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)): its DAGs, and its overrides of the metadata of the marts ([below](#the-metadata-of-the-marts)). Releases never overwrite it. A relative path starts at the checkout. |
 | `AIRFLOW_PORT` | `8080` | The port of the Airflow UI and API on `127.0.0.1`. |
 | `METABASE_PORT` | `3000` | The port of Metabase on `127.0.0.1`. |
 | `AIRFLOW_PARALLELISM` | `4` | How many Airflow tasks run at the same time, in the whole stack. With LocalExecutor, each one is a process in the scheduler container, so more tasks need more memory, and a task that runs out of memory can make the scheduler restart (Airflow's documentation warns about this). With CeleryExecutor it caps all workers together: raise it together with `AIRFLOW_WORKER_CONCURRENCY` or the number of workers. |
@@ -46,6 +46,30 @@ The two caches from which Cosmos renders the tasks of dbt stay out of Airflow Va
 Without the caches, `dbt ls` runs each time that the DAG processor parses a DAG of Cosmos, and again when each task of such a DAG starts, since a task parses the file of its DAG first. For the demo project that takes 1.2 to 2 seconds in the DAG processor and 1.3 to 1.7 seconds at the start of each task of `agoranomos_demo_transform` (measured on an arm64 machine). That DAG has a file of its own, so the task of `agoranomos_demo_load` does not wait for `dbt ls`.
 
 A DAG in the extensions folder should not use two features of Cosmos that still keep state in Variables, and that the stack does not use: `SeedRenderingBehavior.WHEN_SEED_CHANGES`, which keeps `cosmos_seed_checksum__…` Variables, and the watcher execution mode, which keeps a backup of its XComs there.
+
+## The metadata of the marts
+
+The display names, descriptions and semantic types of the tables and fields of the marts in Metabase come from the dbt project ([Describe the marts](describe-the-marts.md)). On every start, the one-shot job `metadata-export` exports them from dbt, and `metabase-init` applies them, with the overrides of this deployment; `demo-init` applies them too, after its sync ([ADR-0016](../adr/0016-keep-the-metadata-of-the-marts-as-code.md)).
+
+The overrides are in `metadata/overrides.toml` in the extensions folder, which releases never change, and the file is optional. Each entry names a table of the marts, `[marts.<table>]`, or a column of one, `[marts.<table>.columns.<column>]`, with any of three properties ([Rename a field or add your own definitions](../how-to/rename-a-field.md)):
+
+| Property | What it does | At most |
+|---|---|---|
+| `display_name` | Replaces the display name of the release. One line. | 100 characters |
+| `description` | Replaces the description of the release. | 2,000 characters |
+| `note` | Follows the description of the release after an empty line, so that a better description of a later release still reaches Metabase. | 2,000 characters |
+
+```toml
+[marts.ad_spend_daily.columns.conversions]
+display_name = "Purchases"
+note = "In this business, a conversion is a paid order in the online shop."
+```
+
+Each value is a text in quotes, and the file has at most 256 KiB. A table, a column or a property that dbt does not have, a value that is not a text or is empty, two columns of a table with one display name, and a mistake in the TOML are errors: the job then writes nothing in Metabase and stops with one line that names the entry, and `./agoranomos up` fails. The file is data: the jobs parse it, and nothing in it runs. Metabase OSS shows one display name for each field to everyone, so names in another language are for the whole deployment.
+
+The code always wins. A display name, a description or a semantic type that someone changes in the Metabase UI is set back at the next start, and each change is one line of `./agoranomos logs metabase-init`: a first fill, an update from the code, or the revert of an edit, with the value that it replaced. What the code does not declare, such as whether a field is hidden, stays as it is. `./agoranomos metadata diff` prints what the next start would change, and changes nothing ([Command line](command-line.md#metadata)).
+
+A mart that a run of a DAG creates after a start gets its descriptions at the next sync of Metabase, from the comments of the warehouse, and its display names and types at the next start.
 
 ## Secrets
 

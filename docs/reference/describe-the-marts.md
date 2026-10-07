@@ -2,9 +2,7 @@
 
 Every model and column of the dbt project, and every table of its sources, has a description. Every mart also has a display name for Metabase, and each of its columns a display name and a semantic type. People read the descriptions in SQL clients and in Metabase, and the planned AI access through MCP ([ADR-0007](../adr/0007-ai-access-via-mcp-read-only.md)) is to take its context from them, so they follow the rules on this page. Tests check them ([How the rules are checked](#how-the-rules-are-checked)).
 
-!!! note "Status, as of October 2026"
-
-    The descriptions are in place for the demo project, and in the comments of the warehouse too. Metabase copies a comment into the description of a table or field only while that description is empty ([Comments in the warehouse](#comments-in-the-warehouse)). The display names and semantic types are declared in dbt. Applying the descriptions, display names and semantic types to Metabase on every start is planned.
+Metabase gets them on every start: the one-shot job `metadata-export` exports them from dbt, and `metabase-init` applies them, with the overrides of a deployment ([A deployment's own words](#a-deployments-own-words)).
 
 ## What a description says
 
@@ -62,7 +60,7 @@ The marts declare them under `config: meta: metabase:`, with the key names of [d
 | Money, when the whole table has one currency and tests assert it | `type/Currency`, with `currency` | `spend` |
 | Any other number, such as a count that can be fractional | `null` | `conversions` |
 
-`type/Quantity` is for whole numbers: Metabase defines it under its integer types (as of Metabase 0.63.19). `null` declares that the column has no type of its own.
+`type/Quantity` is for whole numbers: Metabase defines it under its integer types (as of Metabase 0.63.19). `null` declares that the column has no type of its own: the jobs that apply the metadata then clear a type that Metabase guessed, or that someone set in its UI.
 
 **Money and its currency.** `type/Currency` and the types under it, such as `type/Cost`, go together with `currency`, and only in a mart whose column `currency` has an `accepted_values` test with that one code and a `not_null` test: `accepted_values` lets NULL through. The demo is in USD only. In a mart that mixes currencies, the columns of money stay plain numbers, and their descriptions name the column of the currency.
 
@@ -84,11 +82,16 @@ The constraint has no `name`. dbt builds a table under a temporary name and then
 
 `+persist_docs` in `dbt/dbt_project.yml` makes dbt write the descriptions into the comments of the tables, views and columns that it builds, so SQL clients see them too, and so will the planned AI access to the warehouse. dbt does not comment the tables of the sources.
 
-Metabase copies the comment of a table or column into its description when it syncs, but only while that description is empty, as of Metabase 0.63.19: a changed description does not reach Metabase this way.
+Metabase copies the comment of a table or column into its description when it syncs, but only while that description is empty, as of Metabase 0.63.19: a changed description does not reach Metabase this way. The jobs that apply the metadata on every start bring it there instead.
+
+## A deployment's own words
+
+A deployment can override the display name and the description of a table or a field of the marts, and add a note of its own to a description, in `extensions/metadata/overrides.toml`: [Rename a field or add your own definitions](../how-to/rename-a-field.md) shows how, and [Configuration](configuration.md#the-metadata-of-the-marts) lists the properties and the limits. Overrides reach Metabase only. The semantic types and the currency stay those of the release.
 
 ## How the rules are checked
 
 - `tests/unit/test_dbt_project.py` reads the files: `persist_docs` is on, every description over several lines is `>-`, the mart has its contract and its key, and no primary key has a name, in whatever order its keys are written.
 - `tests/stack/test_dbt_metadata.py` asks dbt itself, with `dbt ls` in the Airflow image, which resolves the doc blocks and the configs as dbt does: every model, column and source table has a description, every mart has a display name and each of its columns a display name and a semantic type, columns of one name have one description, money has its tests of one currency and no NULL, the names follow the style, and every mart has its contract. It also checks the warehouse after a build: each table and view that dbt builds in `staging` and `marts` has exactly the columns that dbt declares, it and each of them carry the description as their comment, and the key of the mart is a primary key in PostgreSQL.
+- `tests/stack/test_metabase_metadata.py` checks Metabase after a start: every table and field of the marts shows the display name, the description and the semantic type of the code, also a semantic type of none, and the currency of money; an edit in the Metabase UI is reverted at the next start, and a field that someone hid stays hidden.
 
-CI runs the first on every pull request, and the second on every pull request that changes `dbt/`.
+CI runs the first on every pull request, and the other two on every pull request that changes the stack, such as `dbt/` or `metabase/`.
