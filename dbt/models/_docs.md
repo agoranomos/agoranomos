@@ -10,7 +10,7 @@ The ID of the ad account that the statistics belong to, as the ad platform gives
 {% enddocs %}
 
 {% docs campaign_id %}
-The ID of the campaign, as the ad platform gives it. It is unique within its ad account, not across accounts: account_id and campaign_id together identify a campaign.
+The ID of the campaign, as the ad platform gives it. It is unique within its ad account, and some platforms make it unique across accounts too; account_id and campaign_id together identify a campaign on any platform.
 {% enddocs %}
 
 {% docs campaign_name %}
