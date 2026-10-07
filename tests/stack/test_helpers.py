@@ -885,16 +885,33 @@ def test_shown_in_finds_a_value_that_pytest_wrapped_over_lines(report, shown):
 # one. The values are made up. The env fixture and the comparison hook are those of the real
 # conftest.py, which the test copies next to this module. The token and the headers are what the
 # token fixture of conftest.py and api() of airflow_api.py build; the module has a token fixture of
-# its own, which overrides the real one, so that nothing signs in to Airflow. The control takes a
-# plain str, and the report must show it: a check that cannot see a leak would pass too.
+# its own, which overrides the real one, so that nothing signs in to Airflow. The rendered service
+# is what rendered() makes of the output of docker compose config, which a fixture gives instead
+# of Docker. The control takes a plain str, and the report must show it: a check that cannot see a
+# leak would pass too.
 FAILING_TESTS = """
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
 import stack_helpers
 
 stack_helpers.REPO_ROOT = Path(__ROOT__)
+
+
+@pytest.fixture
+def rendered_config(env, monkeypatch):
+    # What docker compose config --format json prints for a service whose environment holds the
+    # password; rendered() reads it as it reads the real one.
+    environment = {"API_PASSWORD": env["API_PASSWORD"], "PORT": "1"}
+    service = {"image": "an-image", "environment": environment}
+    output = json.dumps({"services": {"a-service": service}})
+
+    def compose(*args, **options):
+        return subprocess.CompletedProcess(args, 0, stdout=output, stderr="")
+
+    monkeypatch.setattr(stack_helpers, "compose", compose)
 
 
 @pytest.fixture
@@ -953,6 +970,17 @@ def test_a_scan_of_a_log_in_a_local_fails(env, token, headers):
     assert not stack_helpers.leaked(stack_helpers.secrets(env), log), "the log holds a secret"
 
 
+def test_a_check_of_a_rendered_service_fails(env, token, headers, rendered_config):
+    service = stack_helpers.rendered("local")["a-service"]
+    environment = service["environment"]
+    assert "A_MISSING_SETTING" in environment, "deliberate failure"
+
+
+def test_a_comparison_of_a_rendered_environment_fails(env, token, headers, rendered_config):
+    environment = stack_helpers.rendered("local")["a-service"]["environment"]
+    assert environment == {"API_PASSWORD": "something else", "PORT": "1"}
+
+
 def test_the_control_fails(plain):
     assert plain == "something else", "deliberate failure"
 """
@@ -980,17 +1008,25 @@ def test_pytest_does_not_print_the_secrets_of_a_failing_test(tmp_path, options):
     (tmp_path / "test_fails_on_purpose.py").write_text(source, encoding="utf-8")
     shutil.copy(Path(stack_helpers.__file__).parent / "conftest.py", tmp_path / "conftest.py")
     report = nested_pytest(tmp_path, *options)
-    assert "8 failed" in report, "the tests did not fail as they should"
+    assert "10 failed" in report, "the tests did not fail as they should"
+    # The report shows no value, and the control shows that this check can see a leak.
+    hidden = {"the token": values["__TOKEN__"], "the password": password}
+    assert [label for label, value in hidden.items() if shown_in(value, report)] == []
+    assert not shown_in(f"Bearer {values['__TOKEN__']}", report)
+    assert shown_in(values["__PLAIN__"], report)
     # The scans of a log fail on the password, and say so by its name.
     assert report.count("the log holds the values of ['API_PASSWORD']") >= 1
     # The arguments are printed, and show no value.
     assert "Secret('<hidden>')" in report
     assert "EnvValues(" in report
-    hidden = {"the token": values["__TOKEN__"], "the password": password}
-    assert [label for label, value in hidden.items() if shown_in(value, report)] == []
-    assert not shown_in(f"Bearer {values['__TOKEN__']}", report)
-    # The control shows that this check can see a leak.
-    assert shown_in(values["__PLAIN__"], report)
+    # A rendered service and its environment print their names, and a failed comparison of the
+    # environment names the key that differs.
+    assert "NamesOnly(['API_PASSWORD', 'PORT'])" in report
+    assert "keys whose values differ: ['API_PASSWORD']" in report
+
+
+# A page in Latin-1, which is not UTF-8, as a proxy in front of a service can send.
+LATIN_1_PAGE = "<html><body>Passerelle indisponible, réessayez</body></html>".encode("latin-1")
 
 
 def unused_port() -> int:
@@ -1015,6 +1051,7 @@ def http_server():
         "/text": (200, "text/plain", b"not json"),
         "/denied": (401, "application/json", b'{"detail": "Not authenticated"}'),
         "/missing": (404, "text/plain", b"nothing here"),
+        "/latin-1": (502, "text/html; charset=iso-8859-1", LATIN_1_PAGE),
     }
 
     class Handler(BaseHTTPRequestHandler):
@@ -1089,6 +1126,9 @@ def test_http_json_sends_no_body_when_it_has_none(http_server):
         pytest.param("/text", (200, "not json"), id="not-json"),
         pytest.param("/denied", (401, {"detail": "Not authenticated"}), id="a-status-of-401"),
         pytest.param("/missing", (404, "nothing here"), id="a-status-of-404-that-is-text"),
+        pytest.param(
+            "/latin-1", (502, LATIN_1_PAGE.decode(errors="replace")), id="a-page-that-is-not-utf-8"
+        ),
     ],
 )
 def test_http_json_returns_every_answer_of_the_server_as_a_status_and_a_body(
@@ -1452,16 +1492,18 @@ def test_the_celery_variant_adds_the_worker_to_the_airflow_services():
 
 
 def rendered_with(*names):
-    """A stand-in for stack_helpers.rendered, whose services are the given names."""
-    return lambda variant: {name: {"image": "stand-in"} for name in names}
+    """A stand-in for stack_helpers.rendered, whose services are the given names, each with a
+    definition of its own."""
+    return lambda variant: {name: {"image": f"the image of {name}"} for name in names}
 
 
 def test_airflow_services_are_the_rendered_services_named_airflow(monkeypatch):
     names = services.airflow_names("celery")
-    monkeypatch.setattr(
-        services, "rendered", rendered_with("db-init", "broker", "metabase", *names)
-    )
-    assert set(services.airflow_services("celery")) == names
+    stand_in = rendered_with("db-init", "broker", "metabase", *names)
+    monkeypatch.setattr(services, "rendered", stand_in)
+    # The services themselves, each with its own definition, and not only their names.
+    wanted = {name: service for name, service in stand_in("celery").items() if name in names}
+    assert services.airflow_services("celery") == wanted
 
 
 @pytest.mark.parametrize(

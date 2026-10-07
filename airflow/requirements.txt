@@ -2,3 +2,11 @@
 # constraints of the base image. dbt is not here: it has an environment of its own.
 dlt[postgres]==1.30.0
 astronomer-cosmos==1.15.1
+
+# Dependencies of dlt that the constraints of Airflow leave open. They are pinned so that every
+# machine builds the same image, and so that Renovate moves them.
+giturlparse==0.15.0
+pathvalidate==3.3.1
+requirements-parser==0.13.1
+semver==3.1.0
+simplejson==4.2.0

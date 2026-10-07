@@ -73,6 +73,8 @@ class FakeMetabase:
         # Calls that get no HTTP answer: "close" (the connection ends), "truncate" (it ends in
         # the middle of the body) or "garbage" (the answer is not HTTP).
         self.faults: dict[tuple[str, str], str] = {}
+        # Calls that get a page of their own, as (status, body in bytes), such as a proxy sends.
+        self.pages: dict[tuple[str, str], tuple[int, bytes]] = {}
         self.health_faults = 0
         self.admin: dict[str, str] | None = None
         self.databases: list[dict[str, Any]] = []
@@ -90,6 +92,8 @@ class FakeMetabase:
         self.calls.append((method, path))
         if (method, path) in self.faults:
             return 0, self.faults[(method, path)]
+        if (method, path) in self.pages:
+            return self.pages[(method, path)]
         if (method, path) == ("GET", "/api/health") and self.health_faults > 0:
             self.health_faults -= 1
             return 0, "close"
@@ -328,18 +332,19 @@ def test_a_failing_call_names_the_step_and_the_status_and_prints_no_secret(
 
 
 @pytest.mark.parametrize(
-    ("method", "path", "after_first_start"),
+    ("method", "path", "after_first_start", "function"),
     [
-        pytest.param("POST", "/api/setup", False, id="setup"),
-        pytest.param("POST", "/api/session", True, id="sign-in"),
-        pytest.param("POST", "/api/database", False, id="connect"),
+        pytest.param("POST", "/api/setup", False, "ensure_admin", id="setup"),
+        pytest.param("POST", "/api/session", True, "sign_in", id="sign-in"),
+        pytest.param("POST", "/api/database", False, "ensure_warehouse", id="connect"),
     ],
 )
 def test_an_answer_of_an_unexpected_shape_ends_in_one_line(
-    metabase, capsys, method, path, after_first_start
+    metabase, capsys, method, path, after_first_start, function
 ):
     # A success status with an echo of the request, the setup token and a password in it: the job
-    # looks for an id that is not there. The line names the class of the error, never the answer.
+    # looks for an id that is not there. The line names the class of the error and the function
+    # that read the answer, never the answer.
     if after_first_start:
         assert mi.main(env_for(metabase)) == 0
         capsys.readouterr()
@@ -349,10 +354,66 @@ def test_an_answer_of_an_unexpected_shape_ends_in_one_line(
     assert output.out == ""
     assert "Traceback" not in output.err
     assert output.err.splitlines() == [
-        "metabase-init: an answer of Metabase had an unexpected shape (KeyError). "
+        f"metabase-init: an answer of Metabase had an unexpected shape (KeyError in {function}). "
         "See ./agoranomos logs metabase."
     ]
     assert leaked(output.err) == []
+
+
+def test_the_line_of_an_unexpected_shape_names_the_function_that_raised():
+    # The name of a function is code, never a value: a nested one keeps the name of the function
+    # around it, and an error that was never raised has no function to name.
+    def read_the_id(answer):
+        return answer["id"]
+
+    with pytest.raises(KeyError) as raised:
+        read_the_id({})
+    assert mi.unexpected_shape("Metabase", raised.value, "A hint.") == (
+        "an answer of Metabase had an unexpected shape (KeyError in "
+        "test_the_line_of_an_unexpected_shape_names_the_function_that_raised.read_the_id). "
+        "A hint."
+    )
+    assert mi.unexpected_shape("Metabase", KeyError("id"), "A hint.") == (
+        "an answer of Metabase had an unexpected shape (KeyError). A hint."
+    )
+
+
+# A page in Latin-1, which is not UTF-8, as a proxy in front of Metabase can send.
+LATIN_1_PAGE = "<html><body>Passerelle indisponible, réessayez</body></html>".encode("latin-1")
+
+
+@pytest.mark.parametrize(
+    ("status", "line"),
+    [
+        pytest.param(
+            502,
+            "metabase-init: GET /api/session/properties failed with HTTP 502. "
+            "See ./agoranomos logs metabase.",
+            id="an-error-status",
+        ),
+        pytest.param(
+            200,
+            "metabase-init: an answer of Metabase had an unexpected shape (AttributeError in "
+            "ensure_admin). See ./agoranomos logs metabase.",
+            id="a-success-status",
+        ),
+    ],
+)
+def test_a_page_that_is_not_utf_8_ends_in_one_line(metabase, capsys, status, line):
+    metabase.pages[("GET", "/api/session/properties")] = (status, LATIN_1_PAGE)
+    assert mi.main(env_for(metabase)) == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err.splitlines() == [line]
+
+
+def test_an_answer_that_is_not_utf_8_is_a_text_with_a_status(metabase):
+    # The client gives the status and the page as text, with a replacement for what is not UTF-8,
+    # whatever the status: the caller judges the status, and the shape of what it reads.
+    metabase.pages[("GET", "/api/session/properties")] = (502, LATIN_1_PAGE)
+    page = LATIN_1_PAGE.decode(errors="replace")
+    assert "�" in page
+    assert mi.Metabase(metabase.url).request("GET", "/api/session/properties") == (502, page)
 
 
 def test_a_failing_call_is_an_error_with_the_step_the_status_and_a_fixed_hint_only(metabase):

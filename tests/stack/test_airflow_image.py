@@ -1,7 +1,8 @@
 """The Airflow image of the stack: built from airflow/Dockerfile and run by every Airflow service.
 
-The checks of the rendered Compose files need no running stack; the checks inside the containers do.
-They print versions and names, never the environment, which holds secrets.
+The checks of the rendered Compose files and of the reader of the pins need no running stack; the
+checks inside the containers do. They print versions and names, never the environment, which holds
+secrets.
 """
 
 import json
@@ -72,14 +73,46 @@ print(json.dumps({
 """
 
 
-def pinned(name):
-    """The versions that airflow/requirements.txt and airflow/dbt-requirements.in pin."""
+def pins_of(path):
+    """The packages of a requirements file, name -> version, as pins() of the unit tests reads
+    them: any extras, a comment or a marker after a pin, and no line that is not a pin with ==.
+    Such a line fails here, rather than drop out of the check of the installed versions."""
     versions = {}
-    for line in (REPO_ROOT / "airflow" / name).read_text(encoding="utf-8").splitlines():
-        match = re.fullmatch(r"([a-z0-9-]+)(\[[a-z]+\])?==(\S+)", line.strip())
-        if match:
-            versions[match.group(1)] = match.group(3)
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip().removesuffix("\\").strip()
+        if not line or line.startswith("--"):
+            continue
+        requirement = line.split(";", 1)[0].strip()
+        match = re.fullmatch(r"([A-Za-z0-9_.-]+)(\[[^\]]+\])?==(\S+)", requirement)
+        assert match, f"{path.name}: not pinned with ==: {requirement}"
+        versions[match.group(1).lower()] = match.group(3)
     return versions
+
+
+def pinned(name):
+    """The versions that airflow/requirements.txt or airflow/dbt-requirements.in pins."""
+    return pins_of(REPO_ROOT / "airflow" / name)
+
+
+def test_the_pins_are_read_with_any_extras_and_a_line_that_is_no_pin_fails(tmp_path):
+    # A pin that the reader dropped would leave the check of its installed version out, silently.
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text(
+        "# a comment\n\n"
+        "dlt[postgres,parquet]==1.30.0  # two extras, and a comment\n"
+        "Astronomer-Cosmos==1.15.1\n"
+        "semver==3.1.0 ; python_version >= '3.10'\n",
+        encoding="utf-8",
+    )
+    assert pins_of(requirements) == {
+        "dlt": "1.30.0",
+        "astronomer-cosmos": "1.15.1",
+        "semver": "3.1.0",
+    }
+    for line in ("dlt>=1.30.0", "dlt", "dlt[postgres]"):
+        requirements.write_text(f"{line}\n", encoding="utf-8")
+        with pytest.raises(AssertionError, match="not pinned with =="):
+            pins_of(requirements)
 
 
 def airflow_version():
@@ -157,9 +190,39 @@ def test_compose_keeps_the_caches_of_cosmos_out_of_airflow_variables_in_every_ai
 
 
 @pytest.mark.parametrize("service", USERS)
-def test_airflow_has_the_pinned_dlt_and_cosmos(service):
+def test_airflow_has_the_pinned_packages(service):
+    # dlt, Cosmos, and the dependencies of dlt that the constraints of Airflow leave open.
     wanted = {"apache-airflow": airflow_version(), **pinned("requirements.txt")}
     assert versions(service, "python", *wanted) == wanted
+
+
+# The packages of Airflow's environment that neither the constraints of the base image nor
+# airflow/requirements.txt pin: Airflow itself, which the base image installs, and pip.
+UNPINNED = {"apache-airflow", "apache-airflow-core", "apache-airflow-task-sdk", "pip"}
+# The names of the installed packages and of the packages that the constraints pin, normalized as
+# pip compares them.
+ENVIRONMENT_PROBE = """
+import importlib.metadata as m, json, os, re
+
+def name(raw):
+    return re.sub(r"[-_.]+", "-", raw).lower()
+
+with open(os.path.expanduser("~/constraints.txt"), encoding="utf-8") as constraints:
+    constrained = {name(line.split("==", 1)[0]) for line in constraints if "==" in line}
+installed = {name(dist.metadata["Name"]) for dist in m.distributions()}
+print(json.dumps({"installed": sorted(installed), "constrained": sorted(constrained)}))
+"""
+
+
+@pytest.mark.parametrize("service", USERS)
+def test_every_package_of_airflow_is_pinned(service):
+    # A new dependency that an update of dlt or Cosmos brings, and that the constraints of Airflow
+    # leave open, would be resolved again on every machine that builds the image. This fails until
+    # it is pinned in airflow/requirements.txt.
+    found = json.loads(compose("exec", "-T", service, "python", "-c", ENVIRONMENT_PROBE).stdout)
+    ours = {re.sub(r"[-_.]+", "-", name) for name in pinned("requirements.txt")}
+    open_ = set(found["installed"]) - set(found["constrained"]) - ours - UNPINNED
+    assert not open_, f"pinned by neither the constraints nor requirements.txt: {sorted(open_)}"
 
 
 @pytest.mark.parametrize("service", USERS)

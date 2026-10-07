@@ -7,9 +7,10 @@ connection details. Settings that must not change in the Metabase UI, such as th
 being off, are environment variables in compose.yaml instead.
 
 Every secret comes from the environment and goes only into the body of a request. The messages of
-this script name a step and an HTTP status (or the class of an error), and end in a fixed hint:
-never what Metabase answered, because an answer can repeat what the request carried. The one-shot
-demo-init job (demo_init.py) shares its client and these rules.
+this script name a step and an HTTP status, or the class of an error (and, for an answer of an
+unexpected shape, the function that read it), and end in a fixed hint: never what Metabase
+answered, because an answer can repeat what the request carried. The one-shot demo-init job
+(demo_init.py) shares its client and these rules.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import json
 import os
 import sys
 import time
+import traceback
 import urllib.error
 import urllib.request
 from collections.abc import Collection, Mapping
@@ -56,15 +58,27 @@ class SetupError(RuntimeError):
 
 
 # What reading an answer of an unexpected shape raises, such as an echo of the request with a
-# success status. The jobs then end with one line that names the class of the error, and never a
-# value of the answer, which can repeat what the request carried.
+# success status. The jobs then end with one line that names the class of the error and the
+# function that raised it, and never a value of the answer, which can repeat what the request
+# carried.
 SHAPE_ERRORS = (KeyError, TypeError, AttributeError, IndexError)
 
 
+def raised_in(error: BaseException) -> str | None:
+    """The function in which an error was raised: the name of the code of the last frame of its
+    traceback, with the function around a nested one, such as wait_for_run.finished. A name of
+    code, never a value. None for an error that was never raised."""
+    frames = [frame for frame, _ in traceback.walk_tb(error.__traceback__)]
+    return frames[-1].f_code.co_qualname.replace(".<locals>", "") if frames else None
+
+
 def unexpected_shape(server: str, error: BaseException, hint: str) -> str:
-    """The message of an answer of an unexpected shape: the server, the class of the error and a
-    fixed hint."""
-    return f"an answer of {server} had an unexpected shape ({type(error).__name__}). {hint}"
+    """The message of an answer of an unexpected shape: the server, the class of the error, the
+    function that raised it, and a fixed hint. The function helps to tell a bug of the job from an
+    answer that the job did not expect."""
+    where = raised_in(error)
+    found = type(error).__name__ + (f" in {where}" if where else "")
+    return f"an answer of {server} had an unexpected shape ({found}). {hint}"
 
 
 def read_settings(
@@ -151,9 +165,12 @@ class ApiClient:
                 status, raw = response.status, response.read()
         except urllib.error.HTTPError as error:
             status, raw = error.code, error.read()
+        # An answer that is no JSON, such as the page of a proxy, is a text: json.loads raises
+        # JSONDecodeError, or UnicodeDecodeError when the page is not UTF-8, and both are a
+        # ValueError.
         try:
             payload = json.loads(raw) if raw else None
-        except json.JSONDecodeError:
+        except ValueError:
             payload = raw.decode(errors="replace")
         return status, payload
 

@@ -14,8 +14,17 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from services import BASE_AIRFLOW, airflow_services
-from stack_helpers import FILES, REPO_ROOT, NamesOnly, compose, rendered, secrets
+from services import BASE_AIRFLOW, airflow_names, airflow_services
+from stack_helpers import (
+    FILES,
+    REPO_ROOT,
+    NamesOnly,
+    compose,
+    leaked,
+    read_env,
+    rendered,
+    secrets,
+)
 
 EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
 CELERY_ONLY = {"broker", "airflow-worker"}
@@ -86,9 +95,12 @@ def test_every_airflow_service_shares_the_keys_and_the_database(variant):
     )
     services = airflow_services(variant)
     for key in shared:
-        values = {name: service["environment"].get(key) for name, service in services.items()}
-        # Some of these are secrets, and a failed assertion prints what it compares: so it compares
-        # names and counts, never the values.
+        # Some of these are secrets, and a failed assertion prints what it compares, and the locals
+        # of the test under --showlocals: so the values of the services are NamesOnly, and the test
+        # compares names and counts, never the values.
+        values = NamesOnly(
+            {name: service["environment"].get(key) for name, service in services.items()}
+        )
         missing = sorted(name for name, value in values.items() if not value)
         assert not missing, f"{key} is missing in {missing}"
         different = len(set(values.values()))
@@ -131,16 +143,19 @@ def test_every_service_keeps_the_same_log_limits(variant):
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_no_secret_is_in_a_command_of_the_variant(env, variant):
     # A command, an entry point or a health check shows in docker inspect and in the process list.
+    # The words are scanned where they are read, so that no frame of a failed test holds them.
     values = secrets(env)
     assert values, "no secrets in .env: run ./agoranomos init"
     for name, service in rendered(variant).items():
-        words = [
-            *(service.get("command") or []),
-            *(service.get("entrypoint") or []),
-            *(service.get("healthcheck", {}).get("test") or []),
-        ]
-        leaked = [key for key, value in values.items() if any(value in word for word in words)]
-        assert not leaked, f"{name} has the values of {leaked} in a command"
+        found = leaked(
+            values,
+            [
+                *(service.get("command") or []),
+                *(service.get("entrypoint") or []),
+                *(service.get("healthcheck", {}).get("test") or []),
+            ],
+        )
+        assert not found, f"{name} has the values of {found} in a command"
 
 
 def test_the_celery_services_wait_for_the_broker_and_the_api_server():
@@ -189,39 +204,93 @@ def strings(node: Any) -> Iterator[str]:
         yield str(node)
 
 
+def holders(variant: str, value: str) -> list[str]:
+    """The services of a variant whose rendered definition holds the value anywhere, sorted: names
+    only."""
+    return sorted(
+        name
+        for name, service in rendered(variant).items()
+        if any(value in text for text in strings(service))
+    )
+
+
+def expected_holders(variant: str) -> dict[str, set[str]]:
+    """The services of a variant that hold each secret of .env: the one place where a secret is
+    placed. Each service holds only the secrets that its job needs.
+
+    - Each database holds the password of its superuser, and db-init, which sets up the roles,
+      the databases and the schemas, holds those and the passwords that it gives the roles.
+    - The Airflow services share the keys of Airflow and its metadata database. The service that
+      runs the tasks gets the passwords of the warehouse roles of dlt and dbt, and the DAG
+      processor, which parses the DAGs of the extensions folder, gets none.
+    - With Celery, the broker, the scheduler that sends it the tasks and the worker that runs them
+      hold the password of the broker.
+    - The admin passwords stay in the one-shot jobs that create the admins or sign in as them, so
+      the code of an Airflow task, an extension DAG included, never holds one.
+    - Metabase holds its own database password and key. It learns the password of the warehouse
+      from metabase-init, which holds it with the admin password that it signs in with.
+    """
+    airflow = airflow_names(variant)
+    runner = TASK_RUNNER[variant]
+    return {
+        "WAREHOUSE_POSTGRES_PASSWORD": {"warehouse-db", "db-init"},
+        "PLATFORM_POSTGRES_PASSWORD": {"platform-db", "db-init"},
+        "AIRFLOW_DB_PASSWORD": {"db-init", *airflow},
+        "METABASE_DB_PASSWORD": {"db-init", "metabase"},
+        "METABASE_READER_PASSWORD": {"db-init", "metabase-init"},
+        "WAREHOUSE_LOADER_PASSWORD": {"db-init", runner},
+        "WAREHOUSE_TRANSFORMER_PASSWORD": {"db-init", runner},
+        "VALKEY_PASSWORD": (
+            {"broker", "airflow-scheduler", "airflow-worker"} if variant == "celery" else set()
+        ),
+        "AIRFLOW_FERNET_KEY": airflow,
+        "AIRFLOW_JWT_SECRET": airflow,
+        "AIRFLOW_API_SECRET_KEY": airflow,
+        "AIRFLOW_ADMIN_PASSWORD": {"airflow-init", "demo-init"},
+        "METABASE_ENCRYPTION_KEY": {"metabase"},
+        "METABASE_ADMIN_PASSWORD": {"metabase-init", "demo-init"},
+    }
+
+
 @pytest.mark.parametrize("variant", VARIANTS)
-def test_only_the_service_that_runs_tasks_gets_the_passwords_of_the_warehouse_roles(env, variant):
-    # Judged by value, so that a password under another name, or inside a URL, counts too, and in
-    # the whole service: the environment, the command, the entry point, the health check and the
-    # labels. The rendered services hold secrets, so the test binds no name to one, the
-    # environments are NamesOnly, which pytest prints by their names, and the messages name
-    # services and settings.
+def test_each_secret_is_held_by_the_services_that_need_it_and_by_no_other(env, variant):
+    # Judged by value, so that a secret under another name, or inside a URL, counts too, and in the
+    # whole service: the environment, the command, the entry point, the health check and the
+    # labels. The secrets of .env are Secret values, the rendered services are NamesOnly, and the
+    # messages name secrets and services: no frame of a failed test shows a value.
+    expected = expected_holders(variant)
+    in_the_example = sorted(
+        name for name, default in read_env(REPO_ROOT / ".env.example").items() if not default
+    )
+    # A new secret fails here until the table above says which services hold it.
+    assert sorted(expected) == in_the_example, (
+        f"the table places {sorted(expected)}, and .env.example has the secrets {in_the_example}"
+    )
+    values = secrets(env)
+    assert sorted(values) == in_the_example, "a secret has no value in .env: run ./agoranomos init"
+    wrong = [
+        f"{name} is held by {held}, and should be held by {sorted(expected[name])}"
+        for name in in_the_example
+        if (held := holders(variant, values[name])) != sorted(expected[name])
+    ]
+    assert not wrong, "; ".join(wrong)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_db_init_and_each_tool_get_the_password_of_their_role_under_its_name(env, variant):
+    # Which services hold the passwords of the warehouse roles is in the table above. This checks
+    # the names: warehouse.sql reads the passwords from the environment of db-init under the names
+    # of .env, and each tool of the service that runs the tasks gets the password of its own role.
+    # The values are secrets, so the test compares them into flags, and a failed assertion prints
+    # the flag.
     values = secrets(env)
     passwords = {key: values.get(key) for key in WAREHOUSE_PASSWORDS}
     assert all(passwords.values()), "no passwords of the warehouse roles in .env: run init"
-    environments = {
-        name: NamesOnly(
-            {key: str(value) for key, value in (service.get("environment") or {}).items()}
-        )
-        for name, service in rendered(variant).items()
-    }
-    # db-init sets the passwords of the roles, so it has them too.
-    wanted = sorted({TASK_RUNNER[variant], "db-init"})
-    for key, password in passwords.items():
-        holders = sorted(
-            name
-            for name, service in rendered(variant).items()
-            if any(password in text for text in strings(service))
-        )
-        assert holders == wanted, f"the value of {key} is held by {holders}, not {wanted}"
-    # warehouse.sql reads the passwords from the environment of db-init under these names.
-    db_init = environments["db-init"]
+    db_init = rendered(variant)["db-init"]["environment"]
     for key in WAREHOUSE_PASSWORDS:
         holds_its_password = db_init.get(key) == passwords[key]
         assert holds_its_password, f"{key} of db-init is not the password of its role"
-    # Each tool gets the password of its own role. The values are secrets, so the test compares
-    # them into flags, and a failed assertion prints the flag.
-    runner = environments[TASK_RUNNER[variant]]
+    runner = rendered(variant)[TASK_RUNNER[variant]]["environment"]
     dlt_gets_loader = (
         runner.get("WAREHOUSE_LOADER_PASSWORD") == passwords["WAREHOUSE_LOADER_PASSWORD"]
     )
@@ -433,28 +502,6 @@ def test_without_the_demo_profile_there_is_no_demo_init():
 def test_metabase_may_not_gain_privileges(variant):
     metabase = rendered(variant)["metabase"]
     assert metabase["security_opt"] == ["no-new-privileges:true"]
-
-
-@pytest.mark.parametrize("variant", VARIANTS)
-def test_each_metabase_service_holds_only_the_secrets_it_needs(env, variant):
-    # Metabase learns the password of the warehouse from the setup job, through its API, so it has
-    # no use for that password or for the one of the admin in its environment; the setup job holds
-    # the two passwords that it sends, and no key or database password. demo-init signs in to
-    # Airflow and to Metabase as their admins, and to nothing else. The test names settings.
-    values = secrets(env)
-    assert values, "no secrets in .env: run ./agoranomos init"
-    services = rendered(variant)
-    needed = {
-        "metabase": {"METABASE_DB_PASSWORD", "METABASE_ENCRYPTION_KEY"},
-        "metabase-init": {"METABASE_ADMIN_PASSWORD", "METABASE_READER_PASSWORD"},
-        "demo-init": {"AIRFLOW_ADMIN_PASSWORD", "METABASE_ADMIN_PASSWORD"},
-    }
-    for name, wanted in needed.items():
-        environment = [str(value) for value in services[name]["environment"].values()]
-        held = {
-            key for key, value in values.items() if any(value in entry for entry in environment)
-        }
-        assert held == wanted, f"{name} holds {sorted(held)}, and should hold {sorted(wanted)}"
 
 
 def serve_once(status, body):

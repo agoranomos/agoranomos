@@ -66,9 +66,11 @@ def test_airflow_init_can_run_again():
     assert said_so, "airflow-init did not find the admin that exists"
 
 
-def test_the_admin_password_stays_out_of_the_audit_log(env):
-    # airflow users create writes its command line into the log table. Airflow hides the value after
-    # --password there, but only when the command starts as airflow users create.
+def users_create_in_the_audit_log(env):
+    """Read the entries that airflow users create wrote into the audit log of Airflow: the exit code
+    of psql, the error that it printed, whether an entry shows the password hidden, and the names
+    of the secrets in the entries. The entries stay in this frame, which has ended before the test
+    checks anything; the error of this SELECT holds no secret."""
     result = psql(
         "platform-db",
         "airflow",
@@ -76,13 +78,23 @@ def test_the_admin_password_stays_out_of_the_audit_log(env):
         "airflow",
         "SELECT extra FROM log WHERE event = 'cli_users_create'",
     )
-    assert result.returncode == 0, result.stderr
-    # A failed assertion prints what it compares, and the log may hold the password: so the test
-    # compares flags, never the text of the log.
-    hidden = "'--password', '********'" in result.stdout
+    return (
+        result.returncode,
+        result.stderr,
+        "'--password', '********'" in result.stdout,
+        leaked({"AIRFLOW_ADMIN_PASSWORD": env["AIRFLOW_ADMIN_PASSWORD"]}, result.stdout),
+    )
+
+
+def test_the_admin_password_stays_out_of_the_audit_log(env):
+    # airflow users create writes its command line into the log table. Airflow hides the value after
+    # --password there, but only when the command starts as airflow users create. A failed
+    # assertion prints what it compares, and the log may hold the password: so the test compares
+    # flags and names, never the text of the log.
+    code, error, hidden, found = users_create_in_the_audit_log(env)
+    assert code == 0, error
     assert hidden, "the audit log has no entry for airflow users create with the password hidden"
-    leaked = env["AIRFLOW_ADMIN_PASSWORD"] in result.stdout
-    assert not leaked, "the audit log holds the password of the admin"
+    assert not found, f"the audit log holds the values of {found}"
 
 
 def test_selfcheck_comes_from_the_base_bundle_and_runs(airflow_url, token, selfcheck_run):

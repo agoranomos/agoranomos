@@ -25,6 +25,7 @@ ENV AIRFLOW__COSMOS__ENABLE_CACHE_DBT_LS=False \
 
 # dlt and Cosmos go into Airflow's environment, under the constraints that the base image was built
 # with, and with apache-airflow in the same command, so that pip fails instead of moving Airflow.
+# requirements.txt also pins the dependencies of dlt that the constraints leave open.
 COPY requirements.txt /tmp/agoranomos/requirements.txt
 RUN pip install --no-cache-dir "apache-airflow==${AIRFLOW_VERSION}" \
         -r /tmp/agoranomos/requirements.txt --constraint "${HOME}/constraints.txt" \

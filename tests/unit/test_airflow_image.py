@@ -126,10 +126,15 @@ def test_the_image_starts_from_the_pinned_official_image():
     assert re.fullmatch(BASE_IMAGE, images[0]), images[0]
 
 
+# The dependencies of dlt 1.30.0 that the constraints of Airflow 3.3.2 leave open:
+# airflow/requirements.txt pins them, so that every machine builds the same image.
+DLT_DEPENDENCIES = {"giturlparse", "pathvalidate", "requirements-parser", "semver", "simplejson"}
+
+
 def test_airflow_gets_dlt_and_cosmos_under_its_constraints():
     # Renovate updates their versions: the test fixes the names, and pins() requires the ==.
     requirements = AIRFLOW / "requirements.txt"
-    assert set(pins(requirements)) == {"dlt", "astronomer-cosmos"}
+    assert set(pins(requirements)) == {"dlt", "astronomer-cosmos"} | DLT_DEPENDENCIES
     # dlt keeps the extra that its postgres destination needs.
     extra = r"^dlt\[[^\]]*\bpostgres\b[^\]]*\]=="
     assert re.search(extra, requirements.read_text(encoding="utf-8"), flags=re.MULTILINE)

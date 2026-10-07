@@ -188,9 +188,10 @@ def test_metabase_init_can_run_again(metabase_url, session):
     assert names.count(WAREHOUSE_NAME) == 1, names
 
 
-def test_the_connection_details_are_encrypted_in_the_application_database(env):
-    # METABASE_ENCRYPTION_KEY reaches Metabase as MB_ENCRYPTION_SECRET_KEY. Without that variable
-    # (a misspelled name does as much) Metabase saves what it knows of a connection in clear.
+def stored_details(env, in_clear):
+    """Read what the application database of Metabase keeps of the warehouse connection: the exit
+    code of psql, whether it keeps anything, and the labels of the values of in_clear that it keeps
+    in clear. The details stay in this frame, which has ended before the test checks anything."""
     result = psql(
         "platform-db",
         "metabase",
@@ -198,15 +199,20 @@ def test_the_connection_details_are_encrypted_in_the_application_database(env):
         "metabase",
         "SELECT details FROM metabase_database WHERE name = 'Agoranomos warehouse'",
     )
-    assert result.returncode == 0, f"psql exited with {result.returncode}"
-    stored = result.stdout
-    assert stored.strip(), "the application database holds no details of the warehouse"
+    return result.returncode, bool(result.stdout.strip()), leaked(in_clear, result.stdout)
+
+
+def test_the_connection_details_are_encrypted_in_the_application_database(env):
+    # METABASE_ENCRYPTION_KEY reaches Metabase as MB_ENCRYPTION_SECRET_KEY. Without that variable
+    # (a misspelled name does as much) Metabase saves what it knows of a connection in clear.
     in_clear = {
         "the user": "metabase_reader",
         "the host": "warehouse-db",
         "the password": env["METABASE_READER_PASSWORD"],
     }
-    found = [label for label, value in in_clear.items() if value in stored]
+    code, stored, found = stored_details(env, in_clear)
+    assert code == 0, f"psql exited with {code}"
+    assert stored, "the application database holds no details of the warehouse"
     assert not found, f"the details of the connection are saved in clear: {found}"
 
 
