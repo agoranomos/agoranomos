@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from metadata import WAREHOUSE_TABLES, humanize
+from metadata import WAREHOUSE_COLUMNS, humanize
 
 SETUP_TOKEN = "setup-token-1"
 # The session that POST /api/setup gives, and the one that a sign-in gives.
@@ -67,6 +67,21 @@ def free_port() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         return probe.getsockname()[1]
+
+
+class FakeClock:
+    """The clock of the waits of the jobs, which the tests put in place of time.monotonic and
+    time.sleep: a pause moves it on at once. The stand-in of Metabase and the one of Airflow in the
+    tests of demo-init run on it too."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
 
 
 def column(name: str, display_name: str, semantic_type: str | None, **more: str) -> dict:
@@ -146,7 +161,8 @@ class FakeMetabase:
     The warehouse holds the table of the mart when mart_in_warehouse is true, and a native query
     through the warehouse connection lists it. A sync of the schema makes Metabase know it
     sync_seconds later on the clock, at once when there is no clock, and Metabase then shows it
-    with the fields of its columns, named as Metabase names a new field. A person can hide the
+    with the fields of its columns, named as Metabase names a new field: fields_seconds after the
+    table itself, as Metabase makes the row of a new table before its fields. A person can hide the
     table (mart_hidden), or a field (its visibility_type): the metadata of the database then
     leaves it out unless the request passes include_hidden=true, and a sync does not show it
     again. PUT /api/table/:id and PUT /api/field/:id set what their body says, and a field's
@@ -182,6 +198,7 @@ class FakeMetabase:
         self.mart_hidden = False
         self.mart: dict[str, Any] | None = None
         self.sync_seconds = 10.0
+        self.fields_seconds = 0.0
         self.synced_at: float | None = None
         self.collections: list[dict[str, Any]] = [
             {"id": "root", "name": "Our analytics", "can_write": True},
@@ -264,6 +281,8 @@ class FakeMetabase:
         if not self.mart_known:
             return []
         table = copy.deepcopy(self.mart_table())
+        if self.synced_at is not None and self.now() < self.synced_at + self.fields_seconds:
+            table["fields"] = []  # a sync has made the row of the table, and not its fields yet
         table["visibility_type"] = "hidden" if self.mart_hidden else table["visibility_type"]
         if not include_hidden:
             if table["visibility_type"]:
@@ -380,11 +399,12 @@ class FakeMetabase:
         return 404, "Not found"
 
     def dataset(self, body: Any) -> tuple[int, Any]:
-        """A native query through a connection: the stand-in knows the one that lists the tables of
-        the marts in the warehouse."""
+        """A native query through a connection: the stand-in knows the one that lists the columns
+        of the tables of the marts in the warehouse, one row a column."""
         native = (body or {}).get("native") or {}
-        if native.get("query") == WAREHOUSE_TABLES and self.is_warehouse(body.get("database")):
-            rows = [["marts", "ad_spend_daily"]] if self.mart_in_warehouse else []
+        if native.get("query") == WAREHOUSE_COLUMNS and self.is_warehouse(body.get("database")):
+            mart = [["marts", "ad_spend_daily", name] for name in MART_COLUMNS]
+            rows = mart if self.mart_in_warehouse else []
             return 202, {"status": "completed", "data": {"rows": rows}}
         return 202, {"status": "failed", "error": "this stand-in does not know the query"}
 

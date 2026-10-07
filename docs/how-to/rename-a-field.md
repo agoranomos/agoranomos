@@ -19,7 +19,7 @@ The names and descriptions of the tables and fields of the marts in Metabase com
     `display_name` and `description` replace what the release says. `note` keeps the description of the release and adds yours after an empty line, so that an improved description in a later release still reaches you: prefer it to `description`.
 
 3. See what will change: `./agoranomos metadata diff` prints each change, and changes nothing.
-4. Apply it: `./agoranomos up`. `./agoranomos logs metabase-init` shows one line for each change.
+4. Apply it: `./agoranomos up`. `./agoranomos logs metabase-init` shows one line for each change; on the first start with the demo, `./agoranomos logs demo-init` shows them, as it applies the metadata once the demo pipeline has built the mart.
 
 The tables and columns go by their names in the warehouse, the ones that a SQL query uses, which Admin > Table Metadata in Metabase shows next to the display names. [Describe the marts](../reference/describe-the-marts.md) has the rules that the names and descriptions of the release follow.
 
@@ -38,7 +38,7 @@ A description is not an instruction: write facts about the data, and never copy 
 
 ## The questions of the demo
 
-The questions of the demo take the titles of their columns and axes from the display names when `demo-init` creates them, and keep them after that, also when you change a name later. To get the new titles, delete the question in Metabase, and the next start creates it again.
+The questions of the demo take the titles of their columns and axes from the display names when `demo-init` creates them, and keep them after that, also when you change a name later. A question that lacks a title gets it on the next start. To get the new titles, delete the question in Metabase, and the next start creates it again.
 
 ## Keep the file in git
 

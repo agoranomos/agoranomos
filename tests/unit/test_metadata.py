@@ -17,7 +17,7 @@ from typing import Any
 import metabase_init as mi
 import metadata as md
 import pytest
-from metabase_stand_in import EXPORT, FakeMetabase, metadata_env, serve
+from metabase_stand_in import EXPORT, FakeClock, FakeMetabase, metadata_env, serve
 
 # What dbt ls printed for the demo project, a model and the source, cut short: the stand-in for dbt
 # prints these lines, or the error of a project that dbt cannot read.
@@ -68,17 +68,6 @@ Parsing Error
 """
 MART = ("marts", "ad_spend_daily")
 SECRETS = {"the admin password": "Secret-password-1", "the session": "session-from-login"}
-
-
-class FakeClock:
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def monotonic(self) -> float:
-        return self.now
-
-    def sleep(self, seconds: float) -> None:
-        self.now += seconds
 
 
 @pytest.fixture
@@ -730,6 +719,62 @@ def test_a_mart_that_the_warehouse_has_and_metabase_does_not_show_is_synced_once
     assert metabase.mart_table()["display_name"] == "Ad Spend by Day"
     assert lines
     assert not any("not in the warehouse" in line for line in lines)
+
+
+def test_a_sync_is_awaited_until_metabase_shows_the_fields_of_the_mart(tmp_path, metabase, clock):
+    # A sync of Metabase makes the row of a new table before its fields: the wait ends when the
+    # fields are there, so that the metadata of every column is applied, and none is a note.
+    metabase.mart_known = False
+    metabase.fields_seconds = 15.0
+    lines = md.apply(client(metabase), 2, loaded(tmp_path), md.waiter(120, "see the logs"))
+    assert clock.now >= metabase.sync_seconds + metabase.fields_seconds
+    assert metabase.field("spend")["semantic_type"] == "type/Currency"
+    assert not any("does not show this column" in line for line in lines), lines
+
+
+def test_a_table_that_metabase_shows_without_its_fields_is_waited_for(tmp_path, metabase, clock):
+    # A sync of Metabase's own, such as the one that a new connection starts, can be between the
+    # row of a table and its fields when the job looks: the job asks for a sync and waits for them.
+    metabase.synced_at, metabase.fields_seconds = 0.0, 15.0
+    lines = md.apply(client(metabase), 2, loaded(tmp_path), md.waiter(120, "see the logs"))
+    assert ("POST", "/api/database/2/sync_schema") in metabase.calls
+    assert clock.now >= metabase.fields_seconds
+    assert metabase.field("spend")["semantic_type"] == "type/Currency"
+    assert not any("does not show this column" in line for line in lines), lines
+
+
+def test_a_column_that_the_warehouse_does_not_have_yet_needs_no_sync(tmp_path):
+    # After a release that adds a column, the warehouse keeps the old table until dbt rebuilds the
+    # mart. A table that Metabase shows with a field for every column that the warehouse has needs
+    # no sync and no wait: otherwise every start would wait for a column that no sync can bring.
+    marts = loaded(tmp_path)
+    columns = [c.name for c in marts.effective[MART].columns if c.name != "conversions"]
+    fields = [{"id": 90 + i, "name": name, "parent_id": None} for i, name in enumerate(columns)]
+    table = {"id": 9, "schema": "marts", "name": "ad_spend_daily", "fields": fields}
+
+    class Warehouse:
+        def call(self, method: str, path: str, body: Any = None) -> Any:
+            assert (method, path) == ("POST", "/api/dataset")
+            rows = [["marts", "ad_spend_daily", name] for name in columns]
+            return {"status": "completed", "data": {"rows": rows}}
+
+    assert md.sync_needed(Warehouse(), 2, marts, {"tables": [table]}) == md.Sync(tables={})
+
+
+def test_a_column_that_metabase_does_not_show_is_a_note_that_says_when_it_comes(tmp_path):
+    # As after a release that adds or renames a column: the warehouse keeps the old table until dbt
+    # rebuilds the mart, and Metabase shows the new column only after the sync that follows.
+    marts = loaded(tmp_path)
+    fields = [
+        {"id": 90 + index, "name": column.name, "parent_id": None}
+        for index, column in enumerate(marts.effective[MART].columns)
+        if column.name != "conversions"
+    ]
+    table = {"id": 9, "schema": "marts", "name": "ad_spend_daily", "fields": fields}
+    assert md.make_plan(marts, {"tables": [table]}).notes == (
+        "marts.ad_spend_daily.conversions: Metabase does not show this column yet: it comes when "
+        "dbt rebuilds the mart, and the start after that syncs it and applies its metadata",
+    )
 
 
 def test_a_mart_that_the_warehouse_does_not_have_is_a_note_and_no_wait(tmp_path, metabase, clock):

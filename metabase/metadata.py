@@ -49,9 +49,11 @@ EXPORT_KEYS = ("resource_type", "schema", "name", "source_name", "description", 
 DBT_TIMEOUT = 300
 # The schemas whose tables Metabase shows: metabase-init connects the warehouse with this filter.
 MANAGED_SCHEMAS = ("marts",)
-# The tables of those schemas in the warehouse, which Metabase lists through its connection.
-WAREHOUSE_TABLES = (
-    "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = 'marts'"
+# The columns of the tables of those schemas in the warehouse, which Metabase lists through its
+# connection: a query that reads only.
+WAREHOUSE_COLUMNS = (
+    "SELECT table_schema, table_name, column_name FROM information_schema.columns "
+    "WHERE table_schema = 'marts'"
 )
 # The overrides file: its largest size, its properties and the longest value of each.
 OVERRIDES_LIMIT = 256 * 1024
@@ -647,8 +649,11 @@ def make_plan(metadata: Metadata, database: Mapping[str, Any]) -> Plan:
             field_path = f"{path}.{column.name}"
             shown_field = fields.get(column.name)
             if shown_field is None:
+                # The jobs sync and wait for every column that the warehouse has: the column is
+                # one that a release adds or renames, which comes with the next run of dbt.
                 notes.append(
-                    f"{field_path}: Metabase does not show this column; its next sync adds it"
+                    f"{field_path}: Metabase does not show this column yet: it comes when dbt "
+                    "rebuilds the mart, and the start after that syncs it and applies its metadata"
                 )
                 continue
             before = [
@@ -686,27 +691,71 @@ def make_plan(metadata: Metadata, database: Mapping[str, Any]) -> Plan:
 # --- Applying it -------------------------------------------------------------------------------
 
 
-def warehouse_tables(metabase: Client, database_id: int) -> set[tuple[str, str]]:
-    """The tables of the marts that the warehouse has, as Metabase lists them through its read-only
-    connection: a table that it has and Metabase does not show waits for a sync, and one that it
-    does not have needs a run of dbt first."""
+def warehouse_tables(metabase: Client, database_id: int) -> dict[tuple[str, str], frozenset[str]]:
+    """The tables of the marts that the warehouse has, with their columns, as Metabase lists them
+    through its read-only connection: a table that it has and Metabase does not show waits for a
+    sync, and one that it does not have needs a run of dbt first."""
     answer = metabase.call(
         "POST",
         "/api/dataset",
-        {"database": database_id, "type": "native", "native": {"query": WAREHOUSE_TABLES}},
+        {"database": database_id, "type": "native", "native": {"query": WAREHOUSE_COLUMNS}},
     )
     if not isinstance(answer, dict) or answer.get("status") != "completed":
         raise MetadataError(
             "Metabase could not list the tables of the warehouse: see ./agoranomos logs metabase"
         )
-    found = set()
+    found: dict[tuple[str, str], set[str]] = {}
     for row in answer["data"]["rows"]:
-        # A row is [schema, name]. One of another shape is an answer of an unexpected shape, which
-        # the jobs end in one line that names this function, as they end a KeyError.
-        if not isinstance(row, list) or len(row) != 2:
-            raise TypeError("a row of the tables of the warehouse is not a pair")
-        found.add((row[0], row[1]))
-    return found
+        # A row is [schema, table, column]. One of another shape is an answer of an unexpected
+        # shape, which the jobs end in one line that names this function, as they end a KeyError.
+        if not isinstance(row, list) or len(row) != 3:
+            raise TypeError("a row of the columns of the warehouse is not of three values")
+        found.setdefault((row[0], row[1]), set()).add(row[2])
+    return {key: frozenset(columns) for key, columns in found.items()}
+
+
+def shows(database: Mapping[str, Any], table: Table, columns: Iterable[str]) -> bool:
+    """Whether Metabase shows the table, active, with a field for each of the columns. A sync makes
+    the row of a new table before its fields, so the row alone is not enough."""
+    shown = tables_of(database).get((table.schema, table.name))
+    if shown is None:
+        return False
+    fields = {f["name"] for f in shown.get("fields") or [] if f.get("parent_id") is None}
+    return set(columns) <= fields
+
+
+@dataclass(frozen=True)
+class Sync:
+    """What a start must do before it can apply the metadata of the marts: the tables that wait for
+    a sync, each with the columns whose fields it waits for (those that the code declares and the
+    warehouse has), and the tables that the warehouse does not have, which wait for a run of dbt."""
+
+    tables: dict[tuple[str, str], frozenset[str]]
+    absent: tuple[tuple[str, str], ...] = ()
+
+
+def sync_needed(
+    metabase: Client, database_id: int, metadata: Metadata, database: Mapping[str, Any]
+) -> Sync:
+    """The tables of the marts that Metabase does not show with the fields of their columns, from
+    what it shows now (database). The warehouse is asked only for those. A table whose fields
+    Metabase shows for every column that the warehouse has needs no sync: a column that a release
+    adds comes with the next dbt run."""
+    waiting = {
+        key: table
+        for key, table in sorted(metadata.effective.items())
+        if not shows(database, table, (column.name for column in table.columns))
+    }
+    if not waiting:
+        return Sync(tables={})
+    present = warehouse_tables(metabase, database_id)
+    tables = {}
+    for key, table in waiting.items():
+        if key in present:
+            columns = present[key] & {column.name for column in table.columns}
+            if not shows(database, table, columns):
+                tables[key] = columns
+    return Sync(tables=tables, absent=tuple(key for key in waiting if key not in present))
 
 
 def waiter(seconds: float, hint: str) -> Waiter:
@@ -726,6 +775,15 @@ def waiter(seconds: float, hint: str) -> Waiter:
     return wait
 
 
+def absent_note(key: tuple[str, str]) -> str:
+    """The note about a table of the marts that the warehouse does not have."""
+    schema, name = key
+    return (
+        f"{schema}.{name}: not in the warehouse yet; the start after the dbt run that builds it "
+        "applies its metadata"
+    )
+
+
 def ignore(line: str) -> None:
     """A log that keeps nothing: apply() still returns the lines."""
 
@@ -738,33 +796,31 @@ def apply(
     log: Callable[[str], None] = ignore,
 ) -> list[str]:
     """Make Metabase show the effective metadata of the marts, and return the lines that say what
-    changed. A table that the warehouse has and Metabase does not show yet gets one sync, waited for
-    with wait; a table that the warehouse does not have yet is a note.
+    changed. A table that the warehouse has and Metabase does not show yet, with the fields of its
+    columns, gets one sync, waited for with wait until the fields are there; a table that the
+    warehouse does not have yet is a note (sync_needed()).
 
     Each line goes to log as soon as its write is done, and the notes go at the end: a write or a
     later step of the job that fails leaves the lines of the writes before it in the log, with the
     values that they replaced, which the next start could no longer tell."""
     database = metadata_of(metabase, database_id)
+    sync = sync_needed(metabase, database_id, metadata, database)
+    notes = [absent_note(key) for key in sync.absent]
+    if sync.tables:
+        metabase.call("POST", f"/api/database/{database_id}/sync_schema")
+        names = ", ".join(f"{schema}.{name}" for schema, name in sync.tables)
+
+        def synced() -> dict[str, Any] | None:
+            # The table and the fields of its columns: the row of a table comes first.
+            found = metadata_of(metabase, database_id)
+            ready = all(
+                shows(found, metadata.effective[key], columns)
+                for key, columns in sync.tables.items()
+            )
+            return found if ready else None
+
+        database = wait(synced, f"Metabase did not find {names} after a sync")
     plan = make_plan(metadata, database)
-    notes = []
-    if plan.unknown:
-        present = warehouse_tables(metabase, database_id)
-        to_sync = [key for key in plan.unknown if key in present]
-        notes = [
-            f"{schema}.{name}: not in the warehouse yet; the start after the dbt run that builds "
-            "it applies its metadata"
-            for schema, name in plan.unknown
-            if (schema, name) not in present
-        ]
-        if to_sync:
-            metabase.call("POST", f"/api/database/{database_id}/sync_schema")
-            names = ", ".join(f"{schema}.{name}" for schema, name in to_sync)
-
-            def synced() -> dict[str, Any] | None:
-                found = metadata_of(metabase, database_id)
-                return found if all(key in tables_of(found) for key in to_sync) else None
-
-            plan = make_plan(metadata, wait(synced, f"Metabase did not find {names} after a sync"))
     lines = []
     for request in plan.requests:
         metabase.call("PUT", request.path, request.body)
