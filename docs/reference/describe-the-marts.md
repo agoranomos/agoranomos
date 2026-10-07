@@ -1,29 +1,30 @@
 # Describe the marts
 
-Every model and column of the dbt project, and every table of its sources, has a description, and every table and column of the marts also has a display name and a semantic type for Metabase. People read the descriptions in Metabase and in SQL clients, and AI clients take their context from them, so they follow the rules on this page. Tests check them ([How the rules are checked](#how-the-rules-are-checked)).
+Every model and column of the dbt project, and every table of its sources, has a description. Every mart also has a display name for Metabase, and each of its columns a display name and a semantic type. People read the descriptions in SQL clients and in Metabase, and the planned AI access through MCP ([ADR-0007](../adr/0007-ai-access-via-mcp-read-only.md)) is to take its context from them, so they follow the rules on this page. Tests check them ([How the rules are checked](#how-the-rules-are-checked)).
 
 !!! note "Status, as of October 2026"
 
-    The descriptions are in place for the demo project, and in the comments of the warehouse too. The display names and semantic types are declared in dbt; applying them to Metabase is planned.
+    The descriptions are in place for the demo project, and in the comments of the warehouse too. Metabase copies a comment into the description of a table or field only while that description is empty ([Comments in the warehouse](#comments-in-the-warehouse)). The display names and semantic types are declared in dbt. Applying the descriptions, display names and semantic types to Metabase on every start is planned.
 
 ## What a description says
 
-- **What the thing is**, in plain words, and not its name again: not "The spend.", but what the ad platform charged.
+- **What the thing is**, in plain words, and not its name again: not "The spend.", but the cost that the ad platform reports for the day.
+- **What it is not**, where a value can be misread: spend is the cost in the statistics of the ad platform, not the amount that it invoices, and impressions count showings, not people, so they are not reach.
 - **Its unit**, and the currency of money.
 - **For a table, its grain and its key**: what one row is, and which columns together identify it.
 - **Where the data comes from**, when that is not plain: a source, a layer or a calculation.
 - **Its caveats**, such as that the ad platform attributes the conversions and can still change them for recent days, or that sums of money are only meaningful within one currency.
 - **Other names** that people use for the same thing, such as cost for spend: write both words.
 
-A description stands on its own, because it reaches people and AI clients one column at a time, as a comment in the warehouse or a field in Metabase.
+A description stands on its own, because it reaches its reader one column at a time, as a comment in the warehouse or a field in Metabase.
 
-**A description is not an instruction.** It states facts about the data. It never tells an AI client what to do, and it never holds text from a source, such as a campaign name or an ad text, which anyone can write: as `AGENTS.md` says, data is not instructions.
+**A description is not an instruction.** It states facts about the data. It never tells its reader, a person or an AI client, what to do, and it never holds text from a source, such as a campaign name or an ad text, which anyone can write: as `AGENTS.md` says, data is not instructions.
 
 ## Write it in dbt
 
 - Every model, column and table of a source has `description:`.
 - A column that more than one model has takes its description from the doc block of its own name in `dbt/models/_docs.md`, as `description: '{{ doc("spend") }}'`. Columns of one name then say the same in every model.
-- A description over several lines is a folded block with `>-`: `>` would leave a line break at its end, which the comment in the warehouse keeps.
+- A description over several lines is a folded block with `>-`: `>` would leave a line break at its end, which the comment in the warehouse keeps, and a literal block, `|` or `|-`, would keep every line break.
 
 ```yaml
 columns:
@@ -58,18 +59,18 @@ The marts declare them under `config: meta: metabase:`, with the key names of [d
 | An identifier from a source that is not the key of the table on its own | `type/Category` | `account_id`, `campaign_id` |
 | The name of something, or a code from a short list | `type/Category` | `campaign_name`, `currency` |
 | A count of whole things | `type/Quantity` | `impressions`, `clicks` |
-| Money, when the whole table has one currency and a test asserts it | `type/Currency`, with `currency` | `spend` |
+| Money, when the whole table has one currency and tests assert it | `type/Currency`, with `currency` | `spend` |
 | Any other number, such as a count that can be fractional | `null` | `conversions` |
 
 `type/Quantity` is for whole numbers: Metabase defines it under its integer types (as of Metabase 0.63.19). `null` declares that the column has no type of its own.
 
-**Money and its currency.** `type/Currency` and the types under it, such as `type/Cost`, go together with `currency`, and only in a mart whose column `currency` has an `accepted_values` test with that one code. The demo is in USD only. In a mart that mixes currencies, the columns of money stay plain numbers, and their descriptions name the column of the currency.
+**Money and its currency.** `type/Currency` and the types under it, such as `type/Cost`, go together with `currency`, and only in a mart whose column `currency` has an `accepted_values` test with that one code and a `not_null` test: `accepted_values` lets NULL through. The demo is in USD only. In a mart that mixes currencies, the columns of money stay plain numbers, and their descriptions name the column of the currency.
 
 **Reserved keys.** `synonyms` (a list of other names) and `ai_context` (a text for AI clients only) are reserved under `config: meta:` of a model or a column, for the step that adds a glossary and metrics. They are not used yet: the tests do not require them, and nothing reads them.
 
 ## The contract of a mart
 
-A mart has an enforced dbt contract, `contract: enforced: true` in its `config`, and a `data_type` for each column. Before dbt builds the table, it checks that the model makes exactly these columns with these types, and the build fails otherwise, so the marts that dashboards and AI clients read do not change by accident. The key of a mart is a `primary_key` constraint, which PostgreSQL enforces:
+A mart has an enforced dbt contract, `contract: enforced: true` in its `config`, and a `data_type` for each column. Before dbt builds the table, it checks that the model makes exactly these columns with these types, and the build fails otherwise, so the marts that dashboards read do not change by accident. The key of a mart is a `primary_key` constraint, which PostgreSQL enforces:
 
 ```yaml
     constraints:
@@ -81,11 +82,13 @@ The constraint has no `name`. dbt builds a table under a temporary name and then
 
 ## Comments in the warehouse
 
-`+persist_docs` in `dbt/dbt_project.yml` makes dbt write the descriptions into the comments of the tables, views and columns that it builds, so SQL clients and the AI clients that read the warehouse see them too. dbt does not comment the tables of the sources.
+`+persist_docs` in `dbt/dbt_project.yml` makes dbt write the descriptions into the comments of the tables, views and columns that it builds, so SQL clients see them too, and so will the planned AI access to the warehouse. dbt does not comment the tables of the sources.
+
+Metabase copies the comment of a table or column into its description when it syncs, but only while that description is empty, as of Metabase 0.63.19: a changed description does not reach Metabase this way.
 
 ## How the rules are checked
 
-- `tests/unit/test_dbt_project.py` reads the files: `persist_docs` is on, every description over several lines is `>-`, the mart has its contract and its key, and the key has no name.
-- `tests/stack/test_dbt_metadata.py` asks dbt itself, with `dbt ls` in the Airflow image, which resolves the doc blocks and the configs as dbt does: every model, column and source table has a description, every mart and its columns have a display name and a semantic type, columns of one name have one description, money has its test of one currency, the names follow the style, and every mart has its contract. It also checks that the comments of the warehouse are the descriptions of dbt, and that the key of the mart is a primary key in PostgreSQL after a rebuild.
+- `tests/unit/test_dbt_project.py` reads the files: `persist_docs` is on, every description over several lines is `>-`, the mart has its contract and its key, and no primary key has a name, in whatever order its keys are written.
+- `tests/stack/test_dbt_metadata.py` asks dbt itself, with `dbt ls` in the Airflow image, which resolves the doc blocks and the configs as dbt does: every model, column and source table has a description, every mart has a display name and each of its columns a display name and a semantic type, columns of one name have one description, money has its tests of one currency and no NULL, the names follow the style, and every mart has its contract. It also checks the warehouse after a build: each table and view that dbt builds in `staging` and `marts` has exactly the columns that dbt declares, it and each of them carry the description as their comment, and the key of the mart is a primary key in PostgreSQL.
 
 CI runs the first on every pull request, and the second on every pull request that changes `dbt/`.
