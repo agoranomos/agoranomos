@@ -1,9 +1,9 @@
 """The AI switches of Metabase: which settings they are, and which of them are on.
 
-Metabase 0.63 turns its AI features on by default, and compose.yaml switches off the ones that
-exist, by name. A later release can add a switch that is on by default and that compose.yaml does
-not know. This finds the switches by their names, so that a new one that is on turns a test red,
-instead of opening an entry point unseen.
+Metabase 0.63 and 0.64 turn their AI features on by default, and compose.yaml switches off the
+ones that exist, by name. A later release can add a switch that is on by default and that
+compose.yaml does not know. This finds the switches by their names, so that a new one that is on
+turns a test red, instead of opening an entry point unseen.
 
 What it cannot see: a switch whose name does not end in "enabled" (the LLM keys are checked on
 their own), and the value of a switch that an environment variable sets and that is not public,

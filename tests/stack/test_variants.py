@@ -442,9 +442,9 @@ def test_only_metadata_export_can_write_the_export(variant):
     assert readers == {"metabase-init", "demo-init"}
 
 
-# Metabase 0.63 has these on by default, and compose.yaml switches them off with environment
-# variables until an ADR decides what AI access may do in Metabase (AGENTS.md). The first is the
-# master switch that the other two also require, so the three are checked one by one.
+# Metabase 0.63 and 0.64 have these on by default, and compose.yaml switches them off with
+# environment variables until an ADR decides what AI access may do in Metabase (AGENTS.md). The
+# first is the master switch that the other two also require, so the three are checked one by one.
 METABASE_AI_SWITCHES = ("MB_AI_FEATURES_ENABLED", "MB_MCP_ENABLED", "MB_AGENT_API_ENABLED")
 
 
@@ -454,6 +454,14 @@ def test_metabase_switches_off_every_ai_entry_point_with_an_environment_variable
     environment = rendered(variant)["metabase"]["environment"]
     states = {name: environment.get(name) for name in METABASE_AI_SWITCHES}
     assert states == dict.fromkeys(METABASE_AI_SWITCHES, "false"), states
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_keeps_its_list_of_llm_providers_empty_with_an_environment_variable(variant):
+    # Metabase 0.64 lets an admin save the key of an LLM provider whatever the switches above say.
+    # An empty list in MB_LLM_PROVIDERS keeps that list empty and refuses changes to it.
+    environment = rendered(variant)["metabase"]["environment"]
+    assert environment.get("MB_LLM_PROVIDERS") == "[]"
 
 
 @pytest.mark.parametrize("variant", VARIANTS)

@@ -2,8 +2,9 @@
 
 The answers of Metabase and the environment of its containers hold secrets, and a failed assertion
 prints what it compares: these tests print names, flags and status codes, never an answer. They
-change no setting of Metabase. They read, they run one SELECT through it, and they run metabase-init
-again, which the stack does on every start anyway.
+change no setting of Metabase. They read, they run one SELECT through it, they run metabase-init
+again, which the stack does on every start anyway, and they try three changes of the LLM providers
+that Metabase must refuse, and that would change nothing if it took them.
 """
 
 import pytest
@@ -13,9 +14,10 @@ from stack_helpers import compose, http_json, leaked, psql, secrets
 
 WAREHOUSE_NAME = "Agoranomos warehouse"
 
-# The AI entry points of Metabase 0.63, which are on by default and which compose.yaml switches
-# off: each one is a setting, and the environment variable that sets it. ai-features-enabled? is
-# the master switch that the other two also require, so the three are pinned one by one.
+# The AI entry points of Metabase 0.63 and 0.64, which are on by default and which compose.yaml
+# switches off: each one is a setting, and the environment variable that sets it.
+# ai-features-enabled? is the master switch that the other two also require, so the three are pinned
+# one by one.
 AI_SETTINGS = {
     "ai-features-enabled?": "MB_AI_FEATURES_ENABLED",
     "mcp-enabled?": "MB_MCP_ENABLED",
@@ -39,8 +41,18 @@ INITIALIZE = {
     },
 }
 # The Anthropic key and the provider of Metabot: /api/llm does not read ai-features-enabled?, it is
-# closed only while no key is saved, and a key saved in the admin UI would open it.
+# closed only while no key is saved, and a key saved in the admin UI would open it. In Metabase 0.64
+# the keys are connections in the list of LLM providers, which MB_LLM_PROVIDERS keeps empty.
 LLM_SETTINGS = ("llm-anthropic-api-key-configured?", "llm-metabot-configured?")
+# Writes to the list of LLM providers that would change nothing even if Metabase took them: a
+# provider type and a connection that do not exist. While MB_LLM_PROVIDERS sets the list, Metabase
+# refuses each of them with 400 and a message that names the variable, before it looks at the
+# request; without it, it answers 400 for the unknown type and 404 for the missing connection.
+PROVIDER_WRITES = {
+    "create": ("POST", "/api/llm/providers", {"type": "agoranomos-stack-test"}),
+    "update": ("PUT", "/api/llm/providers/agoranomos-stack-test", {}),
+    "delete": ("DELETE", "/api/llm/providers/agoranomos-stack-test", None),
+}
 
 
 @pytest.fixture(scope="module")
@@ -74,9 +86,9 @@ def test_the_ai_settings_read_false(properties):
 
 
 def test_every_ai_switch_of_metabase_reads_false(metabase_url, session, properties):
-    # compose.yaml fixes the three switches that Metabase 0.63 has. A later release can add one that
-    # is on by default: this finds every setting that is named like an AI switch (see ai_switches),
-    # so that a new one turns this test red. The names are printed, and never a value.
+    # compose.yaml fixes the three switches that Metabase 0.63 and 0.64 have. A later release can
+    # add one that is on by default: this finds every setting that is named like an AI switch (see
+    # ai_switches), so that a new one turns this test red. The names are printed, and never a value.
     status, admin_settings = http_json("GET", f"{metabase_url}/api/setting", headers=session)
     assert status == 200, f"GET /api/setting answered HTTP {status}"
     found = readings(properties, admin_settings)
@@ -94,11 +106,32 @@ def test_no_llm_key_is_saved(properties):
     assert states == dict.fromkeys(LLM_SETTINGS, False), states
 
 
+def test_no_llm_provider_is_saved(metabase_url, session):
+    # Metabase 0.64 keeps the keys of its LLM providers in a list of connections, which only this
+    # admin endpoint shows: the public settings above tell of the Anthropic key and of the provider
+    # of Metabot, and of no other. The answer masks the keys; the test prints the provider types.
+    status, providers = http_json("GET", f"{metabase_url}/api/llm/providers", headers=session)
+    assert status == 200, f"GET /api/llm/providers answered HTTP {status}"
+    types = [p.get("type") for p in providers] if isinstance(providers, list) else providers
+    assert types == [], f"LLM provider connections are saved: {types}"
+
+
+@pytest.mark.parametrize("write", PROVIDER_WRITES)
+def test_the_llm_providers_cannot_be_changed_through_the_api(metabase_url, session, write):
+    # compose.yaml sets MB_LLM_PROVIDERS to an empty list, and an admin cannot add a provider to it,
+    # in Admin > AI or through the API. The answer holds a message, which is not a secret.
+    method, path, body = PROVIDER_WRITES[write]
+    status, answer = http_json(method, f"{metabase_url}{path}", body, headers=session)
+    message = answer.get("message") if isinstance(answer, dict) else answer
+    assert status == 400, f"{method} {path} answered HTTP {status}"
+    assert "MB_LLM_PROVIDERS" in str(message), f"{method} {path} was refused: {message}"
+
+
 def test_the_settings_that_compose_fixes_come_from_the_environment(metabase_url, session):
     # A value from the environment wins over a value saved in Metabase, including one changed in the
-    # Metabase UI, which does not lock these switches (0.63.19). This sees each variable apart from
-    # the others: with ai-features-enabled? off, the other two AI settings read false without
-    # theirs.
+    # Metabase UI, which does not lock these switches (0.63.19 and 0.64.1). This sees each variable
+    # apart from the others: with ai-features-enabled? off, the other two AI settings read false
+    # without theirs.
     expected = {**AI_SETTINGS, **REPORTING_SETTINGS}
     status, settings = http_json("GET", f"{metabase_url}/api/setting", headers=session)
     assert status == 200, f"GET /api/setting answered HTTP {status}"

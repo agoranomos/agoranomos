@@ -328,8 +328,8 @@ def mart_is_synced(
     """Whether Metabase shows the table of the mart, active, with the fields of these columns, by
     the rule of metadata.shows(). A person may have hidden the table in Admin > Table Metadata,
     and the metadata of a database leaves a hidden table out unless the request passes
-    include_hidden=true (Metabase 0.63.19); a sync does not show it again. A table that a sync
-    marked inactive, as after a reset of the warehouse, does not count."""
+    include_hidden=true (Metabase 0.63.19 and 0.64.1); a sync does not show it again. A table that a
+    sync marked inactive, as after a reset of the warehouse, does not count."""
     return metadata.shows(metadata.metadata_of(metabase, database_id), table, columns)
 
 
