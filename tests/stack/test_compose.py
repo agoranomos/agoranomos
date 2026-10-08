@@ -11,6 +11,7 @@ from stack_helpers import (
     docker,
     job_failed,
     leaked,
+    process_uids,
     rendered,
     rendered_config,
     secrets,
@@ -163,3 +164,43 @@ def test_no_secret_is_in_the_arguments_of_a_running_process(env):
         listed, found = arguments_of_the_processes(service, values)
         assert listed, f"{service}: the listing did not run"
         assert not found, f"a process of {service} has the values of {found} in its arguments"
+
+
+def test_no_process_of_a_running_service_holds_a_capability():
+    # cap_drop: [ALL] in compose.yaml, as the kernel applies it: the first process of each
+    # container has no effective capability, and its bounding set is empty, so that no process of
+    # the container can ever get one. A process that is not root has no effective capability even
+    # without cap_drop; only the bounding set shows that cap_drop is there.
+    for service in sorted(LONG_RUNNING):
+        result = compose(
+            "exec", "-T", service, "grep", "-E", "^Cap(Eff|Bnd):", "/proc/1/status", check=False
+        )
+        assert result.returncode == 0, f"{service}: {result.stderr}"
+        empty = "0000000000000000"
+        assert result.stdout.split() == ["CapEff:", empty, "CapBnd:", empty], service
+
+
+# The services that start as a named user of their image, and the number of that user: the user
+# that their entrypoint would switch to as root.
+NAMED_USERS = {"warehouse-db": ("postgres", 999), "platform-db": ("postgres", 999)}
+
+
+def test_the_databases_and_metabase_run_as_the_users_of_their_images():
+    for service, (process, uid) in {**NAMED_USERS, "metabase": ("java", 2000)}.items():
+        result = compose("exec", "-T", service, "sh", "-c", process_uids(process), check=False)
+        assert result.returncode == 0, f"{service}: {result.stderr}"
+        uids = {line.split()[1] for line in result.stdout.splitlines()}
+        assert uids == {str(uid)}, (service, sorted(uids))
+
+
+def test_db_init_leaves_no_volume_behind():
+    # Its container has only the bind mount of postgres/: no anonymous volume for the data that
+    # the image of PostgreSQL declares (see compose.yaml). A db-init container of an earlier
+    # release has such a volume, and Compose carries it over to the container that it recreates
+    # from the new compose.yaml: on a stack that was upgraded, this fails until ./agoranomos down,
+    # after which the next up gives db-init a new container without it. The volume stays.
+    [details] = json.loads(
+        docker("inspect", containers()["db-init"]["ID"]).stdout, object_hook=NamesOnly
+    )
+    kinds = sorted(mount["Type"] for mount in details["Mounts"])
+    assert kinds == ["bind"], kinds
