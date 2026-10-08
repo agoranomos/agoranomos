@@ -132,8 +132,8 @@ print(*sorted(scores))
 
 @pytest.mark.parametrize("service", sorted(s for s in LONG_RUNNING if s.startswith("airflow-")))
 def test_the_airflow_services_keep_their_place_at_the_memory_limit(service):
-    # The plugin of the image ranks task processes only: the services themselves keep the 0 that
-    # Docker gives, so that at the memory limit the kernel stops a task before them.
+    # The plugin of the image ranks task processes only, and only on a host with Yama: the services
+    # themselves keep the 0 that Docker gives, so that there the kernel stops a task before them.
     result = compose("exec", "-T", service, "python", "-c", SERVICE_SCORES, check=False)
     assert result.returncode == 0, f"the probe exited with {result.returncode}"
     assert result.stdout.split() == ["0"], result.stdout

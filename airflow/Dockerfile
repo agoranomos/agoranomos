@@ -52,7 +52,8 @@ RUN install -d -m 0755 /opt/agoranomos/plugins
 USER ${AIRFLOW_UID}
 
 # The plugins of Agoranomos: agoranomos_oom.py makes each task process the first that the kernel
-# stops when its container reaches its memory limit, before the scheduler or the worker. Airflow
+# stops when its container reaches its memory limit, before the scheduler or the worker, on a host
+# whose kernel restricts ptrace with Yama (the docstring of the plugin says why). Airflow
 # imports every file of its plugins folder in each of its processes, so the folder and the plugins
 # belong to root, and only root may write them: the Airflow services run as 50000 in the group root,
 # COPY would keep a mode of the checkout that the group may write, and the default folder,
