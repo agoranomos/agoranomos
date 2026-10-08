@@ -1,6 +1,9 @@
 """Tests of scripts/memory_report.py: how it reads docker stats and the cgroup, and the table."""
 
+import io
 import json
+import subprocess
+import sys
 
 import memory_report as mr
 import pytest
@@ -119,3 +122,119 @@ def test_without_a_command_or_seconds_there_is_nothing_to_measure(capsys):
         mr.main(["--title", "Local"])
     assert exit_info.value.code == 2
     assert "give a command after --, or --seconds" in capsys.readouterr().err
+
+
+def test_a_row_says_which_cells_docker_could_not_read():
+    row = mr.make_row(CONTAINER, None, None, {"a-metabase-1": 1400 * MIB})
+    assert row == mr.Row(
+        "metabase", True, None, 1400 * MIB, None, None, 0, mr.FROM_INSPECT | mr.FROM_CGROUP
+    )
+    table = mr.render("Local", "x86_64", [row])
+    assert "| metabase | unread | 1400 MiB | unread | unread | unread |" in table
+    assert "| **Running services, total** | **unread** | **1400 MiB** | | | |" in table
+
+
+SCHEDULER = {
+    "ID": "c1",
+    "Service": "airflow-scheduler",
+    "Name": "a-airflow-scheduler-1",
+    "State": "running",
+}
+
+
+def fake_docker(*failing: str):
+    """docker for collect() and main(), in which the given subcommands fail."""
+
+    def docker(*args: str) -> str:
+        if args[0] in failing:
+            raise subprocess.CalledProcessError(1, ["docker", *args])
+        if args[0] == "inspect":
+            return json.dumps([details(1152 * MIB, restarts=1)])
+        if args[0] == "exec":
+            return "peak 1207959552\noom_kill 1\n"
+        if args[0] == "info":
+            return "x86_64\n"
+        raise AssertionError(args)
+
+    return docker
+
+
+@pytest.mark.parametrize(
+    ("failing", "row"),
+    [
+        ((), "| airflow-scheduler | 1152 MiB | 600 MiB | 1152 MiB | 1 | 1 |"),
+        (("exec",), "| airflow-scheduler | 1152 MiB | 600 MiB | unread | unread | 1 |"),
+        (("inspect",), "| airflow-scheduler | unread | 600 MiB | 1152 MiB | 1 | unread |"),
+    ],
+)
+def test_a_container_that_docker_cannot_read_still_gets_its_row(monkeypatch, failing, row):
+    # Such as a container that the kernel stopped at its limit between docker compose ps and
+    # docker exec: the table is needed most then.
+    monkeypatch.setattr(mr, "project_containers", lambda: [SCHEDULER])
+    monkeypatch.setattr(mr, "docker", fake_docker(*failing))
+    rows = mr.collect({"a-airflow-scheduler-1": 600 * MIB})
+    assert row in mr.render("Local", "x86_64", rows)
+
+
+class FakeStats:
+    """What subprocess.Popen gives the Sampler: the output of docker stats as a pipe."""
+
+    def __init__(self, output: str) -> None:
+        self.stdout = io.StringIO(output)
+
+    def terminate(self) -> None:
+        pass
+
+    def wait(self, timeout: float | None = None) -> int:
+        return 0
+
+
+def test_a_line_of_docker_stats_that_cannot_be_read_is_left_out_and_counted(monkeypatch):
+    output = (
+        stats("a-metabase-1", "1GiB / 2GiB")
+        + "\n"
+        + stats("a-metabase-1", "12 parsecs / 2GiB")
+        + "\n{not json\n"
+        + json.dumps({"Name": "a-broker-1"})
+        + "\n"
+        + stats("a-metabase-1", "1.5GiB / 2GiB")
+        + "\n"
+    )
+    monkeypatch.setattr(mr.subprocess, "Popen", lambda *args, **kwargs: FakeStats(output))
+    sampler = mr.Sampler()
+    assert sampler.stop() == {"a-metabase-1": round(1.5 * 1024**3)}
+    assert sampler.skipped == 3
+    assert mr.render("Local", "x86_64", [], sampler.skipped).endswith(
+        "| **Running services, total** | **0 MiB** | **0 MiB** | | | |\n"
+        "\n"
+        "3 lines of docker stats could not be read and were left out.\n"
+    )
+
+
+class QuietSampler:
+    """A Sampler that samples nothing, for main() without Docker."""
+
+    skipped = 0
+
+    def stop(self) -> dict[str, int]:
+        return {}
+
+
+@pytest.mark.parametrize("code", [0, 1, 3])
+def test_the_exit_code_is_that_of_the_command(monkeypatch, capsys, code):
+    # CI runs the stack tests through the report: a test that fails must still fail the step.
+    monkeypatch.setattr(mr, "Sampler", QuietSampler)
+    monkeypatch.setattr(mr, "docker", fake_docker())
+    monkeypatch.setattr(mr, "collect", lambda peaks: [])
+    command = [sys.executable, "-c", f"raise SystemExit({code})"]
+    assert mr.main(["--title", "T", "--", *command]) == code
+    assert "### T (x86_64)" in capsys.readouterr().out
+
+
+def test_a_failed_docker_exec_keeps_the_table_and_the_exit_code(monkeypatch, capsys):
+    monkeypatch.setattr(mr, "Sampler", QuietSampler)
+    monkeypatch.setattr(mr, "project_containers", lambda: [SCHEDULER])
+    monkeypatch.setattr(mr, "docker", fake_docker("exec"))
+    command = [sys.executable, "-c", "raise SystemExit(3)"]
+    assert mr.main(["--title", "T", "--", *command]) == 3
+    assert "| airflow-scheduler | 1152 MiB | n/a | unread | unread | 1 |" in capsys.readouterr().out

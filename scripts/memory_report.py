@@ -19,6 +19,10 @@ project (docs/reference/system-requirements.md explains how the limits come from
 - OOM kills: how many processes of the container the kernel killed for want of memory, from
   memory.events; Restarts: how often Docker restarted the container.
 
+A cell says "unread" when docker inspect or docker exec failed for its container, such as one that
+stopped while the table was made: the table still comes out. A line of docker stats that cannot be
+read is left out, and the table says how many were.
+
 The total adds up the services that run all the time. The script prints the table, and --output
 also appends it to a file, such as $GITHUB_STEP_SUMMARY. It exits with the exit code of the command.
 """
@@ -88,6 +92,11 @@ def cgroup_values(text: str) -> tuple[int | None, int | None]:
     return peak, kills
 
 
+# The columns that come from docker inspect, and those that come from CGROUP through docker exec.
+FROM_INSPECT = frozenset({"limit", "restarts"})
+FROM_CGROUP = frozenset({"since_start", "oom_kills"})
+
+
 @dataclass(frozen=True)
 class Row:
     service: str
@@ -97,22 +106,33 @@ class Row:
     since_start: int | None
     oom_kills: int | None
     restarts: int
+    # The columns that could not be read, which the table shows as "unread".
+    unread: frozenset[str] = frozenset()
 
 
 def make_row(
-    container: dict[str, Any], details: dict[str, Any], cgroup: str, peaks: dict[str, int]
+    container: dict[str, Any],
+    details: dict[str, Any] | None,
+    cgroup: str | None,
+    peaks: dict[str, int],
 ) -> Row:
-    """The row of a container: from docker compose ps, docker inspect, CGROUP and the samples."""
-    since_start, kills = cgroup_values(cgroup)
-    limit = details["HostConfig"].get("Memory") or None
+    """The row of a container: from docker compose ps, docker inspect, CGROUP and the samples.
+
+    details is None when docker inspect failed, and cgroup when docker exec did."""
+    unread = (FROM_INSPECT if details is None else frozenset()) | (
+        FROM_CGROUP if cgroup is None else frozenset()
+    )
+    since_start, kills = cgroup_values(cgroup or "")
+    details = details or {"HostConfig": {}}
     return Row(
         service=container["Service"],
         running=container["State"] == "running",
-        limit=limit,
+        limit=details["HostConfig"].get("Memory") or None,
         peak=peaks.get(container["Name"]),
         since_start=since_start,
         oom_kills=kills,
         restarts=details.get("RestartCount", 0),
+        unread=unread,
     )
 
 
@@ -120,8 +140,9 @@ def mib(value: int | None) -> str:
     return "n/a" if value is None else f"{value / MIB:.0f} MiB"
 
 
-def render(title: str, arch: str, rows: list[Row]) -> str:
-    """The Markdown table of the rows, by service, with the total of the running services."""
+def render(title: str, arch: str, rows: list[Row], skipped: int = 0) -> str:
+    """The Markdown table of the rows, by service, with the total of the running services, and
+    the number of lines of docker stats that were left out, if any."""
     lines = [
         f"### {title} ({arch})",
         "",
@@ -129,17 +150,27 @@ def render(title: str, arch: str, rows: list[Row]) -> str:
         "|---|---:|---:|---:|---:|---:|",
     ]
     for row in sorted(rows, key=lambda row: row.service):
-        limit = "none" if row.limit is None else mib(row.limit)
-        kills = "n/a" if row.oom_kills is None else str(row.oom_kills)
+        cells = {
+            "limit": "none" if row.limit is None else mib(row.limit),
+            "since_start": mib(row.since_start),
+            "oom_kills": "n/a" if row.oom_kills is None else str(row.oom_kills),
+            "restarts": str(row.restarts),
+        }
+        cells.update(dict.fromkeys(row.unread, "unread"))
         lines.append(
-            f"| {row.service} | {limit} | {mib(row.peak)} | {mib(row.since_start)} "
-            f"| {kills} | {row.restarts} |"
+            f"| {row.service} | {cells['limit']} | {mib(row.peak)} | {cells['since_start']} "
+            f"| {cells['oom_kills']} | {cells['restarts']} |"
         )
     running = [row for row in rows if row.running]
     limits = [row.limit for row in running]
-    total_limit = "none" if None in limits else mib(sum(limits))  # type: ignore[arg-type]
+    if any("limit" in row.unread for row in running):
+        total_limit = "unread"
+    else:
+        total_limit = "none" if None in limits else mib(sum(limits))  # type: ignore[arg-type]
     total_peak = mib(sum(row.peak or 0 for row in running))
     lines.append(f"| **Running services, total** | **{total_limit}** | **{total_peak}** | | | |")
+    if skipped:
+        lines += ["", f"{skipped} lines of docker stats could not be read and were left out."]
     return "\n".join(lines) + "\n"
 
 
@@ -165,12 +196,22 @@ def project_containers() -> list[dict[str, Any]]:
 
 
 def collect(peaks: dict[str, int]) -> list[Row]:
+    """A row for each container of the project. A container can stop between docker compose ps
+    and docker inspect or docker exec, such as one that the kernel stopped at its limit: its row
+    then says which cells could not be read, and the table still comes out."""
     rows = []
     for container in project_containers():
-        [details] = json.loads(docker("inspect", container["ID"]))
-        cgroup = ""
+        details: dict[str, Any] | None = None
+        try:
+            [details] = json.loads(docker("inspect", container["ID"]))
+        except (subprocess.SubprocessError, ValueError):
+            details = None
+        cgroup: str | None = ""
         if container["State"] == "running":
-            cgroup = docker("exec", container["ID"], "sh", "-c", CGROUP)
+            try:
+                cgroup = docker("exec", container["ID"], "sh", "-c", CGROUP)
+            except subprocess.SubprocessError:
+                cgroup = None
         rows.append(make_row(container, details, cgroup, peaks))
     return rows
 
@@ -180,6 +221,8 @@ class Sampler:
 
     def __init__(self) -> None:
         self.peaks: dict[str, int] = {}
+        # The lines that could not be read: a sample less is better than no samples from then on.
+        self.skipped = 0
         self.process = subprocess.Popen(
             ["docker", "stats", "--format", "{{json .}}"],  # noqa: S607
             stdout=subprocess.PIPE,
@@ -193,7 +236,12 @@ class Sampler:
         if self.process.stdout is None:
             return
         for line in self.process.stdout:
-            for name, used in samples(line):
+            try:
+                found = samples(line)
+            except (ValueError, KeyError, TypeError, AttributeError):
+                self.skipped += 1
+                continue
+            for name, used in found:
                 self.peaks[name] = max(used, self.peaks.get(name, 0))
 
     def stop(self) -> dict[str, int]:
@@ -222,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         peaks = sampler.stop()
     arch = docker("info", "--format", "{{.Architecture}}").strip()
-    table = render(args.title, arch, collect(peaks))
+    table = render(args.title, arch, collect(peaks), sampler.skipped)
     print(table, end="")
     if args.output:
         with args.output.open("a", encoding="utf-8") as summary:
