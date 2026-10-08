@@ -33,7 +33,7 @@ The limits are set from measurements without limits, made on 8 October 2026, as 
 | `airflow-apiserver` | 356 MiB | Mac | 512 MiB |
 | `airflow-dag-processor` | 522 MiB | CI, amd64 | 768 MiB |
 | `airflow-triggerer` | 439 MiB | Mac | 640 MiB |
-| The tasks: `airflow-scheduler` with LocalExecutor, `airflow-worker` with CeleryExecutor | 861 MiB, the worker | CI, amd64 | 1,152 MiB |
+| The tasks: `airflow-scheduler` with LocalExecutor, `airflow-worker` with CeleryExecutor | 861 MiB, the worker; under the limit it reached 870 MiB (Mac, below), which gives the same limit | CI, amd64 | 1,152 MiB |
 | `metabase` | 1,720 MiB | CI, amd64 | 2,176 MiB |
 | `airflow-scheduler`, with CeleryExecutor only | 404 MiB | CI, arm64 | 512 MiB |
 | `broker`, with CeleryExecutor only | 41 MiB | Mac | 256 MiB, the minimum |
@@ -172,7 +172,7 @@ CI measures the stack in the same way in every run of the stack tests, on the Gi
 A task that writes 4 GiB of memory, more than `AIRFLOW_TASKS_MEMORY`, ran on the same Mac with the default limits, on 8 October 2026:
 
 - With the CeleryExecutor, the kernel stopped the task process in `airflow-worker`. The task failed within a second, and its log in Airflow says `Process terminated by signal. Likely out of memory error (OOM).`, with the signal `-9` (`SIGKILL`). The worker went on.
-- With the LocalExecutor, the check ran twice. Once, the same happened in `airflow-scheduler`: the task failed, and the scheduler went on. The other time, the kernel stopped the scheduler itself, as Airflow's documentation warns ([ADR-0015](../adr/0015-run-localexecutor-by-default.md)). Docker restarted the container, and the task stayed running in Airflow until the new scheduler reset it as orphaned five minutes later and ran it again, as a second try although the task had no retries. The kernel then stopped the task, which failed.
+- With the LocalExecutor, the check ran twice. Once, the same happened in `airflow-scheduler`: the task failed, and the scheduler went on. The other time, the kernel stopped the scheduler itself, as Airflow's documentation warns ([ADR-0015](../adr/0015-run-localexecutor-by-default.md)). Docker restarted the container, and the task stayed running in Airflow until the new scheduler reset it as orphaned five minutes later and ran it again, as a second try although the task had no retries. The kernel then stopped the task, which failed. As of Airflow 3.3.2 (October 2026), a restart of the scheduler runs again every task that was running in it, whatever its retries, so every task has to be safe to run twice, as the tasks of the demo are. With the CeleryExecutor, the scheduler has a container of its own, so a task at its limit cannot stop it.
 - Each time, the other services went on, and `agoranomos_selfcheck` succeeded right after.
 
 The memory report shows such a kill in the column OOM kills and a restart in Restarts, `docker inspect` of the container says `"OOMKilled": true`, and the stack test `test_no_service_ran_out_of_memory_or_restarted` fails.
