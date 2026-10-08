@@ -321,3 +321,32 @@ def test_the_image_has_the_folder_of_the_export_of_nobody_and_the_user_of_airflo
     assert (result.returncode, result.stdout.strip()) == (0, "65534:65534 755"), result.stderr
     user = docker("image", "inspect", IMAGE, "--format", "{{.Config.User}}").stdout.strip()
     assert user == "50000"
+
+
+def test_the_plugins_belong_to_root_and_only_root_may_write_them():
+    # Airflow imports every file of its plugins folder in each of its processes, and the Airflow
+    # services run as 50000 in the group root: neither the plugins nor a folder above them may be
+    # writable by that group (airflow/Dockerfile).
+    plugins = "/opt/agoranomos/plugins"
+    result = docker(
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--entrypoint",
+        "stat",
+        IMAGE,
+        "-c",
+        "%u:%g %a %n",
+        "/opt/agoranomos",
+        plugins,
+        f"{plugins}/agoranomos_oom.py",
+        check=False,
+    )
+    assert result.returncode == 0, f"stat in {IMAGE} exited with {result.returncode}"
+    assert result.stdout.splitlines() == [
+        "0:0 755 /opt/agoranomos",
+        f"0:0 755 {plugins}",
+        f"0:0 644 {plugins}/agoranomos_oom.py",
+    ]
+    assert image_environment().get("AIRFLOW__CORE__PLUGINS_FOLDER") == plugins

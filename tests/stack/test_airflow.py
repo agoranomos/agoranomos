@@ -111,15 +111,49 @@ def test_tasks_run_where_the_executor_puts_them(airflow_url, token, selfcheck_ru
     assert [i["hostname"] for i in task_instances(airflow_url, token, selfcheck_run)] == [host]
 
 
-def test_a_dag_in_the_extensions_folder_runs(env, airflow_url, token):
+# The oom_score_adj of the first process of a container and of its children, the service itself.
+# The images have no ps, so the probe reads the process files; a process that ends while it reads
+# is skipped. A process that docker compose exec starts has no parent in the container.
+SERVICE_SCORES = """
+import pathlib
+scores = set()
+for proc in pathlib.Path("/proc").iterdir():
+    if not proc.name.isdigit():
+        continue
+    try:
+        parent = (proc / "stat").read_text().rpartition(")")[2].split()[1]
+        if proc.name == "1" or parent == "1":
+            scores.add((proc / "oom_score_adj").read_text().strip())
+    except OSError:
+        continue
+print(*sorted(scores))
+"""
+
+
+@pytest.mark.parametrize("service", sorted(s for s in LONG_RUNNING if s.startswith("airflow-")))
+def test_the_airflow_services_keep_their_place_at_the_memory_limit(service):
+    # The plugin of the image ranks task processes only: the services themselves keep the 0 that
+    # Docker gives, so that at the memory limit the kernel stops a task before them.
+    result = compose("exec", "-T", service, "python", "-c", SERVICE_SCORES, check=False)
+    assert result.returncode == 0, f"the probe exited with {result.returncode}"
+    assert result.stdout.split() == ["0"], result.stdout
+
+
+@pytest.fixture(scope="module")
+def extension_run(env, airflow_url, token):
+    """The DAG of the extensions folder and a run of it."""
     extensions = REPO_ROOT / (env.get("AGORANOMOS_EXTENSIONS_DIR") or "./extensions") / "dags"
     target = extensions / FIXTURE.name
     # CI copies the fixture before the start. A local run adds it here, or updates an older copy.
     if not target.exists() or target.read_bytes() != FIXTURE.read_bytes():
         shutil.copy(FIXTURE, target)
     dag = wait_for_dag(airflow_url, token, EXTENSION_CHECK, timeout=240)
+    return dag, run_dag(airflow_url, token, EXTENSION_CHECK)
+
+
+def test_a_dag_in_the_extensions_folder_runs(env, airflow_url, token, extension_run):
+    dag, run = extension_run
     assert dag["bundle_name"] == "extensions", dag
-    run = run_dag(airflow_url, token, EXTENSION_CHECK)
     assert run["state"] == "success", run
     # The task also records what task code can see. The log must say it, and no entry of it may
     # hold a secret, in any field. The log is read where it is used, so that no frame of a failed
@@ -135,6 +169,38 @@ def test_a_dag_in_the_extensions_folder_runs(env, airflow_url, token):
     assert said == prefixes, f"the log of the task does not say {sorted(prefixes - said)}"
     found = leaked(secrets(env), task_log(airflow_url, token, instance))
     assert not found, f"the log of the task holds the values of {found}"
+
+
+def test_a_task_and_its_children_go_first_at_the_memory_limit(airflow_url, token, extension_run):
+    # The plugin of the image (airflow/plugins/agoranomos_oom.py) gives each task process the
+    # oom_score_adj 1000, and the children of the task inherit it: the task of the fixture reports
+    # both. Only the entry that starts with the prefix is kept, and it holds no secret.
+    _, run = extension_run
+    [instance] = task_instances(airflow_url, token, run)
+    scores = [
+        json.loads(entry)["event"]
+        for entry in task_log(airflow_url, token, instance)
+        if json.loads(entry).get("event", "").startswith("oom_score_adj: ")
+    ]
+    assert scores == ["oom_score_adj: task 1000, child 1000"], scores
+
+
+def test_a_task_is_non_dumpable_again_after_the_plugin_has_written_its_score(
+    airflow_url, token, extension_run
+):
+    # Airflow marks the process of a task non-dumpable, so that task code cannot read the memory of
+    # the other processes of its user. The kernel then gives the files of /proc/self to root, so the
+    # plugin makes the process dumpable for the write of its score alone: the task, which reports
+    # it after that, must see the flag as Airflow left it. Only the entry that starts with the
+    # prefix is kept, and it holds no secret.
+    _, run = extension_run
+    [instance] = task_instances(airflow_url, token, run)
+    flags = [
+        json.loads(entry)["event"]
+        for entry in task_log(airflow_url, token, instance)
+        if json.loads(entry).get("event", "").startswith("dumpable: ")
+    ]
+    assert flags == ["dumpable: 0"], flags
 
 
 def test_the_dag_processor_reports_no_import_error(airflow_url, token):

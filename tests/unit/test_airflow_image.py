@@ -198,9 +198,14 @@ def test_the_build_context_holds_only_what_the_dockerfile_copies():
         "*",
         "!requirements.txt",
         "!dbt-requirements.txt",
+        "!plugins/agoranomos_oom.py",
     ]
-    copied = re.findall(r"^COPY\s+(\S+)\s", dockerfile(), flags=re.MULTILINE)
-    assert sorted(copied) == ["dbt-requirements.txt", "requirements.txt"]
+    copied = re.findall(r"^COPY\s+(?:--\S+\s+)*(\S+)\s", dockerfile(), flags=re.MULTILINE)
+    assert sorted(copied) == [
+        "dbt-requirements.txt",
+        "plugins/agoranomos_oom.py",
+        "requirements.txt",
+    ]
 
 
 def test_the_image_gives_the_folder_of_the_export_to_nobody_and_keeps_its_user():
@@ -216,4 +221,26 @@ def test_the_image_gives_the_folder_of_the_export_to_nobody_and_keeps_its_user()
         "RUN",
         "install -d -o 65534 -g 65534 -m 0755 /opt/agoranomos/metadata",
     )
-    assert found[root + 2] == ("USER", "${AIRFLOW_UID}")
+    # The next instruction makes the folder of the plugins, as root (below).
+    assert found[root + 3] == ("USER", "${AIRFLOW_UID}")
+
+
+def test_the_image_installs_the_plugins_where_only_root_may_write_them():
+    # Airflow imports every file of its plugins folder in each of its processes, so a plugin that a
+    # task could change would run in the scheduler too. The Airflow services run as 50000 in the
+    # group root (compose.yaml), and COPY keeps the mode of the file on disk, which a umask of 002
+    # makes writable by the group: so each plugin is copied with the mode 0644 set. The folder of
+    # the official image, /opt/airflow/plugins, is not used: its parent is writable by that group.
+    plugins = sorted(path.name for path in (AIRFLOW / "plugins").glob("*.py"))
+    assert plugins == ["agoranomos_oom.py"]
+    found = instructions(dockerfile())
+    # COPY --chmod gives a folder that it has to create the mode of the file, 0644, and nobody could
+    # enter /opt/agoranomos, where the DAGs and the dbt project are mounted: so root makes the
+    # folder, with the mode 0755, before the plugins are copied into it.
+    folder = ("RUN", "install -d -m 0755 /opt/agoranomos/plugins")
+    assert folder in found
+    for name in plugins:
+        copy = ("COPY", f"--chmod=0644 plugins/{name} /opt/agoranomos/plugins/{name}")
+        assert copy in found
+        assert found.index(folder) < found.index(copy)
+    assert environment(dockerfile())["AIRFLOW__CORE__PLUGINS_FOLDER"] == "/opt/agoranomos/plugins"

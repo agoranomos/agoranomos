@@ -4,11 +4,15 @@ Its task also records what task code can see in this deployment (ADR-0015): the 
 values, of the environment variables; whether the settings that can hold the connection string of
 the Airflow metadata database open a connection, in the environment of the task and in the one that
 the container started with; and which secrets of the container the task environment holds as they
-are. The result is in the log of the task.
+are. It also records how the kernel ranks its process and a child of it when the container reaches
+its memory limit (airflow/plugins/agoranomos_oom.py), and whether the process is still marked
+non-dumpable, as Airflow marks it. The result is in the log of the task.
 """
 
+import ctypes
 import logging
 import os
+import subprocess
 from pathlib import Path
 
 import pendulum
@@ -75,6 +79,20 @@ def compare_secrets(started_with: dict[str, str]) -> str:
     return "; ".join(f"{kind}: {' '.join(names) or '-'}" for kind, names in outcome.items())
 
 
+def oom_scores() -> str:
+    """The oom_score_adj of this process and of a child of it, which inherits it."""
+    task = Path("/proc/self/oom_score_adj").read_text(encoding="ascii").strip()
+    child = subprocess.run(
+        ["cat", "/proc/self/oom_score_adj"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    return f"task {task}, child {child}"
+
+
+def dumpable() -> int:
+    """PR_GET_DUMPABLE of this process: Airflow marks the process of a task non-dumpable (0)."""
+    return ctypes.CDLL(None).prctl(3, 0, 0, 0, 0)
+
+
 @dag(
     dag_id="ci_extension_check",
     schedule=None,
@@ -88,6 +106,8 @@ def ci_extension_check():
     def ping() -> str:
         log.info("environment variables: %s", " ".join(sorted(os.environ)))
         log.info("metadata database, task environment: %s", database_settings(dict(os.environ)))
+        log.info("oom_score_adj: %s", oom_scores())
+        log.info("dumpable: %s", dumpable())
         started_with = container_environment()
         if started_with is None:
             log.info("container environment: not readable")
