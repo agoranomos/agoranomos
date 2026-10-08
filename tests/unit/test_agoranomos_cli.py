@@ -335,6 +335,16 @@ def test_an_env_of_the_last_release_gets_the_session_key_and_keeps_the_rest(cli)
     assert after == {key: value for key, value in before.items() if key != "METABASE_SESSION_KEY"}
 
 
+# Where to raise the memory and the CPUs: in Docker Desktop on macOS, Linux and Windows with
+# Hyper-V, and in .wslconfig on Windows with WSL2, where Docker Desktop leaves the limits to WSL (as
+# of October 2026, Docker's and Microsoft's documentation).
+MEMORY_HINT = "Settings → Resources → Advanced → Memory limit"
+CPU_HINT = "Settings → Resources → Advanced → CPU limit"
+WSL_MEMORY_HINT = "set memory= in the [wsl2] section of .wslconfig in your Windows user folder"
+WSL_CPU_HINT = "set processors= in the [wsl2] section of .wslconfig in your Windows user folder"
+WSL_RESTART = "then run wsl --shutdown"
+
+
 def test_preflight_stops_when_docker_is_down(cli):
     result = cli.run("preflight", FAKE_DOCKER_DOWN="1")
     assert result.returncode == 1
@@ -344,7 +354,7 @@ def test_preflight_stops_when_docker_is_down(cli):
 def test_preflight_stops_on_too_little_memory(cli):
     result = cli.run("preflight", FAKE_MEMTOTAL=str(4 * GIB))
     assert result.returncode == 1
-    assert "Settings → Resources → Memory" in result.stderr
+    assert MEMORY_HINT in result.stderr
 
 
 def test_preflight_warns_below_the_recommended_memory(cli):
@@ -614,11 +624,14 @@ def test_disk_limits(cli, tmp_path, free_kb, outcome):
 
 
 def test_the_messages_about_resources_say_what_to_do(cli, tmp_path):
-    memory = cli.run("preflight", FAKE_MEMTOTAL=str(7 * GIB))
-    assert "Settings → Resources → Memory" in memory.stderr
+    for total in (4 * GIB, 7 * GIB):
+        memory = cli.run("preflight", FAKE_MEMTOTAL=str(total))
+        for hint in (MEMORY_HINT, WSL_MEMORY_HINT, WSL_RESTART):
+            assert hint in memory.stderr, (total, hint)
     for cpus in ("1", "2"):
         result = cli.run("preflight", FAKE_NCPU=cpus)
-        assert "Settings → Resources → CPUs" in result.stderr, cpus
+        for hint in (CPU_HINT, WSL_CPU_HINT, WSL_RESTART):
+            assert hint in result.stderr, (cpus, hint)
     for free_gb in (5, 15):
         result = cli.run(
             "preflight",
@@ -998,7 +1011,7 @@ def test_up_gives_up_after_the_timeout(cli, tmp_path):
 def test_up_does_not_start_when_preflight_fails(cli, tmp_path):
     result = cli.run("up", FAKE_MEMTOTAL=str(4 * GIB), FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
     assert result.returncode == 1
-    assert "Settings → Resources → Memory" in result.stderr  # it was preflight that stopped it
+    assert MEMORY_HINT in result.stderr  # it was preflight that stopped it
     assert not any(call.startswith("compose up") for call in cli.docker_calls())
 
 

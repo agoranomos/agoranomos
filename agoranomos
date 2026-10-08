@@ -390,16 +390,21 @@ EOF
     x86_64 | amd64) check_x86_64_v2 ;;
     *) problem "the CPU architecture $arch is not supported: Agoranomos runs on arm64 and on x86-64 with x86-64-v2" ;;
   esac
+  # Where to raise them: Docker Desktop on macOS, Linux and Windows with Hyper-V sets the memory and
+  # the CPUs of its VM itself; on Windows with WSL2 it leaves them to WSL, which reads .wslconfig in
+  # the Windows user folder when it starts (as of October 2026, Docker's and Microsoft's documentation).
+  raise_memory="In Docker Desktop, raise it in Settings → Resources → Advanced → Memory limit; on Windows with WSL2, set memory= in the [wsl2] section of .wslconfig in your Windows user folder, then run wsl --shutdown."
+  raise_cpus="In Docker Desktop, raise it in Settings → Resources → Advanced → CPU limit; on Windows with WSL2, set processors= in the [wsl2] section of .wslconfig in your Windows user folder, then run wsl --shutdown."
   mem_mb=$((mem_total / 1048576))
   if [ "$mem_mb" -lt "$MIN_MEMORY_MB" ]; then
-    resource_problem "Docker has $mem_mb MB of memory, and Agoranomos needs 6 GB (8 GB recommended). In Docker Desktop, raise it in Settings → Resources → Memory."
+    resource_problem "Docker has $mem_mb MB of memory, and Agoranomos needs 6 GB (8 GB recommended). $raise_memory"
   elif [ "$mem_mb" -lt "$RECOMMENDED_MEMORY_MB" ]; then
-    warn "Docker has $mem_mb MB of memory; 8 GB is recommended. In Docker Desktop, raise it in Settings → Resources → Memory."
+    warn "Docker has $mem_mb MB of memory; 8 GB is recommended. $raise_memory"
   fi
   if [ "$ncpu" -lt "$MIN_CPUS" ]; then
-    resource_problem "Docker has $ncpu CPU, and Agoranomos needs $MIN_CPUS ($RECOMMENDED_CPUS recommended). In Docker Desktop, raise it in Settings → Resources → CPUs."
+    resource_problem "Docker has $ncpu CPU, and Agoranomos needs $MIN_CPUS ($RECOMMENDED_CPUS recommended). $raise_cpus"
   elif [ "$ncpu" -lt "$RECOMMENDED_CPUS" ]; then
-    warn "Docker has $ncpu CPUs; $RECOMMENDED_CPUS are recommended. In Docker Desktop, raise it in Settings → Resources → CPUs."
+    warn "Docker has $ncpu CPUs; $RECOMMENDED_CPUS are recommended. $raise_cpus"
   fi
   # On Linux the data of Docker is on this machine; Docker Desktop keeps it inside its VM.
   if [ -d "$docker_root" ]; then
