@@ -23,7 +23,7 @@ Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 - `extensions/`: the folder for a deployment's own additions ([ADR-0013](docs/adr/0013-keep-extensions-apart-from-the-base-package.md)): its DAGs, and its overrides of the metadata of the marts in `metadata/overrides.toml`; git tracks only its README.
 - `pyproject.toml`, `uv.lock`, `.python-version`: the development tooling (Python 3.13, ruff, prek, Zensical and pytest). The root is a uv project that is never built or installed.
 - `.pre-commit-config.yaml`: the git hooks and static checks, run by prek. `_typos.toml` is the word list of the spell checker, and `.editorconfig` and `.gitattributes` fix indentation and line endings (LF).
-- `scripts/`: the scripts of the repository's own checks. `check_docs_nav.py` compares the documentation navigation with the pages, and the `check-docs-nav` hook runs it.
+- `scripts/`: the scripts of the repository's own checks. `check_docs_nav.py` compares the documentation navigation with the pages, and the `check-docs-nav` hook runs it. `memory_report.py` measures the memory of each service of the running stack ([docs/reference/system-requirements.md](docs/reference/system-requirements.md)); CI runs it around the stack tests.
 - `tests/unit/`: the unit tests, run by `uv run pytest`.
 - `tests/stack/`: the stack tests, run with `uv run pytest tests/stack` against a running stack.
 - `.github/`: the workflows (`workflows/`: CI, the stack tests, the pull request checks and the daily Renovate run), the issue forms, the pull request template and `CODEOWNERS`.

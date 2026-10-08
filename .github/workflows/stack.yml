@@ -111,8 +111,13 @@ jobs:
         run: docker compose pull --quiet --ignore-buildable
       - name: Start the stack
         run: ./agoranomos up
+      # The memory report samples every container while the tests run, and appends a table of the
+      # limits, the peaks and the kills at a limit to the summary of the job
+      # (docs/reference/system-requirements.md). It exits with the exit code of the tests.
       - name: Stack tests
-        run: uv run pytest tests/stack -v
+        env:
+          TITLE: Local mode (${{ matrix.arch }}, ${{ matrix.variant }}), the stack tests
+        run: uv run python scripts/memory_report.py --title "$TITLE" --output "$GITHUB_STEP_SUMMARY" -- uv run pytest tests/stack -v
       - name: Start again (nothing changes)
         run: |
           sha256sum .env > env.sha256
