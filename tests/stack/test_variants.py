@@ -317,7 +317,16 @@ def test_every_airflow_service_of_the_celery_variant_skips_the_check_of_the_entr
 def test_the_worker_is_set_up_like_the_other_airflow_services():
     services = airflow_services("celery")
     worker, scheduler = services["airflow-worker"], services["airflow-scheduler"]
-    for key in ("image", "user", "networks", "security_opt", "logging", "restart", "profiles"):
+    for key in (
+        "image",
+        "user",
+        "networks",
+        "cap_drop",
+        "security_opt",
+        "logging",
+        "restart",
+        "profiles",
+    ):
         assert worker[key] == scheduler[key], key
     assert worker["volumes"] == scheduler["volumes"]
     assert set(worker["environment"]) - set(scheduler["environment"]) == {"DUMB_INIT_SETSID"}
@@ -610,6 +619,62 @@ def test_without_the_demo_profile_there_is_no_demo_init():
 def test_metabase_may_not_gain_privileges(variant):
     metabase = rendered(variant)["metabase"]
     assert metabase["security_opt"] == ["no-new-privileges:true"]
+
+
+# The users that are root: a name, a number, or either with a group.
+ROOT = {"", "root", "0"}
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_every_service_drops_every_capability_and_starts_as_a_user_that_is_not_root(variant):
+    # Every image of the stack runs as a user that is not root from its first process, so none
+    # needs a capability of Linux: a process of a container that someone breaks into cannot use
+    # one, and cannot gain one (no-new-privileges). A service that needs one is a decision for its
+    # own comment and its own line here. The values are names and flags.
+    problems = []
+    for name, service in rendered(variant).items():
+        user = str(service.get("user") or "").split(":")[0]
+        if user in ROOT:
+            problems.append(f"{name} starts as root")
+        if service.get("cap_drop") != ["ALL"]:
+            problems.append(f"{name} keeps the capabilities of Docker")
+        if service.get("cap_add") or service.get("privileged"):
+            problems.append(f"{name} adds capabilities")
+        if service.get("security_opt") != ["no-new-privileges:true"]:
+            problems.append(f"{name} may gain privileges")
+    assert not problems, "; ".join(problems)
+
+
+# The one-shot jobs that write their file system: airflow-init, where Airflow writes its
+# airflow.cfg into /opt/airflow and Python the bytecode of the modules that it imports. Every other
+# one-shot job writes nothing outside its volumes and tmpfs mounts.
+WRITING_JOBS = {"airflow-init"}
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_the_jobs_that_write_nothing_have_a_read_only_file_system(variant):
+    # The one-shot jobs come from the rendered config: restart: "no", which
+    # test_the_one_shot_jobs_are_the_services_named_init_or_export ties to the names that
+    # ./agoranomos up waits for. So a new job is checked without a change here: it gets
+    # read_only, or a place in WRITING_JOBS with the reason in the comment above it.
+    services = rendered(variant)
+    jobs = {name for name, service in services.items() if service.get("restart") == "no"}
+    stale = sorted(WRITING_JOBS - jobs)
+    assert not stale, f"not a one-shot job of the variant: {stale}"
+    writable = sorted(
+        name for name in jobs - WRITING_JOBS if services[name].get("read_only") is not True
+    )
+    assert not writable, f"these jobs can write their file system: {writable}"
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_db_init_keeps_the_volume_of_its_image_in_memory(variant):
+    # The image of PostgreSQL declares a volume for its data at /var/lib/postgresql. db-init does
+    # not use it, and each new container of db-init would get an anonymous volume there, which
+    # ./agoranomos down keeps: a tmpfs at that path takes its place.
+    db_init = rendered(variant)["db-init"]
+    assert db_init["tmpfs"] == ["/var/lib/postgresql"]
+    assert [mount["target"] for mount in db_init["volumes"]] == ["/opt/agoranomos/postgres"]
 
 
 def serve_once(status, body):

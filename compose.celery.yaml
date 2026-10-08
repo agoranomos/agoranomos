@@ -55,6 +55,7 @@ services:
         appendonly no
         EOF
     networks: [data]
+    cap_drop: [ALL]
     # valkey-cli reads the password from VALKEYCLI_AUTH (REDISCLI_AUTH works too, as of 9.1.2), not from -a.
     healthcheck:
       test: ["CMD-SHELL", "VALKEYCLI_AUTH=\"$$VALKEY_PASSWORD\" valkey-cli ping | grep -q PONG"]

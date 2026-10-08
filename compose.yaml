@@ -71,6 +71,7 @@ x-airflow: &airflow
     - ${AGORANOMOS_EXTENSIONS_DIR:-./extensions}/dags:/opt/agoranomos/extensions/dags:ro
     - airflow-logs:/opt/airflow/logs
   networks: [default, data]
+  cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
   logging: *logging
   depends_on: &airflow-depends-on
@@ -80,10 +81,14 @@ x-airflow: &airflow
       condition: service_completed_successfully
 
 services:
+  # Each database runs as postgres from its first process, with no capability of Linux: the entrypoint
+  # of the image then skips what needs root (a chown of the data directory and a switch of user),
+  # and a new volume belongs to postgres already, as the folder of the image that it starts from.
   warehouse-db:
     image: postgres:18.6-trixie@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
     profiles: [core]
     restart: unless-stopped
+    user: postgres
     environment:
       POSTGRES_PASSWORD: ${WAREHOUSE_POSTGRES_PASSWORD:?run ./agoranomos init}
       POSTGRES_DB: warehouse
@@ -101,6 +106,7 @@ services:
       # PostgreSQL 18 images keep their data under /var/lib/postgresql/18/docker (ADR-0003).
       - warehouse-data:/var/lib/postgresql
     networks: [data]
+    cap_drop: [ALL]
     # The check connects over TCP: on the first start with an empty volume the image runs a temporary
     # server that listens only on the Unix socket while it initializes, and a check over the socket
     # could report it ready. Over TCP only the final server answers.
@@ -117,6 +123,7 @@ services:
     image: postgres:18.6-trixie@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
     profiles: [core]
     restart: unless-stopped
+    user: postgres
     environment:
       POSTGRES_PASSWORD: ${PLATFORM_POSTGRES_PASSWORD:?run ./agoranomos init}
     command:
@@ -130,6 +137,7 @@ services:
     volumes:
       - platform-data:/var/lib/postgresql
     networks: [data]
+    cap_drop: [ALL]
     # Over TCP, for the reason given at warehouse-db.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
@@ -157,12 +165,19 @@ services:
       WAREHOUSE_TRANSFORMER_PASSWORD: ${WAREHOUSE_TRANSFORMER_PASSWORD:?run ./agoranomos init}
     volumes:
       - ./postgres:/opt/agoranomos/postgres:ro
+    # psql writes nothing. The image declares a volume for the data of PostgreSQL, which db-init
+    # does not use: the tmpfs takes its place, so that no new container of db-init leaves an
+    # anonymous volume behind, which ./agoranomos down would keep.
+    read_only: true
+    tmpfs:
+      - /var/lib/postgresql
     networks: [data]
     depends_on:
       warehouse-db:
         condition: service_healthy
       platform-db:
         condition: service_healthy
+    cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     logging: *logging
 
@@ -304,6 +319,10 @@ services:
     image: metabase/metabase:v0.64.1@sha256:fcf3ad4c00f303d96c63233967a24f0d0348bbb725d4704ee1961f9185674e13
     profiles: [core]
     restart: unless-stopped
+    # The user that the entrypoint of the image would create and switch to, from the first process,
+    # so that it needs no capability of Linux. Metabase keeps everything in its application
+    # database, and its plugins in /plugins, which the image lets everyone write.
+    user: "2000:2000"
     environment:
       MB_DB_TYPE: postgres
       MB_DB_HOST: platform-db
@@ -374,6 +393,7 @@ services:
         condition: service_healthy
       db-init:
         condition: service_completed_successfully
+    cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     logging: *logging
 
@@ -401,10 +421,13 @@ services:
       # The folder of the image that this volume is mounted on belongs to nobody, so the new volume
       # does too (airflow/Dockerfile).
       - metadata-export:/opt/agoranomos/metadata
-    # dbt writes its target and logs folders under /tmp, and they go with the container.
+    # dbt writes its target and logs folders under /tmp, and they go with the container; the job
+    # writes nothing else but the export.
+    read_only: true
     tmpfs:
       - /tmp
     network_mode: none
+    cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     logging: *logging
 
@@ -439,6 +462,9 @@ services:
         condition: service_healthy
       metadata-export:
         condition: service_completed_successfully
+    # The job writes nothing: PYTHONDONTWRITEBYTECODE keeps Python from writing its bytecode.
+    read_only: true
+    cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     logging: *logging
 
@@ -479,6 +505,9 @@ services:
         condition: service_healthy
       metabase-init:
         condition: service_completed_successfully
+    # As metabase-init, it writes nothing.
+    read_only: true
+    cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     logging: *logging
 
