@@ -22,7 +22,15 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import demo_init as di
 import metadata as md
 import pytest
-from metabase_stand_in import SAMPLE, FakeClock, FakeMetabase, free_port, metadata_env, serve
+from metabase_stand_in import (
+    EXPORT,
+    SAMPLE,
+    FakeClock,
+    FakeMetabase,
+    free_port,
+    metadata_env,
+    serve,
+)
 from metabase_stand_in import leaked as leaked_in
 
 ENV = {
@@ -757,6 +765,40 @@ def test_a_mart_that_is_gone_after_an_earlier_run_names_the_cause_and_the_load(
     assert f"trigger {di.LOAD_DAG} in Airflow" in line
     assert ("POST", "/api/database/2/sync_schema") not in metabase.calls[calls:]
     assert clock.now == started
+
+
+def test_a_transform_that_ran_now_and_left_no_mart_names_the_transform(airflow, metabase, capsys):
+    # The pipeline runs now and succeeds, and the warehouse still has no mart, as when the model
+    # of the mart was left out of the run: the line points at the run of the transform, not at a
+    # reset of the warehouse, and the job asks the warehouse once and syncs nothing.
+    metabase.mart_in_warehouse = False
+    assert di.main(env_for(airflow, metabase)) == 1
+    line = one_line(capsys)
+    assert line == (
+        "demo-init: Metabase finds no marts.ad_spend_daily in the warehouse: see the last run of "
+        f"{di.TRANSFORM_DAG} in Airflow"
+    )
+    assert airflow.calls.count(("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns")) == 1
+    assert metabase.calls.count(("POST", "/api/dataset")) == 1
+    assert ("POST", "/api/database/2/sync_schema") not in metabase.calls
+
+
+def test_an_export_without_the_mart_of_the_demo_stops_before_anything_is_written(
+    airflow, metabase, tmp_path, capsys
+):
+    # The dbt project of a release that renamed or dropped the mart of the demo: demo-init reads
+    # the export first, so it stops before it signs in anywhere, and its line names the job that
+    # exported the metadata.
+    export = {**EXPORT, "models": [m for m in EXPORT["models"] if m["schema"] != "marts"]}
+    metabase.files = metadata_env(tmp_path, export=export)
+    assert di.main(env_for(airflow, metabase)) == 1
+    line = one_line(capsys)
+    assert line == (
+        "demo-init: the dbt project declares no marts.ad_spend_daily: see ./agoranomos logs "
+        "metadata-export"
+    )
+    assert airflow.calls == []
+    assert metabase.calls == []
 
 
 def test_a_first_start_waits_for_the_fields_of_the_mart_and_not_its_table_alone(

@@ -5,11 +5,14 @@ from services import LONG_RUNNING, ONE_SHOT
 from stack_helpers import (
     LogEntries,
     NamesOnly,
+    active_variant,
     compose,
     containers,
     docker,
     job_failed,
     leaked,
+    rendered,
+    rendered_config,
     secrets,
 )
 
@@ -80,16 +83,22 @@ def test_db_init_can_run_again():
     assert result.returncode == 0, job_failed("db-init", result)
 
 
+# The configuration that these tests read holds the secrets of .env: rendered() and
+# rendered_config() give its objects as NamesOnly dicts, so that a frame of a failed test, under
+# --showlocals too, shows no value. They render every profile, demo-init included, whatever .env
+# selects: the checks sweep all services or look at core ones, so a deployment with the demo off
+# meets the same rules.
+
+
 def test_no_service_mounts_the_docker_socket():
-    config = json.loads(compose("config", "--format", "json").stdout)
-    for name, service in config["services"].items():
+    for name, service in rendered(active_variant()).items():
         for volume in service.get("volumes", []):
             source = volume.get("source", "") if isinstance(volume, dict) else str(volume)
             assert "docker.sock" not in source, name
 
 
 def test_databases_and_broker_are_on_the_internal_network_only():
-    config = json.loads(compose("config", "--format", "json").stdout)
+    config = rendered_config(active_variant())
     assert config["networks"]["data"].get("internal") is True
     for name in sorted(DATA_ONLY & set(config["services"])):
         assert set(config["services"][name].get("networks", {})) == {"data"}, name
@@ -103,17 +112,21 @@ def test_the_network_that_docker_made_is_internal_and_the_databases_are_only_on_
     running = containers()
     # The broker of the Celery variant is on the data network only, as the databases are.
     for service in ("warehouse-db", "platform-db", "db-init", *sorted({"broker"} & set(running))):
-        [container] = json.loads(docker("inspect", running[service]["ID"]).stdout)
+        # docker inspect shows the environment of the container, secrets included.
+        [container] = json.loads(
+            docker("inspect", running[service]["ID"]).stdout, object_hook=NamesOnly
+        )
         assert set(container["NetworkSettings"]["Networks"]) == {network}, service
 
 
 def test_the_database_health_checks_connect_over_tcp():
     # On the first start with an empty volume the image runs a temporary server that listens only
     # on the Unix socket, and a check over the socket could report it ready (see compose.yaml).
-    config = json.loads(compose("config", "--format", "json").stdout)
+    services = rendered(active_variant())
     for service in ("warehouse-db", "platform-db"):
-        test = config["services"][service]["healthcheck"]["test"]
-        words = shlex.split(" ".join(test[1:]))
+        # The texts of a health check could hold a password, so they print as their number only.
+        test = LogEntries(services[service]["healthcheck"]["test"])
+        words = LogEntries(shlex.split(" ".join(test[1:])))
         assert words[0] == "pg_isready", service
         assert words[words.index("-h") + 1] == "127.0.0.1", service
 
