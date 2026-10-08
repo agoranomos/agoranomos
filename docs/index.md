@@ -4,7 +4,7 @@ Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 
 !!! warning "Status: pre-alpha"
 
-    Agoranomos is under active development and is not ready for use yet. These pages describe the intended design. Pages about features that are not released yet describe what is planned and, where a release is known, which one.
+    Agoranomos is under active development and is not ready for use yet. These pages describe the intended design. Pages about features that are not released yet describe what is planned and, where a release is known, which one. Local mode already runs from the main branch: [Run Agoranomos locally](how-to/run-locally.md).
 
 ## What it does
 
@@ -20,7 +20,7 @@ To see how the pieces fit together, read the [architecture overview](explanation
 The documentation follows [Diátaxis](https://diataxis.fr/): content is split by what you need at the moment, so every part has one job.
 
 - [Tutorials](tutorials/index.md): learn by doing. The full demo generator comes in v0.2.0, and with it the first tutorial, running Agoranomos locally with demo data.
-- [How-to guides](how-to/index.md): recipes for specific tasks, such as adding a data source. Published together with the features they describe: the first guide, [See the demo](how-to/see-the-demo.md), covers the one demo path that ships in v0.1.0, from a demo source to a dashboard.
+- [How-to guides](how-to/index.md): recipes for specific tasks, such as adding a data source. Published together with the features they describe: the first guides, [Run Agoranomos locally](how-to/run-locally.md) and [See the demo](how-to/see-the-demo.md), start the stack in local mode and cover the one demo path that ships in v0.1.0, from a demo source to a dashboard.
 - [Reference](reference/index.md): exact facts to look up, such as configuration and the data model. Published together with the features they describe.
 - [Explanation](explanation/index.md): how Agoranomos works and why it is built that way, starting with the [architecture](explanation/architecture.md).
 - [Decisions](adr/index.md): the architecture decision records, one per significant choice.

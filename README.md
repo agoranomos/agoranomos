@@ -5,7 +5,7 @@ English | [Русский](README.ru.md)
 Open-source marketing BI out of the box: ad platforms → PostgreSQL warehouse → Metabase dashboards → ask anything in Claude or ChatGPT via MCP. One command. Your data stays yours.
 
 > [!WARNING]
-> **Status: pre-alpha.** Agoranomos is under active development: parts of the stack already run in local mode from the main branch, and the demo goes end to end, from a demo source to a dashboard. Most of the stack is still being built. The repository is private until v0.3. The design of the whole stack is in the [architecture overview](docs/explanation/architecture.md) and the [decision records](docs/adr/index.md). See [Status and roadmap](#status-and-roadmap).
+> **Status: pre-alpha.** Agoranomos is under active development: the stack runs in local mode from the main branch ([Run Agoranomos locally](docs/how-to/run-locally.md)), and the demo goes end to end, from a demo source to a dashboard. Server mode, backups and the connectors to real sources are still being built. The repository is private until v0.3. The design of the whole stack is in the [architecture overview](docs/explanation/architecture.md) and the [decision records](docs/adr/index.md). See [Status and roadmap](#status-and-roadmap).
 
 ## What it is
 
@@ -76,11 +76,11 @@ The design rests on a few principles:
 - **Your data stays yours.** The warehouse is PostgreSQL on infrastructure you control, and the history stays there. Agoranomos needs no LLM account or key of its own: you use the AI client you already have, and it sees only what the MCP servers let it read. Whatever an AI client reads to answer a question is sent to that client's AI provider and handled under that provider's terms.
 - **Least privilege by default.** Each MCP server is to be limited by its own control, so one mistake does not open everything. What AI access may do in each tool, such as reading the warehouse, changing dashboards in Metabase or starting pipelines in Airflow, is decided in an ADR before the AI layer ships (Phase 3); until then the built-in MCP server of Metabase stays off. Campaign names and ad texts can carry instructions written by anyone, so Agoranomos treats them as untrusted data, and these limits reduce the damage if an AI client follows them anyway. See [ADR-0007](docs/adr/0007-ai-access-via-mcp-read-only.md).
 - **Local and server modes.** Local mode is for engineers on their own machine: ports are published on `127.0.0.1` only. Server mode is for teams and for business users who connect from the Claude and ChatGPT apps: a reverse proxy with TLS sits in front of the web endpoints, the Metabase MCP server is served over HTTPS with OAuth, and backups run on a schedule. See [ADR-0011](docs/adr/0011-local-and-server-modes.md).
-- **amd64 and arm64.** Both architectures are supported targets, Apple Silicon included, within a memory budget: 8 GB of RAM available to Docker is the recommended amount and 6 GB the minimum, so that the stack fits on a host with 8 GB of RAM. These figures are targets that have not been measured yet. See [ADR-0010](docs/adr/0010-multi-arch-and-memory-budget.md).
+- **amd64 and arm64.** Both architectures are supported targets, Apple Silicon included, within a memory budget: 8 GB of RAM available to Docker is the recommended amount and 6 GB the minimum, so that the stack fits on a host with 8 GB of RAM. The stack is measured on the demo, and every service has a memory limit: see [System requirements](docs/reference/system-requirements.md) and [ADR-0010](docs/adr/0010-multi-arch-and-memory-budget.md).
 
 ## Status and roadmap
 
-Agoranomos is **pre-alpha**. Phase 0, the foundation, is complete: the repository has its tooling, CI, documentation skeleton and the first decision records. Phase 1, the platform, is in progress: parts of the stack already run in local mode from the main branch, and the demo goes end to end, from a demo source to a dashboard. The repository is private until v0.3.
+Agoranomos is **pre-alpha**. Phase 0, the foundation, is complete: the repository has its tooling, CI, documentation skeleton and the first decision records. Phase 1, the platform, is in progress: local mode runs from the main branch, and the demo goes end to end, from a demo source to a dashboard; server mode, backups and the v0.1.0 release come next. The repository is private until v0.3.
 
 | Phase | Release | What it delivers |
 |---|---|---|
@@ -96,7 +96,7 @@ The roadmap gives the order of the work, not dates. Versions are 0.x until the c
 
 ## Documentation
 
-The documentation is Markdown in [`docs/`](docs/), built with [Zensical](https://zensical.org/) and organized after [Diátaxis](https://diataxis.fr/): tutorials, how-to guides, reference and explanation, plus the [architecture decision records](docs/adr/index.md). English is its primary language. The README is also available in Russian, and the key pages are to follow. Start with the [architecture overview](docs/explanation/architecture.md). To see what already runs, read [See the demo](docs/how-to/see-the-demo.md).
+The documentation is Markdown in [`docs/`](docs/), built with [Zensical](https://zensical.org/) and organized after [Diátaxis](https://diataxis.fr/): tutorials, how-to guides, reference and explanation, plus the [architecture decision records](docs/adr/index.md). English is its primary language. The README is also available in Russian, and the key pages are to follow. Start with the [architecture overview](docs/explanation/architecture.md). To start Agoranomos on your machine, read [Run Agoranomos locally](docs/how-to/run-locally.md), and to see what already runs, [See the demo](docs/how-to/see-the-demo.md).
 
 The site will be published when the repository goes public. Until then, read it locally. You need [uv](https://docs.astral.sh/uv/):
 

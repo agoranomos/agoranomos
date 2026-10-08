@@ -10,6 +10,7 @@ nav = [
   { "Tutorials" = ["tutorials/index.md"] },
   { "How-to guides" = [
     "how-to/index.md",
+    { "Run Agoranomos locally" = "how-to/run-locally.md" },
     { "See the demo" = "how-to/see-the-demo.md" },
     { "Rename a field or add your own definitions" = "how-to/rename-a-field.md" },
   ] },
@@ -17,6 +18,7 @@ nav = [
     "reference/index.md",
     { "Command line" = "reference/command-line.md" },
     { "Configuration" = "reference/configuration.md" },
+    { "System requirements" = "reference/system-requirements.md" },
     { "Describe the marts" = "reference/describe-the-marts.md" },
   ] },
   { "Explanation" = ["explanation/index.md", "explanation/architecture.md"] },

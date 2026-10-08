@@ -2,7 +2,7 @@
 
 !!! warning "Target design"
 
-    Agoranomos is pre-alpha. This page describes the architecture the project is being built toward, and components arrive release by release. One demo path, from a demo source to a dashboard, ships in v0.1.0 and already runs in local mode from the main branch ([See the demo](../how-to/see-the-demo.md)). The full demo generator comes in v0.2.0.
+    Agoranomos is pre-alpha. This page describes the architecture the project is being built toward, and components arrive release by release. Local mode already runs from the main branch ([Run Agoranomos locally](../how-to/run-locally.md)), with one demo path, from a demo source to a dashboard, which ships in v0.1.0 ([See the demo](../how-to/see-the-demo.md)). The full demo generator comes in v0.2.0.
 
 Marketing data moves through Agoranomos in one direction, from ad platforms to dashboards and AI clients, and every step is code that runs on infrastructure you control.
 
@@ -148,14 +148,15 @@ Decision records: [ADR-0007: Give AI clients least-privilege access through MCP]
 
 The stack runs as one Docker Compose project, split into profiles so that you start only what you need:
 
-* `core`: both PostgreSQL instances, Airflow and Metabase, plus the one-shot jobs that initialize them (database migrations, users, the first Metabase setup, and the export and application of the metadata of the marts). The CeleryExecutor variant of Airflow adds the broker and a worker to it.
+* `core`: both PostgreSQL instances, Airflow and Metabase, and the one-shot jobs that set them up on every start: `db-init` (the roles, databases and schemas), `airflow-init` (the migration of the metadata database and the admin), `metadata-export` (the export of the metadata of the marts from dbt) and `metabase-init` (the first setup of Metabase, its connection to the warehouse, and the metadata of the marts). The CeleryExecutor variant of Airflow, which `compose.celery.yaml` adds, puts the Valkey broker and a worker in it.
 * `demo`: the one-shot `demo-init` job, which makes the demo ready on the first start; `.env` turns it on by default ([See the demo](../how-to/see-the-demo.md)).
-* `ai`: one container with the Airflow, Toolbox and dbt MCP servers, reached over stdio with `docker exec`.
-* `flower`: Celery monitoring, for the CeleryExecutor variant only.
+* `ai` (planned, with the AI layer): one container with the Airflow, Toolbox and dbt MCP servers, reached over stdio with `docker exec`.
 
-The stack has two modes, local and server. Both are first-class, and both are to be covered by automated tests. In local mode, ports are published on `127.0.0.1` only. Server mode adds a reverse proxy with TLS (the `server` profile) and scheduled backups (the `ops` profile).
+Each container gets the Linux privileges that its job needs and no more. Every service drops all Linux capabilities, starts as a user that is not root and may not gain privileges, and every one-shot job but `airflow-init` has a read-only file system. The secrets of a container can be wider than its job: the containers that run the tasks, the scheduler with the LocalExecutor and the worker with the CeleryExecutor, hold the keys of Airflow and the passwords of its metadata database and of the warehouse roles, and task code can read them ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md) and [ADR-0015](../adr/0015-run-localexecutor-by-default.md) record the passwords; the keys are in the same environment, [Configuration](../reference/configuration.md#secrets) lists them). The databases and the broker are on an internal network with no route to the internet, and no container mounts the Docker socket. Every service has a memory limit, so that, on the recommended 8 GB, one that runs short of memory cannot take it from the others ([System requirements](../reference/system-requirements.md#memory-limits) says what holds on less). Metabase asks no service on the internet where the addresses of its users are ([Configuration](../reference/configuration.md#settings-fixed-in-composeyaml)).
 
-The resource targets, which are still to be measured, are 8 GB of RAM available to Docker (6 GB as a minimum), 4 CPUs and 20 GB of disk, on x86-64-v2 or ARM64 hardware such as Apple Silicon.
+The stack has two modes, local and server. Both are first-class, and both are to be covered by automated tests. Local mode runs today, with its ports published on `127.0.0.1` only ([Run Agoranomos locally](../how-to/run-locally.md)). Server mode, planned for v0.1.0, adds a reverse proxy with TLS (the `server` profile) and scheduled backups (the `ops` profile).
+
+The stack needs 8 GB of RAM available to Docker (6 GB as a minimum), 4 CPUs and 20 GB of disk, on x86-64-v2 or ARM64 hardware such as Apple Silicon. The memory limits of the services come from measurements on the demo ([System requirements](../reference/system-requirements.md)).
 
 Decision records: [ADR-0010: Support amd64 and arm64 within a memory budget](../adr/0010-multi-arch-and-memory-budget.md) covers the architectures and the memory budget, and [ADR-0011: Support local and server modes](../adr/0011-local-and-server-modes.md) covers the two modes.
 

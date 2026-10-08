@@ -6,6 +6,9 @@
 # Airflow runs on an image of its own, built from airflow/Dockerfile, with the LocalExecutor: the
 # scheduler runs the tasks. compose.celery.yaml adds a broker and a separate worker (CeleryExecutor);
 # select it with COMPOSE_FILE in .env (ADR-0015).
+# Every service has a memory limit, without swap, so that the stack stays within the memory budget of
+# ADR-0010: those of the services that run all the time are settings of .env, from measurements
+# (docs/reference/system-requirements.md), and those of the one-shot jobs are fixed here.
 
 x-logging: &logging
   driver: json-file
@@ -89,6 +92,8 @@ services:
     profiles: [core]
     restart: unless-stopped
     user: postgres
+    mem_limit: ${WAREHOUSE_DB_MEMORY:-256m}
+    memswap_limit: ${WAREHOUSE_DB_MEMORY:-256m}
     environment:
       POSTGRES_PASSWORD: ${WAREHOUSE_POSTGRES_PASSWORD:?run ./agoranomos init}
       POSTGRES_DB: warehouse
@@ -124,6 +129,8 @@ services:
     profiles: [core]
     restart: unless-stopped
     user: postgres
+    mem_limit: ${PLATFORM_DB_MEMORY:-384m}
+    memswap_limit: ${PLATFORM_DB_MEMORY:-384m}
     environment:
       POSTGRES_PASSWORD: ${PLATFORM_POSTGRES_PASSWORD:?run ./agoranomos init}
     command:
@@ -154,6 +161,8 @@ services:
     profiles: [core]
     restart: "no"
     user: postgres
+    mem_limit: 128m
+    memswap_limit: 128m
     entrypoint: ["/bin/sh", "/opt/agoranomos/postgres/db-init.sh"]
     environment:
       WAREHOUSE_POSTGRES_PASSWORD: ${WAREHOUSE_POSTGRES_PASSWORD:?run ./agoranomos init}
@@ -195,6 +204,8 @@ services:
       context: ./airflow
     pull_policy: build
     restart: "no"
+    mem_limit: 384m
+    memswap_limit: 384m
     command:
       - python
       - -c
@@ -235,6 +246,8 @@ services:
 
   airflow-apiserver:
     <<: *airflow
+    mem_limit: ${AIRFLOW_APISERVER_MEMORY:-512m}
+    memswap_limit: ${AIRFLOW_APISERVER_MEMORY:-512m}
     command: ["api-server"]
     ports:
       - "127.0.0.1:${AIRFLOW_PORT:-8080}:8080"
@@ -267,6 +280,9 @@ services:
   # that runs out of memory can restart the scheduler (ADR-0015).
   airflow-scheduler:
     <<: *airflow
+    # It runs the tasks, so it gets the limit of the tasks; with CeleryExecutor the worker does.
+    mem_limit: ${AIRFLOW_TASKS_MEMORY:-1152m}
+    memswap_limit: ${AIRFLOW_TASKS_MEMORY:-1152m}
     command: ["scheduler"]
     environment:
       <<: *airflow-environment
@@ -289,6 +305,9 @@ services:
 
   airflow-dag-processor:
     <<: *airflow
+    # It runs dbt ls each time that it parses the transform DAG (docs/reference/configuration.md).
+    mem_limit: ${AIRFLOW_DAG_PROCESSOR_MEMORY:-768m}
+    memswap_limit: ${AIRFLOW_DAG_PROCESSOR_MEMORY:-768m}
     command: ["dag-processor"]
     healthcheck:
       test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob --hostname \"$${HOSTNAME}\""]
@@ -303,6 +322,8 @@ services:
 
   airflow-triggerer:
     <<: *airflow
+    mem_limit: ${AIRFLOW_TRIGGERER_MEMORY:-640m}
+    memswap_limit: ${AIRFLOW_TRIGGERER_MEMORY:-640m}
     command: ["triggerer"]
     healthcheck:
       test: ["CMD-SHELL", "airflow jobs check --job-type TriggererJob --hostname \"$${HOSTNAME}\""]
@@ -323,7 +344,13 @@ services:
     # so that it needs no capability of Linux. Metabase keeps everything in its application
     # database, and its plugins in /plugins, which the image lets everyone write.
     user: "2000:2000"
+    mem_limit: ${METABASE_MEMORY:-2176m}
+    memswap_limit: ${METABASE_MEMORY:-2176m}
     environment:
+      # Java gives its heap a quarter of the memory limit unless it is told otherwise, which would
+      # leave Metabase short: half of the limit goes to the heap, and the other half holds what
+      # Java needs besides, about 0.5 GiB for Metabase 0.64.1 (classes, threads and buffers).
+      JAVA_OPTS: -XX:MaxRAMPercentage=50
       MB_DB_TYPE: postgres
       MB_DB_HOST: platform-db
       MB_DB_PORT: "5432"
@@ -409,6 +436,8 @@ services:
     profiles: [core]
     restart: "no"
     user: "65534:65534"
+    mem_limit: 256m
+    memswap_limit: 256m
     entrypoint: ["python", "/opt/agoranomos/metabase/metadata.py", "export"]
     environment:
       PYTHONDONTWRITEBYTECODE: "1"
@@ -439,6 +468,8 @@ services:
     profiles: [core]
     restart: "no"
     user: "65534:65534"
+    mem_limit: 128m
+    memswap_limit: 128m
     command: ["python", "/opt/agoranomos/metabase/metabase_init.py"]
     environment:
       PYTHONDONTWRITEBYTECODE: "1"
@@ -477,6 +508,8 @@ services:
     profiles: [demo]
     restart: "no"
     user: "65534:65534"
+    mem_limit: 128m
+    memswap_limit: 128m
     command: ["python", "/opt/agoranomos/metabase/demo_init.py"]
     environment:
       PYTHONDONTWRITEBYTECODE: "1"

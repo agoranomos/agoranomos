@@ -40,6 +40,8 @@ services:
     # The entrypoint of the image drops to this user only when the command is valkey-server. This command
     # is a shell, so the user is set here.
     user: valkey
+    mem_limit: ${BROKER_MEMORY:-256m}
+    memswap_limit: ${BROKER_MEMORY:-256m}
     environment:
       VALKEY_PASSWORD: ${VALKEY_PASSWORD:?run ./agoranomos init}
     # The server reads its configuration from standard input (the - argument), so the password is in no
@@ -71,7 +73,11 @@ services:
   airflow-apiserver:
     environment: *airflow-celery-environment
 
+  # It runs no task here: the worker, which extends the scheduler of compose.yaml, gets the limit of
+  # the tasks from there.
   airflow-scheduler:
+    mem_limit: ${AIRFLOW_SCHEDULER_MEMORY:-512m}
+    memswap_limit: ${AIRFLOW_SCHEDULER_MEMORY:-512m}
     environment:
       <<: [*airflow-celery-environment, *airflow-celery-queue-environment]
       # With CeleryExecutor the scheduler runs no task, so the worker alone gets the passwords of the

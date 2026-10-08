@@ -390,16 +390,23 @@ EOF
     x86_64 | amd64) check_x86_64_v2 ;;
     *) problem "the CPU architecture $arch is not supported: Agoranomos runs on arm64 and on x86-64 with x86-64-v2" ;;
   esac
+  # Where to raise them: Docker Desktop on macOS, Linux and Windows with Hyper-V sets the memory and
+  # the CPUs of its VM itself; on Windows with WSL2 it leaves them to WSL, which reads .wslconfig in
+  # the Windows user folder when it starts. That file does not exist by default, and wsl --shutdown,
+  # which restarts WSL, is a command of Windows (as of October 2026, Docker's and Microsoft's
+  # documentation). Docker Engine on Linux has the memory and the CPUs of its machine.
+  raise_memory="In Docker Desktop, raise it in Settings → Resources → Advanced → Memory limit; on Windows with WSL2, set memory= in the [wsl2] section of .wslconfig in your Windows user folder (create the file if there is none), then run wsl --shutdown in PowerShell. With Docker Engine on Linux, Docker has the memory of the machine."
+  raise_cpus="In Docker Desktop, raise it in Settings → Resources → Advanced → CPU limit; on Windows with WSL2, set processors= in the [wsl2] section of .wslconfig in your Windows user folder (create the file if there is none), then run wsl --shutdown in PowerShell. With Docker Engine on Linux, Docker has the CPUs of the machine."
   mem_mb=$((mem_total / 1048576))
   if [ "$mem_mb" -lt "$MIN_MEMORY_MB" ]; then
-    resource_problem "Docker has $mem_mb MB of memory, and Agoranomos needs 6 GB (8 GB recommended). In Docker Desktop, raise it in Settings → Resources → Memory."
+    resource_problem "Docker has $mem_mb MB of memory, and Agoranomos needs 6 GB (8 GB recommended). $raise_memory"
   elif [ "$mem_mb" -lt "$RECOMMENDED_MEMORY_MB" ]; then
-    warn "Docker has $mem_mb MB of memory; 8 GB is recommended. In Docker Desktop, raise it in Settings → Resources → Memory."
+    warn "Docker has $mem_mb MB of memory; 8 GB is recommended. $raise_memory"
   fi
   if [ "$ncpu" -lt "$MIN_CPUS" ]; then
-    resource_problem "Docker has $ncpu CPU, and Agoranomos needs $MIN_CPUS ($RECOMMENDED_CPUS recommended). In Docker Desktop, raise it in Settings → Resources → CPUs."
+    resource_problem "Docker has $ncpu CPU, and Agoranomos needs $MIN_CPUS ($RECOMMENDED_CPUS recommended). $raise_cpus"
   elif [ "$ncpu" -lt "$RECOMMENDED_CPUS" ]; then
-    warn "Docker has $ncpu CPUs; $RECOMMENDED_CPUS are recommended. In Docker Desktop, raise it in Settings → Resources → CPUs."
+    warn "Docker has $ncpu CPUs; $RECOMMENDED_CPUS are recommended. $raise_cpus"
   fi
   # On Linux the data of Docker is on this machine; Docker Desktop keeps it inside its VM.
   if [ -d "$docker_root" ]; then
@@ -417,6 +424,24 @@ EOF
   session_key=$(env_get METABASE_SESSION_KEY)
   if [ -n "$session_key" ] && [ "${#session_key}" -lt 16 ]; then
     problem "METABASE_SESSION_KEY in .env has fewer than 16 characters, and Metabase does not start with it: empty it, and ./agoranomos up generates a new one"
+  fi
+  # Compose reads a memory limit without a unit as bytes, and Docker then refuses the container
+  # with an error that names neither the service nor the setting. A unit of k, m or g, in either
+  # case and with b or ib after it, is what Compose reads as KiB, MiB or GiB; empty is the default
+  # of compose.yaml. The message names the setting, never a value.
+  # The loop reads a here-document, not a pipe, so that problem counts in this shell.
+  if [ -f "$ENV_FILE" ]; then
+    memory_settings=$(sed -n 's/^\([A-Za-z0-9_]*_MEMORY\)=.*/\1/p' "$ENV_FILE" | sort -u)
+    while IFS= read -r memory_setting; do
+      [ -n "$memory_setting" ] || continue
+      memory_value=$(env_get "$memory_setting")
+      [ -n "$memory_value" ] || continue
+      if ! printf '%s\n' "$memory_value" | grep -Eq '^[0-9]+(\.[0-9]+)?[kKmMgG]([iI]?[bB])?$'; then
+        problem "$memory_setting in .env is not a memory size: write a number with m or g, such as 2048m or 2g, or leave it empty for the default; a number alone would be bytes"
+      fi
+    done << EOF
+$memory_settings
+EOF
   fi
   # A running stack holds its own ports, so the ports are checked only while it is not running.
   if [ -z "$(compose ps --quiet --status running 2> /dev/null)" ]; then
@@ -447,6 +472,16 @@ EOF
 # the wait goes on until the rest is ready, and then sets demo_failed=1 for cmd_up.
 # AGORANOMOS_WAIT_TIMEOUT and AGORANOMOS_WAIT_INTERVAL, in seconds, are hooks for the tests: how long
 # to wait at most (default 900) and how long to sleep between two looks (default 5).
+# The line that names a service that failed while up waited, and the command that shows its logs.
+# Exit code 137 is SIGKILL, which is what the kernel sends at a memory limit: the log of the
+# service then ends without an error of its own, so the line says what the code means.
+failed_service() {
+  case " $killed " in
+    *" $1 "*) printf '%s failed: see ./agoranomos logs %s (exit code 137: it was killed, most often because it reached its memory limit)' "$1" "$1" ;;
+    *) printf '%s failed: see ./agoranomos logs %s' "$1" "$1" ;;
+  esac
+}
+
 wait_healthy() {
   demo_failed=0
   timeout=${AGORANOMOS_WAIT_TIMEOUT:-900}
@@ -459,7 +494,7 @@ wait_healthy() {
   while :; do
     states=$(compose ps --all --format '{{.Service}}|{{.State}}|{{.Health}}|{{.ExitCode}}') ||
       die "docker compose ps failed; the error above names the cause, and Docker may have stopped"
-    pending="" failed="" seen=""
+    pending="" failed="" killed="" seen=""
     while IFS='|' read -r service state health exit_code; do
       [ -n "$service" ] || continue
       case "$active" in *" $service "*) ;; *) continue ;; esac
@@ -468,14 +503,16 @@ wait_healthy() {
         *-init | *-export)
           case "$state:$exit_code" in
             exited:0) ;;
+            exited:137) failed="$failed $service" killed="$killed $service" ;;
             exited:* | dead:*) failed="$failed $service" ;;
             *) pending="${pending:+$pending,} $service ($state${health:+, $health})" ;;
           esac
           ;;
         *)
-          case "$state:$health" in
-            running:healthy | running:) ;;
-            running:unhealthy | exited:* | dead:*) failed="$failed $service" ;;
+          case "$state:$health:$exit_code" in
+            running:healthy:* | running::*) ;;
+            exited:*:137) failed="$failed $service" killed="$killed $service" ;;
+            running:unhealthy:* | exited:* | dead:*) failed="$failed $service" ;;
             *) pending="${pending:+$pending,} $service ($state${health:+, $health})" ;;
           esac
           ;;
@@ -491,13 +528,13 @@ EOF
     done
     if [ -n "$others" ]; then
       for service in $failed; do
-        warn "$service failed: see ./agoranomos logs $service"
+        warn "$(failed_service "$service")"
       done
       die "the stack did not start"
     fi
     if [ -z "$pending" ]; then
       if [ -n "$failed" ]; then
-        warn "demo-init failed: see ./agoranomos logs demo-init"
+        warn "$(failed_service demo-init)"
         demo_failed=1
         return 0
       fi
@@ -505,7 +542,7 @@ EOF
       return 0
     fi
     if [ $(($(date +%s) - started)) -ge "$timeout" ]; then
-      [ -z "$failed" ] || warn "demo-init failed: see ./agoranomos logs demo-init"
+      [ -z "$failed" ] || warn "$(failed_service demo-init)"
       die "still waiting after $timeout seconds for:$pending (see ./agoranomos status)"
     fi
     sleep "$interval"

@@ -214,3 +214,30 @@ def test_db_init_leaves_no_volume_behind():
         "old anonymous volume of db-init until ./agoranomos down and ./agoranomos up. The volume "
         "that it left is then dangling, and docker volume rm <name> removes it (never prune)."
     )
+
+
+def oom_kills(service: str) -> int | None:
+    """How many processes of a running service the kernel killed for want of memory, from the
+    cgroup v2 of its container, or None when the host has no cgroup v2."""
+    result = compose(
+        "exec", "-T", service, "grep", "^oom_kill ", "/sys/fs/cgroup/memory.events", check=False
+    )
+    return int(result.stdout.split()[1]) if result.returncode == 0 else None
+
+
+def test_no_service_ran_out_of_memory_or_restarted():
+    # The memory limits come from measurements (docs/reference/system-requirements.md). A process
+    # that the kernel killed at a limit, or a container that Docker restarted, says that a limit is
+    # too low, or that something else broke. CI runs the stack tests twice, so the second run also
+    # checks what the first one did.
+    problems = []
+    for service, container in sorted(containers().items()):
+        if service not in LONG_RUNNING:
+            continue
+        [details] = json.loads(docker("inspect", container["ID"]).stdout, object_hook=NamesOnly)
+        if details["RestartCount"]:
+            problems.append(f"{service} restarted {details['RestartCount']} times")
+        kills = oom_kills(service)
+        if kills:
+            problems.append(f"the kernel killed {kills} processes of {service} at its limit")
+    assert not problems, "; ".join(problems)
