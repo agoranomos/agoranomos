@@ -25,12 +25,12 @@ jobs:
           persist-credentials: false
       - uses: j178/prek-action@4e14d07f9231acabce116ccfca13b13dd9755ece # v3.0.0
         with:
-          prek-version: "0.5.4"
+          prek-version: "v0.5.5"
       - name: Scan the full git history for secrets (gitleaks)
         if: ${{ !cancelled() }}
         uses: j178/prek-action@4e14d07f9231acabce116ccfca13b13dd9755ece # v3.0.0
         with:
-          prek-version: "0.5.4"
+          prek-version: "v0.5.5"
           cache: false
           extra-args: "gitleaks-history --all-files --hook-stage manual"
 
