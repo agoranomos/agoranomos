@@ -794,6 +794,29 @@ def test_the_dry_run_counts_a_mart_that_a_sync_would_show_as_a_change(metabase, 
     assert ("POST", "/api/database/1/sync_schema") not in metabase.calls
 
 
+def test_the_dry_run_counts_a_mart_that_metabase_shows_without_a_column_as_a_change(
+    metabase, capsys
+):
+    # Metabase shows the table of the mart, and not the field of one column that the warehouse
+    # has: the next sync adds it, so up would sync the table and apply its metadata, and the dry
+    # run has something to change. The table waits for the sync as a whole, so the fields that
+    # Metabase shows are not planned one by one, and no column is a note.
+    metabase.mart_in_warehouse = True
+    assert mi.main(env_for(metabase)) == 0
+    table = metabase.mart_table()
+    table["fields"] = [field for field in table["fields"] if field["name"] != "spend"]
+    capsys.readouterr()
+    writes = len(metabase.bodies)
+    assert mi.main(env_for(metabase), ["diff"]) == 3
+    assert capsys.readouterr().out.splitlines() == [
+        "would sync: marts.ad_spend_daily: the warehouse has it, and Metabase does not show it "
+        "with its columns yet; up syncs it and applies its metadata",
+        "1 change to apply: run ./agoranomos up",
+    ]
+    assert [path for _, path, _ in metabase.bodies[writes:]] == ["/api/session", "/api/dataset"]
+    assert metabase.calls.count(("POST", "/api/database/1/sync_schema")) == 1  # the first start
+
+
 def test_the_dry_run_with_metabase_down_says_so_at_once(tmp_path, capsys):
     url = f"http://127.0.0.1:{free_port()}"
     env = {**ENV, "METABASE_URL": url, **metadata_env(tmp_path)}
