@@ -71,6 +71,24 @@ def logged(text: str) -> int:
     return compose("logs", "--no-color", "metabase").stdout.count(text)
 
 
+def geojs_address() -> str | None:
+    """The address that the name get.geojs.io has inside the container of Metabase, or None when it
+    has none."""
+    result = compose("exec", "-T", "metabase", "getent", "hosts", "get.geojs.io", check=False)
+    fields = result.stdout.split()
+    return fields[0] if result.returncode == 0 and fields else None
+
+
+def login_history(metabase_url: str, session: dict[str, str]) -> tuple[int, int, int]:
+    """The login history of the admin, as Account settings shows it: the status of the answer, how
+    many sign-ins it lists, and how many of them have a place. The history holds the addresses, the
+    devices and the places of the sign-ins, so it is counted where it is read, and no frame of a
+    failed test holds it."""
+    status, history = http_json("GET", f"{metabase_url}/api/login-history/current", headers=session)
+    entries = history if status == 200 and isinstance(history, list) else []
+    return status, len(entries), sum(entry.get("location") is not None for entry in entries)
+
+
 @pytest.fixture(scope="module")
 def properties(metabase_url):
     """What Metabase tells everyone, without a session: its public settings."""
@@ -293,15 +311,18 @@ def test_no_secret_is_in_the_logs(env, service):
 
 
 def test_the_geocoding_service_is_metabase_itself():
-    result = compose("exec", "-T", "metabase", "getent", "hosts", "get.geojs.io", check=False)
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.split()[0] == "127.0.0.1", result.stdout
+    assert geojs_address() == "127.0.0.1"
 
 
 def test_a_sign_in_from_a_new_device_asks_nothing_about_its_address(env, metabase_url):
     # A request without the cookie of a device comes from a new device. Metabase would ask where
-    # its address is, in the background, for an email; with the question going nowhere (the test
-    # above), each question would log an error.
+    # its address is, in the background, for an email; with the question going nowhere, each
+    # question would log an error. Where the question reaches get.geojs.io, it logs nothing, so the
+    # test first makes sure that it goes nowhere, also when it runs alone.
+    assert geojs_address() == "127.0.0.1", (
+        "get.geojs.io does not lead to Metabase itself (extra_hosts): a sign-in that logs nothing "
+        "would prove nothing"
+    )
     before = logged(GEOCODING_ERROR)
     # Only the status: the answer holds the id of the new session.
     status = http_json(
@@ -319,12 +340,15 @@ def test_a_sign_in_from_a_new_device_asks_nothing_about_its_address(env, metabas
 
 def test_the_login_history_asks_and_the_question_goes_nowhere(metabase_url, session):
     # The login history in Account settings asks where each address is, whatever the settings say:
-    # the question reaches no one, and the history shows no place.
+    # the question reaches no one, and the history shows no place. The test compares counts: the
+    # history holds the addresses and the places of the sign-ins.
     before = logged(GEOCODING_REFUSED)
-    status, history = http_json("GET", f"{metabase_url}/api/login-history/current", headers=session)
+    status, entries, with_a_place = login_history(metabase_url, session)
     assert status == 200, f"HTTP {status}"
-    assert history, "the login history is empty"
-    assert {entry.get("location") for entry in history} == {None}
+    assert entries, "the login history is empty"
+    assert not with_a_place, (
+        f"{with_a_place} of {entries} sign-ins in the login history have a place"
+    )
     assert logged(GEOCODING_REFUSED) == before + 1
 
 
