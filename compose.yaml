@@ -347,8 +347,10 @@ services:
       # On a sign-in from a new device, Metabase sends the address of the sign-in to get.geojs.io,
       # to name its place in an email to the user (Metabase 0.63 and 0.64). The data of a
       # deployment stays on its own machines, and so do the addresses of its users: this turns the
-      # email off, and the question with it. The stack sets up no email server, so no email is lost.
-      # The login history in Account settings still asks: extra_hosts below answers it.
+      # email off, and the question with it. The stack sets up no email server, so no email is lost;
+      # if email is set up in Metabase later, it still sends no email about a sign-in from a new
+      # device while this is false. The login history in Account settings still asks: extra_hosts
+      # below answers it.
       MB_SEND_EMAIL_ON_FIRST_LOGIN_FROM_NEW_DEVICE: "false"
       # Prometheus metrics, for the planned Ops collection. The port is not published, so it is
       # reachable only from the Compose networks.
