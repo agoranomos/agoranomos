@@ -41,6 +41,7 @@ uv run zensical serve            # preview the documentation at http://localhost
 uv run zensical build --strict   # build the documentation; broken links and anchors fail
 uv run pytest                    # the unit tests in tests/unit
 ./agoranomos up                  # set up .env, check the machine, start the stack
+./agoranomos credentials         # where to sign in; never prints a password
 uv run pytest tests/stack        # the stack tests, against a running stack
 ./agoranomos down                # stop the stack; the data stays
 ```
