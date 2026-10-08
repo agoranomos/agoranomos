@@ -19,6 +19,7 @@ from services import BASE_AIRFLOW, airflow_names, airflow_services
 from stack_helpers import (
     FILES,
     REPO_ROOT,
+    LogEntries,
     NamesOnly,
     compose,
     leaked,
@@ -340,17 +341,22 @@ def test_the_broker_is_set_up_as_the_decision_says():
     assert "volumes" not in broker  # it keeps nothing on disk
     assert "@sha256:" in broker["image"]
     assert broker["user"] == "valkey"
-    # A failed assertion prints what it compares, and a command that holds the password must not be
-    # printed: the test compares flags.
-    command = " ".join(broker["command"])
-    health = " ".join(broker["healthcheck"]["test"])
-    on_the_command_line = "--requirepass" in command or " -a " in health
+    # A failed assertion prints what it compares, and the locals of the test under --showlocals: the
+    # command and the health check could hold the password, so they are LogEntries, which print
+    # their number of words, and the test compares flags.
+    command = LogEntries(broker["command"])
+    health = LogEntries(broker["healthcheck"]["test"])
+    on_the_command_line = any("--requirepass" in word for word in command) or any(
+        " -a " in f" {word} " for word in health
+    )
     assert not on_the_command_line, "the password is on a command line of the broker"
-    reads_standard_input = "valkey-server -" in command
+    reads_standard_input = any("valkey-server -" in word for word in command)
     assert reads_standard_input, "the broker does not read its configuration from standard input"
-    authenticates_with_the_environment = "VALKEYCLI_AUTH" in health
+    authenticates_with_the_environment = any("VALKEYCLI_AUTH" in word for word in health)
     assert authenticates_with_the_environment, "the health check does not use VALKEYCLI_AUTH"
-    keeps_nothing_on_disk = 'save ""' in command and "appendonly no" in command
+    keeps_nothing_on_disk = any('save ""' in word for word in command) and any(
+        "appendonly no" in word for word in command
+    )
     assert keeps_nothing_on_disk, "the broker is not set to keep nothing on disk"
 
 

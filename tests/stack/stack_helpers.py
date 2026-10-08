@@ -91,13 +91,14 @@ def compose(
 
 
 @functools.cache
-def rendered(variant: str) -> dict[str, Any]:
-    """The services of a variant, as docker compose config renders them. COMPOSE_FILE and
-    COMPOSE_PROFILES are set for the call, so neither the variant nor the profiles that .env
-    selects matter, and no stack has to run: every service of the variant is there, demo-init
-    too. Cached, because the Compose files do not change during a run.
+def rendered_config(variant: str) -> dict[str, Any]:
+    """The whole configuration of a variant, as docker compose config renders it: its services,
+    networks and volumes. COMPOSE_FILE and COMPOSE_PROFILES are set for the call, so neither the
+    variant nor the profiles that .env selects matter, and no stack has to run: every service of
+    the variant is there, demo-init too. Cached, because the Compose files do not change during a
+    run.
 
-    The rendered services hold secrets, so every object of the JSON becomes a NamesOnly dict, which
+    The configuration holds secrets, so every object of the JSON becomes a NamesOnly dict, which
     pytest prints by its names: a frame or an assertion of a failed test that holds a service, or
     its environment, shows no value. The lists and the texts in them stay plain, so compare names,
     and bind no name to a text that can hold a secret."""
@@ -109,7 +110,12 @@ def rendered(variant: str) -> dict[str, Any]:
             env={"COMPOSE_FILE": FILES[variant], "COMPOSE_PROFILES": "core,demo"},
         ).stdout,
         object_hook=NamesOnly,
-    )["services"]
+    )
+
+
+def rendered(variant: str) -> dict[str, Any]:
+    """The services of a variant, as rendered_config() gives them."""
+    return rendered_config(variant)["services"]
 
 
 def docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
