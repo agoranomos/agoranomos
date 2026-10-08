@@ -5,8 +5,9 @@ values, of the environment variables; whether the settings that can hold the con
 the Airflow metadata database open a connection, in the environment of the task and in the one that
 the container started with; and which secrets of the container the task environment holds as they
 are. It also records how the kernel ranks its process and a child of it when the container reaches
-its memory limit (airflow/plugins/agoranomos_oom.py), and whether the process is still marked
-non-dumpable, as Airflow marks it. The result is in the log of the task.
+its memory limit (airflow/plugins/agoranomos_oom.py), whether the process is still marked
+non-dumpable, as Airflow marks it, and whether the kernel of the host restricts ptrace with Yama,
+which decides whether the plugin ranks the task first. The result is in the log of the task.
 """
 
 import ctypes
@@ -93,6 +94,15 @@ def dumpable() -> int:
     return ctypes.CDLL(None).prctl(3, 0, 0, 0, 0)
 
 
+def yama() -> str:
+    """What the kernel of the host says about the restriction of ptrace by Yama: the value of
+    ptrace_scope, or "absent" where the kernel has no Yama, as on Docker Desktop."""
+    try:
+        return Path("/proc/sys/kernel/yama/ptrace_scope").read_text(encoding="ascii").strip()
+    except OSError:
+        return "absent"
+
+
 @dag(
     dag_id="ci_extension_check",
     schedule=None,
@@ -108,6 +118,7 @@ def ci_extension_check():
         log.info("metadata database, task environment: %s", database_settings(dict(os.environ)))
         log.info("oom_score_adj: %s", oom_scores())
         log.info("dumpable: %s", dumpable())
+        log.info("yama: %s", yama())
         started_with = container_environment()
         if started_with is None:
             log.info("container environment: not readable")

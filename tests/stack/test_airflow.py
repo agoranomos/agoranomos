@@ -171,18 +171,49 @@ def test_a_dag_in_the_extensions_folder_runs(env, airflow_url, token, extension_
     assert not found, f"the log of the task holds the values of {found}"
 
 
+def fixture_events(airflow_url, token, run, prefix):
+    """The events of the log of the task of the fixture that start with the prefix. The log is read
+    here, so that no frame of a failed test holds it, and only these events are kept: they hold no
+    secret."""
+    [instance] = task_instances(airflow_url, token, run)
+    events = (
+        json.loads(entry).get("event", "") for entry in task_log(airflow_url, token, instance)
+    )
+    return [event for event in events if event.startswith(prefix)]
+
+
+def plugin_lines(airflow_url, token, run):
+    """The (level, event) of each line that the plugin of the image wrote to the log of the task of
+    the fixture. Read here, like fixture_events: the plugin names no secret."""
+    [instance] = task_instances(airflow_url, token, run)
+    entries = (json.loads(entry) for entry in task_log(airflow_url, token, instance))
+    return [
+        (entry["level"], entry["event"])
+        for entry in entries
+        if entry.get("logger") == "agoranomos_oom"
+    ]
+
+
+def yama_restricts_ptrace(airflow_url, token, run):
+    """Whether the kernel of the host restricts ptrace with Yama (ptrace_scope 1, 2 or 3), as the
+    task of the fixture saw it."""
+    [event] = fixture_events(airflow_url, token, run, "yama: ")
+    return event.removeprefix("yama: ") in {"1", "2", "3"}
+
+
 def test_a_task_and_its_children_go_first_at_the_memory_limit(airflow_url, token, extension_run):
     # The plugin of the image (airflow/plugins/agoranomos_oom.py) gives each task process the
     # oom_score_adj 1000, and the children of the task inherit it: the task of the fixture reports
-    # both. Only the entry that starts with the prefix is kept, and it holds no secret.
+    # both. The plugin does so only where the kernel of the host restricts ptrace with Yama, as
+    # that of Ubuntu does: Airflow marks the process of the task non-dumpable, and the plugin lifts
+    # the mark for the write, which another process of the same user could use without Yama. On a
+    # host without it, such as Docker Desktop, the task keeps 0.
     _, run = extension_run
-    [instance] = task_instances(airflow_url, token, run)
-    scores = [
-        json.loads(entry)["event"]
-        for entry in task_log(airflow_url, token, instance)
-        if json.loads(entry).get("event", "").startswith("oom_score_adj: ")
-    ]
-    assert scores == ["oom_score_adj: task 1000, child 1000"], scores
+    scores = fixture_events(airflow_url, token, run, "oom_score_adj: ")
+    if yama_restricts_ptrace(airflow_url, token, run):
+        assert scores == ["oom_score_adj: task 1000, child 1000"], scores
+    else:
+        assert scores == ["oom_score_adj: task 0, child 0"], scores
 
 
 def test_a_task_is_non_dumpable_again_after_the_plugin_has_written_its_score(
@@ -191,16 +222,25 @@ def test_a_task_is_non_dumpable_again_after_the_plugin_has_written_its_score(
     # Airflow marks the process of a task non-dumpable, so that task code cannot read the memory of
     # the other processes of its user. The kernel then gives the files of /proc/self to root, so the
     # plugin makes the process dumpable for the write of its score alone: the task, which reports
-    # it after that, must see the flag as Airflow left it. Only the entry that starts with the
-    # prefix is kept, and it holds no secret.
+    # it after that, must see the flag as Airflow left it, on a host with Yama and on one without.
     _, run = extension_run
-    [instance] = task_instances(airflow_url, token, run)
-    flags = [
-        json.loads(entry)["event"]
-        for entry in task_log(airflow_url, token, instance)
-        if json.loads(entry).get("event", "").startswith("dumpable: ")
-    ]
+    flags = fixture_events(airflow_url, token, run, "dumpable: ")
     assert flags == ["dumpable: 0"], flags
+
+
+def test_the_plugin_says_in_the_log_when_it_leaves_a_task_as_it_is(
+    airflow_url, token, extension_run
+):
+    # Without Yama the plugin changes nothing and writes one line at INFO level; with it, it writes
+    # no line.
+    _, run = extension_run
+    said = plugin_lines(airflow_url, token, run)
+    if yama_restricts_ptrace(airflow_url, token, run):
+        assert said == [], said
+    else:
+        [(level, event)] = said
+        assert level == "info", level
+        assert "keeps its place at the memory limit" in event, event
 
 
 def test_the_dag_processor_reports_no_import_error(airflow_url, token):

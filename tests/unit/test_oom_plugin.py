@@ -73,6 +73,10 @@ def kernel():
     return Kernel()
 
 
+ABSENT = None  # the file of Yama does not exist, as on a kernel without Yama
+UNREADABLE = object()  # the path of Yama is there, but cannot be read
+
+
 @pytest.fixture
 def plugin(monkeypatch, tmp_path, kernel):
     """The plugin, imported with the stand-ins, writing to a file in tmp_path instead of /proc."""
@@ -91,7 +95,33 @@ def plugin(monkeypatch, tmp_path, kernel):
     score.write_text("0\n", encoding="ascii")
     monkeypatch.setattr(module, "OOM_SCORE_ADJ", Score(score, kernel))
     monkeypatch.setattr(module, "prctl", kernel.prctl)
+    # A host whose kernel restricts ptrace with Yama, unless a test says otherwise.
+    monkeypatch.setattr(module, "YAMA_PTRACE_SCOPE", yama_file(tmp_path, "1\n"))
     return module
+
+
+def yama_file(folder: Path, content: str | object | None) -> Path:
+    """The stand-in for /proc/sys/kernel/yama/ptrace_scope: a file with this content (as the
+    kernel writes it, with a newline), no file, or a path that cannot be read."""
+    path = folder / "ptrace_scope"
+    if path.is_dir():
+        path.rmdir()
+    path.unlink(missing_ok=True)
+    if content is UNREADABLE:
+        path.mkdir()
+    elif content is not ABSENT:
+        path.write_text(content, encoding="ascii")
+    return path
+
+
+@pytest.fixture
+def host_yama(plugin, monkeypatch, tmp_path):
+    """Sets what the kernel of the host says about Yama."""
+
+    def set_to(content):
+        monkeypatch.setattr(plugin, "YAMA_PTRACE_SCOPE", yama_file(tmp_path, content))
+
+    return set_to
 
 
 def listener(plugin):
@@ -110,10 +140,17 @@ def test_a_task_process_goes_first(plugin):
     assert plugin.OOM_SCORE_ADJ.read_text(encoding="ascii") == "1000"
 
 
-def test_a_non_dumpable_process_is_dumpable_only_while_it_writes_the_score(plugin, kernel):
+@pytest.mark.parametrize("scope", ["1\n", "2\n", "3\n"])
+def test_a_non_dumpable_process_is_dumpable_only_while_it_writes_the_score(
+    plugin, kernel, host_yama, scope
+):
     # The kernel gives the files of /proc/self to root while the process is non-dumpable, as the
     # process of a task is: so the plugin makes it dumpable for the write, and non-dumpable again.
+    # It does so only where Yama keeps the other processes of the user from opening its memory in
+    # the meantime: ptrace_scope 1, 2 or 3.
+    host_yama(scope)
     listener(plugin).on_starting(component=component(TASK_RUNNER, "TaskRunnerMarker"))
+    assert plugin.OOM_SCORE_ADJ.read_text(encoding="ascii") == "1000"
     assert kernel.calls == [
         (PR_GET_DUMPABLE, 0),
         (PR_SET_DUMPABLE, 1),
@@ -122,12 +159,51 @@ def test_a_non_dumpable_process_is_dumpable_only_while_it_writes_the_score(plugi
     assert kernel.dumpable == 0
 
 
-def test_a_dumpable_process_is_left_as_it_is(plugin, kernel):
+# What a host without the restriction of Yama gives, and what the plugin reports as found.
+NOT_RESTRICTED = [
+    pytest.param(ABSENT, "absent", id="no-yama"),
+    pytest.param(UNREADABLE, "absent", id="unreadable"),
+    pytest.param("0\n", "0", id="scope-0"),
+    pytest.param("", "empty", id="empty"),
+    pytest.param("banana\n", "banana", id="garbage"),
+    pytest.param("-1\n", "-1", id="negative"),
+]
+
+
+@pytest.mark.parametrize(("content", "found"), NOT_RESTRICTED)
+def test_a_non_dumpable_process_is_left_as_it_is_where_yama_does_not_restrict_ptrace(
+    plugin, kernel, host_yama, caplog, content, found
+):
+    # Without Yama, a process of the same user could open the memory of the task while the mark is
+    # lifted, and keep it open: so the mark and the score stay, and the log says so, once, at INFO.
+    host_yama(content)
+    with caplog.at_level(logging.INFO):
+        listener(plugin).on_starting(component=component(TASK_RUNNER, "TaskRunnerMarker"))
+    assert plugin.OOM_SCORE_ADJ.read_text(encoding="ascii") == "0\n"
+    assert kernel.calls == [(PR_GET_DUMPABLE, 0)]
+    assert kernel.dumpable == 0
+    [record] = caplog.records
+    assert record.levelno == logging.INFO
+    assert "keeps its place" in record.getMessage()
+    assert "Yama" in record.getMessage()
+    assert record.getMessage().count(found) >= 1
+    assert f"ptrace_scope {found}" in record.getMessage()
+
+
+@pytest.mark.parametrize(
+    "content", [pytest.param(ABSENT, id="no-yama"), pytest.param("0\n", id="scope-0"), "1\n", "3\n"]
+)
+def test_a_dumpable_process_is_written_whatever_yama_says(
+    plugin, kernel, host_yama, caplog, content
+):
+    host_yama(content)
     kernel.dumpable = 1
-    listener(plugin).on_starting(component=component(TASK_RUNNER, "TaskRunnerMarker"))
+    with caplog.at_level(logging.INFO):
+        listener(plugin).on_starting(component=component(TASK_RUNNER, "TaskRunnerMarker"))
     assert plugin.OOM_SCORE_ADJ.read_text(encoding="ascii") == "1000"
     assert kernel.calls == [(PR_GET_DUMPABLE, 0)]
     assert kernel.dumpable == 1
+    assert caplog.records == []
 
 
 @pytest.mark.parametrize(
@@ -176,3 +252,40 @@ def test_a_process_that_cannot_be_made_dumpable_stops_no_task(plugin, kernel, mo
     assert "before this task" in record.getMessage()
     assert plugin.OOM_SCORE_ADJ.read_text(encoding="ascii") == "0\n"
     assert kernel.dumpable == 0
+
+
+def refuse_to_put_the_mark_back(kernel):
+    """A prctl that works, except that it cannot make the process non-dumpable again."""
+
+    def prctl(option: int, value: int = 0) -> int:
+        if option == PR_SET_DUMPABLE and value == 0:
+            raise OSError(errno.EPERM, "Operation not permitted")
+        return kernel.prctl(option, value)
+
+    return prctl
+
+
+def test_a_mark_that_cannot_be_put_back_is_an_error_and_stops_no_task(
+    plugin, kernel, monkeypatch, caplog
+):
+    monkeypatch.setattr(plugin, "prctl", refuse_to_put_the_mark_back(kernel))
+    with caplog.at_level(logging.INFO):
+        listener(plugin).on_starting(component=component(TASK_RUNNER, "TaskRunnerMarker"))
+    assert plugin.OOM_SCORE_ADJ.read_text(encoding="ascii") == "1000"
+    [record] = caplog.records
+    assert record.levelno == logging.ERROR
+    assert "dumpable" in record.getMessage()
+    assert "non-dumpable" in record.getMessage()
+    # The process is left as it is: the log says so.
+    assert kernel.dumpable == 1
+
+
+def test_a_mark_that_cannot_be_put_back_after_a_failed_write_gives_both_lines(
+    plugin, kernel, monkeypatch, tmp_path, caplog
+):
+    monkeypatch.setattr(plugin, "prctl", refuse_to_put_the_mark_back(kernel))
+    missing = tmp_path / "no-such-folder" / "oom_score_adj"
+    monkeypatch.setattr(plugin, "OOM_SCORE_ADJ", Score(missing, kernel))
+    with caplog.at_level(logging.INFO):
+        listener(plugin).on_starting(component=component(TASK_RUNNER, "TaskRunnerMarker"))
+    assert sorted(record.levelno for record in caplog.records) == [logging.WARNING, logging.ERROR]

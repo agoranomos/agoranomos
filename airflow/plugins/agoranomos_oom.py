@@ -16,6 +16,13 @@ files of /proc/self to root, and the write fails with "Permission denied". So th
 process dumpable for the write alone, and non-dumpable again right after it, before any code of a
 DAG loads.
 
+It does so only where the kernel of the host restricts ptrace with Yama
+(/proc/sys/kernel/yama/ptrace_scope reads 1, 2 or 3), as the kernel of Ubuntu does. While the mark
+is lifted, a process of the same user could open /proc/<pid>/mem of the task and keep it open after
+the mark is back; Yama forbids that to every process that is not an ancestor of the task. Where
+the file is missing or reads 0, as on Docker Desktop, the plugin changes nothing and says so in
+one line of the log: the task keeps its place at the memory limit.
+
 The image installs this folder where only root may write, and points Airflow at it
 (airflow/Dockerfile).
 """
@@ -42,6 +49,9 @@ FIRST = "1000"
 # From <linux/prctl.h>.
 PR_GET_DUMPABLE = 3
 PR_SET_DUMPABLE = 4
+# The restriction of ptrace by Yama: the file exists only in a kernel that has Yama, and reads 0
+# (no restriction), 1, 2 or 3.
+YAMA_PTRACE_SCOPE = Path("/proc/sys/kernel/yama/ptrace_scope")
 # What the task runner passes to on_starting, as of Airflow 3.3.2; the scheduler, the triggerer and
 # the DAG processor pass their jobs instead. The class is matched by its module and name, so that
 # the services that run no task do not import the task runner.
@@ -57,17 +67,55 @@ def prctl(option: int, value: int = 0) -> int:
     return result
 
 
+def ptrace_scope() -> str:
+    """What the kernel says about the restriction of ptrace by Yama, as text: the value, or
+    "absent" where the file is missing or cannot be read."""
+    try:
+        return YAMA_PTRACE_SCOPE.read_text(encoding="ascii").strip()[:32] or "empty"
+    except (OSError, UnicodeError):
+        return "absent"
+
+
+def restricts_ptrace(scope: str) -> bool:
+    """Whether the value says that Yama is on: a number from 1 up."""
+    return scope.isascii() and scope.isdecimal() and int(scope) >= 1
+
+
 @contextmanager
 def dumpable() -> Iterator[None]:
-    """Make a non-dumpable process dumpable for the block, and non-dumpable again after it."""
-    if prctl(PR_GET_DUMPABLE) != 0:
-        yield
-        return
+    """Make a non-dumpable process dumpable for the block, and non-dumpable again after it. If
+    that last step fails, the log says that the process stays dumpable; nothing is raised."""
     prctl(PR_SET_DUMPABLE, 1)
     try:
         yield
     finally:
-        prctl(PR_SET_DUMPABLE, 0)
+        try:
+            prctl(PR_SET_DUMPABLE, 0)
+        except OSError as error:
+            log.error(
+                "the task process could not be made non-dumpable again (%s): it stays dumpable",
+                error,
+            )
+
+
+def rank_first() -> None:
+    """Write FIRST to the oom_score_adj of this process, or say why it stays as it is."""
+    if prctl(PR_GET_DUMPABLE) != 0:
+        OOM_SCORE_ADJ.write_text(FIRST, encoding="ascii")
+        return
+    scope = ptrace_scope()
+    if not restricts_ptrace(scope):
+        log.info(
+            "this task keeps its place at the memory limit: the kernel of this host does not "
+            "restrict ptrace (Yama, ptrace_scope %s), so the plugin does not lift the "
+            "non-dumpable mark of the task to write %s; at the limit, the kernel may stop the "
+            "scheduler or the worker before this task",
+            scope,
+            OOM_SCORE_ADJ,
+        )
+        return
+    with dumpable():
+        OOM_SCORE_ADJ.write_text(FIRST, encoding="ascii")
 
 
 def is_task_runner(component: object) -> bool:
@@ -84,8 +132,7 @@ class TasksFirst:
         if not is_task_runner(component):
             return
         try:
-            with dumpable():
-                OOM_SCORE_ADJ.write_text(FIRST, encoding="ascii")
+            rank_first()
         except OSError as error:
             # The task runs on; only the choice of the kernel at the memory limit stays as it was.
             log.warning(
