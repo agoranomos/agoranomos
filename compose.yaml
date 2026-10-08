@@ -277,7 +277,8 @@ services:
 
   # With the LocalExecutor the scheduler also runs the tasks, as processes of its own container, so its
   # memory and its restarts are shared with them. Airflow's documentation warns that in a container a task
-  # that runs out of memory can restart the scheduler (ADR-0015).
+  # that runs out of memory can restart the scheduler (ADR-0015): a plugin of the image makes each task
+  # process the first that the kernel stops at the memory limit (airflow/plugins/agoranomos_oom.py).
   airflow-scheduler:
     <<: *airflow
     # It runs the tasks, so it gets the limit of the tasks; with CeleryExecutor the worker does.
