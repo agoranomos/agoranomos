@@ -2,10 +2,6 @@
 
 Agoranomos reads its settings from the `.env` file in the root of the checkout. `./agoranomos init` creates it from `.env.example` and fills in every secret that is empty ([Command line](command-line.md)). Only its owner can read `.env`, and it is never committed.
 
-!!! note "Status, as of October 2026"
-
-    The stack is being built during Phase 1. Until it is complete, some of the settings and commands on this page belong to parts of the stack that do not exist yet.
-
 !!! warning "Keep a copy of `.env`"
 
     `.env` holds the keys that decrypt the connections Airflow and Metabase save in their databases. Without them, the connections in a restored backup of those databases cannot be decrypted. Keep a copy in a password manager.

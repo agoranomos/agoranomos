@@ -63,7 +63,7 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** being built in Phase 1, for v0.1.0. The layer of its own is in place: `airflow/Dockerfile` adds dlt and Cosmos to the official image and dbt in a virtual environment of its own, and `./agoranomos up` builds it.
+* **Implementation status, as of October 2026:** in place for v0.1.0: Airflow 3.3.2 runs as separate services, with the FAB auth manager, the LocalExecutor by default and Valkey as the broker of the CeleryExecutor variant ([ADR-0015](0015-run-localexecutor-by-default.md)). The layer of its own is in place too: `airflow/Dockerfile` adds dlt and Cosmos to the official image and dbt in a virtual environment of its own, and `./agoranomos up` builds it. astro-airflow-mcp comes with the AI layer in v0.3.0 ([ADR-0007](0007-ai-access-via-mcp-read-only.md)).
 * Versions as of October 2026: Airflow 3.3 (3.3.2) and Valkey 9 (the latest release is 9.1.2, and the 9.0 line still gets patch releases, the latest being 9.0.6). Airflow 3.3 supports Python 3.10 to 3.14 and PostgreSQL 14 to 18, which covers the choices in [ADR-0003](0003-two-postgres-instances.md) and [ADR-0012](0012-python-and-tooling.md).
 * The memory use of the stack was measured in October 2026, with the LocalExecutor by default ([ADR-0015](0015-run-localexecutor-by-default.md)): it fits the budget, so no `lite` profile is planned ([System requirements](../reference/system-requirements.md)).
 * The [Celery executor documentation](https://airflow.apache.org/docs/apache-airflow-providers-celery/stable/celery_executor.html) describes the executor and its broker settings. [Valkey](https://valkey.io/) is the broker project.

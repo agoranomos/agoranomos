@@ -10,6 +10,7 @@ nav = [
   { "Tutorials" = ["tutorials/index.md"] },
   { "How-to guides" = [
     "how-to/index.md",
+    { "Run Agoranomos locally" = "how-to/run-locally.md" },
     { "See the demo" = "how-to/see-the-demo.md" },
     { "Rename a field or add your own definitions" = "how-to/rename-a-field.md" },
   ] },

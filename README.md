@@ -5,7 +5,7 @@ English | [Русский](README.ru.md)
 Open-source marketing BI out of the box: ad platforms → PostgreSQL warehouse → Metabase dashboards → ask anything in Claude or ChatGPT via MCP. One command. Your data stays yours.
 
 > [!WARNING]
-> **Status: pre-alpha.** Agoranomos is under active development: parts of the stack already run in local mode from the main branch, and the demo goes end to end, from a demo source to a dashboard. Most of the stack is still being built. The repository is private until v0.3. The design of the whole stack is in the [architecture overview](docs/explanation/architecture.md) and the [decision records](docs/adr/index.md). See [Status and roadmap](#status-and-roadmap).
+> **Status: pre-alpha.** Agoranomos is under active development: the stack runs in local mode from the main branch ([Run Agoranomos locally](docs/how-to/run-locally.md)), and the demo goes end to end, from a demo source to a dashboard. Server mode, backups and the connectors to real sources are still being built. The repository is private until v0.3. The design of the whole stack is in the [architecture overview](docs/explanation/architecture.md) and the [decision records](docs/adr/index.md). See [Status and roadmap](#status-and-roadmap).
 
 ## What it is
 
@@ -80,7 +80,7 @@ The design rests on a few principles:
 
 ## Status and roadmap
 
-Agoranomos is **pre-alpha**. Phase 0, the foundation, is complete: the repository has its tooling, CI, documentation skeleton and the first decision records. Phase 1, the platform, is in progress: parts of the stack already run in local mode from the main branch, and the demo goes end to end, from a demo source to a dashboard. The repository is private until v0.3.
+Agoranomos is **pre-alpha**. Phase 0, the foundation, is complete: the repository has its tooling, CI, documentation skeleton and the first decision records. Phase 1, the platform, is in progress: local mode runs from the main branch, and the demo goes end to end, from a demo source to a dashboard; server mode, backups and the v0.1.0 release come next. The repository is private until v0.3.
 
 | Phase | Release | What it delivers |
 |---|---|---|
@@ -96,7 +96,7 @@ The roadmap gives the order of the work, not dates. Versions are 0.x until the c
 
 ## Documentation
 
-The documentation is Markdown in [`docs/`](docs/), built with [Zensical](https://zensical.org/) and organized after [Diátaxis](https://diataxis.fr/): tutorials, how-to guides, reference and explanation, plus the [architecture decision records](docs/adr/index.md). English is its primary language. The README is also available in Russian, and the key pages are to follow. Start with the [architecture overview](docs/explanation/architecture.md). To see what already runs, read [See the demo](docs/how-to/see-the-demo.md).
+The documentation is Markdown in [`docs/`](docs/), built with [Zensical](https://zensical.org/) and organized after [Diátaxis](https://diataxis.fr/): tutorials, how-to guides, reference and explanation, plus the [architecture decision records](docs/adr/index.md). English is its primary language. The README is also available in Russian, and the key pages are to follow. Start with the [architecture overview](docs/explanation/architecture.md). To start it on your machine, read [Run Agoranomos locally](docs/how-to/run-locally.md), and to see what already runs, [See the demo](docs/how-to/see-the-demo.md).
 
 The site will be published when the repository goes public. Until then, read it locally. You need [uv](https://docs.astral.sh/uv/):
 

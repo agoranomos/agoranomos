@@ -2,10 +2,6 @@
 
 `./agoranomos`, in the root of the checkout, sets up, checks and runs the stack ([ADR-0014](../adr/0014-start-the-stack-with-one-script.md)). It needs Docker and the standard tools of macOS, Linux or WSL2, and it works from any directory, because it finds the checkout from its own path.
 
-!!! note "Status, as of October 2026"
-
-    The stack is being built during Phase 1. Until it is complete, some of the commands and checks on this page belong to parts of the stack that do not exist yet.
-
 ```bash
 ./agoranomos <command> [options]
 ```
