@@ -316,6 +316,44 @@ def test_preflight_stops_on_a_session_key_that_metabase_refuses(cli, key, outcom
     assert key not in result.stdout + result.stderr
 
 
+@pytest.mark.parametrize(
+    ("value", "outcome"),
+    [
+        *[
+            (value, "pass")
+            for value in ["2048m", "2g", "2G", "512M", "1024k", "2GB", "2gib", "1.5g", ""]
+        ],
+        *[(value, "stop") for value in ["2048", "2048b", "2 g", "2t", "lots", "g", "1.g", "-2g"]],
+    ],
+)
+def test_preflight_stops_on_a_memory_limit_without_a_unit(cli, value, outcome):
+    # Compose reads a number alone as bytes, and Docker then refuses the container with an error
+    # that names neither the service nor the setting. Empty is the default of compose.yaml.
+    cli.run("init")
+    set_env(cli, AIRFLOW_TASKS_MEMORY=value)
+    result = cli.run("preflight")
+    check_limit(result, outcome, "AIRFLOW_TASKS_MEMORY")
+
+
+def test_the_check_of_the_memory_limits_names_each_setting_and_no_value(cli):
+    # Every *_MEMORY setting of .env, also one that .env.example does not have, on one line each.
+    cli.run("init")
+    names = [key for key in cli.read_env() if key.endswith("_MEMORY")]
+    assert len(names) == 9
+    values = {name: f"4242{index}" for index, name in enumerate(names)}
+    set_env(cli, **values)
+    with cli.env_path.open("a", encoding="utf-8") as env:
+        env.write("MY_SERVICE_MEMORY=31337\n")
+    result = cli.run("preflight")
+    assert result.returncode == 1
+    errors = [line for line in result.stderr.splitlines() if "_MEMORY" in line]
+    assert sorted(line.split()[1] for line in errors) == sorted([*names, "MY_SERVICE_MEMORY"])
+    output = result.stdout + result.stderr
+    secrets = {key: value for key, value in cli.read_env().items() if key in SECRET_KEYS}
+    for value in [*values.values(), "31337", *secrets.values()]:
+        assert value not in output
+
+
 def test_an_env_of_the_last_release_gets_the_session_key_and_keeps_the_rest(cli):
     # The .env of a release before the session key: init adds the setting and generates it, and
     # changes nothing else.
@@ -342,7 +380,11 @@ MEMORY_HINT = "Settings → Resources → Advanced → Memory limit"
 CPU_HINT = "Settings → Resources → Advanced → CPU limit"
 WSL_MEMORY_HINT = "set memory= in the [wsl2] section of .wslconfig in your Windows user folder"
 WSL_CPU_HINT = "set processors= in the [wsl2] section of .wslconfig in your Windows user folder"
-WSL_RESTART = "then run wsl --shutdown"
+# .wslconfig does not exist by default, and wsl --shutdown is a command of Windows, not of WSL.
+WSL_CREATE = "create the file if there is none"
+WSL_RESTART = "then run wsl --shutdown in PowerShell"
+LINUX_MEMORY = "With Docker Engine on Linux, Docker has the memory of the machine"
+LINUX_CPUS = "With Docker Engine on Linux, Docker has the CPUs of the machine"
 
 
 def test_preflight_stops_when_docker_is_down(cli):
@@ -626,11 +668,11 @@ def test_disk_limits(cli, tmp_path, free_kb, outcome):
 def test_the_messages_about_resources_say_what_to_do(cli, tmp_path):
     for total in (4 * GIB, 7 * GIB):
         memory = cli.run("preflight", FAKE_MEMTOTAL=str(total))
-        for hint in (MEMORY_HINT, WSL_MEMORY_HINT, WSL_RESTART):
+        for hint in (MEMORY_HINT, WSL_MEMORY_HINT, WSL_CREATE, WSL_RESTART, LINUX_MEMORY):
             assert hint in memory.stderr, (total, hint)
     for cpus in ("1", "2"):
         result = cli.run("preflight", FAKE_NCPU=cpus)
-        for hint in (CPU_HINT, WSL_CPU_HINT, WSL_RESTART):
+        for hint in (CPU_HINT, WSL_CPU_HINT, WSL_CREATE, WSL_RESTART, LINUX_CPUS):
             assert hint in result.stderr, (cpus, hint)
     for free_gb in (5, 15):
         result = cli.run(
@@ -1120,6 +1162,32 @@ def test_up_does_not_report_success_before_any_container_exists(cli):
     assert result.returncode == 1
     assert "still waiting after 1 seconds for: (no containers yet)" in result.stderr
     assert "All services are healthy." not in result.stdout
+
+
+KILLED = "(exit code 137: it was killed, most often because it reached its memory limit)"
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["airflow-init|exited||137", "warehouse-db|exited||137", "demo-init|exited||137"],
+    ids=["job", "service", "demo"],
+)
+def test_up_says_that_exit_code_137_is_most_often_the_memory_limit(cli, tmp_path, line):
+    # A job stopped at its limit leaves a log without an error of its own, and the limits of the
+    # jobs are fixed in compose.yaml: the exit code is the one hint.
+    service = line.split("|")[0]
+    ps = HEALTHY_PS + line + "\n" if service == "demo-init" else ps_with(line)
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps), **QUICK)
+    assert result.returncode == 1
+    assert f"{service} failed: see ./agoranomos logs {service} {KILLED}" in result.stderr
+
+
+def test_up_says_nothing_of_memory_for_another_exit_code(cli, tmp_path):
+    ps = ps_with("airflow-init|exited||1") + "demo-init|exited||2\n"
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps), **QUICK)
+    assert result.returncode == 1
+    assert "airflow-init failed: see ./agoranomos logs airflow-init\n" in result.stderr
+    assert "exit code 137" not in result.stderr
 
 
 @pytest.mark.parametrize(
