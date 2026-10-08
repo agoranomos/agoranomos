@@ -15,17 +15,35 @@ SET pg_stat_statements.track_utility = off;
 -- Run again, this file would print a notice for every object that exists already.
 SET client_min_messages = warning;
 
+-- ALTER ROLE keeps every attribute that it does not name, so the statements below name LOGIN and
+-- each attribute that would give a role more power: one given by hand, such as CREATEDB, is gone
+-- after the next start.
 SELECT 'CREATE ROLE airflow' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'airflow') \gexec
-SELECT format('ALTER ROLE airflow WITH LOGIN PASSWORD %L', :'airflow_password') \gexec
+SELECT format(
+  'ALTER ROLE airflow WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+  :'airflow_password'
+) \gexec
 SELECT 'CREATE DATABASE airflow OWNER airflow'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'airflow') \gexec
 REVOKE ALL ON DATABASE airflow FROM PUBLIC;
 
 SELECT 'CREATE ROLE metabase' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'metabase') \gexec
-SELECT format('ALTER ROLE metabase WITH LOGIN PASSWORD %L', :'metabase_password') \gexec
+SELECT format(
+  'ALTER ROLE metabase WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+  :'metabase_password'
+) \gexec
 SELECT 'CREATE DATABASE metabase OWNER metabase'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'metabase') \gexec
 REVOKE ALL ON DATABASE metabase FROM PUBLIC;
 
--- Statement statistics for the Ops collection; its view lives in the postgres database.
+-- PUBLIC gets no CONNECT or TEMPORARY on the other databases that take connections (template0
+-- takes none): each role connects to the database that it owns, and to no other.
+REVOKE ALL ON DATABASE postgres, template1 FROM PUBLIC;
+
+-- Statement statistics for the Ops collection; its view lives in the postgres database. The
+-- extension gives PUBLIC its views and the functions behind them, which show the calls and the
+-- timings of every statement. Only the superuser reads them, as the Ops collection is to do.
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+REVOKE SELECT ON public.pg_stat_statements, public.pg_stat_statements_info FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.pg_stat_statements(boolean), public.pg_stat_statements_info()
+FROM PUBLIC;

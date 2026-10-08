@@ -1,6 +1,10 @@
 import pytest
 from stack_helpers import WAREHOUSE_ROLES, leaked, psql, psql_over_network, warehouse
 
+# The roles of the platform instance, each the owner of its database, and the setting of .env that
+# holds the password of each.
+PLATFORM_ROLES = {"airflow": "AIRFLOW_DB_PASSWORD", "metabase": "METABASE_DB_PASSWORD"}
+
 
 def test_pg_stat_statements_is_loaded(env):
     for service, password, database in (
@@ -322,10 +326,17 @@ ORDER BY 1
 """
 
 
-def test_no_member_of_pg_stat_statements_is_open_to_public(env):
-    # warehouse.sql revokes PUBLIC's access to the objects of version 1.12 by name, and a later
+@pytest.mark.parametrize(
+    ("service", "superuser", "database"),
+    [
+        ("warehouse-db", "WAREHOUSE_POSTGRES_PASSWORD", "warehouse"),
+        ("platform-db", "PLATFORM_POSTGRES_PASSWORD", "postgres"),
+    ],
+)
+def test_no_member_of_pg_stat_statements_is_open_to_public(env, service, superuser, database):
+    # The SQL files revoke PUBLIC's access to the objects of version 1.12 by name, and a later
     # version of the extension could add a member that nothing revokes: so every member is checked.
-    result = warehouse(env, EXTENSION_MEMBERS_OPEN_TO_PUBLIC)
+    result = psql(service, "postgres", env[superuser], database, EXTENSION_MEMBERS_OPEN_TO_PUBLIC)
     assert result.returncode == 0, result.stderr
     members = dict(line.split("|") for line in result.stdout.splitlines())
     # The query finds the objects that warehouse.sql names, so it looks where they are.
@@ -338,3 +349,55 @@ def test_no_member_of_pg_stat_statements_is_open_to_public(env):
     assert named <= set(members), f"the members found are {sorted(members)}"
     open_to_public = sorted(name for name, is_open in members.items() if is_open == "t")
     assert not open_to_public, f"PUBLIC holds a privilege on {open_to_public}"
+
+
+@pytest.mark.parametrize("role", sorted(PLATFORM_ROLES))
+def test_each_role_of_the_platform_signs_in_with_its_password_and_with_no_other(env, role):
+    # As for the warehouse: across the data network the server asks for the password.
+    right = psql_over_network("platform-db", role, env[PLATFORM_ROLES[role]], role, "SELECT 1")
+    assert right.returncode == 0, right.stderr
+    assert right.stdout.strip() == "1"
+    wrong = psql_over_network("platform-db", role, "not-the-password", role, "SELECT 1")
+    assert wrong.returncode != 0
+    assert "password authentication failed" in wrong.stderr
+
+
+# What each role of the platform is, beyond its database: no attribute but LOGIN, and a member of
+# no role.
+PLATFORM_ROLE_ATTRIBUTES = {
+    "superuser": "f",
+    "createdb": "f",
+    "createrole": "f",
+    "replication": "f",
+    "bypassrls": "f",
+    "login": "t",
+    "member of": "",
+}
+
+
+def test_the_roles_of_the_platform_sign_in_and_have_no_other_power(env):
+    result = psql(
+        "platform-db",
+        "postgres",
+        env["PLATFORM_POSTGRES_PASSWORD"],
+        "postgres",
+        "SELECT rolname, rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls, "
+        "rolcanlogin, (SELECT string_agg(pg_get_userbyid(roleid), ',' ORDER BY roleid) "
+        "FROM pg_auth_members WHERE member = pg_roles.oid) "
+        "FROM pg_roles WHERE rolname IN ('airflow', 'metabase')",
+    )
+    assert result.returncode == 0, result.stderr
+    found = {}
+    for line in result.stdout.splitlines():
+        role, *values = line.split("|")
+        found[role] = dict(zip(PLATFORM_ROLE_ATTRIBUTES, values, strict=True))
+    assert found == dict.fromkeys(PLATFORM_ROLES, PLATFORM_ROLE_ATTRIBUTES)
+
+
+@pytest.mark.parametrize("database", ["postgres", "template1"])
+@pytest.mark.parametrize("role", sorted(PLATFORM_ROLES))
+def test_the_roles_of_the_platform_connect_to_their_own_database_only(env, role, database):
+    # PUBLIC gets no CONNECT on the other databases of the instance; template0 takes no connections.
+    result = psql("platform-db", role, env[PLATFORM_ROLES[role]], database, "SELECT 1")
+    assert result.returncode != 0
+    assert f'permission denied for database "{database}"' in result.stderr

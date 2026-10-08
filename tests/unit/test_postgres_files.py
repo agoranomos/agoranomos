@@ -159,7 +159,7 @@ def test_warehouse_sql_gives_a_warehouse_of_an_earlier_version_what_a_new_one_ge
     assert runs(text, dropped), f"warehouse.sql must also run {dropped}"
 
 
-# The attributes that warehouse.sql gives each of its roles on every start.
+# The attributes that each SQL file gives each of its roles on every start.
 ROLE_ATTRIBUTES = {
     "LOGIN",
     "NOSUPERUSER",
@@ -168,19 +168,40 @@ ROLE_ATTRIBUTES = {
     "NOREPLICATION",
     "NOBYPASSRLS",
 }
+# The roles that each SQL file sets up.
+FILE_ROLES = {
+    "platform.sql": ["airflow", "metabase"],
+    "warehouse.sql": ["loader", "metabase_reader", "transformer"],
+}
 
 
-def test_warehouse_sql_names_every_attribute_of_its_roles_on_every_start():
+@pytest.mark.parametrize("name", sorted(FILE_ROLES))
+def test_the_sql_files_name_every_attribute_of_their_roles_on_every_start(name):
     # ALTER ROLE keeps every attribute that it does not name, so one given by hand stays unless the
     # file names it. A new role has none of the powers anyway, and CI starts from a new volume, so
     # no stack test there notices if one of these goes.
     altered = re.findall(
-        r"\bALTER ROLE (\w+) WITH ((?:\w+ )+)PASSWORD %L",
-        normalized("warehouse.sql"),
-        re.IGNORECASE,
+        r"\bALTER ROLE (\w+) WITH ((?:\w+ )+)PASSWORD %L", normalized(name), re.IGNORECASE
     )
     attributes = {role.lower(): set(words.upper().split()) for role, words in altered}
-    assert sorted(attributes) == ["loader", "metabase_reader", "transformer"]
+    assert sorted(attributes) == FILE_ROLES[name]
     for role, given in attributes.items():
         missing, extra = sorted(ROLE_ATTRIBUTES - given), sorted(given - ROLE_ATTRIBUTES)
         assert given == ROLE_ATTRIBUTES, f"{role} lacks {missing} and gets {extra}"
+
+
+# What PUBLIC must not keep on either instance: CONNECT and TEMPORARY on the databases that no role
+# of the stack owns, and the statistics of the statements.
+PUBLIC_REVOKES = (
+    "REVOKE ALL ON DATABASE postgres, template1 FROM PUBLIC;",
+    "REVOKE SELECT ON public.pg_stat_statements, public.pg_stat_statements_info FROM PUBLIC;",
+    "REVOKE EXECUTE ON FUNCTION public.pg_stat_statements(boolean), "
+    "public.pg_stat_statements_info() FROM PUBLIC;",
+)
+
+
+@pytest.mark.parametrize("name", sorted(FILE_ROLES))
+def test_the_sql_files_take_from_public_what_no_role_needs(name):
+    text = normalized(name)
+    missing = [statement for statement in PUBLIC_REVOKES if not runs(text, statement)]
+    assert not missing, f"{name} must also run {missing}"
