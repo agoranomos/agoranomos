@@ -50,6 +50,7 @@ The other option was not chosen for this reason:
 
 ## More Information
 
+* **Implementation status, as of October 2026:** the stack is measured on the demo, on arm64 and amd64 and with both executors, and every service has a memory limit from those measurements: [System requirements](../reference/system-requirements.md) gives the figures and how the limits are set. The default variant fits the budget, so no `lite` profile is planned.
 * The budget is the reason for several choices in other records: the number of PostgreSQL instances ([ADR-0003](0003-two-postgres-instances.md)) and the possible `lite` profile with the LocalExecutor ([ADR-0002](0002-orchestrate-with-airflow-3.md)).
 * The same stack runs in local and server mode ([ADR-0011](0011-local-and-server-modes.md)), on both architectures.
 * Docker describes [multi-platform images](https://docs.docker.com/build/building/multi-platform/) and how to build them.

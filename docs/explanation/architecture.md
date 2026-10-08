@@ -155,7 +155,7 @@ The stack runs as one Docker Compose project, split into profiles so that you st
 
 The stack has two modes, local and server. Both are first-class, and both are to be covered by automated tests. In local mode, ports are published on `127.0.0.1` only. Server mode adds a reverse proxy with TLS (the `server` profile) and scheduled backups (the `ops` profile).
 
-The resource targets, which are still to be measured, are 8 GB of RAM available to Docker (6 GB as a minimum), 4 CPUs and 20 GB of disk, on x86-64-v2 or ARM64 hardware such as Apple Silicon.
+The stack needs 8 GB of RAM available to Docker (6 GB as a minimum), 4 CPUs and 20 GB of disk, on x86-64-v2 or ARM64 hardware such as Apple Silicon. Every service has a memory limit, from measurements on the demo ([System requirements](../reference/system-requirements.md)).
 
 Decision records: [ADR-0010: Support amd64 and arm64 within a memory budget](../adr/0010-multi-arch-and-memory-budget.md) covers the architectures and the memory budget, and [ADR-0011: Support local and server modes](../adr/0011-local-and-server-modes.md) covers the two modes.
 

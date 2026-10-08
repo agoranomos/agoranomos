@@ -51,7 +51,7 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** being built in Phase 1, for v0.1.0; the measurements run during Phase 1.
+* **Implementation status, as of October 2026:** in place for v0.1.0: `compose.yaml` runs the LocalExecutor, `compose.celery.yaml` is the CeleryExecutor overlay, and CI tests both. Measured, for both executors: idle and peak memory, with a memory limit for the service that runs the tasks, and a task that runs out of memory ([System requirements](../reference/system-requirements.md)); the secrets that task code can see ([ADR-0013](0013-keep-extensions-apart-from-the-base-package.md)). Not measured yet: the time of the pipeline, and restarts of the scheduler, the worker and the broker.
 * This record replaces the choice of the executor in ADR-0002. Airflow 3, the official image and Valkey as the broker of the Celery variant stay as ADR-0002 decided.
 * Airflow's documentation: the [LocalExecutor](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/executor/local.html) runs tasks "by spawning processes in a controlled fashion on the scheduler node" and warns that in containers a task out of memory can restart the scheduler; the [overview of executors](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/executor/index.html); the [CeleryExecutor](https://airflow.apache.org/docs/apache-airflow-providers-celery/stable/celery_executor.html).
 * Airflow's own Compose file runs the CeleryExecutor and asks for at least 4 GB of memory for Docker, ideally 8 GB, without a warehouse or a BI tool ([Running Airflow in Docker](https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html)).
