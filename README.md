@@ -96,7 +96,7 @@ The roadmap gives the order of the work, not dates. Versions are 0.x until the c
 
 ## Documentation
 
-The documentation is Markdown in [`docs/`](docs/), built with [Zensical](https://zensical.org/) and organized after [Diátaxis](https://diataxis.fr/): tutorials, how-to guides, reference and explanation, plus the [architecture decision records](docs/adr/index.md). English is its primary language. The README is also available in Russian, and the key pages are to follow. Start with the [architecture overview](docs/explanation/architecture.md). To start it on your machine, read [Run Agoranomos locally](docs/how-to/run-locally.md), and to see what already runs, [See the demo](docs/how-to/see-the-demo.md).
+The documentation is Markdown in [`docs/`](docs/), built with [Zensical](https://zensical.org/) and organized after [Diátaxis](https://diataxis.fr/): tutorials, how-to guides, reference and explanation, plus the [architecture decision records](docs/adr/index.md). English is its primary language. The README is also available in Russian, and the key pages are to follow. Start with the [architecture overview](docs/explanation/architecture.md). To start Agoranomos on your machine, read [Run Agoranomos locally](docs/how-to/run-locally.md), and to see what already runs, [See the demo](docs/how-to/see-the-demo.md).
 
 The site will be published when the repository goes public. Until then, read it locally. You need [uv](https://docs.astral.sh/uv/):
 

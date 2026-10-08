@@ -11,7 +11,7 @@ Agoranomos runs on any machine with Docker that has the resources below ([ADR-00
 | Docker Engine | 25.0 | |
 | Docker Compose | 2.24 | 5.4 or newer |
 
-On macOS and Windows, Docker Desktop sets the memory, CPUs and disk of its virtual machine in Settings → Resources. Windows is supported through WSL2. Docker reports a little less memory than its machine has, so preflight counts 5,632 MiB as 6 GB and 7,680 MiB as 8 GB.
+On macOS, Docker Desktop sets the memory, CPUs and disk of its virtual machine in Settings → Resources → Advanced. Windows is supported through WSL2: run the commands of Agoranomos in a WSL2 terminal, with the checkout in the Linux file system of WSL, not under `/mnt/c`, where by default `chmod` cannot make `.env` readable only by its owner ([Run Agoranomos locally](../how-to/run-locally.md#before-you-begin)). With WSL2, Docker Desktop leaves the memory and the CPUs to WSL, which gives its virtual machine half of the memory of Windows and all of its logical processors by default: `memory=` and `processors=` in the `[wsl2]` section of `.wslconfig`, in the Windows user folder, change them, and `wsl --shutdown` restarts WSL with them (as of October 2026, Docker's and Microsoft's documentation). Docker reports a little less memory than its machine has, so preflight counts 5,632 MiB as 6 GB and 7,680 MiB as 8 GB.
 
 The CeleryExecutor variant needs the recommended 8 GB: its broker and its worker come on top of the services of the default variant, and its memory limits add up to 7,680 MiB ([Configuration](configuration.md#docker-compose)).
 
@@ -177,7 +177,7 @@ A task that writes 4 GiB of memory, more than `AIRFLOW_TASKS_MEMORY`, ran on the
 
 The memory report shows such a kill in the column OOM kills and a restart in Restarts, `docker inspect` of the container says `"OOMKilled": true`, and the stack test `test_no_service_ran_out_of_memory_or_restarted` fails.
 
-When it happens, raise the limit of that service in `.env`, `AIRFLOW_TASKS_MEMORY` for a task, and run `./agoranomos up` ([Configuration](configuration.md#memory-limits)). With the LocalExecutor, `AIRFLOW_PARALLELISM` tasks run in the scheduler at the same time, 4 by default, so raise `AIRFLOW_TASKS_MEMORY` with it, and for pipelines heavier than the demo. Each limit that you raise needs memory on the machine as well ([Memory limits](#memory-limits)).
+When it happens, raise the limit of that service in `.env`, `AIRFLOW_TASKS_MEMORY` for a task, and run `./agoranomos up` ([Configuration](configuration.md#memory-limits)). With the LocalExecutor, up to `AIRFLOW_PARALLELISM` tasks run in the scheduler at the same time, 4 by default, so raise `AIRFLOW_TASKS_MEMORY` with it, and for pipelines heavier than the demo. Each limit that you raise needs memory on the machine as well ([Memory limits](#memory-limits)).
 
 ## How to measure
 

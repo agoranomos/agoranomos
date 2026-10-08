@@ -45,7 +45,7 @@ Every service has a memory limit, also for swap, so that the stack stays within 
 | `AIRFLOW_SCHEDULER_MEMORY` | `512m` | Only with CeleryExecutor: `airflow-scheduler`, which then runs no task |
 | `BROKER_MEMORY` | `256m` | Only with CeleryExecutor: `broker` |
 
-When a service needs more, raise its limit in `.env` and run `./agoranomos up`, which starts it again with the new limit. The tasks of heavier pipelines need more than the demo, and so do more tasks at the same time: with LocalExecutor, `AIRFLOW_PARALLELISM` tasks run in the scheduler at once, so raise `AIRFLOW_TASKS_MEMORY` with it. Each limit that you raise needs memory on the machine as well: [System requirements](system-requirements.md#memory-limits) says how the defaults add up. When a service reaches its limit, the kernel stops one of its processes ([System requirements](system-requirements.md#when-a-service-reaches-its-limit)).
+When a service needs more, raise its limit in `.env` and run `./agoranomos up`, which starts it again with the new limit. The tasks of heavier pipelines need more than the demo, and so do more tasks at the same time: with LocalExecutor, up to `AIRFLOW_PARALLELISM` tasks run in the scheduler at once, so raise `AIRFLOW_TASKS_MEMORY` with it. Each limit that you raise needs memory on the machine as well: [System requirements](system-requirements.md#memory-limits) says how the defaults add up. When a service reaches its limit, the kernel stops one of its processes ([System requirements](system-requirements.md#when-a-service-reaches-its-limit)).
 
 ## Settings fixed in `compose.yaml`
 

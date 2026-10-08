@@ -2,7 +2,7 @@
 
 Thank you for your interest in Agoranomos. This guide describes how work is done in this repository today.
 
-Agoranomos is pre-alpha, and the repository is private until v0.3, so for now it is open to invited collaborators only. Besides the project's tooling, its documentation and the architecture decision records, parts of the stack already run in local mode, and the rest is being built; the [README](README.md) has the roadmap.
+Agoranomos is pre-alpha, and the repository is private until v0.3, so for now it is open to invited collaborators only. Besides the project's tooling, its documentation and the architecture decision records, the stack runs in local mode, and the rest is being built; the [README](README.md) has the roadmap.
 
 By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). If you found a security vulnerability, do not open an issue: follow the [security policy](SECURITY.md).
 
@@ -46,7 +46,7 @@ To preview the documentation while you edit it, run `uv run zensical serve` and 
 
 ### Run the stack
 
-The stack needs Docker with at least 6 GB of memory (8 GB recommended). On Docker Desktop, set it in Settings → Resources. Then:
+The stack needs Docker with at least 6 GB of memory (8 GB recommended). In Docker Desktop on macOS, set it in Settings → Resources → Advanced; on Windows, work in a WSL2 terminal and set it in `.wslconfig` ([System requirements](docs/reference/system-requirements.md)). Then:
 
 ```bash
 ./agoranomos up              # set up .env, check the machine, start the stack
