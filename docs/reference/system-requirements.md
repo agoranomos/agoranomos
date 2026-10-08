@@ -11,13 +11,13 @@ Agoranomos runs on any machine with Docker that has the resources below ([ADR-00
 | Docker Engine | 25.0 | |
 | Docker Compose | 2.24 | 5.4 or newer |
 
-On macOS, Docker Desktop sets the memory, CPUs and disk of its virtual machine in Settings → Resources → Advanced. Windows is supported through WSL2: run the commands of Agoranomos in a WSL2 terminal, with the checkout in the Linux file system of WSL, not under `/mnt/c`, where by default `chmod` cannot make `.env` readable only by its owner ([Run Agoranomos locally](../how-to/run-locally.md#before-you-begin)). With WSL2, Docker Desktop leaves the memory and the CPUs to WSL, which gives its virtual machine half of the memory of Windows and all of its logical processors by default: `memory=` and `processors=` in the `[wsl2]` section of `.wslconfig`, in the Windows user folder, change them, and `wsl --shutdown` restarts WSL with them (as of October 2026, Docker's and Microsoft's documentation). Docker reports a little less memory than its machine has, so preflight counts 5,632 MiB as 6 GB and 7,680 MiB as 8 GB.
+On macOS, Docker Desktop sets the memory, CPUs and disk of its virtual machine in Settings → Resources → Advanced. Windows is supported through WSL2: run the commands of Agoranomos in a WSL2 terminal, with the checkout in the Linux file system of WSL, not under `/mnt/c`, where by default `chmod` cannot make `.env` readable only by its owner ([Run Agoranomos locally](../how-to/run-locally.md#before-you-begin)). With WSL2, Docker Desktop leaves the memory and the CPUs to WSL, which gives its virtual machine half of the memory of Windows and all of its logical processors by default: `memory=` and `processors=` in the `[wsl2]` section of `.wslconfig`, in the Windows user folder, change them, and `wsl --shutdown`, run in PowerShell, restarts WSL with them. `.wslconfig` does not exist by default: create it (as of October 2026, Docker's and Microsoft's documentation). Docker reports a little less memory than its machine has, so preflight counts 5,632 MiB as 6 GB and 7,680 MiB as 8 GB.
 
 The CeleryExecutor variant needs the recommended 8 GB: its broker and its worker come on top of the services of the default variant, and its memory limits add up to 7,680 MiB ([Configuration](configuration.md#docker-compose)).
 
 ## Memory limits
 
-Every service has a memory limit, with no swap ([Configuration](configuration.md#memory-limits)). A limit keeps a service that runs short of memory from taking it from the others: the kernel stops a process of that service when the service reaches its limit, and the other services go on.
+Every service has a memory limit, with no swap ([Configuration](configuration.md#memory-limits)). On the recommended 8 GB, a limit keeps a service that runs short of memory from taking it from the others: the kernel stops a process of that service when the service reaches its limit, and the other services go on. On the minimum of 6 GB the limits do less, as the end of this section says.
 
 The limits are set from measurements without limits, made on 8 October 2026, as follows:
 
@@ -43,7 +43,9 @@ The limits are set from measurements without limits, made on 8 October 2026, as 
 | `metabase-init` | 19 MiB | Mac | 128 MiB, the minimum |
 | `demo-init` | 20 MiB | Mac | 128 MiB, the minimum |
 
-The limits of every service of a variant, the one-shot jobs too, add up to 6,912 MiB in the default variant and to 7,680 MiB in the CeleryExecutor variant. That is at most 7,680 MiB, the recommended 8 GB as Docker reports it, so that even every service at its limit at the same time fits there. The highest peaks of the services of the default variant add up to at most 4,607 MiB, less than 5,632 MiB, the minimum of 6 GB. A unit test checks the sum of the limits for the defaults of both variants.
+The limits of every service of a variant, the one-shot jobs too, add up to 6,912 MiB in the default variant and to 7,680 MiB in the CeleryExecutor variant. That is at most 7,680 MiB, the recommended 8 GB as Docker reports it, so that on 8 GB even every service at its limit at the same time fits the memory that Docker reports: in the default variant with 768 MiB to spare, and in the CeleryExecutor variant exactly, which leaves nothing for the processes of Docker itself. A unit test checks the sum of the limits for the defaults of both variants.
+
+On the minimum of 6 GB, 5,632 MiB as Docker reports it, the limits do not keep the services apart: the limits of the services of the default variant that run all the time add up to 5,888 MiB, more than that, so services that reach their limits at the same time can still run the whole machine out of memory. What holds there is that the highest measured peaks of the services of the default variant add up to at most 4,607 MiB, which fits. The CeleryExecutor variant needs the recommended 8 GB.
 
 ## Measured memory
 
@@ -177,7 +179,9 @@ A task that writes 4 GiB of memory, more than `AIRFLOW_TASKS_MEMORY`, ran on the
 
 The memory report shows such a kill in the column OOM kills and a restart in Restarts, `docker inspect` of the container says `"OOMKilled": true`, and the stack test `test_no_service_ran_out_of_memory_or_restarted` fails.
 
-When it happens, raise the limit of that service in `.env`, `AIRFLOW_TASKS_MEMORY` for a task, and run `./agoranomos up` ([Configuration](configuration.md#memory-limits)). With the LocalExecutor, up to `AIRFLOW_PARALLELISM` tasks run in the scheduler at the same time, 4 by default, so raise `AIRFLOW_TASKS_MEMORY` with it, and for pipelines heavier than the demo. Each limit that you raise needs memory on the machine as well ([Memory limits](#memory-limits)).
+When it happens to a service that runs all the time, raise its limit in `.env`, `AIRFLOW_TASKS_MEMORY` for a task, and run `./agoranomos up` ([Configuration](configuration.md#memory-limits)). With the LocalExecutor, up to `AIRFLOW_PARALLELISM` tasks run in the scheduler at the same time, 4 by default, so raise `AIRFLOW_TASKS_MEMORY` with it, and for pipelines heavier than the demo. Each limit that you raise needs memory on the machine as well ([Memory limits](#memory-limits)).
+
+The one-shot setup jobs have their limits fixed in `compose.yaml`, with no setting in `.env`. A job that reaches its limit exits with the code 137, and its log ends without an error of its own, or is empty. When other services wait for the job, such as for `airflow-init`, `docker compose up` stops first and names it: `service "airflow-init" didn't complete successfully: exit 137`. Otherwise `up` names it and adds that exit code 137 means that it was killed, most often because it reached its memory limit ([Command line](command-line.md#up)). `./agoranomos status` shows such a job as `Exited (137)`, and `docker inspect` says `"OOMKilled": true`. Then raise its `mem_limit` and `memswap_limit` in `compose.yaml`, both to the same value, run `./agoranomos up`, and report it in an issue, so that its limit grows in Agoranomos too.
 
 ## How to measure
 

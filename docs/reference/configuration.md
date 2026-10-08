@@ -16,7 +16,7 @@ Each value is used as written: keep it on one line, do not put a comment after i
 |---|---|---|
 | `COMPOSE_PROJECT_NAME` | `agoranomos` | The name of the Compose project. It starts the names of the containers, networks and volumes. |
 | `COMPOSE_PROFILES` | `core,demo` | The profiles that run. `core` is the whole stack in local mode, and `demo` adds the demo: on the first start, the one-shot `demo-init` job runs the demo pipeline and creates a demo dashboard in Metabase ([See the demo](../how-to/see-the-demo.md)). Set `core` to start without it. |
-| `COMPOSE_FILE` | `compose.yaml` | The Compose files of the stack. `compose.yaml` runs Airflow with LocalExecutor, which needs no broker. `compose.yaml:compose.celery.yaml` adds the Celery broker and a separate worker (CeleryExecutor). |
+| `COMPOSE_FILE` | `compose.yaml` | The Compose files of the stack. `compose.yaml` runs Airflow with LocalExecutor, which needs no broker. `compose.yaml:compose.celery.yaml` adds the Celery broker and a separate worker (CeleryExecutor), which needs the recommended 8 GB of memory ([System requirements](system-requirements.md)). |
 
 ## Stack
 
@@ -26,12 +26,12 @@ Each value is used as written: keep it on one line, do not put a comment after i
 | `AGORANOMOS_EXTENSIONS_DIR` | `./extensions` | The folder for the deployment's own extensions ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)): its DAGs, and its overrides of the metadata of the marts ([below](#the-metadata-of-the-marts)). Releases never overwrite it. A relative path starts at the checkout. |
 | `AIRFLOW_PORT` | `8080` | The port of the Airflow UI and API on `127.0.0.1`. |
 | `METABASE_PORT` | `3000` | The port of Metabase on `127.0.0.1`. |
-| `AIRFLOW_PARALLELISM` | `4` | How many Airflow tasks run at the same time, in the whole stack. With LocalExecutor, each one is a process in the scheduler container, so more tasks need more memory, and a task that runs out of memory can make the scheduler restart (Airflow's documentation warns about this). With CeleryExecutor it caps all workers together: raise it together with `AIRFLOW_WORKER_CONCURRENCY` or the number of workers. |
-| `AIRFLOW_WORKER_CONCURRENCY` | `4` | Only with CeleryExecutor: how many tasks one Airflow worker runs at a time. More tasks need more memory. |
+| `AIRFLOW_PARALLELISM` | `4` | How many Airflow tasks run at the same time at most, in the whole stack. With LocalExecutor, each one is a process in the scheduler container, so more tasks need more memory, and a task that runs out of memory can make the scheduler restart (Airflow's documentation warns about this). With CeleryExecutor it caps all workers together: raise it together with `AIRFLOW_WORKER_CONCURRENCY` or the number of workers. |
+| `AIRFLOW_WORKER_CONCURRENCY` | `4` | Only with CeleryExecutor: how many tasks one Airflow worker runs at a time. More tasks need more memory: raise `AIRFLOW_TASKS_MEMORY`, the limit of the worker, with it. |
 
 ## Memory limits
 
-Every service has a memory limit, also for swap, so that the stack stays within the memory of [System requirements](system-requirements.md) and a service that runs short of memory cannot take it from the others. The limits of the services that run all the time are these settings, with defaults from measurements on the demo; those of the one-shot setup jobs are fixed in `compose.yaml`. A value is a number of MiB with `m`, or of GiB with `g`.
+Every service has a memory limit, also for swap, so that the stack stays within the memory of [System requirements](system-requirements.md) and, on the recommended 8 GB, a service that runs short of memory cannot take it from the others ([System requirements](system-requirements.md#memory-limits) says what holds on the minimum of 6 GB). The limits of the services that run all the time are these settings, with defaults from measurements on the demo; those of the one-shot setup jobs are fixed in `compose.yaml`. A value is a number of MiB with `m`, or of GiB with `g`: `preflight` stops on a number without a unit, which Compose would read as bytes.
 
 | Setting | Default | Service |
 |---|---|---|
@@ -45,7 +45,7 @@ Every service has a memory limit, also for swap, so that the stack stays within 
 | `AIRFLOW_SCHEDULER_MEMORY` | `512m` | Only with CeleryExecutor: `airflow-scheduler`, which then runs no task |
 | `BROKER_MEMORY` | `256m` | Only with CeleryExecutor: `broker` |
 
-When a service needs more, raise its limit in `.env` and run `./agoranomos up`, which starts it again with the new limit. The tasks of heavier pipelines need more than the demo, and so do more tasks at the same time: with LocalExecutor, up to `AIRFLOW_PARALLELISM` tasks run in the scheduler at once, so raise `AIRFLOW_TASKS_MEMORY` with it. Each limit that you raise needs memory on the machine as well: [System requirements](system-requirements.md#memory-limits) says how the defaults add up. When a service reaches its limit, the kernel stops one of its processes ([System requirements](system-requirements.md#when-a-service-reaches-its-limit)).
+When a service needs more, raise its limit in `.env` and run `./agoranomos up`, which starts it again with the new limit. A one-shot job has no setting here: [System requirements](system-requirements.md#when-a-service-reaches-its-limit) says how one that reaches its limit shows, and what to do. The tasks of heavier pipelines need more than the demo, and so do more tasks at the same time: with LocalExecutor, up to `AIRFLOW_PARALLELISM` tasks run in the scheduler at once, so raise `AIRFLOW_TASKS_MEMORY` with it. Each limit that you raise needs memory on the machine as well: [System requirements](system-requirements.md#memory-limits) says how the defaults add up. When a service reaches its limit, the kernel stops one of its processes ([System requirements](system-requirements.md#when-a-service-reaches-its-limit)).
 
 ## Settings fixed in `compose.yaml`
 

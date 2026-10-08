@@ -67,14 +67,20 @@ git diff HEAD origin/main -- compose.yaml | grep '^[-+].*metabase/metabase:'
 
 When it prints nothing, the version stays. When it prints the old and the new image of Metabase, and the second number of the version changes, such as from `v0.64.1` to `v0.65.0`, the update moves Metabase to a new major version: the next `up` migrates the database of Metabase, and only a backup made before it can take that back. Then back up Metabase first, as [Back up Metabase before an upgrade](../reference/configuration.md#back-up-metabase-before-an-upgrade) says, and note the commit that you come from, which `git rev-parse HEAD` prints, to go back to.
 
-Then update and start again:
+Then update, and let `init` add the settings that the new version brings to `.env`:
 
 ```bash
 git pull
+./agoranomos init
+```
+
+`init` names the settings that it adds, with their defaults or new secrets, and changes no value that is set. Look at them before you start the stack: an update can bring limits, such as the memory limits that every service got in October 2026, whose defaults fit the demo. If your own DAGs, a higher `AIRFLOW_PARALLELISM` or the questions and dashboards of your Metabase need more, raise the limits now ([Give a service more memory](#give-a-service-more-memory)). With its limit, Metabase gives half of `METABASE_MEMORY` to its heap, 1,088 MiB by default; without one, Java gave the heap a quarter of the memory of Docker, about 1.9 GiB on 8 GB. Then start the stack:
+
+```bash
 ./agoranomos up
 ```
 
-`up` adds to `.env` the settings that the new version brings, with their defaults or new secrets, and changes no value that is set. It builds the Airflow image again and starts again the services that changed; the data stays.
+`up` builds the Airflow image again and starts again the services that changed; the data stays. A new key, such as the key that signs the sessions of Metabase, which came with the same update, signs everyone out of Metabase once: sign in again.
 
 In earlier versions, the one-shot job `db-init` had an anonymous volume, and a stack that one of them started keeps it after an update, until the next `./agoranomos down` and `./agoranomos up`. The volume then stays behind, used by no container. It does no harm and does not grow, so removing it is up to you. To remove it, find its name first, in the root of the checkout, then start the stack again and remove the volume by that name:
 
@@ -103,13 +109,13 @@ To go back, wait again until no DAG run is running or queued, set `COMPOSE_FILE=
 
 ## Give a service more memory
 
-Every service has a memory limit, set from measurements on the demo. Pipelines heavier than the demo need more, above all in the service that runs the tasks. Raise its setting in `.env`, for example `AIRFLOW_TASKS_MEMORY=2048m`, and run `./agoranomos up`, which starts that service again with the new limit. With the LocalExecutor, up to `AIRFLOW_PARALLELISM` tasks run in the scheduler at the same time, so raise `AIRFLOW_TASKS_MEMORY` with it. Each limit that you raise needs memory on the machine too ([System requirements](../reference/system-requirements.md#memory-limits)). [Configuration](../reference/configuration.md#memory-limits) lists the settings.
+Every service has a memory limit, set from measurements on the demo. Pipelines heavier than the demo need more, above all in the service that runs the tasks. Raise its setting in `.env`, for example `AIRFLOW_TASKS_MEMORY=2048m`, and run `./agoranomos up`, which starts that service again with the new limit. With the LocalExecutor, up to `AIRFLOW_PARALLELISM` tasks run in the scheduler at the same time, so raise `AIRFLOW_TASKS_MEMORY` with it. Each limit that you raise needs memory on the machine too ([System requirements](../reference/system-requirements.md#memory-limits)). [Configuration](../reference/configuration.md#memory-limits) lists the settings. The one-shot setup jobs, such as `airflow-init`, have their limits fixed in `compose.yaml`, with no setting in `.env`: [System requirements](../reference/system-requirements.md#when-a-service-reaches-its-limit) says what to do when one reaches its limit.
 
 ## If something goes wrong
 
 - **A port is in use.** `preflight` names the port and its setting. Set another port in `.env`, for example `AIRFLOW_PORT=18080`, and run `./agoranomos up` again.
-- **Docker has too little memory or too few CPUs.** In Docker Desktop on macOS, raise them in Settings → Resources → Advanced, Memory limit and CPU limit. On Windows with WSL2, Docker Desktop leaves them to WSL, which gives its virtual machine half of the memory of Windows by default: set `memory=` and `processors=` in the `[wsl2]` section of `.wslconfig` in your Windows user folder, such as `memory=8GB`, then restart WSL with `wsl --shutdown`. On Linux with Docker Engine, Docker has the memory and the CPUs of the machine. Then run `./agoranomos up` again. (As of October 2026, Docker's and Microsoft's documentation.)
-- **A service failed.** `up` names it and the command that shows its logs, for example `./agoranomos logs airflow-init`.
+- **Docker has too little memory or too few CPUs.** In Docker Desktop on macOS, raise them in Settings → Resources → Advanced, Memory limit and CPU limit. On Windows with WSL2, Docker Desktop leaves them to WSL, which gives its virtual machine half of the memory of Windows by default: set `memory=` and `processors=` in the `[wsl2]` section of `.wslconfig` in your Windows user folder, such as `memory=8GB`, and create the file if there is none, which is the default; then restart WSL with `wsl --shutdown` in PowerShell, not in the WSL2 terminal. On Linux with Docker Engine, Docker has the memory and the CPUs of the machine. Then run `./agoranomos up` again. (As of October 2026, Docker's and Microsoft's documentation.)
+- **A service failed.** `up` names it and the command that shows its logs, for example `./agoranomos logs airflow-init`. When the line says exit code 137, or Docker Compose says `exit 137`, the service was killed, most often at its memory limit: [System requirements](../reference/system-requirements.md#when-a-service-reaches-its-limit) says what to do.
 - **A task failed with no error of its own, or a service restarted.** It may have reached its memory limit: [System requirements](../reference/system-requirements.md#when-a-service-reaches-its-limit) says how that shows, and [Give a service more memory](#give-a-service-more-memory) raises the limit. With the LocalExecutor, a task at its limit can take the scheduler down with it. After the scheduler restarts, it resets the task as orphaned, about five minutes later on the stack that was measured, and runs it again, whatever its retries (as of Airflow 3.3.2, October 2026), so write tasks that are safe to run twice. With the CeleryExecutor, the tasks run in the container of the worker, apart from the scheduler ([above](#run-the-tasks-on-a-separate-worker)).
 - **The demo is not ready.** [See the demo](see-the-demo.md) says what `demo-init` does and how to read its log.
 
