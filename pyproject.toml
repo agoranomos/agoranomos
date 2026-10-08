@@ -10,7 +10,7 @@ dependencies = []
 
 [dependency-groups]
 dev = [
-    "prek==0.5.4",
+    "prek==0.5.5",
     "pytest==9.1.1",
     "ruff==0.16.10",
     "zensical==0.0.67",
