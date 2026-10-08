@@ -266,6 +266,24 @@ def test_init_adds_settings_that_a_new_release_brings(cli):
     assert all("NEW_SETTING" not in line or line == "NEW_SETTING=42" for line in lines)
 
 
+def test_an_env_of_the_last_release_gets_the_memory_limits_with_their_defaults(cli):
+    # The .env of a release before the memory limits: init adds every limit with the value of
+    # .env.example, and Compose has the same default for each.
+    cli.run("init")
+    lines = cli.env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    cli.env_path.write_text(
+        "".join(line for line in lines if not re.match(r"[A-Z_]+_MEMORY=", line)),
+        encoding="utf-8",
+    )
+    result = cli.run("init")
+    assert result.returncode == 0, result.stderr
+    example = (cli.root / ".env.example").read_text(encoding="utf-8").splitlines()
+    limits = dict(line.split("=", 1) for line in example if re.match(r"[A-Z_]+_MEMORY=", line))
+    assert limits, "no memory limits in .env.example"
+    assert f"Added new settings to .env: {' '.join(limits)}" in result.stdout
+    assert {key: cli.read_env()[key] for key in limits} == limits
+
+
 def test_init_creates_the_extensions_folder(cli):
     cli.run("init")
     assert (cli.root / "extensions" / "dags").is_dir()

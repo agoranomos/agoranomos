@@ -621,6 +621,27 @@ def test_metabase_may_not_gain_privileges(variant):
     assert metabase["security_opt"] == ["no-new-privileges:true"]
 
 
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_every_service_has_a_memory_limit_and_no_swap(variant):
+    # Compose gives both in bytes. The values come from .env, which may raise them; the budget of
+    # the defaults is a unit test (tests/unit/test_memory_limits.py).
+    problems = []
+    for name, service in rendered(variant).items():
+        limit = service.get("mem_limit")
+        if not limit:
+            problems.append(f"{name} has no memory limit")
+        elif service.get("memswap_limit") != limit:
+            problems.append(f"{name} may swap")
+    assert not problems, "; ".join(problems)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_gives_half_of_its_limit_to_the_heap_of_java(variant):
+    # Without it, Java takes a quarter of the limit, and Metabase runs short of heap.
+    java = rendered(variant)["metabase"]["environment"].get("JAVA_OPTS")
+    assert java == "-XX:MaxRAMPercentage=50"
+
+
 # The users that are root: a name, a number, or either with a group.
 ROOT = {"", "root", "0"}
 

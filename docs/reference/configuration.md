@@ -33,6 +33,24 @@ Each value is used as written: keep it on one line, do not put a comment after i
 | `AIRFLOW_PARALLELISM` | `4` | How many Airflow tasks run at the same time, in the whole stack. With LocalExecutor, each one is a process in the scheduler container, so more tasks need more memory, and a task that runs out of memory can make the scheduler restart (Airflow's documentation warns about this). With CeleryExecutor it caps all workers together: raise it together with `AIRFLOW_WORKER_CONCURRENCY` or the number of workers. |
 | `AIRFLOW_WORKER_CONCURRENCY` | `4` | Only with CeleryExecutor: how many tasks one Airflow worker runs at a time. More tasks need more memory. |
 
+## Memory limits
+
+Every service has a memory limit, also for swap, so that the stack stays within the memory of [System requirements](system-requirements.md) and a service that runs short of memory cannot take it from the others. The limits of the services that run all the time are these settings, with defaults from measurements on the demo; those of the one-shot setup jobs are fixed in `compose.yaml`. A value is a number of MiB with `m`, or of GiB with `g`.
+
+| Setting | Default | Service |
+|---|---|---|
+| `WAREHOUSE_DB_MEMORY` | `256m` | `warehouse-db`, the warehouse |
+| `PLATFORM_DB_MEMORY` | `384m` | `platform-db`, the databases of Airflow and Metabase |
+| `AIRFLOW_APISERVER_MEMORY` | `512m` | `airflow-apiserver` |
+| `AIRFLOW_DAG_PROCESSOR_MEMORY` | `768m` | `airflow-dag-processor`, which runs `dbt ls` each time that it parses the transform DAG (below) |
+| `AIRFLOW_TRIGGERER_MEMORY` | `640m` | `airflow-triggerer` |
+| `AIRFLOW_TASKS_MEMORY` | `1152m` | The service that runs the Airflow tasks: `airflow-scheduler` with LocalExecutor, `airflow-worker` with CeleryExecutor |
+| `METABASE_MEMORY` | `2176m` | `metabase`; half of it is the heap of Java |
+| `AIRFLOW_SCHEDULER_MEMORY` | `512m` | Only with CeleryExecutor: `airflow-scheduler`, which then runs no task |
+| `BROKER_MEMORY` | `256m` | Only with CeleryExecutor: `broker` |
+
+When a service needs more, raise its limit in `.env` and run `./agoranomos up`, which starts it again with the new limit. The tasks of heavier pipelines need more than the demo, and so do more tasks at the same time: with LocalExecutor, `AIRFLOW_PARALLELISM` tasks run in the scheduler at once, so raise `AIRFLOW_TASKS_MEMORY` with it. Each limit that you raise needs memory on the machine as well: [System requirements](system-requirements.md#memory-limits) says how the defaults add up. When a service reaches its limit, the kernel stops one of its processes ([System requirements](system-requirements.md#when-a-service-reaches-its-limit)).
+
 ## Settings fixed in `compose.yaml`
 
 Some settings are not in `.env`, because changing them is a decision and not a preference. They are environment variables in `compose.yaml`, and a value from an environment variable wins over any value saved in the application.
