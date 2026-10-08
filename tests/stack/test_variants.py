@@ -645,14 +645,25 @@ def test_every_service_drops_every_capability_and_starts_as_a_user_that_is_not_r
     assert not problems, "; ".join(problems)
 
 
-# The one-shot jobs that write nothing outside their volumes and tmpfs mounts.
-READ_ONLY_JOBS = ("db-init", "metadata-export", "metabase-init", "demo-init")
+# The one-shot jobs that write their file system: airflow-init, where Airflow writes its
+# airflow.cfg into /opt/airflow and Python the bytecode of the modules that it imports. Every other
+# one-shot job writes nothing outside its volumes and tmpfs mounts.
+WRITING_JOBS = {"airflow-init"}
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_the_jobs_that_write_nothing_have_a_read_only_file_system(variant):
+    # The one-shot jobs come from the rendered config: restart: "no", which
+    # test_the_one_shot_jobs_are_the_services_named_init_or_export ties to the names that
+    # ./agoranomos up waits for. So a new job is checked without a change here: it gets
+    # read_only, or a place in WRITING_JOBS with the reason in the comment above it.
     services = rendered(variant)
-    writable = [name for name in READ_ONLY_JOBS if services[name].get("read_only") is not True]
+    jobs = {name for name, service in services.items() if service.get("restart") == "no"}
+    stale = sorted(WRITING_JOBS - jobs)
+    assert not stale, f"not a one-shot job of the variant: {stale}"
+    writable = sorted(
+        name for name in jobs - WRITING_JOBS if services[name].get("read_only") is not True
+    )
     assert not writable, f"these jobs can write their file system: {writable}"
 
 

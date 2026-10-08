@@ -186,21 +186,31 @@ NAMED_USERS = {"warehouse-db": ("postgres", 999), "platform-db": ("postgres", 99
 
 
 def test_the_databases_and_metabase_run_as_the_users_of_their_images():
+    # The processes alone would show the same users without user: in compose.yaml, since the
+    # entrypoint would switch to them as root. docker compose exec runs as the user: of the
+    # service, and as root without one, so id -u shows that the line is there.
     for service, (process, uid) in {**NAMED_USERS, "metabase": ("java", 2000)}.items():
         result = compose("exec", "-T", service, "sh", "-c", process_uids(process), check=False)
         assert result.returncode == 0, f"{service}: {result.stderr}"
         uids = {line.split()[1] for line in result.stdout.splitlines()}
         assert uids == {str(uid)}, (service, sorted(uids))
+        user = compose("exec", "-T", service, "id", "-u", check=False)
+        assert user.returncode == 0, f"{service}: {user.stderr}"
+        assert user.stdout.strip() == str(uid), (service, user.stdout.strip())
 
 
 def test_db_init_leaves_no_volume_behind():
     # Its container has only the bind mount of postgres/: no anonymous volume for the data that
     # the image of PostgreSQL declares (see compose.yaml). A db-init container of an earlier
     # release has such a volume, and Compose carries it over to the container that it recreates
-    # from the new compose.yaml: on a stack that was upgraded, this fails until ./agoranomos down,
-    # after which the next up gives db-init a new container without it. The volume stays.
+    # from the new compose.yaml, so on a stack that was upgraded this fails until the container
+    # is new. The message names the types of the mounts only.
     [details] = json.loads(
         docker("inspect", containers()["db-init"]["ID"]).stdout, object_hook=NamesOnly
     )
     kinds = sorted(mount["Type"] for mount in details["Mounts"])
-    assert kinds == ["bind"], kinds
+    assert kinds == ["bind"], (
+        f"db-init has the mounts {kinds}. A deployment upgraded from an earlier release keeps the "
+        "old anonymous volume of db-init until ./agoranomos down and ./agoranomos up. The volume "
+        "that it left is then dangling, and docker volume rm <name> removes it (never prune)."
+    )
