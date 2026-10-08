@@ -3,9 +3,12 @@
 The answers of Metabase and the environment of its containers hold secrets, and a failed assertion
 prints what it compares: these tests print names, flags and status codes, never an answer. They
 change no setting of Metabase. They read, they run one SELECT through it, they run metabase-init
-again, which the stack does on every start anyway, and they try three changes of the LLM providers
-that Metabase must refuse, and that would change nothing if it took them.
+again, which the stack does on every start anyway, they sign in once more and read the login
+history, and they try three changes of the LLM providers that Metabase must refuse, and that would
+change nothing if it took them.
 """
+
+import time
 
 import pytest
 from ai_switches import readings, switches_on
@@ -53,6 +56,37 @@ PROVIDER_WRITES = {
     "update": ("PUT", "/api/llm/providers/agoranomos-stack-test", {}),
     "delete": ("DELETE", "/api/llm/providers/agoranomos-stack-test", None),
 }
+
+
+# What Metabase logs when it cannot ask get.geojs.io where the address of a sign-in is, as
+# compose.yaml makes sure: the name leads to the container of Metabase itself, where nothing
+# listens (Metabase 0.64.1).
+GEOCODING_ERROR = "Error geocoding IP addresses"
+GEOCODING_REFUSED = "Error geocoding IP addresses: Connection refused"
+
+
+def logged(text: str) -> int:
+    """How often the log of Metabase holds a text. The log is counted where it is read, so that no
+    frame of a failed test holds it."""
+    return compose("logs", "--no-color", "metabase").stdout.count(text)
+
+
+def geojs_address() -> str | None:
+    """The address that the name get.geojs.io has inside the container of Metabase, or None when it
+    has none."""
+    result = compose("exec", "-T", "metabase", "getent", "hosts", "get.geojs.io", check=False)
+    fields = result.stdout.split()
+    return fields[0] if result.returncode == 0 and fields else None
+
+
+def login_history(metabase_url: str, session: dict[str, str]) -> tuple[int, int, int]:
+    """The login history of the admin, as Account settings shows it: the status of the answer, how
+    many sign-ins it lists, and how many of them have a place. The history holds the addresses, the
+    devices and the places of the sign-ins, so it is counted where it is read, and no frame of a
+    failed test holds it."""
+    status, history = http_json("GET", f"{metabase_url}/api/login-history/current", headers=session)
+    entries = history if status == 200 and isinstance(history, list) else []
+    return status, len(entries), sum(entry.get("location") is not None for entry in entries)
 
 
 @pytest.fixture(scope="module")
@@ -274,3 +308,56 @@ def test_no_secret_is_in_the_logs(env, service):
     assert has_log, f"{service} has no log, so there is nothing to look in"
     found = leaked(values, compose("logs", "--no-color", service).stdout)
     assert not found, f"the log of {service} holds the values of {found}"
+
+
+def test_the_geocoding_service_is_metabase_itself():
+    assert geojs_address() == "127.0.0.1"
+
+
+def test_a_sign_in_from_a_new_device_asks_nothing_about_its_address(env, metabase_url):
+    # A request without the cookie of a device comes from a new device. Metabase would ask where
+    # its address is, in the background, for an email; with the question going nowhere, each
+    # question would log an error. Where the question reaches get.geojs.io, it logs nothing, so the
+    # test first makes sure that it goes nowhere, also when it runs alone.
+    assert geojs_address() == "127.0.0.1", (
+        "get.geojs.io does not lead to Metabase itself (extra_hosts): a sign-in that logs nothing "
+        "would prove nothing"
+    )
+    before = logged(GEOCODING_ERROR)
+    # Only the status: the answer holds the id of the new session.
+    status = http_json(
+        "POST",
+        f"{metabase_url}/api/session",
+        {
+            "username": env.get("AGORANOMOS_ADMIN_EMAIL") or "admin@example.com",
+            "password": env["METABASE_ADMIN_PASSWORD"],
+        },
+    )[0]
+    assert status == 200, f"the admin could not sign in: HTTP {status}"
+    time.sleep(5)
+    assert logged(GEOCODING_ERROR) == before, "a sign-in made Metabase ask where its address is"
+
+
+def test_the_login_history_asks_and_the_question_goes_nowhere(metabase_url, session):
+    # The login history in Account settings asks where each address is, whatever the settings say:
+    # the question reaches no one, and the history shows no place. The test compares counts: the
+    # history holds the addresses and the places of the sign-ins.
+    before = logged(GEOCODING_REFUSED)
+    status, entries, with_a_place = login_history(metabase_url, session)
+    assert status == 200, f"HTTP {status}"
+    assert entries, "the login history is empty"
+    assert not with_a_place, (
+        f"{with_a_place} of {entries} sign-ins in the login history have a place"
+    )
+    assert logged(GEOCODING_REFUSED) == before + 1
+
+
+def test_metabase_signs_its_sessions():
+    # Without MB_SESSION_SECRET_KEY, Metabase warns at every start that it keeps its sessions
+    # without a signature. The line of the end of the start shows that the log still holds the
+    # start, which an old log may have lost.
+    assert logged("Metabase Initialization COMPLETE"), (
+        "the log of Metabase does not hold its start: run docker compose restart metabase, "
+        "and run this test again"
+    )
+    assert not logged("MB_SESSION_SECRET_KEY is not set"), "Metabase keeps unsigned sessions"

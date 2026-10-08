@@ -230,8 +230,8 @@ def expected_holders(variant: str) -> dict[str, set[str]]:
       hold the password of the broker.
     - The admin passwords stay in the one-shot jobs that create the admins or sign in as them, so
       the code of an Airflow task, an extension DAG included, never holds one.
-    - Metabase holds its own database password and key. It learns the password of the warehouse
-      from metabase-init, which holds it with the admin password that it signs in with.
+    - Metabase holds its own database password and its two keys. It learns the password of the
+      warehouse from metabase-init, which holds it with the admin password that it signs in with.
     """
     airflow = airflow_names(variant)
     runner = TASK_RUNNER[variant]
@@ -251,6 +251,7 @@ def expected_holders(variant: str) -> dict[str, set[str]]:
         "AIRFLOW_API_SECRET_KEY": airflow,
         "AIRFLOW_ADMIN_PASSWORD": {"airflow-init", "demo-init"},
         "METABASE_ENCRYPTION_KEY": {"metabase"},
+        "METABASE_SESSION_KEY": {"metabase"},
         "METABASE_ADMIN_PASSWORD": {"metabase-init", "demo-init"},
     }
 
@@ -469,6 +470,30 @@ def test_metabase_keeps_its_list_of_llm_providers_empty_with_an_environment_vari
     # API refuses changes to it.
     environment = rendered(variant)["metabase"]["environment"]
     assert environment.get("MB_LLM_PROVIDERS") == "[]"
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_keeps_the_addresses_of_sign_ins_and_the_traces_of_ai_at_home(variant):
+    # The values are flags and a host name, so a failed assertion may print them.
+    metabase = rendered(variant)["metabase"]
+    environment = metabase["environment"]
+    states = {
+        key: environment.get(key)
+        for key in ("MB_SEND_EMAIL_ON_FIRST_LOGIN_FROM_NEW_DEVICE", "MB_AI_EVAL_CAPTURE")
+    }
+    assert states == dict.fromkeys(states, "false"), states
+    # Compose writes an entry as host=address, and older versions as host:address.
+    hosts = sorted(entry.replace("=", ":", 1) for entry in metabase.get("extra_hosts") or [])
+    assert hosts == ["get.geojs.io:127.0.0.1"]
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_signs_its_sessions_with_a_key_long_enough(variant):
+    # A key shorter than 16 characters stops Metabase at start. The key is a secret: the test
+    # compares its length into a flag, and binds no name to the key itself.
+    environment = rendered(variant)["metabase"]["environment"]
+    long_enough = len(environment.get("MB_SESSION_SECRET_KEY") or "") >= 16
+    assert long_enough, "MB_SESSION_SECRET_KEY is missing or shorter than 16 characters"
 
 
 @pytest.mark.parametrize("variant", VARIANTS)

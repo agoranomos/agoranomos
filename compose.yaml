@@ -312,6 +312,10 @@ services:
       MB_DB_USER: metabase
       MB_DB_PASS: ${METABASE_DB_PASSWORD:?run ./agoranomos init}
       MB_ENCRYPTION_SECRET_KEY: ${METABASE_ENCRYPTION_KEY:?run ./agoranomos init}
+      # Signs the sessions that Metabase keeps in its application database, so that whoever can read
+      # or write that database cannot make a session of their own. At least 16 characters: a
+      # shorter one stops Metabase at start. A new key signs everyone out of Metabase once.
+      MB_SESSION_SECRET_KEY: ${METABASE_SESSION_KEY:?run ./agoranomos init}
       MB_SITE_URL: http://localhost:${METABASE_PORT:-3000}
       MB_ANON_TRACKING_ENABLED: "false"
       MB_CHECK_FOR_UPDATES: "false"
@@ -335,11 +339,28 @@ services:
       # as soon as the variable is removed, so a change that removes it checks Admin > AI at the first
       # start without it.
       MB_LLM_PROVIDERS: "[]"
+      # Metabase 0.64 can write the traces of its AI features, prompts and answers with the data that
+      # they carry, into files, and show them to an admin. It is off by default and can be turned on
+      # only from the environment: this keeps it off where the next person to read this file sees
+      # it.
+      MB_AI_EVAL_CAPTURE: "false"
+      # On a sign-in from a new device, Metabase sends the address of the sign-in to get.geojs.io,
+      # to name its place in an email to the user (Metabase 0.63 and 0.64). The data of a
+      # deployment stays on its own machines, and so do the addresses of its users: this turns the
+      # email off, and the question with it. The stack sets up no email server, so no email is lost;
+      # if email is set up in Metabase later, it still sends no email about a sign-in from a new
+      # device while this is false. The login history in Account settings still asks: extra_hosts
+      # below answers it.
+      MB_SEND_EMAIL_ON_FIRST_LOGIN_FROM_NEW_DEVICE: "false"
       # Prometheus metrics, for the planned Ops collection. The port is not published, so it is
       # reachable only from the Compose networks.
       MB_PROMETHEUS_SERVER_PORT: "9191"
     ports:
       - "127.0.0.1:${METABASE_PORT:-3000}:3000"
+    # get.geojs.io is this container itself, where nothing listens, so the question of the login
+    # history about the place of an address goes nowhere, and the history shows no place.
+    extra_hosts:
+      - "get.geojs.io:127.0.0.1"
     # default for the published port and for metabase-init; data to reach the databases.
     networks: [default, data]
     healthcheck:

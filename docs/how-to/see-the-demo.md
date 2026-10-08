@@ -13,7 +13,7 @@ Agoranomos comes with a demo: eight weeks of statistics of one fictional ad acco
 
 ## Look at it
 
-- **Metabase**, at the address that `up` prints: sign in with `AGORANOMOS_ADMIN_EMAIL` and `METABASE_ADMIN_PASSWORD` from `.env`, and open the collection **Agoranomos demo**. The dashboard shows the spend of the last seven days that have data, in total and by campaign, and the spend of every day.
+- **Metabase**, at the address that `up` prints: sign in with `AGORANOMOS_ADMIN_EMAIL` and `METABASE_ADMIN_PASSWORD` from `.env` (`./agoranomos credentials` shows the address, the email and the setting that holds the password), and open the collection **Agoranomos demo**. The dashboard shows the spend of the last seven days that have data, in total and by campaign, and the spend of every day.
 - **Airflow**, at the address that `up` prints: sign in as `admin` with `AIRFLOW_ADMIN_PASSWORD` from `.env`, and open the DAGs `agoranomos_demo_load` and `agoranomos_demo_transform`, their runs and the asset between them.
 
 ## What later starts do

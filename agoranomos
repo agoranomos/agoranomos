@@ -28,7 +28,8 @@ force=0
 SECRET_KEYS="WAREHOUSE_POSTGRES_PASSWORD PLATFORM_POSTGRES_PASSWORD AIRFLOW_DB_PASSWORD
 METABASE_DB_PASSWORD METABASE_READER_PASSWORD WAREHOUSE_LOADER_PASSWORD
 WAREHOUSE_TRANSFORMER_PASSWORD VALKEY_PASSWORD AIRFLOW_FERNET_KEY AIRFLOW_JWT_SECRET
-AIRFLOW_API_SECRET_KEY AIRFLOW_ADMIN_PASSWORD METABASE_ENCRYPTION_KEY METABASE_ADMIN_PASSWORD"
+AIRFLOW_API_SECRET_KEY AIRFLOW_ADMIN_PASSWORD METABASE_ENCRYPTION_KEY METABASE_SESSION_KEY
+METABASE_ADMIN_PASSWORD"
 
 say() { printf '%s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -195,7 +196,9 @@ generate_secret() {
   case "$1" in
     AIRFLOW_FERNET_KEY) fernet_key ;;
     AIRFLOW_ADMIN_PASSWORD | METABASE_ADMIN_PASSWORD) random_password ;;
-    AIRFLOW_JWT_SECRET | AIRFLOW_API_SECRET_KEY | METABASE_ENCRYPTION_KEY) random_alnum 64 ;;
+    AIRFLOW_JWT_SECRET | AIRFLOW_API_SECRET_KEY | METABASE_ENCRYPTION_KEY | METABASE_SESSION_KEY)
+      random_alnum 64
+      ;;
     *) random_alnum 32 ;;
   esac
 }
@@ -409,6 +412,12 @@ EOF
       warn "$free_gb GB of disk is free for Docker ($docker_root); $RECOMMENDED_DISK_GB GB is recommended. Free up disk space on the file system of $docker_root."
     fi
   fi
+  # Metabase does not start with a session key shorter than 16 characters (compose.yaml). init
+  # generates a longer one; this catches one set by hand.
+  session_key=$(env_get METABASE_SESSION_KEY)
+  if [ -n "$session_key" ] && [ "${#session_key}" -lt 16 ]; then
+    problem "METABASE_SESSION_KEY in .env has fewer than 16 characters, and Metabase does not start with it: empty it, and ./agoranomos up generates a new one"
+  fi
   # A running stack holds its own ports, so the ports are checked only while it is not running.
   if [ -z "$(compose ps --quiet --status running 2> /dev/null)" ]; then
     if [ -n "$(port_tools)" ]; then
@@ -522,6 +531,7 @@ cmd_up() {
   wait_healthy
   say "Airflow:  http://127.0.0.1:$(setting AIRFLOW_PORT 8080)"
   say "Metabase: http://127.0.0.1:$(setting METABASE_PORT 3000)"
+  say "./agoranomos credentials shows how to sign in."
   # Only demo-init failed: Airflow and Metabase run, and its log names what to look at in them. up
   # still fails, so that a start that is not complete never passes as one.
   [ "$demo_failed" -eq 0 ] || die "the stack is up, but the demo is not ready"
@@ -584,6 +594,17 @@ cmd_metadata() {
   esac
 }
 
+# Where to sign in, and as whom. The passwords stay in .env: this prints the names of their
+# settings, never their values, so that no password lands in the scrollback of a terminal, in a
+# log or on a shared screen.
+cmd_credentials() {
+  [ "$#" -eq 0 ] || die "credentials takes no options"
+  [ -f "$ENV_FILE" ] || die "there is no .env yet: run ./agoranomos init"
+  say "Airflow:  http://127.0.0.1:$(setting AIRFLOW_PORT 8080)  user name admin, password AIRFLOW_ADMIN_PASSWORD"
+  say "Metabase: http://127.0.0.1:$(setting METABASE_PORT 3000)  email $(setting AGORANOMOS_ADMIN_EMAIL admin@example.com), password METABASE_ADMIN_PASSWORD"
+  say "The passwords are the values of these settings in $ENV_FILE, which only you can read."
+}
+
 cmd_help() {
   print_banner
   usage
@@ -601,6 +622,7 @@ Commands:
   status        Show the state and health of every service
   logs          Show the logs: the last 200 lines, or pass options and services to docker compose logs
   metadata      metadata diff: show what up would change in the metadata of the marts in Metabase
+  credentials   Show where to sign in to Airflow and Metabase, and where the passwords are
   help          Show this help
 
 Documentation: docs/reference/command-line.md
@@ -618,6 +640,7 @@ main() {
     status) cmd_status "$@" ;;
     logs) cmd_logs "$@" ;;
     metadata) cmd_metadata "$@" ;;
+    credentials) cmd_credentials "$@" ;;
     help | -h | --help) cmd_help ;;
     *)
       usage >&2
