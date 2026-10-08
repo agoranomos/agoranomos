@@ -189,3 +189,5 @@ uv run python scripts/memory_report.py --title "Local, idle" --seconds 600
 ```
 
 CI does the same in every run of the stack tests, and adds the table to the summary of the job.
+
+In the table, `n/a` means that there is nothing to read: a one-shot job that has exited, or a machine without cgroup v2. `unread` means that `docker inspect` or `docker exec` failed for that container, for example because it stopped while the table was made, as a container that the kernel stopped at its limit can: the rest of the table still comes out, and when the limit of a running service is `unread`, so is the total of the limits. A line of `docker stats` that cannot be read is left out, and a note under the table says how many were, such as `1 line of docker stats could not be read and was left out.` The peaks then come from fewer samples, so they can be a little lower than the real ones.

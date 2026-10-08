@@ -169,7 +169,9 @@ def render(title: str, arch: str, rows: list[Row], skipped: int = 0) -> str:
         total_limit = "none" if None in limits else mib(sum(limits))  # type: ignore[arg-type]
     total_peak = mib(sum(row.peak or 0 for row in running))
     lines.append(f"| **Running services, total** | **{total_limit}** | **{total_peak}** | | | |")
-    if skipped:
+    if skipped == 1:
+        lines += ["", "1 line of docker stats could not be read and was left out."]
+    elif skipped:
         lines += ["", f"{skipped} lines of docker stats could not be read and were left out."]
     return "\n".join(lines) + "\n"
 
@@ -223,11 +225,12 @@ class Sampler:
         self.peaks: dict[str, int] = {}
         # The lines that could not be read: a sample less is better than no samples from then on.
         self.skipped = 0
+        # Bytes, not text: read() decodes each line itself, so that a line that is not UTF-8 is
+        # one line left out, not the end of the pipe.
         self.process = subprocess.Popen(
             ["docker", "stats", "--format", "{{json .}}"],  # noqa: S607
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            text=True,
         )
         self.thread = threading.Thread(target=self.read, daemon=True)
         self.thread.start()
@@ -236,9 +239,11 @@ class Sampler:
         if self.process.stdout is None:
             return
         for line in self.process.stdout:
+            # Whatever reading one line raises, such as a size too large for a number, only
+            # leaves that line out. The line itself is never printed.
             try:
-                found = samples(line)
-            except (ValueError, KeyError, TypeError, AttributeError):
+                found = samples(line.decode("utf-8"))
+            except Exception:
                 self.skipped += 1
                 continue
             for name, used in found:

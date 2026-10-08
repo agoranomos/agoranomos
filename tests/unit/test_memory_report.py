@@ -177,16 +177,26 @@ def test_a_container_that_docker_cannot_read_still_gets_its_row(monkeypatch, fai
 
 
 class FakeStats:
-    """What subprocess.Popen gives the Sampler: the output of docker stats as a pipe."""
+    """What subprocess.Popen gives the Sampler: the output of docker stats as a pipe of bytes."""
 
-    def __init__(self, output: str) -> None:
-        self.stdout = io.StringIO(output)
+    def __init__(self, output: bytes) -> None:
+        self.stdout = io.BytesIO(output)
 
     def terminate(self) -> None:
         pass
 
     def wait(self, timeout: float | None = None) -> int:
         return 0
+
+
+def fake_popen(output: bytes):
+    """subprocess.Popen for the Sampler, which must ask for bytes: it decodes each line itself."""
+
+    def popen(*args, **kwargs) -> FakeStats:
+        assert not {"text", "encoding", "errors", "universal_newlines"} & kwargs.keys()
+        return FakeStats(output)
+
+    return popen
 
 
 def test_a_line_of_docker_stats_that_cannot_be_read_is_left_out_and_counted(monkeypatch):
@@ -200,7 +210,7 @@ def test_a_line_of_docker_stats_that_cannot_be_read_is_left_out_and_counted(monk
         + stats("a-metabase-1", "1.5GiB / 2GiB")
         + "\n"
     )
-    monkeypatch.setattr(mr.subprocess, "Popen", lambda *args, **kwargs: FakeStats(output))
+    monkeypatch.setattr(mr.subprocess, "Popen", fake_popen(output.encode()))
     sampler = mr.Sampler()
     assert sampler.stop() == {"a-metabase-1": round(1.5 * 1024**3)}
     assert sampler.skipped == 3
@@ -209,6 +219,39 @@ def test_a_line_of_docker_stats_that_cannot_be_read_is_left_out_and_counted(monk
         "\n"
         "3 lines of docker stats could not be read and were left out.\n"
     )
+
+
+def test_a_line_that_fails_in_any_other_way_is_left_out_too_and_never_printed(monkeypatch, capsys):
+    # A size too large for a number raises OverflowError, and bytes that are not UTF-8 raise
+    # UnicodeDecodeError: each is one line left out, and the lines after it are still read.
+    output = (
+        stats("a-metabase-1", "1e999MiB / 2GiB").encode()
+        + b"\n"
+        + b'{"Name": "a-marker-\xff", "MemUsage": "1GiB / 2GiB"}\n'
+        + stats("a-metabase-1", "1.5GiB / 2GiB").encode()
+        + b"\n"
+    )
+    monkeypatch.setattr(mr.subprocess, "Popen", fake_popen(output))
+    sampler = mr.Sampler()
+    assert sampler.stop() == {"a-metabase-1": round(1.5 * 1024**3)}
+    assert sampler.skipped == 2
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ""
+
+
+@pytest.mark.parametrize(
+    ("skipped", "note"),
+    [
+        (1, "1 line of docker stats could not be read and was left out."),
+        (2, "2 lines of docker stats could not be read and were left out."),
+    ],
+)
+def test_the_note_counts_the_lines_that_were_left_out(skipped, note):
+    assert mr.render("Local", "x86_64", [], skipped).endswith(f" | | | |\n\n{note}\n")
+
+
+def test_without_a_line_left_out_there_is_no_note():
+    assert mr.render("Local", "x86_64", [], 0).endswith(" | | | |\n")
 
 
 class QuietSampler:
@@ -228,7 +271,25 @@ def test_the_exit_code_is_that_of_the_command(monkeypatch, capsys, code):
     monkeypatch.setattr(mr, "collect", lambda peaks: [])
     command = [sys.executable, "-c", f"raise SystemExit({code})"]
     assert mr.main(["--title", "T", "--", *command]) == code
-    assert "### T (x86_64)" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "### T (x86_64)" in output
+    # A command that fails is not a line of docker stats left out.
+    assert "could not be read" not in output
+
+
+def test_main_says_under_the_table_how_many_lines_were_left_out(monkeypatch, capsys, tmp_path):
+    class SkippingSampler(QuietSampler):
+        skipped = 2
+
+    monkeypatch.setattr(mr, "Sampler", SkippingSampler)
+    monkeypatch.setattr(mr, "docker", fake_docker())
+    monkeypatch.setattr(mr, "collect", lambda peaks: [])
+    summary = tmp_path / "summary.md"
+    command = [sys.executable, "-c", "raise SystemExit(1)"]
+    assert mr.main(["--title", "T", "--output", str(summary), "--", *command]) == 1
+    note = "\n\n2 lines of docker stats could not be read and were left out.\n"
+    assert capsys.readouterr().out.endswith(note)
+    assert summary.read_text(encoding="utf-8").endswith(note + "\n")
 
 
 def test_a_failed_docker_exec_keeps_the_table_and_the_exit_code(monkeypatch, capsys):
