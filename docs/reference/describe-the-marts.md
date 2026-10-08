@@ -49,6 +49,8 @@ The marts declare them under `config: meta: metabase:`, with the key names of [d
 
 **Names are in Title Case.** After the first word, a, an, and, as, at, by, for, in, of, on, or, per, the and to stay in lower case, and these abbreviations are in capitals: ID, CTR, CPC, CPM, CPA, ROAS and ISO. Two columns of one table never share a display name.
 
+The jobs that apply the metadata never send a display name of `null`, which the two versions treat differently, as of October 2026: Metabase 0.64.1 then clears the name that someone gave the field and shows the one of its sync, where 0.63.19 ignores it.
+
 **Semantic types**, by the kind of column:
 
 | Kind of column | `semantic_type` | In the demo |
@@ -60,7 +62,7 @@ The marts declare them under `config: meta: metabase:`, with the key names of [d
 | Money, when the whole table has one currency and tests assert it | `type/Currency`, with `currency` | `spend` |
 | Any other number, such as a count that can be fractional | `null` | `conversions` |
 
-`type/Quantity` is for whole numbers: Metabase defines it under its integer types (as of Metabase 0.63.19). `null` declares that the column has no type of its own: the jobs that apply the metadata then clear a type that Metabase guessed, or that someone set in its UI. A column without the key would keep the type that Metabase shows, and the tests require the key on every column of a mart.
+`type/Quantity` is for whole numbers: Metabase defines it under its integer types (as of Metabase 0.63.19 and 0.64.1). `null` declares that the column has no type of its own: the jobs that apply the metadata then clear a type that Metabase guessed, or that someone set in its UI. A column without the key would keep the type that Metabase shows, and the tests require the key on every column of a mart.
 
 **Money and its currency.** `type/Currency` and the types under it, such as `type/Cost`, go together with `currency`, and only in a mart whose column `currency` has an `accepted_values` test with that one code and a `not_null` test: `accepted_values` lets NULL through. The demo is in USD only. In a mart that mixes currencies, the columns of money stay plain numbers, and their descriptions name the column of the currency.
 
@@ -82,7 +84,7 @@ The constraint has no `name`. dbt builds a table under a temporary name and then
 
 `+persist_docs` in `dbt/dbt_project.yml` makes dbt write the descriptions into the comments of the tables, views and columns that it builds, so SQL clients see them too, and so will the planned AI access to the warehouse. dbt does not comment the tables of the sources.
 
-Metabase copies the comment of a table or column into its description when it syncs, but only while that description is empty, as of Metabase 0.63.19: a changed description does not reach Metabase this way. The jobs that apply the metadata on every start bring it there instead.
+Metabase copies the comment of a table or column into its description when it syncs, but only while that description is empty, as of Metabase 0.63.19 and 0.64.1: a changed description does not reach Metabase this way. In 0.64.1, a sync no longer fills the description of a column that someone cleared in Metabase either. The jobs that apply the metadata on every start bring it there instead.
 
 ## A deployment's own words
 

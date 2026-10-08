@@ -261,7 +261,7 @@ def test_metabase_lists_the_columns_of_the_warehouse_through_its_connection(
 ):
     # The jobs ask this when Metabase does not show a mart with the fields of its columns: to tell
     # a mart that dbt has not built yet from one that waits for a sync, and to know which fields
-    # to wait for. The answer of Metabase 0.63.19 to a native query, one row a column.
+    # to wait for. The answer of Metabase 0.63.19 and 0.64.1 to a native query, one row a column.
     status, databases = http_json("GET", f"{metabase_url}/api/database", headers=session)
     assert status == 200, f"GET /api/database answered HTTP {status}"
     [warehouse] = [d for d in databases["data"] if d.get("name") == WAREHOUSE_NAME]

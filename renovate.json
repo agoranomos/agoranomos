@@ -57,6 +57,12 @@
       "schedule": ["* 0-3 * * 1"]
     },
     {
+      "description": "Metabase publishes its hotfixes as four-part tags, such as v0.63.19.3, and its release notes name the floating v0.64.1.x tag. Renovate's docker versioning offers only tags with as many parts as the pinned one (as of 44.132.5, October 2026), so a pin on v0.64.1 would never get v0.64.1.1. This versioning sees the tags of three and of four parts, and leaves out the floating, beta and LTS tags, such as v0.64.x, v0.64.0.10-beta and v0.58-lts.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["metabase/metabase"],
+      "versioning": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)(?:\\.(?<build>\\d+))?$"
+    },
+    {
       "description": "metabase-init and demo-init run on the Python version chosen in ADR-0012, so a new Python minor or major version of the python image is a decision, not a routine update.",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["python"],

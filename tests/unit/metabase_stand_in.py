@@ -2,9 +2,9 @@
 metabase-init, demo-init and the metadata of the marts. One stand-in, so that a correction of how
 Metabase answers reaches the tests of every job.
 
-It answers as Metabase 0.63.19 does where the jobs depend on it, and it answers a failure by
-echoing the request with its credentials: the worst case for secrets. serve() runs a stand-in on a
-free local port, leaked() finds a secret in what a job printed, and metadata_env() writes the
+It answers as Metabase 0.63.19 and 0.64.1 do where the jobs depend on it, and it answers a failure
+by echoing the request with its credentials: the worst case for secrets. serve() runs a stand-in on
+a free local port, leaked() finds a secret in what a job printed, and metadata_env() writes the
 export of the metadata and the overrides that the jobs read.
 """
 
@@ -153,7 +153,7 @@ def metadata_env(
 
 
 class FakeMetabase:
-    """What the setup jobs can see of Metabase 0.63.19.
+    """What the setup jobs can see of Metabase 0.63.19 and 0.64.1.
 
     A new Metabase: no admin, no connection, the root collection and a personal one. A sign-in
     works once there is an admin, and a request without a session is refused.

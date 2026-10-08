@@ -1,8 +1,8 @@
 """Tests of metabase/demo_init.py against stand-ins for the REST APIs of Airflow and Metabase.
 
-The stand-ins answer as Airflow 3.3.2 and Metabase 0.63 do where demo-init depends on it, and they
-answer a failure by echoing the request with its credentials: the worst case for secrets. A fake
-clock runs the waits of demo-init, so a pause takes no time, and the scheduler of the Airflow
+The stand-ins answer as Airflow 3.3.2 and Metabase 0.63 and 0.64 do where demo-init depends on it,
+and they answer a failure by echoing the request with its credentials: the worst case for secrets.
+A fake clock runs the waits of demo-init, so a pause takes no time, and the scheduler of the Airflow
 stand-in runs on the same clock.
 """
 

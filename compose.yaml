@@ -301,7 +301,7 @@ services:
         condition: service_completed_successfully
 
   metabase:
-    image: metabase/metabase:v0.63.19@sha256:7324f83713df9851c6c7b6c8247098de14c0924fc3b868202f886df4877cd4ff
+    image: metabase/metabase:v0.64.1@sha256:fcf3ad4c00f303d96c63233967a24f0d0348bbb725d4704ee1961f9185674e13
     profiles: [core]
     restart: unless-stopped
     environment:
@@ -318,15 +318,23 @@ services:
       # A new Metabase gets no Sample Database and no Examples collection, which have nothing to do
       # with marketing data.
       MB_LOAD_SAMPLE_CONTENT: "false"
-      # Metabase 0.63 turns its AI entry points on by default: the built-in MCP server (with the OAuth
-      # client registration that goes with it) and the Agent API. They stay off until an ADR decides what
-      # AI access may do in Metabase (AGENTS.md). MB_AI_FEATURES_ENABLED is the master switch, which the
-      # other two settings also require; all three are set, so that no one line opens an entry point. A
-      # value from an environment variable wins over any value saved in Metabase, including one changed
+      # Metabase 0.63 and 0.64 turn their AI entry points on by default: the built-in MCP server (with the
+      # OAuth client registration that goes with it) and the Agent API. They stay off until an ADR decides
+      # what AI access may do in Metabase (AGENTS.md). MB_AI_FEATURES_ENABLED is the master switch, which
+      # the other two settings also require; all three are set, so that no one line opens an entry point.
+      # A value from an environment variable wins over any value saved in Metabase, including one changed
       # in the Metabase UI.
       MB_AI_FEATURES_ENABLED: "false"
       MB_MCP_ENABLED: "false"
       MB_AGENT_API_ENABLED: "false"
+      # Metabase 0.64 keeps the keys of LLM providers in a list that an admin can add to whatever the three
+      # switches say. An empty list here puts the list under the control of the environment, and Metabase
+      # then refuses to change it through its provider API and Admin > AI. The older per-provider
+      # settings, such as that of the Anthropic key, still save a value into the stored list, which has no
+      # effect, and which no one can see or clear through the API, while the variable is set. It applies
+      # as soon as the variable is removed, so a change that removes it checks Admin > AI at the first
+      # start without it.
+      MB_LLM_PROVIDERS: "[]"
       # Prometheus metrics, for the planned Ops collection. The port is not published, so it is
       # reachable only from the Compose networks.
       MB_PROMETHEUS_SERVER_PORT: "9191"

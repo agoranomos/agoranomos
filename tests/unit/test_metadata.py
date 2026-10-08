@@ -566,7 +566,8 @@ def test_what_the_code_said_before_comes_from_the_previous_export(tmp_path):
     ],
 )
 def test_humanize_names_a_field_as_metabase_does(name, shown):
-    # Metabase's simple strategy, the default, as its jar answered offline (Metabase 0.63.19).
+    # Metabase's simple strategy, the default, as its jar answered offline (Metabase 0.63.19; 0.64.1
+    # has the same code).
     assert md.humanize(name) == shown
 
 
@@ -599,9 +600,10 @@ def test_a_second_apply_changes_nothing(tmp_path, metabase):
 
 
 def test_no_request_carries_null_but_to_clear_a_semantic_type(tmp_path, metabase):
-    # Metabase 0.63.19 ignores a null display name and 0.64 records it as unset, so the job never
-    # sends one: a property with no value in the code is left out. The one null is the semantic type
-    # of a column that the code declares as none, sent only when Metabase shows a type.
+    # Metabase 0.63.19 ignores a null display name, and 0.64.1 clears the name that a person gave
+    # the field and shows the one of its sync, so the job never sends one: a property with no value
+    # in the code is left out. The one null is the semantic type of a column that the code declares
+    # as none, sent only when Metabase shows a type.
     metabase.field("report_date")["semantic_type"] = "type/CreationDate"
     md.apply(client(metabase), 2, loaded(tmp_path), md.waiter(120, "see the logs"))
     nulls = []

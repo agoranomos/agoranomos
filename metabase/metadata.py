@@ -588,7 +588,7 @@ def describe(change: Change) -> str:
 def metadata_of(metabase: Client, database_id: int) -> dict[str, Any]:
     """What Metabase shows of the warehouse: its tables with their fields. A person may have hidden
     a table or a field in Metabase, and Metabase leaves the hidden ones out unless the request
-    passes include_hidden=true (Metabase 0.63.19)."""
+    passes include_hidden=true (Metabase 0.63.19 and 0.64.1)."""
     return metabase.call("GET", f"/api/database/{database_id}/metadata?include_hidden=true")
 
 

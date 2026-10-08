@@ -10,6 +10,8 @@ Agoranomos reads its settings from the `.env` file in the root of the checkout. 
 
     `.env` holds the keys that decrypt the connections Airflow and Metabase save in their databases. Without them, the connections in a restored backup of those databases cannot be decrypted. Keep a copy in a password manager.
 
+    Before an upgrade of Metabase, back up its database as well: [Back up Metabase before an upgrade](#back-up-metabase-before-an-upgrade).
+
 Each value is used as written: keep it on one line, do not put a comment after it, and put a value with spaces or a `$` in single quotes.
 
 ## Docker Compose
@@ -36,6 +38,8 @@ Each value is used as written: keep it on one line, do not put a comment after i
 Some settings are not in `.env`, because changing them is a decision and not a preference. They are environment variables in `compose.yaml`, and a value from an environment variable wins over any value saved in the application.
 
 The AI switches of Metabase are fixed off in `compose.yaml` until the permissions of AI access are decided ([ADR-0007](../adr/0007-ai-access-via-mcp-read-only.md)): `MB_AI_FEATURES_ENABLED`, `MB_MCP_ENABLED` and `MB_AGENT_API_ENABLED` are all `false`, which keeps the built-in MCP server, the registration of its OAuth clients and the Agent API off. The switch in Admin > AI has no effect while they are. Changing it saves a value that would apply if a variable were removed, so leave it alone.
+
+The switches do not cover the keys of LLM providers, which Metabase uses for its own AI features, such as Metabot and the generation of SQL. Metabase 0.64 keeps them in a list of provider connections, to which an admin can add, in Admin > AI and whatever the switches say, a connection with the key of one of eleven providers, such as Anthropic, OpenAI or Google. An Anthropic key also opens `/api/llm/generate-sql`, which does not read the master switch, as in Metabase 0.63. So `compose.yaml` also sets `MB_LLM_PROVIDERS` to an empty list, `[]`: the list then comes from the environment, and Metabase refuses to change it, in Admin > AI and through its provider API, with a message that names the variable (checked on Metabase 0.64.1, as of October 2026). The lock covers the provider API only. The older setting of each provider, such as `llm-anthropic-api-key` or `llm-openai-api-key` (`PUT /api/setting/…`), still saves a value into the stored list, which has no effect while the variable is set. While the variable is set, Metabase neither shows that stored list nor lets anyone clear it through its API, and the list applies as soon as the variable is removed: a change that removes `MB_LLM_PROVIDERS` should check Admin > AI at the first start without it, which is when that list shows. A variable of one provider, such as `MB_LLM_ANTHROPIC_API_KEY`, would still add a connection; `compose.yaml` sets none, and the stack tests check that the list is empty.
 
 dlt, dbt and Cosmos send anonymous usage statistics by default, and four variables in `compose.yaml`, which the Airflow image sets too, turn that off: `RUNTIME__DLTHUB_TELEMETRY=false` for dlt, `DBT_ENGINE_SEND_ANONYMOUS_USAGE_STATS=False` for dbt, `AIRFLOW__COSMOS__ENABLE_TELEMETRY=False` for Cosmos, and `DO_NOT_TRACK=1`, which dbt and Cosmos also honor. The dbt project says the same with `send_anonymous_usage_stats: false` in `dbt/dbt_project.yml`. Metabase reports nothing to its makers either: `MB_ANON_TRACKING_ENABLED` and `MB_CHECK_FOR_UPDATES` are `false`.
 
@@ -95,3 +99,31 @@ A mart, or a column that a release adds or renames, reaches the warehouse with t
 On every start, the setup job `db-init` sets each role of the warehouse (`loader`, `transformer` and `metabase_reader`) to `LOGIN`, with no `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION` or `BYPASSRLS` attribute, and gives it the password from `.env`. So if you give one of these roles such a power by hand, the next `./agoranomos up` takes it back. It also gives `loader` and `transformer` a lock timeout of one minute: a statement that waits longer for a lock fails with `canceling statement due to lock timeout`. A load then fails and is tried again instead of waiting without end. A dbt run fails too, and the mart keeps its data: dbt renames a table that it rebuilds, which waits for the queries that read the table, and the queries that come later, such as those of Metabase, wait behind it.
 
 `AIRFLOW_DB_PASSWORD` and `VALKEY_PASSWORD` are written into connection URLs. If you choose them yourself instead of letting `init` generate them, use letters and digits only: a character such as `@`, `/` or `:` breaks the URL.
+
+## Back up Metabase before an upgrade
+
+A release that moves Metabase to a new major version, such as from 0.63 to 0.64, migrates the application database of Metabase, the `metabase` database of `platform-db`, at the first `./agoranomos up`. Do not count on undoing the migration: as of October 2026, Metabase 0.63.19 refuses to start on a database that 0.64.1 has migrated, and after the `migrate down` command of 0.64.1 it fails on a migration of its own. The way back is a backup made before the upgrade. A large application database can take a while to migrate, because 0.64 changes the primary key of the `query_execution` table, which logs the queries that Metabase runs, and splits that table into partitions.
+
+Before the first `./agoranomos up` of the new release, back up the database of Metabase. Run the commands in the root of the checkout, where `docker compose` finds `.env`. They need `platform-db` running, which the first command checks: it fails with `service "platform-db" is not running` after `./agoranomos down`, and `docker compose up --detach --wait platform-db` then starts it alone. The second command stops Metabase, so that nothing changes during the backup, the third makes the backup, and the last one checks that the backup reads:
+
+```bash
+docker compose exec -T platform-db pg_isready --quiet
+docker compose stop metabase
+(umask 077 && docker compose exec -T platform-db pg_dump --username=postgres --format=custom --dbname=metabase > ../metabase-before-upgrade.dump)
+docker compose exec -T platform-db pg_restore --list < ../metabase-before-upgrade.dump > /dev/null && echo "the backup reads"
+```
+
+Go on only when the last command prints `the backup reads`. The shell creates the file even when `pg_dump` fails, and the check fails on an empty or broken file, for example with `input file is too short`.
+
+`pg_dump` runs in the `platform-db` container and connects through the socket of the container, where the PostgreSQL image accepts a connection without a password, so no password is typed or printed. The backup lands next to the checkout, outside it, so that git never sees it, and `umask 077` makes it readable only by you. Keep it as safe as `.env`: it holds what Metabase keeps, such as the hashes of the passwords of its users and the connection details, which only the `METABASE_ENCRYPTION_KEY` of this `.env` decrypts. Then run `./agoranomos up`, which starts the new version; `./agoranomos logs metabase` shows the migration.
+
+To go back, stop Metabase first, so that nothing is connected to its database, and restore the backup, which drops the `metabase` database and creates it again, with its owner and access rights, from the backup. Then return the checkout to the release that you came from, which pins the earlier version of Metabase, and start it:
+
+```bash
+docker compose stop metabase
+docker compose exec -T platform-db pg_restore --username=postgres --clean --if-exists --create --exit-on-error --dbname=postgres < ../metabase-before-upgrade.dump
+# Only when pg_restore ended without an error: return the checkout to the release that you came from, then:
+./agoranomos up
+```
+
+If Metabase, or anything else, is still connected to the database, the restore stops at once with `database "metabase" is being accessed by other users` and changes nothing, because PostgreSQL does not drop a database that has connections: stop what is connected, such as Metabase, and run the restore again. `--exit-on-error` makes it stop at the first error; without it, `pg_restore` goes on after an error, and would restore what it can into the database that is still there. If the restore stops on any other error, after it dropped the database, do not start the stack: Metabase would start on an empty database. Fix the cause and run the restore again. Everything that Metabase saved after the backup is lost.

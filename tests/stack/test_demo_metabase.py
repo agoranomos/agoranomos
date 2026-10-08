@@ -95,7 +95,7 @@ def test_the_spend_of_the_last_seven_days_is_what_the_generator_made(env, metaba
     _, content = demo_content(metabase_url, session)
     card_id = dict(content["card"])["Spend, last 7 days"]
     status, result = http_json("POST", f"{metabase_url}/api/card/{card_id}/query", headers=session)
-    # Metabase 0.63.19 answers 202, with the rows in data.rows.
+    # Metabase 0.63.19 and 0.64.1 answer 202, with the rows in data.rows.
     state = result.get("status") if isinstance(result, dict) else None
     assert (status, state) in {(200, "completed"), (202, "completed")}, (status, state)
     [[spend]] = result["data"]["rows"]
@@ -110,8 +110,8 @@ def test_metabase_knows_the_mart(metabase_url, session):
     databases = get(metabase_url, session, "/api/database")
     databases = databases.get("data", databases) if isinstance(databases, dict) else databases
     [warehouse] = [d for d in databases if d.get("name") == WAREHOUSE_NAME]
-    # As demo-init asks: a table that a person hid in Metabase counts, and Metabase 0.63.19 leaves
-    # it out unless the request passes include_hidden=true.
+    # As demo-init asks: a table that a person hid in Metabase counts, and Metabase 0.63.19 and
+    # 0.64.1 leave it out unless the request passes include_hidden=true.
     metadata = get(
         metabase_url,
         session,
