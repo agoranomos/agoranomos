@@ -1,111 +1,128 @@
-# Agoranomos
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/hero-dark.svg">
+    <img alt="agoranomos: ads in. answers out." src="docs/assets/readme/hero-light.svg" width="100%">
+  </picture>
+</p>
 
-English | [Русский](README.ru.md)
+<p align="center">
+  <b>Open-source marketing BI out of the box.</b><br>
+  Ad platforms → a PostgreSQL warehouse of your own → Metabase dashboards → questions in Claude or ChatGPT through MCP.<br>
+  One command. Your data stays yours.
+</p>
 
-Open-source marketing BI out of the box: ad platforms → PostgreSQL warehouse → Metabase dashboards → ask anything in Claude or ChatGPT via MCP. One command. Your data stays yours.
+<p align="center">
+  <a href="#status-and-roadmap"><img alt="Status: pre-alpha" src="docs/assets/readme/badge-status.svg" height="24"></a>
+  <a href="LICENSE"><img alt="License: Apache 2.0" src="docs/assets/readme/badge-license.svg" height="24"></a>
+  <a href="docs/reference/system-requirements.md"><img alt="Runs on amd64 and arm64" src="docs/assets/readme/badge-platforms.svg" height="24"></a>
+  <a href="docs/explanation/architecture.md"><img alt="Stack: Apache Airflow, dlt, dbt, PostgreSQL, Metabase" src="docs/assets/readme/badge-stack.svg" height="24"></a>
+</p>
+
+<p align="center">
+  <a href="#quick-start"><b>Quick start</b></a> ·
+  <a href="docs/how-to/see-the-demo.md"><b>Demo</b></a> ·
+  <a href="docs/explanation/architecture.md"><b>Architecture</b></a> ·
+  <a href="docs/adr/index.md"><b>Decisions</b></a> ·
+  <a href="#status-and-roadmap"><b>Roadmap</b></a> ·
+  <a href="README.ru.md"><b>Русский</b></a>
+</p>
 
 > [!WARNING]
-> **Status: pre-alpha.** Agoranomos is under active development: the stack runs in local mode from the main branch ([Run Agoranomos locally](docs/how-to/run-locally.md)), and the demo goes end to end, from a demo source to a dashboard. Server mode, backups and the connectors to real sources are still being built. The repository is private until v0.3. The design of the whole stack is in the [architecture overview](docs/explanation/architecture.md) and the [decision records](docs/adr/index.md). See [Status and roadmap](#status-and-roadmap).
+> **Pre-alpha.** Local mode runs from the main branch, and the demo goes end to end, from a demo source to a dashboard. Server mode and backups are being built, and the connectors to real sources and AI access come after them. The repository is private until v0.3.
 
-## What it is
+<p align="center">
+  <img alt="The demo dashboard Ad spend (demo) in Metabase: the spend of the last seven days, in total and by campaign, and the spend of every day" src="docs/assets/readme/demo-dashboard.png" width="100%">
+</p>
+<p align="center"><sub>The demo dashboard, which the first start builds from a demo source through dlt, dbt and Metabase. No accounts or keys needed.</sub></p>
 
-Agoranomos is a marketing analytics stack that you run on your own infrastructure. It is being built to:
+## Why Agoranomos
 
-- **Load** data from ad platforms, web analytics, CRM systems and files into a PostgreSQL warehouse that you own, on a schedule.
-- **Model** that data with dbt into one view of advertising performance across all platforms.
-- **Show** it in Metabase, with dashboards, metrics and a glossary that come ready-made.
-- **Answer questions** asked in AI clients such as Claude and ChatGPT, through [MCP](https://modelcontextprotocol.io/) servers with least-privilege defaults. For example: "How much did we spend on each platform last week?"
+AI assistants can already reach ad platforms through connectors to their live APIs. That works for a one-off question, and it leaves three gaps:
 
-It is designed to start with a single command, on a laptop or on a small server.
-
-## Who it is for
-
-- **Implementers**: analysts, freelancers, small agencies and data engineers who set up marketing analytics for their clients or for themselves. They get a stack of standard open-source parts (Apache Airflow, dlt, dbt Core, PostgreSQL and Metabase) that they can read, change and run, documentation to maintain it without its author, and every significant decision recorded in the open. Their coding agents, such as Claude Code, Cursor and Codex, are to work with the stack through MCP servers.
-- **Business owners and marketers**, who want to see in one place what their advertising delivers across all platforms, and to ask about it in plain language in the AI app they already use, without writing SQL, and from a phone when the stack runs on a server. They get Agoranomos through a specialist who runs it for them, or through a hosted version that is planned for later.
-
-## The problem it solves
-
-AI assistants can already reach advertising platforms directly, through connectors to their live APIs. That works for a one-off question, but it leaves three gaps:
-
-- **No history of your own.** A live API shows the data as the platform holds it today. Nothing is stored on your side, so there is nothing to compare against when the platform restates numbers, as it does while attribution matures.
-- **No common model.** Each platform has its own names, metrics, currencies and time zones. Without one model across platforms, the same question can get a different answer each time it is asked.
-- **No dashboards.** An answer in a chat is not a dashboard that a whole team can open every morning.
+| No history of your own | No common model | No dashboards |
+|---|---|---|
+| A live API shows the data as the platform holds it today. Nothing is stored on your side, so there is nothing to compare against when the platform restates numbers as attribution matures. | Each platform has its own names, metrics, currencies and time zones. Without one model across platforms, the same question can get a different answer each time it is asked. | An answer in a chat is not a dashboard that a whole team can open every morning. |
 
 Agoranomos is meant to close these gaps: it keeps the history in a warehouse you own, models the data once, puts dashboards on top and gives AI clients access to the modeled data instead of the raw platform APIs.
 
 ## How it works
 
-Data moves in one direction, from ad platforms to dashboards and AI clients, and every step is code that runs on infrastructure you control. This is the target design: components arrive release by release, as the [roadmap](#status-and-roadmap) shows.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/pipeline-dark.svg">
+    <img alt="The pipeline: demo data, dlt, the PostgreSQL warehouse with raw, staging and marts built by dbt, and Metabase run today, with Airflow running the steps; ad platform connectors, MCP and AI clients are planned" src="docs/assets/readme/pipeline-light.svg" width="100%">
+  </picture>
+</p>
 
-```mermaid
-flowchart TB
-    sources["<b>Sources</b><br/>ad platform APIs, GA4, CRM, files,<br/>demo source (v0.1.0; full demo generator in v0.2.0)"]
-    dlt["<b>dlt</b><br/>incremental load"]
-    airflow["<b>Apache Airflow</b><br/>schedules loads, dbt builds<br/>and Metabase refreshes"]
+Data moves in one direction, from ad platforms to dashboards and AI clients, and every step is code that runs on infrastructure you control. The diagram is the target design: glowing lines are what runs today, dashed lines are planned, and components arrive release by release.
 
-    subgraph warehouse["PostgreSQL warehouse"]
-        direction LR
-        raw["raw_#lt;source#gt;"] -->|dbt| staging --> intermediate --> marts
-    end
+| Step | Tool | What it does |
+|---|---|---|
+| **Load** | [dlt](https://dlthub.com/) | Pulls data from ad platform APIs, web analytics, CRM systems and files into PostgreSQL. The planned sources include Google, Meta, TikTok, Yandex, VK and GA4. A demo source that needs no accounts or keys loads synthetic statistics of a fictional ad account. |
+| **Transform** | [dbt Core](https://docs.getdbt.com/) | Turns the raw tables into one unified model of advertising statistics, with a description of every model and column and tests that guard the marts. |
+| **Orchestrate** | [Apache Airflow](https://airflow.apache.org/) | Schedules the loads and the dbt build, and refreshes Metabase afterwards. Today the demo chains the load and the dbt build; the refresh is planned. |
+| **Explore** | [Metabase](https://www.metabase.com/) | Serves dashboards, metrics and a glossary from the final layer of the warehouse. |
+| **Ask** | [MCP](https://modelcontextprotocol.io/) | AI clients reach the same data through MCP servers: the one built into Metabase, and servers for Airflow, the warehouse and dbt. Planned for v0.3.0. |
 
-    metabase["<b>Metabase</b><br/>dashboards, metrics, glossary"]
-    mcp["<b>MCP servers</b><br/>Metabase, Airflow, warehouse, dbt<br/>least privilege by default"]
-    clients["<b>AI clients</b><br/>Claude, ChatGPT,<br/>Claude Code, Cursor,<br/>VS Code, Codex"]
+The [architecture overview](docs/explanation/architecture.md) describes every part, and the [decision records](docs/adr/index.md) say why each was chosen.
 
-    sources --> dlt --> warehouse
-    warehouse -->|marts only| metabase
-    metabase --> mcp
-    warehouse --> mcp
-    airflow --> mcp
-    mcp --> clients
-    airflow -.-> dlt
-    airflow -.->|dbt build| warehouse
-    airflow -.->|refresh| metabase
+## Quick start
+
+You need Docker with at least 6 GB of memory (8 GB recommended), git, and free ports 8080 and 3000 on `127.0.0.1`.
+
+```bash
+git clone https://github.com/agoranomos/agoranomos.git
+cd agoranomos
+./agoranomos up
 ```
 
-Solid arrows show how data moves. Dotted arrows show what Airflow runs.
+`up` creates `.env` with new secrets, checks the machine, builds the Airflow image, starts the stack and waits until every service is healthy and the demo is ready. The first start takes a few minutes. Then:
 
-1. **Load.** [dlt](https://dlthub.com/) pulls data from ad platform APIs, web analytics, CRM systems and files into PostgreSQL. The planned sources include ad platforms such as Google, Meta, TikTok, Yandex and VK, and GA4. A demo source, which needs no accounts or keys, loads synthetic statistics of a fictional ad account.
-2. **Transform.** [dbt](https://docs.getdbt.com/) turns the raw tables into one unified model of advertising statistics.
-3. **Orchestrate.** [Apache Airflow](https://airflow.apache.org/) schedules the loads and the dbt build, and refreshes Metabase afterwards.
-4. **Explore.** [Metabase](https://www.metabase.com/) serves dashboards, metrics and a glossary from the final layer of the warehouse.
-5. **Ask.** AI clients reach the same data through MCP servers: the one built into Metabase, and servers for Airflow, the warehouse and dbt.
+| Service | Address | What to open |
+|---|---|---|
+| Metabase | <http://127.0.0.1:3000> | The collection **Agoranomos demo** and its dashboard **Ad spend (demo)** |
+| Airflow | <http://127.0.0.1:8080> | The DAGs `agoranomos_demo_load` and `agoranomos_demo_transform` |
 
-The design rests on a few principles:
+`./agoranomos credentials` shows where to sign in, and `./agoranomos down` stops the stack while the data stays. [Run Agoranomos locally](docs/how-to/run-locally.md) covers Windows, updates, memory and troubleshooting.
+
+## Principles
 
 - **Your data stays yours.** The warehouse is PostgreSQL on infrastructure you control, and the history stays there. Agoranomos needs no LLM account or key of its own: you use the AI client you already have, and it sees only what the MCP servers let it read. Whatever an AI client reads to answer a question is sent to that client's AI provider and handled under that provider's terms.
 - **Least privilege by default.** Each MCP server is to be limited by its own control, so one mistake does not open everything. In Metabase, each deployment is to set how much AI clients may do, from running saved questions up to building dashboards with a BI developer; the dashboards of the package and the warehouse are to stay out of reach at every level ([ADR-0017](docs/adr/0017-set-ai-access-in-metabase-by-levels.md)). What AI access may do in the other tools, such as reading the warehouse or starting pipelines in Airflow, is to be checked before the AI layer ships (Phase 3). Until the AI layer ships, the built-in MCP server of Metabase stays off. Campaign names and ad texts can carry instructions written by anyone, so Agoranomos treats them as untrusted data, and these limits reduce the damage if an AI client follows them anyway. See [ADR-0007](docs/adr/0007-ai-access-via-mcp-read-only.md).
-- **Local and server modes.** Local mode is for engineers on their own machine: ports are published on `127.0.0.1` only. Server mode is for teams and for business users who connect from the Claude and ChatGPT apps: a reverse proxy with TLS sits in front of the web endpoints, the Metabase MCP server is served over HTTPS with OAuth, and backups run on a schedule. See [ADR-0011](docs/adr/0011-local-and-server-modes.md).
-- **amd64 and arm64.** Both architectures are supported targets, Apple Silicon included, within a memory budget: 8 GB of RAM available to Docker is the recommended amount and 6 GB the minimum, so that the stack fits on a host with 8 GB of RAM. The stack is measured on the demo, and every service has a memory limit: see [System requirements](docs/reference/system-requirements.md) and [ADR-0010](docs/adr/0010-multi-arch-and-memory-budget.md).
+- **Local and server modes.** Local mode is for engineers on their own machine, with ports published on `127.0.0.1` only. Server mode, planned for v0.1.0, is for teams and for business users who connect from the Claude and ChatGPT apps: a reverse proxy with TLS, the Metabase MCP server over HTTPS with OAuth, and scheduled backups ([ADR-0011](docs/adr/0011-local-and-server-modes.md)).
+- **amd64 and arm64, in 8 GB.** Both architectures are supported targets, Apple Silicon included. 8 GB of RAM available to Docker is recommended and 6 GB is the minimum, and every service has a memory limit measured on the demo ([System requirements](docs/reference/system-requirements.md), [ADR-0010](docs/adr/0010-multi-arch-and-memory-budget.md)).
+
+## Who it is for
+
+- **Implementers**: analysts, freelancers, small agencies and data engineers who set up marketing analytics for their clients or for themselves. They get a stack of standard open-source parts that they can read, change and run, documentation to maintain it without its author, and every significant decision recorded in the open. Their coding agents, such as Claude Code, Cursor and Codex, are to work with the stack through MCP servers.
+- **Business owners and marketers**, who want to see in one place what their advertising delivers across all platforms, and to ask about it in plain language in the AI app they already use, without writing SQL. They get Agoranomos through a specialist who runs it for them, or through a hosted version that is planned for later.
 
 ## Status and roadmap
 
-Agoranomos is **pre-alpha**. Phase 0, the foundation, is complete: the repository has its tooling, CI, documentation skeleton and the first decision records. Phase 1, the platform, is in progress: local mode runs from the main branch, and the demo goes end to end, from a demo source to a dashboard; server mode, backups and the v0.1.0 release come next. The repository is private until v0.3.
-
-| Phase | Release | What it delivers |
-|---|---|---|
-| 0. Foundation | none | The name, repository, license and structure, the tooling (uv, ruff, prek), the CI and documentation skeletons, and the first architecture decision records. Complete. |
-| 1. Platform | v0.1.0 | A Docker Compose stack with two PostgreSQL instances, Airflow 3.3 (the LocalExecutor by default; the CeleryExecutor variant adds a Valkey broker and a separate worker) and Metabase, in local and server modes, both covered by CI (server mode adds Caddy with automatic TLS and scheduled backups); secrets initialization; preflight checks; every service healthy, with a smoke test in CI; and one path end to end on demo data: a demo source (dlt) → raw → dbt (through Cosmos) → marts → a Metabase dashboard created from code. |
-| 2. Data model on demo data | v0.2.0 | The full demo generator, with several fictional platforms; the unified model of advertising statistics in marts; and the Ops collection of dashboards about the stack itself. |
-| 3. AI layer | v0.3.0 | The four MCP servers, among them the Metabase MCP server over HTTPS with OAuth for the Claude and ChatGPT apps; database roles; a ready-made `.mcp.json`; skills for coding agents; and the guide "Talk to your data". The candidate for the first public release. |
-| 4. Real connectors | v0.4 and later | One data source per minor release, together with the unified model and FX rates. |
-| 5. Operations | v0.x | Verified restores, an upgrade runbook, and observability with elementary. |
-| Stable | v1.0.0 | A stable contract for the configuration and the data models. |
+| Phase | Release | Status | What it delivers |
+|---|---|---|---|
+| 0. Foundation | none | ✅ Done | The name, repository, license and structure, the tooling (uv, ruff, prek), the CI and documentation skeletons, and the first architecture decision records. |
+| 1. Platform | v0.1.0 | 🟧 In progress | A Docker Compose stack with two PostgreSQL instances, Airflow 3.3 (the LocalExecutor by default; the CeleryExecutor variant adds a Valkey broker and a separate worker) and Metabase, in local and server modes, both covered by CI (server mode adds Caddy with automatic TLS and scheduled backups); secrets initialization; preflight checks; every service healthy, with a smoke test in CI; and one path end to end on demo data: a demo source (dlt) → raw → dbt (through Cosmos) → marts → a Metabase dashboard created from code. Local mode and the demo path run today; server mode and backups come next. |
+| 2. Data model on demo data | v0.2.0 | Planned | The full demo generator, with several fictional platforms; the unified model of advertising statistics in marts; and the Ops collection of dashboards about the stack itself. |
+| 3. AI layer | v0.3.0 | Planned | The four MCP servers, among them the Metabase MCP server over HTTPS with OAuth for the Claude and ChatGPT apps; database roles; a ready-made `.mcp.json`; skills for coding agents; and the guide "Talk to your data". The candidate for the first public release. |
+| 4. Real connectors | v0.4 and later | Planned | One data source per minor release, together with the unified model and FX rates. |
+| 5. Operations | v0.x | Planned | Verified restores, an upgrade runbook, and observability with elementary. |
+| Stable | v1.0.0 | Planned | A stable contract for the configuration and the data models. |
 
 The roadmap gives the order of the work, not dates. Versions are 0.x until the configuration and the data model are stable.
 
 ## Documentation
 
-The documentation is Markdown in [`docs/`](docs/), built with [Zensical](https://zensical.org/) and organized after [Diátaxis](https://diataxis.fr/): tutorials, how-to guides, reference and explanation, plus the [architecture decision records](docs/adr/index.md). English is its primary language. The README is also available in Russian, and the key pages are to follow. Start with the [architecture overview](docs/explanation/architecture.md). To start Agoranomos on your machine, read [Run Agoranomos locally](docs/how-to/run-locally.md), and to see what already runs, [See the demo](docs/how-to/see-the-demo.md).
+The documentation is Markdown in [`docs/`](docs/), built with [Zensical](https://zensical.org/) and organized after [Diátaxis](https://diataxis.fr/): tutorials, how-to guides, reference and explanation, plus the [architecture decision records](docs/adr/index.md). English is its primary language; this README is also [in Russian](README.ru.md), and the key pages are to follow.
 
-The site will be published when the repository goes public. Until then, read it locally. You need [uv](https://docs.astral.sh/uv/):
+| Page | What it covers |
+|---|---|
+| [Architecture overview](docs/explanation/architecture.md) | What each part does and how they fit together |
+| [Run Agoranomos locally](docs/how-to/run-locally.md) | Start, stop, update and troubleshoot the stack |
+| [See the demo](docs/how-to/see-the-demo.md) | What the first start builds and where to look at it |
+| [Command line](docs/reference/command-line.md) and [Configuration](docs/reference/configuration.md) | Every command of `./agoranomos` and every setting of `.env` |
 
-```bash
-uv sync
-uv run zensical serve
-```
-
-Then open <http://localhost:8000>.
+The site will be published when the repository goes public. Until then, read it locally with [uv](https://docs.astral.sh/uv/): run `uv sync` and `uv run zensical serve`, then open <http://localhost:8000>.
 
 ## Contributing
 
@@ -118,3 +135,14 @@ Agoranomos is licensed under the [Apache License 2.0](LICENSE). The third-party 
 ## About the name
 
 The name comes from the *agoranomoi* (singular: *agoranomos*), the market officials of ancient Athens. They made sure that the goods on sale were genuine and unadulterated (Aristotle, [*Constitution of the Athenians*, chapter 51](https://www.perseus.tufts.edu/hopper/text?doc=Perseus%3Atext%3A1999.01.0046%3Achapter%3D51)). Agoranomos tries to do the same for marketing numbers: one way of measuring every platform, and code that anyone can read, so that you can check that the numbers you rely on are genuine.
+
+<br>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/mark-dark.svg">
+    <img alt="" src="docs/assets/readme/mark-light.svg" width="36">
+  </picture>
+  <br>
+  <sub><b>ads in. answers out.</b></sub>
+</p>
