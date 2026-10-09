@@ -1043,6 +1043,18 @@ def test_the_series_of_a_person_stay_when_the_color_is_added(airflow, metabase):
     }
 
 
+@pytest.mark.parametrize("name", CHARTS)
+@pytest.mark.parametrize("others", [{}, {"other": {"color": "#000000"}}])
+def test_a_chart_whose_series_settings_lack_spend_gets_the_color(airflow, metabase, name, others):
+    assert di.main(env_for(airflow, metabase)) == 0
+    settings_of(metabase, name)["series_settings"] = dict(others)
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert settings_of(metabase, name)["series_settings"] == {
+        **others,
+        "spend": {"color": "#A86400"},
+    }
+
+
 def test_a_mistake_in_the_overrides_stops_demo_init_before_it_writes(
     airflow, metabase, tmp_path, capsys
 ):

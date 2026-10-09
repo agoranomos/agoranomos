@@ -83,10 +83,10 @@ RAN_NOW_HINT = f"see the last run of {TRANSFORM_DAG} in Airflow"
 
 # The settings of a chart that hold the titles of its axes.
 AXIS_TITLES = ("graph.x_axis.title_text", "graph.y_axis.title_text")
-# The color of the series of the demo charts: the first color of the chart palette of the project
-# for a light background, which a Metabase dashboard has by default. Metabase keeps the color of a
-# series in series_settings, under the series key, which for a chart with one metric and no breakout
-# is the name of the metric column. A color with no color_name is drawn as it is.
+# The color of the series of the demo charts: the first color of the chart palette of the project,
+# which is made for a light background (the default of a Metabase dashboard). Metabase keeps the
+# color of a series in series_settings, under the series key, which for a chart with one metric and
+# no breakout is the name of the metric column. A color with no color_name is drawn as it is.
 SERIES_COLOR = "#A86400"
 # What demo-init writes into each entry of the settings that Metabase keeps for each column and for
 # each series of a card: the title of a column, the color of a series.
@@ -440,7 +440,7 @@ def visualization_settings(question: Mapping[str, Any], titles: Mapping[str, str
     return settings
 
 
-def with_missing_titles(current: Mapping[str, Any], wanted: Mapping[str, Any]) -> dict | None:
+def with_missing_settings(current: Mapping[str, Any], wanted: Mapping[str, Any]) -> dict | None:
     """The settings of a card that exists, with the titles and the series color of wanted that it
     lacks, or None when it lacks none: a title or a color that is there, also one that a person
     changed, stays as it is."""
@@ -451,10 +451,10 @@ def with_missing_titles(current: Mapping[str, Any], wanted: Mapping[str, Any]) -
             settings[key] = wanted[key]
             added = True
     for group, field in ENTRY_SETTINGS:
-        for key, entry in (wanted.get(group) or {}).items():
-            item = settings.setdefault(group, {}).setdefault(key, {})
-            if field not in item:
-                item[field] = entry[field]
+        for key, wanted_entry in (wanted.get(group) or {}).items():
+            current_entry = settings.setdefault(group, {}).setdefault(key, {})
+            if field not in current_entry:
+                current_entry[field] = wanted_entry[field]
                 added = True
     return settings if added else None
 
@@ -471,7 +471,7 @@ def ensure_questions(
         if question["name"] in cards:
             card_id = cards[question["name"]]
             card = metabase.call("GET", f"/api/card/{card_id}")
-            added = with_missing_titles(card.get("visualization_settings") or {}, settings)
+            added = with_missing_settings(card.get("visualization_settings") or {}, settings)
             if added is not None:
                 metabase.call("PUT", f"/api/card/{card_id}", {"visualization_settings": added})
             continue
