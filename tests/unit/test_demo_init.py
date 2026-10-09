@@ -988,6 +988,61 @@ def test_a_question_that_exists_gets_only_the_titles_that_it_lacks(airflow, meta
     assert settings["graph.dimensions"] == ["report_date"]
 
 
+CHARTS = ("Spend by campaign, last 7 days", "Spend by day")
+
+
+def test_the_charts_are_drawn_in_the_first_color_of_the_project(airflow, metabase):
+    assert di.main(env_for(airflow, metabase)) == 0
+    for name in CHARTS:
+        # The series of a chart with the one metric spend is keyed by the name of its column.
+        assert settings_of(metabase, name)["series_settings"] == {"spend": {"color": "#A86400"}}
+    # A number has no series.
+    assert "series_settings" not in settings_of(metabase, "Spend, last 7 days")
+
+
+@pytest.mark.parametrize("name", CHARTS)
+def test_a_chart_that_exists_gets_the_color_that_it_lacks(airflow, metabase, name):
+    assert di.main(env_for(airflow, metabase)) == 0
+    settings = settings_of(metabase, name)
+    # As on a chart made before the color, with a title of a person on its series.
+    settings["series_settings"] = {"spend": {"title": "Cost"}}
+    assert di.main(env_for(airflow, metabase)) == 0
+    settings = settings_of(metabase, name)
+    assert settings["series_settings"] == {"spend": {"title": "Cost", "color": "#A86400"}}
+    assert settings["graph.metrics"] == ["spend"]
+    del settings["series_settings"]
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert settings_of(metabase, name)["series_settings"] == {"spend": {"color": "#A86400"}}
+
+
+@pytest.mark.parametrize("name", CHARTS)
+@pytest.mark.parametrize("color", ["#4F6382", "#a86400", "red", ""])
+def test_a_color_that_a_person_set_stays(airflow, metabase, name, color):
+    assert di.main(env_for(airflow, metabase)) == 0
+    settings_of(metabase, name)["series_settings"]["spend"] = {"color": color, "color_name": "x"}
+    calls_before = len(metabase.calls)
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert settings_of(metabase, name)["series_settings"] == {
+        "spend": {"color": color, "color_name": "x"}
+    }
+    # Nothing was written: a question that lacks nothing is not saved again.
+    assert all(
+        call[0] == "GET" or call == ("POST", "/api/session")
+        for call in metabase.calls[calls_before:]
+    )
+
+
+def test_the_series_of_a_person_stay_when_the_color_is_added(airflow, metabase):
+    assert di.main(env_for(airflow, metabase)) == 0
+    settings = settings_of(metabase, "Spend by day")
+    settings["series_settings"] = {"other": {"color": "#000000"}, "spend": {"title": "Cost"}}
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert settings_of(metabase, "Spend by day")["series_settings"] == {
+        "other": {"color": "#000000"},
+        "spend": {"title": "Cost", "color": "#A86400"},
+    }
+
+
 def test_a_mistake_in_the_overrides_stops_demo_init_before_it_writes(
     airflow, metabase, tmp_path, capsys
 ):

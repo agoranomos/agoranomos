@@ -13,7 +13,7 @@ Agoranomos comes with a demo: eight weeks of statistics of one fictional ad acco
 
 ## Look at it
 
-- **Metabase**, at the address that `up` prints: sign in with `AGORANOMOS_ADMIN_EMAIL` and `METABASE_ADMIN_PASSWORD` from `.env` (`./agoranomos credentials` shows the address, the email and the setting that holds the password), and open the collection **Agoranomos demo**. The dashboard shows the spend of the last seven days that have data, in total and by campaign, and the spend of every day.
+- **Metabase**, at the address that `up` prints: sign in with `AGORANOMOS_ADMIN_EMAIL` and `METABASE_ADMIN_PASSWORD` from `.env` (`./agoranomos credentials` shows the address, the email and the setting that holds the password), and open the collection **Agoranomos demo**. The dashboard shows the spend of the last seven days that have data, in total and by campaign, and the spend of every day. The two charts use the colors of the project.
 - **Airflow**, at the address that `up` prints: sign in as `admin` with `AIRFLOW_ADMIN_PASSWORD` from `.env`, and open the DAGs `agoranomos_demo_load` and `agoranomos_demo_transform`, their runs and the asset between them.
 
 ## What later starts do
@@ -21,7 +21,7 @@ Agoranomos comes with a demo: eight weeks of statistics of one fictional ad acco
 `demo-init` runs on every start, and each step looks at what is there first.
 
 - Once a run of `agoranomos_demo_transform` has succeeded, the pipeline does not run again, and `demo-init` leaves both DAGs as they are: if you pause them, they stay paused.
-- `demo-init` finds the collection, its questions and its dashboard by name. What it finds stays as it is, with your edits, but for one thing: a question that lacks the title of a column or an axis gets it, and a title that is there, also one that you changed, stays. What it does not find, it creates again on the next start, and a renamed one stays as well. A question that you delete or rename comes back in the collection, and goes back on the dashboard only when the dashboard has no question left. A dashboard or a collection that you delete or rename comes back with the three questions.
+- `demo-init` finds the collection, its questions and its dashboard by name. What it finds stays as it is, with your edits, but for one thing: a question that lacks the title of a column or an axis, or the color of a chart, gets it, and a title or a color that is there, also one that you changed, stays. What it does not find, it creates again on the next start, and a renamed one stays as well. A question that you delete or rename comes back in the collection, and goes back on the dashboard only when the dashboard has no question left. A dashboard or a collection that you delete or rename comes back with the three questions.
 - To keep a version of your own, duplicate the question or the dashboard and change the copy, rather than rename the original. To stop all of this, turn the demo off.
 
 ## Bring the demo up to date
