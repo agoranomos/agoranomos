@@ -60,12 +60,12 @@ In practice this means:
 
 * **Implementation status, as of October 2026:** planned for v0.1.0, and in place: the descriptions, the names and types in the dbt YAML, the contract of the mart, the comments of the warehouse, the export, the jobs that apply the metadata, the overrides and the dry run.
 * The other options were not chosen for these reasons:
-  * **dbt-metabase** (1.7.5, as of October 2026) covers tables and fields only, shows hidden fields again and resets values by design, states no support for Metabase 0.63, has one maintainer, and would need the admin credential in one more place.
-  * **Comments only.** Metabase takes a comment only into an empty description, so a changed comment never reaches it, and comments carry no display names and no types.
-  * **`_metabase_metadata`** is not documented, takes strings only, and has no schema in its keys.
-  * **The UI wins, or fill in only what is empty.** Improvements of the base would stop reaching the deployments, and the test that every field is described could not hold.
-  * **A three-way merge** needs a store of state, which Metabase has no room for, and lets edits live outside the code. The file of overrides is the reviewed way to keep the words of a deployment.
-  * **Models of Metabase** make a copy for each renaming, which drifts, and which has no home in the extensions folder. They stay the way to build new business objects.
-  * **Serialization, Remote Sync and the Library** are paid, and Remote Sync leaves the metadata of tables out.
+    * **dbt-metabase** (1.7.5, as of October 2026) covers tables and fields only, shows hidden fields again and resets values by design, states no support for Metabase 0.63, has one maintainer, and would need the admin credential in one more place.
+    * **Comments only.** Metabase takes a comment only into an empty description, so a changed comment never reaches it, and comments carry no display names and no types.
+    * **`_metabase_metadata`** is not documented, takes strings only, and has no schema in its keys.
+    * **The UI wins, or fill in only what is empty.** Improvements of the base would stop reaching the deployments, and the test that every field is described could not hold.
+    * **A three-way merge** needs a store of state, which Metabase has no room for, and lets edits live outside the code. The file of overrides is the reviewed way to keep the words of a deployment.
+    * **Models of Metabase** make a copy for each renaming, which drifts, and which has no home in the extensions folder. They stay the way to build new business objects.
+    * **Serialization, Remote Sync and the Library** are paid, and Remote Sync leaves the metadata of tables out.
 * Metabase 0.64 keeps what users and the API write in a layer of its own, and records no author for either. The jobs send explicit, non-empty values only, which both versions treat alike, with one exception: a null semantic type, which clears the type that Metabase shows for a column that the code declares as having none. Their stack tests pass on Metabase 0.64.1 (as of October 2026).
 * Not decided here: a glossary and metrics, translation of the base, a currency of the deployment's own (with the rates of exchange), a command that turns edits in the UI into overrides, and a hash of the base in an override, which would show when an override hides a newer base.

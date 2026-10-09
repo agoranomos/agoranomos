@@ -76,3 +76,9 @@ repos:
         language_version: "3.13" # the Python of the repository; tomllib needs 3.11 or newer
         files: ^(zensical\.toml|docs/.+\.md)$
         pass_filenames: false
+      - id: check-docs-lists
+        name: Nested list items in the documentation are indented by four spaces
+        entry: python scripts/check_docs_lists.py
+        language: python
+        language_version: "3.13"
+        files: ^docs/.+\.md$

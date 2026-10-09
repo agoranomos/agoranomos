@@ -24,7 +24,7 @@ Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 - `extensions/`: the folder for a deployment's own additions ([ADR-0013](docs/adr/0013-keep-extensions-apart-from-the-base-package.md)): its DAGs, and its overrides of the metadata of the marts in `metadata/overrides.toml`; git tracks only its README.
 - `pyproject.toml`, `uv.lock`, `.python-version`: the development tooling (Python 3.13, ruff, prek, Zensical and pytest). The root is a uv project that is never built or installed.
 - `.pre-commit-config.yaml`: the git hooks and static checks, run by prek. `_typos.toml` is the word list of the spell checker, and `.editorconfig` and `.gitattributes` fix indentation and line endings (LF).
-- `scripts/`: the scripts of the repository's own checks. `check_docs_nav.py` compares the documentation navigation with the pages, and the `check-docs-nav` hook runs it. `memory_report.py` measures the memory of each service of the running stack ([docs/reference/system-requirements.md](docs/reference/system-requirements.md)); CI runs it around the stack tests.
+- `scripts/`: the scripts of the repository's own checks. `check_docs_nav.py` compares the documentation navigation with the pages, and the `check-docs-nav` hook runs it. `check_docs_lists.py` checks that the list items of the pages are indented by multiples of four spaces, and the `check-docs-lists` hook runs it. `memory_report.py` measures the memory of each service of the running stack ([docs/reference/system-requirements.md](docs/reference/system-requirements.md)); CI runs it around the stack tests.
 - `tests/unit/`: the unit tests, run by `uv run pytest`.
 - `tests/stack/`: the stack tests, run with `uv run pytest tests/stack` against a running stack.
 - `.github/`: the workflows (`workflows/`: CI, the stack tests, the pull request checks and the daily Renovate run), the issue forms, the pull request template and `CODEOWNERS`.
@@ -47,9 +47,9 @@ uv run pytest tests/stack        # the stack tests, against a running stack
 ./agoranomos down                # stop the stack; the data stays
 ```
 
-If port 8000 is in use, add `--dev-addr 127.0.0.1:8001` to `zensical serve`. The strict build does not check navigation entries (as of Zensical 0.0.67); the `check-docs-nav` hook does. Use `uv` for everything, not `pip`, and never edit `uv.lock` by hand.
+If port 8000 is in use, add `--dev-addr 127.0.0.1:8001` to `zensical serve`. The strict build does not check navigation entries (as of Zensical 0.0.67); the `check-docs-nav` hook does. Nor does it warn about a nested list item indented by two spaces, which renders flat (as of Zensical 0.0.68); the `check-docs-lists` hook does. Use `uv` for everything, not `pip`, and never edit `uv.lock` by hand.
 
-CI runs the static checks, the full-history secret scan, the strict documentation build and the unit tests in `tests/unit`, and it checks the pull request title and the DCO sign-off. For pull requests that change the stack, the workflow `stack.yml` starts it and runs the stack tests. A prek hook (`scripts/check_docs_nav.py`) checks that every navigation entry points at a page and every page is in the navigation.
+CI runs the static checks, the full-history secret scan, the strict documentation build and the unit tests in `tests/unit`, and it checks the pull request title and the DCO sign-off. For pull requests that change the stack, the workflow `stack.yml` starts it and runs the stack tests. A prek hook (`scripts/check_docs_nav.py`) checks that every navigation entry points at a page and every page is in the navigation, and another (`scripts/check_docs_lists.py`) that every nested list item of the pages is indented by four spaces for each level.
 
 ## Conventions
 
