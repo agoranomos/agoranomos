@@ -1,4 +1,6 @@
-# Only the files that airflow/Dockerfile copies go to the build; the DAGs are mounted at run time.
+# Only the files that airflow/Dockerfile copies go to the build; the DAGs are mounted at run time,
+# and the plugins are copied one by one.
 *
 !requirements.txt
 !dbt-requirements.txt
+!plugins/agoranomos_oom.py
