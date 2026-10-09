@@ -11,5 +11,9 @@ indent_size = 2
 [*.py]
 indent_size = 4
 
+# The documentation site nests a list item only when it is indented by four spaces.
+[*.md]
+indent_size = 4
+
 [Makefile]
 indent_style = tab

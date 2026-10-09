@@ -87,7 +87,7 @@ Use `--force-with-lease` only on your own branch.
 
 A change that alters what users or contributors see, such as behavior, commands, configuration or the design, updates the documentation in the same pull request.
 
-- The documentation is Markdown in `docs/` and follows [Diátaxis](https://diataxis.fr/): tutorials (learn by doing), how-to guides (recipes for tasks), reference (facts to look up) and explanation (background). Each page has one job. Add a new page to the navigation in `zensical.toml`: the `check-docs-nav` hook fails when the pages and the navigation do not match. Check how the page looks with `zensical serve`.
+- The documentation is Markdown in `docs/` and follows [Diátaxis](https://diataxis.fr/): tutorials (learn by doing), how-to guides (recipes for tasks), reference (facts to look up) and explanation (background). Each page has one job. Add a new page to the navigation in `zensical.toml`: the `check-docs-nav` hook fails when the pages and the navigation do not match. Indent a nested list item by four spaces: Python-Markdown, which renders the site, shows one indented by two as an item of the outer list, and the `check-docs-lists` hook fails on it. Check how the page looks with `zensical serve`.
 - Write in plain English with American spelling. Describe what exists today in the present tense, and say plainly that something is planned when it is not built yet.
 - The English README is the reference. When it changes, update `README.ru.md` as well.
 
