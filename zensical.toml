@@ -41,7 +41,7 @@ nav = [
     { "ADR-0015: Run LocalExecutor by default" = "adr/0015-run-localexecutor-by-default.md" },
     { "ADR-0016: Keep the metadata of the marts as code, with a deployment's overrides in extensions" = "adr/0016-keep-the-metadata-of-the-marts-as-code.md" },
     { "ADR-0017: Set the access of AI clients in Metabase by levels" = "adr/0017-set-ai-access-in-metabase-by-levels.md" },
-    { "ADR-0018: Keep the content of the package in Metabase as code, and view-only" = "adr/0018-keep-the-base-content-of-metabase-as-code.md" },
+    { "ADR-0018: Keep the content of the package in Metabase as code, and view-only" = "adr/0018-keep-the-content-of-the-package-in-metabase-as-code.md" },
   ] },
 ]
 

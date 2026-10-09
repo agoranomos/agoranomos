@@ -65,4 +65,4 @@ Agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0015](0015-run-localexecutor-by-default.md) | Run LocalExecutor by default | accepted | 2026-10-05 |
 | [0016](0016-keep-the-metadata-of-the-marts-as-code.md) | Keep the metadata of the marts as code, with a deployment's overrides in extensions | accepted | 2026-10-07 |
 | [0017](0017-set-ai-access-in-metabase-by-levels.md) | Set the access of AI clients in Metabase by levels | proposed | 2026-10-10 |
-| [0018](0018-keep-the-base-content-of-metabase-as-code.md) | Keep the content of the package in Metabase as code, and view-only | proposed | 2026-10-10 |
+| [0018](0018-keep-the-content-of-the-package-in-metabase-as-code.md) | Keep the content of the package in Metabase as code, and view-only | proposed | 2026-10-10 |
