@@ -5,6 +5,8 @@ site_author = "Andrei Gromov"
 repo_url = "https://github.com/agoranomos/agoranomos"
 repo_name = "agoranomos/agoranomos"
 copyright = "Copyright &copy; 2026 Andrei Gromov and Agoranomos contributors. Apache-2.0."
+# The brand style of the site: colors, the self-hosted fonts and the logo (see [project.theme]).
+extra_css = ["stylesheets/brand.css"]
 nav = [
   { "Home" = "index.md" },
   { "Tutorials" = ["tutorials/index.md"] },
@@ -47,6 +49,11 @@ nav = [
 
 [project.theme]
 language = "en"
+# The header is dark in both color schemes, so it takes the mark for dark backgrounds.
+logo = "assets/brand/agoranomos-mark-on-dark.svg"
+favicon = "assets/brand/favicon.svg"
+# No Google Fonts: Fira Sans and Fira Code are served from docs/assets/fonts by brand.css.
+font = false
 features = [
   "content.code.copy",
   "navigation.footer",
@@ -56,15 +63,29 @@ features = [
   "search.highlight",
 ]
 
+# The scheme follows the system until the reader picks one. The colors are custom: brand.css sets them.
 [[project.theme.palette]]
+media = "(prefers-color-scheme)"
+primary = "custom"
+accent = "custom"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
 scheme = "default"
+primary = "custom"
+accent = "custom"
 toggle.icon = "lucide/sun"
 toggle.name = "Switch to dark mode"
 
 [[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
 scheme = "slate"
+primary = "custom"
+accent = "custom"
 toggle.icon = "lucide/moon"
-toggle.name = "Switch to light mode"
+toggle.name = "Switch to system preference"
 
 [project.markdown_extensions]
 admonition = {}
