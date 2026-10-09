@@ -7,8 +7,8 @@
 
 <p align="center">
   <b>Open-source marketing BI out of the box.</b><br>
-  Ad platforms → a PostgreSQL warehouse of your own → Metabase dashboards → questions in Claude or ChatGPT through MCP.<br>
-  One command. Your data stays yours.
+  The goal: ad platforms → a PostgreSQL warehouse of your own → Metabase dashboards → questions in Claude or ChatGPT through MCP.<br>
+  Today: one command, <code>./agoranomos up</code>, starts the stack and a demo dashboard on your machine. Your data stays yours.
 </p>
 
 <p align="center">
@@ -50,19 +50,19 @@ Agoranomos is meant to close these gaps: it keeps the history in a warehouse you
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/pipeline-dark.svg">
-    <img alt="The pipeline: demo data, dlt, the PostgreSQL warehouse with raw, staging and marts built by dbt, and Metabase run today, with Airflow running the steps; ad platform connectors, MCP and AI clients are planned" src="docs/assets/readme/pipeline-light.svg" width="100%">
+    <img alt="The pipeline: demo data, dlt, the PostgreSQL warehouse with raw, staging and marts built by dbt, and Metabase run today, and Airflow runs the load and the dbt build; the Metabase refresh, ad platform connectors, MCP and AI clients are planned" src="docs/assets/readme/pipeline-light.svg" width="100%">
   </picture>
 </p>
 
-Data moves in one direction, from ad platforms to dashboards and AI clients, and every step is code that runs on infrastructure you control. The diagram is the target design: glowing lines are what runs today, dashed lines are planned, and components arrive release by release.
+Data moves in one direction, from ad platforms to dashboards and AI clients, and every step is code that runs on infrastructure you control. The diagram is the target design. Solid lines show what runs today: the colored ones carry data, and the thin gray ones are Airflow starting a step. Dashed lines are planned, and components arrive release by release.
 
 | Step | Tool | What it does |
 |---|---|---|
-| **Load** | [dlt](https://dlthub.com/) | Pulls data from ad platform APIs, web analytics, CRM systems and files into PostgreSQL. The planned sources include Google, Meta, TikTok, Yandex, VK and GA4. A demo source that needs no accounts or keys loads synthetic statistics of a fictional ad account. |
-| **Transform** | [dbt Core](https://docs.getdbt.com/) | Turns the raw tables into one unified model of advertising statistics, with a description of every model and column and tests that guard the marts. |
-| **Orchestrate** | [Apache Airflow](https://airflow.apache.org/) | Schedules the loads and the dbt build, and refreshes Metabase afterwards. Today the demo chains the load and the dbt build; the refresh is planned. |
-| **Explore** | [Metabase](https://www.metabase.com/) | Serves dashboards, metrics and a glossary from the final layer of the warehouse. |
-| **Ask** | [MCP](https://modelcontextprotocol.io/) | AI clients reach the same data through MCP servers: the one built into Metabase, and servers for Airflow, the warehouse and dbt. Planned for v0.3.0. |
+| **Load** | [dlt](https://dlthub.com/) | Pulls data from ad platform APIs, web analytics, CRM systems and files into PostgreSQL. The planned sources include Google, Meta, TikTok, Yandex, VK and GA4. Today only the demo source runs: it needs no accounts or keys and loads synthetic statistics of a fictional ad account. |
+| **Transform** | [dbt Core](https://docs.getdbt.com/) | Turns the raw tables into one unified model of advertising statistics, with a description of every model and column and tests that guard the marts. Today it builds the demo: one staging model and one mart, `ad_spend_daily`. The unified model comes in v0.2.0. |
+| **Orchestrate** | [Apache Airflow](https://airflow.apache.org/) | Schedules the loads and the dbt build, and refreshes Metabase afterwards. Today the DAGs of the demo have no time schedule: the first start runs the load once, and its success starts the dbt build. The refresh is planned. |
+| **Explore** | [Metabase](https://www.metabase.com/) | Serves dashboards, metrics and a glossary from the final layer of the warehouse. Today there is one dashboard, the demo one; metrics and a glossary are not built yet. |
+| **Ask** | [MCP](https://modelcontextprotocol.io/) | AI clients reach the same data through MCP servers: the one built into Metabase, and servers for Airflow, the warehouse and dbt. Planned for v0.3.0. An example question: "How much did we spend on each platform last week?" |
 
 The [architecture overview](docs/explanation/architecture.md) describes every part, and the [decision records](docs/adr/index.md) say why each was chosen.
 
@@ -89,7 +89,7 @@ cd agoranomos
 
 - **Your data stays yours.** The warehouse is PostgreSQL on infrastructure you control, and the history stays there. Agoranomos needs no LLM account or key of its own: you use the AI client you already have, and it sees only what the MCP servers let it read. Whatever an AI client reads to answer a question is sent to that client's AI provider and handled under that provider's terms.
 - **Least privilege by default.** Each MCP server is to be limited by its own control, so one mistake does not open everything. In Metabase, each deployment is to set how much AI clients may do, from running saved questions up to building dashboards with a BI developer; the dashboards of the package and the warehouse are to stay out of reach at every level ([ADR-0017](docs/adr/0017-set-ai-access-in-metabase-by-levels.md)). What AI access may do in the other tools, such as reading the warehouse or starting pipelines in Airflow, is to be checked before the AI layer ships (Phase 3). Until the AI layer ships, the built-in MCP server of Metabase stays off. Campaign names and ad texts can carry instructions written by anyone, so Agoranomos treats them as untrusted data, and these limits reduce the damage if an AI client follows them anyway. See [ADR-0007](docs/adr/0007-ai-access-via-mcp-read-only.md).
-- **Local and server modes.** Local mode is for engineers on their own machine, with ports published on `127.0.0.1` only. Server mode, planned for v0.1.0, is for teams and for business users who connect from the Claude and ChatGPT apps: a reverse proxy with TLS, the Metabase MCP server over HTTPS with OAuth, and scheduled backups ([ADR-0011](docs/adr/0011-local-and-server-modes.md)).
+- **Local and server modes.** Local mode is for engineers on their own machine, with ports published on `127.0.0.1` only. Server mode is for teams and for business users who connect from the Claude and ChatGPT apps. It is planned: a reverse proxy with TLS and scheduled backups in v0.1.0, and the Metabase MCP server over HTTPS with OAuth in v0.3.0 ([ADR-0011](docs/adr/0011-local-and-server-modes.md)).
 - **amd64 and arm64, in 8 GB.** Both architectures are supported targets, Apple Silicon included. 8 GB of RAM available to Docker is recommended and 6 GB is the minimum, and every service has a memory limit measured on the demo ([System requirements](docs/reference/system-requirements.md), [ADR-0010](docs/adr/0010-multi-arch-and-memory-budget.md)).
 
 ## Who it is for
@@ -99,15 +99,15 @@ cd agoranomos
 
 ## Status and roadmap
 
-| Phase | Release | Status | What it delivers |
-|---|---|---|---|
-| 0. Foundation | none | ✅ Done | The name, repository, license and structure, the tooling (uv, ruff, prek), the CI and documentation skeletons, and the first architecture decision records. |
-| 1. Platform | v0.1.0 | 🟧 In progress | A Docker Compose stack with two PostgreSQL instances, Airflow 3.3 (the LocalExecutor by default; the CeleryExecutor variant adds a Valkey broker and a separate worker) and Metabase, in local and server modes, both covered by CI (server mode adds Caddy with automatic TLS and scheduled backups); secrets initialization; preflight checks; every service healthy, with a smoke test in CI; and one path end to end on demo data: a demo source (dlt) → raw → dbt (through Cosmos) → marts → a Metabase dashboard created from code. Local mode and the demo path run today; server mode and backups come next. |
-| 2. Data model on demo data | v0.2.0 | Planned | The full demo generator, with several fictional platforms; the unified model of advertising statistics in marts; and the Ops collection of dashboards about the stack itself. |
-| 3. AI layer | v0.3.0 | Planned | The four MCP servers, among them the Metabase MCP server over HTTPS with OAuth for the Claude and ChatGPT apps; database roles; a ready-made `.mcp.json`; skills for coding agents; and the guide "Talk to your data". The candidate for the first public release. |
-| 4. Real connectors | v0.4 and later | Planned | One data source per minor release, together with the unified model and FX rates. |
-| 5. Operations | v0.x | Planned | Verified restores, an upgrade runbook, and observability with elementary. |
-| Stable | v1.0.0 | Planned | A stable contract for the configuration and the data models. |
+| Phase | Release and status | What it delivers |
+|---|---|---|
+| 0. Foundation | none<br>✅ Done | The name, repository, license and structure, the tooling (uv, ruff, prek), the CI and documentation skeletons, and the first architecture decision records. |
+| 1. Platform | v0.1.0<br>🟧 In progress | A Docker Compose stack with two PostgreSQL instances, Airflow 3.3 (the LocalExecutor by default; the CeleryExecutor variant adds a Valkey broker and a separate worker) and Metabase, in local and server modes, both covered by CI (server mode adds Caddy with automatic TLS and scheduled backups); secrets initialization; preflight checks; every service healthy, with a smoke test in CI; and one path end to end on demo data: a demo source (dlt) → raw → dbt (through Cosmos) → marts → a Metabase dashboard created from code. Local mode and the demo path run today; server mode and backups come next. |
+| 2. Data model on demo data | v0.2.0<br>Planned | The full demo generator, with several fictional platforms; the unified model of advertising statistics in marts; and the Ops collection of dashboards about the stack itself. |
+| 3. AI layer | v0.3.0<br>Planned | The four MCP servers, among them the Metabase MCP server over HTTPS with OAuth for the Claude and ChatGPT apps; database roles; a ready-made `.mcp.json`; skills for coding agents; and the guide "Talk to your data". The candidate for the first public release. |
+| 4. Real connectors | v0.4 and later<br>Planned | One data source per minor release, together with the unified model and FX rates. |
+| 5. Operations | v0.x<br>Planned | Verified restores, an upgrade runbook, and observability with elementary. |
+| Stable | v1.0.0<br>Planned | A stable contract for the configuration and the data models. |
 
 The roadmap gives the order of the work, not dates. Versions are 0.x until the configuration and the data model are stable.
 
