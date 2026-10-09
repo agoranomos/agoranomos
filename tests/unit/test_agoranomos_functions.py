@@ -41,7 +41,7 @@ def shell_function(name: str) -> str:
 
 def run_env_functions(shell, body, *args, env_file, path=None):
     """Run body, with the functions that env_set needs and ENV_FILE set, in a shell with set -eu."""
-    names = ("say", "warn", "die", "env_get", "env_set")
+    names = ("say", "warn", "error_line", "die", "paint", "sgr", "env_get", "env_set")
     program = "set -eu\n" + "\n".join(shell_function(name) for name in names) + "\n" + body
     return subprocess.run(
         [shell, "-c", program, "sh", *args],
