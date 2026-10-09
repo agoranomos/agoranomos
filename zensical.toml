@@ -49,8 +49,9 @@ nav = [
 
 [project.theme]
 language = "en"
-# The header is dark in both color schemes, so it takes the mark for dark backgrounds.
-logo = "assets/brand/agoranomos-mark-on-dark.svg"
+# The header is dark in both color schemes, so it takes the logo for dark backgrounds.
+# brand.css hides the site name next to it: the logo already carries the name.
+logo = "assets/brand/agoranomos-lockup-on-dark.svg"
 favicon = "assets/brand/favicon.svg"
 # No Google Fonts: Fira Sans and Fira Code are served from docs/assets/fonts by brand.css.
 font = false
