@@ -10,7 +10,10 @@
   ../assets/fonts under the SIL Open Font License 1.1 (OFL-FiraSans.txt, OFL-FiraCode.txt).
   No request goes to a font host: zensical.toml sets `font = false`.
 
-  Every text color below keeps at least 4.5:1 against its background (WCAG 2.2, level AA).
+  Every text color below keeps at least 4.5:1 against its background (WCAG 2.2, level AA),
+  in highlighted and selected code too. The secondary text of the search dialog (its result
+  paths and counts) is the theme's own: an alpha set inside its shadow DOM, which these
+  variables do not reach.
 */
 
 /* Fonts ------------------------------------------------------------------------------------ */
@@ -340,7 +343,9 @@
 @media screen and (max-width: 76.234375em) {
   /*
     On narrow screens the theme hides the logo and shows the typed name. Here the logo stays,
-    after the menu button, until the page title takes its place on scroll.
+    after the menu button, until the page title takes its place on scroll. Moving the menu
+    button first changes no focus order: the theme keeps that button (a label) out of the tab
+    order, so Tab still goes from the skip link to the logo and then to the palette toggle.
   */
   .md-header__button[for="__drawer"] {
     order: -1;
@@ -480,7 +485,8 @@
   --md-code-bg-color--light: rgb(22 22 26 / 90%);
   --md-code-bg-color--lighter: rgb(22 22 26 / 54%);
   --md-code-hl-color: var(--ag-amber);
-  --md-code-hl-color--light: rgb(255 176 32 / 12%);
+  /* A highlighted line: the 2 px Amber bar, and a 4 % tint that keeps Dusk at 4.55:1. */
+  --md-code-hl-color--light: rgb(255 176 32 / 4%);
   --md-code-hl-number-color: var(--ag-ember-soft);
   --md-code-hl-special-color: var(--ag-ember-soft);
   --md-code-hl-function-color: var(--ag-bone);
@@ -502,6 +508,14 @@
   --md-accent-fg-color: var(--ag-amber);
   --md-accent-fg-color--transparent: rgb(255 176 32 / 10%);
   --md-typeset-a-color: var(--ag-amber);
+}
+
+/*
+  Selected code: the Amber selection of the page, with Bone text (6.38:1). On that background
+  Amber, Ember soft, Mute and Dusk would fall below 4.5:1, so no token keeps its color there.
+*/
+.md-typeset .highlight ::selection {
+  color: var(--ag-bone);
 }
 
 /* The prompt of a console session is Amber, as in the terminal of the brand. */
