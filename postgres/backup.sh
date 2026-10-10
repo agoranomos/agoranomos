@@ -108,6 +108,9 @@ write_latest() {
 # Run one step of a backup. set -e is in effect in it, in the functions too (it would not be in an
 # if or an ||), so the first command that fails stops the shell, and abort, the trap on EXIT, says
 # which step it was. A command between two steps is not the step before.
+#
+# Call it as a plain command, never in an if, a !, an && or an ||: set -e is ignored there, so a
+# failing command would not stop the shell, and step returns 0 whatever the command did.
 step() {
   current_step=$1
   shift
@@ -343,6 +346,9 @@ schedule() {
     say "the last scheduled backup failed at $(field "$recorded" attempted): the next try is an hour after it, or now"
   fi
   while :; do
+    # A last try in the future (a clock that was ahead and is right now) counts as none, or the
+    # hour from it would shut the schedule until the clock catches up.
+    [ "$last_try" -le "$(date +%s)" ] || last_try=0
     if { [ -n "$pending" ] || due; } && [ $(($(date +%s) - last_try)) -ge "$RETRY_SECONDS" ]; then
       last_try=$(date +%s)
       if /bin/sh "$0" scheduled; then
@@ -389,16 +395,19 @@ verify() {
     *) fail "not the name of a backup: $backup" ;;
   esac
   # A shared lock, so that the retention of a backup that runs cannot remove this one while it is
-  # checked. A folder that is writable gets its lock file now if it has none, so that a first backup
-  # that starts meanwhile finds the lock. The file is opened to read, so that a read-only mount will
-  # do; a read-only folder with no lock file cannot be locked against a backup that another
-  # container starts, and the check says so and goes on.
+  # checked. A folder that can be written gets its lock file now if it has none, so that a first
+  # backup that starts meanwhile finds the lock; if the file cannot be made, the check stops. The
+  # file is opened to read, so that a read-only mount will do; a folder that cannot be written and
+  # has no lock file cannot be locked against a backup that another container starts, and the check
+  # says so and goes on. (true, not :, which is a special builtin: when its redirection fails, dash
+  # stops at once with status 2 and no word.)
   lock="$BACKUP_ROOT/.lock"
   if [ ! -e "$lock" ] && [ -w "$BACKUP_ROOT" ]; then
-    { : >> "$lock"; } 2> /dev/null || true
+    { true >> "$lock"; } 2> /dev/null ||
+      fail "cannot create the lock file $lock: it must belong to the user of AGORANOMOS_UID in .env, $(id -u)"
   fi
   if [ ! -e "$lock" ]; then
-    say "the backups folder is read-only and has no lock file: checking without a lock"
+    say "the backups folder cannot be written and has no lock file: checking without a lock"
   else
     if ! { command exec 9< "$lock"; } 2> /dev/null; then
       fail "cannot read the lock file $lock: it must belong to the user of AGORANOMOS_UID in .env, $(id -u)"

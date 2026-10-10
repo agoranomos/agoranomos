@@ -731,7 +731,9 @@ def test_verify_stops_on_a_folder_without_its_manifest(backups):
 
 
 @pytest.mark.parametrize("shell", SHELLS)
-def test_verify_in_a_read_only_folder_with_no_lock_file_says_so_and_goes_on(shell, backups):
+def test_verify_in_a_folder_that_cannot_be_written_with_no_lock_file_says_so_and_goes_on(
+    shell, backups
+):
     assert run(shell, backups, "now").returncode == 0
     (backups / ".lock").unlink()
     (backups.parent / "tools.log").unlink()
@@ -742,10 +744,28 @@ def test_verify_in_a_read_only_folder_with_no_lock_file_says_so_and_goes_on(shel
         backups.chmod(0o700)
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines()[0] == (
-        "backup: the backups folder is read-only and has no lock file: checking without a lock"
+        "backup: the backups folder cannot be written and has no lock file: checking without a lock"
     )
     assert "checked the files only" in result.stdout
     assert not (backups / ".lock").exists()
+    assert tool_calls(backups) == []
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_verify_stops_with_one_line_when_it_cannot_create_the_lock_file(shell, backups):
+    # The folder can be written, but the file cannot be made (a full disk, a quota): here a link
+    # to a folder that does not exist stands for it. The special builtin : would make dash stop
+    # at once with status 2 and no word.
+    assert run(shell, backups, "now").returncode == 0
+    (backups.parent / "tools.log").unlink()
+    lock = backups / ".lock"
+    lock.unlink()
+    lock.symlink_to(backups.parent / "nowhere" / "lock")
+    result = run(shell, backups, "verify", NAME)
+    assert result.returncode == 1
+    lines = result.stderr.splitlines()
+    assert len(lines) == 1, result.stderr
+    assert lines[0].startswith(f"backup: error: cannot create the lock file {lock}")
     assert tool_calls(backups) == []
 
 
@@ -986,6 +1006,37 @@ def test_a_restart_after_the_hour_has_passed_tries_at_once(shell, backups):
     )
     assert result.returncode == 0, result.stderr
     assert attempts(result) == [utc_epoch("2026-10-12 03:00")]
+    assert latest(backups)["result"] == "ok"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_failure_recorded_by_a_clock_that_was_ahead_does_not_hold_the_schedule_shut(
+    shell, backups
+):
+    # The run failed at 12:00 by a clock that was ahead; the clock is right now, 00:10, and the time
+    # of the failure is in the future. The hour from it must not hold the schedule shut until 13:00.
+    (backups / "latest.json").write_text(
+        "{\n"
+        '  "result": "failed",\n'
+        '  "attempted": "2026-10-12T12:00:00Z",\n'
+        '  "step": "the dump of warehouse",\n'
+        '  "kind": "scheduled",\n'
+        '  "last_ok": "",\n'
+        '  "last_ok_epoch": 0,\n'
+        '  "last_scheduled_local": "2026-10-10 23:30"\n'
+        "}\n",
+        encoding="utf-8",
+    )
+    result = simulate(
+        shell,
+        backups,
+        utc_epoch("2026-10-12 00:10"),
+        utc_epoch("2026-10-12 01:00"),
+        600,
+        BACKUP_TIME="23:30",
+    )
+    assert result.returncode == 0, result.stderr
+    assert attempts(result) == [utc_epoch("2026-10-12 00:10")]
     assert latest(backups)["result"] == "ok"
 
 
