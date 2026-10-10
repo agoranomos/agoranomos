@@ -86,6 +86,49 @@ def test_env_set_and_env_get_round_trip_backslashes(shell, tmp_path):
     assert not list(tmp_path.glob(".env.tmp.*"))
 
 
+# What Compose reads from a line of .env (compose-go 2.16.1, dotenv/parser.go): a value without
+# quotes ends before " #" and loses the blanks at its end, the carriage return of a line of Windows
+# among them; a value in quotes is what is between them.
+ENV_LINES = [
+    ("KEY=plain", "plain"),
+    ("KEY=plain # a comment", "plain"),
+    ("KEY=plain # a comment\r", "plain"),
+    ("KEY=plain\r", "plain"),
+    ("KEY=plain   ", "plain"),
+    ("KEY=  after blanks", "after blanks"),
+    ("KEY=a#b", "a#b"),
+    (
+        "KEY=tab\t# no space before the hash, so no comment",
+        "tab\t# no space before the hash, so no comment",
+    ),
+    ("KEY='in single # quotes'", "in single # quotes"),
+    ('KEY="in double quotes"\r', "in double quotes"),
+    ("KEY='$dollar and spaces '", "$dollar and spaces "),
+    ("KEY=", ""),
+]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(("line", "value"), ENV_LINES)
+def test_env_get_reads_a_value_as_docker_compose_does(shell, tmp_path, line, value):
+    env_file = tmp_path / ".env"
+    env_file.write_bytes(f"OTHER=1\n{line}\nKEYS=not this key\n".encode())
+    result = run_env_functions(shell, 'env_get "$1"', "KEY", env_file=env_file)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == value
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_env_get_takes_the_last_line_that_sets_the_key_and_nothing_for_a_missing_one(
+    shell, tmp_path
+):
+    env_file = tmp_path / ".env"
+    env_file.write_text("KEY=first\nKEY=second # the one that counts\n", encoding="utf-8")
+    result = run_env_functions(shell, 'env_get KEY; printf "|"; env_get MISSING', env_file=env_file)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "second|"
+
+
 @pytest.mark.parametrize("shell", SHELLS)
 def test_env_set_replaces_the_first_line_drops_duplicates_and_appends(shell, tmp_path):
     env_file = tmp_path / ".env"

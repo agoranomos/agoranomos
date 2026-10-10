@@ -166,15 +166,48 @@ compose() {
   )
 }
 
-# Print the value of a setting in .env without quotes around it, or nothing when it is not set.
+# Print the value of a setting in .env, or nothing when it is not set, read as Docker Compose
+# reads it (compose-go 2.16.1, as of October 2026), so that this script and Compose agree on every
+# value: the last line that sets it counts, the blanks after the = do not, a value in single or
+# double quotes is what is between them, and a value without quotes ends before " #", which starts
+# a comment, and without the blanks at its end, the carriage return of a .env that Windows saved
+# among them. The key reaches awk in its environment, not in its program.
 env_get() {
   [ -f "$ENV_FILE" ] || return 0
-  env_value=$(sed -n "s/^$1=//p" "$ENV_FILE" | tail -n 1)
-  case "$env_value" in
-    \"*\") env_value=${env_value#\"} env_value=${env_value%\"} ;;
-    \'*\') env_value=${env_value#\'} env_value=${env_value%\'} ;;
-  esac
-  printf '%s' "$env_value"
+  ENV_GET_KEY=$1 awk -v squote="'" '
+    BEGIN { key = ENVIRON["ENV_GET_KEY"] "="; found = 0 }
+    index($0, key) == 1 { value = substr($0, length(key) + 1); found = 1 }
+    END {
+      if (!found) exit
+      sub(/^[ \t\r\v\f]+/, "", value)
+      quote = substr(value, 1, 1)
+      if (quote == "\"" || quote == squote) {
+        rest = substr(value, 2)
+        end = index(rest, quote)
+        if (end > 0) {
+          printf "%s", substr(rest, 1, end - 1)
+          exit
+        }
+      }
+      cut = index(value, " #")
+      if (cut > 0) value = substr(value, 1, cut - 1)
+      sub(/[ \t\r\v\f]+$/, "", value)
+      printf "%s", value
+    }
+  ' "$ENV_FILE"
+}
+
+# Print the size of a memory limit in bytes, as Compose reads it: a number with the unit k, m or
+# g, in either case and with b or ib after it, each a power of 1024. Print nothing for anything
+# else, such as a number without a unit, which Compose would read as bytes.
+memory_bytes() {
+  printf '%s\n' "$1" | awk '
+    /^[0-9]+(\.[0-9]+)?[kKmMgG]([iI]?[bB])?$/ {
+      match($0, /[kKmMgG]/)
+      unit = tolower(substr($0, RSTART, 1))
+      factor = unit == "k" ? 1024 : (unit == "m" ? 1048576 : 1073741824)
+      printf "%.0f\n", substr($0, 1, RSTART - 1) * factor
+    }'
 }
 
 # Print a setting from .env, or the default when it is not set or empty.
@@ -457,7 +490,8 @@ EOF
   # Compose reads a memory limit without a unit as bytes, and Docker then refuses the container
   # with an error that names neither the service nor the setting. A unit of k, m or g, in either
   # case and with b or ib after it, is what Compose reads as KiB, MiB or GiB; empty is the default
-  # of compose.yaml. The message names the setting, never a value.
+  # of compose.yaml. The size must also be at least 6 MiB, the smallest limit that Docker accepts.
+  # The message names the setting, never a value.
   # The loop reads a here-document, not a pipe, so that problem counts in this shell.
   if [ -f "$ENV_FILE" ]; then
     memory_settings=$(sed -n 's/^\([A-Za-z0-9_]*_MEMORY\)=.*/\1/p' "$ENV_FILE" | sort -u)
@@ -465,8 +499,11 @@ EOF
       [ -n "$memory_setting" ] || continue
       memory_value=$(env_get "$memory_setting")
       [ -n "$memory_value" ] || continue
-      if ! printf '%s\n' "$memory_value" | grep -Eq '^[0-9]+(\.[0-9]+)?[kKmMgG]([iI]?[bB])?$'; then
+      memory_size=$(memory_bytes "$memory_value")
+      if [ -z "$memory_size" ]; then
         problem "$memory_setting in .env is not a memory size: write a number with m or g, such as 2048m or 2g, or leave it empty for the default; a number alone would be bytes"
+      elif [ "$memory_size" -lt 6291456 ]; then
+        problem "$memory_setting in .env is smaller than 6 MiB, the smallest memory limit that Docker accepts: write at least 6m, or leave it empty for the default"
       fi
     done << EOF
 $memory_settings

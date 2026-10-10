@@ -8,7 +8,7 @@ Agoranomos reads its settings from the `.env` file in the root of the checkout. 
 
     Before an upgrade of Metabase, back up its database as well: [Back up Metabase before an upgrade](#back-up-metabase-before-an-upgrade).
 
-Each value is used as written: keep it on one line, do not put a comment after it, and put a value with spaces or a `$` in single quotes.
+`./agoranomos` reads each value as Docker Compose does (compose-go 2.16.1, as of October 2026): the last line that sets a setting counts, a value in single or double quotes is what is between the quotes, and a value without quotes ends where a space and `#` start a comment, without the blanks and the carriage return at its end, which a `.env` saved with the line endings of Windows has. Keep each value on one line, and put a value with spaces, a `#` or a `$` in single quotes.
 
 ## Docker Compose
 

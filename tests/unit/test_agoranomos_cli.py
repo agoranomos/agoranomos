@@ -472,7 +472,7 @@ def test_preflight_stops_on_a_session_key_that_metabase_refuses(cli, key, outcom
     [
         *[
             (value, "pass")
-            for value in ["2048m", "2g", "2G", "512M", "1024k", "2GB", "2gib", "1.5g", ""]
+            for value in ["2048m", "2g", "2G", "512M", "8192k", "2GB", "2gib", "1.5g", ""]
         ],
         *[(value, "stop") for value in ["2048", "2048b", "2 g", "2t", "lots", "g", "1.g", "-2g"]],
     ],
@@ -484,6 +484,35 @@ def test_preflight_stops_on_a_memory_limit_without_a_unit(cli, value, outcome):
     set_env(cli, AIRFLOW_TASKS_MEMORY=value)
     result = cli.run("preflight")
     check_limit(result, outcome, "AIRFLOW_TASKS_MEMORY")
+
+
+def test_preflight_reads_an_env_that_windows_saved(cli):
+    # A .env with the line endings of Windows, and a comment after a value: Compose reads every
+    # value without the carriage return and without the comment, and so does preflight.
+    cli.run("init")
+    text = cli.env_path.read_text(encoding="utf-8")
+    text = re.sub(r"^(AIRFLOW_TASKS_MEMORY=.*)$", r"\1 # for the pipelines", text, flags=re.M)
+    cli.env_path.write_bytes(text.replace("\n", "\r\n").encode())
+    result = cli.run("preflight")
+    assert result.returncode == 0, result.stderr
+    assert "Preflight passed" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("value", "outcome"),
+    [
+        *[(value, "pass") for value in ["6m", "6144k", "0.5g", "6M", "6mib"]],
+        *[(value, "stop") for value in ["5m", "5.9m", "1k", "0m", "0g"]],
+    ],
+)
+def test_preflight_stops_on_a_memory_limit_that_docker_refuses(cli, value, outcome):
+    # Docker refuses a memory limit below 6 MiB, and 0 would be no limit at all.
+    cli.run("init")
+    set_env(cli, WAREHOUSE_DB_MEMORY=value)
+    result = cli.run("preflight")
+    check_limit(result, outcome, "WAREHOUSE_DB_MEMORY")
+    if outcome == "stop":
+        assert "smaller than 6 MiB" in result.stderr
 
 
 def test_the_check_of_the_memory_limits_names_each_setting_and_no_value(cli):
