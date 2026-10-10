@@ -220,13 +220,13 @@ def test_anonymous_tracking_is_off(properties):
 
 def test_public_links_are_off_on_a_new_metabase(metabase_url, session):
     # metabase-init turns them off once, when it creates the admin; an admin may turn them on
-    # again. Metabase answers null for a setting at its default, true, so false is the only answer
-    # that says "off". A stand set up before this release keeps what it had: start it from empty
-    # volumes, as CI does.
+    # again. Metabase answers null for a setting at its default, true, with HTTP 204 and no body,
+    # so false is the only answer that says "off". A stand set up before this release keeps what it
+    # had: start it from empty volumes, as CI does.
     status, value = http_json(
         "GET", f"{metabase_url}/api/setting/enable-public-sharing", headers=session
     )
-    assert status == 200
+    assert status in (200, 204)
     assert value is False, "public links are on: start from empty volumes, or see configuration.md"
 
 

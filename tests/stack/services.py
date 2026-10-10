@@ -3,8 +3,10 @@
 The default variant runs Airflow with the LocalExecutor, inside the scheduler. The Celery variant,
 which .env selects with COMPOSE_FILE=compose.yaml:compose.celery.yaml, adds the broker and a worker.
 The demo profile, which COMPOSE_PROFILES in .env lists by default, adds the one-shot demo-init.
+The server profile, which ./agoranomos init --server adds to COMPOSE_PROFILES, adds the proxy.
 """
 
+from collections.abc import Collection
 from typing import Any
 
 from stack_helpers import active_profiles, active_variant, rendered
@@ -19,6 +21,8 @@ BASE_LONG_RUNNING = {
     "metabase",
 }
 CELERY_LONG_RUNNING = {"broker", "airflow-worker"}
+# The services that server mode adds: the proxy (the server profile).
+SERVER_LONG_RUNNING = {"proxy"}
 BASE_ONE_SHOT = {"db-init", "airflow-init", "metadata-export", "metabase-init"}
 # The Airflow services of the base stack: airflow-init, a one-shot job, and the four that stay up.
 BASE_AIRFLOW = {
@@ -30,11 +34,14 @@ BASE_AIRFLOW = {
 }
 
 
-def long_running(variant: str) -> set[str]:
-    """The services that run all the time in a variant."""
+def long_running(variant: str, profiles: Collection[str] = ()) -> set[str]:
+    """The services that run all the time in a variant, with the profiles of .env."""
+    services = set(BASE_LONG_RUNNING)
     if variant == "celery":
-        return BASE_LONG_RUNNING | CELERY_LONG_RUNNING
-    return set(BASE_LONG_RUNNING)
+        services |= CELERY_LONG_RUNNING
+    if "server" in profiles:
+        services |= SERVER_LONG_RUNNING
+    return services
 
 
 def one_shot(demo: bool) -> set[str]:
@@ -69,5 +76,7 @@ def airflow_services(variant: str) -> dict[str, Any]:
 
 # Whether .env selects the demo profile: the tests of the demo skip without it.
 DEMO = "demo" in active_profiles()
-LONG_RUNNING = long_running(active_variant())
+# Whether .env selects the server profile: the tests of server mode skip without it.
+SERVER = "server" in active_profiles()
+LONG_RUNNING = long_running(active_variant(), active_profiles())
 ONE_SHOT = one_shot(DEMO)

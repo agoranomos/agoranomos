@@ -7,6 +7,8 @@ import http.client
 import json
 import os
 import re
+import socket
+import ssl
 import subprocess
 import time
 import urllib.error
@@ -320,6 +322,86 @@ def http_json(
         return status, json.loads(raw) if raw else None
     except ValueError:
         return status, raw.decode(errors="replace")
+
+
+class SiteConnection(http.client.HTTPSConnection):
+    """HTTPS to the proxy of this machine for the name of the site, as a browser that resolved the
+    name to this machine would send it: the TCP connection goes to 127.0.0.1, and the name is in
+    TLS, where the certificate is checked against it, and in the Host header."""
+
+    def __init__(self, name: str, context: ssl.SSLContext, timeout: float) -> None:
+        super().__init__(name, 443, timeout=timeout, context=context)
+        self.site_context = context
+
+    def connect(self) -> None:
+        sock = socket.create_connection(("127.0.0.1", self.port), self.timeout)
+        self.sock = self.site_context.wrap_socket(sock, server_hostname=self.host)
+
+
+def site_host(env: dict[str, str]) -> str:
+    """The name of the site, from AGORANOMOS_SITE_URL in .env."""
+    url = env.get("AGORANOMOS_SITE_URL") or ""
+    assert url.startswith("https://"), "server mode needs AGORANOMOS_SITE_URL=https://<domain>"
+    return url.removeprefix("https://").rstrip("/")
+
+
+@functools.cache
+def site_context(tls: str) -> ssl.SSLContext:
+    """What trusts the certificate of the proxy: the authorities of this machine, for one of Let's
+    Encrypt, or, with AGORANOMOS_TLS=internal, the root of the own authority of Caddy, read from
+    the proxy."""
+    if tls != "internal":
+        return ssl.create_default_context()
+    root = compose("exec", "-T", "proxy", "cat", "/data/caddy/pki/authorities/local/root.crt")
+    return ssl.create_default_context(cadata=root.stdout)
+
+
+def site_request(
+    env: dict[str, str],
+    method: str,
+    path: str,
+    body: Any = None,
+    headers: dict[str, str] | None = None,
+    timeout: float = 30,
+    name: str | None = None,
+) -> tuple[int, dict[str, str], bytes]:
+    """One request to the site through the proxy: the status, the headers in lower case and the
+    body. name sends it for another name than that of the site. As in http_json, the encoded body
+    is never bound to a name, and a failure to connect raises a ConnectionError that names the
+    method, the path and the classes of the failure, such as SSLError for a refused certificate."""
+    connection = SiteConnection(
+        name or site_host(env), site_context(env.get("AGORANOMOS_TLS") or "acme"), timeout
+    )
+    try:
+        try:
+            connection.request(
+                method,
+                path,
+                body=None if body is None else json.dumps(body).encode(),
+                headers={"Content-Type": "application/json", **(headers or {})},
+            )
+            response = connection.getresponse()
+            return (
+                response.status,
+                {k.lower(): v for k, v in response.getheaders()},
+                response.read(),
+            )
+        except (OSError, http.client.HTTPException) as error:
+            raise ConnectionError(f"{method} {path} failed: {error_classes(error)}") from None
+    finally:
+        connection.close()
+
+
+def plain_request(env: dict[str, str], path: str) -> tuple[int, str]:
+    """One GET of the site over plain HTTP, on port 80 of this machine: the status and the
+    Location header."""
+    connection = http.client.HTTPConnection("127.0.0.1", 80, timeout=30)
+    try:
+        connection.request("GET", path, headers={"Host": site_host(env)})
+        response = connection.getresponse()
+        return response.status, response.getheader("Location") or ""
+    finally:
+        connection.close()
 
 
 def psql(

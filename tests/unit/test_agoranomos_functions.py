@@ -134,6 +134,8 @@ ENV_LINES = [
     # Compose trims the blanks after the = before it looks for a comment, so a comment after an
     # empty value is the value (./agoranomos preflight stops on such a line).
     ("KEY= # a comment", "# a comment"),
+    # The rule of the sessions of Metabase in server mode, which ./agoranomos init --server writes.
+    ('KEY=\'{"amount":24,"unit":"hours"}\'', '{"amount":24,"unit":"hours"}'),
 ]
 
 

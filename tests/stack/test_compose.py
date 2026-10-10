@@ -65,10 +65,19 @@ def test_one_shot_jobs_succeeded():
         assert running[service]["ExitCode"] == 0, running[service]
 
 
-def test_ports_are_published_on_localhost_only():
+def test_ports_are_published_on_localhost_only_but_those_of_the_proxy():
+    # The proxy of server mode publishes TCP 80 and 443 on every address of the host
+    # (tests/stack/test_server.py checks them); every other port is on 127.0.0.1.
     for service, container in containers().items():
         for publisher in container.get("Publishers") or []:
-            if publisher.get("PublishedPort"):
+            if not publisher.get("PublishedPort"):
+                continue
+            if service == "proxy":
+                assert (publisher["PublishedPort"], publisher["Protocol"]) in {
+                    (80, "tcp"),
+                    (443, "tcp"),
+                }, publisher
+            else:
                 assert publisher["URL"] == "127.0.0.1", (service, publisher)
 
 

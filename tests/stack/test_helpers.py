@@ -9,6 +9,7 @@ import pprint
 import re
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import threading
@@ -1394,6 +1395,8 @@ ENV_LINES = [
     # Compose trims the blanks after the = before it looks for a comment, so a comment after an
     # empty value is the value (./agoranomos preflight stops on such a line).
     ("KEY= # a comment", "# a comment"),
+    # The rule of the sessions of Metabase in server mode, which ./agoranomos init --server writes.
+    ('KEY=\'{"amount":24,"unit":"hours"}\'', '{"amount":24,"unit":"hours"}'),
 ]
 
 
@@ -1560,7 +1563,83 @@ def test_the_celery_variant_adds_the_broker_and_the_worker_to_the_long_running_s
         "metadata-export",
         "metabase-init",
     }
-    assert services.LONG_RUNNING in (local, celery)
+    assert (
+        services.long_running(stack_helpers.active_variant(), stack_helpers.active_profiles())
+        == services.LONG_RUNNING
+    )
+
+
+def test_server_mode_adds_the_proxy_to_the_long_running_services():
+    for variant in ("local", "celery"):
+        alone = services.long_running(variant)
+        assert services.long_running(variant, {"core", "server"}) == alone | {"proxy"}
+        assert services.long_running(variant, {"core", "demo"}) == alone
+
+
+def test_the_name_of_the_site_is_its_address_without_the_scheme():
+    site = {"AGORANOMOS_SITE_URL": "https://bi.example.com/"}
+    assert stack_helpers.site_host(site) == "bi.example.com"
+    with pytest.raises(AssertionError, match="server mode needs AGORANOMOS_SITE_URL"):
+        stack_helpers.site_host({"AGORANOMOS_SITE_URL": "http://localhost:3000"})
+
+
+def test_a_request_to_the_site_that_cannot_connect_names_the_call_and_holds_no_body(monkeypatch):
+    def refuse(*args, **kwargs):
+        raise ConnectionRefusedError
+
+    monkeypatch.setattr(stack_helpers.socket, "create_connection", refuse)
+    site = {"AGORANOMOS_SITE_URL": "https://bi.example.com", "AGORANOMOS_TLS": "acme"}
+    with pytest.raises(ConnectionError) as raised:
+        stack_helpers.site_request(site, "POST", "/api/session", {"password": PASSWORD})
+    assert str(raised.value) == "POST /api/session failed: ConnectionRefusedError"
+    assert raised.value.__cause__ is None
+    assert raised.value.__suppress_context__ is True
+
+
+def test_a_request_to_the_site_goes_to_this_machine_and_names_the_site_in_tls(monkeypatch):
+    seen = {}
+
+    class Context:
+        def wrap_socket(self, sock, server_hostname):
+            seen["server_hostname"] = server_hostname
+            raise ssl.SSLError("no certificate for this name")
+
+    def connect(address, timeout=None):
+        seen["address"] = address
+        return object()
+
+    monkeypatch.setattr(stack_helpers.socket, "create_connection", connect)
+    monkeypatch.setattr(stack_helpers, "site_context", lambda tls: Context())
+    site = {"AGORANOMOS_SITE_URL": "https://bi.example.com", "AGORANOMOS_TLS": "internal"}
+    with pytest.raises(ConnectionError, match="SSLError"):
+        stack_helpers.site_request(site, "GET", "/", name="airflow.bi.example.com")
+    assert seen == {"address": ("127.0.0.1", 443), "server_hostname": "airflow.bi.example.com"}
+
+
+def test_the_context_of_the_site_reads_the_root_of_caddy_only_with_internal_tls(monkeypatch):
+    stack_helpers.site_context.cache_clear()
+    contexts, calls = [], []
+
+    def create_default_context(**options):
+        contexts.append(options)
+        return f"context {len(contexts)}"
+
+    def compose(*args, **options):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="the root of Caddy", stderr="")
+
+    monkeypatch.setattr(stack_helpers.ssl, "create_default_context", create_default_context)
+    monkeypatch.setattr(stack_helpers, "compose", compose)
+    try:
+        assert stack_helpers.site_context("acme") == "context 1"
+        assert calls == []
+        assert stack_helpers.site_context("internal") == "context 2"
+        assert contexts == [{}, {"cadata": "the root of Caddy"}]
+        assert calls == [
+            ("exec", "-T", "proxy", "cat", "/data/caddy/pki/authorities/local/root.crt")
+        ]
+    finally:
+        stack_helpers.site_context.cache_clear()
 
 
 def test_the_celery_variant_adds_the_worker_to_the_airflow_services():
