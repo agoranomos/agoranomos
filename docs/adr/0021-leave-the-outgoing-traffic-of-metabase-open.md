@@ -19,7 +19,7 @@ Does the stack limit where Metabase may connect, and how?
 * No request leaves the deployment because a stranger asked for it.
 * The features that an admin may set up later keep working.
 * No extra service and no image that is not official, within the memory budget of [ADR-0022](0022-budget-the-memory-by-variant-and-mode.md).
-* A container that is only on an internal network of Docker publishes no port, and Metabase publishes `127.0.0.1:3000` for its tunnel.
+* A container that is only on an internal network of Docker publishes no port (checked on Docker Desktop, as of October 2026), and Metabase publishes `127.0.0.1:3000` for its tunnel.
 
 ## Considered Options
 
