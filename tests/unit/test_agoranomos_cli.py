@@ -442,6 +442,173 @@ def test_init_creates_the_extensions_folder(cli):
     assert (cli.root / "extensions" / "metadata").is_dir()
 
 
+def test_init_with_server_turns_server_mode_on(cli):
+    result = cli.run("init", "--server", "bi.example.com")
+    assert result.returncode == 0, result.stderr
+    env = cli.read_env()
+    assert env["AGORANOMOS_SITE_URL"] == "https://bi.example.com"
+    assert env["COMPOSE_PROFILES"] == "core,demo,server"
+    # Metabase on the internet: passwords of 15 characters, and a sign-out after a day idle.
+    assert env["METABASE_PASSWORD_COMPLEXITY"] == "strong-enough"
+    # In single quotes in .env, which Compose reads as the JSON between them.
+    assert env["METABASE_SESSION_TIMEOUT"] == "'" + '{"amount":24,"unit":"hours"}' + "'"
+    assert "Point the DNS record of bi.example.com at this server" in result.stdout
+    # Again, and with a list of profiles of one's own: each profile once, in its place; a rule of
+    # Metabase that a person set stays.
+    set_env(cli, COMPOSE_PROFILES="core,server", METABASE_PASSWORD_COMPLEXITY="strong")
+    assert cli.run("init", "--server", "bi.example.com").returncode == 0
+    assert cli.read_env()["COMPOSE_PROFILES"] == "core,server"
+    assert cli.read_env()["METABASE_PASSWORD_COMPLEXITY"] == "strong"
+
+
+def test_init_without_server_leaves_the_rules_of_metabase_to_metabase(cli):
+    cli.run("init")
+    env = cli.read_env()
+    assert "METABASE_PASSWORD_COMPLEXITY" not in env
+    assert "METABASE_SESSION_TIMEOUT" not in env
+    assert "AGORANOMOS_SITE_URL" not in env
+
+
+@pytest.mark.parametrize(
+    "domain",
+    [
+        "https://bi.example.com",
+        "bi.example.com/metabase",
+        "bi.example.com:8443",
+        "203.0.113.7",
+        "localhost",
+        "-bad.example.com",
+        "",
+    ],
+)
+def test_init_with_server_refuses_what_is_not_a_domain_name(cli, domain):
+    result = cli.run("init", "--server", domain)
+    assert result.returncode == 1
+    assert "not a domain name" in result.stderr
+    assert not cli.env_path.exists()
+
+
+def test_init_with_server_needs_a_domain_and_init_takes_no_other_option(cli):
+    assert "--server needs the domain name" in cli.run("init", "--server").stderr
+    assert "unknown option of init: --local" in cli.run("init", "--local").stderr
+
+
+def server_env(cli, tls="internal", site="https://agoranomos.localhost"):
+    cli.run("init", "--server", "bi.example.com")
+    set_env(cli, AGORANOMOS_TLS=tls, AGORANOMOS_SITE_URL=site)
+
+
+@pytest.mark.parametrize(("version", "outcome"), [("27.5.1", "stop"), ("28.0.0", "pass")])
+def test_preflight_in_server_mode_needs_docker_28(cli, version, outcome):
+    server_env(cli)
+    result = cli.run("preflight", FAKE_SERVER_VERSION=version)
+    check_limit(result, outcome, "28.0.0")
+
+
+def test_preflight_in_local_mode_keeps_docker_25(cli):
+    cli.run("init")
+    result = cli.run("preflight", FAKE_SERVER_VERSION="27.5.1")
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("tls", "site", "word"),
+    [
+        ("acme", "https://agoranomos.localhost", "cannot get a certificate from Let's Encrypt"),
+        ("acme", "https://bi.test", "cannot get a certificate from Let's Encrypt"),
+        ("internal", "http://agoranomos.localhost", "AGORANOMOS_SITE_URL"),
+        ("internal", "https://agoranomos.localhost/metabase", "AGORANOMOS_SITE_URL"),
+        ("letsencrypt", "https://bi.example.com", "AGORANOMOS_TLS"),
+    ],
+)
+def test_preflight_stops_on_a_site_that_server_mode_cannot_serve(cli, tls, site, word):
+    server_env(cli, tls=tls, site=site)
+    result = cli.run("preflight")
+    assert result.returncode == 1
+    assert word in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("tls", "site"),
+    [("internal", "https://agoranomos.localhost"), ("acme", "https://bi.example.com")],
+)
+def test_preflight_passes_a_site_that_server_mode_can_serve(cli, tls, site):
+    server_env(cli, tls=tls, site=site)
+    result = cli.run("preflight")
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("port", ["80", "443"])
+def test_preflight_in_server_mode_stops_when_a_port_of_the_proxy_is_in_use(cli, port):
+    server_env(cli)
+    result = cli.run("preflight", FAKE_BUSY_PORTS=port)
+    assert result.returncode == 1
+    assert f"port {port} is in use" in result.stderr
+
+
+def test_up_in_server_mode_prints_the_site_and_the_tunnel_to_airflow(cli, tmp_path):
+    server_env(cli)
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert "Metabase: https://agoranomos.localhost" in lines
+    assert (
+        "Airflow:  http://127.0.0.1:8080 on this server; from your machine: "
+        "ssh -L 8080:127.0.0.1:8080 <user>@<server>"
+    ) in lines
+
+
+def test_up_checks_the_certificate_of_a_site_of_lets_encrypt(cli, tmp_path):
+    server_env(cli, tls="acme", site="https://bi.example.com")
+    cli.stub("curl", 'printf "%s\\n" "$*" >> "$FAKE_LOG.curl"; exit 0')
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
+    assert result.returncode == 0, result.stderr
+    calls = (tmp_path / "docker.log.curl").read_text(encoding="utf-8").splitlines()
+    assert calls == [
+        "--silent --output /dev/null --max-time 10 --resolve bi.example.com:443:127.0.0.1 "
+        "https://bi.example.com/api/health"
+    ]
+    assert "certificate" not in result.stderr
+
+
+def test_up_warns_when_the_site_has_no_trusted_certificate_yet(cli, tmp_path):
+    # The domain does not point at the server yet, or the ports are closed: Caddy runs, and the
+    # stack works, but the site has no certificate. up says so and still succeeds.
+    server_env(cli, tls="acme", site="https://bi.example.com")
+    cli.stub("curl", "exit 60")
+    result = cli.run(
+        "up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), AGORANOMOS_CERTIFICATE_TRIES="2", **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    assert "https://bi.example.com does not answer with a certificate that this machine trusts" in (
+        result.stderr
+    )
+    assert "DNS record of bi.example.com" in result.stderr
+    assert "./agoranomos logs proxy" in result.stderr
+    assert "docker compose restart proxy" in result.stderr
+
+
+def test_up_with_the_own_authority_of_caddy_does_not_check_the_certificate(cli, tmp_path):
+    server_env(cli)
+    cli.stub("curl", 'printf "called\\n" >> "$FAKE_LOG.curl"; exit 60')
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / "docker.log.curl").exists()
+
+
+def test_credentials_in_server_mode_name_the_site_and_the_tunnel(cli):
+    server_env(cli)
+    lines = cli.run("credentials").stdout.splitlines()
+    assert lines[0] == (
+        "Airflow:  http://127.0.0.1:8080 through an SSH tunnel  user name admin, password "
+        "AIRFLOW_ADMIN_PASSWORD"
+    )
+    assert lines[1] == (
+        "Metabase: https://agoranomos.localhost  email admin@example.com, password "
+        "METABASE_ADMIN_PASSWORD"
+    )
+
+
 def test_runs_from_another_directory(cli, tmp_path):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()

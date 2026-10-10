@@ -33,6 +33,8 @@ Agoranomos reads its settings from the `.env` file in the root of the checkout. 
 
 Server mode puts Metabase on the internet behind Caddy, with HTTPS, and opens the ports 80 and 443 of the host and no other ([ADR-0019](../adr/0019-open-only-metabase-in-server-mode.md)). Airflow and Metabase stay on `127.0.0.1` too, for SSH tunnels.
 
+`./agoranomos init --server <domain>` turns it on: it sets `AGORANOMOS_SITE_URL=https://<domain>`, adds the `server` profile to `COMPOSE_PROFILES`, and sets the two rules of Metabase below where they are not set. To go back to local mode, take `server` out of `COMPOSE_PROFILES`, delete the lines `AGORANOMOS_SITE_URL`, `METABASE_PASSWORD_COMPLEXITY` and `METABASE_SESSION_TIMEOUT` of `.env`, and run `./agoranomos up`: Metabase then has its address on `localhost` again.
+
 | Setting | Default | What it does |
 |---|---|---|
 | `AGORANOMOS_SITE_URL` | `http://localhost:` and `METABASE_PORT` | The address of Metabase, which it uses in its links. In server mode it is `https://` and the domain name of the server, which Caddy serves; `./agoranomos init --server <domain>` sets it. It is not in `.env.example`, so that local mode keeps the default. |

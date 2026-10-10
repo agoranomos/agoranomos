@@ -86,6 +86,30 @@ def test_env_set_and_env_get_round_trip_backslashes(shell, tmp_path):
     assert not list(tmp_path.glob(".env.tmp.*"))
 
 
+@pytest.mark.parametrize("shell", SHELLS)
+def test_env_set_keeps_the_single_quotes_of_the_session_timeout_and_env_get_reads_the_json(
+    shell, tmp_path
+):
+    # init --server writes METABASE_SESSION_TIMEOUT with env_set, in single quotes: Compose reads
+    # the JSON between them, and env_get must too.
+    env_file = tmp_path / ".env"
+    env_file.write_text("OTHER=1\n", encoding="utf-8")
+    env_file.chmod(0o600)
+    json = '{"amount":24,"unit":"hours"}'
+    result = run_env_functions(
+        shell,
+        "env_set METABASE_SESSION_TIMEOUT \"'$1'\"; env_get METABASE_SESSION_TIMEOUT",
+        json,
+        env_file=env_file,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == json
+    assert env_file.read_text(encoding="utf-8").splitlines() == [
+        "OTHER=1",
+        f"METABASE_SESSION_TIMEOUT='{json}'",
+    ]
+
+
 # What Compose reads from a line of .env (compose-go 2.16.1, dotenv/parser.go): a value without
 # quotes ends before " #" and loses the blanks at its end, the carriage return of a line of Windows
 # among them; a value in quotes is what is between them.
