@@ -133,14 +133,14 @@ def test_public_links_that_could_not_be_turned_off_say_where_to_do_it(metabase, 
 PUBLIC_SHARING = ("PUT", "/api/setting/enable-public-sharing")
 
 
-def test_a_status_that_no_hint_was_made_for_still_names_the_public_links(metabase, capsys):
-    # 429 is a status that the job has no special hint for: the error must still say that the links
+def test_any_failure_status_names_the_public_links(metabase, capsys):
+    # Whatever the status of the failed PUT (429 here), the error ends with the hint that the links
     # are on and where to turn them off, because ./agoranomos up never prints the log of the job.
     metabase.failures[PUBLIC_SHARING] = 429
     assert mi.main(env_for(metabase)) == 1
     err = capsys.readouterr().err
     assert "PUT /api/setting/enable-public-sharing failed with HTTP 429" in err
-    assert "The public links of Metabase are still on" in err
+    assert err.rstrip().endswith(mi.PUBLIC_SHARING_HINT)
     assert "Admin > Settings > Public sharing" in err
     assert not leaked(err)
 
@@ -539,6 +539,27 @@ def test_a_dropped_connection_on_the_public_links_names_them(metabase, capsys, f
     assert "Admin > Settings > Public sharing" in err
     assert "Traceback" not in err
     assert not leaked(err)
+
+
+@pytest.mark.parametrize(("fault", "error_class"), FAULTS)
+def test_a_dropped_connection_on_the_first_put_and_then_a_success_ends_well(
+    metabase, clock, capsys, monkeypatch, fault, error_class
+):
+    # A transport fault counts as a try, like a status: the second PUT goes through.
+    metabase.faults[PUBLIC_SHARING] = fault
+
+    def blip_over(seconds: float) -> None:
+        clock.sleep(seconds)
+        metabase.faults.clear()
+
+    monkeypatch.setattr(mi, "pause", blip_over)
+    assert mi.main(env_for(metabase)) == 0
+    assert metabase.calls.count(PUBLIC_SHARING) == 2
+    assert metabase.settings["enable-public-sharing"] is False
+    assert clock.now == 2.0
+    output = capsys.readouterr()
+    assert "public links are off" in output.out
+    assert output.err == ""
 
 
 def test_a_call_that_cannot_connect_names_the_step_and_the_classes_of_the_error():

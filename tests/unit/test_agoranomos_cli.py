@@ -452,7 +452,7 @@ def test_init_with_server_turns_server_mode_on(cli):
     assert env["METABASE_PASSWORD_COMPLEXITY"] == "strong-enough"
     # In single quotes in .env, which Compose reads as the JSON between them.
     assert env["METABASE_SESSION_TIMEOUT"] == "'" + '{"amount":24,"unit":"hours"}' + "'"
-    assert "Point the DNS record of bi.example.com at this server" in result.stdout
+    assert "Point the A record of bi.example.com at this server" in result.stdout
     # Again, and with a list of profiles of one's own: each profile once, in its place; a rule of
     # Metabase that a person set stays.
     set_env(cli, COMPOSE_PROFILES="core,server", METABASE_PASSWORD_COMPLEXITY="strong")
@@ -497,6 +497,19 @@ def test_init_with_server_needs_a_domain_and_init_takes_no_other_option(cli):
     assert "unknown option of init: --local" in cli.run("init", "--local").stderr
 
 
+def test_init_with_server_tells_an_upgrade_to_check_its_public_links(cli):
+    # Every Metabase that was set up before this release has public links on, Metabase's default,
+    # and metabase-init leaves them as they are: the person hears it when server mode goes on.
+    result = cli.run("init", "--server", "bi.example.com")
+    assert result.returncode == 0, result.stderr
+    assert (
+        "If this Metabase was set up before this release, its public links stay as they were: "
+        "check Admin > Settings > Public sharing."
+    ) in result.stdout.splitlines()
+    # init alone, and up, say nothing of server mode.
+    assert "public links" not in cli.run("init").stdout
+
+
 def test_init_with_server_accepts_a_label_of_63_characters(cli):
     result = cli.run("init", "--server", "a" * 63 + ".example.com")
     assert result.returncode == 0, result.stderr
@@ -509,7 +522,7 @@ def test_init_with_server_hints_at_internal_tls_for_a_name_that_gets_no_certific
     # message of init says what to set, and stops saying it once it is set.
     result = cli.run("init", "--server", domain)
     assert result.returncode == 0, result.stderr
-    assert "Point the DNS record of" in result.stdout
+    assert "Point the A record of" in result.stdout
     assert "set AGORANOMOS_TLS=internal in .env" in result.stdout
     set_env(cli, AGORANOMOS_TLS="internal")
     again = cli.run("init", "--server", domain)

@@ -308,9 +308,10 @@ valid_domain() {
 # True when Let's Encrypt can issue a certificate for the domain $1: not localhost or a name under
 # .localhost, .test, .example or .invalid, which RFC 6761 keeps for local use and tests, and not a
 # name under .local, .internal or home.arpa (or home.arpa itself), which Caddy serves only with its
-# own authority. DNS names are not case-sensitive, so the name is folded to lower case first.
+# own authority. DNS names are not case-sensitive, so the name is folded to lower case first, in
+# the C locale, where only A to Z change.
 public_name() {
-  public_lower=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  public_lower=$(printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]')
   case "$public_lower" in
     localhost | *.localhost | *.test | *.example | *.invalid | *.local | *.internal | home.arpa | *.home.arpa)
       return 1
@@ -393,7 +394,8 @@ cmd_init() {
     [ -n "$(env_get METABASE_PASSWORD_COMPLEXITY)" ] || env_set METABASE_PASSWORD_COMPLEXITY strong-enough
     [ -n "$(env_get METABASE_SESSION_TIMEOUT)" ] ||
       env_set METABASE_SESSION_TIMEOUT "'{\"amount\":24,\"unit\":\"hours\"}'"
-    say "Server mode is on: Metabase is to be at https://$server_domain. Point the DNS record of $server_domain at this server, then run ./agoranomos up."
+    say "Server mode is on: Metabase is to be at https://$server_domain. Point the A record of $server_domain at this server, then run ./agoranomos up."
+    say "If this Metabase was set up before this release, its public links stay as they were: check Admin > Settings > Public sharing."
     if ! public_name "$server_domain" && [ "$(setting AGORANOMOS_TLS acme)" != internal ]; then
       say "$server_domain is not a name that gets a certificate of Let's Encrypt: for a test, set AGORANOMOS_TLS=internal in .env, or ./agoranomos up stops on it."
     fi
