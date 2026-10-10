@@ -538,6 +538,45 @@ def test_preflight_passes_a_site_that_server_mode_can_serve(cli, tls, site):
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.parametrize(("length", "outcome"), [(14, "stop"), (15, "pass"), (0, "pass")])
+def test_preflight_in_server_mode_stops_on_an_admin_password_that_strong_enough_refuses(
+    cli, length, outcome
+):
+    # Metabase checks the admin password of its first start against its rule: with strong-enough
+    # (init --server sets it), one of fewer than 15 characters makes metabase-init fail. An empty
+    # password is not set by hand: init generates one of 32.
+    server_env(cli)
+    password = "x" * length
+    set_env(cli, METABASE_ADMIN_PASSWORD=password)
+    assert cli.read_env()["METABASE_PASSWORD_COMPLEXITY"] == "strong-enough"
+    result = cli.run("preflight")
+    assert result.returncode == (1 if outcome == "stop" else 0), result.stderr
+    if outcome == "stop":
+        assert "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters" in result.stderr
+        assert "METABASE_PASSWORD_COMPLEXITY=strong-enough" in result.stderr
+    else:
+        assert "METABASE_ADMIN_PASSWORD" not in result.stderr
+    # Never the value, whether or not it was refused.
+    assert password == "" or password not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("complexity", ["normal", "strong"])
+def test_preflight_leaves_a_short_admin_password_to_the_other_rules_of_metabase(cli, complexity):
+    # normal asks for 6 characters and a digit, and strong has rules of its own: the check of the
+    # length of strong-enough is not theirs.
+    server_env(cli)
+    set_env(cli, METABASE_PASSWORD_COMPLEXITY=complexity, METABASE_ADMIN_PASSWORD="Aa1Aa1Aa1")
+    result = cli.run("preflight")
+    assert result.returncode == 0, result.stderr
+
+
+def test_preflight_in_local_mode_does_not_check_the_length_of_the_admin_password(cli):
+    cli.run("init")
+    set_env(cli, METABASE_ADMIN_PASSWORD="Aa1")
+    result = cli.run("preflight")
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize("port", ["80", "443"])
 def test_preflight_in_server_mode_stops_when_a_port_of_the_proxy_is_in_use(cli, port):
     server_env(cli)

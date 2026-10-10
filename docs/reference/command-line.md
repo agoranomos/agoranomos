@@ -30,6 +30,7 @@ Checks that this machine can run the stack. Each problem is reported with what t
 | Ports `AIRFLOW_PORT` and `METABASE_PORT` | a port is in use and the stack is not running | — |
 | Ports 80 and 443, in server mode | a port is in use and the stack is not running | — |
 | The site, in server mode | `AGORANOMOS_SITE_URL` is not `https://` and a domain name, `AGORANOMOS_TLS` is neither `acme` nor `internal`, or with `acme` the name cannot get a certificate of Let's Encrypt, such as `agoranomos.localhost` | — |
+| `METABASE_ADMIN_PASSWORD` in `.env`, in server mode with `METABASE_PASSWORD_COMPLEXITY=strong-enough` | it is set and has fewer than 15 characters, with which the first start of Metabase fails | — |
 | `METABASE_SESSION_KEY` in `.env` | it has fewer than 16 characters, with which Metabase does not start | — |
 | Each `*_MEMORY` setting in `.env` | it is not empty and not a number with the unit `k`, `m` or `g`, in either case, such as `2048m` or `2g`: Compose would read a number alone as bytes; or it is smaller than 6 MiB, the smallest memory limit that Docker accepts | — |
 | A comment after an empty value in `.env` | a setting has a space or a tab and then `#` after its `=`, as in `KEY= # note`: Compose trims the blanks and reads `# note` as the value, a secret or the session key of Metabase among them; a `#` right after the `=`, as in `KEY=#abc`, is a value and no problem | — |

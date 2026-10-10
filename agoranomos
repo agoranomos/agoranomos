@@ -527,6 +527,16 @@ EOF
     elif [ "$site_tls" = acme ] && ! public_name "$site_host"; then
       problem "$site_host cannot get a certificate from Let's Encrypt: run ./agoranomos init --server with the domain name of the server, or set AGORANOMOS_TLS=internal in .env for a test"
     fi
+    # Metabase checks the password of the admin account against its rule when metabase-init creates
+    # the account at the first start, and with strong-enough (init --server sets it) it refuses one
+    # of fewer than 15 characters. init generates one of 32, so this catches one set by hand. The
+    # message names the settings, never the value. strong has other rules, and normal is the default
+    # of local mode, so they are Metabase's to check.
+    admin_password=$(env_get METABASE_ADMIN_PASSWORD)
+    if [ "$(setting METABASE_PASSWORD_COMPLEXITY normal)" = strong-enough ] &&
+      [ -n "$admin_password" ] && [ "${#admin_password}" -lt 15 ]; then
+      problem "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters, which METABASE_PASSWORD_COMPLEXITY=strong-enough asks for: write a longer one, or leave it empty for ./agoranomos init to generate one"
+    fi
   fi
   compose_version=$(docker compose version --short 2> /dev/null) || compose_version=""
   if [ -z "$compose_version" ]; then
