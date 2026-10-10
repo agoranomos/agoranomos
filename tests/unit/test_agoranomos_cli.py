@@ -1553,7 +1553,7 @@ def test_up_waits_for_the_rest_of_the_stack_when_only_demo_init_failed(cli, tmp_
     assert result.returncode == 1
     assert result.stderr.splitlines()[-1] == "error: the stack is up, but the demo is not ready"
     assert "Metabase: http://127.0.0.1:3000" in result.stdout
-    polls = [call for call in cli.docker_calls() if call.startswith("compose ps --all")]
+    polls = [call for call in cli.docker_calls() if call.startswith("compose ps --all --format")]
     assert len(polls) == 2  # the first poll found platform-db still starting
 
 
@@ -1684,7 +1684,7 @@ def test_up_reports_a_failing_docker_compose_up_and_does_not_wait(cli, tmp_path)
     assert "./agoranomos status and ./agoranomos logs <service>" in result.stderr
     assert "Waiting until every service is healthy" not in result.stdout
     assert "The stack is up" not in result.stdout
-    assert not any(call.startswith("compose ps --all") for call in cli.docker_calls())
+    assert not any(call.startswith("compose ps --all --format") for call in cli.docker_calls())
 
 
 def test_up_reports_a_failing_docker_compose_ps(cli):
@@ -1706,7 +1706,7 @@ def test_up_keeps_waiting_until_the_services_are_healthy(cli, tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert "All services are healthy." in result.stdout
-    polls = [call for call in cli.docker_calls() if call.startswith("compose ps --all")]
+    polls = [call for call in cli.docker_calls() if call.startswith("compose ps --all --format")]
     assert len(polls) == 2  # the first poll found platform-db still starting
 
 
@@ -1833,7 +1833,7 @@ def test_up_names_every_failed_service_and_does_not_wait_for_the_rest(cli, tmp_p
     assert "db-init failed: see ./agoranomos logs db-init" in result.stderr
     assert "warehouse-db failed: see ./agoranomos logs warehouse-db" in result.stderr
     assert "platform-db" not in result.stderr  # still starting: no reason to wait for it
-    assert len([c for c in cli.docker_calls() if c.startswith("compose ps --all")]) == 1
+    assert len([c for c in cli.docker_calls() if c.startswith("compose ps --all --format")]) == 1
 
 
 def test_up_hands_compose_the_files_of_env_and_never_passes_flags(cli, tmp_path):
@@ -1867,7 +1867,15 @@ def test_compose_gets_its_settings_from_env_whatever_the_shell_exports(cli, tmp_
     assert result.returncode == 0, result.stderr
     settings = cli.compose_settings()
     assert len(settings) == len(compose_calls(cli)) >= 3  # the running check, up and a poll
-    assert set(settings) == {("my-stack", "core,extra", "compose.yaml")}
+    # The look for a proxy left from server mode adds the profile of the proxy to the profiles of
+    # .env; every other call has those of .env alone.
+    with_server = [
+        call_settings
+        for call_settings, call in zip(settings, compose_calls(cli), strict=True)
+        if call == "compose ps --all --quiet proxy"
+    ]
+    assert with_server == [("my-stack", "core,extra,server", "compose.yaml")]
+    assert {*settings} - {*with_server} == {("my-stack", "core,extra", "compose.yaml")}
 
 
 def test_compose_settings_have_defaults_when_env_does_not_set_them(cli):
@@ -1883,6 +1891,80 @@ def test_down_keeps_the_volumes(cli):
     [call] = [c for c in cli.docker_calls() if c.startswith("compose down")]
     assert "--volumes" not in call
     assert " -v" not in call
+
+
+# A person who takes server out of COMPOSE_PROFILES and runs up or down leaves the proxy container
+# of the disabled profile running, and Caddy then keeps serving the new Metabase on ports 80 and
+# 443, with the rules of local mode. In local mode up and down remove it.
+LEFTOVER_PROXY = "Server mode is off: the proxy of server mode is stopped and removed."
+PROXY_REMOVAL = "compose rm --stop --force proxy"
+COMMANDS_WITH_A_PROXY = {
+    "up": "compose up --detach --remove-orphans",
+    "down": "compose down --remove-orphans",
+}
+
+
+def run_with_a_proxy_left(cli, tmp_path, command, **fake):
+    """A .env that was server mode and is local mode now, and a stack with a proxy container."""
+    server_env(cli)
+    set_env(cli, COMPOSE_PROFILES="core,demo")
+    return cli.run(command, FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK, **fake)
+
+
+@pytest.mark.parametrize("command", ["up", "down"])
+def test_in_local_mode_a_proxy_left_from_server_mode_is_removed_before_the_stack_starts(
+    cli, tmp_path, command
+):
+    result = run_with_a_proxy_left(cli, tmp_path, command, FAKE_PROXY="0123abcdef\n")
+    assert result.returncode == 0, result.stderr
+    assert LEFTOVER_PROXY in result.stdout.splitlines()
+    calls = cli.docker_calls()
+    assert calls.count(PROXY_REMOVAL) == 1
+    assert calls.index(PROXY_REMOVAL) < calls.index(COMMANDS_WITH_A_PROXY[command])
+    # The removal is the only call that knows the profile of the proxy, which reaches Compose in
+    # COMPOSE_PROFILES, as every profile does; the stack itself keeps the profiles of .env.
+    names = compose_calls(cli)
+    profiles = [settings[1].split(",") for settings in cli.compose_settings()]
+    assert "server" in profiles[names.index(PROXY_REMOVAL)]
+    assert "server" in profiles[names.index("compose ps --all --quiet proxy")]
+    assert profiles[names.index(COMMANDS_WITH_A_PROXY[command])] == ["core", "demo"]
+    # The volume of Caddy, with its certificates and its own authority, stays.
+    assert "--volumes" not in PROXY_REMOVAL.split()
+    assert not any(" -v" in call or "--volumes" in call for call in calls)
+
+
+@pytest.mark.parametrize("command", ["up", "down"])
+def test_in_local_mode_up_and_down_leave_alone_a_stack_that_has_no_proxy(cli, tmp_path, command):
+    result = run_with_a_proxy_left(cli, tmp_path, command)
+    assert result.returncode == 0, result.stderr
+    assert PROXY_REMOVAL not in cli.docker_calls()
+    assert LEFTOVER_PROXY not in result.stdout
+    assert COMMANDS_WITH_A_PROXY[command] in cli.docker_calls()
+
+
+@pytest.mark.parametrize("command", ["up", "down"])
+def test_in_server_mode_up_and_down_never_remove_the_proxy(cli, tmp_path, command):
+    server_env(cli)
+    result = cli.run(
+        command, FAKE_PROXY="0123abcdef\n", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    assert LEFTOVER_PROXY not in result.stdout
+    assert not any(" rm " in call or call.endswith(" proxy") for call in cli.docker_calls())
+
+
+@pytest.mark.parametrize("command", ["up", "down"])
+def test_a_proxy_that_cannot_be_removed_stops_the_command_and_says_how_to_remove_it(
+    cli, tmp_path, command
+):
+    result = run_with_a_proxy_left(
+        cli, tmp_path, command, FAKE_PROXY="0123abcdef\n", FAKE_COMPOSE_EXIT="1"
+    )
+    assert result.returncode == 1
+    assert LEFTOVER_PROXY not in result.stdout
+    assert "docker compose --profile server rm --stop --force proxy" in result.stderr
+    assert "ports 80 and 443" in result.stderr
+    assert COMMANDS_WITH_A_PROXY[command] not in cli.docker_calls()
 
 
 @pytest.mark.parametrize("command", ["down", "status"])

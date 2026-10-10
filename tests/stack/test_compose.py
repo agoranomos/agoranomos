@@ -1,7 +1,7 @@
 import json
 import shlex
 
-from services import LONG_RUNNING, ONE_SHOT
+from services import LONG_RUNNING, ONE_SHOT, SERVER
 from stack_helpers import (
     LogEntries,
     NamesOnly,
@@ -65,14 +65,15 @@ def test_one_shot_jobs_succeeded():
         assert running[service]["ExitCode"] == 0, running[service]
 
 
-def test_ports_are_published_on_localhost_only_but_those_of_the_proxy():
+def test_ports_are_published_on_localhost_only_but_those_of_the_proxy_in_server_mode():
     # The proxy of server mode publishes TCP 80 and 443 on every address of the host
-    # (tests/stack/test_server.py checks them); every other port is on 127.0.0.1.
+    # (tests/stack/test_server.py checks them); every other port is on 127.0.0.1. In local mode no
+    # container publishes on every address, a proxy left from server mode included.
     for service, container in containers().items():
         for publisher in container.get("Publishers") or []:
             if not publisher.get("PublishedPort"):
                 continue
-            if service == "proxy":
+            if service == "proxy" and SERVER:
                 assert (publisher["PublishedPort"], publisher["Protocol"]) in {
                     (80, "tcp"),
                     (443, "tcp"),
