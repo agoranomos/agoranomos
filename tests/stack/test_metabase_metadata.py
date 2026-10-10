@@ -35,6 +35,8 @@ display_name = "Purchases (stack test)"
 note = "A note of the stack test."
 """
 QUESTIONS = {"Spend, last 7 days", "Spend by campaign, last 7 days", "Spend by day"}
+# The first color of the palette of the project for a light background.
+SERIES_COLOR = "#A86400"
 KINDS = (metadata.FIRST, metadata.UPDATE, metadata.REVERT)
 
 
@@ -256,6 +258,31 @@ def test_the_demo_questions_have_the_titles_of_their_columns_and_axes(metabase_u
 
 
 @needs_the_demo
+def test_the_demo_charts_are_drawn_in_the_color_of_the_project(metabase_url, session):
+    # Metabase keys the color of the one series of a chart by the name of its metric column.
+    status, collections = http_json("GET", f"{metabase_url}/api/collection", headers=session)
+    assert status == 200, f"GET /api/collection answered HTTP {status}"
+    [collection] = [
+        c for c in collections if c.get("name") == "Agoranomos demo" and c.get("location") == "/"
+    ]
+    path = f"/api/collection/{collection['id']}/items?models=card"
+    status, items = http_json("GET", f"{metabase_url}{path}", headers=session)
+    assert status == 200, f"GET {path} answered HTTP {status}"
+    colors = {}
+    for item in items["data"]:
+        if item["name"] not in QUESTIONS:
+            continue
+        status, card = http_json("GET", f"{metabase_url}/api/card/{item['id']}", headers=session)
+        assert status == 200, f"GET /api/card/{item['id']} answered HTTP {status}"
+        colors[item["name"]] = card["visualization_settings"].get("series_settings")
+    assert colors == {
+        "Spend by campaign, last 7 days": {"spend": {"color": SERIES_COLOR}},
+        "Spend by day": {"spend": {"color": SERIES_COLOR}},
+        "Spend, last 7 days": None,  # a number has no series
+    }, colors
+
+
+@needs_the_demo
 def test_metabase_lists_the_columns_of_the_warehouse_through_its_connection(
     metabase_url, session, marts
 ):
@@ -280,9 +307,10 @@ def test_metabase_lists_the_columns_of_the_warehouse_through_its_connection(
 
 @needs_the_demo
 def test_demo_init_gives_a_question_the_title_that_it_lacks(env, metabase_url, session, marts):
-    # A question made before the titles: the next start adds the title of the code, and leaves the
-    # rest. The body of the PUT has the settings only, as the one of demo-init has. The settings
-    # of the card go back as they were, a title that a person set included, also when it fails.
+    # A question made before the titles and the color: the next start adds the title and the color
+    # of the code, and leaves the rest. The body of the PUT has the settings only, as the one of
+    # demo-init has. The settings of the card go back as they were, a title that a person set
+    # included, also when it fails.
     [spend] = [c for c in marts.effective[MART].columns if c.name == "spend"]
     status, collections = http_json("GET", f"{metabase_url}/api/collection", headers=session)
     assert status == 200, f"GET /api/collection answered HTTP {status}"
@@ -297,7 +325,8 @@ def test_demo_init_gives_a_question_the_title_that_it_lacks(env, metabase_url, s
     status, card = http_json("GET", card_path, headers=session)
     assert status == 200, f"GET /api/card/{card_id} answered HTTP {status}"
     before = card["visualization_settings"]
-    lacking = {key: value for key, value in before.items() if key != "graph.y_axis.title_text"}
+    omitted = ("graph.y_axis.title_text", "series_settings")
+    lacking = {key: value for key, value in before.items() if key not in omitted}
     try:
         status, _ = http_json(
             "PUT", card_path, {"visualization_settings": lacking}, headers=session
@@ -311,6 +340,7 @@ def test_demo_init_gives_a_question_the_title_that_it_lacks(env, metabase_url, s
         assert status == 200, f"GET /api/card/{card_id} answered HTTP {status}"
         settings = card["visualization_settings"]
         assert settings.get("graph.y_axis.title_text") == spend.display_name
+        assert settings.get("series_settings") == {"spend": {"color": SERIES_COLOR}}
         assert settings["graph.dimensions"] == ["report_date"]
     finally:
         # No assert here: it would hide the failure of the test when the way back fails too.

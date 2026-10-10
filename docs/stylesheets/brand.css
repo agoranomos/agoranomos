@@ -1,0 +1,630 @@
+/*
+  The brand style of the Agoranomos documentation.
+
+  Light scheme ("default"): Paper background, Void text, Rust links.
+  Dark scheme ("slate"): Void background, Bone text, Mute secondary text, Amber links.
+  In both, the header is Void and carries the logo for dark backgrounds, and code blocks are a
+  terminal: Graphite, Bone text, Amber keywords and prompts.
+
+  The fonts are Fira Sans (text) and Fira Code (headings, labels and code), served from
+  ../assets/fonts under the SIL Open Font License 1.1 (OFL-FiraSans.txt, OFL-FiraCode.txt).
+  No request goes to a font host: zensical.toml sets `font = false`.
+
+  Every text color below keeps at least 4.5:1 against its background (WCAG 2.2, level AA),
+  in highlighted and selected code too. The secondary text of the search dialog (its result
+  paths and counts) is the theme's own: an alpha set inside its shadow DOM, which these
+  variables do not reach.
+*/
+
+/* Fonts ------------------------------------------------------------------------------------ */
+
+@font-face {
+  font-family: "Fira Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../assets/fonts/FiraSans-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Fira Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../assets/fonts/FiraSans-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Fira Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../assets/fonts/FiraSans-600.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Fira Code";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../assets/fonts/FiraCode-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Fira Code";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../assets/fonts/FiraCode-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Fira Code";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../assets/fonts/FiraCode-600.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Fira Code";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../assets/fonts/FiraCode-700.woff2") format("woff2");
+}
+
+/* Brand tokens ----------------------------------------------------------------------------- */
+
+:root {
+  --ag-void: #09090b;
+  --ag-graphite: #16161a;
+  --ag-line: #2a2a30;
+  --ag-mute: #8a8893;
+  --ag-bone: #e8e6e1;
+  --ag-amber: #ffb020;
+  --ag-ember: #ff4a1c;
+  --ag-ok: #3ddc97;
+  --ag-paper: #f4f3ef;
+  --ag-rust: #b23a0e;
+  /* Chart colors of the brand: the dark variants for icons on Paper, the others on dark. */
+  --ag-amber-dark: #a86400;
+  --ag-rust-chart: #c2360a;
+  --ag-dusk-dark: #4f6382;
+  --ag-dusk: #6f86a6;
+  --ag-ember-soft: #f06a3a;
+  /*
+    Values derived for this site, not tokens of the brand:
+    - mute-dark: secondary text on Paper (6.29:1), where Mute (3.14:1) is too light for text;
+    - ok-dark: the success color on Paper (4.49:1), where Mint is too light;
+    - code-light: the background of inline code in the light scheme, Bone at 70 % over Paper;
+    - mute-deep: icons and scrollbars on Void, never text.
+  */
+  --ag-mute-dark: #5a5862;
+  --ag-ok-dark: #1a7f55;
+  --ag-code-light: #eceae5;
+  --ag-mute-deep: #5f5d66;
+  --ag-mono: "Fira Code", ui-monospace, Menlo, Consolas, monospace;
+}
+
+:root > * {
+  --md-text-font: "Fira Sans";
+  --md-code-font: "Fira Code";
+}
+
+/* Light scheme ----------------------------------------------------------------------------- */
+
+[data-md-color-scheme="default"] {
+  color-scheme: light;
+
+  --md-primary-fg-color: var(--ag-rust);
+  --md-primary-fg-color--light: var(--ag-rust);
+  --md-primary-fg-color--dark: var(--ag-rust);
+  --md-primary-bg-color: var(--ag-paper);
+  --md-primary-bg-color--light: rgb(244 243 239 / 70%);
+  --md-accent-fg-color: var(--ag-rust);
+  --md-accent-fg-color--transparent: rgb(178 58 14 / 8%);
+  --md-accent-bg-color: var(--ag-paper);
+  --md-accent-bg-color--light: rgb(244 243 239 / 70%);
+
+  --md-default-fg-color: var(--ag-void);
+  --md-default-fg-color--light: var(--ag-mute-dark);
+  --md-default-fg-color--lighter: var(--ag-mute);
+  --md-default-fg-color--lightest: rgb(9 9 11 / 8%);
+  --md-default-bg-color: var(--ag-paper);
+  --md-default-bg-color--light: rgb(244 243 239 / 70%);
+  --md-default-bg-color--lighter: rgb(244 243 239 / 30%);
+  --md-default-bg-color--lightest: rgb(244 243 239 / 12%);
+
+  --md-typeset-color: var(--ag-void);
+  --md-typeset-a-color: var(--ag-rust);
+  --md-typeset-mark-color: rgb(255 176 32 / 35%);
+  --md-typeset-table-color: rgb(9 9 11 / 12%);
+  --md-typeset-table-color--light: rgb(9 9 11 / 3%);
+  --md-typeset-kbd-color: var(--ag-paper);
+  --md-typeset-kbd-accent-color: #fff;
+  --md-typeset-kbd-border-color: var(--ag-mute);
+
+  /* Inline code; code blocks are a terminal in both schemes (see "Code"). */
+  --md-code-fg-color: var(--ag-void);
+  --md-code-bg-color: var(--ag-code-light);
+  --md-code-bg-color--light: rgb(236 234 229 / 70%);
+  --md-code-bg-color--lighter: rgb(236 234 229 / 30%);
+
+  --md-admonition-fg-color: var(--ag-void);
+  --md-admonition-bg-color: var(--ag-paper);
+
+  /* The search dialog reads these as RGB triplets. */
+  --color-foreground: 9 9 11;
+  --color-background: 244 243 239;
+  --color-background-subtle: 232 230 225;
+  --color-backdrop: 244 243 239;
+
+  /* The rule under the Void header: none on Paper, Line on Void. */
+  --ag-header-rule: transparent;
+
+  /*
+    Admonitions: the color of the icon and the rule, and the tint behind the text. On Paper the
+    danger color is the chart Rust: Ember falls below 3:1 on its own tint.
+  */
+  --ag-note: var(--ag-dusk-dark);
+  --ag-note-bg: rgb(79 99 130 / 8%);
+  --ag-warning: var(--ag-amber-dark);
+  --ag-warning-bg: rgb(168 100 0 / 8%);
+  --ag-danger: var(--ag-rust-chart);
+  --ag-danger-bg: rgb(194 54 10 / 6%);
+  --ag-success: var(--ag-ok-dark);
+  --ag-success-bg: rgb(26 127 85 / 8%);
+}
+
+/* Dark scheme ------------------------------------------------------------------------------ */
+
+[data-md-color-scheme="slate"] {
+  color-scheme: dark;
+
+  --md-primary-fg-color: var(--ag-amber);
+  --md-primary-fg-color--light: var(--ag-amber);
+  --md-primary-fg-color--dark: var(--ag-amber);
+  --md-primary-bg-color: var(--ag-void);
+  --md-primary-bg-color--light: rgb(9 9 11 / 70%);
+  --md-accent-fg-color: var(--ag-amber);
+  --md-accent-fg-color--transparent: rgb(255 176 32 / 10%);
+  --md-accent-bg-color: var(--ag-void);
+  --md-accent-bg-color--light: rgb(9 9 11 / 70%);
+
+  --md-default-fg-color: var(--ag-bone);
+  --md-default-fg-color--light: var(--ag-mute);
+  --md-default-fg-color--lighter: var(--ag-mute-deep);
+  --md-default-fg-color--lightest: var(--ag-line);
+  --md-default-bg-color: var(--ag-void);
+  --md-default-bg-color--light: rgb(9 9 11 / 70%);
+  --md-default-bg-color--lighter: rgb(9 9 11 / 30%);
+  --md-default-bg-color--lightest: rgb(9 9 11 / 12%);
+
+  --md-typeset-color: var(--ag-bone);
+  --md-typeset-a-color: var(--ag-amber);
+  --md-typeset-mark-color: rgb(255 176 32 / 30%);
+  --md-typeset-table-color: var(--ag-line);
+  --md-typeset-table-color--light: rgb(232 230 225 / 3%);
+  --md-typeset-kbd-color: var(--ag-graphite);
+  --md-typeset-kbd-accent-color: var(--ag-line);
+  --md-typeset-kbd-border-color: var(--ag-void);
+
+  /* Inline code; code blocks are a terminal in both schemes (see "Code"). */
+  --md-code-fg-color: var(--ag-bone);
+  --md-code-bg-color: var(--ag-graphite);
+  --md-code-bg-color--light: rgb(22 22 26 / 90%);
+  --md-code-bg-color--lighter: rgb(22 22 26 / 54%);
+
+  --md-admonition-fg-color: var(--ag-bone);
+  --md-admonition-bg-color: var(--ag-void);
+
+  --md-footer-bg-color: var(--ag-graphite);
+  --md-footer-bg-color--dark: var(--ag-void);
+  --md-shadow-z1: 0 0.2rem 0.5rem rgb(0 0 0 / 30%), 0 0 0.05rem var(--ag-line);
+  --md-shadow-z2: 0 0.2rem 0.5rem rgb(0 0 0 / 40%), 0 0 0.05rem var(--ag-line);
+  --md-shadow-z3: 0 0.5rem 2rem rgb(0 0 0 / 50%), 0 0 0.05rem var(--ag-line);
+
+  --color-foreground: 232 230 225;
+  --color-background: 22 22 26;
+  --color-background-subtle: 42 42 48;
+  --color-backdrop: 9 9 11;
+
+  --ag-header-rule: var(--ag-line);
+
+  --ag-note: var(--ag-dusk);
+  --ag-note-bg: rgb(111 134 166 / 10%);
+  --ag-warning: var(--ag-amber);
+  --ag-warning-bg: rgb(255 176 32 / 8%);
+  --ag-danger: var(--ag-ember);
+  --ag-danger-bg: rgb(255 74 28 / 8%);
+  --ag-success: var(--ag-ok);
+  --ag-success-bg: rgb(61 220 151 / 8%);
+}
+
+/* Selection: a soft Amber in both schemes. */
+::selection {
+  background-color: rgb(255 176 32 / 35%);
+}
+
+/* Header ----------------------------------------------------------------------------------- */
+
+/*
+  The header and the head of the navigation drawer take the colors of the dark scheme in both
+  schemes, so that the search button, the palette toggle and the repository link inside them
+  stay readable on the dark background.
+*/
+.md-header,
+.md-nav--primary .md-nav__title[for="__drawer"] {
+  color-scheme: dark;
+
+  --md-default-fg-color: var(--ag-bone);
+  --md-default-fg-color--light: var(--ag-mute);
+  --md-default-fg-color--lighter: var(--ag-mute-deep);
+  --md-default-fg-color--lightest: rgb(232 230 225 / 10%);
+  --md-default-bg-color: var(--ag-void);
+  --md-default-bg-color--light: var(--ag-line);
+  --md-accent-fg-color: var(--ag-amber);
+
+  color: var(--ag-bone);
+  background-color: var(--ag-void);
+}
+
+.md-header {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.md-header--shadow {
+  box-shadow: 0 0.05rem 0 var(--ag-header-rule);
+}
+
+.md-header__title,
+[data-md-color-scheme="slate"] .md-header__title {
+  color: var(--ag-bone);
+  font-family: var(--ag-mono);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Square corners, like the cells of the mark. */
+.md-search__button,
+.md-search__button::after,
+.md-nav__link,
+.md-nav__source,
+.md-sidebar--secondary .md-sidebar__inner,
+.md-tooltip,
+.md-tooltip2__inner,
+.md-dialog,
+.md-typeset .md-button {
+  border-radius: 0;
+}
+
+/*
+  The logo of the kit: the mark and the word, in curves. Its cells are 6 px, so the logo is
+  18.93 px high and 163 px wide, and its x-height is 12 px. The field around it is at least the
+  x-height on every side: above and below it in the 48 px header, and beside it, where the
+  buttons keep 12 px or more clear. Its size is in px, so the cells stay 6 px when the theme
+  enlarges the text on wide screens.
+*/
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg,
+.md-nav--primary .md-nav__title[for="__drawer"] .md-logo {
+  width: auto;
+  height: calc(34.7px * 6 / 11);
+}
+
+/*
+  The mark sits in the upper part of the logo's box, and the descender of the g hangs below it.
+  Moving the logo down by 1.54 px centers the mark in the header, on whole pixels; the field
+  stays above the x-height: 16 px above and 13 px below.
+*/
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg,
+.md-nav--primary .md-nav__title[for="__drawer"] .md-logo img {
+  transform: translateY(1.54px);
+}
+
+/*
+  The logo carries the name, so the header shows no typed site name next to it. The page title
+  still slides in when the reader scrolls past the first heading. The link of the logo keeps
+  its accessible name, the site name.
+*/
+.md-header__topic:first-child {
+  display: none;
+}
+
+/* The head of the navigation drawer carries the same logo, without the typed name. */
+.md-nav--primary .md-nav__title[for="__drawer"] {
+  gap: 0;
+  font-size: 0;
+}
+
+@media screen and (max-width: 76.234375em) {
+  /*
+    On narrow screens the theme hides the logo and shows the typed name. Here the logo stays,
+    after the menu button, until the page title takes its place on scroll. Moving the menu
+    button first changes no focus order: the theme keeps that button (a label) out of the tab
+    order, so Tab still goes from the skip link to the logo and then to the palette toggle.
+  */
+  .md-header__button[for="__drawer"] {
+    order: -1;
+  }
+
+  .md-header__button.md-logo {
+    display: block;
+  }
+
+  .md-header__inner:has(.md-header__title--active) .md-header__button.md-logo {
+    display: none;
+  }
+
+  /* The navigation is a drawer: square, like the cells of the mark, with a dark head. */
+  .md-sidebar--primary {
+    border-radius: 0;
+  }
+
+  .md-nav--primary .md-nav__title[for="__drawer"] {
+    margin: 0 -0.2rem;
+  }
+}
+
+/*
+  Below 360 px the logo gives up its own padding, so that the header fits; the menu button and
+  the title beside it still keep 12 px or more clear of it.
+*/
+@media screen and (max-width: 22.4375em) {
+  .md-header__button.md-logo {
+    padding: 0;
+    margin: 0;
+  }
+}
+
+/* Text --------------------------------------------------------------------------------------- */
+
+.md-typeset {
+  font-size: 0.8rem;
+  line-height: 1.65;
+  letter-spacing: 0;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4,
+[data-md-color-scheme="slate"] .md-typeset h1,
+[data-md-color-scheme="slate"] .md-typeset h2,
+[data-md-color-scheme="slate"] .md-typeset h3,
+[data-md-color-scheme="slate"] .md-typeset h4 {
+  color: var(--md-default-fg-color);
+  font-family: var(--ag-mono);
+  font-variant-ligatures: none;
+}
+
+.md-typeset h1 {
+  margin-bottom: 1em;
+  font-size: 1.75em;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+}
+
+.md-typeset h2 {
+  margin-top: 1.8em;
+  font-size: 1.375em;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.md-typeset h3 {
+  font-size: 1.125em;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+
+.md-typeset h4 {
+  font-size: 1em;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+@media screen and (max-width: 44.984375em) {
+  .md-typeset h1 {
+    font-size: 1.5em;
+  }
+
+  .md-typeset h2 {
+    font-size: 1.25em;
+  }
+}
+
+.md-typeset a {
+  text-decoration-thickness: 0.05em;
+  text-underline-offset: 0.18em;
+}
+
+.md-typeset a:focus,
+.md-typeset a:hover {
+  text-decoration-thickness: 0.12em;
+}
+
+/* Fira Sans is served up to 600, so bold text takes 600 rather than a synthesized 700. */
+.md-typeset b,
+.md-typeset strong {
+  font-weight: 600;
+}
+
+/* Code: Fira Code with its ligatures, square corners like the cells of the mark. */
+.md-typeset code,
+.md-typeset kbd,
+.md-typeset pre {
+  font-variant-ligatures: normal;
+}
+
+.md-typeset code {
+  border-radius: 0;
+}
+
+.md-typeset pre > code {
+  border-radius: 0;
+  line-height: 1.7;
+}
+
+/*
+  Code blocks are a terminal in both schemes: Graphite, Bone text, Amber keywords, Mint strings.
+  Inline code keeps the colors of its scheme. Every color is set here rather than taken from the
+  scheme, because the theme resolves its derived colors once, for the whole page.
+*/
+.md-typeset .highlight {
+  color-scheme: dark;
+
+  --md-code-fg-color: var(--ag-bone);
+  --md-code-bg-color: var(--ag-graphite);
+  --md-code-bg-color--light: rgb(22 22 26 / 90%);
+  --md-code-bg-color--lighter: rgb(22 22 26 / 54%);
+  --md-code-hl-color: var(--ag-amber);
+  /* A highlighted line: the 2 px Amber bar, and a 4 % tint that keeps every token at 4.5:1 or more (Dusk, the lowest, at about 4.54:1). */
+  --md-code-hl-color--light: rgb(255 176 32 / 4%);
+  --md-code-hl-number-color: var(--ag-ember-soft);
+  --md-code-hl-special-color: var(--ag-ember-soft);
+  --md-code-hl-function-color: var(--ag-bone);
+  --md-code-hl-constant-color: var(--ag-dusk);
+  --md-code-hl-keyword-color: var(--ag-amber);
+  --md-code-hl-string-color: var(--ag-ok);
+  --md-code-hl-name-color: var(--ag-bone);
+  --md-code-hl-operator-color: var(--ag-mute);
+  --md-code-hl-punctuation-color: var(--ag-mute);
+  --md-code-hl-comment-color: var(--ag-mute);
+  --md-code-hl-generic-color: var(--ag-mute);
+  --md-code-hl-variable-color: var(--ag-mute);
+
+  /* The copy button (Mute at rest, 5.18:1, Amber on hover) and the scrollbar of the block. */
+  --md-default-fg-color: var(--ag-bone);
+  --md-default-fg-color--light: var(--ag-mute);
+  --md-default-fg-color--lighter: var(--ag-mute-deep);
+  --md-default-fg-color--lightest: var(--ag-mute);
+  --md-accent-fg-color: var(--ag-amber);
+  --md-accent-fg-color--transparent: rgb(255 176 32 / 10%);
+  --md-typeset-a-color: var(--ag-amber);
+}
+
+/*
+  Selected code: the Amber selection of the page, with Bone text (6.38:1). On that background
+  Amber, Ember soft, Mute and Dusk would fall below 4.5:1, so no token keeps its color there.
+*/
+.md-typeset .highlight ::selection {
+  color: var(--ag-bone);
+}
+
+/* The prompt of a console session is Amber, as in the terminal of the brand. */
+.md-typeset .highlight .gp {
+  color: var(--ag-amber);
+}
+
+[data-md-color-scheme="slate"] .md-typeset pre > code {
+  box-shadow: inset 0 0 0 0.05rem var(--ag-line);
+}
+
+/* Tables: 14 px text, the header row on the code background. */
+.md-typeset table:not([class]) {
+  font-size: 0.7rem;
+  border-radius: 0;
+}
+
+.md-typeset table:not([class]) th {
+  font-weight: 600;
+  background-color: var(--md-code-bg-color);
+}
+
+/* On a phone, tighter cells leave more room for the text. */
+@media screen and (max-width: 44.984375em) {
+  .md-typeset table:not([class]) :is(th, td) {
+    padding: 0.75em 1em;
+  }
+}
+
+/* A setting name in a table stays whole: on a narrow screen the table scrolls instead. */
+.md-typeset table:not([class]) code {
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+/* Admonitions ---------------------------------------------------------------------------- */
+
+.md-typeset :is(.admonition, details) {
+  --ag-adm: var(--ag-note);
+  --ag-adm-bg: var(--ag-note-bg);
+
+  font-size: 0.75rem;
+  border-left: 0.15rem solid var(--ag-adm);
+  border-radius: 0;
+}
+
+.md-typeset :is(.admonition, details):is(.warning, .caution, .attention) {
+  --ag-adm: var(--ag-warning);
+  --ag-adm-bg: var(--ag-warning-bg);
+}
+
+.md-typeset :is(.admonition, details):is(.danger, .error, .failure, .fail, .missing, .bug) {
+  --ag-adm: var(--ag-danger);
+  --ag-adm-bg: var(--ag-danger-bg);
+}
+
+.md-typeset :is(.admonition, details):is(.success, .check, .done) {
+  --ag-adm: var(--ag-success);
+  --ag-adm-bg: var(--ag-success-bg);
+}
+
+/* Three classes, as in the theme's own rules for each type, so that these win. */
+.md-typeset :is(.admonition, details)[class] {
+  background-color: var(--ag-adm-bg);
+}
+
+.md-typeset :is(.admonition, details) > :is(.admonition-title, summary) {
+  font-family: var(--ag-mono);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.md-typeset :is(.admonition, details) > :is(.admonition-title, summary)::before {
+  background-color: var(--ag-adm);
+}
+
+.md-typeset details > summary::after {
+  color: var(--ag-adm);
+}
+
+/* Navigation ----------------------------------------------------------------------------- */
+
+.md-nav__item .md-nav__link--active,
+.md-nav--primary .md-nav__item .md-nav__link--active {
+  font-weight: 600;
+}
+
+/* On wide screens the sections of the navigation read as labels: Fira Code, capitals, spaced. */
+@media screen and (min-width: 76.25em) {
+  .md-nav--primary > .md-nav__list > .md-nav__item--section > .md-nav__link {
+    color: var(--md-default-fg-color--light);
+    font-family: var(--ag-mono);
+    font-size: 0.6rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+}
+
+.md-nav__title {
+  font-family: var(--ag-mono);
+  font-weight: 600;
+}
+
+/* Footer: the copyright band on Bone in the light scheme and on Graphite in the dark one. */
+[data-md-color-scheme="default"] .md-footer-meta {
+  background-color: var(--ag-bone);
+}
+
+[data-md-color-scheme="slate"] .md-footer-meta {
+  background-color: var(--ag-graphite);
+}

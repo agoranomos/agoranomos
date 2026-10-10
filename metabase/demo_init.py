@@ -5,13 +5,13 @@ It runs the demo pipeline once: agoranomos_demo_load, and then agoranomos_demo_t
 asset of the raw table starts. Then it makes the demo visible in Metabase: it syncs the schema of
 the warehouse, applies the metadata of the marts (metadata.py), as metabase-init does, and creates
 the demo collection, its questions and its dashboard. The questions get the titles of their columns
-and axes from the display names of the metadata.
+and axes from the display names of the metadata, and their charts get the color of the project.
 
 Each step looks at the current state first. A start that finds a successful run of the transform
 does not run the pipeline again and leaves the pause state of both DAGs as it is. The content of
 Metabase is found by name: what is there stays as it is, edits included, and what is missing is
 created again, so a deleted or renamed question, dashboard or collection comes back. A question
-that exists gets only the titles that it lacks.
+that exists gets only the titles and the series color that it lacks.
 
 The whole job has one deadline, DEADLINE seconds from its start, which every wait shares, and a
 step that runs out of time names itself; ./agoranomos up waits longer than that for the stack.
@@ -83,6 +83,14 @@ RAN_NOW_HINT = f"see the last run of {TRANSFORM_DAG} in Airflow"
 
 # The settings of a chart that hold the titles of its axes.
 AXIS_TITLES = ("graph.x_axis.title_text", "graph.y_axis.title_text")
+# The color of the series of the demo charts: the first color of the chart palette of the project,
+# which is made for a light background (the default of a Metabase dashboard). Metabase keeps the
+# color of a series in series_settings, under the series key, which for a chart with one metric and
+# no breakout is the name of the metric column. A color with no color_name is drawn as it is.
+SERIES_COLOR = "#A86400"
+# What demo-init writes into each entry of the settings that Metabase keeps for each column and for
+# each series of a card: the title of a column, the color of a series.
+ENTRY_SETTINGS = (("column_settings", "column_title"), ("series_settings", "color"))
 
 # The questions of the demo dashboard, in the order of the dashboard, with their place on its grid
 # of 24 columns. columns are the columns of the answer, which are columns of the mart, so that the
@@ -105,6 +113,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "visualization_settings": {
             "graph.dimensions": ["campaign_name"],
             "graph.metrics": ["spend"],
+            "series_settings": {"spend": {"color": SERIES_COLOR}},
         },
         "query": (
             "SELECT campaign_name, sum(spend) AS spend\nFROM marts.ad_spend_daily\n"
@@ -117,7 +126,11 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "description": "The spend of every day that has data.",
         "display": "line",
         "columns": ("report_date", "spend"),
-        "visualization_settings": {"graph.dimensions": ["report_date"], "graph.metrics": ["spend"]},
+        "visualization_settings": {
+            "graph.dimensions": ["report_date"],
+            "graph.metrics": ["spend"],
+            "series_settings": {"spend": {"color": SERIES_COLOR}},
+        },
         "query": (
             "SELECT report_date, sum(spend) AS spend\nFROM marts.ad_spend_daily\n"
             "GROUP BY report_date\nORDER BY report_date"
@@ -408,8 +421,9 @@ def column_key(name: str) -> str:
 
 
 def visualization_settings(question: Mapping[str, Any], titles: Mapping[str, str]) -> dict:
-    """The settings of a question, with the titles of its columns and, for a chart, of its axes.
-    A native question takes no title from the fields of the mart, so the titles are its own."""
+    """The settings of a question, with the titles of its columns and, for a chart, of its axes,
+    and the series color that its definition holds. A native question takes no title from the
+    fields of the mart, so the titles are its own."""
     settings = copy.deepcopy(question["visualization_settings"])
     columns = {
         column_key(name): {"column_title": titles[name]}
@@ -426,35 +440,38 @@ def visualization_settings(question: Mapping[str, Any], titles: Mapping[str, str
     return settings
 
 
-def with_missing_titles(current: Mapping[str, Any], wanted: Mapping[str, Any]) -> dict | None:
-    """The settings of a card that exists, with the titles of wanted that it lacks, or None when it
-    lacks none: a title that is there, also one that a person changed, stays as it is."""
+def with_missing_settings(current: Mapping[str, Any], wanted: Mapping[str, Any]) -> dict | None:
+    """The settings of a card that exists, with the titles and the series color of wanted that it
+    lacks, or None when it lacks none: a title or a color that is there, also one that a person
+    changed, stays as it is."""
     settings = copy.deepcopy(dict(current))
     added = False
     for key in AXIS_TITLES:
         if key in wanted and key not in settings:
             settings[key] = wanted[key]
             added = True
-    for key, entry in (wanted.get("column_settings") or {}).items():
-        column = settings.setdefault("column_settings", {}).setdefault(key, {})
-        if "column_title" not in column:
-            column["column_title"] = entry["column_title"]
-            added = True
+    for group, field in ENTRY_SETTINGS:
+        for key, wanted_entry in (wanted.get(group) or {}).items():
+            current_entry = settings.setdefault(group, {}).setdefault(key, {})
+            if field not in current_entry:
+                current_entry[field] = wanted_entry[field]
+                added = True
     return settings if added else None
 
 
 def ensure_questions(
     metabase: Metabase, collection_id: int, database_id: int, titles: Mapping[str, str]
 ) -> dict[str, int]:
-    """Create the questions that the collection lacks, with their titles, and give the questions
-    that it has the titles that they lack; return the id of every question by name."""
+    """Create the questions that the collection lacks, with their titles and series color, and give
+    the questions that it has the titles and the color that they lack; return the id of every
+    question by name."""
     cards = collection_items(metabase, collection_id, "card")
     for question in QUESTIONS:
         settings = visualization_settings(question, titles)
         if question["name"] in cards:
             card_id = cards[question["name"]]
             card = metabase.call("GET", f"/api/card/{card_id}")
-            added = with_missing_titles(card.get("visualization_settings") or {}, settings)
+            added = with_missing_settings(card.get("visualization_settings") or {}, settings)
             if added is not None:
                 metabase.call("PUT", f"/api/card/{card_id}", {"visualization_settings": added})
             continue

@@ -47,17 +47,72 @@ def test_env_example_has_fifteen_secrets():
     assert len(SECRET_KEYS) == 15
 
 
-BANNER_FIRST_LINE = "    ___   __________  ____  ___    _   ______  __  _______  _____"
-TAGLINE = "marketing BI out of the box"
-SGR = re.compile(r"\x1b\[[0-9;]*m")  # a color or a reset
+# The header that up and help print, in plain text: the mark of three cells, and the name. The cells
+# are Unicode full blocks, also when the output is not a terminal. The fourth line is empty.
+BANNER_FIRST_LINE = "  ██"
+NAME_LINE = "██  ██  agoranomos"
+TAGLINE_LINE = "        marketing bi, out of the box."
+BANNER = [BANNER_FIRST_LINE, NAME_LINE, TAGLINE_LINE, ""]
+CELL = "██"
+
+SGR = re.compile(r"\x1b\[[0-9;]*m")  # a color, a style or a reset
+RESET = "\x1b[0m"
+BOLD = "\x1b[1m"
+
+# The escape codes of each color on the three kinds of terminal, by the number of colors that the
+# script finds out. The mark is bright amber, the exact color of the brand, in 24-bit color. The
+# text is the own text color of the terminal, so that the name reads on a dark and on a light
+# background. The colors of the messages (amber, ok, ember and mute) are mid-tones of the brand
+# hues that keep 4.5:1 against both black and white (see the test of the contrast below): the
+# nearest entries of the 256-color palette that do, and the basic colors (dim for the gray) on a
+# terminal with 8, which the theme of the terminal tunes to its background.
+PALETTES = {
+    24: {
+        "mark": "\x1b[38;2;255;176;32m",
+        "text": "\x1b[39m",
+        "amber": "\x1b[38;2;157;108;20m",
+        "ok": "\x1b[38;2;37;133;91m",
+        "ember": "\x1b[38;2;215;62;24m",
+        "mute": "\x1b[38;2;118;116;126m",
+    },
+    256: {
+        "mark": "\x1b[38;5;214m",
+        "text": "\x1b[39m",
+        "amber": "\x1b[38;5;130m",
+        "ok": "\x1b[38;5;29m",
+        "ember": "\x1b[38;5;131m",
+        "mute": "\x1b[38;5;243m",
+    },
+    8: {
+        "mark": "\x1b[33m",
+        "text": "\x1b[39m",
+        "amber": "\x1b[33m",
+        "ok": "\x1b[32m",
+        "ember": "\x1b[31m",
+        "mute": "\x1b[2m",
+    },
+}
+TRUECOLOR = {"TERM": "xterm-256color", "COLORTERM": "truecolor"}
+TERMINALS = [
+    pytest.param(TRUECOLOR, 24, id="24-bit"),
+    pytest.param({"TERM": "xterm-256color", "COLORTERM": "24bit"}, 24, id="24bit"),
+    pytest.param({"TERM": "xterm-256color"}, 256, id="256-colors"),
+    pytest.param({"TERM": "xterm"}, 8, id="8-colors"),
+]
+# Terminals that have colors and still get none: the user asks for none, or the terminal cannot.
+PLAIN_TERMINALS = [
+    pytest.param({**TRUECOLOR, "NO_COLOR": "1"}, id="no-color"),
+    pytest.param({"TERM": "dumb", "COLORTERM": "truecolor"}, id="dumb"),
+    pytest.param({"COLORTERM": "truecolor"}, id="no-term"),
+]
 
 
 def test_help_starts_with_the_banner(cli):
     result = cli.run("help")
     assert result.returncode == 0
     lines = result.stdout.splitlines()
-    assert lines[0] == BANNER_FIRST_LINE
-    assert lines.index(TAGLINE) < lines.index("Usage: ./agoranomos <command> [options]")
+    assert lines[:5] == [*BANNER, "Usage: ./agoranomos <command> [options]"]
+    assert all(line == line.rstrip() for line in lines[:4])
 
 
 def test_the_banner_is_plain_text_when_the_output_is_not_a_terminal(cli):
@@ -65,54 +120,150 @@ def test_the_banner_is_plain_text_when_the_output_is_not_a_terminal(cli):
     assert "\x1b[" not in result.stdout
 
 
+def test_the_banner_uses_full_blocks_also_as_plain_text(cli):
+    # The blocks are not an ASCII look-alike: the plain text and the colored text carry the same
+    # characters, so that removing the escape codes from the colored text gives the plain text.
+    result = cli.run("help")
+    assert result.stdout.startswith(f"  {CELL}\n{CELL}  {CELL}  agoranomos\n")
+    assert CELL == "\u2588\u2588"  # U+2588, FULL BLOCK
+
+
 def test_unknown_command_shows_the_usage_without_the_banner(cli):
     result = cli.run("launch")
     assert "Usage: ./agoranomos <command> [options]" in result.stderr
-    assert BANNER_FIRST_LINE not in result.stderr
+    assert CELL not in result.stderr
 
 
-@pytest.mark.parametrize(
-    ("terminal", "code"),
-    [
-        pytest.param(
-            {"TERM": "xterm-256color", "COLORTERM": "truecolor"}, "\x1b[38;2;", id="24-bit"
-        ),
-        pytest.param({"TERM": "xterm-256color", "COLORTERM": "24bit"}, "\x1b[38;2;", id="24bit"),
-        pytest.param({"TERM": "xterm-256color"}, "\x1b[38;5;", id="256-colors"),
-        pytest.param({"TERM": "xterm"}, "\x1b[36m", id="8-colors"),
-    ],
-)
-def test_the_banner_gets_colors_on_a_terminal(cli, terminal, code):
+@pytest.mark.parametrize(("terminal", "colors"), TERMINALS)
+def test_the_banner_gets_colors_on_a_terminal(cli, terminal, colors):
     result = cli.run_on_terminal("help", **terminal)
     assert result.returncode == 0, result.stderr
-    assert code in result.stdout
-    # The colors change nothing but the colors: without them, the output is the plain banner.
-    plain = SGR.sub("", result.stdout)
-    assert plain == cli.run("help").stdout
-    # The gradient runs over the columns of the banner, violet on the left and teal on the right,
-    # and every line ends with a reset.
+    palette = PALETTES[colors]
     lines = result.stdout.splitlines()
-    if code == "\x1b[38;2;":
-        assert lines[4].startswith("\x1b[38;2;139;92;246m/")
-        assert "\x1b[38;2;45;212;191m_" in lines[0]
-    assert all(line.endswith("\x1b[0m") for line in lines[:5])
+    # The top cell is bright amber, the two bottom cells and the name are in the own text color of
+    # the terminal, the name in bold, and the tagline is gray; every colored line ends with a reset,
+    # and the empty line has no code.
+    assert lines[:4] == [
+        f"  {palette['mark']}{CELL}{RESET}",
+        f"{palette['text']}{CELL}{RESET}  {palette['text']}{CELL}{RESET}"
+        f"  {palette['text']}{BOLD}agoranomos{RESET}",
+        f"        {palette['mute']}marketing bi, out of the box.{RESET}",
+        "",
+    ]
+    # The colors change nothing but the colors: without them, the output is the plain banner, and
+    # the usage under it has no color at all.
+    assert SGR.sub("", result.stdout) == cli.run("help").stdout
+    assert "\x1b" not in "\n".join(lines[4:])
 
 
-@pytest.mark.parametrize(
-    "terminal",
-    [
-        pytest.param(
-            {"TERM": "xterm-256color", "COLORTERM": "truecolor", "NO_COLOR": "1"}, id="no-color"
-        ),
-        pytest.param({"TERM": "dumb", "COLORTERM": "truecolor"}, id="dumb"),
-        pytest.param({"COLORTERM": "truecolor"}, id="no-term"),
-    ],
-)
+def xterm_rgb(index):
+    """An entry of the 256-color palette of xterm, from 16 on: a color cube, then a gray ramp."""
+    if index >= 232:
+        return (8 + 10 * (index - 232),) * 3
+    levels = (0, 95, 135, 175, 215, 255)
+    cube = index - 16
+    return levels[cube // 36], levels[cube // 6 % 6], levels[cube % 6]
+
+
+def code_rgb(code):
+    """The color that an escape code of the 24-bit or the 256-color palette sets."""
+    if match := re.fullmatch(r"\x1b\[38;2;(\d+);(\d+);(\d+)m", code):
+        return tuple(int(part) for part in match.groups())
+    match = re.fullmatch(r"\x1b\[38;5;(\d+)m", code)
+    return xterm_rgb(int(match.group(1)))
+
+
+def luminance(rgb):
+    """The relative luminance of WCAG 2.2."""
+    r, g, b = (
+        value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+        for value in (channel / 255 for channel in rgb)
+    )
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast_ratio(first, second):
+    lighter, darker = sorted((luminance(first), luminance(second)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+@pytest.mark.parametrize("colors", [24, 256])
+@pytest.mark.parametrize("name", ["amber", "ok", "ember", "mute"])
+def test_the_colors_of_the_messages_read_on_a_black_and_on_a_white_terminal(colors, name):
+    rgb = code_rgb(PALETTES[colors][name])
+    black, white = contrast_ratio(rgb, (0, 0, 0)), contrast_ratio(rgb, (255, 255, 255))
+    # No entry of the 256-color palette has the hue of amber and 4.5:1 against both; the nearest,
+    # 130, has 4.46:1 against black. Every other color keeps 4.5:1 against both.
+    floor = 4.4 if (colors, name) == (256, "amber") else 4.5
+    assert min(black, white) >= floor, (black, white)
+
+
+@pytest.mark.parametrize("terminal", PLAIN_TERMINALS)
 def test_the_banner_stays_plain_when_the_terminal_wants_no_color(cli, terminal):
     result = cli.run_on_terminal("help", **terminal)
     assert result.returncode == 0, result.stderr
     assert "\x1b[" not in result.stdout
     assert result.stdout == cli.run("help").stdout
+
+
+@pytest.mark.parametrize(("terminal", "colors"), TERMINALS)
+def test_an_error_is_ember_on_a_terminal_stderr(cli, terminal, colors):
+    result = cli.run_on_terminal("down", "now", streams=("stderr",), **terminal)
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr == f"{PALETTES[colors]['ember']}error:{RESET} down takes no options\n"
+
+
+@pytest.mark.parametrize(
+    ("args", "fake", "code"),
+    [
+        pytest.param(("down", "now"), {}, 1, id="die"),
+        pytest.param(("preflight",), {"FAKE_MEMTOTAL": str(4 * GIB)}, 1, id="problem"),
+        pytest.param(("metadata",), {}, 2, id="check-failed"),
+    ],
+)
+def test_every_error_line_gets_ember_and_keeps_its_text(cli, args, fake, code):
+    result = cli.run_on_terminal(*args, streams=("stderr",), **TRUECOLOR, **fake)
+    plain = cli.run(*args, **fake)
+    assert result.returncode == plain.returncode == code
+    ember = PALETTES[24]["ember"]
+    assert result.stderr.startswith(f"{ember}error:{RESET} ")
+    assert SGR.sub("", result.stderr) == plain.stderr
+
+
+@pytest.mark.parametrize(("terminal", "colors"), TERMINALS)
+def test_a_warning_is_amber_on_a_terminal_stderr(cli, terminal, colors):
+    fake = {"FAKE_MEMTOTAL": str(7 * GIB)}
+    result = cli.run_on_terminal("preflight", streams=("stderr",), **terminal, **fake)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr.startswith(f"{PALETTES[colors]['amber']}warning:{RESET} Docker has ")
+    assert SGR.sub("", result.stderr) == cli.run("preflight", **fake).stderr
+    assert "\x1b" not in result.stdout  # stdout is a pipe
+
+
+@pytest.mark.parametrize(
+    "streams", [(), ("stdout",), ("stderr",), ("stdout", "stderr")], ids="-".join
+)
+def test_each_stream_gets_colors_only_when_it_is_a_terminal(cli, streams):
+    # preflight prints to both: the warning to stderr, and that it passed to stdout.
+    fake = {"FAKE_MEMTOTAL": str(7 * GIB)}
+    result = cli.run_on_terminal("preflight", streams=streams, **TRUECOLOR, **fake)
+    plain = cli.run("preflight", **fake)
+    assert result.returncode == 0, result.stderr
+    assert ("\x1b[" in result.stdout) == ("stdout" in streams)
+    assert ("\x1b[" in result.stderr) == ("stderr" in streams)
+    assert SGR.sub("", result.stdout) == plain.stdout
+    assert SGR.sub("", result.stderr) == plain.stderr
+
+
+@pytest.mark.parametrize("terminal", PLAIN_TERMINALS)
+def test_messages_stay_plain_when_the_terminal_wants_no_color(cli, terminal):
+    fake = {"FAKE_MEMTOTAL": str(7 * GIB)}
+    result = cli.run_on_terminal("preflight", streams=("stdout", "stderr"), **terminal, **fake)
+    plain = cli.run("preflight", **fake)
+    assert result.returncode == 0, result.stderr
+    assert "\x1b[" not in result.stdout + result.stderr
+    assert (result.stdout, result.stderr) == (plain.stdout, plain.stderr)
 
 
 def test_help_lists_the_commands(cli):
@@ -873,6 +1024,27 @@ def test_up_starts_the_stack_and_waits_until_healthy(cli, tmp_path):
     assert "Airflow:  http://127.0.0.1:8080" in result.stdout
     assert "Metabase: http://127.0.0.1:3000" in result.stdout
     assert cli.env_path.exists()
+
+
+@pytest.mark.parametrize(("terminal", "colors"), TERMINALS)
+def test_up_colors_its_messages_on_a_terminal(cli, tmp_path, terminal, colors):
+    fake = {"FAKE_PS_FILE": ps_file(tmp_path, HEALTHY_PS), **QUICK}
+    plain = cli.run("up", **fake)
+    cli.env_path.unlink()  # the next start sets up again, so that both print the same lines
+    result = cli.run_on_terminal("up", **terminal, **fake)
+    assert result.returncode == 0, result.stderr
+    palette = PALETTES[colors]
+    ok, mute, amber = palette["ok"], palette["mute"], palette["amber"]
+    lines = result.stdout.splitlines()
+    assert any(line.startswith(f"{ok}Preflight passed:{RESET} Docker ") for line in lines)
+    assert f"{ok}All services are healthy.{RESET}" in lines
+    assert f"{mute}Airflow:{RESET}  {amber}http://127.0.0.1:8080{RESET}" in lines
+    assert f"{mute}Metabase:{RESET} {amber}http://127.0.0.1:3000{RESET}" in lines
+    assert f"{ok}The stack is up.{RESET} ./agoranomos status shows every service." in lines
+    # The words of the messages stay as they are: without the colors, it is the plain output, and
+    # nothing is printed to stderr.
+    assert SGR.sub("", result.stdout) == plain.stdout
+    assert result.stderr == ""
 
 
 def test_up_prints_the_addresses_of_airflow_and_metabase_after_the_stack_is_healthy(cli, tmp_path):

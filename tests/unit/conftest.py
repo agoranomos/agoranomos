@@ -13,6 +13,7 @@ import os
 import pty
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -165,6 +166,18 @@ echo "/dev/fake 999999999 1 ${FAKE_DISK_AVAILABLE_KB:-104857600} 1% /"
 """
 
 
+def drain(fd: int, into: bytearray) -> None:
+    """Read a descriptor to its end, into a buffer."""
+    while True:
+        try:
+            chunk = os.read(fd, 65536)
+        except OSError:  # Linux: EIO once the script has closed its end of a pseudo-terminal
+            return
+        if not chunk:  # macOS and a pipe: end of file
+            return
+        into.extend(chunk)
+
+
 @dataclass
 class Cli:
     root: Path
@@ -196,44 +209,63 @@ class Cli:
             check=False,
         )
 
-    def run_on_terminal(self, *args: str, **fake: str) -> subprocess.CompletedProcess[str]:
-        """Like run, with a pseudo-terminal as the standard output, as when a person runs it.
+    def run_on_terminal(
+        self, *args: str, streams: tuple[str, ...] = ("stdout",), **fake: str
+    ) -> subprocess.CompletedProcess[str]:
+        """Like run, with a pseudo-terminal in place of a pipe for each stream that streams names.
 
-        The terminal turns every newline into a carriage return and a newline; the result has plain
-        newlines, so that it compares with the output of run.
+        streams holds "stdout", "stderr" or both, as when a person runs the script in a terminal;
+        a stream that it does not name stays a pipe, as when the output is redirected. A terminal
+        turns every newline into a carriage return and a newline; the result has plain newlines,
+        so that it compares with the output of run.
         """
-        leader, follower = pty.openpty()
-        output = bytearray()
+        unknown = set(streams) - {"stdout", "stderr"}
+        assert not unknown, f"not a stream: {sorted(unknown)}"
+        # Each stream is a pair of descriptors: the end that this test reads, and the end that the
+        # script gets. os.pipe returns them in this order, pty.openpty as (terminal, script side).
+        ends = {
+            name: (pty.openpty() if name in streams else os.pipe()) for name in ("stdout", "stderr")
+        }
+        readers = {name: pair[0] for name, pair in ends.items()}
+        writers = {name: pair[1] for name, pair in ends.items()}
+        collected = {name: bytearray() for name in ends}
         try:
-            with subprocess.Popen(
-                [str(self.root / "agoranomos"), *args],
-                cwd=self.root,
-                env=self.environment(fake),
-                stdin=subprocess.DEVNULL,
-                stdout=follower,
-                stderr=subprocess.PIPE,
-                text=True,
-            ) as process:
-                os.close(follower)
-                follower = -1
-                while True:
-                    try:
-                        chunk = os.read(leader, 65536)
-                    except OSError:  # Linux: EIO once the script has closed its end
-                        break
-                    if not chunk:  # macOS: end of file instead
-                        break
-                    output.extend(chunk)
-                _, stderr = process.communicate(timeout=60)
+            try:
+                process = subprocess.Popen(
+                    [str(self.root / "agoranomos"), *args],
+                    cwd=self.root,
+                    env=self.environment(fake),
+                    stdin=subprocess.DEVNULL,
+                    stdout=writers["stdout"],
+                    stderr=writers["stderr"],
+                )
+            finally:
+                # Without the script's ends open here, the readers see the end of the output when
+                # the script exits.
+                for fd in writers.values():
+                    os.close(fd)
+            threads = [
+                threading.Thread(target=drain, args=(readers[name], collected[name]))
+                for name in ends
+            ]
+            for thread in threads:
+                thread.start()
+            try:
+                returncode = process.wait(timeout=60)
+            finally:
+                process.kill()
+                for thread in threads:
+                    thread.join(timeout=10)
         finally:
-            if follower != -1:
-                os.close(follower)
-            os.close(leader)
+            for fd in readers.values():
+                os.close(fd)
+
+        def text(name: str) -> str:
+            decoded = collected[name].decode("utf-8")
+            return decoded.replace("\r\n", "\n") if name in streams else decoded
+
         return subprocess.CompletedProcess(
-            [str(self.root / "agoranomos"), *args],
-            process.returncode,
-            output.decode("utf-8").replace("\r\n", "\n"),
-            stderr,
+            [str(self.root / "agoranomos"), *args], returncode, text("stdout"), text("stderr")
         )
 
     def stub(self, name: str, body: str) -> None:

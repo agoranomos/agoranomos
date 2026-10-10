@@ -32,92 +32,121 @@ AIRFLOW_API_SECRET_KEY AIRFLOW_ADMIN_PASSWORD METABASE_ENCRYPTION_KEY METABASE_S
 METABASE_ADMIN_PASSWORD"
 
 say() { printf '%s\n' "$*"; }
-warn() { printf 'warning: %s\n' "$*" >&2; }
+warn() { printf '%s %s\n' "$(paint amber 'warning:' 2)" "$*" >&2; }
+error_line() { printf '%s %s\n' "$(paint ember 'error:' 2)" "$*" >&2; }
 die() {
-  printf 'error: %s\n' "$*" >&2
+  error_line "$*"
   exit 1
 }
 
-# The banner that up and help print: AGORANOMOS in the FIGlet font Slant, 65 columns, ASCII only, so
-# that every terminal and every log shows it. print_banner paints it with a gradient on a terminal
-# that has color, and prints the plain text everywhere else: into a log or a pipe, when NO_COLOR is
-# set (https://no-color.org) or when TERM is dumb.
-BANNER='    ___   __________  ____  ___    _   ______  __  _______  _____
-   /   | / ____/ __ \/ __ \/   |  / | / / __ \/  |/  / __ \/ ___/
-  / /| |/ / __/ / / / /_/ / /| | /  |/ / / / / /|_/ / / / /\__ \
- / ___ / /_/ / /_/ / _, _/ ___ |/ /|  / /_/ / /  / / /_/ /___/ /
-/_/  |_\____/\____/_/ |_/_/  |_/_/ |_/\____/_/  /_/\____//____/'
-TAGLINE='marketing BI out of the box'
+# Colors. A stream gets them only when it is a terminal that has color: the standard output and
+# the standard error are decided one by one, so that an error on a terminal still has its color
+# while the standard output goes into a pipe, and the other way round. Neither gets any when NO_COLOR
+# is set to a value that is not empty (https://no-color.org) or when TERM is dumb or not set.
+# The colors must read on a dark and on a light terminal, so only the top cell of the mark is the
+# bright amber of the brand, and the name and the two bottom cells use the own text color of the
+# terminal. The messages use mid-tones of the hues of the brand (amber, ok for mint, ember and mute
+# for gray) that keep 4.5:1 or more against both black and white in 24-bit color.
 
-# Set colors to how many colors the banner may use on standard output: 0 (none), 8, 256 or 24
-# (24-bit color). It sets a variable rather than printing the number, because inside $(...) the
-# standard output is a pipe, and the test for a terminal would always fail there.
-detect_colors() {
-  colors=0
-  if [ ! -t 1 ] || [ -n "${NO_COLOR:-}" ] || [ "${TERM:-dumb}" = dumb ]; then
-    return 0
-  fi
+# How many colors the terminal has: 24 (24-bit color, when COLORTERM says so), 256, 8 or 0.
+color_depth() {
   case "${COLORTERM:-}" in
     truecolor | 24bit)
-      colors=24
+      printf '24'
       return 0
       ;;
   esac
-  colors=$(tput colors 2> /dev/null) || colors=0
-  if [ "$colors" -ge 256 ] 2> /dev/null; then
-    colors=256
-  elif [ "$colors" -ge 8 ] 2> /dev/null; then
-    colors=8
+  count=$(tput colors 2> /dev/null) || count=0
+  if [ "$count" -ge 256 ] 2> /dev/null; then
+    printf '256'
+  elif [ "$count" -ge 8 ] 2> /dev/null; then
+    printf '8'
   else
-    colors=0
+    printf '0'
   fi
 }
 
-# Paint standard input with a gradient from violet to teal, left to right over $2 columns: 24-bit
-# colors when $1 is 24, the nearest colors of the 256-color palette when it is 256, and plain cyan
-# when it is 8. Every line ends with a reset, so the colors never leak into what follows.
-paint_gradient() {
-  awk -v mode="$1" -v width="$2" '
-    BEGIN { esc = "\033" }
-    {
-      out = ""
-      last = ""
-      for (i = 1; i <= length($0); i++) {
-        ch = substr($0, i, 1)
-        if (ch == " ") {
-          out = out ch
-          continue
-        }
-        t = width > 1 ? (i - 1) / (width - 1) : 0
-        r = int(139 + (45 - 139) * t + 0.5)
-        g = int(92 + (212 - 92) * t + 0.5)
-        b = int(246 + (191 - 246) * t + 0.5)
-        if (mode == 24) {
-          code = esc "[38;2;" r ";" g ";" b "m"
-        } else if (mode == 256) {
-          code = esc "[38;5;" (16 + 36 * int(r / 51 + 0.5) + 6 * int(g / 51 + 0.5) + int(b / 51 + 0.5)) "m"
-        } else {
-          code = esc "[36m"
-        }
-        if (code != last) {
-          out = out code
-          last = code
-        }
-        out = out ch
-      }
-      print out esc "[0m"
-    }'
-}
-
-print_banner() {
-  detect_colors
-  if [ "$colors" -eq 0 ]; then
-    printf '%s\n\n%s\n\n' "$BANNER" "$TAGLINE"
+# Set colors_out and colors_err to how many colors the standard output and the standard error may
+# use: 0 (none), 8, 256 or 24. It sets variables rather than printing numbers, because the tests
+# for a terminal fail inside $(...), where the standard output is a pipe. main runs it once, before
+# anything is printed; paint reads the variables, also inside $(...).
+detect_colors() {
+  colors_out=0
+  colors_err=0
+  if [ -n "${NO_COLOR:-}" ] || [ "${TERM:-dumb}" = dumb ]; then
     return 0
   fi
-  width=$(printf '%s\n' "$BANNER" | awk '{ if (length($0) > w) w = length($0) } END { print w }')
-  printf '%s\n' "$BANNER" | paint_gradient "$colors" "$width"
-  printf '\n\033[2m%s\033[0m\n\n' "$TAGLINE"
+  if [ -t 1 ] || [ -t 2 ]; then
+    depth=$(color_depth)
+    if [ -t 1 ]; then colors_out=$depth; fi
+    if [ -t 2 ]; then colors_err=$depth; fi
+  fi
+}
+
+# Print the escape sequence of the style $1 for a terminal with $2 colors (8, 256 or 24): mark,
+# text, amber, ok, ember, mute or bold. mark is the bright amber of the brand, for the top cell of
+# the mark only, and text is the own text color of the terminal. The other colors are mid-tones of
+# the hues of the brand, for words that people read. The 24-bit codes keep at least 4.5:1 against
+# both black and white; the 256-color codes are the nearest entries of the xterm palette that do
+# (amber has none with its hue: 130 has 4.46:1 against black). A terminal with 8 colors gets the
+# nearest basic color, and dim for mute; its theme sets those colors for its own background.
+sgr() {
+  case "$1" in
+    bold)
+      printf '\033[1m'
+      return 0
+      ;;
+    text)
+      printf '\033[39m'
+      return 0
+      ;;
+  esac
+  case "$2:$1" in
+    24:mark) printf '\033[38;2;255;176;32m' ;;
+    24:amber) printf '\033[38;2;157;108;20m' ;;
+    24:ok) printf '\033[38;2;37;133;91m' ;;
+    24:ember) printf '\033[38;2;215;62;24m' ;;
+    24:mute) printf '\033[38;2;118;116;126m' ;;
+    256:mark) printf '\033[38;5;214m' ;;
+    256:amber) printf '\033[38;5;130m' ;;
+    256:ok) printf '\033[38;5;29m' ;;
+    256:ember) printf '\033[38;5;131m' ;;
+    256:mute) printf '\033[38;5;243m' ;;
+    8:mark | 8:amber) printf '\033[33m' ;;
+    8:ok) printf '\033[32m' ;;
+    8:ember) printf '\033[31m' ;;
+    8:mute) printf '\033[2m' ;;
+  esac
+}
+
+# Print the text $2 without a newline, in the styles $1 (words, such as 'text bold') when the stream
+# $3 (1 for the standard output, 2 for the standard error) may have color, and then a reset, so that
+# the colors never leak into what follows. The text is the same without the colors. Name the stream
+# that the text will be printed to: paint does not print to it, it only decides about the colors.
+paint() {
+  case "$3" in
+    2) depth=${colors_err:-0} ;;
+    *) depth=${colors_out:-0} ;;
+  esac
+  if [ "$depth" -eq 0 ]; then
+    printf '%s' "$2"
+    return 0
+  fi
+  for style in $1; do
+    sgr "$style" "$depth"
+  done
+  printf '%s\033[0m' "$2"
+}
+
+# The header that up and help print: the mark of three cells, which together read as the letter A,
+# and the name. The cells are the Unicode full block (U+2588) also in the plain text, so that the
+# colored output without its escape codes is the plain output; a terminal or a log that does not
+# use UTF-8 shows them wrongly. The top cell is bright amber, the two bottom ones and the name are
+# in the own text color of the terminal, the name in bold, and the tagline is mute.
+print_banner() {
+  printf '  %s\n' "$(paint mark '██' 1)"
+  printf '%s  %s  %s\n' "$(paint text '██' 1)" "$(paint text '██' 1)" "$(paint 'text bold' agoranomos 1)"
+  printf '        %s\n\n' "$(paint mute 'marketing bi, out of the box.' 1)"
 }
 
 # Run docker compose in the checkout, where Compose finds compose.yaml and .env. Compose reads
@@ -263,7 +292,7 @@ version_ge() {
 }
 
 problem() {
-  printf 'error: %s\n' "$*" >&2
+  error_line "$*"
   problems=$((problems + 1))
 }
 
@@ -460,7 +489,7 @@ EOF
   if [ "$problems" -gt 0 ]; then
     die "preflight found $problems problem(s)"
   fi
-  say "Preflight passed: Docker $server_version, Compose ${compose_version#v}, $arch, $ncpu CPUs, $mem_mb MB of memory."
+  say "$(paint ok 'Preflight passed:' 1) Docker $server_version, Compose ${compose_version#v}, $arch, $ncpu CPUs, $mem_mb MB of memory."
 }
 
 # Wait until every long-running service is healthy (or running, if it has no health check) and every
@@ -538,7 +567,7 @@ EOF
         demo_failed=1
         return 0
       fi
-      say "All services are healthy."
+      say "$(paint ok 'All services are healthy.' 1)"
       return 0
     fi
     if [ $(($(date +%s) - started)) -ge "$timeout" ]; then
@@ -566,13 +595,13 @@ cmd_up() {
   compose up --detach --remove-orphans ||
     die "docker compose could not start the stack; the error above names the cause, and ./agoranomos status and ./agoranomos logs <service> show more"
   wait_healthy
-  say "Airflow:  http://127.0.0.1:$(setting AIRFLOW_PORT 8080)"
-  say "Metabase: http://127.0.0.1:$(setting METABASE_PORT 3000)"
+  say "$(paint mute 'Airflow:' 1)  $(paint amber "http://127.0.0.1:$(setting AIRFLOW_PORT 8080)" 1)"
+  say "$(paint mute 'Metabase:' 1) $(paint amber "http://127.0.0.1:$(setting METABASE_PORT 3000)" 1)"
   say "./agoranomos credentials shows how to sign in."
   # Only demo-init failed: Airflow and Metabase run, and its log names what to look at in them. up
   # still fails, so that a start that is not complete never passes as one.
   [ "$demo_failed" -eq 0 ] || die "the stack is up, but the demo is not ready"
-  say "The stack is up. ./agoranomos status shows every service."
+  say "$(paint ok 'The stack is up.' 1) ./agoranomos status shows every service."
 }
 
 cmd_down() {
@@ -606,7 +635,7 @@ metabase_is_up() {
 # Stop the dry run with 2, the code of a check that could not run: a failure of metadata diff never
 # looks like the 1 of a plan that is not empty.
 check_failed() {
-  printf 'error: %s\n' "$*" >&2
+  error_line "$*"
   exit 2
 }
 
@@ -667,6 +696,7 @@ EOF
 }
 
 main() {
+  detect_colors
   command=${1:-help}
   if [ "$#" -gt 0 ]; then shift; fi
   case "$command" in

@@ -68,4 +68,31 @@ Prints the banner and lists the commands. `./agoranomos` without a command does 
 
 ## The banner
 
-`up` and `help` start with the name of the project in large letters, the FIGlet font Slant, 65 columns wide and in plain ASCII, so that every terminal and every log shows it. On a terminal, the letters get a gradient from violet to teal: in 24-bit color when `COLORTERM` is `truecolor` or `24bit`, with the nearest colors of the 256-color palette when `tput colors` reports 256 or more, and in one color on a terminal with 8. The banner stays plain text when the output is not a terminal, such as a pipe or a log, when `NO_COLOR` is set to anything ([no-color.org](https://no-color.org/)), and when `TERM` is `dumb` or not set.
+`up` and `help` start with the mark of the project and its name:
+
+```text
+  ██
+██  ██  agoranomos
+        marketing bi, out of the box.
+```
+
+The mark is three cells that together read as the letter A, and the name is in lowercase. The cells are the Unicode full block (U+2588) in the plain text too, so a terminal or a log that does not use UTF-8 shows them wrongly.
+
+### Colors
+
+The text reads on a dark and on a light terminal. On a terminal, the top cell of the mark is bright amber, the only bright color, and it is a graphic, not text: on a white background it is a pale block. The two bottom cells and the name use the own text color of the terminal (the name in bold), so they show on any background, and the tagline is gray.
+
+`./agoranomos` colors a few messages too, and changes no word of them. Their colors are darker shades of the colors of the project, chosen so that each keeps a contrast of at least 4.5 to 1 against both a black and a white background (in 24-bit color, by the WCAG formula):
+
+| Color | Where |
+|---|---|
+| Green | In `up` and `preflight`: `Preflight passed:`. In `up`: `All services are healthy.` and `The stack is up.` |
+| Gray | In `up`, the names `Airflow:` and `Metabase:` before their addresses |
+| Amber | In `up`, the addresses of Airflow and Metabase. On standard error, the prefix `warning:` |
+| Red-orange | On standard error, the prefix `error:` |
+
+The colors are 24-bit when `COLORTERM` is `truecolor` or `24bit`. When `tput colors` reports 256 or more, they are entries of the 256-color palette that keep at least 4.5 to 1 against both backgrounds, so their hues drift: `error:` is a muted brick red. No entry of the palette has the hue of amber and 4.5 to 1 on both, so amber is the entry that comes closest, with 4.46 to 1 against black. On a terminal with 8 colors, they are its basic green, yellow and red, and dim for gray, which its theme sets for its own background.
+
+Each stream gets colors only when it is itself a terminal. With `./agoranomos up > up.log`, the file has none, while an `error:` on the terminal still has its color, and with `./agoranomos up 2> up.err`, the file has none and the rest of the output still does. Neither stream gets any escape codes when `NO_COLOR` is set to a value that is not empty ([no-color.org](https://no-color.org/)) or when `TERM` is `dumb` or not set.
+
+The plain text, when there are no colors, is the same text without escape codes, with the same full blocks and no ASCII look-alike for them: the colored output with its escape codes removed is the plain output.
