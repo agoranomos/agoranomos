@@ -110,7 +110,7 @@ def test_role_passwords_stay_out_of_pg_stat_statements(env):
             "platform-db",
             "PLATFORM_POSTGRES_PASSWORD",
             "postgres",
-            ("AIRFLOW_DB_PASSWORD", "METABASE_DB_PASSWORD"),
+            ("AIRFLOW_DB_PASSWORD", "METABASE_DB_PASSWORD", "BACKUP_DB_PASSWORD"),
         ),
         (
             "warehouse-db",
@@ -120,6 +120,7 @@ def test_role_passwords_stay_out_of_pg_stat_statements(env):
                 "METABASE_READER_PASSWORD",
                 "WAREHOUSE_LOADER_PASSWORD",
                 "WAREHOUSE_TRANSFORMER_PASSWORD",
+                "BACKUP_DB_PASSWORD",
             ),
         ),
     ):
@@ -425,6 +426,19 @@ BACKUP_DATABASES = {
     "warehouse-db": (["warehouse"], "WAREHOUSE_POSTGRES_PASSWORD"),
     "platform-db": (["airflow", "metabase"], "PLATFORM_POSTGRES_PASSWORD"),
 }
+# Each database that backup may connect to, as (instance, database): the cases of the tests below.
+BACKUP_TARGETS = [
+    (service, database)
+    for service, (databases, _) in sorted(BACKUP_DATABASES.items())
+    for database in databases
+]
+# A table that another role owns in each of those databases, with its owner: tables that a fresh
+# stack has, with rows in them.
+BACKUP_TABLES = {
+    "warehouse": ("raw_demo.ad_stats_daily", "loader"),
+    "airflow": ("public.dag", "airflow"),
+    "metabase": ("public.metabase_database", "metabase"),
+}
 
 
 @pytest.mark.parametrize("service", sorted(BACKUP_DATABASES))
@@ -438,38 +452,74 @@ def test_the_backup_role_signs_in_with_its_password_and_with_no_other(env, servi
     assert "password authentication failed" in wrong.stderr
 
 
-@pytest.mark.parametrize("service", sorted(BACKUP_DATABASES))
-def test_the_backup_role_reads_and_cannot_write(env, service):
-    databases, _ = BACKUP_DATABASES[service]
-    for database in databases:
-        member = psql(
-            service,
-            "backup",
-            env["BACKUP_DB_PASSWORD"],
-            database,
-            "SELECT pg_has_role('backup', 'pg_read_all_data', 'member')",
-        )
-        assert member.stdout.strip() == "t", (database, member.stderr)
-        read_only = psql(
-            service,
-            "backup",
-            env["BACKUP_DB_PASSWORD"],
-            database,
-            "SHOW default_transaction_read_only",
-        )
-        assert read_only.stdout.strip() == "on", database
-        # The sessions of backup start read-only, and PostgreSQL refuses a write in a read-only
-        # transaction before it checks the permission: the transaction is made read-write first, so
-        # that the permission decides.
+@pytest.mark.parametrize(("service", "database"), BACKUP_TARGETS)
+def test_the_backup_role_reads_a_table_that_another_role_owns(env, service, database):
+    # The role reads through pg_read_all_data, which it inherits: it owns nothing and has no grant
+    # of its own on the table. The result is a number of rows, not the rows.
+    table, owner = BACKUP_TABLES[database]
+    password = env["BACKUP_DB_PASSWORD"]
+    owned_by = f"SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = '{table}'::regclass"  # noqa: S608 (a constant)
+    found = psql(service, "backup", password, database, owned_by)
+    assert found.returncode == 0, found.stderr
+    assert found.stdout.strip() == owner
+    count = f"SELECT count(*) FROM {table}"  # noqa: S608 (the table is a constant of this file)
+    rows = psql(service, "backup", password, database, count)
+    assert rows.returncode == 0, rows.stderr
+    assert int(rows.stdout.strip()) > 0, f"{table} has no row for backup to read"
+
+
+@pytest.mark.parametrize(("service", "database"), BACKUP_TARGETS)
+def test_the_backup_role_writes_nothing(env, service, database):
+    # The sessions of backup start read-only, and PostgreSQL refuses a write in a read-only
+    # transaction before it checks the permission: the transaction is made read-write first, so
+    # that the permission decides. The insert selects no row, so a grant that went wrong would
+    # still change no data.
+    table, _ = BACKUP_TABLES[database]
+    read_only = psql(
+        service, "backup", env["BACKUP_DB_PASSWORD"], database, "SHOW default_transaction_read_only"
+    )
+    assert read_only.stdout.strip() == "on", database
+    insert = f"INSERT INTO {table} SELECT * FROM {table} WHERE false"  # noqa: S608 (a constant)
+    refused = {
+        "CREATE TABLE public.should_not_exist (id integer)": "permission denied for schema public",
+        "CREATE SCHEMA should_not_exist": f"permission denied for database {database}",
+        insert: f"permission denied for table {table.rpartition('.')[2]}",
+    }
+    for sql, error in refused.items():
         write = psql(
             service,
             "backup",
             env["BACKUP_DB_PASSWORD"],
             database,
-            "SET TRANSACTION READ WRITE; CREATE TABLE public.should_not_exist (id integer)",
+            f"SET TRANSACTION READ WRITE; {sql}",
         )
-        assert write.returncode != 0, database
-        assert "permission denied for schema public" in write.stderr, database
+        assert write.returncode != 0, (database, sql)
+        assert error in write.stderr, (database, sql)
+
+
+# What backup meets on the statistics of the statements, which live in warehouse on the warehouse
+# instance (the platform instance has them in postgres, where backup may not connect). The
+# members of pg_read_all_data may select from the two views, but db-init revoked the functions
+# behind them from PUBLIC and gave backup no right to run them, so each read fails on the function.
+BACKUP_STATEMENT_STATISTICS = {
+    "SELECT 1 FROM pg_stat_statements LIMIT 1": "permission denied for function pg_stat_statements",
+    "SELECT 1 FROM pg_stat_statements(true) LIMIT 1": (
+        "permission denied for function pg_stat_statements"
+    ),
+    "SELECT 1 FROM pg_stat_statements_info LIMIT 1": (
+        "permission denied for function pg_stat_statements_info"
+    ),
+    "SELECT 1 FROM pg_stat_statements_info() LIMIT 1": (
+        "permission denied for function pg_stat_statements_info"
+    ),
+}
+
+
+@pytest.mark.parametrize("sql", sorted(BACKUP_STATEMENT_STATISTICS))
+def test_the_backup_role_cannot_read_the_statistics_of_the_statements(env, sql):
+    result = psql("warehouse-db", "backup", env["BACKUP_DB_PASSWORD"], "warehouse", sql)
+    assert result.returncode != 0
+    assert BACKUP_STATEMENT_STATISTICS[sql] in result.stderr
 
 
 @pytest.mark.parametrize("database", ["postgres", "template1"])
