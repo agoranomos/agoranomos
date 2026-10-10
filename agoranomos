@@ -169,12 +169,14 @@ compose() {
   )
 }
 
-# Print the value of a setting in .env, or nothing when it is not set, read as Docker Compose
-# reads it (compose-go 2.16.1, as of October 2026), so that this script and Compose agree on every
-# value: the last line that sets it counts, the blanks after the = do not, a value in single or
-# double quotes is what is between them, and a value without quotes ends before " #", which starts
-# a comment, and without the blanks at its end, the carriage return of a .env that Windows saved
-# among them. The key reaches awk in its environment, not in its program.
+# Print the value of a setting in .env, or nothing when it is not set. It reads lines of the form
+# KEY=value as Docker Compose does (compose-go 2.16.1, as of October 2026): the last line that sets
+# the key counts, the blanks after the = do not, a value in single or double quotes is what is
+# between them, and a value without quotes ends before " #", which starts a comment, and without the
+# blanks at its end, the carriage return of a .env that Windows saved among them. After an empty
+# value " #" starts no comment, as in Compose. It does not read "export KEY=v" or blanks around the
+# =, and it does not expand $ or read escapes in quotes. The key reaches awk in its environment, not
+# in its program.
 env_get() {
   [ -f "$ENV_FILE" ] || return 0
   ENV_GET_KEY=$1 awk -v squote="'" '
