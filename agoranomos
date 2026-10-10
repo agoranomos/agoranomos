@@ -42,9 +42,11 @@ die() {
 # Colors. A stream gets them only when it is a terminal that has color: the standard output and
 # the standard error are decided one by one, so that an error on a terminal still has its color
 # while the standard output goes into a pipe, and the other way round. Neither gets any when NO_COLOR
-# is set to anything (https://no-color.org) or when TERM is dumb or not set. The colors are those of
-# the brand: amber for what runs and for addresses, bone for text and the mark, mute for secondary
-# words, ok (mint) for a check that passed, and ember for errors.
+# is set to a value that is not empty (https://no-color.org) or when TERM is dumb or not set.
+# The colors must read on a dark and on a light terminal, so only the top cell of the mark is the
+# bright amber of the brand, and the name and the two bottom cells use the own text color of the
+# terminal. The messages use mid-tones of the hues of the brand (amber, ok for mint, ember and mute
+# for gray) that keep 4.5:1 or more against both black and white in 24-bit color.
 
 # How many colors the terminal has: 24 (24-bit color, when COLORTERM says so), 256, 8 or 0.
 color_depth() {
@@ -81,36 +83,43 @@ detect_colors() {
   fi
 }
 
-# Print the escape sequence of the style $1 for a terminal with $2 colors (8, 256 or 24): amber, bone,
-# mute, ok, ember or bold. The 24-bit codes are the exact colors; the 256-color codes are their
-# entries in the palette of xterm; a terminal with 8 gets the nearest basic color, and dim for mute.
+# Print the escape sequence of the style $1 for a terminal with $2 colors (8, 256 or 24): mark,
+# text, amber, ok, ember, mute or bold. mark is the bright amber of the brand, for the top cell of
+# the mark only, and text is the own text color of the terminal. The other colors are mid-tones of
+# the hues of the brand, for words that people read. The 24-bit codes keep at least 4.5:1 against
+# both black and white; the 256-color codes are the nearest entries of the xterm palette that do
+# (amber has none with its hue: 130 has 4.46:1 against black). A terminal with 8 colors gets the
+# nearest basic color, and dim for mute; its theme sets those colors for its own background.
 sgr() {
   case "$1" in
     bold)
       printf '\033[1m'
       return 0
       ;;
+    text)
+      printf '\033[39m'
+      return 0
+      ;;
   esac
   case "$2:$1" in
-    24:amber) printf '\033[38;2;255;176;32m' ;;
-    24:bone) printf '\033[38;2;232;230;225m' ;;
-    24:mute) printf '\033[38;2;138;136;147m' ;;
-    24:ok) printf '\033[38;2;61;220;151m' ;;
-    24:ember) printf '\033[38;2;255;74;28m' ;;
-    256:amber) printf '\033[38;5;214m' ;;
-    256:bone) printf '\033[38;5;254m' ;;
-    256:mute) printf '\033[38;5;245m' ;;
-    256:ok) printf '\033[38;5;78m' ;;
-    256:ember) printf '\033[38;5;202m' ;;
-    8:amber) printf '\033[33m' ;;
-    8:bone) printf '\033[37m' ;;
-    8:mute) printf '\033[2m' ;;
+    24:mark) printf '\033[38;2;255;176;32m' ;;
+    24:amber) printf '\033[38;2;157;108;20m' ;;
+    24:ok) printf '\033[38;2;37;133;91m' ;;
+    24:ember) printf '\033[38;2;215;62;24m' ;;
+    24:mute) printf '\033[38;2;118;116;126m' ;;
+    256:mark) printf '\033[38;5;214m' ;;
+    256:amber) printf '\033[38;5;130m' ;;
+    256:ok) printf '\033[38;5;29m' ;;
+    256:ember) printf '\033[38;5;131m' ;;
+    256:mute) printf '\033[38;5;243m' ;;
+    8:mark | 8:amber) printf '\033[33m' ;;
     8:ok) printf '\033[32m' ;;
     8:ember) printf '\033[31m' ;;
+    8:mute) printf '\033[2m' ;;
   esac
 }
 
-# Print the text $2 without a newline, in the styles $1 (words, such as 'bone bold') when the stream
+# Print the text $2 without a newline, in the styles $1 (words, such as 'text bold') when the stream
 # $3 (1 for the standard output, 2 for the standard error) may have color, and then a reset, so that
 # the colors never leak into what follows. The text is the same without the colors. Name the stream
 # that the text will be printed to: paint does not print to it, it only decides about the colors.
@@ -132,11 +141,11 @@ paint() {
 # The header that up and help print: the mark of three cells, which together read as the letter A,
 # and the name. The cells are the Unicode full block (U+2588) also in the plain text, so that the
 # colored output without its escape codes is the plain output; a terminal or a log that does not
-# use UTF-8 shows them wrongly. The top cell is amber, the two bottom ones and the name are bone,
-# the name in bold, and the tagline is mute.
+# use UTF-8 shows them wrongly. The top cell is bright amber, the two bottom ones and the name are
+# in the own text color of the terminal, the name in bold, and the tagline is mute.
 print_banner() {
-  printf '  %s\n' "$(paint amber '██' 1)"
-  printf '%s  %s  %s\n' "$(paint bone '██' 1)" "$(paint bone '██' 1)" "$(paint 'bone bold' agoranomos 1)"
+  printf '  %s\n' "$(paint mark '██' 1)"
+  printf '%s  %s  %s\n' "$(paint text '██' 1)" "$(paint text '██' 1)" "$(paint 'text bold' agoranomos 1)"
   printf '        %s\n\n' "$(paint mute 'marketing bi, out of the box.' 1)"
 }
 

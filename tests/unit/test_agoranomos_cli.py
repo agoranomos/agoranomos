@@ -60,29 +60,36 @@ RESET = "\x1b[0m"
 BOLD = "\x1b[1m"
 
 # The escape codes of each color on the three kinds of terminal, by the number of colors that the
-# script finds out: the exact colors of the brand in 24-bit color, the nearest colors of the
-# 256-color palette, and the basic colors (dim for the gray) on a terminal with 8.
+# script finds out. The mark is bright amber, the exact color of the brand, in 24-bit color. The
+# text is the own text color of the terminal, so that the name reads on a dark and on a light
+# background. The colors of the messages (amber, ok, ember and mute) are mid-tones of the brand
+# hues that keep 4.5:1 against both black and white (see the test of the contrast below): the
+# nearest entries of the 256-color palette that do, and the basic colors (dim for the gray) on a
+# terminal with 8, which the theme of the terminal tunes to its background.
 PALETTES = {
     24: {
-        "amber": "\x1b[38;2;255;176;32m",
-        "bone": "\x1b[38;2;232;230;225m",
-        "mute": "\x1b[38;2;138;136;147m",
-        "ok": "\x1b[38;2;61;220;151m",
-        "ember": "\x1b[38;2;255;74;28m",
+        "mark": "\x1b[38;2;255;176;32m",
+        "text": "\x1b[39m",
+        "amber": "\x1b[38;2;157;108;20m",
+        "ok": "\x1b[38;2;37;133;91m",
+        "ember": "\x1b[38;2;215;62;24m",
+        "mute": "\x1b[38;2;118;116;126m",
     },
     256: {
-        "amber": "\x1b[38;5;214m",
-        "bone": "\x1b[38;5;254m",
-        "mute": "\x1b[38;5;245m",
-        "ok": "\x1b[38;5;78m",
-        "ember": "\x1b[38;5;202m",
+        "mark": "\x1b[38;5;214m",
+        "text": "\x1b[39m",
+        "amber": "\x1b[38;5;130m",
+        "ok": "\x1b[38;5;29m",
+        "ember": "\x1b[38;5;131m",
+        "mute": "\x1b[38;5;243m",
     },
     8: {
+        "mark": "\x1b[33m",
+        "text": "\x1b[39m",
         "amber": "\x1b[33m",
-        "bone": "\x1b[37m",
-        "mute": "\x1b[2m",
         "ok": "\x1b[32m",
         "ember": "\x1b[31m",
+        "mute": "\x1b[2m",
     },
 }
 TRUECOLOR = {"TERM": "xterm-256color", "COLORTERM": "truecolor"}
@@ -133,12 +140,13 @@ def test_the_banner_gets_colors_on_a_terminal(cli, terminal, colors):
     assert result.returncode == 0, result.stderr
     palette = PALETTES[colors]
     lines = result.stdout.splitlines()
-    # The top cell is amber, the two bottom cells and the name are bone, the name in bold, and the
-    # tagline is gray; every colored line ends with a reset, and the empty line has no code.
+    # The top cell is bright amber, the two bottom cells and the name are in the own text color of
+    # the terminal, the name in bold, and the tagline is gray; every colored line ends with a reset,
+    # and the empty line has no code.
     assert lines[:4] == [
-        f"  {palette['amber']}{CELL}{RESET}",
-        f"{palette['bone']}{CELL}{RESET}  {palette['bone']}{CELL}{RESET}"
-        f"  {palette['bone']}{BOLD}agoranomos{RESET}",
+        f"  {palette['mark']}{CELL}{RESET}",
+        f"{palette['text']}{CELL}{RESET}  {palette['text']}{CELL}{RESET}"
+        f"  {palette['text']}{BOLD}agoranomos{RESET}",
         f"        {palette['mute']}marketing bi, out of the box.{RESET}",
         "",
     ]
@@ -146,6 +154,48 @@ def test_the_banner_gets_colors_on_a_terminal(cli, terminal, colors):
     # the usage under it has no color at all.
     assert SGR.sub("", result.stdout) == cli.run("help").stdout
     assert "\x1b" not in "\n".join(lines[4:])
+
+
+def xterm_rgb(index):
+    """An entry of the 256-color palette of xterm, from 16 on: a color cube, then a gray ramp."""
+    if index >= 232:
+        return (8 + 10 * (index - 232),) * 3
+    levels = (0, 95, 135, 175, 215, 255)
+    cube = index - 16
+    return levels[cube // 36], levels[cube // 6 % 6], levels[cube % 6]
+
+
+def code_rgb(code):
+    """The color that an escape code of the 24-bit or the 256-color palette sets."""
+    if match := re.fullmatch(r"\x1b\[38;2;(\d+);(\d+);(\d+)m", code):
+        return tuple(int(part) for part in match.groups())
+    match = re.fullmatch(r"\x1b\[38;5;(\d+)m", code)
+    return xterm_rgb(int(match.group(1)))
+
+
+def luminance(rgb):
+    """The relative luminance of WCAG 2.2."""
+    r, g, b = (
+        value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+        for value in (channel / 255 for channel in rgb)
+    )
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast_ratio(first, second):
+    lighter, darker = sorted((luminance(first), luminance(second)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+@pytest.mark.parametrize("colors", [24, 256])
+@pytest.mark.parametrize("name", ["amber", "ok", "ember", "mute"])
+def test_the_colors_of_the_messages_read_on_a_black_and_on_a_white_terminal(colors, name):
+    rgb = code_rgb(PALETTES[colors][name])
+    black, white = contrast_ratio(rgb, (0, 0, 0)), contrast_ratio(rgb, (255, 255, 255))
+    # No entry of the 256-color palette has the hue of amber and 4.5:1 against both; the nearest,
+    # 130, has 4.46:1 against black. Every other color keeps 4.5:1 against both.
+    floor = 4.4 if (colors, name) == (256, "amber") else 4.5
+    assert min(black, white) >= floor, (black, white)
 
 
 @pytest.mark.parametrize("terminal", PLAIN_TERMINALS)

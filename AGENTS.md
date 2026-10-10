@@ -12,8 +12,8 @@ Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 
 - `README.md`, `README.ru.md`: the project overview in English and in Russian. The English text is the reference.
 - `docs/`: the documentation source, in Markdown, laid out after [Diátaxis](https://diataxis.fr/): `tutorials/`, `how-to/`, `reference/`, `explanation/` (the architecture overview is here) and `adr/` (the decision records and their index).
-- `docs/stylesheets/`, `docs/assets/`: the brand theme of the documentation site: `brand.css` (its colors and type), the Fira Sans and Fira Code fonts with their SIL OFL 1.1 texts, and the logo files.
-- `docs/assets/readme/`: the pictures of `README.md` and `README.ru.md`, each in a light and a dark variant for the two themes of GitHub. They are built with the project's brand tooling, which is not in this repository.
+- `docs/stylesheets/`, `docs/assets/brand/`, `docs/assets/fonts/`: the brand theme of the documentation site: `brand.css` (its colors and type), the logo files, and the Fira Sans and Fira Code fonts with their SIL OFL 1.1 texts.
+- `docs/assets/readme/`: the pictures of `README.md` and `README.ru.md`: the banner, the pipeline and the mark in a light and a dark variant for the two themes of GitHub, the badges in English and Russian, and a screenshot of the demo dashboard. They are built with the project's brand tooling, which is not in this repository.
 - `zensical.toml`: the configuration of the documentation site, including its navigation.
 - `agoranomos`, `.env.example`: the command that sets up, checks and runs the stack, and the template of its settings ([ADR-0014](docs/adr/0014-start-the-stack-with-one-script.md)).
 - `compose.yaml`, `compose.celery.yaml`, `postgres/`: the Docker Compose stack, its CeleryExecutor overlay ([ADR-0015](docs/adr/0015-run-localexecutor-by-default.md)), and the SQL that the one-shot `db-init` job runs on every start.

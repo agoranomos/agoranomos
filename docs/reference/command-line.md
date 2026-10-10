@@ -80,17 +80,19 @@ The mark is three cells that together read as the letter A, and the name is in l
 
 ### Colors
 
-On a terminal, the top cell is amber, the two bottom cells and the name are bone white (the name in bold), and the tagline is gray. `./agoranomos` colors a few messages too, and changes no word of them:
+The colors read on a dark and on a light terminal. On a terminal, the top cell of the mark is bright amber, the only bright color. The two bottom cells and the name use the own text color of the terminal (the name in bold), so they show on any background, and the tagline is gray.
+
+`./agoranomos` colors a few messages too, and changes no word of them. Their colors are darker shades of the colors of the project, chosen so that each keeps a contrast of at least 4.5 to 1 against both a black and a white background (in 24-bit color, by the WCAG formula):
 
 | Color | Where |
 |---|---|
-| Mint | In `up` and `preflight`: `Preflight passed:`. In `up`: `All services are healthy.` and `The stack is up.` |
+| Green | In `up` and `preflight`: `Preflight passed:`. In `up`: `All services are healthy.` and `The stack is up.` |
 | Gray | In `up`, the names `Airflow:` and `Metabase:` before their addresses |
 | Amber | In `up`, the addresses of Airflow and Metabase. On standard error, the prefix `warning:` |
-| Ember (red-orange) | On standard error, the prefix `error:` |
+| Red-orange | On standard error, the prefix `error:` |
 
-The colors are 24-bit when `COLORTERM` is `truecolor` or `24bit`, the nearest colors of the 256-color palette when `tput colors` reports 256 or more, and the basic colors, with dim for gray, on a terminal with 8.
+The colors are 24-bit when `COLORTERM` is `truecolor` or `24bit`. When `tput colors` reports 256 or more, they are the nearest entries of the 256-color palette that keep the same contrast; none has the hue of amber and 4.5 to 1 on both backgrounds, so amber is the best one, with 4.46 to 1 against black. On a terminal with 8 colors, they are its basic green, yellow and red, and dim for gray, which its theme sets for its own background.
 
-Each stream gets colors only when it is itself a terminal. With `./agoranomos up > up.log`, the file has none, while an `error:` on the terminal still has its color, and with `./agoranomos up 2> up.err`, the file has none and the rest of the output still does. Neither stream gets any escape codes when `NO_COLOR` is set to anything ([no-color.org](https://no-color.org/)) or when `TERM` is `dumb` or not set.
+Each stream gets colors only when it is itself a terminal. With `./agoranomos up > up.log`, the file has none, while an `error:` on the terminal still has its color, and with `./agoranomos up 2> up.err`, the file has none and the rest of the output still does. Neither stream gets any escape codes when `NO_COLOR` is set to a value that is not empty ([no-color.org](https://no-color.org/)) or when `TERM` is `dumb` or not set.
 
 The plain text, when there are no colors, is the same text without escape codes, with the same full blocks and no ASCII look-alike for them: the colored output with its escape codes removed is the plain output.

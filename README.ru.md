@@ -83,7 +83,7 @@ cd agoranomos
 | Metabase | <http://127.0.0.1:3000> | Коллекцию **Agoranomos demo** и её дашборд **Ad spend (demo)** |
 | Airflow | <http://127.0.0.1:8080> | DAG `agoranomos_demo_load` и `agoranomos_demo_transform` |
 
-`./agoranomos credentials` показывает, куда и как войти, а `./agoranomos down` останавливает стек, данные при этом остаются. [Run Agoranomos locally](docs/how-to/run-locally.md) (на английском) рассказывает про Windows, обновления, память и решение проблем.
+`./agoranomos credentials` показывает адреса, имена пользователей и настройки `.env`, в которых лежат пароли, а сам пароль не печатает; `./agoranomos down` останавливает стек, данные при этом остаются. [Run Agoranomos locally](docs/how-to/run-locally.md) (на английском) рассказывает про Windows, обновления, память и решение проблем.
 
 ## Принципы
 
@@ -130,7 +130,7 @@ cd agoranomos
 
 ## Лицензия
 
-Agoranomos распространяется по лицензии [Apache License 2.0](LICENSE). Стороннее ПО, которое запускает стек, сохраняет собственные лицензии. Кодекс поведения адаптирован из Contributor Covenant 3.0 и распространяется по лицензии [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+Agoranomos распространяется по лицензии [Apache License 2.0](LICENSE). Стороннее ПО, которое запускает стек, сохраняет собственные лицензии. Шрифты Fira Sans и Fira Code сайта документации в `docs/assets/fonts/` распространяются по лицензии SIL Open Font License 1.1, тексты лицензий (на английском) лежат рядом: [Fira Sans](docs/assets/fonts/OFL-FiraSans.txt) и [Fira Code](docs/assets/fonts/OFL-FiraCode.txt). Кодекс поведения адаптирован из Contributor Covenant 3.0 и распространяется по лицензии [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
 ## Об имени
 

@@ -83,7 +83,7 @@ cd agoranomos
 | Metabase | <http://127.0.0.1:3000> | The collection **Agoranomos demo** and its dashboard **Ad spend (demo)** |
 | Airflow | <http://127.0.0.1:8080> | The DAGs `agoranomos_demo_load` and `agoranomos_demo_transform` |
 
-`./agoranomos credentials` shows where to sign in, and `./agoranomos down` stops the stack while the data stays. [Run Agoranomos locally](docs/how-to/run-locally.md) covers Windows, updates, memory and troubleshooting.
+`./agoranomos credentials` shows the addresses, the user names and the settings of `.env` that hold the passwords, and never prints a password; `./agoranomos down` stops the stack while the data stays. [Run Agoranomos locally](docs/how-to/run-locally.md) covers Windows, updates, memory and troubleshooting.
 
 ## Principles
 
@@ -130,7 +130,7 @@ The site will be published when the repository goes public. Until then, read it 
 
 ## License
 
-Agoranomos is licensed under the [Apache License 2.0](LICENSE). The third-party software that the stack runs keeps its own licenses. The Code of Conduct is adapted from the Contributor Covenant 3.0 and is licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+Agoranomos is licensed under the [Apache License 2.0](LICENSE). The third-party software that the stack runs keeps its own licenses. The Fira Sans and Fira Code fonts of the documentation site, in `docs/assets/fonts/`, are under the SIL Open Font License 1.1, and the license texts are next to them: [Fira Sans](docs/assets/fonts/OFL-FiraSans.txt) and [Fira Code](docs/assets/fonts/OFL-FiraCode.txt). The Code of Conduct is adapted from the Contributor Covenant 3.0 and is licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
 ## About the name
 

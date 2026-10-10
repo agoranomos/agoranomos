@@ -485,7 +485,7 @@
   --md-code-bg-color--light: rgb(22 22 26 / 90%);
   --md-code-bg-color--lighter: rgb(22 22 26 / 54%);
   --md-code-hl-color: var(--ag-amber);
-  /* A highlighted line: the 2 px Amber bar, and a 4 % tint that keeps Dusk at 4.55:1. */
+  /* A highlighted line: the 2 px Amber bar, and a 4 % tint that keeps every token at 4.5:1 or more (Dusk, the lowest, at about 4.54:1). */
   --md-code-hl-color--light: rgb(255 176 32 / 4%);
   --md-code-hl-number-color: var(--ag-ember-soft);
   --md-code-hl-special-color: var(--ag-ember-soft);
