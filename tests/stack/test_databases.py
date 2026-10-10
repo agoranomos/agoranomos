@@ -417,3 +417,80 @@ def test_the_roles_of_the_platform_connect_to_their_own_database_only(env, role,
     result = psql("platform-db", role, env[PLATFORM_ROLES[role]], database, "SELECT 1")
     assert result.returncode != 0
     assert f'permission denied for database "{database}"' in result.stderr
+
+
+# The databases that backup may connect to, on each instance, and the setting of .env that holds
+# the password of the superuser of that instance.
+BACKUP_DATABASES = {
+    "warehouse-db": (["warehouse"], "WAREHOUSE_POSTGRES_PASSWORD"),
+    "platform-db": (["airflow", "metabase"], "PLATFORM_POSTGRES_PASSWORD"),
+}
+
+
+@pytest.mark.parametrize("service", sorted(BACKUP_DATABASES))
+def test_the_backup_role_signs_in_with_its_password_and_with_no_other(env, service):
+    [database, *_] = BACKUP_DATABASES[service][0]
+    right = psql_over_network(service, "backup", env["BACKUP_DB_PASSWORD"], database, "SELECT 1")
+    assert right.returncode == 0, right.stderr
+    assert right.stdout.strip() == "1"
+    wrong = psql_over_network(service, "backup", "not-the-password", database, "SELECT 1")
+    assert wrong.returncode != 0
+    assert "password authentication failed" in wrong.stderr
+
+
+@pytest.mark.parametrize("service", sorted(BACKUP_DATABASES))
+def test_the_backup_role_reads_and_cannot_write(env, service):
+    databases, _ = BACKUP_DATABASES[service]
+    for database in databases:
+        member = psql(
+            service,
+            "backup",
+            env["BACKUP_DB_PASSWORD"],
+            database,
+            "SELECT pg_has_role('backup', 'pg_read_all_data', 'member')",
+        )
+        assert member.stdout.strip() == "t", (database, member.stderr)
+        read_only = psql(
+            service,
+            "backup",
+            env["BACKUP_DB_PASSWORD"],
+            database,
+            "SHOW default_transaction_read_only",
+        )
+        assert read_only.stdout.strip() == "on", database
+        # The sessions of backup start read-only, and PostgreSQL refuses a write in a read-only
+        # transaction before it checks the permission: the transaction is made read-write first, so
+        # that the permission decides.
+        write = psql(
+            service,
+            "backup",
+            env["BACKUP_DB_PASSWORD"],
+            database,
+            "SET TRANSACTION READ WRITE; CREATE TABLE public.should_not_exist (id integer)",
+        )
+        assert write.returncode != 0, database
+        assert "permission denied for schema public" in write.stderr, database
+
+
+@pytest.mark.parametrize("database", ["postgres", "template1"])
+@pytest.mark.parametrize("service", sorted(BACKUP_DATABASES))
+def test_the_backup_role_connects_to_the_databases_of_the_stack_only(env, service, database):
+    result = psql(service, "backup", env["BACKUP_DB_PASSWORD"], database, "SELECT 1")
+    assert result.returncode != 0
+    assert "permission denied for database" in result.stderr
+
+
+@pytest.mark.parametrize("service", sorted(BACKUP_DATABASES))
+def test_the_backup_role_has_no_other_power(env, service):
+    _, superuser = BACKUP_DATABASES[service]
+    result = psql(
+        service,
+        "postgres",
+        env[superuser],
+        "postgres",
+        "SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls, rolcanlogin, "
+        "(SELECT string_agg(pg_get_userbyid(roleid), ',' ORDER BY roleid) FROM pg_auth_members "
+        "WHERE member = pg_roles.oid) FROM pg_roles WHERE rolname = 'backup'",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "f|f|f|f|f|t|pg_read_all_data"

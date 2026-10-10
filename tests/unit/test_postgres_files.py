@@ -17,11 +17,13 @@ ROLE_PASSWORDS = {
     "platform.sql": {
         "airflow_password": "AIRFLOW_DB_PASSWORD",
         "metabase_password": "METABASE_DB_PASSWORD",
+        "backup_password": "BACKUP_DB_PASSWORD",
     },
     "warehouse.sql": {
         "loader_password": "WAREHOUSE_LOADER_PASSWORD",
         "transformer_password": "WAREHOUSE_TRANSFORMER_PASSWORD",
         "metabase_reader_password": "METABASE_READER_PASSWORD",
+        "backup_password": "BACKUP_DB_PASSWORD",
     },
 }
 
@@ -170,8 +172,8 @@ ROLE_ATTRIBUTES = {
 }
 # The roles that each SQL file sets up.
 FILE_ROLES = {
-    "platform.sql": ["airflow", "metabase"],
-    "warehouse.sql": ["loader", "metabase_reader", "transformer"],
+    "platform.sql": ["airflow", "backup", "metabase"],
+    "warehouse.sql": ["backup", "loader", "metabase_reader", "transformer"],
 }
 
 
@@ -214,3 +216,18 @@ def test_metabase_reader_gets_its_limits_on_every_start():
     text = normalized("warehouse.sql")
     assert runs(text, "ALTER ROLE metabase_reader SET statement_timeout = '5min';")
     assert runs(text, "ALTER ROLE metabase_reader CONNECTION LIMIT 20;")
+
+
+@pytest.mark.parametrize(
+    ("name", "databases"), [("warehouse.sql", "warehouse"), ("platform.sql", "airflow, metabase")]
+)
+def test_the_backup_role_reads_every_table_and_writes_nothing(name, databases):
+    # backup takes the backups (ADR-0020): pg_read_all_data and CONNECT on the databases of the
+    # stack are all that it is given, and its sessions start read-only.
+    text = normalized(name)
+    granted = re.findall(r"\bGRANT [^;]*\bTO backup;", text, re.IGNORECASE)
+    assert granted == [
+        "GRANT pg_read_all_data TO backup;",
+        f"GRANT CONNECT ON DATABASE {databases} TO backup;",
+    ]
+    assert runs(text, "ALTER ROLE backup SET default_transaction_read_only = on;")

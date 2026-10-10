@@ -223,6 +223,7 @@ def expected_holders(variant: str) -> dict[str, set[str]]:
 
     - Each database holds the password of its superuser, and db-init, which sets up the roles,
       the databases and the schemas, holds those and the passwords that it gives the roles.
+    - The role backup has a password of its own, which db-init gives it.
     - The Airflow services share the keys of Airflow and its metadata database. The service that
       runs the tasks gets the passwords of the warehouse roles of dlt and dbt, and the DAG
       processor, which parses the DAGs of the extensions folder, gets none.
@@ -243,6 +244,7 @@ def expected_holders(variant: str) -> dict[str, set[str]]:
         "METABASE_READER_PASSWORD": {"db-init", "metabase-init"},
         "WAREHOUSE_LOADER_PASSWORD": {"db-init", runner},
         "WAREHOUSE_TRANSFORMER_PASSWORD": {"db-init", runner},
+        "BACKUP_DB_PASSWORD": {"db-init"},
         "VALKEY_PASSWORD": (
             {"broker", "airflow-scheduler", "airflow-worker"} if variant == "celery" else set()
         ),

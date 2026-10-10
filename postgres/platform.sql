@@ -11,6 +11,7 @@ SET pg_stat_statements.track_utility = off;
 -- Linux host could read them. Export the variables when you run this file by hand.
 \getenv airflow_password AIRFLOW_DB_PASSWORD
 \getenv metabase_password METABASE_DB_PASSWORD
+\getenv backup_password BACKUP_DB_PASSWORD
 
 -- Run again, this file would print a notice for every object that exists already.
 SET client_min_messages = warning;
@@ -35,6 +36,18 @@ SELECT format(
 SELECT 'CREATE DATABASE metabase OWNER metabase'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'metabase') \gexec
 REVOKE ALL ON DATABASE metabase FROM PUBLIC;
+
+-- backup takes the backups (ADR-0020): it may read every table of airflow and metabase
+-- (pg_read_all_data), the hashes of the passwords of the roles in pg_authid among them, and it
+-- writes nothing. It connects to these two databases only.
+SELECT 'CREATE ROLE backup' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'backup') \gexec
+SELECT format(
+  'ALTER ROLE backup WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+  :'backup_password'
+) \gexec
+GRANT pg_read_all_data TO backup;
+GRANT CONNECT ON DATABASE airflow, metabase TO backup;
+ALTER ROLE backup SET default_transaction_read_only = on;
 
 -- PUBLIC gets no CONNECT or TEMPORARY on the other databases that take connections (template0
 -- takes none): each role connects to the database that it owns, and to no other.
