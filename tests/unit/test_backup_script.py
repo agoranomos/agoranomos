@@ -2,8 +2,11 @@
 
 The script runs in the image of PostgreSQL. Here it runs on this machine, with stand-ins for
 pg_dump, pg_dumpall, pg_restore and flock, which log their arguments and fail when FAKE_FAIL names
-them, and for date, which answers for the time FAKE_NOW, in UTC. tar, sha256sum, awk, sed and the
-rest are the real ones. A test of one function cuts it out of the script.
+them, for mkdir and wc, which fail when FAKE_FAIL names them and are the real ones otherwise, and
+for date and sleep, which share one clock. The clock is FAKE_NOW, or the file FAKE_CLOCK when a test
+runs the schedule over hours and days: date formats it with the date of this machine, in the zone
+TZ names unless it gets -u, and sleep moves it forward and returns at once. tar, sha256sum, awk, sed
+and the rest are the real ones. A test of one function cuts it out of the script.
 """
 
 from __future__ import annotations
@@ -11,14 +14,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import stat
 import subprocess
-import sys
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytest
 
@@ -52,20 +56,45 @@ def available_shells() -> list[str]:
 
 SHELLS = available_shells()
 
+
+def zone_files_exist() -> bool:
+    """Whether this machine has the zone files that the tests of time zones read."""
+    try:
+        ZoneInfo("Europe/Berlin")
+    except ZoneInfoNotFoundError:
+        return False
+    return Path("/usr/share/zoneinfo/Europe/Berlin").is_file()
+
+
+needs_zone_files = pytest.mark.skipif(
+    not zone_files_exist(), reason="the zone files of this machine have no Europe/Berlin"
+)
+
 FAKE_TOOL = r"""#!/bin/sh
 # A stand-in for {name}: it logs its arguments, fails when FAKE_FAIL names it with the database or
 # the file that it works on, such as {name}:metabase, and writes a small file where --file= says.
 printf '{name} %s\n' "$*" >> "$FAKE_LOG"
-target="" output=""
+target="" output="" listing=""
 for argument in "$@"; do
   case "$argument" in
+    --list) listing=1 ;;
     --dbname=* | --database=*) target=${{argument#*=}} ;;
     --file=*) output=${{argument#--file=}} ;;
     -*) ;;
     *) target=${{argument##*/}} ;;
   esac
 done
+# FAKE_FAIL_UNTIL: the failures stop when the clock FAKE_CLOCK reaches this time.
+if [ -n "${{FAKE_FAIL_UNTIL:-}}" ]; then
+  read -r clock < "$FAKE_CLOCK"
+  if [ "$clock" -ge "$FAKE_FAIL_UNTIL" ]; then FAKE_FAIL=""; fi
+fi
 case " ${{FAKE_FAIL:-}} " in *" {name}:$target "*) exit 1 ;; esac
+# FAKE_TRUNCATED: a dump cut short after its table of contents. pg_restore --list reads it to the
+# end of the contents and passes it; a read of all of it, such as --file=/dev/null, fails.
+case " ${{FAKE_TRUNCATED:-}} " in *" $target "*) [ -n "$listing" ] && exit 0; exit 1 ;; esac
+# FAKE_SLOW: the work on this target takes FAKE_SLOW_SECONDS of real time.
+case " ${{FAKE_SLOW:-}} " in *" {name}:$target "*) /bin/sleep "${{FAKE_SLOW_SECONDS:-1}}" ;; esac
 if [ -n "$output" ] && [ "$output" != /dev/null ]; then
   printf '{name} of %s\n' "$target" > "$output"
 fi
@@ -77,18 +106,39 @@ printf 'flock %s\\n' "$*" >> "$FAKE_LOG"
 [ -z "${FAKE_FLOCK_BUSY:-}" ]
 """
 
-FAKE_DATE = '''#!{python}
-"""A stand-in for date: +FORMAT, of the time FAKE_NOW (seconds since 1970) or of now, in UTC."""
-import os
-import sys
-import time
-from datetime import UTC, datetime
+# A tool that fails when FAKE_FAIL names it, and is the real one otherwise.
+FAKE_PASSTHROUGH = """#!/bin/sh
+case " ${FAKE_FAIL:-} " in *" @NAME@ "*) exit 1 ;; esac
+exec @REAL@ "$@"
+"""
 
-now = int(os.environ.get("FAKE_NOW") or time.time())
-formats = [argument[1:] for argument in sys.argv[1:] if argument.startswith("+")]
-pattern = (formats or ["%a %b %d %H:%M:%S UTC %Y"])[0].replace("%s", str(now))
-print(datetime.fromtimestamp(now, UTC).strftime(pattern))
-'''
+# date: the real date of this machine, for the time of the clock: FAKE_CLOCK when that file exists,
+# else FAKE_NOW. It formats in the zone of TZ, and in UTC with -u, as the date of the image does.
+FAKE_DATE = """#!/bin/sh
+now=${FAKE_NOW:-}
+if [ -n "${FAKE_CLOCK:-}" ] && [ -f "$FAKE_CLOCK" ]; then read -r now < "$FAKE_CLOCK"; fi
+if [ -z "$now" ]; then exec @REAL@ "$@"; fi
+exec @REAL@ @AT@ "$@"
+"""
+
+# sleep: with a clock file it moves the clock forward by FAKE_STEP seconds (its own argument when
+# that is not set) and returns at once; the sleep that brings the clock to FAKE_END sends TERM to
+# the shell that started it, such as the schedule. Without a clock file it sleeps a little.
+FAKE_SLEEP = """#!/bin/sh
+if [ -z "${FAKE_CLOCK:-}" ]; then exec /bin/sleep 0.05; fi
+read -r now < "$FAKE_CLOCK"
+now=$((now + ${FAKE_STEP:-${1:-0}}))
+echo "$now" > "$FAKE_CLOCK"
+if [ -n "${FAKE_END:-}" ] && [ "$now" -ge "$FAKE_END" ]; then kill -TERM "$PPID"; fi
+"""
+
+
+def fake_date() -> str:
+    """The stand-in for date. GNU date takes the time as -d @N, BSD date as -r N."""
+    real = shutil.which("date")
+    assert real, "this machine has no date"
+    gnu = subprocess.run([real, "-d", "@0"], capture_output=True, check=False).returncode == 0
+    return FAKE_DATE.replace("@REAL@", real).replace("@AT@", '-d "@$now"' if gnu else '-r "$now"')
 
 
 def write_tool(path: Path, text: str) -> None:
@@ -108,7 +158,12 @@ def backups(tmp_path: Path) -> Path:
     for name in ("pg_dump", "pg_dumpall", "pg_restore"):
         write_tool(bin_dir / name, FAKE_TOOL.format(name=name))
     write_tool(bin_dir / "flock", FAKE_FLOCK)
-    write_tool(bin_dir / "date", FAKE_DATE.format(python=sys.executable))
+    write_tool(bin_dir / "date", fake_date())
+    write_tool(bin_dir / "sleep", FAKE_SLEEP)
+    for name in ("mkdir", "wc"):
+        real = shutil.which(name)
+        assert real, f"this machine has no {name}"
+        write_tool(bin_dir / name, FAKE_PASSTHROUGH.replace("@NAME@", name).replace("@REAL@", real))
     return root
 
 
@@ -135,7 +190,7 @@ def run(shell: str, backups: Path, *args: str, **fake: str) -> subprocess.Comple
         env=environment(backups, **fake),
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=120,
         check=False,
     )
 
@@ -168,6 +223,50 @@ def old_backup(backups: Path, moment: int, kind: str) -> str:
 
 def backup_names(backups: Path) -> list[str]:
     return sorted(path.name for path in backups.iterdir() if path.is_dir())
+
+
+def utc_epoch(text: str) -> int:
+    """The epoch of a time in UTC, such as 2026-10-11 03:00."""
+    return int(datetime.fromisoformat(text).replace(tzinfo=UTC).timestamp())
+
+
+def berlin_epoch(text: str) -> int:
+    """The epoch of a time on the clocks of Berlin (the first one, of a time that occurs twice)."""
+    return int(datetime.fromisoformat(text).replace(tzinfo=ZoneInfo("Europe/Berlin")).timestamp())
+
+
+def seed_latest(backups: Path, last_scheduled_local: str) -> None:
+    """The latest.json of a deployment whose last good scheduled backup started at this time."""
+    (backups / "latest.json").write_text(
+        f'{{\n  "last_scheduled_local": "{last_scheduled_local}"\n}}\n', encoding="utf-8"
+    )
+
+
+def simulate(
+    shell: str, backups: Path, start: int, end: int, step: int, **fake: str
+) -> subprocess.CompletedProcess[str]:
+    """Run the schedule on the fake clock from start to end (epochs). Each sleep of its loop moves
+    the clock forward by step seconds, and the one that reaches end stops the schedule with TERM."""
+    clock = backups.parent / "clock"
+    clock.write_text(f"{start}\n", encoding="utf-8")
+    return run(
+        shell,
+        backups,
+        "schedule",
+        FAKE_CLOCK=str(clock),
+        FAKE_END=str(end),
+        FAKE_STEP=str(step),
+        **fake,
+    )
+
+
+def attempts(result: subprocess.CompletedProcess[str]) -> list[int]:
+    """The start (epoch) of each scheduled backup that the schedule took, good or not, from the
+    names in its output."""
+    return [
+        utc_epoch(datetime.strptime(name, "%Y%m%dT%H%M%SZ").isoformat())
+        for name in re.findall(r"taking the scheduled backup (\d{8}T\d{6}Z)", result.stdout)
+    ]
 
 
 def shell_function(name: str) -> str:
@@ -461,6 +560,31 @@ def test_the_service_is_healthy_while_the_last_good_backup_is_fresh(
         assert "hours" in result.stdout
 
 
+@pytest.mark.parametrize(("started_hours_ago", "healthy"), [(1, True), (26, True), (27, False)])
+def test_the_service_counts_from_its_start_while_every_run_has_failed(
+    backups, started_hours_ago, healthy
+):
+    # latest.json of runs that all failed has no good backup (epoch 0): that is not "a backup from
+    # 1970", and the 26 hours count from the start of the service.
+    (backups.parent / "started").write_text(f"{NOW - started_hours_ago * HOUR}\n", encoding="utf-8")
+    (backups / "latest.json").write_text(
+        "{\n"
+        '  "result": "failed",\n'
+        '  "attempted": "2026-10-11T03:00:12Z",\n'
+        '  "step": "the dump of warehouse",\n'
+        '  "kind": "scheduled",\n'
+        '  "last_ok": "",\n'
+        '  "last_ok_epoch": 0,\n'
+        '  "last_scheduled_local": ""\n'
+        "}\n",
+        encoding="utf-8",
+    )
+    result = run("/bin/sh", backups, "health")
+    assert (result.returncode == 0) is healthy, result.stdout
+    if not healthy:
+        assert "since the service started" in result.stdout
+
+
 @pytest.mark.parametrize(
     ("now", "last_scheduled_local", "due"),
     [
@@ -520,10 +644,62 @@ def test_verify_passes_a_complete_backup_and_stops_on_a_damaged_one(shell, backu
     assert result.returncode == 1
     assert f"{NAME} is damaged" in result.stderr
     dump.write_bytes(data)
-    # A dump cut short whose checksum fits it too: only a full read finds it.
-    result = run(shell, backups, "verify", NAME, "metabase", FAKE_FAIL="pg_restore:metabase.dump")
+    assert "read to their end" in run(shell, backups, "verify", NAME, "metabase").stdout
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_verify_reads_a_dump_to_its_end_because_the_table_of_contents_alone_passes(shell, backups):
+    # A dump cut short whose checksum fits it too: pg_restore --list reads only the table of
+    # contents and passes it (R10), so verify must read all of it.
+    assert run(shell, backups, "now").returncode == 0
+    (backups.parent / "tools.log").unlink()
+    result = run(shell, backups, "verify", NAME, "metabase", FAKE_TRUNCATED="metabase.dump")
     assert result.returncode == 1
-    assert "metabase.dump does not read to its end" in result.stderr
+    assert f"{NAME}: metabase.dump does not read to its end" in result.stderr
+    assert f"pg_restore --file=/dev/null {backups / NAME / 'metabase.dump'}" in tool_calls(backups)
+    # The stand-in is right about --list: it passes the same dump.
+    assert (
+        subprocess.run(
+            [str(backups.parent / "bin" / "pg_restore"), "--list", "metabase.dump"],
+            env=environment(backups, FAKE_TRUNCATED="metabase.dump"),
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_verify_takes_a_shared_lock_so_that_a_retention_cannot_remove_the_backup(shell, backups):
+    assert run(shell, backups, "now").returncode == 0
+    (backups.parent / "tools.log").unlink()
+    assert run(shell, backups, "verify", NAME, "warehouse").returncode == 0
+    assert tool_calls(backups)[0] == "flock -s -n 9"
+    # A backup that runs: it waits up to 10 minutes, as a backup by hand does.
+    (backups.parent / "tools.log").unlink()
+    result = run(shell, backups, "verify", NAME, "warehouse", FAKE_FLOCK_BUSY="1")
+    assert result.returncode == 1
+    assert "waiting for it, at most 10 minutes" in result.stdout
+    assert "still runs after 10 minutes" in result.stderr
+    assert tool_calls(backups) == ["flock -s -n 9", "flock -s -w 600 9"]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_verify_opens_the_lock_to_read_so_that_a_read_only_folder_will_do(shell, backups):
+    assert run(shell, backups, "now").returncode == 0
+    (backups / ".lock").chmod(0o400)
+    result = run(shell, backups, "verify", NAME, "warehouse")
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_verify_with_no_database_says_that_it_checked_the_files_only(shell, backups):
+    assert run(shell, backups, "now").returncode == 0
+    (backups.parent / "tools.log").unlink()
+    result = run(shell, backups, "verify", NAME)
+    assert result.returncode == 0, result.stderr
+    assert "checked the files only" in result.stdout
+    assert "read to their end" not in result.stdout
+    assert not [call for call in tool_calls(backups) if call.startswith("pg_restore")]
 
 
 @pytest.mark.parametrize("name", ["../x", "20261011", "20261011T030012Z/..", ""])
@@ -538,6 +714,7 @@ def test_verify_stops_on_a_folder_without_its_manifest(backups):
     result = run("/bin/sh", backups, "verify", NAME)
     assert result.returncode == 1
     assert "is not a complete backup" in result.stderr
+    assert tool_calls(backups) == []  # no lock file, so no backup was ever taken and none runs
 
 
 def test_the_schedule_takes_the_first_backup_at_once_and_stops_on_sigterm(backups):
@@ -561,6 +738,293 @@ def test_the_schedule_takes_the_first_backup_at_once_and_stops_on_sigterm(backup
     finally:
         process.kill()
         process.wait(timeout=10)
+
+
+@needs_zone_files
+@pytest.mark.parametrize("shell", SHELLS)
+def test_the_names_and_times_of_a_backup_are_utc_whatever_the_time_zone_is(shell, backups):
+    # 03:00:12 UTC is 05:00:12 in Berlin in October. The folder, the manifest and latest.json
+    # say UTC; only the time that the schedule reads says Berlin.
+    result = run(shell, backups, "scheduled", TZ="Europe/Berlin")
+    assert result.returncode == 0, result.stderr
+    assert backup_names(backups) == [NAME]
+    assert manifest(backups, NAME)["started"] == "2026-10-11T03:00:12Z"
+    assert manifest(backups, NAME)["finished"] == "2026-10-11T03:00:12Z"
+    assert latest(backups)["attempted"] == "2026-10-11T03:00:12Z"
+    assert latest(backups)["last_scheduled_local"] == "2026-10-11 05:00"
+
+
+@needs_zone_files
+@pytest.mark.parametrize(
+    ("zone", "moment", "due"),
+    [
+        ("UTC", "2026-10-11T01:30:00", False),  # 01:30, before the 03:00 of UTC
+        ("Europe/Berlin", "2026-10-11T00:30:00", False),  # 02:30 in Berlin
+        ("Europe/Berlin", "2026-10-11T01:00:00", True),  # 03:00 in Berlin
+        ("Europe/Berlin", "2026-10-11T01:30:00", True),  # 03:30 in Berlin
+    ],
+)
+def test_the_time_zone_decides_the_local_time_of_the_backup(backups, zone, moment, due):
+    seed_latest(backups, "2026-10-10 03:00")
+    program = "\n".join([shell_function("field"), shell_function("due"), "due"])
+    result = subprocess.run(
+        ["/bin/sh", "-c", program],
+        env=environment(backups, FAKE_NOW=str(utc_epoch(moment)), BACKUP_TIME="03:00", TZ=zone),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert (result.returncode == 0) is due, result.stderr
+
+
+# The days of the time change of 2026 in Berlin, a BACKUP_TIME, and the UTC time of the first run.
+# Spring: at 01:00 UTC the clocks go from 02:00 to 03:00. Autumn: at 01:00 UTC they go from 03:00
+# back to 02:00. The times 02:30 run in both shells, the others in the last one (dash, when it is
+# installed), as a run of a day and a half of the schedule takes a second or two.
+TIME_CHANGE_CASES = [
+    ("2026-03-29", "01:30", "2026-03-29 00:30"),
+    ("2026-03-29", "02:30", "2026-03-29 01:00"),  # a time that does not exist: it runs at 03:00
+    ("2026-03-29", "03:00", "2026-03-29 01:00"),
+    ("2026-10-25", "02:00", "2026-10-25 00:00"),
+    ("2026-10-25", "02:30", "2026-10-25 00:30"),  # a time that happens twice: it runs the first
+    ("2026-10-25", "03:00", "2026-10-25 02:00"),
+]
+
+
+def time_change_params() -> list:
+    return [
+        pytest.param(shell, *case, id=f"{case[0]}-{case[1]}-{Path(shell).name}")
+        for case in TIME_CHANGE_CASES
+        for shell in (SHELLS if case[1] == "02:30" else SHELLS[-1:])
+    ]
+
+
+@needs_zone_files
+@pytest.mark.parametrize(("shell", "day", "backup_time", "first_run_utc"), time_change_params())
+def test_the_schedule_takes_one_backup_per_local_day_also_on_the_days_of_the_time_change(
+    shell, backups, day, backup_time, first_run_utc
+):
+    following = (datetime.fromisoformat(day) + timedelta(days=1)).date().isoformat()
+    previous = (datetime.fromisoformat(day) - timedelta(days=1)).date().isoformat()
+    seed_latest(backups, f"{previous} {backup_time}")
+    result = simulate(
+        shell,
+        backups,
+        berlin_epoch(f"{day} 00:00"),
+        berlin_epoch(f"{following} {backup_time}") + HOUR,
+        1800,
+        TZ="Europe/Berlin",
+        BACKUP_TIME=backup_time,
+    )
+    assert result.returncode == 0, result.stderr
+    found = attempts(result)
+    assert found == [utc_epoch(first_run_utc), berlin_epoch(f"{following} {backup_time}")]
+    local_days = [
+        datetime.fromtimestamp(moment, ZoneInfo("Europe/Berlin")).date() for moment in found
+    ]
+    assert [moment.isoformat() for moment in local_days] == [day, following]
+    assert latest(backups)["result"] == "ok"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_failed_scheduled_run_is_tried_again_an_hour_later_and_not_sooner(shell, backups):
+    start = utc_epoch("2026-10-11 03:00")
+    result = simulate(
+        shell, backups, start, start + 4 * HOUR + 1800, 300, FAKE_FAIL="pg_dump:warehouse"
+    )
+    assert result.returncode == 0, result.stderr
+    assert attempts(result) == [start + hours * HOUR for hours in range(5)]
+    assert result.stdout.count("the schedule tries again in an hour") == 5
+    assert latest(backups)["result"] == "failed"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_failed_run_is_tried_again_an_hour_later_also_after_midnight(shell, backups):
+    # A time of the evening: the run of 23:30 fails, and the retry of 00:30 is of the day after.
+    seed_latest(backups, "2026-10-10 23:30")
+    result = simulate(
+        shell,
+        backups,
+        utc_epoch("2026-10-11 23:00"),
+        utc_epoch("2026-10-12 02:00"),
+        900,
+        BACKUP_TIME="23:30",
+        FAKE_FAIL="pg_dump:warehouse",
+        FAKE_FAIL_UNTIL=str(utc_epoch("2026-10-12 00:15")),
+    )
+    assert result.returncode == 0, result.stderr
+    assert attempts(result) == [utc_epoch("2026-10-11 23:30"), utc_epoch("2026-10-12 00:30")]
+    assert latest(backups)["result"] == "ok"
+    assert latest(backups)["last_scheduled_local"] == "2026-10-12 00:30"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_two_failed_runs_then_a_good_one_and_the_next_run_comes_at_the_time_of_the_day(
+    shell, backups
+):
+    seed_latest(backups, "2026-10-10 03:00")
+    result = simulate(
+        shell,
+        backups,
+        utc_epoch("2026-10-11 02:00"),
+        utc_epoch("2026-10-12 04:00"),
+        900,
+        FAKE_FAIL="pg_dump:warehouse",
+        FAKE_FAIL_UNTIL=str(utc_epoch("2026-10-11 04:30")),
+    )
+    assert result.returncode == 0, result.stderr
+    assert attempts(result) == [
+        utc_epoch("2026-10-11 03:00"),  # fails
+        utc_epoch("2026-10-11 04:00"),  # fails
+        utc_epoch("2026-10-11 05:00"),  # good: the schedule is not pending any more
+        utc_epoch("2026-10-12 03:00"),  # the time of the next day
+    ]
+    assert latest(backups)["result"] == "ok"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_stop_during_a_backup_is_held_until_the_backup_ends(shell, backups):
+    process = subprocess.Popen(
+        [shell, str(SCRIPT), "schedule"],
+        env=environment(backups, FAKE_SLOW="pg_dump:warehouse", FAKE_SLOW_SECONDS="2"),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        log = backups.parent / "tools.log"
+        deadline = time.monotonic() + 20
+        while not (log.exists() and "pg_dump" in log.read_text()) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        process.send_signal(signal.SIGTERM)
+        time.sleep(0.5)
+        assert process.poll() is None  # the dump still runs, and the shell waits for its child
+        assert not (backups / "latest.json").exists()
+        assert process.wait(timeout=20) == 0  # it stops when the backup has ended
+        assert latest(backups)["result"] == "ok"
+        assert latest(backups)["kind"] == "scheduled"
+    finally:
+        process.kill()
+        process.wait(timeout=10)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_folder_without_a_readable_manifest_is_never_removed_by_the_retention(shell, backups):
+    # A backup by hand whose manifest was lost, or came back from another machine with CRLF line
+    # ends: only a manifest that says scheduled lets the retention remove a folder.
+    (backups / "20260901T030000Z").mkdir(mode=0o700)
+    crlf = backups / "20260902T030000Z"
+    crlf.mkdir(mode=0o700)
+    (crlf / "manifest.json").write_bytes(b'{\r\n  "kind": "manual",\r\n  "files": []\r\n}\r\n')
+    result = run(
+        shell,
+        backups,
+        "scheduled",
+        BACKUP_KEEP_DAILY="1",
+        BACKUP_KEEP_WEEKLY="0",
+        BACKUP_KEEP_MONTHLY="0",
+    )
+    assert result.returncode == 0, result.stderr
+    assert backup_names(backups) == ["20260901T030000Z", "20260902T030000Z", NAME]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_lock_file_that_cannot_be_opened_stops_the_backup_with_one_line(shell, backups):
+    lock = backups / ".lock"
+    lock.touch()
+    lock.chmod(0o400)
+    result = run(shell, backups, "now")
+    assert result.returncode == 1
+    lines = result.stderr.splitlines()
+    assert len(lines) == 1, result.stderr
+    assert lines[0].startswith(f"backup: error: cannot open the lock file {lock}")
+    assert "AGORANOMOS_UID" in lines[0]
+    assert tool_calls(backups) == []
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_folder_that_cannot_be_made_is_recorded_as_a_failed_step(shell, backups):
+    result = run(shell, backups, "now", FAKE_FAIL="mkdir")
+    assert result.returncode == 1
+    assert result.stderr.splitlines() == [
+        f"backup: error: the backup {NAME} failed at: the folder of the backup"
+    ]
+    assert latest(backups)["result"] == "failed"
+    assert latest(backups)["step"] == "the folder of the backup"
+    assert not [call for call in tool_calls(backups) if call.startswith("pg_")]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_an_old_partial_backup_that_cannot_be_removed_is_recorded_as_a_failed_step(shell, backups):
+    stuck = backups / ".partial-20261001T030000Z" / "locked"
+    stuck.mkdir(parents=True)
+    (stuck / "file").write_text("x", encoding="utf-8")
+    stuck.chmod(0o500)  # its file cannot be removed
+    try:
+        result = run(shell, backups, "now")
+    finally:
+        stuck.chmod(0o700)
+    assert result.returncode == 1
+    step = "the removal of the partial backups of earlier runs"
+    assert result.stderr.splitlines()[-1] == f"backup: error: the backup {NAME} failed at: {step}"
+    assert latest(backups)["step"] == step
+    assert not [call for call in tool_calls(backups) if call.startswith("pg_")]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_name_that_is_taken_stops_the_backup_and_leaves_that_folder_as_it_is(shell, backups):
+    taken = backups / NAME
+    taken.mkdir(mode=0o700)
+    (taken / "keep").write_text("x", encoding="utf-8")
+    result = run(shell, backups, "now")
+    assert result.returncode == 1
+    step = "the check that no backup has this name"
+    assert result.stderr.splitlines() == [f"backup: error: the backup {NAME} failed at: {step}"]
+    assert latest(backups)["step"] == step
+    assert [path.name for path in taken.iterdir()] == ["keep"]
+    assert not list(backups.glob(".partial-*"))
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_command_that_fails_inside_the_manifest_fails_its_step(shell, backups):
+    # set -e is in effect in the functions that write the files, not only in the commands
+    # that step runs: the failure of wc inside write_manifest is not swallowed by a pipeline.
+    result = run(shell, backups, "now", FAKE_FAIL="wc")
+    assert result.returncode == 1
+    assert (
+        result.stderr.splitlines()[-1]
+        == f"backup: error: the backup {NAME} failed at: the manifest"
+    )
+    assert latest(backups)["step"] == "the manifest"
+    assert backup_names(backups) == []
+    assert not list(backups.glob(".partial-*"))
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_retention_that_cannot_remove_a_backup_warns_and_the_good_backup_stays_good(
+    shell, backups
+):
+    stuck = old_backup(backups, NOW - 3 * DAY, "scheduled")
+    locked = backups / stuck / "locked"
+    locked.mkdir()
+    (locked / "file").write_text("x", encoding="utf-8")
+    locked.chmod(0o500)  # its file cannot be removed
+    try:
+        result = run(
+            shell,
+            backups,
+            "scheduled",
+            BACKUP_KEEP_DAILY="1",
+            BACKUP_KEEP_WEEKLY="0",
+            BACKUP_KEEP_MONTHLY="0",
+        )
+    finally:
+        locked.chmod(0o700)
+    assert result.returncode == 0, result.stderr
+    assert f"the scheduled backup {NAME} is complete" in result.stdout
+    assert f"backup: warning: could not remove the scheduled backup {stuck}" in result.stderr
+    assert "backup: error" not in result.stderr
+    assert latest(backups)["result"] == "ok"
+    assert latest(backups)["last_ok"] == NAME
 
 
 def test_usage(backups):

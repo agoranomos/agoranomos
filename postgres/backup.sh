@@ -8,7 +8,9 @@
 #   backup.sh now         take a backup by hand: ./agoranomos backup
 #   backup.sh health      the health check of the service: is the last good backup fresh?
 #   backup.sh verify <backup> [<database>...]
-#                         check a backup before ./agoranomos restore uses it
+#                         check a backup before ./agoranomos restore uses it: its files against
+#                         SHA256SUMS, and each named dump read to its end; it holds a shared lock,
+#                         so that no retention removes the backup meanwhile
 #
 # A backup is a folder of BACKUP_ROOT named after the time of its start in UTC, such as
 # 20261011T030012Z. It holds the dump of each database (pg_dump, custom format, zstd), the global
@@ -45,6 +47,7 @@ fail() {
   printf 'backup: error: %s\n' "$*" >&2
   exit 1
 }
+warn() { printf 'backup: warning: %s\n' "$*" >&2; }
 
 # Stop on a setting of .env that the schedule or the retention cannot use.
 check_settings() {
@@ -102,16 +105,27 @@ write_latest() {
   mv "$latest.tmp" "$latest"
 }
 
-# Run one step of a backup. When it fails, remove the partial backup, record the step in
-# latest.json, and stop: the backups that exist stay as they are.
+# Run one step of a backup. set -e is in effect in it, in the functions too (it would not be in an
+# if or an ||), so the first command that fails stops the shell, and abort, the trap on EXIT, says
+# which step it was.
 step() {
-  label=$1
+  current_step=$1
   shift
-  if ! "$@"; then
-    rm -rf -- "$partial"
-    write_latest failed "$label"
-    fail "the backup $name failed at: $label"
+  "$@"
+}
+
+# When a step has failed, remove the partial backup, record the step in latest.json, and stop with
+# one line: the backups that exist stay as they are.
+abort() {
+  status=$?
+  trap - EXIT
+  if [ "$status" -ne 0 ] && [ -n "$current_step" ]; then
+    rm -rf -- "$partial" || true
+    write_latest failed "$current_step" || true
+    printf 'backup: error: the backup %s failed at: %s\n' "$name" "$current_step" >&2
+    exit 1
   fi
+  exit "$status"
 }
 
 write_checksums() {
@@ -134,9 +148,9 @@ write_manifest() {
     printf '  "files": [\n'
     separator=""
     while read -r checksum file; do
+      size=$(wc -c < "$partial/$file")
       printf '%s' "$separator"
-      printf '    {"name": "%s", "bytes": %s, "sha256": "%s"}' \
-        "$file" "$(wc -c < "$partial/$file" | tr -d ' ')" "$checksum"
+      printf '    {"name": "%s", "bytes": %s, "sha256": "%s"}' "$file" "$((size))" "$checksum"
       separator=",
 "
     done < "$partial/SHA256SUMS"
@@ -153,10 +167,15 @@ remove_partials() {
   done
 }
 
+# True when no backup, and nothing else, has the name that this backup takes.
+name_is_free() { [ ! -e "$BACKUP_ROOT/$name" ]; }
+
 # Read the names of the scheduled backups, newest first, and print those that the retention
 # removes: every one but the newest of each of the last $1 days, $2 weeks (Monday to Sunday) and
 # $3 months that have a backup. The names hold the time of the start in UTC, so days, weeks and
-# months are of UTC.
+# months are of UTC, while the schedule keeps the days of BACKUP_TZ. With a BACKUP_TIME near
+# midnight UTC, the change to summer time can put two scheduled backups on one UTC day, and the
+# older goes: once a year the restore points are two days apart.
 expired() {
   awk -v daily="$1" -v weekly="$2" -v monthly="$3" '
     # The number of the day since 1970-01-01 of a date of the Gregorian calendar.
@@ -181,13 +200,14 @@ expired() {
     }'
 }
 
-# Remove the scheduled backups that the retention no longer keeps. A backup by hand is never
-# removed here. Only under the lock.
+# Remove the scheduled backups that the retention no longer keeps. Only a folder whose manifest
+# says scheduled can go: a backup by hand, and a folder whose manifest is missing or cannot be
+# read, stay until a person deletes them. Only under the lock.
 prune() {
   names=""
   for path in "$BACKUP_ROOT"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z; do
     [ -d "$path" ] || continue
-    [ "$(field "$path/manifest.json" kind)" != manual ] || continue
+    [ "$(field "$path/manifest.json" kind)" = scheduled ] || continue
     names="${path##*/}
 $names"
   done
@@ -195,8 +215,11 @@ $names"
     expired "${BACKUP_KEEP_DAILY:-7}" "${BACKUP_KEEP_WEEKLY:-4}" "${BACKUP_KEEP_MONTHLY:-3}" |
     while IFS= read -r old; do
       [ -n "$old" ] || continue
-      rm -rf -- "${BACKUP_ROOT:?}/$old"
-      say "removed the scheduled backup $old, which the retention no longer keeps"
+      if rm -rf -- "${BACKUP_ROOT:?}/$old"; then
+        say "removed the scheduled backup $old, which the retention no longer keeps"
+      else
+        warn "could not remove the scheduled backup $old, which the retention no longer keeps"
+      fi
     done
 }
 
@@ -208,7 +231,11 @@ take_backup() {
   if [ ! -d "$BACKUP_ROOT" ] || [ ! -w "$BACKUP_ROOT" ]; then
     fail "cannot write the backups folder $BACKUP_ROOT: it must exist and belong to the user of AGORANOMOS_UID in .env, $(id -u)"
   fi
-  exec 9> "$BACKUP_ROOT/.lock"
+  # command exec: a redirection of a bare exec that fails stops a POSIX shell with a message of its
+  # own (and exit 2 in dash). The group keeps that message off, as fail says it in one line.
+  if ! { command exec 9> "$BACKUP_ROOT/.lock"; } 2> /dev/null; then
+    fail "cannot open the lock file $BACKUP_ROOT/.lock: it must belong to the user of AGORANOMOS_UID in .env, $(id -u)"
+  fi
   if [ "$kind" = manual ]; then
     if ! flock -n 9; then
       say "another backup is running: waiting for it, at most $((LOCK_WAIT_SECONDS / 60)) minutes"
@@ -223,8 +250,11 @@ take_backup() {
   started_local=$(date '+%Y-%m-%d %H:%M')
   name=$(date -u +%Y%m%dT%H%M%SZ)
   partial="$BACKUP_ROOT/.partial-$name"
-  remove_partials
-  mkdir "$partial"
+  current_step=""
+  trap abort EXIT
+  step "the removal of the partial backups of earlier runs" remove_partials
+  step "the check that no backup has this name" name_is_free
+  step "the folder of the backup" mkdir "$partial"
   say "taking the $kind backup $name"
   for entry in $DATABASES; do
     database=${entry%%:*} host=${entry#*:}
@@ -241,9 +271,11 @@ take_backup() {
   finished_epoch=$(date +%s)
   step "the manifest" write_manifest
   step "the rename of the backup" mv "$partial" "$BACKUP_ROOT/$name"
-  write_latest ok ""
+  step "the record in latest.json" write_latest ok ""
+  current_step=""
   say "the $kind backup $name is complete: $(du -sk "$BACKUP_ROOT/$name" | cut -f1) KiB in $((finished_epoch - started_epoch)) seconds"
-  prune
+  # The backup is good whatever the retention does: its errors are warnings.
+  prune || warn "the retention could not finish; the backup just taken is complete"
 }
 
 # True when the scheduled backup of today is due: the time BACKUP_TIME of today has come, and the
@@ -258,9 +290,16 @@ due() {
     'BEGIN { exit !(now >= target && last < target) }'
 }
 
-# Wait in a loop, a minute at a time, so that a stop of Docker ends the wait at once: the trap
-# stops the sleep that runs in the background, and the shell exits. Each backup runs as a child
-# process, so that set -e holds in it.
+# Wait in a loop, a minute at a time. A stop (TERM or INT) ends a sleep at once: the trap kills it
+# and the shell exits. During a backup it is held until the backup ends, since the shell waits for
+# its child and runs the trap afterwards; Docker kills the container when its grace period (10
+# seconds by default) is over, which leaves a .partial-* folder that the next run removes, and
+# latest.json as it was. Each backup runs as a child process, so that set -e holds in it.
+#
+# A run that failed leaves the schedule pending: the next try comes an hour after the failure,
+# also after midnight, until a scheduled backup succeeds. Without it a BACKUP_TIME of the evening
+# would wait for the same time of the next day. The day's own rule, due, stays: one backup a day
+# at BACKUP_TIME, and at once when there is none.
 schedule() {
   check_settings
   date +%s > "$STARTED_FILE"
@@ -268,10 +307,14 @@ schedule() {
   trap 'if [ -n "$sleeper" ]; then kill "$sleeper" 2> /dev/null || true; fi; exit 0' TERM INT
   say "a backup every day at ${BACKUP_TIME:-03:00}, ${TZ:-UTC}"
   last_try=0
+  pending=""
   while :; do
-    if due && [ $(($(date +%s) - last_try)) -ge "$RETRY_SECONDS" ]; then
+    if { [ -n "$pending" ] || due; } && [ $(($(date +%s) - last_try)) -ge "$RETRY_SECONDS" ]; then
       last_try=$(date +%s)
-      if ! /bin/sh "$0" scheduled; then
+      if /bin/sh "$0" scheduled; then
+        pending=""
+      else
+        pending=1
         say "the backup failed: the schedule tries again in an hour"
       fi
     fi
@@ -281,6 +324,10 @@ schedule() {
   done
 }
 
+# The service is unhealthy when the last good backup, scheduled or by hand, is more than 26 hours
+# old, or when there is none 26 hours after the service started. The start counts from the file in
+# /tmp, which a restart of the service renews: a service that restarts more often than every 26
+# hours and never succeeds stays healthy.
 health() {
   now=$(date +%s)
   last=$(field "$BACKUP_ROOT/latest.json" last_ok_epoch)
@@ -307,6 +354,20 @@ verify() {
     [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z) ;;
     *) fail "not the name of a backup: $backup" ;;
   esac
+  # A shared lock, so that the retention of a backup that runs cannot remove this one while it is
+  # checked. The lock file is opened to read: the folder may be a read-only mount. With no lock file
+  # no backup was ever taken, and none can run.
+  lock="$BACKUP_ROOT/.lock"
+  if [ -e "$lock" ]; then
+    if ! { command exec 9< "$lock"; } 2> /dev/null; then
+      fail "cannot read the lock file $lock: it must belong to the user of AGORANOMOS_UID in .env, $(id -u)"
+    fi
+    if ! flock -s -n 9; then
+      say "a backup is running: waiting for it, at most $((LOCK_WAIT_SECONDS / 60)) minutes"
+      flock -s -w "$LOCK_WAIT_SECONDS" 9 ||
+        fail "a backup still runs after $((LOCK_WAIT_SECONDS / 60)) minutes: see ./agoranomos logs backup"
+    fi
+  fi
   folder="$BACKUP_ROOT/$backup"
   if [ ! -f "$folder/manifest.json" ] || [ ! -f "$folder/SHA256SUMS" ]; then
     fail "$backup is not a complete backup: it has no manifest.json or no SHA256SUMS"
@@ -321,7 +382,11 @@ verify() {
     pg_restore --file=/dev/null "$folder/$database.dump" ||
       fail "$backup: $database.dump does not read to its end"
   done
-  say "$backup is complete, and its dumps read to their end"
+  if [ "$#" -eq 0 ]; then
+    say "$backup: checked the files only, against SHA256SUMS; no dump was read"
+  else
+    say "$backup is complete, and its dumps read to their end"
+  fi
 }
 
 case "${1:-}" in
