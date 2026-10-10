@@ -288,18 +288,26 @@ server_mode() {
 }
 
 # True when $1 is a domain name of two labels or more, of letters, digits and hyphens, whose last
-# label starts with a letter: no scheme, port or path, and not an IP address.
+# label starts with a letter: no scheme, port or path, and not an IP address. grep reads lines, so
+# an argument of more than one line is refused first: its other lines could be anything.
 valid_domain() {
+  domain_newline='
+'
+  case "$1" in
+    *"$domain_newline"*) return 1 ;;
+  esac
   printf '%s\n' "$1" |
     grep -Eq '^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$'
 }
 
 # True when Let's Encrypt can issue a certificate for the domain $1: not localhost or a name under
 # .localhost, .test, .example or .invalid, which RFC 6761 keeps for local use and tests, and not a
-# name under .local, .internal or .home.arpa, which Caddy serves only with its own authority.
+# name under .local, .internal or home.arpa (or home.arpa itself), which Caddy serves only with its
+# own authority. DNS names are not case-sensitive, so the name is folded to lower case first.
 public_name() {
-  case "$1" in
-    localhost | *.localhost | *.test | *.example | *.invalid | *.local | *.internal | *.home.arpa)
+  public_lower=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$public_lower" in
+    localhost | *.localhost | *.test | *.example | *.invalid | *.local | *.internal | home.arpa | *.home.arpa)
       return 1
       ;;
   esac
@@ -368,14 +376,22 @@ cmd_init() {
   fi
   mkdir -p "$(extensions_path)/dags" "$(extensions_path)/metadata"
   if [ "$server_asked" -eq 1 ]; then
-    env_set AGORANOMOS_SITE_URL "https://$server_domain"
-    env_set COMPOSE_PROFILES "$(with_profiles "$(setting COMPOSE_PROFILES core,demo)" server)"
+    # A line is written only when its value changes, so that running init --server again changes
+    # nothing, also in a .env that a person edited: a line with quotes or a comment stays as it is.
+    [ "$(env_get AGORANOMOS_SITE_URL)" = "https://$server_domain" ] ||
+      env_set AGORANOMOS_SITE_URL "https://$server_domain"
+    current_profiles=$(setting COMPOSE_PROFILES core,demo)
+    server_profiles=$(with_profiles "$current_profiles" server)
+    [ "$server_profiles" = "$current_profiles" ] || env_set COMPOSE_PROFILES "$server_profiles"
     # Metabase on the internet (ADR-0019): passwords of at least 15 characters, and a sign-out after
     # 24 hours without activity. A value that a person set stays.
     [ -n "$(env_get METABASE_PASSWORD_COMPLEXITY)" ] || env_set METABASE_PASSWORD_COMPLEXITY strong-enough
     [ -n "$(env_get METABASE_SESSION_TIMEOUT)" ] ||
       env_set METABASE_SESSION_TIMEOUT "'{\"amount\":24,\"unit\":\"hours\"}'"
     say "Server mode is on: Metabase is to be at https://$server_domain. Point the DNS record of $server_domain at this server, then run ./agoranomos up."
+    if ! public_name "$server_domain" && [ "$(setting AGORANOMOS_TLS acme)" != internal ]; then
+      say "$server_domain is not a name that gets a certificate of Let's Encrypt: for a test, set AGORANOMOS_TLS=internal in .env, or ./agoranomos up stops on it."
+    fi
   fi
 }
 
@@ -527,16 +543,17 @@ EOF
     elif [ "$site_tls" = acme ] && ! public_name "$site_host"; then
       problem "$site_host cannot get a certificate from Let's Encrypt: run ./agoranomos init --server with the domain name of the server, or set AGORANOMOS_TLS=internal in .env for a test"
     fi
-    # Metabase checks the password of the admin account against its rule when metabase-init creates
-    # the account at the first start, and with strong-enough (init --server sets it) it refuses one
-    # of fewer than 15 characters. init generates one of 32, so this catches one set by hand. The
-    # message names the settings, never the value. strong has other rules, and normal is the default
-    # of local mode, so they are Metabase's to check.
-    admin_password=$(env_get METABASE_ADMIN_PASSWORD)
-    if [ "$(setting METABASE_PASSWORD_COMPLEXITY normal)" = strong-enough ] &&
-      [ -n "$admin_password" ] && [ "${#admin_password}" -lt 15 ]; then
-      problem "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters, which METABASE_PASSWORD_COMPLEXITY=strong-enough asks for: write a longer one, or leave it empty for ./agoranomos init to generate one"
-    fi
+  fi
+  # Metabase checks the password of the admin account against its rule when metabase-init creates
+  # the account at the first start, and with strong-enough it refuses one of fewer than 15
+  # characters. init --server sets that rule, and compose.yaml hands it to Metabase in every mode, so
+  # a person can set it in local mode too. init generates a password of 32 characters, so this
+  # catches one set by hand. The message names the settings, never the value. strong has other
+  # rules, and normal, the default, asks for less: they are Metabase's to check.
+  admin_password=$(env_get METABASE_ADMIN_PASSWORD)
+  if [ "$(setting METABASE_PASSWORD_COMPLEXITY normal)" = strong-enough ] &&
+    [ -n "$admin_password" ] && [ "${#admin_password}" -lt 15 ]; then
+    problem "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters, which METABASE_PASSWORD_COMPLEXITY=strong-enough asks for: write a longer one, or leave it empty for ./agoranomos init to generate one"
   fi
   compose_version=$(docker compose version --short 2> /dev/null) || compose_version=""
   if [ -z "$compose_version" ]; then
@@ -766,7 +783,7 @@ print_addresses() {
 # In server mode with a certificate of Let's Encrypt: whether the site answers over HTTPS with a
 # certificate that this machine trusts. Caddy gets the certificate after it starts, and only when
 # the DNS record of the domain points at this server and ports 80 and 443 are open to the
-# internet, so this tries for a minute and then only warns: the stack runs either way.
+# internet, so this tries for about a minute and then only warns: the stack runs either way.
 # AGORANOMOS_CERTIFICATE_TRIES is a hook for the tests (default 12, every AGORANOMOS_WAIT_INTERVAL
 # seconds).
 check_certificate() {
@@ -779,9 +796,10 @@ check_certificate() {
     warn "cannot check the certificate of https://$site_host: install curl"
     return 0
   fi
+  say "Checking the certificate of https://$site_host, for about a minute."
   tries=${AGORANOMOS_CERTIFICATE_TRIES:-12}
   while [ "$tries" -gt 0 ]; do
-    if curl --silent --output /dev/null --max-time 10 --resolve "$site_host:443:127.0.0.1" "https://$site_host/api/health"; then
+    if curl --silent --output /dev/null --max-time 10 --noproxy '*' --resolve "$site_host:443:127.0.0.1" "https://$site_host/api/health"; then
       return 0
     fi
     tries=$((tries - 1))

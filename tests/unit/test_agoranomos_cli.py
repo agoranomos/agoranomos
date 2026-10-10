@@ -479,6 +479,10 @@ def test_init_without_server_leaves_the_rules_of_metabase_to_metabase(cli):
         "localhost",
         "-bad.example.com",
         "",
+        # A name on the first line is not enough: the whole argument must be a name.
+        "bi.example.com\nother.example.com",
+        "bi.example.com\n",
+        "a" * 64 + ".example.com",
     ],
 )
 def test_init_with_server_refuses_what_is_not_a_domain_name(cli, domain):
@@ -491,6 +495,48 @@ def test_init_with_server_refuses_what_is_not_a_domain_name(cli, domain):
 def test_init_with_server_needs_a_domain_and_init_takes_no_other_option(cli):
     assert "--server needs the domain name" in cli.run("init", "--server").stderr
     assert "unknown option of init: --local" in cli.run("init", "--local").stderr
+
+
+def test_init_with_server_accepts_a_label_of_63_characters(cli):
+    result = cli.run("init", "--server", "a" * 63 + ".example.com")
+    assert result.returncode == 0, result.stderr
+    assert cli.read_env()["AGORANOMOS_SITE_URL"] == "https://" + "a" * 63 + ".example.com"
+
+
+@pytest.mark.parametrize("domain", ["agoranomos.localhost", "Bi.LOCALHOST", "home.arpa"])
+def test_init_with_server_hints_at_internal_tls_for_a_name_that_gets_no_certificate(cli, domain):
+    # Let's Encrypt issues for none of these names, and preflight stops on them with acme: the
+    # message of init says what to set, and stops saying it once it is set.
+    result = cli.run("init", "--server", domain)
+    assert result.returncode == 0, result.stderr
+    assert "Point the DNS record of" in result.stdout
+    assert "set AGORANOMOS_TLS=internal in .env" in result.stdout
+    set_env(cli, AGORANOMOS_TLS="internal")
+    again = cli.run("init", "--server", domain)
+    assert again.returncode == 0, again.stderr
+    assert "AGORANOMOS_TLS" not in again.stdout
+
+
+def test_init_with_server_gives_no_hint_about_tls_for_a_name_that_gets_a_certificate(cli):
+    result = cli.run("init", "--server", "bi.example.com")
+    assert result.returncode == 0, result.stderr
+    assert "AGORANOMOS_TLS" not in result.stdout
+
+
+def test_init_with_server_again_leaves_the_hand_written_lines_as_they_are(cli):
+    # Running it again changes nothing: a line that a person wrote with quotes and a comment is not
+    # rewritten when the list of profiles and the address are already right.
+    assert cli.run("init", "--server", "bi.example.com").returncode == 0
+    set_env(
+        cli,
+        COMPOSE_PROFILES='"core,demo,server" # mine',
+        AGORANOMOS_SITE_URL="'https://bi.example.com' # mine too",
+    )
+    before = cli.env_path.read_bytes()
+    assert b'COMPOSE_PROFILES="core,demo,server" # mine\n' in before
+    result = cli.run("init", "--server", "bi.example.com")
+    assert result.returncode == 0, result.stderr
+    assert cli.env_path.read_bytes() == before
 
 
 def server_env(cli, tls="internal", site="https://agoranomos.localhost"):
@@ -516,6 +562,7 @@ def test_preflight_in_local_mode_keeps_docker_25(cli):
     [
         ("acme", "https://agoranomos.localhost", "cannot get a certificate from Let's Encrypt"),
         ("acme", "https://bi.test", "cannot get a certificate from Let's Encrypt"),
+        ("acme", "https://localhost", "AGORANOMOS_SITE_URL"),
         ("internal", "http://agoranomos.localhost", "AGORANOMOS_SITE_URL"),
         ("internal", "https://agoranomos.localhost/metabase", "AGORANOMOS_SITE_URL"),
         ("letsencrypt", "https://bi.example.com", "AGORANOMOS_TLS"),
@@ -526,6 +573,34 @@ def test_preflight_stops_on_a_site_that_server_mode_cannot_serve(cli, tls, site,
     result = cli.run("preflight")
     assert result.returncode == 1
     assert word in result.stderr
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "bi.localhost",
+        "bi.test",
+        "bi.example",
+        "bi.invalid",
+        "bi.local",
+        "bi.internal",
+        "bi.home.arpa",
+        "home.arpa",
+        # DNS names are not case-sensitive.
+        "Bi.LOCALHOST",
+        "bi.Test",
+        "BI.Home.ARPA",
+        "HOME.arpa",
+    ],
+)
+def test_preflight_with_acme_stops_on_every_name_that_no_public_authority_certifies(cli, host):
+    server_env(cli, tls="acme", site=f"https://{host}")
+    result = cli.run("preflight")
+    assert result.returncode == 1
+    assert "cannot get a certificate from Let's Encrypt" in result.stderr
+    # Caddy's own authority serves the same name.
+    set_env(cli, AGORANOMOS_TLS="internal")
+    assert cli.run("preflight").returncode == 0
 
 
 @pytest.mark.parametrize(
@@ -571,10 +646,29 @@ def test_preflight_leaves_a_short_admin_password_to_the_other_rules_of_metabase(
 
 
 def test_preflight_in_local_mode_does_not_check_the_length_of_the_admin_password(cli):
+    # With the default rule of Metabase, normal.
     cli.run("init")
     set_env(cli, METABASE_ADMIN_PASSWORD="Aa1")
     result = cli.run("preflight")
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(("length", "outcome"), [(14, "stop"), (15, "pass")])
+def test_preflight_in_local_mode_checks_the_admin_password_against_strong_enough(
+    cli, length, outcome
+):
+    # compose.yaml hands the rule to Metabase in every mode, so a person who sets strong-enough in
+    # local mode needs the same password as in server mode.
+    cli.run("init")
+    with cli.env_path.open("a", encoding="utf-8") as env:
+        env.write("METABASE_PASSWORD_COMPLEXITY=strong-enough\n")
+    password = "x" * length
+    set_env(cli, METABASE_ADMIN_PASSWORD=password)
+    result = cli.run("preflight")
+    assert result.returncode == (1 if outcome == "stop" else 0), result.stderr
+    if outcome == "stop":
+        assert "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters" in result.stderr
+    assert password not in result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("port", ["80", "443"])
@@ -583,6 +677,20 @@ def test_preflight_in_server_mode_stops_when_a_port_of_the_proxy_is_in_use(cli, 
     result = cli.run("preflight", FAKE_BUSY_PORTS=port)
     assert result.returncode == 1
     assert f"port {port} is in use" in result.stderr
+
+
+def test_preflight_in_local_mode_ignores_busy_ports_80_and_443(cli):
+    cli.run("init")
+    result = cli.run("preflight", FAKE_BUSY_PORTS="80 443")
+    assert result.returncode == 0, result.stderr
+
+
+def test_preflight_in_server_mode_does_not_check_the_ports_while_the_stack_runs(cli):
+    # The running proxy holds 80 and 443 itself.
+    server_env(cli)
+    result = cli.run("preflight", FAKE_BUSY_PORTS="80 443 8080 3000", FAKE_RUNNING="abc123\n")
+    assert result.returncode == 0, result.stderr
+    assert "is in use" not in result.stderr
 
 
 def test_up_in_server_mode_prints_the_site_and_the_tunnel_to_airflow(cli, tmp_path):
@@ -603,11 +711,18 @@ def test_up_checks_the_certificate_of_a_site_of_lets_encrypt(cli, tmp_path):
     result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
     assert result.returncode == 0, result.stderr
     calls = (tmp_path / "docker.log.curl").read_text(encoding="utf-8").splitlines()
+    # --noproxy: a proxy in the environment of the person must not bypass --resolve.
     assert calls == [
-        "--silent --output /dev/null --max-time 10 --resolve bi.example.com:443:127.0.0.1 "
-        "https://bi.example.com/api/health"
+        "--silent --output /dev/null --max-time 10 --noproxy * "
+        "--resolve bi.example.com:443:127.0.0.1 https://bi.example.com/api/health"
     ]
     assert "certificate" not in result.stderr
+    lines = result.stdout.splitlines()
+    checking = lines.index(
+        "Checking the certificate of https://bi.example.com, for about a minute."
+    )
+    assert lines.index("All services are healthy.") < checking
+    assert checking < next(i for i, line in enumerate(lines) if line.startswith("The stack is up."))
 
 
 def test_up_warns_when_the_site_has_no_trusted_certificate_yet(cli, tmp_path):
@@ -633,6 +748,7 @@ def test_up_with_the_own_authority_of_caddy_does_not_check_the_certificate(cli, 
     result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
     assert result.returncode == 0, result.stderr
     assert not (tmp_path / "docker.log.curl").exists()
+    assert "Checking the certificate" not in result.stdout
 
 
 def test_credentials_in_server_mode_name_the_site_and_the_tunnel(cli):
