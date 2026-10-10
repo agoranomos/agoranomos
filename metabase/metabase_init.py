@@ -4,10 +4,11 @@ It waits until Metabase is healthy, creates the admin account when Metabase is n
 and connects the warehouse as the read-only metabase_reader role, showing only the marts schema.
 Each step looks at the current state first, so running it again changes nothing but the
 connection details. Settings that must not change in the Metabase UI, such as the AI features
-being off, are environment variables in compose.yaml instead. Then it applies the metadata of the
-marts (metadata.py): the names, descriptions and types that dbt and the overrides of the
-deployment give the tables and fields of the marts, with one line for each change. Run with the
-argument diff, as ./agoranomos metadata diff does, it prints that plan and applies nothing.
+being off, are environment variables in compose.yaml instead. On a new Metabase it also turns the
+public links off, once. Then it applies the metadata of the marts (metadata.py): the names,
+descriptions and types that dbt and the overrides of the deployment give the tables and fields of
+the marts, with one line for each change. Run with the argument diff, as ./agoranomos metadata diff
+does, it prints that plan and applies nothing.
 
 Every secret comes from the environment and goes only into the body of a request. The messages of
 this script name a step and an HTTP status, or the class of an error (and, for an answer of an
@@ -300,6 +301,27 @@ def sign_in(metabase: Metabase, email: str, password: str) -> None:
     metabase.session = result["id"]
 
 
+PUBLIC_SHARING_HINT = (
+    "The public links of Metabase are still on: turn them off in Admin > Settings > Public sharing."
+)
+
+
+def turn_off_public_sharing(metabase: Metabase) -> None:
+    """Turn the public links of Metabase off, on a Metabase that this job has just set up.
+
+    Metabase 0.64 turns them on by default. Anyone who has the link of a public question or
+    dashboard sees it without signing in, also without the filters of the link, which can be taken
+    out of its address. An admin may turn them on again in Admin > Settings > Public sharing, so the
+    job does this once, at the first start: Metabase answers null for a setting at its default, so
+    a later start could not tell an admin's choice from the default."""
+    metabase.call(
+        "PUT",
+        "/api/setting/enable-public-sharing",
+        {"value": False},
+        hints={status: PUBLIC_SHARING_HINT for status in (400, 401, 403, 404, 500, 502, 503)},
+    )
+
+
 def warehouse_details(config: Config) -> dict[str, Any]:
     return {
         "host": config.warehouse_host,
@@ -458,6 +480,8 @@ def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> in
         metabase = Metabase(config.url)
         wait_until_healthy(metabase)
         admin_created = ensure_admin(metabase, config)
+        if admin_created:
+            turn_off_public_sharing(metabase)
         database_id, database_created = ensure_warehouse(metabase, config)
         wait = metadata.waiter(METADATA_SYNC_TIMEOUT, "see ./agoranomos logs metabase")
         metadata.apply(metabase, database_id, marts, wait, log=logged("metabase-init"))
@@ -468,8 +492,9 @@ def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> in
         print(f"metabase-init: {unexpected_shape('Metabase', error, LOGS_HINT)}", file=sys.stderr)
         return 1
     print(
-        f"metabase-init: the admin account {'is created' if admin_created else 'exists'}, and the "
-        f"warehouse connection {database_id} is {'created' if database_created else 'up to date'}"
+        f"metabase-init: the admin account {'is created' if admin_created else 'exists'}, "
+        f"{'the public links are off, ' if admin_created else ''}and the warehouse connection "
+        f"{database_id} is {'created' if database_created else 'up to date'}"
     )
     return 0
 

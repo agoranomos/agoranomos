@@ -364,9 +364,25 @@ services:
       # or write that database cannot make a session of their own. At least 16 characters: a
       # shorter one stops Metabase at start. A new key signs everyone out of Metabase once.
       MB_SESSION_SECRET_KEY: ${METABASE_SESSION_KEY:?run ./agoranomos init}
-      MB_SITE_URL: http://localhost:${METABASE_PORT:-3000}
+      # The address of Metabase in its links: http://localhost and its port in local mode, and the
+      # https:// address of the site in server mode, which ./agoranomos init --server sets. Metabase
+      # does not redirect to HTTPS by itself: the proxy does, and metabase-init and demo-init reach
+      # Metabase over the network of the stack, without HTTPS (MB_REDIRECT_ALL_REQUESTS_TO_HTTPS
+      # stays unset).
+      MB_SITE_URL: ${AGORANOMOS_SITE_URL:-http://localhost:${METABASE_PORT:-3000}}
       MB_ANON_TRACKING_ENABLED: "false"
       MB_CHECK_FOR_UPDATES: "false"
+      # A connection of Metabase to a database may go to a private network, where the warehouse
+      # is, or to the internet, but not to a loopback or link-local address, such as the metadata
+      # service of a cloud at 169.254.169.254 (ADR-0021). Metabase 0.64 allows all by default.
+      MB_WAREHOUSE_ALLOWED_NETWORKS: allow-private
+      # Passwords and sessions on the internet (ADR-0019): ./agoranomos init --server sets passwords
+      # of at least 15 characters, strong-enough, for new and changed passwords, and a sign-out after
+      # 24 hours without activity. Local mode keeps the defaults of Metabase 0.64.1: normal, 6
+      # characters and a digit, and no timeout, which an empty MB_SESSION_TIMEOUT gives, because
+      # Metabase reads an empty variable as unset.
+      MB_PASSWORD_COMPLEXITY: ${METABASE_PASSWORD_COMPLEXITY:-normal}
+      MB_SESSION_TIMEOUT: ${METABASE_SESSION_TIMEOUT:-}
       # A new Metabase gets no Sample Database and no Examples collection, which have nothing to do
       # with marketing data.
       MB_LOAD_SAMPLE_CONTENT: "false"

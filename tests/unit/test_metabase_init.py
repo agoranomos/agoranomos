@@ -89,6 +89,39 @@ def test_next_start_updates_the_connection_and_creates_nothing(metabase):
     assert metabase.databases[0]["details"]["password"] == "rotated-password"
 
 
+def test_the_first_start_turns_the_public_links_off(metabase, capsys):
+    assert mi.main(env_for(metabase)) == 0
+    assert metabase.settings["enable-public-sharing"] is False
+    assert metabase.calls.count(("PUT", "/api/setting/enable-public-sharing")) == 1
+    assert "public links are off" in capsys.readouterr().out
+
+
+def test_a_later_start_leaves_the_public_links_as_an_admin_set_them(metabase):
+    assert mi.main(env_for(metabase)) == 0
+    metabase.settings["enable-public-sharing"] = True  # an admin turned them on
+    assert mi.main(env_for(metabase)) == 0
+    assert metabase.settings["enable-public-sharing"] is True
+    assert metabase.calls.count(("PUT", "/api/setting/enable-public-sharing")) == 1
+
+
+def test_a_metabase_set_up_before_keeps_its_public_links(metabase):
+    # A deployment from before this release: the job did not create its admin, so it does not
+    # know whether an admin chose public links, and leaves them as they are.
+    metabase.set_up(ENV["METABASE_ADMIN_EMAIL"], ENV["METABASE_ADMIN_PASSWORD"])
+    assert mi.main(env_for(metabase)) == 0
+    assert ("PUT", "/api/setting/enable-public-sharing") not in metabase.calls
+    assert metabase.settings["enable-public-sharing"] is True
+
+
+def test_public_links_that_could_not_be_turned_off_say_where_to_do_it(metabase, capsys):
+    metabase.failures[("PUT", "/api/setting/enable-public-sharing")] = 500
+    assert mi.main(env_for(metabase)) == 1
+    err = capsys.readouterr().err
+    assert "PUT /api/setting/enable-public-sharing failed with HTTP 500" in err
+    assert "Admin > Settings > Public sharing" in err
+    assert not leaked(err)
+
+
 def test_the_result_is_reported_without_a_secret(metabase, capsys):
     assert mi.main(env_for(metabase)) == 0
     first = capsys.readouterr()

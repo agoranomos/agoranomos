@@ -515,6 +515,60 @@ def test_metabase_reports_nothing_to_its_makers(variant):
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_takes_its_address_from_the_setting_of_the_site(variant):
+    for site, expected in (("https://bi.example.com", "https://bi.example.com"), ("", None)):
+        config = json.loads(
+            compose(
+                "config",
+                "--format",
+                "json",
+                env={
+                    "COMPOSE_FILE": FILES[variant],
+                    "COMPOSE_PROFILES": "core,server",
+                    "AGORANOMOS_SITE_URL": site,
+                    "METABASE_PORT": "13000",
+                },
+            ).stdout,
+            object_hook=NamesOnly,
+        )["services"]
+        wanted = expected or "http://localhost:13000"
+        assert config["metabase"]["environment"]["MB_SITE_URL"] == wanted
+        assert config["proxy"]["environment"]["AGORANOMOS_SITE_URL"] == wanted
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_keeps_its_connections_off_loopback_and_does_not_redirect_itself(variant):
+    environment = rendered(variant)["metabase"]["environment"]
+    assert environment["MB_WAREHOUSE_ALLOWED_NETWORKS"] == "allow-private"
+    assert "MB_REDIRECT_ALL_REQUESTS_TO_HTTPS" not in environment
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_takes_its_rules_of_passwords_and_sessions_from_the_settings(variant):
+    # ./agoranomos init --server writes the two settings; without them, Metabase keeps its own
+    # defaults: normal, and no timeout.
+    timeout = '{"amount":24,"unit":"hours"}'
+    for settings, expected in (
+        (
+            {"METABASE_PASSWORD_COMPLEXITY": "strong-enough", "METABASE_SESSION_TIMEOUT": timeout},
+            ("strong-enough", timeout),
+        ),
+        ({"METABASE_PASSWORD_COMPLEXITY": "", "METABASE_SESSION_TIMEOUT": ""}, ("normal", "")),
+    ):
+        environment = json.loads(
+            compose(
+                "config",
+                "--format",
+                "json",
+                env={"COMPOSE_FILE": FILES[variant], "COMPOSE_PROFILES": "core", **settings},
+            ).stdout,
+            object_hook=NamesOnly,
+        )["services"]["metabase"]["environment"]
+        found = (environment["MB_PASSWORD_COMPLEXITY"], environment["MB_SESSION_TIMEOUT"])
+        assert found == expected
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
 def test_the_pool_of_metabase_fits_the_connections_of_its_role(variant):
     # The warehouse gives metabase_reader 20 connections (postgres/warehouse.sql), and Metabase
     # keeps up to 15 in its pool by default: a pool set here could take more than the role has.
