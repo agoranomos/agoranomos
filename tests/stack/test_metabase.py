@@ -234,9 +234,31 @@ def test_the_rules_of_passwords_are_those_of_env(env, properties):
     # ./agoranomos init --server asks for 15 characters (ADR-0019); without it, Metabase keeps its
     # default, 6 characters and a digit. password-complexity is a public setting of Metabase 0.64.1
     # (src/metabase/session/settings.clj:27-32).
-    strong = env.get("METABASE_PASSWORD_COMPLEXITY") == "strong-enough"
-    expected = {"total": 15} if strong else {"total": 6, "digit": 1}
-    assert properties["password-complexity"] == expected
+    rules = {"strong-enough": {"total": 15}, "": {"total": 6, "digit": 1}}
+    setting = env.get("METABASE_PASSWORD_COMPLEXITY") or ""
+    if setting not in rules:
+        pytest.skip("METABASE_PASSWORD_COMPLEXITY is set to a value that this test has no rule for")
+    assert properties["password-complexity"] == rules[setting]
+
+
+def test_a_connection_to_loopback_is_refused_at_once(metabase_url, session):
+    # compose.yaml sets MB_WAREHOUSE_ALLOWED_NETWORKS=allow-private (ADR-0021). Metabase checks the
+    # address before it connects, so the refusal comes at once; an address that is allowed but does
+    # not answer takes ten seconds to time out. The endpoint answers HTTP 200 with "valid": false
+    # and the refusal inside the body (Metabase 0.64.1). It saves nothing, and the details are made
+    # up.
+    details = {"host": "127.0.0.1", "port": 5432, "dbname": "probe", "user": "probe", "ssl": False}
+    body = {"details": {"engine": "postgres", "details": details}}
+    started = time.monotonic()
+    status, answer = http_json(
+        "POST", f"{metabase_url}/api/database/validate", body, headers=session, timeout=8
+    )
+    seconds = time.monotonic() - started
+    assert status == 200
+    assert isinstance(answer, dict), f"the answer is a {type(answer).__name__}"
+    assert answer.get("valid") is False
+    assert answer.get("message") == "Cannot connect to a private or internal network address."
+    assert seconds < 5, f"the refusal took {seconds:.1f} seconds"
 
 
 def test_the_warehouse_connection_is_unique_and_read_only(metabase_url, session):

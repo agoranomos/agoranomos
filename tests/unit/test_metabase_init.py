@@ -15,7 +15,7 @@ from typing import Any
 
 import metabase_init as mi
 import pytest
-from metabase_stand_in import FakeMetabase, free_port, metadata_env, serve
+from metabase_stand_in import FakeClock, FakeMetabase, free_port, metadata_env, serve
 from metabase_stand_in import leaked as leaked_in
 
 ENV = {
@@ -64,6 +64,14 @@ def metabase(tmp_path):
     yield state
     server.shutdown()
     server.server_close()
+
+
+@pytest.fixture(autouse=True)
+def clock(monkeypatch):
+    """The pauses of the job between two attempts, which move a fake clock on and take no time."""
+    fake = FakeClock()
+    monkeypatch.setattr(mi, "pause", fake.sleep)
+    return fake
 
 
 def env_for(metabase: FakeMetabase, **overrides: str) -> dict[str, str]:
@@ -120,6 +128,46 @@ def test_public_links_that_could_not_be_turned_off_say_where_to_do_it(metabase, 
     assert "PUT /api/setting/enable-public-sharing failed with HTTP 500" in err
     assert "Admin > Settings > Public sharing" in err
     assert not leaked(err)
+
+
+PUBLIC_SHARING = ("PUT", "/api/setting/enable-public-sharing")
+
+
+def test_a_status_that_no_hint_was_made_for_still_names_the_public_links(metabase, capsys):
+    # 429 is a status that the job has no special hint for: the error must still say that the links
+    # are on and where to turn them off, because ./agoranomos up never prints the log of the job.
+    metabase.failures[PUBLIC_SHARING] = 429
+    assert mi.main(env_for(metabase)) == 1
+    err = capsys.readouterr().err
+    assert "PUT /api/setting/enable-public-sharing failed with HTTP 429" in err
+    assert "The public links of Metabase are still on" in err
+    assert "Admin > Settings > Public sharing" in err
+    assert not leaked(err)
+
+
+def test_the_public_links_are_tried_three_times_two_seconds_apart(metabase, clock):
+    metabase.failures[PUBLIC_SHARING] = 503
+    assert mi.main(env_for(metabase)) == 1
+    assert metabase.calls.count(PUBLIC_SHARING) == 3
+    assert clock.now == 4.0  # two pauses of two seconds, and none after the last attempt
+    assert metabase.databases == []  # the job stopped there: it connected no warehouse
+
+
+def test_a_put_that_fails_once_and_then_succeeds_ends_well(metabase, clock, capsys, monkeypatch):
+    metabase.failures[PUBLIC_SHARING] = 503
+
+    def blip_over(seconds: float) -> None:
+        clock.sleep(seconds)
+        metabase.failures.clear()
+
+    monkeypatch.setattr(mi, "pause", blip_over)
+    assert mi.main(env_for(metabase)) == 0
+    assert metabase.calls.count(PUBLIC_SHARING) == 2
+    assert metabase.settings["enable-public-sharing"] is False
+    assert clock.now == 2.0
+    output = capsys.readouterr()
+    assert "public links are off" in output.out
+    assert output.err == ""
 
 
 def test_the_result_is_reported_without_a_secret(metabase, capsys):
@@ -479,6 +527,18 @@ def test_a_dropped_connection_is_one_line_with_the_step_and_the_class_of_the_err
     assert "./agoranomos logs metabase" in line
     assert "Traceback" not in output.err
     assert leaked(output.err) == []
+
+
+@pytest.mark.parametrize(("fault", "error_class"), FAULTS)
+def test_a_dropped_connection_on_the_public_links_names_them(metabase, capsys, fault, error_class):
+    metabase.faults[PUBLIC_SHARING] = fault
+    assert mi.main(env_for(metabase)) == 1
+    err = capsys.readouterr().err
+    assert f"PUT /api/setting/enable-public-sharing failed: {error_class}" in err
+    assert "The public links of Metabase are still on" in err
+    assert "Admin > Settings > Public sharing" in err
+    assert "Traceback" not in err
+    assert not leaked(err)
 
 
 def test_a_call_that_cannot_connect_names_the_step_and_the_classes_of_the_error():

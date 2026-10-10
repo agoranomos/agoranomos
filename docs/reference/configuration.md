@@ -86,7 +86,7 @@ A DAG in the extensions folder should not use two features of Cosmos that still 
 
 ## Public links
 
-Metabase can give a question or a dashboard a public link, which anyone who has it opens without signing in. Metabase 0.64 allows them by default; `metabase-init` turns them off once, when it sets up a new Metabase, and an admin may turn them on again in Admin > Settings > Public sharing. A public link shows its question or dashboard with the values of the filters in its address, and whoever has the link can take them out of the address and see what the filters hid. A Metabase set up before this release keeps the setting that it had. `metabase-init` tries once: if that first start fails at this step, its error says that the links are still on, and no later start tries again, so turn them off in Admin > Settings > Public sharing.
+Metabase can give a question or a dashboard a public link, which anyone who has it opens without signing in. Metabase 0.64 allows them by default; `metabase-init` turns them off once, when it sets up a new Metabase, and an admin may turn them on again in Admin > Settings > Public sharing. A public link shows its question or dashboard with the values of the filters in its address, and whoever has the link can take them out of the address and see what the filters hid. A Metabase set up before this release keeps the setting that it had. `metabase-init` tries three times, two seconds apart, at the first start: if all three fail, its error, which `./agoranomos logs metabase-init` shows (`./agoranomos up` does not print it), says that the links are still on and where to turn them off, and no later start tries again, so turn them off in Admin > Settings > Public sharing.
 
 ## The metadata of the marts
 

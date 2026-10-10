@@ -36,6 +36,11 @@ import metadata
 WAREHOUSE_NAME = "Agoranomos warehouse"
 # How long the job waits for a sync that adds a table of the marts to Metabase, in seconds.
 METADATA_SYNC_TIMEOUT = 120.0
+# How often the job tries to turn the public links off, and the pause between two attempts in
+# seconds. The pause is a name of this module, which the tests replace with a fake clock.
+PUBLIC_SHARING_ATTEMPTS = 3
+PUBLIC_SHARING_PAUSE = 2.0
+pause = time.sleep
 # The exit codes of the dry run: nothing to change, the check could not run, and a plan to apply.
 # A plan is 3, and not 1, because docker compose run exits with 1 when it fails itself (Compose
 # 5.5.1), and ./agoranomos metadata diff, which runs the dry run with it, must tell the two apart:
@@ -313,13 +318,20 @@ def turn_off_public_sharing(metabase: Metabase) -> None:
     dashboard sees it without signing in, also without the filters of the link, which can be taken
     out of its address. An admin may turn them on again in Admin > Settings > Public sharing, so the
     job does this once, at the first start: Metabase answers null for a setting at its default, so
-    a later start could not tell an admin's choice from the default."""
-    metabase.call(
-        "PUT",
-        "/api/setting/enable-public-sharing",
-        {"value": False},
-        hints={status: PUBLIC_SHARING_HINT for status in (400, 401, 403, 404, 500, 502, 503)},
-    )
+    a later start could not tell an admin's choice from the default.
+
+    No later start tries again, and ./agoranomos up never prints the log of this job, so the job
+    tries up to PUBLIC_SHARING_ATTEMPTS times, PUBLIC_SHARING_PAUSE seconds apart, against a failure
+    that passes, and when none works it fails with the error of the last attempt, whatever it was (a
+    status, or a connection that broke), and PUBLIC_SHARING_HINT."""
+    for attempt in range(1, PUBLIC_SHARING_ATTEMPTS + 1):
+        try:
+            metabase.call("PUT", "/api/setting/enable-public-sharing", {"value": False})
+            return
+        except SetupError as error:
+            if attempt == PUBLIC_SHARING_ATTEMPTS:
+                raise SetupError(f"{error} {PUBLIC_SHARING_HINT}") from None
+            pause(PUBLIC_SHARING_PAUSE)
 
 
 def warehouse_details(config: Config) -> dict[str, Any]:
