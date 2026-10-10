@@ -33,13 +33,14 @@ def test_the_site_is_the_address_of_metabase_and_forwards_to_metabase_only():
     assert re.findall(r"^reverse_proxy (.+)$", text, re.M) == ["metabase:3000"]
 
 
-def test_the_doors_of_metabase_that_need_no_sign_in_are_closed():
+def test_the_doors_of_metabase_that_need_no_sign_in_are_closed_by_prefix():
+    # A prefix closes every path that begins with the name of a door, in whatever spelling
+    # (/api/setup. /api/setup%20 /api/setup;x=1), so none of them reaches the router of Metabase.
     text = caddyfile()
     matchers = dict(re.findall(r"^@(\w+) path (.+)$", text, re.M))
     assert matchers == {
-        "setup": "/api/setup /api/setup/*",
-        "relays": "/api/analytics-proxy /api/analytics-proxy/* "
-        "/api/product-feedback /api/product-feedback/*",
+        "setup": "/api/setup*",
+        "relays": "/api/analytics-proxy* /api/product-feedback*",
     }
     assert sorted(re.findall(r"^respond @(\w+) 404$", text, re.M)) == ["relays", "setup"]
 

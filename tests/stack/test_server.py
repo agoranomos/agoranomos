@@ -64,13 +64,14 @@ def test_the_responses_carry_the_security_headers(env):
         assert headers.get("referrer-policy") == "strict-origin-when-cross-origin", path
 
 
-# Caddy's path matcher is case-insensitive, merges repeated slashes and matches the unescaped
-# path (caddyserver.com/docs/caddyfile/matchers#path, read 2026-10-10), so each of these is closed.
-# The setup API of Metabase 0.64.1 has one endpoint, POST /api/setup (src/metabase/setup_rest/
-# api.clj), so closing it takes nothing from a signed-in admin. Metabase 0.64.1 answers 404 to
-# /api/setup;x=1 and to /api/%73etup by itself (checked on 2026-10-10: it neither drops the
-# parameter of a path segment nor decodes the escape). These two cases guard against a later
-# version of Metabase, or a rule of the proxy, that would map such a form to the setup API.
+# The matchers of the Caddyfile are prefixes (/api/setup*), and Caddy's path matcher is
+# case-insensitive, merges repeated slashes and matches the unescaped path
+# (caddyserver.com/docs/caddyfile/matchers#path, read 2026-10-10). So the proxy closes every path
+# that begins with the name of a door, in whatever spelling, whatever Metabase would answer to it:
+# no such path reaches the router of Metabase. The setup API of Metabase 0.64.1 has one endpoint,
+# POST /api/setup (src/metabase/setup_rest/api.clj), so closing it takes nothing from a signed-in
+# admin. A later Metabase could route /api/setup;x=1, /api/setup. or /api/setup%20 to it, and
+# these cases fail when the proxy lets one through.
 @pytest.mark.parametrize(
     ("method", "path"),
     [
@@ -84,15 +85,37 @@ def test_the_responses_carry_the_security_headers(env):
         ("POST", "/api/setup%2Fvalidate"),
         ("POST", "/api/setup;x=1"),
         ("POST", "/api/%73etup"),
+        ("POST", "/api/setup."),
+        ("POST", "/api/setup%2e"),
+        ("POST", "/api/setup%20"),
         ("POST", "/api/analytics-proxy"),
         ("POST", "/api/analytics-proxy/com.snowplowanalytics.snowplow/tp2"),
         ("POST", "//api/Analytics-Proxy"),
         ("POST", "/api/product-feedback"),
+        ("POST", "/api/product-feedback;a"),
     ],
 )
 def test_the_doors_of_metabase_that_need_no_sign_in_are_closed_at_the_proxy(env, method, path):
     status, _, _ = site_request(env, method, path, body=None if method == "HEAD" else {})
     assert status == 404
+
+
+def test_the_neighbors_of_the_closed_doors_still_reach_metabase_through_the_proxy(env):
+    # A prefix must not close more than the doors: /api/session/properties is open to the login
+    # page, and /api/setting wants a session, so Metabase answers 401 and not the 404 of the proxy.
+    status, _, _ = site_request(env, "GET", "/api/session/properties")
+    assert status == 200
+    status, _, _ = site_request(env, "GET", "/api/setting")
+    assert status == 401
+
+
+def test_the_right_name_in_tls_with_another_host_never_reaches_metabase(env):
+    # Caddy picks the certificate by the name in TLS and the site by the Host header: a request
+    # with the right name in TLS and another Host gets the empty answer of Caddy, and is not
+    # forwarded. Metabase would answer /api/health with a body.
+    status, _, body = site_request(env, "GET", "/api/health", headers={"Host": "other.example"})
+    forwarded = bool(body)  # a bool, so that the report holds no body
+    assert (status, forwarded) == (200, False)
 
 
 def test_metabase_itself_still_answers_its_setup_api_inside_the_stack(metabase_url):

@@ -553,12 +553,14 @@ EOF
   # the account at the first start, and with strong-enough it refuses one of fewer than 15
   # characters. init --server sets that rule, and compose.yaml hands it to Metabase in every mode, so
   # a person can set it in local mode too. init generates a password of 32 characters, so this
-  # catches one set by hand. The message names the settings, never the value. strong has other
-  # rules, and normal, the default, asks for less: they are Metabase's to check.
+  # catches one set by hand. metabase-init never changes the password of an admin that exists, so
+  # for a Metabase that is set up already the message sends the person to Metabase first. The
+  # message names the settings, never the value. strong has other rules, and normal, the default,
+  # asks for less: they are Metabase's to check.
   admin_password=$(env_get METABASE_ADMIN_PASSWORD)
   if [ "$(setting METABASE_PASSWORD_COMPLEXITY normal)" = strong-enough ] &&
     [ -n "$admin_password" ] && [ "${#admin_password}" -lt 15 ]; then
-    problem "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters, which METABASE_PASSWORD_COMPLEXITY=strong-enough asks for: write a longer one, or leave it empty for ./agoranomos init to generate one"
+    problem "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters, which METABASE_PASSWORD_COMPLEXITY=strong-enough asks for. For a Metabase that is set up already, first change the admin password in Metabase (Account settings) to at least 15 characters, then put the same value in .env; for a new one, write a longer value, or leave it empty for ./agoranomos init to generate one"
   fi
   compose_version=$(docker compose version --short 2> /dev/null) || compose_version=""
   if [ -z "$compose_version" ]; then

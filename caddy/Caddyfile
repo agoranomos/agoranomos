@@ -22,12 +22,14 @@
 	# Until its first user exists, Metabase hands its setup token to anyone, and the token creates
 	# the first admin. metabase-init sets Metabase up through the network of the stack, so the setup
 	# API stays closed here, also later: an empty application database would hand out a token again.
-	@setup path /api/setup /api/setup/*
+	# The matcher is a prefix, so it closes every path that begins with /api/setup, in whatever
+	# spelling (a trailing dot, an escaped space, ;x=1): none of them reaches the router of Metabase.
+	@setup path /api/setup*
 	respond @setup 404
 
 	# Two endpoints of Metabase 0.63 and 0.64 that forward what they get to servers of Metabase on
-	# the internet, with no sign-in, whatever the settings say (ADR-0021).
-	@relays path /api/analytics-proxy /api/analytics-proxy/* /api/product-feedback /api/product-feedback/*
+	# the internet, with no sign-in, whatever the settings say (ADR-0021). Prefixes again.
+	@relays path /api/analytics-proxy* /api/product-feedback*
 	respond @relays 404
 
 	# Metabase sets its own security headers, such as its Content-Security-Policy and

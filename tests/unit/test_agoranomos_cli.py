@@ -613,6 +613,20 @@ def test_preflight_passes_a_site_that_server_mode_can_serve(cli, tls, site):
     assert result.returncode == 0, result.stderr
 
 
+def assert_advice_for_a_short_admin_password(message):
+    """metabase-init never changes the password of an admin that exists, so a Metabase that is set
+    up already needs its password changed in Metabase first, and only then in .env; a new one takes
+    whatever .env says. The message names settings, never a value."""
+    assert (
+        "For a Metabase that is set up already, first change the admin password in Metabase "
+        "(Account settings) to at least 15 characters, then put the same value in .env"
+    ) in message
+    assert (
+        "for a new one, write a longer value, or leave it empty for ./agoranomos init to "
+        "generate one"
+    ) in message
+
+
 @pytest.mark.parametrize(("length", "outcome"), [(14, "stop"), (15, "pass"), (0, "pass")])
 def test_preflight_in_server_mode_stops_on_an_admin_password_that_strong_enough_refuses(
     cli, length, outcome
@@ -629,6 +643,7 @@ def test_preflight_in_server_mode_stops_on_an_admin_password_that_strong_enough_
     if outcome == "stop":
         assert "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters" in result.stderr
         assert "METABASE_PASSWORD_COMPLEXITY=strong-enough" in result.stderr
+        assert_advice_for_a_short_admin_password(result.stderr)
     else:
         assert "METABASE_ADMIN_PASSWORD" not in result.stderr
     # Never the value, whether or not it was refused.
@@ -668,6 +683,7 @@ def test_preflight_in_local_mode_checks_the_admin_password_against_strong_enough
     assert result.returncode == (1 if outcome == "stop" else 0), result.stderr
     if outcome == "stop":
         assert "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters" in result.stderr
+        assert_advice_for_a_short_admin_password(result.stderr)
     assert password not in result.stdout + result.stderr
 
 
