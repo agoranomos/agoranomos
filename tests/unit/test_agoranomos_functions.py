@@ -96,6 +96,8 @@ ENV_LINES = [
     ("KEY=plain\r", "plain"),
     ("KEY=plain   ", "plain"),
     ("KEY=  after blanks", "after blanks"),
+    ("KEY=  vivid leaf \r", "vivid leaf"),
+    ("KEY=\fform feed and vertical tab\v", "form feed and vertical tab"),
     ("KEY=a#b", "a#b"),
     (
         "KEY=tab\t# no space before the hash, so no comment",
