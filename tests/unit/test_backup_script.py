@@ -882,6 +882,141 @@ def test_two_failed_runs_then_a_good_one_and_the_next_run_comes_at_the_time_of_t
     assert latest(backups)["result"] == "ok"
 
 
+def fail_at_half_past_eleven(shell: str, backups: Path, until: str) -> None:
+    """The service runs from 23:00 to 23:45 with BACKUP_TIME 23:30, and the backup of 23:30 fails;
+    the failures stop at the time until, which the next run of the service sees."""
+    seed_latest(backups, "2026-10-10 23:30")
+    result = simulate(
+        shell,
+        backups,
+        utc_epoch("2026-10-11 23:00"),
+        utc_epoch("2026-10-11 23:45"),
+        900,
+        BACKUP_TIME="23:30",
+        FAKE_FAIL="pg_dump:warehouse",
+        FAKE_FAIL_UNTIL=str(utc_epoch(until)),
+    )
+    assert result.returncode == 0, result.stderr
+    assert attempts(result) == [utc_epoch("2026-10-11 23:30")]
+    assert latest(backups)["result"] == "failed"
+    assert latest(backups)["kind"] == "scheduled"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_restart_keeps_the_retry_of_a_scheduled_run_that_failed_before_midnight(shell, backups):
+    fail_at_half_past_eleven(shell, backups, "2026-10-12 00:15")
+    # The service starts again at 00:10: the retry is an hour after the failure, at 00:30.
+    result = simulate(
+        shell,
+        backups,
+        utc_epoch("2026-10-12 00:10"),
+        utc_epoch("2026-10-12 02:00"),
+        600,
+        BACKUP_TIME="23:30",
+        FAKE_FAIL="pg_dump:warehouse",
+        FAKE_FAIL_UNTIL=str(utc_epoch("2026-10-12 00:15")),
+    )
+    assert result.returncode == 0, result.stderr
+    assert attempts(result) == [utc_epoch("2026-10-12 00:30")]
+    assert latest(backups)["result"] == "ok"
+    assert latest(backups)["last_scheduled_local"] == "2026-10-12 00:30"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_restart_after_the_hour_has_passed_tries_at_once(shell, backups):
+    fail_at_half_past_eleven(shell, backups, "2026-10-12 00:15")
+    result = simulate(
+        shell,
+        backups,
+        utc_epoch("2026-10-12 03:00"),
+        utc_epoch("2026-10-12 04:00"),
+        900,
+        BACKUP_TIME="23:30",
+        FAKE_FAIL="pg_dump:warehouse",
+        FAKE_FAIL_UNTIL=str(utc_epoch("2026-10-12 00:15")),
+    )
+    assert result.returncode == 0, result.stderr
+    assert attempts(result) == [utc_epoch("2026-10-12 03:00")]
+    assert latest(backups)["result"] == "ok"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_restart_after_a_run_by_hand_that_failed_sets_nothing(shell, backups):
+    seed_latest(backups, "2026-10-11 03:00")
+    failed = run(
+        shell,
+        backups,
+        "now",
+        FAKE_NOW=str(utc_epoch("2026-10-11 05:00")),
+        FAKE_FAIL="pg_dump:warehouse",
+    )
+    assert failed.returncode == 1
+    assert latest(backups)["result"] == "failed"
+    assert latest(backups)["kind"] == "manual"
+    result = simulate(
+        shell,
+        backups,
+        utc_epoch("2026-10-11 05:30"),
+        utc_epoch("2026-10-11 09:30"),
+        900,
+        BACKUP_TIME="03:00",
+    )
+    assert result.returncode == 0, result.stderr
+    assert attempts(result) == []
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_good_scheduled_run_after_a_failure_clears_it_across_a_restart(shell, backups):
+    seed_latest(backups, "2026-10-10 23:30")
+    first = simulate(
+        shell,
+        backups,
+        utc_epoch("2026-10-11 23:00"),
+        utc_epoch("2026-10-12 00:45"),
+        900,
+        BACKUP_TIME="23:30",
+        FAKE_FAIL="pg_dump:warehouse",
+        FAKE_FAIL_UNTIL=str(utc_epoch("2026-10-12 00:15")),
+    )
+    assert attempts(first) == [utc_epoch("2026-10-11 23:30"), utc_epoch("2026-10-12 00:30")]
+    assert latest(backups)["result"] == "ok"
+    # The retry of 00:30 was good, so a start at 00:50 finds nothing pending: the next try is 23:30.
+    second = simulate(
+        shell,
+        backups,
+        utc_epoch("2026-10-12 00:50"),
+        utc_epoch("2026-10-12 06:00"),
+        900,
+        BACKUP_TIME="23:30",
+        FAKE_FAIL="pg_dump:warehouse",
+    )
+    assert second.returncode == 0, second.stderr
+    assert attempts(second) == []
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("time", "expected"),
+    [
+        ("1970-01-01T00:00:00Z", 0),
+        ("2026-10-11T03:00:12Z", utc_epoch("2026-10-11 03:00") + 12),
+        ("2026-10-11T23:30:00Z", utc_epoch("2026-10-11 23:30")),
+        ("2028-02-29T23:59:59Z", utc_epoch("2028-02-29 23:59") + 59),
+        ("2027-03-01T00:00:00Z", utc_epoch("2027-03-01 00:00")),
+        ("", 0),
+        ("2026-10-11 03:00", 0),  # not a time of latest.json
+        ("yesterday", 0),
+    ],
+)
+def test_the_epoch_of_a_time_of_latest_json(shell, time, expected):
+    program = shell_function("epoch_of") + '\nepoch_of "$1"'
+    result = subprocess.run(
+        [shell, "-c", program, "sh", time], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(expected)
+
+
 @pytest.mark.parametrize("shell", SHELLS)
 def test_a_stop_during_a_backup_is_held_until_the_backup_ends(shell, backups):
     process = subprocess.Popen(

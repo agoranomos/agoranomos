@@ -290,6 +290,32 @@ due() {
     'BEGIN { exit !(now >= target && last < target) }'
 }
 
+# Print the epoch of a time as latest.json says it, such as 2026-10-11T23:30:00Z (UTC); 0 for
+# anything else. The date of the image reads no such time (date -d is GNU only), so awk counts.
+epoch_of() {
+  case "$1" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+    *)
+      echo 0
+      return 0
+      ;;
+  esac
+  awk -v time="$1" '
+    # The number of the day since 1970-01-01 of a date of the Gregorian calendar.
+    function day_number(y, m, d,   era, yoe, doy, doe) {
+      if (m <= 2) { y -= 1; m += 12 }
+      era = int(y / 400)
+      yoe = y - era * 400
+      doy = int((153 * (m - 3) + 2) / 5) + d - 1
+      doe = yoe * 365 + int(yoe / 4) - int(yoe / 100) + doy
+      return era * 146097 + doe - 719468
+    }
+    BEGIN {
+      days = day_number(substr(time, 1, 4) + 0, substr(time, 6, 2) + 0, substr(time, 9, 2) + 0)
+      printf "%.0f\n", days * 86400 + substr(time, 12, 2) * 3600 + substr(time, 15, 2) * 60 + substr(time, 18, 2)
+    }'
+}
+
 # Wait in a loop, a minute at a time. A stop (TERM or INT) ends a sleep at once: the trap kills it
 # and the shell exits. During a backup it is held until the backup ends, since the shell waits for
 # its child and runs the trap afterwards; Docker kills the container when its grace period (10
@@ -298,8 +324,9 @@ due() {
 #
 # A run that failed leaves the schedule pending: the next try comes an hour after the failure,
 # also after midnight, until a scheduled backup succeeds. Without it a BACKUP_TIME of the evening
-# would wait for the same time of the next day. The day's own rule, due, stays: one backup a day
-# at BACKUP_TIME, and at once when there is none.
+# would wait for the same time of the next day. A start of the service finds it in latest.json: the
+# last run was a scheduled one and it failed (a run by hand, good or not, is not that). The day's
+# own rule, due, stays: one backup a day at BACKUP_TIME, and at once when there is none.
 schedule() {
   check_settings
   date +%s > "$STARTED_FILE"
@@ -308,6 +335,12 @@ schedule() {
   say "a backup every day at ${BACKUP_TIME:-03:00}, ${TZ:-UTC}"
   last_try=0
   pending=""
+  recorded="$BACKUP_ROOT/latest.json"
+  if [ "$(field "$recorded" result)" = failed ] && [ "$(field "$recorded" kind)" = scheduled ]; then
+    pending=1
+    last_try=$(epoch_of "$(field "$recorded" attempted)")
+    say "the last scheduled backup failed at $(field "$recorded" attempted): the next try is an hour after it, or now"
+  fi
   while :; do
     if { [ -n "$pending" ] || due; } && [ $(($(date +%s) - last_try)) -ge "$RETRY_SECONDS" ]; then
       last_try=$(date +%s)
