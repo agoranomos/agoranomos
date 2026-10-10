@@ -603,6 +603,27 @@ def test_the_celery_variant_recommends_twelve_gigabytes(cli, memory_mb, outcome)
     check_limit(result, outcome, "12 GB for the CeleryExecutor variant")
 
 
+@pytest.mark.parametrize(
+    ("compose_file", "needed"),
+    [
+        ("compose.yaml", "6 GB (8 GB recommended)"),
+        (
+            "compose.yaml:compose.celery.yaml",
+            "6 GB (12 GB recommended for the CeleryExecutor variant)",
+        ),
+    ],
+    ids=["default", "celery"],
+)
+def test_the_stop_for_too_little_memory_names_what_the_variant_needs(cli, compose_file, needed):
+    cli.run("init")
+    set_env(cli, COMPOSE_FILE=compose_file)
+    result = cli.run("preflight", FAKE_MEMTOTAL=str(5000 * MIB))
+    assert result.returncode == 1
+    assert f"Docker has 5000 MB of memory, and Agoranomos needs {needed}. In Docker Desktop" in (
+        result.stderr
+    )
+
+
 def test_force_turns_resource_stops_into_warnings(cli):
     result = cli.run("preflight", "--force", FAKE_MEMTOTAL=str(4 * GIB), FAKE_NCPU="1")
     assert result.returncode == 0, result.stderr

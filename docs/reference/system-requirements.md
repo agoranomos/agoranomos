@@ -28,14 +28,14 @@ The limits are set from measurements made on 8 and 10 October 2026, as follows:
 
 | Service | Highest peak | Where | Limit |
 |---|---:|---|---:|
-| `warehouse-db` | 77 MiB | Mac | 256 MiB, the minimum |
+| `warehouse-db` | 84 MiB | CI, arm64 | 256 MiB, the minimum |
 | `platform-db` | 276 MiB | Mac | 384 MiB |
 | `airflow-apiserver` | 356 MiB | Mac | 512 MiB |
 | `airflow-dag-processor` | 522 MiB | CI, amd64 | 768 MiB |
-| `airflow-triggerer` | 439 MiB | Mac | 640 MiB |
-| The tasks: `airflow-scheduler` with LocalExecutor, `airflow-worker` with CeleryExecutor | 963 MiB, the worker, with its limit of 1,152 MiB | CI, amd64 | 1,280 MiB |
+| `airflow-triggerer` | 467 MiB | CI, amd64 | 640 MiB |
+| The tasks: `airflow-scheduler` with LocalExecutor, `airflow-worker` with CeleryExecutor | 963 MiB, the worker, with its limit of 1,152 MiB | CI, amd64, 8 October 2026 | 1,280 MiB |
 | `metabase` | 1,720 MiB | CI, amd64 | 2,176 MiB |
-| `airflow-scheduler`, with CeleryExecutor only | 422 MiB, with its limit of 512 MiB | CI, amd64 | 640 MiB |
+| `airflow-scheduler`, with CeleryExecutor only | 422 MiB, with its limit of 512 MiB | CI, amd64, 10 October 2026 | 640 MiB |
 | `broker`, with CeleryExecutor only | 41 MiB | Mac | 256 MiB, the minimum |
 | `db-init` | not caught by a sample | | 128 MiB, the minimum |
 | `airflow-init` | 189 MiB | Mac | 384 MiB |
@@ -45,7 +45,7 @@ The limits are set from measurements made on 8 and 10 October 2026, as follows:
 
 Each variant has a budget for the sum of its limits, the one-shot jobs included, so that on the recommended memory every service at its limit at the same time fits what Docker reports ([ADR-0022](../adr/0022-budget-the-memory-by-variant-and-mode.md)): 7,680 MiB, 8 GB, for the default variant, and 11,776 MiB, 12 GB, for the CeleryExecutor variant. Today the limits add up to 7,040 MiB in the default variant, which leaves 640 MiB, and to 7,936 MiB in the CeleryExecutor variant. A unit test checks the sum for the defaults of both variants, in local and in server mode.
 
-On the minimum of 6 GB, 5,632 MiB as Docker reports it, the limits do not keep the services apart: the limits of the services of the default variant that run all the time add up to 6,016 MiB, more than that, so services that reach their limits at the same time can still run the whole machine out of memory. What holds there is that the highest measured peaks of the services of the default variant add up to at most 4,709 MiB, which fits. The CeleryExecutor variant needs the recommended 12 GB.
+On the minimum of 6 GB, 5,632 MiB as Docker reports it, the limits do not keep the services apart: the limits of the services of the default variant that run all the time add up to 6,016 MiB, more than that, so services that reach their limits at the same time can still run the whole machine out of memory. What holds there is that the highest measured peaks of the services of the default variant add up to at most 4,744 MiB, which fits. The CeleryExecutor variant needs the recommended 12 GB.
 
 ## Measured memory
 
@@ -53,7 +53,7 @@ These tables were measured on 8 October 2026, with Airflow 3.3.2, Metabase 0.64.
 
 These tables were measured with the limits of 8 October 2026; the limits of the tasks and of the Celery scheduler have grown since, as the table above says.
 
-CI measures the stack in the same way in every run of the stack tests, on the GitHub-hosted runners `ubuntu-24.04` (amd64) and `ubuntu-24.04-arm` (arm64), and adds the table to the summary of each job of the Stack workflow. As of October 2026, the tables with the limits on this page come from the Mac; the CI peaks in the table of the limits above come from runs without limits, except those of the tasks and of the Celery scheduler, which come from runs with the limits of 8 October 2026.
+CI measures the stack in the same way in every run of the stack tests, on the GitHub-hosted runners `ubuntu-24.04` (amd64) and `ubuntu-24.04-arm` (arm64), and adds the table to the summary of each job of the Stack workflow. As of October 2026, the tables with the limits on this page come from the Mac; the CI peaks in the table of the limits above come from runs without limits, except those of `warehouse-db`, `airflow-triggerer`, the tasks and the Celery scheduler, which come from runs with the limits of 8 October 2026.
 
 "Since start" counts the page cache too, most of which the kernel takes back before it stops a process, so it can come close to a limit without harm. Without limits, `platform-db` reached 389 MiB since its start, most of it page cache, which is more than its limit of 384 MiB; with the limit, the kernel keeps less page cache for it.
 

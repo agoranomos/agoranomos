@@ -36,7 +36,7 @@ In practice this means:
 * **The second level stays.** The measured peaks of the services of the default variant in local mode fit the minimum of 6 GB, 5,632 MiB as Docker reports it.
 * **Preflight.** It stops below 6 GB in every variant, as before, and warns below 8 GB for the LocalExecutor and below 12 GB for the CeleryExecutor.
 * **The peaks of the formula.** A peak is the highest of every measurement of the service, with its limit or without one. A peak under a limit is never higher than it would be without, so this can only raise a limit.
-* **The limits of October 2026.** The service that runs the tasks gets 1,280 MiB (the Celery worker reached 963 MiB in CI on amd64), and the scheduler of the CeleryExecutor variant 640 MiB (422 MiB in CI on amd64). The sums are then 7,040 MiB for the LocalExecutor and 7,936 MiB for the CeleryExecutor in local mode, and 7,552 MiB and 8,448 MiB in server mode, with the proxy and the backups.
+* **The limits of October 2026.** The service that runs the tasks gets 1,280 MiB (the Celery worker reached 963 MiB in CI on amd64 on 8 October 2026), and the scheduler of the CeleryExecutor variant 640 MiB (422 MiB in CI on amd64 on 10 October 2026). The sums are then 7,040 MiB for the LocalExecutor and 7,936 MiB for the CeleryExecutor in local mode, and 7,552 MiB and 8,448 MiB in server mode, with the proxy and the backups.
 
 The other options were not chosen for these reasons:
 

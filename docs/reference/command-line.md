@@ -32,7 +32,7 @@ A Docker Compose that is 2.37 or 2.38, or older than 5.4 with the containerd ima
 
 Ports are checked with `ss`, `netstat` and `lsof`, whichever of them are installed: a port counts as in use when any of them lists a listener on it. Without any of them, preflight warns that it cannot check the ports.
 
-Docker reports a little less memory than its VM or machine has, so a machine or VM with 8 GB passes without a warning.
+Docker reports a little less memory than its VM or machine has, so a machine or VM with 8 GB passes without a warning for the default variant, and one with 12 GB for the CeleryExecutor variant. Preflight takes the CeleryExecutor variant to be the one whose `COMPOSE_FILE` lists `compose.celery.yaml`.
 
 `--force` turns the stops on memory, CPUs and disk into warnings. Use it only if you accept that the stack may run slowly or fail.
 

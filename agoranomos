@@ -468,15 +468,17 @@ EOF
     *compose.celery.yaml:*)
       recommended_mb=$RECOMMENDED_CELERY_MEMORY_MB
       recommended="12 GB for the CeleryExecutor variant"
+      memory_needed="6 GB (12 GB recommended for the CeleryExecutor variant)"
       ;;
     *)
       recommended_mb=$RECOMMENDED_MEMORY_MB
       recommended="8 GB"
+      memory_needed="6 GB (8 GB recommended)"
       ;;
   esac
   mem_mb=$((mem_total / 1048576))
   if [ "$mem_mb" -lt "$MIN_MEMORY_MB" ]; then
-    resource_problem "Docker has $mem_mb MB of memory, and Agoranomos needs 6 GB ($recommended recommended). $raise_memory"
+    resource_problem "Docker has $mem_mb MB of memory, and Agoranomos needs $memory_needed. $raise_memory"
   elif [ "$mem_mb" -lt "$recommended_mb" ]; then
     warn "Docker has $mem_mb MB of memory; $recommended is recommended. $raise_memory"
   fi
