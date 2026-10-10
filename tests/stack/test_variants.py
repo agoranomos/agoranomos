@@ -515,6 +515,14 @@ def test_metabase_reports_nothing_to_its_makers(variant):
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
+def test_the_pool_of_metabase_fits_the_connections_of_its_role(variant):
+    # The warehouse gives metabase_reader 20 connections (postgres/warehouse.sql), and Metabase
+    # keeps up to 15 in its pool by default: a pool set here could take more than the role has.
+    environment = rendered(variant)["metabase"]["environment"]
+    assert "MB_JDBC_DATA_WAREHOUSE_MAX_CONNECTION_POOL_SIZE" not in environment
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
 def test_metabase_and_its_setup_job_get_the_networks_they_need_and_no_more(variant):
     # Metabase connects to the warehouse and to its own database, so it is on data, and it needs
     # default for its published port and for the setup job. Metabase makes the connection to the

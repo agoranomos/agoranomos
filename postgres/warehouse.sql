@@ -78,6 +78,13 @@ ALTER ROLE transformer SET lock_timeout = '1min';
 -- is that the role has no write grant. dbt creates the tables of marts as transformer, so the
 -- default privileges that give Metabase the new tables are those of transformer.
 ALTER ROLE metabase_reader SET default_transaction_read_only = on;
+-- A query of Metabase that runs longer than five minutes is cancelled, so that a dashboard or a
+-- question cannot hold the warehouse, and Metabase holds at most 20 connections: more than the 15
+-- of its pool (MB_JDBC_DATA_WAREHOUSE_MAX_CONNECTION_POOL_SIZE), and few enough that it cannot take
+-- the connections that the pipelines need. Both lines run on every start, so that an existing
+-- role gets them, and a value changed by hand goes back.
+ALTER ROLE metabase_reader SET statement_timeout = '5min';
+ALTER ROLE metabase_reader CONNECTION LIMIT 20;
 GRANT USAGE ON SCHEMA marts TO metabase_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA marts TO metabase_reader;
 ALTER DEFAULT PRIVILEGES FOR ROLE transformer IN SCHEMA marts GRANT SELECT ON TABLES TO metabase_reader;

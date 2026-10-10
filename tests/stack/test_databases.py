@@ -1,5 +1,12 @@
 import pytest
-from stack_helpers import WAREHOUSE_ROLES, leaked, psql, psql_over_network, warehouse
+from stack_helpers import (
+    WAREHOUSE_ROLES,
+    leaked,
+    psql,
+    psql_over_network,
+    warehouse,
+    warehouse_output,
+)
 
 # The roles of the platform instance, each the owner of its database, and the setting of .env that
 # holds the password of each.
@@ -57,6 +64,15 @@ def test_metabase_reader_reads_marts_and_cannot_write(env):
     )
     assert result.returncode != 0
     assert "permission denied for schema marts" in result.stderr
+
+
+def test_metabase_reader_has_a_statement_timeout_and_a_limit_of_connections(env):
+    # db-init sets both on every start, so an existing warehouse gets them with the next up.
+    assert warehouse_output(env, "SHOW statement_timeout", "metabase_reader") == "5min"
+    limit = warehouse_output(
+        env, "SELECT rolconnlimit FROM pg_roles WHERE rolname = 'metabase_reader'"
+    )
+    assert limit == "20"
 
 
 @pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))
