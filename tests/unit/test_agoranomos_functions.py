@@ -392,3 +392,167 @@ def test_server_mode_is_on_when_compose_profiles_lists_server(shell, tmp_path, l
     if line is not None:
         (tmp_path / ".env").write_text(f"OTHER=1\n{line}\n", encoding="utf-8")
     assert answers(shell, tmp_path, "server_mode") is server
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("line", "ops"),
+    [
+        (None, False),
+        ("COMPOSE_PROFILES=core,demo", False),
+        ("COMPOSE_PROFILES=core,demo,server", False),
+        ("COMPOSE_PROFILES=core,demo,server,ops", True),
+        ("COMPOSE_PROFILES=ops", True),
+        ('COMPOSE_PROFILES="core,ops" # mine', True),
+        ("COMPOSE_PROFILES=opsx,core", False),
+        ("COMPOSE_PROFILES=core,xops", False),
+    ],
+    ids=repr,
+)
+def test_ops_mode_is_on_when_compose_profiles_lists_ops(shell, tmp_path, line, ops):
+    if line is not None:
+        (tmp_path / ".env").write_text(f"OTHER=1\n{line}\n", encoding="utf-8")
+    assert answers(shell, tmp_path, "ops_mode") is ops
+
+
+LATEST = (
+    "{\n"
+    '  "result": "ok",\n'
+    '  "attempted": "2026-10-11T03:00:12Z",\n'
+    '  "step": "",\n'
+    '  "last_ok": "20261011T030012Z",\n'
+    '  "last_ok_epoch": 1791687612,\n'
+    '  "last_scheduled_local": "2026-10-11 03:00"\n'
+    "}\n"
+)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("result", "ok"),
+        ("attempted", "2026-10-11T03:00:12Z"),
+        ("step", ""),
+        ("last_ok", "20261011T030012Z"),
+        # A number has no quotes, and a last field has no comma.
+        ("last_ok_epoch", "1791687612"),
+        ("last_scheduled_local", "2026-10-11 03:00"),
+        ("missing", ""),
+        # A key that only starts with the name is another key.
+        ("last", ""),
+    ],
+)
+def test_json_field_reads_the_fields_that_the_backup_script_writes(shell, tmp_path, key, value):
+    (tmp_path / "latest.json").write_text(LATEST, encoding="utf-8")
+    result = run_with_script_functions(shell, 'json_field latest.json "$1"', key, cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    # The caller reads it with $(...), which drops the newline.
+    assert result.stdout.rstrip("\n") == value
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_json_field_of_a_file_that_is_not_there_prints_nothing_and_succeeds(shell, tmp_path):
+    result = run_with_script_functions(shell, "json_field none.json result", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_image_refs_lists_the_images_of_the_checkout_once_each_and_leaves_out_built_images(
+    shell, tmp_path
+):
+    (tmp_path / "compose.yaml").write_text(
+        "services:\n"
+        "  a:\n"
+        "    image: postgres:18.6-trixie@sha256:aaa\n"
+        "  b:\n"
+        "    image:   metabase/metabase:v0.64.1@sha256:bbb   # a comment\n"
+        "  c:\n"
+        "    image: postgres:18.6-trixie@sha256:aaa\n"
+        "  d:\n"
+        "    image: agoranomos-airflow:local\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "compose.celery.yaml").write_text(
+        "services:\n  e:\n    image: valkey/valkey:9.1.2-trixie@sha256:ccc\n", encoding="utf-8"
+    )
+    (tmp_path / "airflow").mkdir()
+    (tmp_path / "airflow" / "Dockerfile").write_text(
+        "# FROM not/an-image:1\n"
+        "FROM apache/airflow:3.3.2-python3.13@sha256:ddd AS base\n"
+        "RUN true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "caddy").mkdir()
+    (tmp_path / "caddy" / "Dockerfile").write_text(
+        "FROM caddy:2.11.7-alpine@sha256:eee\nRUN true\n", encoding="utf-8"
+    )
+    result = run_with_script_functions(shell, "image_refs", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "apache/airflow:3.3.2-python3.13@sha256:ddd",
+        "caddy:2.11.7-alpine@sha256:eee",
+        "metabase/metabase:v0.64.1@sha256:bbb",
+        "postgres:18.6-trixie@sha256:aaa",
+        "valkey/valkey:9.1.2-trixie@sha256:ccc",
+    ]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_image_refs_of_a_checkout_without_files_prints_nothing_and_succeeds(shell, tmp_path):
+    result = run_with_script_functions(shell, "image_refs", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("line", "path"),
+    [
+        (None, "{root}/backups"),
+        ("AGORANOMOS_BACKUP_DIR=./backups", "{root}/backups"),
+        ("AGORANOMOS_BACKUP_DIR=./data/backups", "{root}/data/backups"),
+        ("AGORANOMOS_BACKUP_DIR=other", "{root}/other"),
+        ("AGORANOMOS_BACKUP_DIR=/srv/backups", "/srv/backups"),
+        ("AGORANOMOS_BACKUP_DIR=", "{root}/backups"),
+    ],
+    ids=repr,
+)
+def test_backups_path_is_absolute_and_a_relative_path_starts_at_the_checkout(
+    shell, tmp_path, line, path
+):
+    if line is not None:
+        (tmp_path / ".env").write_text(f"{line}\n", encoding="utf-8")
+    result = run_with_script_functions(shell, "backups_path", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    # The script finds its folder with pwd, which resolves a link such as /var on macOS.
+    assert result.stdout == path.format(root=tmp_path.resolve())
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("ids", "problem"),
+    [
+        ("AGORANOMOS_UID=1000\nAGORANOMOS_GID=1000", ""),
+        ("AGORANOMOS_UID=1000\nAGORANOMOS_GID=0", ""),
+        ("AGORANOMOS_UID=0\nAGORANOMOS_GID=1000", "AGORANOMOS_UID in .env is 0"),
+        ("AGORANOMOS_UID=0\nAGORANOMOS_GID=auto", "AGORANOMOS_UID in .env is 0"),
+        ("AGORANOMOS_UID=auto\nAGORANOMOS_GID=auto", "must be numbers"),
+        ("AGORANOMOS_UID=1000\nAGORANOMOS_GID=auto", "must be numbers"),
+        ("AGORANOMOS_UID=1000\nAGORANOMOS_GID=", "must be numbers"),
+        ("AGORANOMOS_UID=\nAGORANOMOS_GID=1000", "must be numbers"),
+        ("AGORANOMOS_UID=1000", "must be numbers"),
+        ("OTHER=1", "must be numbers"),
+        ("AGORANOMOS_UID=-1\nAGORANOMOS_GID=1000", "must be numbers"),
+        ("AGORANOMOS_UID=10x0\nAGORANOMOS_GID=1000", "must be numbers"),
+    ],
+    ids=repr,
+)
+def test_backup_user_problem_names_root_and_anything_that_is_not_a_number(
+    shell, tmp_path, ids, problem
+):
+    (tmp_path / ".env").write_text(f"{ids}\n", encoding="utf-8")
+    result = run_with_script_functions(shell, "backup_user_problem", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (problem in result.stdout) if problem else (result.stdout == "")

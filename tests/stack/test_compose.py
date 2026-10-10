@@ -18,7 +18,7 @@ from stack_helpers import (
 )
 
 # The services that must stay on the internal data network only (no route to the internet).
-DATA_ONLY = {"warehouse-db", "platform-db", "db-init", "broker"}
+DATA_ONLY = {"warehouse-db", "platform-db", "db-init", "broker", "backup"}
 # Prints the arguments of every process of a container, from the process files.
 LISTING = "cat /proc/[0-9]*/cmdline | tr '\\0' ' '"
 
@@ -121,8 +121,14 @@ def test_the_network_that_docker_made_is_internal_and_the_databases_are_only_on_
     [details] = json.loads(docker("network", "inspect", network).stdout)
     assert details["Internal"] is True
     running = containers()
-    # The broker of the Celery variant is on the data network only, as the databases are.
-    for service in ("warehouse-db", "platform-db", "db-init", *sorted({"broker"} & set(running))):
+    # The broker of the Celery variant and the backup service of the ops profile are on the data
+    # network only, as the databases are.
+    for service in (
+        "warehouse-db",
+        "platform-db",
+        "db-init",
+        *sorted({"broker", "backup"} & set(running)),
+    ):
         # docker inspect shows the environment of the container, secrets included.
         [container] = json.loads(
             docker("inspect", running[service]["ID"]).stdout, object_hook=NamesOnly

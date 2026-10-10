@@ -3,7 +3,9 @@
 The cli fixture copies the script and .env.example into a temporary checkout whose path contains a
 space, and puts stand-ins for docker, ss, netstat, lsof and df first on PATH. The stand-ins answer
 from FAKE_* environment variables, which a test passes to Cli.run, and the docker stand-in logs
-every call and the COMPOSE_* settings that every docker compose call got. Cli.stub replaces a
+every call, the COMPOSE_* settings that every docker compose call got, and the AGORANOMOS_IMAGES
+that it got (the log with the suffix .images). FAKE_RUN_FAIL and FAKE_EXEC_FAIL name a word of a
+call of run or exec that fails, such as verify, db-init or pg_restore. Cli.stub replaces a
 stand-in, or adds a tool, for one test.
 """
 
@@ -41,6 +43,7 @@ case "$1" in
     if [ "$1" != version ]; then
       printf '%s|%s|%s\n' "${COMPOSE_PROJECT_NAME-unset}" "${COMPOSE_PROFILES-unset}" \
         "${COMPOSE_FILE-unset}" >> "$FAKE_LOG.settings"
+      printf '%s\n' "${AGORANOMOS_IMAGES-unset}" >> "$FAKE_LOG.images"
     fi
     case "$1" in
       version)
@@ -74,6 +77,15 @@ case "$1" in
             fi
             printf '%s' "${FAKE_PROXY:-}"
             ;;
+          # The same for the container of the backup service of the ops profile: FAKE_BACKUP
+          # holds its ID, and FAKE_BACKUP_PS_EXIT makes this look-up fail.
+          *" --quiet backup "*)
+            if [ -n "${FAKE_BACKUP_PS_EXIT:-}" ]; then
+              echo "Cannot connect to the Docker daemon" >&2
+              exit "$FAKE_BACKUP_PS_EXIT"
+            fi
+            printf '%s' "${FAKE_BACKUP:-}"
+            ;;
           *" --quiet "*) printf '%s' "${FAKE_RUNNING:-}" ;;
           *)
             # FAKE_PS_EXIT makes every poll fail. Otherwise FAKE_PS_FILE answers every poll, and
@@ -92,6 +104,14 @@ case "$1" in
         esac
         ;;
       *)
+        # FAKE_RUN_FAIL and FAKE_EXEC_FAIL name a word of a call of run or exec, such as verify,
+        # db-init or pg_restore: such a call fails, as that job or that command would.
+        if [ "$1" = run ] && [ -n "${FAKE_RUN_FAIL:-}" ]; then
+          case " $* " in *" $FAKE_RUN_FAIL "*) exit 1 ;; esac
+        fi
+        if [ "$1" = exec ] && [ -n "${FAKE_EXEC_FAIL:-}" ]; then
+          case " $* " in *" $FAKE_EXEC_FAIL "*) exit 1 ;; esac
+        fi
         # FAKE_COMPOSE_EXIT is the exit status of every other subcommand (up, down, logs), and
         # FAKE_COMPOSE_ERROR is what it prints on stderr, as a failing docker compose does.
         if [ -n "${FAKE_COMPOSE_ERROR:-}" ]; then echo "$FAKE_COMPOSE_ERROR" >&2; fi

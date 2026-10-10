@@ -3,7 +3,8 @@
 The default variant runs Airflow with the LocalExecutor, inside the scheduler. The Celery variant,
 which .env selects with COMPOSE_FILE=compose.yaml:compose.celery.yaml, adds the broker and a worker.
 The demo profile, which COMPOSE_PROFILES in .env lists by default, adds the one-shot demo-init.
-The server profile, which ./agoranomos init --server adds to COMPOSE_PROFILES, adds the proxy.
+The server profile, which ./agoranomos init --server adds to COMPOSE_PROFILES, adds the proxy, and
+the ops profile, which it adds too, adds the backup service.
 """
 
 from collections.abc import Collection
@@ -23,6 +24,8 @@ BASE_LONG_RUNNING = {
 CELERY_LONG_RUNNING = {"broker", "airflow-worker"}
 # The services that server mode adds: the proxy (the server profile).
 SERVER_LONG_RUNNING = {"proxy"}
+# The services that the ops profile adds: the backups.
+OPS_LONG_RUNNING = {"backup"}
 BASE_ONE_SHOT = {"db-init", "airflow-init", "metadata-export", "metabase-init"}
 # The Airflow services of the base stack: airflow-init, a one-shot job, and the four that stay up.
 BASE_AIRFLOW = {
@@ -41,6 +44,8 @@ def long_running(variant: str, profiles: Collection[str] = ()) -> set[str]:
         services |= CELERY_LONG_RUNNING
     if "server" in profiles:
         services |= SERVER_LONG_RUNNING
+    if "ops" in profiles:
+        services |= OPS_LONG_RUNNING
     return services
 
 
@@ -78,5 +83,7 @@ def airflow_services(variant: str) -> dict[str, Any]:
 DEMO = "demo" in active_profiles()
 # Whether .env selects the server profile: the tests of server mode skip without it.
 SERVER = "server" in active_profiles()
+# Whether .env selects the ops profile: the tests of the backup service skip without it.
+OPS = "ops" in active_profiles()
 LONG_RUNNING = long_running(active_variant(), active_profiles())
 ONE_SHOT = one_shot(DEMO)

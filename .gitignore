@@ -37,6 +37,9 @@ CLAUDE.local.md
 /extensions/*
 !/extensions/README.md
 
+# The backups of a deployment (ADR-0020): they hold its data.
+/backups/
+
 # Local Compose overrides, for example published database ports for an IDE
 compose.override.yaml
 

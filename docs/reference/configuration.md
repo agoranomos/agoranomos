@@ -15,7 +15,7 @@ Agoranomos reads its settings from the `.env` file in the root of the checkout. 
 | Setting | Default | What it does |
 |---|---|---|
 | `COMPOSE_PROJECT_NAME` | `agoranomos` | The name of the Compose project. It starts the names of the containers, networks and volumes. |
-| `COMPOSE_PROFILES` | `core,demo` | The profiles that run. `core` is the whole stack in local mode, and `demo` adds the demo: on the first start, the one-shot `demo-init` job runs the demo pipeline and creates a demo dashboard in Metabase ([See the demo](../how-to/see-the-demo.md)). Set `core` to start without it. `server` adds the proxy of server mode, which `./agoranomos init --server` adds ([Server mode](#server-mode), [ADR-0019](../adr/0019-open-only-metabase-in-server-mode.md)). |
+| `COMPOSE_PROFILES` | `core,demo` | The profiles that run. `core` is the whole stack in local mode, and `demo` adds the demo: on the first start, the one-shot `demo-init` job runs the demo pipeline and creates a demo dashboard in Metabase ([See the demo](../how-to/see-the-demo.md)). Set `core` to start without it. `server` adds the proxy of server mode, and `ops` the `backup` service, which takes a backup every day; `./agoranomos init --server` adds both ([Server mode](#server-mode), [ADR-0019](../adr/0019-open-only-metabase-in-server-mode.md); [Backups](#backups), [ADR-0020](../adr/0020-back-up-the-databases-every-day.md)). |
 | `COMPOSE_FILE` | `compose.yaml` | The Compose files of the stack. `compose.yaml` runs Airflow with LocalExecutor, which needs no broker. `compose.yaml:compose.celery.yaml` adds the Celery broker and a separate worker (CeleryExecutor), for which 12 GB of memory is recommended ([System requirements](system-requirements.md)). |
 
 ## Stack
@@ -33,7 +33,7 @@ Agoranomos reads its settings from the `.env` file in the root of the checkout. 
 
 Server mode puts Metabase on the internet behind Caddy, with HTTPS, and opens the ports 80 and 443 of the host and no other ([ADR-0019](../adr/0019-open-only-metabase-in-server-mode.md)). Airflow and Metabase stay on `127.0.0.1` too, for SSH tunnels.
 
-`./agoranomos init --server <domain>` turns it on: it sets `AGORANOMOS_SITE_URL=https://<domain>`, adds the `server` profile to `COMPOSE_PROFILES`, and sets the two rules of Metabase below where they are not set. To go back to local mode, run `./agoranomos down` first, while `server` is still in `COMPOSE_PROFILES`: Compose stops only the services of the active profiles, so after you take `server` out, the `proxy` container would keep running on ports 80 and 443. Then take `server` out of `COMPOSE_PROFILES`, delete the lines `AGORANOMOS_SITE_URL`, `METABASE_PASSWORD_COMPLEXITY` and `METABASE_SESSION_TIMEOUT` of `.env`, and run `./agoranomos up`: Metabase then has its address on `localhost` again. If you took `server` out first, `./agoranomos up` and `./agoranomos down` stop and remove the `proxy` container that is left, in local mode, and say so; the volume `caddy-data` stays.
+`./agoranomos init --server <domain>` turns it on: it sets `AGORANOMOS_SITE_URL=https://<domain>`, adds the `server` and `ops` profiles to `COMPOSE_PROFILES`, and sets the two rules of Metabase below where they are not set. To go back to local mode, run `./agoranomos down` first, while `server` is still in `COMPOSE_PROFILES`: Compose stops only the services of the active profiles, so after you take `server` out, the `proxy` container would keep running on ports 80 and 443. Then take `server` out of `COMPOSE_PROFILES` (and `ops`, unless you want the daily backups in local mode too), delete the lines `AGORANOMOS_SITE_URL`, `METABASE_PASSWORD_COMPLEXITY` and `METABASE_SESSION_TIMEOUT` of `.env`, and run `./agoranomos up`: Metabase then has its address on `localhost` again. If you took `server` or `ops` out first, `./agoranomos up` and `./agoranomos down` stop and remove the `proxy` or `backup` container that is left, and say so; the volume `caddy-data` and the backups stay. A `.env` of server mode from before the backups lists `server` and not `ops`: `./agoranomos preflight` warns about it, and `./agoranomos init --server <domain>` again adds `ops`.
 
 | Setting | Default | What it does |
 |---|---|---|
@@ -44,6 +44,28 @@ Server mode puts Metabase on the internet behind Caddy, with HTTPS, and opens th
 | `METABASE_SESSION_TIMEOUT` | none | How long a person stays signed in to Metabase without activity, as JSON: `./agoranomos init --server` sets `'{"amount":24,"unit":"hours"}'`; the unit is `seconds`, `minutes` or `hours`. Empty, Metabase keeps a session until it expires, after two weeks. Not in `.env.example`. |
 
 Caddy keeps its certificates in the Docker volume `caddy-data`, which backups leave out: a lost volume means a new certificate. It sends Let's Encrypt no contact email, as Let's Encrypt has sent no expiration emails since June 2025, and Caddy renews the certificate by itself.
+
+## Backups
+
+`./agoranomos backup` takes a backup of the three databases at any time, and with the `ops` profile, which `./agoranomos init --server` turns on, the `backup` service takes one every day ([ADR-0020](../adr/0020-back-up-the-databases-every-day.md)).
+
+| Setting | Default | What it does |
+|---|---|---|
+| `AGORANOMOS_BACKUP_DIR` | `./backups` | The folder of the backups, which git ignores. `init` creates it, open to its owner only. A relative path starts at the checkout. |
+| `BACKUP_TIME` | `03:00` | With the `ops` profile: the time of the daily backup, as `HH:MM`. A backup that the stack missed, because it was down, comes at its next start. Choose a time when no pipeline runs: a dump holds a shared lock on each table of its database until it ends, and a change of a table by dbt or dlt waits behind it for at most a minute and then fails. No DAG of the base package runs at 03:00 UTC. |
+| `BACKUP_TZ` | `UTC` | The time zone of `BACKUP_TIME`, such as `Europe/Berlin`. `preflight` checks the name. |
+| `BACKUP_KEEP_DAILY` | `7` | How many days back the newest scheduled backup of each day stays; at least 1. |
+| `BACKUP_KEEP_WEEKLY` | `4` | How many weeks back, Monday to Sunday, the newest scheduled backup of each week stays. |
+| `BACKUP_KEEP_MONTHLY` | `3` | How many months back the newest scheduled backup of each month stays. |
+| `AGORANOMOS_UID`, `AGORANOMOS_GID` | `auto` | The user and the group that write the backups, so that they belong to you: `init` replaces `auto` with yours. `preflight` and `backup` stop on 0, root. |
+
+A backup holds the dumps of the databases, the global objects of both instances without passwords, an archive of the extensions folder, the SHA-256 of each file and a manifest, which records the images of the checkout. It does not hold `.env`, whose keys a restore needs, or the certificates of server mode. The days, weeks and months of the retention are those of UTC.
+
+The retention removes scheduled backups only, after each good backup. A backup that `./agoranomos backup` took, such as the one before an upgrade, stays until you delete its folder with `rm -r backups/<name>`; `./agoranomos status` lists these backups with their size and age. When the disk is full, every backup fails and the retention removes none: delete old backups to free space.
+
+A backup is written as `.partial-<name>` and renamed when it is complete, so a folder with the name of a backup is a complete one. A stop of the `backup` service during a backup, such as `./agoranomos down`, ends it: the next backup removes the partial folder, and `latest.json`, in the backups folder, keeps the result of the last backup. To turn the daily backups off, take `ops` out of `COMPOSE_PROFILES`; the backups stay ([Server mode](#server-mode) says what `up` and `down` do with the `backup` container that is left).
+
+The `backup` service runs as `AGORANOMOS_UID` and `AGORANOMOS_GID` of the host, so that the backups belong to you. Rootless Docker and `userns-remap`, which map the users of containers to other users of the host, are not supported: the backups would belong to another user.
 
 ## Memory limits
 
@@ -59,6 +81,7 @@ Every service has a memory limit, also for swap, so that the stack stays within 
 | `AIRFLOW_TASKS_MEMORY` | `1280m` | The service that runs the Airflow tasks: `airflow-scheduler` with LocalExecutor, `airflow-worker` with CeleryExecutor |
 | `METABASE_MEMORY` | `2176m` | `metabase`; half of it is the heap of Java |
 | `PROXY_MEMORY` | `256m` | Server mode only: `proxy`, the Caddy in front of Metabase |
+| `BACKUP_MEMORY` | `256m` | With the ops profile: `backup`, the daily backups |
 | `AIRFLOW_SCHEDULER_MEMORY` | `640m` | Only with CeleryExecutor: `airflow-scheduler`, which then runs no task |
 | `BROKER_MEMORY` | `256m` | Only with CeleryExecutor: `broker` |
 

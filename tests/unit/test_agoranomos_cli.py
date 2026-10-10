@@ -1,6 +1,9 @@
 import base64
+import json
+import os
 import re
 import stat
+import time
 from pathlib import Path
 
 import pytest
@@ -448,18 +451,89 @@ def test_init_with_server_turns_server_mode_on(cli):
     assert result.returncode == 0, result.stderr
     env = cli.read_env()
     assert env["AGORANOMOS_SITE_URL"] == "https://bi.example.com"
-    assert env["COMPOSE_PROFILES"] == "core,demo,server"
+    assert env["COMPOSE_PROFILES"] == "core,demo,server,ops"
     # Metabase on the internet: passwords of 15 characters, and a sign-out after a day idle.
     assert env["METABASE_PASSWORD_COMPLEXITY"] == "strong-enough"
     # In single quotes in .env, which Compose reads as the JSON between them.
     assert env["METABASE_SESSION_TIMEOUT"] == "'" + '{"amount":24,"unit":"hours"}' + "'"
     assert "Point the A record of bi.example.com at this server" in result.stdout
+    assert "with a backup every day at 03:00 UTC into " in result.stdout
     # Again, and with a list of profiles of one's own: each profile once, in its place; a rule of
     # Metabase that a person set stays.
     set_env(cli, COMPOSE_PROFILES="core,server", METABASE_PASSWORD_COMPLEXITY="strong")
     assert cli.run("init", "--server", "bi.example.com").returncode == 0
-    assert cli.read_env()["COMPOSE_PROFILES"] == "core,server"
+    assert cli.read_env()["COMPOSE_PROFILES"] == "core,server,ops"
     assert cli.read_env()["METABASE_PASSWORD_COMPLEXITY"] == "strong"
+
+
+def test_init_puts_in_the_ids_of_its_user_and_keeps_ids_that_are_set(cli):
+    cli.run("init")
+    env = cli.read_env()
+    assert env["AGORANOMOS_UID"] == str(os.getuid())
+    assert env["AGORANOMOS_GID"] == str(os.getgid())
+    set_env(cli, AGORANOMOS_UID="4242")
+    cli.run("init")
+    assert cli.read_env()["AGORANOMOS_UID"] == "4242"
+
+
+def test_init_makes_the_backups_folder_for_its_user(cli):
+    cli.run("init")
+    folder = cli.root / "backups"
+    assert folder.is_dir()
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+    folder.chmod(0o755)
+    cli.run("init")
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+
+
+def test_init_makes_the_backups_folder_where_env_says(cli, tmp_path):
+    cli.run("init")
+    elsewhere = tmp_path / "other backups"
+    set_env(cli, AGORANOMOS_BACKUP_DIR=str(elsewhere))
+    assert cli.run("init").returncode == 0
+    assert stat.S_IMODE(elsewhere.stat().st_mode) == 0o700
+
+
+def test_init_stops_when_the_backups_folder_cannot_be_made(cli):
+    cli.run("init")
+    (cli.root / "taken").write_text("a file", encoding="utf-8")
+    set_env(cli, AGORANOMOS_BACKUP_DIR="./taken/backups")
+    result = cli.run("init")
+    assert result.returncode == 1
+    assert "could not create the backups folder" in result.stderr
+    assert "taken/backups" in result.stderr
+
+
+def test_an_env_of_the_last_release_gets_the_settings_of_the_backups(cli):
+    # The .env of a release before the backups: init adds each new setting, generates the
+    # password of the role backup, puts in the IDs of its user, and changes nothing else.
+    cli.run("init")
+    before = cli.read_env()
+    new = [
+        "AGORANOMOS_BACKUP_DIR",
+        "BACKUP_TIME",
+        "BACKUP_TZ",
+        "BACKUP_KEEP_DAILY",
+        "BACKUP_KEEP_WEEKLY",
+        "BACKUP_KEEP_MONTHLY",
+        "AGORANOMOS_UID",
+        "AGORANOMOS_GID",
+        "BACKUP_MEMORY",
+        "BACKUP_DB_PASSWORD",
+    ]
+    lines = cli.env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    cli.env_path.write_text(
+        "".join(line for line in lines if line.split("=", 1)[0] not in new), encoding="utf-8"
+    )
+    result = cli.run("init")
+    assert result.returncode == 0, result.stderr
+    assert "Generated secrets in .env: BACKUP_DB_PASSWORD" in result.stdout
+    after = cli.read_env()
+    assert re.fullmatch(r"[A-Za-z0-9]{32}", after["BACKUP_DB_PASSWORD"])
+    assert after["AGORANOMOS_UID"] == str(os.getuid())
+    assert {key: value for key, value in after.items() if key not in new} == {
+        key: value for key, value in before.items() if key not in new
+    }
 
 
 def test_init_without_server_leaves_the_rules_of_metabase_to_metabase(cli):
@@ -543,11 +617,11 @@ def test_init_with_server_again_leaves_the_hand_written_lines_as_they_are(cli):
     assert cli.run("init", "--server", "bi.example.com").returncode == 0
     set_env(
         cli,
-        COMPOSE_PROFILES='"core,demo,server" # mine',
+        COMPOSE_PROFILES='"core,demo,server,ops" # mine',
         AGORANOMOS_SITE_URL="'https://bi.example.com' # mine too",
     )
     before = cli.env_path.read_bytes()
-    assert b'COMPOSE_PROFILES="core,demo,server" # mine\n' in before
+    assert b'COMPOSE_PROFILES="core,demo,server,ops" # mine\n' in before
     result = cli.run("init", "--server", "bi.example.com")
     assert result.returncode == 0, result.stderr
     assert cli.env_path.read_bytes() == before
@@ -729,6 +803,86 @@ def test_preflight_in_server_mode_does_not_check_the_ports_while_the_stack_runs(
     assert "is in use" not in result.stderr
 
 
+def ops_env(cli, **values):
+    cli.run("init")
+    set_env(cli, COMPOSE_PROFILES="core,demo,ops", **values)
+
+
+def test_preflight_stops_when_the_backups_would_be_written_as_root(cli):
+    ops_env(cli, AGORANOMOS_UID="0")
+    result = cli.run("preflight")
+    assert result.returncode == 1
+    assert "AGORANOMOS_UID in .env is 0" in result.stderr
+    assert "root" in result.stderr
+    # Without the ops profile no backup service runs.
+    set_env(cli, COMPOSE_PROFILES="core,demo")
+    assert cli.run("preflight").returncode == 0
+
+
+def test_preflight_warns_when_the_backups_would_belong_to_another_user(cli):
+    ops_env(cli, AGORANOMOS_UID=str(os.getuid() + 1))
+    result = cli.run("preflight")
+    assert result.returncode == 0, result.stderr
+    assert f"the backups are written as the user {os.getuid() + 1}" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("setting", "value"),
+    [
+        ("BACKUP_TIME", "3am"),
+        ("BACKUP_TIME", "24:00"),
+        ("BACKUP_KEEP_DAILY", "0"),
+        ("BACKUP_KEEP_WEEKLY", "x"),
+        ("AGORANOMOS_UID", "auto"),
+    ],
+)
+def test_preflight_stops_on_a_setting_of_the_backups_that_cannot_work(cli, setting, value):
+    ops_env(cli, **{setting: value})
+    result = cli.run("preflight")
+    assert result.returncode == 1
+    assert setting in result.stderr
+    # Local mode without the ops profile runs no backup service, so it has nothing to stop on.
+    set_env(cli, COMPOSE_PROFILES="core,demo")
+    assert cli.run("preflight").returncode == 0
+
+
+def test_preflight_stops_on_a_time_zone_that_the_backups_cannot_use(cli, tmp_path):
+    # Else the backup service would stop at its start, and Docker would start it again and again.
+    zoneinfo = tmp_path / "zoneinfo"
+    (zoneinfo / "Europe").mkdir(parents=True)
+    (zoneinfo / "Europe" / "Berlin").write_bytes(b"TZif")
+    ops_env(cli, BACKUP_TZ="Europe/Berlin")
+    assert cli.run("preflight", AGORANOMOS_ZONEINFO=str(zoneinfo)).returncode == 0
+    set_env(cli, BACKUP_TZ="Europe/Berln")
+    result = cli.run("preflight", AGORANOMOS_ZONEINFO=str(zoneinfo))
+    assert result.returncode == 1
+    assert (
+        "BACKUP_TZ in .env is not a time zone, such as Europe/Berlin: Europe/Berln" in result.stderr
+    )
+    # A machine without the files of the time zones leaves the check to the backup service.
+    assert cli.run("preflight", AGORANOMOS_ZONEINFO=str(tmp_path / "none")).returncode == 0
+
+
+def test_preflight_warns_when_server_mode_runs_without_the_backups(cli):
+    # A server-mode .env of the release before the backups lists server and not ops: init adds the
+    # ops profile with --server only, and never changes a list that is set otherwise.
+    server_env(cli)
+    set_env(cli, COMPOSE_PROFILES="core,demo,server")
+    result = cli.run("preflight")
+    assert result.returncode == 0, result.stderr
+    assert (
+        "Server mode runs without the backups of the ops profile: "
+        "./agoranomos init --server agoranomos.localhost turns them on"
+    ) in result.stderr
+    set_env(cli, AGORANOMOS_SITE_URL="")
+    assert "./agoranomos init --server <domain> turns them on" in cli.run("preflight").stderr
+    # With the ops profile in the list, or in local mode, nothing is missing.
+    set_env(cli, COMPOSE_PROFILES="core,demo,server,ops")
+    assert "without the backups" not in cli.run("preflight").stderr
+    set_env(cli, COMPOSE_PROFILES="core,demo")
+    assert "without the backups" not in cli.run("preflight").stderr
+
+
 def test_up_in_server_mode_prints_the_site_and_the_tunnel_to_airflow(cli, tmp_path):
     server_env(cli)
     result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
@@ -900,7 +1054,7 @@ def test_the_check_of_the_memory_limits_names_each_setting_and_no_value(cli):
     # Every *_MEMORY setting of .env, also one that .env.example does not have, on one line each.
     cli.run("init")
     names = [key for key in cli.read_env() if key.endswith("_MEMORY")]
-    assert len(names) == 10
+    assert len(names) == 11
     values = {name: f"4242{index}" for index, name in enumerate(names)}
     set_env(cli, **values)
     with cli.env_path.open("a", encoding="utf-8") as env:
@@ -1456,6 +1610,313 @@ def compose_calls(cli):
     ]
 
 
+BACKUP_RUNNING = HEALTHY_PS + "backup|running|healthy|0\n"
+NO_RECENT_BACKUP = "no good backup in the last 26 hours"
+
+
+def test_backup_runs_in_the_backup_service_when_it_runs(cli, tmp_path):
+    ops_env(cli)
+    result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING))
+    assert result.returncode == 0, result.stderr
+    assert "compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh now" in (
+        cli.docker_calls()
+    )
+    assert not any(call.startswith("compose run") for call in cli.docker_calls())
+
+
+def test_backup_runs_a_container_of_its_own_without_the_service(cli, tmp_path):
+    # Local mode has no backup service. With the ops profile on, the service may not run yet.
+    cli.run("init")
+    result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert result.returncode == 0, result.stderr
+    assert "compose run --rm --no-deps -T backup now" in cli.docker_calls()
+    ops_env(cli)
+    assert cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS)).returncode == 0
+    assert cli.docker_calls().count("compose run --rm --no-deps -T backup now") == 2
+
+
+def test_backup_leaves_a_backup_container_of_an_ops_profile_that_is_off_alone(cli, tmp_path):
+    # Compose reaches a service of a profile that .env does not list through run, not through
+    # exec: up and down remove such a container, and until they do, backup does not use it.
+    cli.run("init")
+    result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING))
+    assert result.returncode == 0, result.stderr
+    assert "compose run --rm --no-deps -T backup now" in cli.docker_calls()
+    assert not any(call.startswith("compose exec") for call in cli.docker_calls())
+
+
+def test_backup_needs_the_databases(cli, tmp_path):
+    cli.run("init")
+    result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, ps_with("warehouse-db|exited||0")))
+    assert result.returncode == 1
+    assert "the databases are not running" in result.stderr
+    assert not any(call.startswith(("compose run", "compose exec")) for call in cli.docker_calls())
+
+
+def test_backup_refuses_to_write_as_root_and_takes_no_options(cli, tmp_path):
+    cli.run("init")
+    set_env(cli, AGORANOMOS_UID="0")
+    result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert result.returncode == 1
+    assert "AGORANOMOS_UID in .env is 0" in result.stderr
+    assert "backup takes no options" in cli.run("backup", "now").stderr
+
+
+def test_backup_needs_an_env(cli):
+    result = cli.run("backup")
+    assert result.returncode == 1
+    assert "there is no .env yet" in result.stderr
+
+
+@pytest.mark.parametrize("ops", [False, True])
+def test_a_failed_backup_fails_the_command(cli, tmp_path, ops):
+    # In the service (exec) and in a container of its own (run) alike.
+    if ops:
+        ops_env(cli)
+    else:
+        cli.run("init")
+    fail = {"FAKE_EXEC_FAIL": "now"} if ops else {"FAKE_RUN_FAIL": "now"}
+    result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING), **fail)
+    assert result.returncode == 1
+    assert "the backup failed" in result.stderr
+
+
+def test_compose_gets_the_images_of_the_checkout(cli, tmp_path):
+    # The backup service writes them into each manifest, and restore compares them.
+    (cli.root / "compose.yaml").write_text(
+        "services:\n"
+        "  warehouse-db:\n"
+        "    image: postgres:18.6-trixie@sha256:aaa\n"
+        "  airflow-init:\n"
+        "    image: agoranomos-airflow:local\n"
+        "  metabase:\n"
+        "    image: metabase/metabase:v0.64.1@sha256:bbb\n"
+        "  db-init:\n"
+        "    image: postgres:18.6-trixie@sha256:aaa\n",
+        encoding="utf-8",
+    )
+    (cli.root / "airflow").mkdir()
+    (cli.root / "airflow" / "Dockerfile").write_text(
+        "# The image\nFROM apache/airflow:3.3.2-python3.13@sha256:ccc\n", encoding="utf-8"
+    )
+    cli.run("init")
+    assert cli.run("status").returncode == 0
+    images = (tmp_path / "docker.log.images").read_text(encoding="utf-8").splitlines()
+    assert images[-1] == (
+        "apache/airflow:3.3.2-python3.13@sha256:ccc metabase/metabase:v0.64.1@sha256:bbb "
+        "postgres:18.6-trixie@sha256:aaa"
+    )
+    # Every call has them, whatever the shell exports.
+    assert set(images) == {images[-1]}
+    cli.run("status", AGORANOMOS_IMAGES="from the shell")
+    assert "from the shell" not in (tmp_path / "docker.log.images").read_text(encoding="utf-8")
+
+
+def test_compose_gets_no_image_from_a_checkout_without_compose_files(cli, tmp_path):
+    cli.run("init")
+    assert cli.run("status").returncode == 0
+    assert (tmp_path / "docker.log.images").read_text(encoding="utf-8").splitlines() == [""]
+
+
+def write_latest(cli, folder="backups", **fields):
+    """Write the latest.json of a backups folder (a path under the checkout, or an absolute one)
+    as postgres/backup.sh does: one field to a line."""
+    lines = [f'  "{key}": {json.dumps(value)}' for key, value in fields.items()]
+    (cli.root / folder / "latest.json").write_text(
+        "{\n" + ",\n".join(lines) + "\n}\n", encoding="utf-8"
+    )
+
+
+def good_backup(hours_ago, **fields):
+    """The fields of a latest.json after a good scheduled backup that finished hours_ago ago."""
+    return {
+        "result": "ok",
+        "attempted": "x",
+        "step": "",
+        "kind": "scheduled",
+        "last_ok": "20261011T030012Z",
+        "last_ok_epoch": int(time.time() - hours_ago * 3600),
+        "last_scheduled_local": "2026-10-11 03:00",
+        **fields,
+    }
+
+
+def test_status_says_when_the_last_good_backup_was(cli):
+    cli.run("init")
+    write_latest(cli, **good_backup(3))
+    result = cli.run("status")
+    assert result.returncode == 0, result.stderr
+    assert "Backups: the last good backup is 20261011T030012Z, 3 hours old" in result.stdout
+    assert result.stderr == ""
+
+
+def test_status_warns_about_a_failed_run_and_an_old_backup(cli):
+    cli.run("init")
+    write_latest(
+        cli,
+        **good_backup(
+            50,
+            result="failed",
+            attempted="2026-10-12T03:00:00Z",
+            step="the dump of metabase",
+            last_ok="20261010T030012Z",
+        ),
+    )
+    result = cli.run("status")
+    assert result.returncode == 0
+    assert (
+        "the last backup, at 2026-10-12T03:00:00Z, failed at: the dump of metabase" in result.stderr
+    )
+    # The retention runs after a good backup only, so a full disk does not free itself.
+    assert (
+        "When the disk is full, every backup fails and the retention removes none" in result.stderr
+    )
+    assert NO_RECENT_BACKUP in result.stderr
+    # The pointer to the logs is for the backup service; a person who took the backup read why
+    # on the screen.
+    assert "./agoranomos logs backup shows why" in result.stderr
+    write_latest(
+        cli,
+        **good_backup(3, result="failed", step="the dump of metabase", kind="manual"),
+    )
+    manual = cli.run("status").stderr
+    assert "failed at: the dump of metabase" in manual
+    assert "./agoranomos logs backup" not in manual
+
+
+@pytest.mark.parametrize(("age", "warns"), [(26 * 3600 - 300, False), (26 * 3600 + 300, True)])
+def test_status_warns_when_the_last_good_backup_is_older_than_26_hours(cli, age, warns):
+    # The service counts in seconds: 93,600 of them are fresh, and status counts the same.
+    cli.run("init")
+    write_latest(cli, **good_backup(age / 3600))
+    result = cli.run("status")
+    assert result.returncode == 0, result.stderr
+    assert (NO_RECENT_BACKUP in result.stderr) is warns
+    assert "failed at" not in result.stderr
+
+
+STATUS_TABLE = "SERVICE   STATE     STATUS\nwarehouse-db   running   Up 2 hours (healthy)\n"
+
+
+@pytest.mark.parametrize(
+    ("line", "warns"),
+    [
+        ("backup   running   Up 2 hours (unhealthy)\n", True),
+        ("backup   running   Up 2 hours (healthy)\n", False),
+        ("backup   running   Up 5 seconds (health: starting)\n", False),
+        # Another service that is unhealthy, and a service that only has the name in its status.
+        ("airflow-triggerer   running   Up 2 hours (unhealthy)\n", False),
+        ("metabase   running   Up 2 hours (unhealthy) next to backup\n", False),
+    ],
+)
+def test_status_warns_when_the_backup_service_is_unhealthy(cli, tmp_path, line, warns):
+    # The service is unhealthy with no good backup for 26 hours since it started, a case in which
+    # latest.json has nothing to say: status reads it from the table it prints.
+    cli.run("init")
+    result = cli.run("status", FAKE_PS_FILE=ps_file(tmp_path, STATUS_TABLE + line))
+    assert result.returncode == 0, result.stderr
+    assert (NO_RECENT_BACKUP in result.stderr) is warns
+    assert line.strip() in result.stdout
+
+
+def test_status_warns_once_when_both_the_service_and_the_file_say_it(cli, tmp_path):
+    cli.run("init")
+    write_latest(cli, **good_backup(50))
+    table = ps_file(tmp_path, STATUS_TABLE + "backup   running   Up 2 hours (unhealthy)\n")
+    result = cli.run("status", FAKE_PS_FILE=table)
+    assert result.stderr.count(NO_RECENT_BACKUP) == 1
+
+
+def test_status_prints_the_table_of_the_services_as_it_is(cli, tmp_path):
+    cli.run("init")
+    result = cli.run("status", FAKE_PS_FILE=ps_file(tmp_path, STATUS_TABLE))
+    assert result.stdout.startswith(STATUS_TABLE)
+
+
+def test_status_lists_the_backups_by_hand_with_their_size_and_age(cli):
+    # The retention never removes them, so status shows what they take, and how to delete one.
+    cli.run("init")
+    finished = int(time.time()) - 5 * 86400 - 60
+    write_latest(
+        cli,
+        **good_backup(5 * 24, last_ok="20261002T030000Z", last_ok_epoch=finished),
+    )
+    for name, kind in (("20261001T120000Z", "manual"), ("20261002T030000Z", "scheduled")):
+        folder = cli.root / "backups" / name
+        folder.mkdir()
+        (folder / "metabase.dump").write_bytes(b"x" * 300_000)
+        (folder / "manifest.json").write_text(
+            "{\n"
+            '  "format": 1,\n'
+            f'  "name": "{name}",\n'
+            f'  "kind": "{kind}",\n'
+            f'  "finished_epoch": {finished},\n'
+            '  "files": []\n'
+            "}\n",
+            encoding="utf-8",
+        )
+    result = cli.run("status")
+    assert result.returncode == 0, result.stderr
+    # The path is in quotes, so that the line can be pasted when the path has a space.
+    assert re.search(
+        r'^Backups by hand, which the retention never removes; rm -r ".+/backups/<name>" '
+        r"deletes one:$",
+        result.stdout,
+        re.M,
+    )
+    assert re.search(r"^  20261001T120000Z: \d+ KiB, 5 days old$", result.stdout, re.M)
+    assert "20261002T030000Z:" not in result.stdout
+
+
+def test_status_says_when_there_is_no_backup_yet(cli):
+    cli.run("init")
+    result = cli.run("status")
+    assert "Backups: none yet in" in result.stdout
+    assert result.stderr == ""
+
+
+def test_status_reads_the_backups_folder_that_env_names(cli, tmp_path):
+    cli.run("init")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    write_latest(cli, elsewhere, **good_backup(3))
+    set_env(cli, AGORANOMOS_BACKUP_DIR=str(elsewhere))
+    assert f"20261011T030012Z, 3 hours old, in {elsewhere}" in cli.run("status").stdout
+
+
+def test_up_warns_about_an_old_backup_and_starts_the_stack_anyway(cli, tmp_path):
+    result = cli.run(
+        "up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS + "backup|running|unhealthy|0\n"), **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    assert f"backup: {NO_RECENT_BACKUP}" in result.stderr
+    assert "./agoranomos logs backup" in result.stderr
+    assert "The stack is up." in result.stdout
+    # The stack is not "all healthy" then, and the line does not say it is.
+    assert "All services are healthy." not in result.stdout
+
+
+def test_up_waits_for_a_backup_service_that_is_still_starting(cli, tmp_path):
+    first = ps_file(tmp_path, HEALTHY_PS + "backup|running|starting|0\n", "first.txt")
+    result = cli.run(
+        "up",
+        FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING),
+        FAKE_PS_FIRST=first,
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "All services are healthy." in result.stdout
+    assert NO_RECENT_BACKUP not in result.stderr
+
+
+@pytest.mark.parametrize("line", ["backup|exited||1", "backup|dead||1", "backup|exited||137"])
+def test_up_stops_when_the_backup_service_has_exited(cli, tmp_path, line):
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps_with(line)), **QUICK)
+    assert result.returncode == 1
+    assert "backup failed: see ./agoranomos logs backup" in result.stderr
+    assert "the stack did not start" in result.stderr
+
+
 def test_up_starts_the_stack_and_waits_until_healthy(cli, tmp_path):
     result = cli.run(
         "up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), AGORANOMOS_WAIT_INTERVAL="0.1"
@@ -1907,15 +2368,19 @@ def test_compose_gets_its_settings_from_env_whatever_the_shell_exports(cli, tmp_
     settings = cli.compose_settings()
     assert len(settings) == len(compose_calls(cli)) >= 3  # the running check, up and a poll
     assert not any("foo" in profiles.split(",") for _, profiles, _ in settings)
-    # The look for a proxy left from server mode adds the profile of the proxy to the profiles of
-    # .env; every other call has those of .env alone.
-    with_server = [
+    # The looks for a proxy left from server mode and for a backup service left from the ops
+    # profile add the profile of that service to the profiles of .env; every other call has those
+    # of .env alone.
+    with_profile = [
         call_settings
         for call_settings, call in zip(settings, compose_calls(cli), strict=True)
-        if call == "compose ps --all --quiet proxy"
+        if call in ("compose ps --all --quiet proxy", "compose ps --all --quiet backup")
     ]
-    assert with_server == [("my-stack", "core,extra,server", "compose.yaml")]
-    assert {*settings} - {*with_server} == {("my-stack", "core,extra", "compose.yaml")}
+    assert with_profile == [
+        ("my-stack", "core,extra,server", "compose.yaml"),
+        ("my-stack", "core,extra,ops", "compose.yaml"),
+    ]
+    assert {*settings} - {*with_profile} == {("my-stack", "core,extra", "compose.yaml")}
 
 
 def test_compose_settings_have_defaults_when_env_does_not_set_them(cli):
@@ -2023,6 +2488,102 @@ def test_a_proxy_that_cannot_be_removed_stops_the_command_and_says_how_to_remove
     assert "docker compose --profile server rm --stop --force proxy" in result.stderr
     assert "ports 80 and 443" in result.stderr
     assert COMMANDS_WITH_A_PROXY[command] not in cli.docker_calls()
+
+
+# The same for the backup service of the ops profile: .env without ops leaves a backup container
+# running, which writes backups that the person no longer asked for. In a mode without ops, up
+# and down remove it.
+LEFTOVER_BACKUP = "The ops profile is off: the backup service is stopped and removed."
+BACKUP_REMOVAL = "compose rm --stop --force backup"
+
+
+def run_with_a_backup_service_left(cli, tmp_path, command, profiles="core,demo", **fake):
+    """A .env of server mode, which has the ops profile, that lists the profiles now, and a backup
+    container."""
+    server_env(cli)
+    set_env(cli, COMPOSE_PROFILES=profiles)
+    return cli.run(command, FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK, **fake)
+
+
+@pytest.mark.parametrize("profiles", ["core,demo", "core,demo,server"])
+@pytest.mark.parametrize("command", ["up", "down"])
+def test_without_the_ops_profile_a_backup_service_left_from_it_is_removed(
+    cli, tmp_path, command, profiles
+):
+    result = run_with_a_backup_service_left(
+        cli, tmp_path, command, profiles, FAKE_BACKUP="0123abcdef\n"
+    )
+    # With server and no ops, preflight warns about the backups and goes on.
+    assert result.returncode == 0, result.stderr
+    assert LEFTOVER_BACKUP in result.stdout.splitlines()
+    calls = cli.docker_calls()
+    assert calls.count(BACKUP_REMOVAL) == 1
+    assert calls.index(BACKUP_REMOVAL) < calls.index(COMMANDS_WITH_A_PROXY[command])
+    # The removal and the look-up are the only calls that know the profile of the service.
+    names = compose_calls(cli)
+    listed = [settings[1].split(",") for settings in cli.compose_settings()]
+    assert "ops" in listed[names.index(BACKUP_REMOVAL)]
+    assert "ops" in listed[names.index("compose ps --all --quiet backup")]
+    assert "ops" not in listed[names.index(COMMANDS_WITH_A_PROXY[command])]
+    assert not any(" -v" in call or "--volumes" in call for call in calls)
+    # No proxy was there to remove, and the backups folder is not touched.
+    assert PROXY_REMOVAL not in calls
+    assert (cli.root / "backups").is_dir()
+
+
+@pytest.mark.parametrize("command", ["up", "down"])
+def test_a_failing_look_up_of_the_backup_service_leaves_up_and_down_working(cli, tmp_path, command):
+    result = run_with_a_backup_service_left(
+        cli, tmp_path, command, FAKE_BACKUP="0123abcdef\n", FAKE_BACKUP_PS_EXIT="1"
+    )
+    assert result.returncode == 0, result.stderr
+    calls = cli.docker_calls()
+    assert "compose ps --all --quiet backup" in calls
+    assert BACKUP_REMOVAL not in calls
+    assert LEFTOVER_BACKUP not in result.stdout
+    assert COMMANDS_WITH_A_PROXY[command] in calls
+    assert "Cannot connect to the Docker daemon" not in result.stderr
+
+
+@pytest.mark.parametrize("command", ["up", "down"])
+def test_with_the_ops_profile_up_and_down_never_remove_the_backup_service(cli, tmp_path, command):
+    ops_env(cli)
+    result = cli.run(
+        command, FAKE_BACKUP="0123abcdef\n", FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING), **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    assert LEFTOVER_BACKUP not in result.stdout
+    assert not any(" rm " in call or call.endswith(" backup") for call in cli.docker_calls())
+
+
+@pytest.mark.parametrize("command", ["up", "down"])
+def test_without_a_backup_service_up_and_down_leave_alone_a_stack(cli, tmp_path, command):
+    result = run_with_a_backup_service_left(cli, tmp_path, command)
+    assert result.returncode == 0, result.stderr
+    assert BACKUP_REMOVAL not in cli.docker_calls()
+    assert LEFTOVER_BACKUP not in result.stdout
+    assert COMMANDS_WITH_A_PROXY[command] in cli.docker_calls()
+
+
+@pytest.mark.parametrize("command", ["up", "down"])
+def test_a_backup_service_that_cannot_be_removed_stops_the_command_and_says_how(
+    cli, tmp_path, command
+):
+    result = run_with_a_backup_service_left(
+        cli, tmp_path, command, FAKE_BACKUP="0123abcdef\n", FAKE_COMPOSE_EXIT="1"
+    )
+    assert result.returncode == 1
+    assert LEFTOVER_BACKUP not in result.stdout
+    assert "docker compose --profile ops rm --stop --force backup" in result.stderr
+    assert COMMANDS_WITH_A_PROXY[command] not in cli.docker_calls()
+
+
+def test_a_proxy_and_a_backup_service_both_left_are_both_removed(cli, tmp_path):
+    result = run_with_a_proxy_left(
+        cli, tmp_path, "down", FAKE_PROXY="0123abcdef\n", FAKE_BACKUP="4567abcdef\n"
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[:2] == [LEFTOVER_PROXY, LEFTOVER_BACKUP]
 
 
 @pytest.mark.parametrize("command", ["down", "status"])

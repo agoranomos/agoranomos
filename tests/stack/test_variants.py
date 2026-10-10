@@ -46,7 +46,15 @@ TASK_RUNNER = {"local": "airflow-scheduler", "celery": "airflow-worker"}
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_a_variant_has_the_services_it_needs(variant):
     names = set(rendered(variant))
-    expected = {"warehouse-db", "platform-db", "db-init", "demo-init", "metadata-export", "proxy"}
+    expected = {
+        "warehouse-db",
+        "platform-db",
+        "db-init",
+        "demo-init",
+        "metadata-export",
+        "proxy",
+        "backup",
+    }
     expected |= BASE_AIRFLOW | METABASE
     assert expected <= names
     # The broker and the worker belong to the Celery variant, and to no other.
@@ -223,7 +231,8 @@ def expected_holders(variant: str) -> dict[str, set[str]]:
 
     - Each database holds the password of its superuser, and db-init, which sets up the roles,
       the databases and the schemas, holds those and the passwords that it gives the roles.
-    - The role backup has a password of its own, which db-init gives it.
+    - The role backup has a password of its own, which db-init gives it and the backup service
+      uses.
     - The Airflow services share the keys of Airflow and its metadata database. The service that
       runs the tasks gets the passwords of the warehouse roles of dlt and dbt, and the DAG
       processor, which parses the DAGs of the extensions folder, gets none.
@@ -244,7 +253,7 @@ def expected_holders(variant: str) -> dict[str, set[str]]:
         "METABASE_READER_PASSWORD": {"db-init", "metabase-init"},
         "WAREHOUSE_LOADER_PASSWORD": {"db-init", runner},
         "WAREHOUSE_TRANSFORMER_PASSWORD": {"db-init", runner},
-        "BACKUP_DB_PASSWORD": {"db-init"},
+        "BACKUP_DB_PASSWORD": {"db-init", "backup"},
         "VALKEY_PASSWORD": (
             {"broker", "airflow-scheduler", "airflow-worker"} if variant == "celery" else set()
         ),
@@ -634,6 +643,39 @@ def test_the_proxy_runs_read_only_as_nobody_on_the_default_network(variant):
     assert [(mount["type"], mount["target"]) for mount in proxy["volumes"]] == [("volume", "/data")]
     assert proxy["image"] == "agoranomos-caddy:local"
     assert proxy["pull_policy"] == "build"
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_the_backup_service_has_only_what_its_job_needs(variant):
+    # The image of the databases, read-only, the data network only, no port, the postgres folder
+    # and the extensions read-only, and the backups folder; its environment holds one secret.
+    service = {
+        key: value for key, value in rendered(variant)["backup"].items() if key != "environment"
+    }
+    assert service["profiles"] == ["ops"]
+    assert service["image"] == rendered(variant)["db-init"]["image"]
+    assert service["read_only"] is True
+    # Tmpfs mounts in the container, not folders of this host.
+    assert sorted(service["tmpfs"]) == ["/tmp", "/var/lib/postgresql"]  # noqa: S108
+    assert set(service["networks"]) == {"data"}
+    assert "ports" not in service
+    assert service["entrypoint"] == ["/bin/sh", "/opt/agoranomos/postgres/backup.sh"]
+    assert service["command"] == ["schedule"]
+    mounts = {(mount["target"], bool(mount.get("read_only"))) for mount in service["volumes"]}
+    assert mounts == {
+        ("/opt/agoranomos/postgres", True),
+        ("/opt/agoranomos/extensions", True),
+        ("/backups", False),
+    }
+    # The probe reads one small file, so it runs every minute: ./agoranomos up sees a service
+    # whose last good backup is too old about a minute after the start period.
+    health = service["healthcheck"]
+    assert health["test"] == ["CMD", "/bin/sh", "/opt/agoranomos/postgres/backup.sh", "health"]
+    assert (health["interval"], health["retries"]) == ("1m0s", 1)
+    environment = rendered(variant)["backup"]["environment"]
+    assert environment["PGUSER"] == "backup"
+    assert {key for key in environment if "PASSWORD" in key} == {"PGPASSWORD"}
+    assert service["user"].split(":")[0] not in ROOT
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
