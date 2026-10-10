@@ -568,7 +568,7 @@ EOF
   admin_password=$(env_get METABASE_ADMIN_PASSWORD)
   if [ "$(setting METABASE_PASSWORD_COMPLEXITY normal)" = strong-enough ] &&
     [ -n "$admin_password" ] && [ "${#admin_password}" -lt 15 ]; then
-    problem "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters, which METABASE_PASSWORD_COMPLEXITY=strong-enough asks for. For a Metabase that is set up already, first change the admin password in Metabase (Account settings) to at least 15 characters (with the stack stopped, docker compose up -d metabase in this folder starts Metabase alone, with the databases it needs and without the proxy, on 127.0.0.1 and METABASE_PORT), then put the same value in .env; for a new one, write a longer value, or leave it empty for ./agoranomos init to generate one"
+    problem "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters, which METABASE_PASSWORD_COMPLEXITY=strong-enough asks for. For a Metabase that is set up already, first change the admin password in Metabase (Account settings) to at least 15 characters (with the stack stopped, docker compose up -d metabase in this folder starts Metabase alone, with the databases it needs and without the proxy, at 127.0.0.1 on METABASE_PORT, which on a server you reach through an SSH tunnel), then put the same value in .env; for a new one, write a longer value, or leave it empty for ./agoranomos init to generate one"
   fi
   compose_version=$(docker compose version --short 2> /dev/null) || compose_version=""
   if [ -z "$compose_version" ]; then

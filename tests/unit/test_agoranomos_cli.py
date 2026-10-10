@@ -636,6 +636,9 @@ def assert_advice_for_a_short_admin_password(message):
         "(Account settings) to at least 15 characters"
     ) in message
     assert "docker compose up -d metabase" in message
+    assert "at 127.0.0.1 on METABASE_PORT, which on a server you reach through an SSH tunnel" in (
+        message
+    )
     assert ", then put the same value in .env" in message
     assert (
         "for a new one, write a longer value, or leave it empty for ./agoranomos init to "
@@ -1885,8 +1888,9 @@ def test_up_hands_compose_the_files_of_env_and_never_passes_flags(cli, tmp_path)
 
 
 def test_compose_gets_its_settings_from_env_whatever_the_shell_exports(cli, tmp_path):
-    # A COMPOSE_* variable that is still exported from another project would override .env, and so
-    # would a variable that has the name of the script's own extra_profile.
+    # A COMPOSE_* variable that is still exported from another project would override .env, and a
+    # variable that has the name of the script's own extra_profile would add a profile to those of
+    # .env.
     cli.run("init")
     set_env(cli, COMPOSE_PROJECT_NAME="my-stack", COMPOSE_PROFILES="core,extra")
     result = cli.run(
@@ -1982,6 +1986,8 @@ def test_in_local_mode_a_failing_look_up_of_the_proxy_leaves_up_and_down_working
     assert PROXY_REMOVAL not in calls
     assert LEFTOVER_PROXY not in result.stdout
     assert COMMANDS_WITH_A_PROXY[command] in calls
+    # The error of the look-up itself is hidden.
+    assert "Cannot connect to the Docker daemon" not in result.stderr
 
 
 @pytest.mark.parametrize("command", ["up", "down"])
