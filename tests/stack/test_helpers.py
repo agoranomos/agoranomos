@@ -1,5 +1,6 @@
 """Tests of the helpers themselves: they need neither Docker nor a running stack."""
 
+import ast
 import http.client
 import importlib.util
 import json
@@ -1365,6 +1366,82 @@ def test_a_failed_request_prints_no_part_of_its_body_under_any_traceback_mode(
     assert shown_in(values["TEST_CONTROL"], report) is control_leaks
 
 
+# What ./agoranomos reads from a line of .env (compose-go 2.16.1, dotenv/parser.go): a value without
+# quotes ends before " #" and loses the blanks at its end, the carriage return of a line of Windows
+# among them; a value in quotes is what is between them. This is a copy of ENV_LINES in
+# tests/unit/test_agoranomos_functions.py, which tests env_get of ./agoranomos: that module is no
+# part of the stack tests, which run on their own. read_env must read every line as env_get does,
+# because Compose starts the stack from the same .env, and the helpers choose the variant and the
+# profiles from what they read; the next test fails when the two lists differ.
+ENV_LINES = [
+    ("KEY=plain", "plain"),
+    ("KEY=plain # a comment", "plain"),
+    ("KEY=plain # a comment\r", "plain"),
+    ("KEY=plain\r", "plain"),
+    ("KEY=plain   ", "plain"),
+    ("KEY=  after blanks", "after blanks"),
+    ("KEY=  vivid leaf \r", "vivid leaf"),
+    ("KEY=\fform feed and vertical tab\v", "form feed and vertical tab"),
+    ("KEY=a#b", "a#b"),
+    (
+        "KEY=tab\t# no space before the hash, so no comment",
+        "tab\t# no space before the hash, so no comment",
+    ),
+    ("KEY='in single # quotes'", "in single # quotes"),
+    ('KEY="in double quotes"\r', "in double quotes"),
+    ("KEY='$dollar and spaces '", "$dollar and spaces "),
+    ("KEY=", ""),
+    # Compose trims the blanks after the = before it looks for a comment, so a comment after an
+    # empty value is the value (./agoranomos preflight stops on such a line).
+    ("KEY= # a comment", "# a comment"),
+]
+
+
+def test_the_cases_of_read_env_are_those_of_env_get():
+    unit_test = stack_helpers.REPO_ROOT / "tests" / "unit" / "test_agoranomos_functions.py"
+    source = unit_test.read_text(encoding="utf-8")
+    cases = [
+        ast.literal_eval(node.value)
+        for node in ast.parse(source).body
+        if isinstance(node, ast.Assign)
+        and [target.id for target in node.targets if isinstance(target, ast.Name)] == ["ENV_LINES"]
+    ]
+    assert cases == [ENV_LINES]
+
+
+@pytest.mark.parametrize(("line", "value"), ENV_LINES)
+def test_read_env_reads_a_value_as_the_command_does(tmp_path, line, value):
+    # Bytes, as the command reads the file: no translation of line endings.
+    path = tmp_path / ".env"
+    path.write_bytes(f"OTHER=1\n{line}\nKEYS=not this key\n".encode())
+    assert stack_helpers.read_env(path) == {"OTHER": "1", "KEY": value, "KEYS": "not this key"}
+
+
+def test_read_env_takes_the_last_line_that_sets_a_key(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text("KEY=first\nKEY=second # the one that counts\n", encoding="utf-8")
+    assert stack_helpers.read_env(path) == {"KEY": "second"}
+
+
+def test_read_env_ends_a_line_at_a_newline_and_nowhere_else(tmp_path):
+    # The command reads lines with awk, which splits on newlines only: a carriage return, a vertical
+    # tab and a form feed stay inside the line, str.splitlines() would split on all of them.
+    path = tmp_path / ".env"
+    path.write_bytes(b"A=one\rB=two\nC=three\x0bD=four\x0c\nE=five\n")
+    assert stack_helpers.read_env(path) == {"A": "one\rB=two", "C": "three\x0bD=four", "E": "five"}
+
+
+def test_read_env_takes_only_lines_that_start_with_the_key(tmp_path):
+    # The command asks for "KEY=" at the start of a line: a comment, an export, blanks before or
+    # around the = and a line without a key set nothing.
+    path = tmp_path / ".env"
+    path.write_text(
+        "# KEY=comment\n  KEY=indented\nexport KEY=exported\nKEY =spaced\n=no key\nno equals\n",
+        encoding="utf-8",
+    )
+    assert "KEY" not in stack_helpers.read_env(path)
+
+
 def write_env(tmp_path, monkeypatch, text):
     """Make stack_helpers read a .env with this text, in a checkout of its own."""
     (tmp_path / ".env").write_text(text, encoding="utf-8")
@@ -1380,6 +1457,8 @@ def write_env(tmp_path, monkeypatch, text):
         ("COMPOSE_FILE='compose.yaml:compose.celery.yaml'", "celery"),
         ("COMPOSE_FILE=compose.celery.yaml:compose.yaml", "celery"),
         ("COMPOSE_FILE=/srv/stack/compose.yaml:/srv/stack/compose.celery.yaml", "celery"),
+        # Compose cuts the comment, so it starts the Celery variant.
+        ("COMPOSE_FILE=compose.yaml:compose.celery.yaml # worker", "celery"),
         ("COMPOSE_FILE=compose.yaml:compose.celery.yaml.bak", "local"),
         ("COMPOSE_FILE=compose.yaml:not-compose.celery.yaml", "local"),
         ("COMPOSE_FILE=", "local"),
@@ -1421,6 +1500,7 @@ def write_example(tmp_path, text="COMPOSE_PROFILES=core,demo\n"):
         ("COMPOSE_PROFILES='core, demo'", {"core", "demo"}),
         ("COMPOSE_PROFILES=core,,demo,", {"core", "demo"}),
         ("COMPOSE_PROFILES=core,demonstration", {"core", "demonstration"}),
+        ("COMPOSE_PROFILES=core,demo # all of them", {"core", "demo"}),
     ],
 )
 def test_active_profiles_follow_compose_profiles_in_env(tmp_path, monkeypatch, setting, profiles):

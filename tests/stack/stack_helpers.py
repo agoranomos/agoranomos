@@ -26,15 +26,32 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FILES = {"local": "compose.yaml", "celery": "compose.yaml:compose.celery.yaml"}
 
 
+# The blanks that env_get of ./agoranomos strips around a value: the characters of [ \t\r\v\f].
+BLANKS = " \t\r\v\f"
+
+
 def read_env(path: Path) -> dict[str, str]:
+    """The settings in an env file, read as ./agoranomos reads them (its env_get), which is how
+    Docker Compose reads them: the helpers then see the stack that Compose starts from that file.
+
+    A line sets the key in front of its first =; blanks or export before it make another key, which
+    nobody asks for. The last line that sets a key counts. Lines end at a newline and nowhere else,
+    as awk reads them: a carriage return, a vertical tab and a form feed stay inside the line. The
+    blanks at the start of a value do not count. A value that starts with a quote is what lies
+    between that quote and the next one, when there is one; otherwise it ends before the first " #",
+    which starts a comment, and loses the blanks at its end, the carriage return of a file that
+    Windows saved among them."""
     values: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line or line.startswith("#") or "=" not in line:
+    for line in path.read_bytes().decode("utf-8").split("\n"):
+        key, separator, value = line.partition("=")
+        if not separator or not key or key.startswith("#"):
             continue
-        key, _, value = line.partition("=")
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-            value = value[1:-1]
-        values[key] = value
+        value = value.lstrip(BLANKS)
+        if value[:1] in ("'", '"') and (end := value.find(value[0], 1)) > 0:
+            values[key] = value[1:end]
+            continue
+        comment = value.find(" #")
+        values[key] = (value if comment < 0 else value[:comment]).rstrip(BLANKS)
     return values
 
 
