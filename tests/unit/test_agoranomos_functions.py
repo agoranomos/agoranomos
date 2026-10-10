@@ -107,6 +107,9 @@ ENV_LINES = [
     ('KEY="in double quotes"\r', "in double quotes"),
     ("KEY='$dollar and spaces '", "$dollar and spaces "),
     ("KEY=", ""),
+    # Compose trims the blanks after the = before it looks for a comment, so a comment after an
+    # empty value is the value (./agoranomos preflight stops on such a line).
+    ("KEY= # a comment", "# a comment"),
 ]
 
 

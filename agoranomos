@@ -526,6 +526,19 @@ EOF
 $memory_settings
 EOF
   fi
+  # Compose trims the blanks after the = before it looks for a comment, so in "KEY= # note" the value
+  # is "# note", not empty: a comment after an empty value becomes the value, a secret or the session
+  # key of Metabase among them, and env_get reads it the same way. A # right after the =, as in
+  # KEY=#abc, is a value, and is not reported. The message names the setting, never the value.
+  if [ -f "$ENV_FILE" ]; then
+    comment_settings=$(awk '/^[A-Za-z0-9_.-]+=[ \t\r\v\f]+#/ { print substr($0, 1, index($0, "=") - 1) }' "$ENV_FILE" | sort -u)
+    while IFS= read -r comment_setting; do
+      [ -n "$comment_setting" ] || continue
+      problem "$comment_setting in .env has a comment after an empty value, which Docker Compose reads as the value: put the comment on a line of its own, and leave the value empty or write one"
+    done << EOF
+$comment_settings
+EOF
+  fi
   # A running stack holds its own ports, so the ports are checked only while it is not running.
   if [ -z "$(compose ps --quiet --status running 2> /dev/null)" ]; then
     if [ -n "$(port_tools)" ]; then

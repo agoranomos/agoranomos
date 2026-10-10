@@ -515,6 +515,29 @@ def test_preflight_stops_on_a_memory_limit_that_docker_refuses(cli, value, outco
         assert "smaller than 6 MiB" in result.stderr
 
 
+@pytest.mark.parametrize("blank", [" ", "\t"], ids=["space", "tab"])
+def test_preflight_stops_on_a_comment_after_an_empty_value(cli, blank):
+    # Compose trims the blanks after the = before it looks for " #", so in "KEY= # rotated" the
+    # value is "# rotated": the comment would become the session key of Metabase, which passes the
+    # check of its length. The message names the setting, never the comment.
+    cli.run("init")
+    set_env(cli, METABASE_SESSION_KEY=f"{blank}# rotated on 2026-10-10")
+    result = cli.run("preflight")
+    assert result.returncode == 1
+    named = [line for line in result.stderr.splitlines() if "comment after an empty value" in line]
+    assert [line.split()[1] for line in named] == ["METABASE_SESSION_KEY"]
+    assert "rotated" not in result.stdout + result.stderr
+
+
+def test_preflight_does_not_take_a_hash_right_after_the_equals_sign_for_a_comment(cli):
+    # KEY=#abc has no blank between the = and the #: Compose reads it as the value #abc.
+    cli.run("init")
+    set_env(cli, AGORANOMOS_ADMIN_EMAIL="#not-a-comment")
+    result = cli.run("preflight")
+    assert "comment after an empty value" not in result.stderr
+    assert result.returncode == 0, result.stderr
+
+
 def test_the_check_of_the_memory_limits_names_each_setting_and_no_value(cli):
     # Every *_MEMORY setting of .env, also one that .env.example does not have, on one line each.
     cli.run("init")
