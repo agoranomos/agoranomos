@@ -65,7 +65,15 @@ case "$1" in
         case " $* " in
           # The container of the proxy of server mode, as docker compose ps --all --quiet proxy
           # lists it: FAKE_PROXY holds its ID, and nothing means that there is none.
-          *" --quiet proxy "*) printf '%s' "${FAKE_PROXY:-}" ;;
+          # FAKE_PROXY_PS_EXIT makes this look-up, and no other call to ps, fail with that status
+          # (FAKE_PS_EXIT does that for the polls).
+          *" --quiet proxy "*)
+            if [ -n "${FAKE_PROXY_PS_EXIT:-}" ]; then
+              echo "Cannot connect to the Docker daemon" >&2
+              exit "$FAKE_PROXY_PS_EXIT"
+            fi
+            printf '%s' "${FAKE_PROXY:-}"
+            ;;
           *" --quiet "*) printf '%s' "${FAKE_RUNNING:-}" ;;
           *)
             # FAKE_PS_EXIT makes every poll fail. Otherwise FAKE_PS_FILE answers every poll, and

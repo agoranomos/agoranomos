@@ -629,11 +629,14 @@ def test_preflight_passes_a_site_that_server_mode_can_serve(cli, tls, site):
 def assert_advice_for_a_short_admin_password(message):
     """metabase-init never changes the password of an admin that exists, so a Metabase that is set
     up already needs its password changed in Metabase first, and only then in .env; a new one takes
-    whatever .env says. The message names settings, never a value."""
+    whatever .env says. With the stack stopped, preflight blocks up, so the message names the
+    command that starts Metabase alone. The message names settings, never a value."""
     assert (
         "For a Metabase that is set up already, first change the admin password in Metabase "
-        "(Account settings) to at least 15 characters, then put the same value in .env"
+        "(Account settings) to at least 15 characters"
     ) in message
+    assert "docker compose up -d metabase" in message
+    assert ", then put the same value in .env" in message
     assert (
         "for a new one, write a longer value, or leave it empty for ./agoranomos init to "
         "generate one"
@@ -766,7 +769,7 @@ def test_up_warns_when_the_site_has_no_trusted_certificate_yet(cli, tmp_path):
     assert "https://bi.example.com does not answer with a certificate that this machine trusts" in (
         result.stderr
     )
-    assert "DNS record of bi.example.com" in result.stderr
+    assert "A record of bi.example.com" in result.stderr
     assert "./agoranomos logs proxy" in result.stderr
     assert "docker compose restart proxy" in result.stderr
 
@@ -1882,7 +1885,8 @@ def test_up_hands_compose_the_files_of_env_and_never_passes_flags(cli, tmp_path)
 
 
 def test_compose_gets_its_settings_from_env_whatever_the_shell_exports(cli, tmp_path):
-    # A COMPOSE_* variable that is still exported from another project would override .env.
+    # A COMPOSE_* variable that is still exported from another project would override .env, and so
+    # would a variable that has the name of the script's own extra_profile.
     cli.run("init")
     set_env(cli, COMPOSE_PROJECT_NAME="my-stack", COMPOSE_PROFILES="core,extra")
     result = cli.run(
@@ -1890,12 +1894,14 @@ def test_compose_gets_its_settings_from_env_whatever_the_shell_exports(cli, tmp_
         COMPOSE_PROJECT_NAME="another-project",
         COMPOSE_PROFILES="another-profile",
         COMPOSE_FILE="elsewhere.yaml",
+        extra_profile="foo",
         FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
         **QUICK,
     )
     assert result.returncode == 0, result.stderr
     settings = cli.compose_settings()
     assert len(settings) == len(compose_calls(cli)) >= 3  # the running check, up and a poll
+    assert not any("foo" in profiles.split(",") for _, profiles, _ in settings)
     # The look for a proxy left from server mode adds the profile of the proxy to the profiles of
     # .env; every other call has those of .env alone.
     with_server = [
@@ -1958,8 +1964,24 @@ def test_in_local_mode_a_proxy_left_from_server_mode_is_removed_before_the_stack
     assert "server" in profiles[names.index("compose ps --all --quiet proxy")]
     assert profiles[names.index(COMMANDS_WITH_A_PROXY[command])] == ["core", "demo"]
     # The volume of Caddy, with its certificates and its own authority, stays.
-    assert "--volumes" not in PROXY_REMOVAL.split()
     assert not any(" -v" in call or "--volumes" in call for call in calls)
+
+
+@pytest.mark.parametrize("command", ["up", "down"])
+def test_in_local_mode_a_failing_look_up_of_the_proxy_leaves_up_and_down_working(
+    cli, tmp_path, command
+):
+    # The look-up only asks whether there is a proxy to remove. When it fails, the command that
+    # follows meets the same fault and says so itself, so the look-up stays silent and goes on.
+    result = run_with_a_proxy_left(
+        cli, tmp_path, command, FAKE_PROXY="0123abcdef\n", FAKE_PROXY_PS_EXIT="1"
+    )
+    assert result.returncode == 0, result.stderr
+    calls = cli.docker_calls()
+    assert "compose ps --all --quiet proxy" in calls
+    assert PROXY_REMOVAL not in calls
+    assert LEFTOVER_PROXY not in result.stdout
+    assert COMMANDS_WITH_A_PROXY[command] in calls
 
 
 @pytest.mark.parametrize("command", ["up", "down"])

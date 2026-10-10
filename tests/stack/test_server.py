@@ -61,7 +61,7 @@ def test_the_responses_carry_the_security_headers(env):
         assert headers["strict-transport-security"].startswith("max-age=31536000"), path
         assert headers["x-content-type-options"] == "nosniff", path
         # Metabase 0.64.1 sends HSTS and nosniff itself on /api/health and never Referrer-Policy,
-        # and the 404 of the proxy on /api/setup has none of the three. So the value of
+        # and the 404 of the proxy on /api/setup has none of its own. So the value of
         # Referrer-Policy is the proxy's on both paths, and it tells the two forms of the headers
         # apart: with one header block, the proxy would leave it out of /api/health.
         assert headers.get("referrer-policy") == "strict-origin-when-cross-origin", path

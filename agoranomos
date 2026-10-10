@@ -27,6 +27,11 @@ RECOMMENDED_DISK_GB=20
 problems=0
 force=0
 
+# The profile that compose adds to those of .env for one call (compose_with_server sets it). It is
+# set here, empty, so that a variable of the same name in the environment of the person never
+# reaches Compose.
+extra_profile=""
+
 # The settings that init generates when they are empty.
 SECRET_KEYS="WAREHOUSE_POSTGRES_PASSWORD PLATFORM_POSTGRES_PASSWORD AIRFLOW_DB_PASSWORD
 METABASE_DB_PASSWORD METABASE_READER_PASSWORD WAREHOUSE_LOADER_PASSWORD
@@ -556,13 +561,14 @@ EOF
   # characters. init --server sets that rule, and compose.yaml hands it to Metabase in every mode, so
   # a person can set it in local mode too. init generates a password of 32 characters, so this
   # catches one set by hand. metabase-init never changes the password of an admin that exists, so
-  # for a Metabase that is set up already the message sends the person to Metabase first. The
-  # message names the settings, never the value. strong has other rules, and normal, the default,
-  # asks for less: they are Metabase's to check.
+  # for a Metabase that is set up already the message sends the person to Metabase first. This
+  # check blocks up, so with the stack stopped the message also names the command that starts
+  # Metabase alone. The message names the settings, never the value. strong has other rules, and
+  # normal, the default, asks for less: they are Metabase's to check.
   admin_password=$(env_get METABASE_ADMIN_PASSWORD)
   if [ "$(setting METABASE_PASSWORD_COMPLEXITY normal)" = strong-enough ] &&
     [ -n "$admin_password" ] && [ "${#admin_password}" -lt 15 ]; then
-    problem "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters, which METABASE_PASSWORD_COMPLEXITY=strong-enough asks for. For a Metabase that is set up already, first change the admin password in Metabase (Account settings) to at least 15 characters, then put the same value in .env; for a new one, write a longer value, or leave it empty for ./agoranomos init to generate one"
+    problem "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters, which METABASE_PASSWORD_COMPLEXITY=strong-enough asks for. For a Metabase that is set up already, first change the admin password in Metabase (Account settings) to at least 15 characters (with the stack stopped, docker compose up -d metabase in this folder starts Metabase alone, with the databases it needs and without the proxy, on 127.0.0.1 and METABASE_PORT), then put the same value in .env; for a new one, write a longer value, or leave it empty for ./agoranomos init to generate one"
   fi
   compose_version=$(docker compose version --short 2> /dev/null) || compose_version=""
   if [ -z "$compose_version" ]; then
@@ -791,7 +797,7 @@ print_addresses() {
 
 # In server mode with a certificate of Let's Encrypt: whether the site answers over HTTPS with a
 # certificate that this machine trusts. Caddy gets the certificate after it starts, and only when
-# the DNS record of the domain points at this server and ports 80 and 443 are open to the
+# the A record of the domain points at this server and ports 80 and 443 are open to the
 # internet, so this tries for about a minute and then only warns: the stack runs either way.
 # AGORANOMOS_CERTIFICATE_TRIES is a hook for the tests (default 12, every AGORANOMOS_WAIT_INTERVAL
 # seconds).
@@ -814,7 +820,7 @@ check_certificate() {
     tries=$((tries - 1))
     [ "$tries" -eq 0 ] || sleep "${AGORANOMOS_WAIT_INTERVAL:-5}"
   done
-  warn "https://$site_host does not answer with a certificate that this machine trusts yet. Check that the DNS record of $site_host points at this server and that ports 80 and 443 are open to the internet; ./agoranomos logs proxy shows what Let's Encrypt answered, and docker compose restart proxy makes Caddy try again at once, without waiting out the pause between its tries. With the staging directory of Let's Encrypt in AGORANOMOS_ACME_CA, no machine trusts the certificate."
+  warn "https://$site_host does not answer with a certificate that this machine trusts yet. Check that the A record of $site_host points at this server and that ports 80 and 443 are open to the internet; ./agoranomos logs proxy shows what Let's Encrypt answered, and docker compose restart proxy makes Caddy try again at once, without waiting out the pause between its tries. With the staging directory of Let's Encrypt in AGORANOMOS_ACME_CA, no machine trusts the certificate."
 }
 
 # docker compose with the server profile added to those of .env: the proxy belongs to it.
