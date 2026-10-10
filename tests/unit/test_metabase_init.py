@@ -15,7 +15,7 @@ from typing import Any
 
 import metabase_init as mi
 import pytest
-from metabase_stand_in import FakeMetabase, free_port, metadata_env, serve
+from metabase_stand_in import FakeClock, FakeMetabase, free_port, metadata_env, serve
 from metabase_stand_in import leaked as leaked_in
 
 ENV = {
@@ -66,6 +66,14 @@ def metabase(tmp_path):
     server.server_close()
 
 
+@pytest.fixture(autouse=True)
+def clock(monkeypatch):
+    """The pauses of the job between two attempts, which move a fake clock on and take no time."""
+    fake = FakeClock()
+    monkeypatch.setattr(mi, "pause", fake.sleep)
+    return fake
+
+
 def env_for(metabase: FakeMetabase, **overrides: str) -> dict[str, str]:
     return {**ENV, "METABASE_URL": metabase.url, **metabase.files, **overrides}
 
@@ -87,6 +95,79 @@ def test_next_start_updates_the_connection_and_creates_nothing(metabase):
     assert metabase.calls.count(("POST", "/api/setup")) == 1
     assert len(metabase.databases) == 1
     assert metabase.databases[0]["details"]["password"] == "rotated-password"
+
+
+def test_the_first_start_turns_the_public_links_off(metabase, capsys):
+    assert mi.main(env_for(metabase)) == 0
+    assert metabase.settings["enable-public-sharing"] is False
+    assert metabase.calls.count(("PUT", "/api/setting/enable-public-sharing")) == 1
+    assert "public links are off" in capsys.readouterr().out
+
+
+def test_a_later_start_leaves_the_public_links_as_an_admin_set_them(metabase):
+    assert mi.main(env_for(metabase)) == 0
+    metabase.settings["enable-public-sharing"] = True  # an admin turned them on
+    assert mi.main(env_for(metabase)) == 0
+    assert metabase.settings["enable-public-sharing"] is True
+    assert metabase.calls.count(("PUT", "/api/setting/enable-public-sharing")) == 1
+
+
+def test_a_metabase_set_up_before_keeps_its_public_links(metabase):
+    # A deployment from before this release: the job did not create its admin, so it does not
+    # know whether an admin chose public links, and leaves them as they are.
+    metabase.set_up(ENV["METABASE_ADMIN_EMAIL"], ENV["METABASE_ADMIN_PASSWORD"])
+    assert mi.main(env_for(metabase)) == 0
+    assert ("PUT", "/api/setting/enable-public-sharing") not in metabase.calls
+    assert metabase.settings["enable-public-sharing"] is True
+
+
+def test_public_links_that_could_not_be_turned_off_say_where_to_do_it(metabase, capsys):
+    metabase.failures[("PUT", "/api/setting/enable-public-sharing")] = 500
+    assert mi.main(env_for(metabase)) == 1
+    err = capsys.readouterr().err
+    assert "PUT /api/setting/enable-public-sharing failed with HTTP 500" in err
+    assert "Admin > Settings > Public sharing" in err
+    assert not leaked(err)
+
+
+PUBLIC_SHARING = ("PUT", "/api/setting/enable-public-sharing")
+
+
+def test_any_failure_status_names_the_public_links(metabase, capsys):
+    # Whatever the status of the failed PUT (429 here), the error ends with the hint that the links
+    # are on and where to turn them off, because ./agoranomos up never prints the log of the job.
+    metabase.failures[PUBLIC_SHARING] = 429
+    assert mi.main(env_for(metabase)) == 1
+    err = capsys.readouterr().err
+    assert "PUT /api/setting/enable-public-sharing failed with HTTP 429" in err
+    assert err.rstrip().endswith(mi.PUBLIC_SHARING_HINT)
+    assert "Admin > Settings > Public sharing" in err
+    assert not leaked(err)
+
+
+def test_the_public_links_are_tried_three_times_two_seconds_apart(metabase, clock):
+    metabase.failures[PUBLIC_SHARING] = 503
+    assert mi.main(env_for(metabase)) == 1
+    assert metabase.calls.count(PUBLIC_SHARING) == 3
+    assert clock.now == 4.0  # two pauses of two seconds, and none after the last attempt
+    assert metabase.databases == []  # the job stopped there: it connected no warehouse
+
+
+def test_a_put_that_fails_once_and_then_succeeds_ends_well(metabase, clock, capsys, monkeypatch):
+    metabase.failures[PUBLIC_SHARING] = 503
+
+    def blip_over(seconds: float) -> None:
+        clock.sleep(seconds)
+        metabase.failures.clear()
+
+    monkeypatch.setattr(mi, "pause", blip_over)
+    assert mi.main(env_for(metabase)) == 0
+    assert metabase.calls.count(PUBLIC_SHARING) == 2
+    assert metabase.settings["enable-public-sharing"] is False
+    assert clock.now == 2.0
+    output = capsys.readouterr()
+    assert "public links are off" in output.out
+    assert output.err == ""
 
 
 def test_the_result_is_reported_without_a_secret(metabase, capsys):
@@ -446,6 +527,39 @@ def test_a_dropped_connection_is_one_line_with_the_step_and_the_class_of_the_err
     assert "./agoranomos logs metabase" in line
     assert "Traceback" not in output.err
     assert leaked(output.err) == []
+
+
+@pytest.mark.parametrize(("fault", "error_class"), FAULTS)
+def test_a_dropped_connection_on_the_public_links_names_them(metabase, capsys, fault, error_class):
+    metabase.faults[PUBLIC_SHARING] = fault
+    assert mi.main(env_for(metabase)) == 1
+    err = capsys.readouterr().err
+    assert f"PUT /api/setting/enable-public-sharing failed: {error_class}" in err
+    assert "The public links of Metabase are still on" in err
+    assert "Admin > Settings > Public sharing" in err
+    assert "Traceback" not in err
+    assert not leaked(err)
+
+
+@pytest.mark.parametrize(("fault", "error_class"), FAULTS)
+def test_a_dropped_connection_on_the_first_put_and_then_a_success_ends_well(
+    metabase, clock, capsys, monkeypatch, fault, error_class
+):
+    # A transport fault counts as a try, like a status: the second PUT goes through.
+    metabase.faults[PUBLIC_SHARING] = fault
+
+    def blip_over(seconds: float) -> None:
+        clock.sleep(seconds)
+        metabase.faults.clear()
+
+    monkeypatch.setattr(mi, "pause", blip_over)
+    assert mi.main(env_for(metabase)) == 0
+    assert metabase.calls.count(PUBLIC_SHARING) == 2
+    assert metabase.settings["enable-public-sharing"] is False
+    assert clock.now == 2.0
+    output = capsys.readouterr()
+    assert "public links are off" in output.out
+    assert output.err == ""
 
 
 def test_a_call_that_cannot_connect_names_the_step_and_the_classes_of_the_error():

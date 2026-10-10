@@ -442,6 +442,357 @@ def test_init_creates_the_extensions_folder(cli):
     assert (cli.root / "extensions" / "metadata").is_dir()
 
 
+def test_init_with_server_turns_server_mode_on(cli):
+    result = cli.run("init", "--server", "bi.example.com")
+    assert result.returncode == 0, result.stderr
+    env = cli.read_env()
+    assert env["AGORANOMOS_SITE_URL"] == "https://bi.example.com"
+    assert env["COMPOSE_PROFILES"] == "core,demo,server"
+    # Metabase on the internet: passwords of 15 characters, and a sign-out after a day idle.
+    assert env["METABASE_PASSWORD_COMPLEXITY"] == "strong-enough"
+    # In single quotes in .env, which Compose reads as the JSON between them.
+    assert env["METABASE_SESSION_TIMEOUT"] == "'" + '{"amount":24,"unit":"hours"}' + "'"
+    assert "Point the A record of bi.example.com at this server" in result.stdout
+    # Again, and with a list of profiles of one's own: each profile once, in its place; a rule of
+    # Metabase that a person set stays.
+    set_env(cli, COMPOSE_PROFILES="core,server", METABASE_PASSWORD_COMPLEXITY="strong")
+    assert cli.run("init", "--server", "bi.example.com").returncode == 0
+    assert cli.read_env()["COMPOSE_PROFILES"] == "core,server"
+    assert cli.read_env()["METABASE_PASSWORD_COMPLEXITY"] == "strong"
+
+
+def test_init_without_server_leaves_the_rules_of_metabase_to_metabase(cli):
+    cli.run("init")
+    env = cli.read_env()
+    assert "METABASE_PASSWORD_COMPLEXITY" not in env
+    assert "METABASE_SESSION_TIMEOUT" not in env
+    assert "AGORANOMOS_SITE_URL" not in env
+
+
+@pytest.mark.parametrize(
+    "domain",
+    [
+        "https://bi.example.com",
+        "bi.example.com/metabase",
+        "bi.example.com:8443",
+        "203.0.113.7",
+        "localhost",
+        "-bad.example.com",
+        "",
+        # A name on the first line is not enough: the whole argument must be a name.
+        "bi.example.com\nother.example.com",
+        "bi.example.com\n",
+        "a" * 64 + ".example.com",
+    ],
+)
+def test_init_with_server_refuses_what_is_not_a_domain_name(cli, domain):
+    result = cli.run("init", "--server", domain)
+    assert result.returncode == 1
+    assert "not a domain name" in result.stderr
+    assert not cli.env_path.exists()
+
+
+def test_init_with_server_needs_a_domain_and_init_takes_no_other_option(cli):
+    assert "--server needs the domain name" in cli.run("init", "--server").stderr
+    assert "unknown option of init: --local" in cli.run("init", "--local").stderr
+
+
+def test_init_with_server_tells_an_upgrade_to_check_its_public_links(cli):
+    # Every Metabase that was set up before this release has public links on, Metabase's default,
+    # and metabase-init leaves them as they are: the person hears it when server mode goes on.
+    result = cli.run("init", "--server", "bi.example.com")
+    assert result.returncode == 0, result.stderr
+    assert (
+        "If this Metabase was set up before this release, its public links stay as they were: "
+        "check Admin > Settings > Public sharing."
+    ) in result.stdout.splitlines()
+    # init alone, and up, say nothing of server mode.
+    assert "public links" not in cli.run("init").stdout
+
+
+def test_init_with_server_accepts_a_label_of_63_characters(cli):
+    result = cli.run("init", "--server", "a" * 63 + ".example.com")
+    assert result.returncode == 0, result.stderr
+    assert cli.read_env()["AGORANOMOS_SITE_URL"] == "https://" + "a" * 63 + ".example.com"
+
+
+@pytest.mark.parametrize("domain", ["agoranomos.localhost", "Bi.LOCALHOST", "home.arpa"])
+def test_init_with_server_hints_at_internal_tls_for_a_name_that_gets_no_certificate(cli, domain):
+    # Let's Encrypt issues for none of these names, and preflight stops on them with acme: the
+    # message of init says what to set, and stops saying it once it is set.
+    result = cli.run("init", "--server", domain)
+    assert result.returncode == 0, result.stderr
+    assert "Point the A record of" in result.stdout
+    assert "set AGORANOMOS_TLS=internal in .env" in result.stdout
+    set_env(cli, AGORANOMOS_TLS="internal")
+    again = cli.run("init", "--server", domain)
+    assert again.returncode == 0, again.stderr
+    assert "AGORANOMOS_TLS" not in again.stdout
+
+
+def test_init_with_server_gives_no_hint_about_tls_for_a_name_that_gets_a_certificate(cli):
+    result = cli.run("init", "--server", "bi.example.com")
+    assert result.returncode == 0, result.stderr
+    assert "AGORANOMOS_TLS" not in result.stdout
+
+
+def test_init_with_server_again_leaves_the_hand_written_lines_as_they_are(cli):
+    # Running it again changes nothing: a line that a person wrote with quotes and a comment is not
+    # rewritten when the list of profiles and the address are already right.
+    assert cli.run("init", "--server", "bi.example.com").returncode == 0
+    set_env(
+        cli,
+        COMPOSE_PROFILES='"core,demo,server" # mine',
+        AGORANOMOS_SITE_URL="'https://bi.example.com' # mine too",
+    )
+    before = cli.env_path.read_bytes()
+    assert b'COMPOSE_PROFILES="core,demo,server" # mine\n' in before
+    result = cli.run("init", "--server", "bi.example.com")
+    assert result.returncode == 0, result.stderr
+    assert cli.env_path.read_bytes() == before
+
+
+def server_env(cli, tls="internal", site="https://agoranomos.localhost"):
+    cli.run("init", "--server", "bi.example.com")
+    set_env(cli, AGORANOMOS_TLS=tls, AGORANOMOS_SITE_URL=site)
+
+
+@pytest.mark.parametrize(("version", "outcome"), [("27.5.1", "stop"), ("28.0.0", "pass")])
+def test_preflight_in_server_mode_needs_docker_28(cli, version, outcome):
+    server_env(cli)
+    result = cli.run("preflight", FAKE_SERVER_VERSION=version)
+    check_limit(result, outcome, "28.0.0")
+
+
+def test_preflight_in_local_mode_keeps_docker_25(cli):
+    cli.run("init")
+    result = cli.run("preflight", FAKE_SERVER_VERSION="27.5.1")
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("tls", "site", "word"),
+    [
+        ("acme", "https://agoranomos.localhost", "cannot get a certificate from Let's Encrypt"),
+        ("acme", "https://bi.test", "cannot get a certificate from Let's Encrypt"),
+        ("acme", "https://localhost", "AGORANOMOS_SITE_URL"),
+        ("internal", "http://agoranomos.localhost", "AGORANOMOS_SITE_URL"),
+        ("internal", "https://agoranomos.localhost/metabase", "AGORANOMOS_SITE_URL"),
+        ("letsencrypt", "https://bi.example.com", "AGORANOMOS_TLS"),
+    ],
+)
+def test_preflight_stops_on_a_site_that_server_mode_cannot_serve(cli, tls, site, word):
+    server_env(cli, tls=tls, site=site)
+    result = cli.run("preflight")
+    assert result.returncode == 1
+    assert word in result.stderr
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "bi.localhost",
+        "bi.test",
+        "bi.example",
+        "bi.invalid",
+        "bi.local",
+        "bi.internal",
+        "bi.home.arpa",
+        "home.arpa",
+        # DNS names are not case-sensitive.
+        "Bi.LOCALHOST",
+        "bi.Test",
+        "BI.Home.ARPA",
+        "HOME.arpa",
+    ],
+)
+def test_preflight_with_acme_stops_on_every_name_that_no_public_authority_certifies(cli, host):
+    server_env(cli, tls="acme", site=f"https://{host}")
+    result = cli.run("preflight")
+    assert result.returncode == 1
+    assert "cannot get a certificate from Let's Encrypt" in result.stderr
+    # Caddy's own authority serves the same name.
+    set_env(cli, AGORANOMOS_TLS="internal")
+    assert cli.run("preflight").returncode == 0
+
+
+@pytest.mark.parametrize(
+    ("tls", "site"),
+    [("internal", "https://agoranomos.localhost"), ("acme", "https://bi.example.com")],
+)
+def test_preflight_passes_a_site_that_server_mode_can_serve(cli, tls, site):
+    server_env(cli, tls=tls, site=site)
+    result = cli.run("preflight")
+    assert result.returncode == 0, result.stderr
+
+
+def assert_advice_for_a_short_admin_password(message):
+    """metabase-init never changes the password of an admin that exists, so a Metabase that is set
+    up already needs its password changed in Metabase first, and only then in .env; a new one takes
+    whatever .env says. The message names settings, never a value."""
+    assert (
+        "For a Metabase that is set up already, first change the admin password in Metabase "
+        "(Account settings) to at least 15 characters, then put the same value in .env"
+    ) in message
+    assert (
+        "for a new one, write a longer value, or leave it empty for ./agoranomos init to "
+        "generate one"
+    ) in message
+
+
+@pytest.mark.parametrize(("length", "outcome"), [(14, "stop"), (15, "pass"), (0, "pass")])
+def test_preflight_in_server_mode_stops_on_an_admin_password_that_strong_enough_refuses(
+    cli, length, outcome
+):
+    # Metabase checks the admin password of its first start against its rule: with strong-enough
+    # (init --server sets it), one of fewer than 15 characters makes metabase-init fail. An empty
+    # password is not set by hand: init generates one of 32.
+    server_env(cli)
+    password = "x" * length
+    set_env(cli, METABASE_ADMIN_PASSWORD=password)
+    assert cli.read_env()["METABASE_PASSWORD_COMPLEXITY"] == "strong-enough"
+    result = cli.run("preflight")
+    assert result.returncode == (1 if outcome == "stop" else 0), result.stderr
+    if outcome == "stop":
+        assert "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters" in result.stderr
+        assert "METABASE_PASSWORD_COMPLEXITY=strong-enough" in result.stderr
+        assert_advice_for_a_short_admin_password(result.stderr)
+    else:
+        assert "METABASE_ADMIN_PASSWORD" not in result.stderr
+    # Never the value, whether or not it was refused.
+    assert password == "" or password not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("complexity", ["normal", "strong"])
+def test_preflight_leaves_a_short_admin_password_to_the_other_rules_of_metabase(cli, complexity):
+    # normal asks for 6 characters and a digit, and strong has rules of its own: the check of the
+    # length of strong-enough is not theirs.
+    server_env(cli)
+    set_env(cli, METABASE_PASSWORD_COMPLEXITY=complexity, METABASE_ADMIN_PASSWORD="Aa1Aa1Aa1")
+    result = cli.run("preflight")
+    assert result.returncode == 0, result.stderr
+
+
+def test_preflight_in_local_mode_does_not_check_the_length_of_the_admin_password(cli):
+    # With the default rule of Metabase, normal.
+    cli.run("init")
+    set_env(cli, METABASE_ADMIN_PASSWORD="Aa1")
+    result = cli.run("preflight")
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(("length", "outcome"), [(14, "stop"), (15, "pass")])
+def test_preflight_in_local_mode_checks_the_admin_password_against_strong_enough(
+    cli, length, outcome
+):
+    # compose.yaml hands the rule to Metabase in every mode, so a person who sets strong-enough in
+    # local mode needs the same password as in server mode.
+    cli.run("init")
+    with cli.env_path.open("a", encoding="utf-8") as env:
+        env.write("METABASE_PASSWORD_COMPLEXITY=strong-enough\n")
+    password = "x" * length
+    set_env(cli, METABASE_ADMIN_PASSWORD=password)
+    result = cli.run("preflight")
+    assert result.returncode == (1 if outcome == "stop" else 0), result.stderr
+    if outcome == "stop":
+        assert "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters" in result.stderr
+        assert_advice_for_a_short_admin_password(result.stderr)
+    assert password not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("port", ["80", "443"])
+def test_preflight_in_server_mode_stops_when_a_port_of_the_proxy_is_in_use(cli, port):
+    server_env(cli)
+    result = cli.run("preflight", FAKE_BUSY_PORTS=port)
+    assert result.returncode == 1
+    assert f"port {port} is in use" in result.stderr
+
+
+def test_preflight_in_local_mode_ignores_busy_ports_80_and_443(cli):
+    cli.run("init")
+    result = cli.run("preflight", FAKE_BUSY_PORTS="80 443")
+    assert result.returncode == 0, result.stderr
+
+
+def test_preflight_in_server_mode_does_not_check_the_ports_while_the_stack_runs(cli):
+    # The running proxy holds 80 and 443 itself.
+    server_env(cli)
+    result = cli.run("preflight", FAKE_BUSY_PORTS="80 443 8080 3000", FAKE_RUNNING="abc123\n")
+    assert result.returncode == 0, result.stderr
+    assert "is in use" not in result.stderr
+
+
+def test_up_in_server_mode_prints_the_site_and_the_tunnel_to_airflow(cli, tmp_path):
+    server_env(cli)
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert "Metabase: https://agoranomos.localhost" in lines
+    assert (
+        "Airflow:  http://127.0.0.1:8080 on this server; from your machine: "
+        "ssh -L 8080:127.0.0.1:8080 <user>@<server>"
+    ) in lines
+
+
+def test_up_checks_the_certificate_of_a_site_of_lets_encrypt(cli, tmp_path):
+    server_env(cli, tls="acme", site="https://bi.example.com")
+    cli.stub("curl", 'printf "%s\\n" "$*" >> "$FAKE_LOG.curl"; exit 0')
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
+    assert result.returncode == 0, result.stderr
+    calls = (tmp_path / "docker.log.curl").read_text(encoding="utf-8").splitlines()
+    # --noproxy: a proxy in the environment of the person must not bypass --resolve.
+    assert calls == [
+        "--silent --output /dev/null --max-time 10 --noproxy * "
+        "--resolve bi.example.com:443:127.0.0.1 https://bi.example.com/api/health"
+    ]
+    assert "certificate" not in result.stderr
+    lines = result.stdout.splitlines()
+    checking = lines.index(
+        "Checking the certificate of https://bi.example.com, for about a minute."
+    )
+    assert lines.index("All services are healthy.") < checking
+    assert checking < next(i for i, line in enumerate(lines) if line.startswith("The stack is up."))
+
+
+def test_up_warns_when_the_site_has_no_trusted_certificate_yet(cli, tmp_path):
+    # The domain does not point at the server yet, or the ports are closed: Caddy runs, and the
+    # stack works, but the site has no certificate. up says so and still succeeds.
+    server_env(cli, tls="acme", site="https://bi.example.com")
+    cli.stub("curl", "exit 60")
+    result = cli.run(
+        "up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), AGORANOMOS_CERTIFICATE_TRIES="2", **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    assert "https://bi.example.com does not answer with a certificate that this machine trusts" in (
+        result.stderr
+    )
+    assert "DNS record of bi.example.com" in result.stderr
+    assert "./agoranomos logs proxy" in result.stderr
+    assert "docker compose restart proxy" in result.stderr
+
+
+def test_up_with_the_own_authority_of_caddy_does_not_check_the_certificate(cli, tmp_path):
+    server_env(cli)
+    cli.stub("curl", 'printf "called\\n" >> "$FAKE_LOG.curl"; exit 60')
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / "docker.log.curl").exists()
+    assert "Checking the certificate" not in result.stdout
+
+
+def test_credentials_in_server_mode_name_the_site_and_the_tunnel(cli):
+    server_env(cli)
+    lines = cli.run("credentials").stdout.splitlines()
+    assert lines[0] == (
+        "Airflow:  http://127.0.0.1:8080 through an SSH tunnel  user name admin, password "
+        "AIRFLOW_ADMIN_PASSWORD"
+    )
+    assert lines[1] == (
+        "Metabase: https://agoranomos.localhost  email admin@example.com, password "
+        "METABASE_ADMIN_PASSWORD"
+    )
+
+
 def test_runs_from_another_directory(cli, tmp_path):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -542,7 +893,7 @@ def test_the_check_of_the_memory_limits_names_each_setting_and_no_value(cli):
     # Every *_MEMORY setting of .env, also one that .env.example does not have, on one line each.
     cli.run("init")
     names = [key for key in cli.read_env() if key.endswith("_MEMORY")]
-    assert len(names) == 9
+    assert len(names) == 10
     values = {name: f"4242{index}" for index, name in enumerate(names)}
     set_env(cli, **values)
     with cli.env_path.open("a", encoding="utf-8") as env:
@@ -1231,7 +1582,7 @@ def test_up_waits_for_the_rest_of_the_stack_when_only_demo_init_failed(cli, tmp_
     assert result.returncode == 1
     assert result.stderr.splitlines()[-1] == "error: the stack is up, but the demo is not ready"
     assert "Metabase: http://127.0.0.1:3000" in result.stdout
-    polls = [call for call in cli.docker_calls() if call.startswith("compose ps --all")]
+    polls = [call for call in cli.docker_calls() if call.startswith("compose ps --all --format")]
     assert len(polls) == 2  # the first poll found platform-db still starting
 
 
@@ -1362,7 +1713,7 @@ def test_up_reports_a_failing_docker_compose_up_and_does_not_wait(cli, tmp_path)
     assert "./agoranomos status and ./agoranomos logs <service>" in result.stderr
     assert "Waiting until every service is healthy" not in result.stdout
     assert "The stack is up" not in result.stdout
-    assert not any(call.startswith("compose ps --all") for call in cli.docker_calls())
+    assert not any(call.startswith("compose ps --all --format") for call in cli.docker_calls())
 
 
 def test_up_reports_a_failing_docker_compose_ps(cli):
@@ -1384,7 +1735,7 @@ def test_up_keeps_waiting_until_the_services_are_healthy(cli, tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert "All services are healthy." in result.stdout
-    polls = [call for call in cli.docker_calls() if call.startswith("compose ps --all")]
+    polls = [call for call in cli.docker_calls() if call.startswith("compose ps --all --format")]
     assert len(polls) == 2  # the first poll found platform-db still starting
 
 
@@ -1511,7 +1862,7 @@ def test_up_names_every_failed_service_and_does_not_wait_for_the_rest(cli, tmp_p
     assert "db-init failed: see ./agoranomos logs db-init" in result.stderr
     assert "warehouse-db failed: see ./agoranomos logs warehouse-db" in result.stderr
     assert "platform-db" not in result.stderr  # still starting: no reason to wait for it
-    assert len([c for c in cli.docker_calls() if c.startswith("compose ps --all")]) == 1
+    assert len([c for c in cli.docker_calls() if c.startswith("compose ps --all --format")]) == 1
 
 
 def test_up_hands_compose_the_files_of_env_and_never_passes_flags(cli, tmp_path):
@@ -1545,7 +1896,15 @@ def test_compose_gets_its_settings_from_env_whatever_the_shell_exports(cli, tmp_
     assert result.returncode == 0, result.stderr
     settings = cli.compose_settings()
     assert len(settings) == len(compose_calls(cli)) >= 3  # the running check, up and a poll
-    assert set(settings) == {("my-stack", "core,extra", "compose.yaml")}
+    # The look for a proxy left from server mode adds the profile of the proxy to the profiles of
+    # .env; every other call has those of .env alone.
+    with_server = [
+        call_settings
+        for call_settings, call in zip(settings, compose_calls(cli), strict=True)
+        if call == "compose ps --all --quiet proxy"
+    ]
+    assert with_server == [("my-stack", "core,extra,server", "compose.yaml")]
+    assert {*settings} - {*with_server} == {("my-stack", "core,extra", "compose.yaml")}
 
 
 def test_compose_settings_have_defaults_when_env_does_not_set_them(cli):
@@ -1561,6 +1920,80 @@ def test_down_keeps_the_volumes(cli):
     [call] = [c for c in cli.docker_calls() if c.startswith("compose down")]
     assert "--volumes" not in call
     assert " -v" not in call
+
+
+# A person who takes server out of COMPOSE_PROFILES and runs up or down leaves the proxy container
+# of the disabled profile running, and Caddy then keeps serving the new Metabase on ports 80 and
+# 443, with the rules of local mode. In local mode up and down remove it.
+LEFTOVER_PROXY = "Server mode is off: the proxy of server mode is stopped and removed."
+PROXY_REMOVAL = "compose rm --stop --force proxy"
+COMMANDS_WITH_A_PROXY = {
+    "up": "compose up --detach --remove-orphans",
+    "down": "compose down --remove-orphans",
+}
+
+
+def run_with_a_proxy_left(cli, tmp_path, command, **fake):
+    """A .env that was server mode and is local mode now, and a stack with a proxy container."""
+    server_env(cli)
+    set_env(cli, COMPOSE_PROFILES="core,demo")
+    return cli.run(command, FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK, **fake)
+
+
+@pytest.mark.parametrize("command", ["up", "down"])
+def test_in_local_mode_a_proxy_left_from_server_mode_is_removed_before_the_stack_starts(
+    cli, tmp_path, command
+):
+    result = run_with_a_proxy_left(cli, tmp_path, command, FAKE_PROXY="0123abcdef\n")
+    assert result.returncode == 0, result.stderr
+    assert LEFTOVER_PROXY in result.stdout.splitlines()
+    calls = cli.docker_calls()
+    assert calls.count(PROXY_REMOVAL) == 1
+    assert calls.index(PROXY_REMOVAL) < calls.index(COMMANDS_WITH_A_PROXY[command])
+    # The removal is the only call that knows the profile of the proxy, which reaches Compose in
+    # COMPOSE_PROFILES, as every profile does; the stack itself keeps the profiles of .env.
+    names = compose_calls(cli)
+    profiles = [settings[1].split(",") for settings in cli.compose_settings()]
+    assert "server" in profiles[names.index(PROXY_REMOVAL)]
+    assert "server" in profiles[names.index("compose ps --all --quiet proxy")]
+    assert profiles[names.index(COMMANDS_WITH_A_PROXY[command])] == ["core", "demo"]
+    # The volume of Caddy, with its certificates and its own authority, stays.
+    assert "--volumes" not in PROXY_REMOVAL.split()
+    assert not any(" -v" in call or "--volumes" in call for call in calls)
+
+
+@pytest.mark.parametrize("command", ["up", "down"])
+def test_in_local_mode_up_and_down_leave_alone_a_stack_that_has_no_proxy(cli, tmp_path, command):
+    result = run_with_a_proxy_left(cli, tmp_path, command)
+    assert result.returncode == 0, result.stderr
+    assert PROXY_REMOVAL not in cli.docker_calls()
+    assert LEFTOVER_PROXY not in result.stdout
+    assert COMMANDS_WITH_A_PROXY[command] in cli.docker_calls()
+
+
+@pytest.mark.parametrize("command", ["up", "down"])
+def test_in_server_mode_up_and_down_never_remove_the_proxy(cli, tmp_path, command):
+    server_env(cli)
+    result = cli.run(
+        command, FAKE_PROXY="0123abcdef\n", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    assert LEFTOVER_PROXY not in result.stdout
+    assert not any(" rm " in call or call.endswith(" proxy") for call in cli.docker_calls())
+
+
+@pytest.mark.parametrize("command", ["up", "down"])
+def test_a_proxy_that_cannot_be_removed_stops_the_command_and_says_how_to_remove_it(
+    cli, tmp_path, command
+):
+    result = run_with_a_proxy_left(
+        cli, tmp_path, command, FAKE_PROXY="0123abcdef\n", FAKE_COMPOSE_EXIT="1"
+    )
+    assert result.returncode == 1
+    assert LEFTOVER_PROXY not in result.stdout
+    assert "docker compose --profile server rm --stop --force proxy" in result.stderr
+    assert "ports 80 and 443" in result.stderr
+    assert COMMANDS_WITH_A_PROXY[command] not in cli.docker_calls()
 
 
 @pytest.mark.parametrize("command", ["down", "status"])

@@ -1,5 +1,6 @@
 """Tests of the helpers themselves: they need neither Docker nor a running stack."""
 
+import ast
 import http.client
 import importlib.util
 import json
@@ -8,6 +9,7 @@ import pprint
 import re
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import threading
@@ -1365,6 +1367,84 @@ def test_a_failed_request_prints_no_part_of_its_body_under_any_traceback_mode(
     assert shown_in(values["TEST_CONTROL"], report) is control_leaks
 
 
+# What ./agoranomos reads from a line of .env (compose-go 2.16.1, dotenv/parser.go): a value without
+# quotes ends before " #" and loses the blanks at its end, the carriage return of a line of Windows
+# among them; a value in quotes is what is between them. This is a copy of ENV_LINES in
+# tests/unit/test_agoranomos_functions.py, which tests env_get of ./agoranomos: that module is no
+# part of the stack tests, which run on their own. read_env must read every line as env_get does,
+# because Compose starts the stack from the same .env, and the helpers choose the variant and the
+# profiles from what they read; the next test fails when the two lists differ.
+ENV_LINES = [
+    ("KEY=plain", "plain"),
+    ("KEY=plain # a comment", "plain"),
+    ("KEY=plain # a comment\r", "plain"),
+    ("KEY=plain\r", "plain"),
+    ("KEY=plain   ", "plain"),
+    ("KEY=  after blanks", "after blanks"),
+    ("KEY=  vivid leaf \r", "vivid leaf"),
+    ("KEY=\fform feed and vertical tab\v", "form feed and vertical tab"),
+    ("KEY=a#b", "a#b"),
+    (
+        "KEY=tab\t# no space before the hash, so no comment",
+        "tab\t# no space before the hash, so no comment",
+    ),
+    ("KEY='in single # quotes'", "in single # quotes"),
+    ('KEY="in double quotes"\r', "in double quotes"),
+    ("KEY='$dollar and spaces '", "$dollar and spaces "),
+    ("KEY=", ""),
+    # Compose trims the blanks after the = before it looks for a comment, so a comment after an
+    # empty value is the value (./agoranomos preflight stops on such a line).
+    ("KEY= # a comment", "# a comment"),
+    # The rule of the sessions of Metabase in server mode, which ./agoranomos init --server writes.
+    ('KEY=\'{"amount":24,"unit":"hours"}\'', '{"amount":24,"unit":"hours"}'),
+]
+
+
+def test_the_cases_of_read_env_are_those_of_env_get():
+    unit_test = stack_helpers.REPO_ROOT / "tests" / "unit" / "test_agoranomos_functions.py"
+    source = unit_test.read_text(encoding="utf-8")
+    cases = [
+        ast.literal_eval(node.value)
+        for node in ast.parse(source).body
+        if isinstance(node, ast.Assign)
+        and [target.id for target in node.targets if isinstance(target, ast.Name)] == ["ENV_LINES"]
+    ]
+    assert cases == [ENV_LINES]
+
+
+@pytest.mark.parametrize(("line", "value"), ENV_LINES)
+def test_read_env_reads_a_value_as_the_command_does(tmp_path, line, value):
+    # Bytes, as the command reads the file: no translation of line endings.
+    path = tmp_path / ".env"
+    path.write_bytes(f"OTHER=1\n{line}\nKEYS=not this key\n".encode())
+    assert stack_helpers.read_env(path) == {"OTHER": "1", "KEY": value, "KEYS": "not this key"}
+
+
+def test_read_env_takes_the_last_line_that_sets_a_key(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text("KEY=first\nKEY=second # the one that counts\n", encoding="utf-8")
+    assert stack_helpers.read_env(path) == {"KEY": "second"}
+
+
+def test_read_env_ends_a_line_at_a_newline_and_nowhere_else(tmp_path):
+    # The command reads lines with awk, which splits on newlines only: a carriage return, a vertical
+    # tab and a form feed stay inside the line, str.splitlines() would split on all of them.
+    path = tmp_path / ".env"
+    path.write_bytes(b"A=one\rB=two\nC=three\x0bD=four\x0c\nE=five\n")
+    assert stack_helpers.read_env(path) == {"A": "one\rB=two", "C": "three\x0bD=four", "E": "five"}
+
+
+def test_read_env_takes_only_lines_that_start_with_the_key(tmp_path):
+    # The command asks for "KEY=" at the start of a line: a comment, an export, blanks before or
+    # around the = and a line without a key set nothing.
+    path = tmp_path / ".env"
+    path.write_text(
+        "# KEY=comment\n  KEY=indented\nexport KEY=exported\nKEY =spaced\n=no key\nno equals\n",
+        encoding="utf-8",
+    )
+    assert "KEY" not in stack_helpers.read_env(path)
+
+
 def write_env(tmp_path, monkeypatch, text):
     """Make stack_helpers read a .env with this text, in a checkout of its own."""
     (tmp_path / ".env").write_text(text, encoding="utf-8")
@@ -1380,6 +1460,8 @@ def write_env(tmp_path, monkeypatch, text):
         ("COMPOSE_FILE='compose.yaml:compose.celery.yaml'", "celery"),
         ("COMPOSE_FILE=compose.celery.yaml:compose.yaml", "celery"),
         ("COMPOSE_FILE=/srv/stack/compose.yaml:/srv/stack/compose.celery.yaml", "celery"),
+        # Compose cuts the comment, so it starts the Celery variant.
+        ("COMPOSE_FILE=compose.yaml:compose.celery.yaml # worker", "celery"),
         ("COMPOSE_FILE=compose.yaml:compose.celery.yaml.bak", "local"),
         ("COMPOSE_FILE=compose.yaml:not-compose.celery.yaml", "local"),
         ("COMPOSE_FILE=", "local"),
@@ -1421,6 +1503,7 @@ def write_example(tmp_path, text="COMPOSE_PROFILES=core,demo\n"):
         ("COMPOSE_PROFILES='core, demo'", {"core", "demo"}),
         ("COMPOSE_PROFILES=core,,demo,", {"core", "demo"}),
         ("COMPOSE_PROFILES=core,demonstration", {"core", "demonstration"}),
+        ("COMPOSE_PROFILES=core,demo # all of them", {"core", "demo"}),
     ],
 )
 def test_active_profiles_follow_compose_profiles_in_env(tmp_path, monkeypatch, setting, profiles):
@@ -1480,7 +1563,119 @@ def test_the_celery_variant_adds_the_broker_and_the_worker_to_the_long_running_s
         "metadata-export",
         "metabase-init",
     }
-    assert services.LONG_RUNNING in (local, celery)
+    assert (
+        services.long_running(stack_helpers.active_variant(), stack_helpers.active_profiles())
+        == services.LONG_RUNNING
+    )
+
+
+def test_server_mode_adds_the_proxy_to_the_long_running_services():
+    for variant in ("local", "celery"):
+        alone = services.long_running(variant)
+        assert services.long_running(variant, {"core", "server"}) == alone | {"proxy"}
+        assert services.long_running(variant, {"core", "demo"}) == alone
+
+
+def test_the_name_of_the_site_is_its_address_without_the_scheme():
+    site = {"AGORANOMOS_SITE_URL": "https://bi.example.com/"}
+    assert stack_helpers.site_host(site) == "bi.example.com"
+    with pytest.raises(AssertionError, match="server mode needs AGORANOMOS_SITE_URL"):
+        stack_helpers.site_host({"AGORANOMOS_SITE_URL": "http://localhost:3000"})
+
+
+def test_a_request_to_the_site_that_cannot_connect_names_the_call_and_holds_no_body(monkeypatch):
+    def refuse(*args, **kwargs):
+        raise ConnectionRefusedError
+
+    monkeypatch.setattr(stack_helpers.socket, "create_connection", refuse)
+    site = {"AGORANOMOS_SITE_URL": "https://bi.example.com", "AGORANOMOS_TLS": "acme"}
+    with pytest.raises(ConnectionError) as raised:
+        stack_helpers.site_request(site, "POST", "/api/session", {"password": PASSWORD})
+    assert str(raised.value) == "POST /api/session failed: ConnectionRefusedError"
+    assert raised.value.__cause__ is None
+    assert raised.value.__suppress_context__ is True
+
+
+def test_a_request_to_the_site_goes_to_this_machine_and_names_the_site_in_tls(monkeypatch):
+    seen = {}
+
+    class Context:
+        def wrap_socket(self, sock, server_hostname):
+            seen["server_hostname"] = server_hostname
+            raise ssl.SSLError("no certificate for this name")
+
+    def connect(address, timeout=None):
+        seen["address"] = address
+        return object()
+
+    monkeypatch.setattr(stack_helpers.socket, "create_connection", connect)
+    monkeypatch.setattr(stack_helpers, "site_context", lambda tls: Context())
+    site = {"AGORANOMOS_SITE_URL": "https://bi.example.com", "AGORANOMOS_TLS": "internal"}
+    with pytest.raises(ConnectionError, match="SSLError"):
+        stack_helpers.site_request(site, "GET", "/", name="airflow.bi.example.com")
+    assert seen == {"address": ("127.0.0.1", 443), "server_hostname": "airflow.bi.example.com"}
+
+
+def test_the_context_of_the_site_reads_the_root_of_caddy_only_with_internal_tls(monkeypatch):
+    stack_helpers.site_context.cache_clear()
+    contexts, calls = [], []
+
+    def create_default_context(**options):
+        contexts.append(options)
+        return f"context {len(contexts)}"
+
+    def compose(*args, **options):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="the root of Caddy", stderr="")
+
+    monkeypatch.setattr(stack_helpers.ssl, "create_default_context", create_default_context)
+    monkeypatch.setattr(stack_helpers, "compose", compose)
+    try:
+        assert stack_helpers.site_context("acme") == "context 1"
+        assert calls == []
+        assert stack_helpers.site_context("internal") == "context 2"
+        assert contexts == [{}, {"cadata": "the root of Caddy"}]
+        assert calls == [
+            ("exec", "-T", "proxy", "cat", "/data/caddy/pki/authorities/local/root.crt")
+        ]
+    finally:
+        stack_helpers.site_context.cache_clear()
+
+
+SESSION = "a-session-that-must-stay-out-of-the-report"
+
+
+def test_the_admin_signs_in_through_the_proxy_and_the_session_comes_back_wrapped(monkeypatch):
+    calls = []
+
+    def answer(env, method, path, body=None, headers=None, timeout=30, name=None):
+        calls.append((method, path, body))
+        cookie = {"set-cookie": f"metabase.SESSION={SESSION}; HttpOnly"}
+        return 200, cookie, json.dumps({"id": SESSION}).encode()
+
+    monkeypatch.setattr(stack_helpers, "site_request", answer)
+    site = {"AGORANOMOS_ADMIN_EMAIL": "admin@bi.example.com", "METABASE_ADMIN_PASSWORD": PASSWORD}
+    session = stack_helpers.site_session(site)
+    assert calls == [
+        ("POST", "/api/session", {"username": "admin@bi.example.com", "password": PASSWORD})
+    ]
+    # Only the wrapped headers come back, and they print without the session.
+    assert type(session) is stack_helpers.SecretHeaders
+    assert session == {"X-Metabase-Session": SESSION}
+    assert type(session["X-Metabase-Session"]) is stack_helpers.Secret
+    assert SESSION not in repr(session) + repr(session["X-Metabase-Session"])
+    # The default of the name, as the session fixture has it.
+    del site["AGORANOMOS_ADMIN_EMAIL"]
+    stack_helpers.site_session(site)
+    assert calls[-1][2]["username"] == "admin@example.com"
+
+
+def test_a_failed_sign_in_through_the_proxy_names_the_status_and_shows_no_body(monkeypatch):
+    refusal = json.dumps({"errors": {"password": "a body that must stay out of the report"}})
+    monkeypatch.setattr(stack_helpers, "site_request", lambda *a, **k: (401, {}, refusal.encode()))
+    with pytest.raises(AssertionError) as raised:
+        stack_helpers.site_session({"METABASE_ADMIN_PASSWORD": PASSWORD})
+    assert str(raised.value) == "the admin could not sign in through the proxy: HTTP 401"
 
 
 def test_the_celery_variant_adds_the_worker_to_the_airflow_services():

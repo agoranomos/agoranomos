@@ -2,7 +2,7 @@
 
 Thank you for your interest in Agoranomos. This guide describes how work is done in this repository today.
 
-Agoranomos is pre-alpha, and the repository is private until v0.3, so for now it is open to invited collaborators only. Besides the project's tooling, its documentation and the architecture decision records, the stack runs in local mode, and the rest is being built; the [README](README.md) has the roadmap.
+Agoranomos is pre-alpha, and the repository is private until v0.3, so for now it is open to invited collaborators only. Besides the project's tooling, its documentation and the architecture decision records, the stack runs in local mode and in server mode, and the rest is being built; the [README](README.md) has the roadmap.
 
 By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). If you found a security vulnerability, do not open an issue: follow the [security policy](SECURITY.md).
 
@@ -54,7 +54,7 @@ uv run pytest tests/stack    # the stack tests, against the running stack
 ./agoranomos down            # stop it; the data stays
 ```
 
-CI runs the same stack tests for every pull request that changes the stack. The stack has two variants of Airflow: the LocalExecutor by default, and the CeleryExecutor with a broker and a worker ([ADR-0015](docs/adr/0015-run-localexecutor-by-default.md)). The stack tests follow the variant that `.env` selects, and the tests of the demo skip when `COMPOSE_PROFILES` in `.env` does not list `demo`. To test the Celery variant, set `COMPOSE_FILE=compose.yaml:compose.celery.yaml` in `.env` before `./agoranomos up`; CI tests both on pushes to `main`.
+CI runs the same stack tests for every pull request that changes the stack. The stack has two variants of Airflow: the LocalExecutor by default, and the CeleryExecutor with a broker and a worker ([ADR-0015](docs/adr/0015-run-localexecutor-by-default.md)). The stack tests follow the variant that `.env` selects, and the tests of the demo skip when `COMPOSE_PROFILES` in `.env` does not list `demo`. To test the Celery variant, set `COMPOSE_FILE=compose.yaml:compose.celery.yaml` in `.env` before `./agoranomos up`; CI tests both on pushes to `main`. The tests of server mode, in `tests/stack/test_server.py`, skip when `COMPOSE_PROFILES` in `.env` does not list `server`; to run them, use `./agoranomos init --server agoranomos.localhost`, set `AGORANOMOS_TLS=internal` in `.env` (Caddy then uses its own certificate authority), and start the stack with ports 80 and 443 free. The proxy publishes them on every address of the host, so run it on a trusted network, and stop it with `./agoranomos down` when you are done. CI tests server mode on pushes to `main`, and in a pull request that changes a file of server mode, in place of the local job.
 
 ## Make a change
 
@@ -62,7 +62,7 @@ CI runs the same stack tests for every pull request that changes the stack. The 
 2. **Commit.** Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `type(optional scope): summary`. The accepted types are `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore` and `revert`. Keep the summary short and in the imperative, for example `docs: explain how attribution windows are reloaded`, and use the body to say why the change is needed.
 3. **Sign off.** Every commit needs a DCO sign-off, which `git commit -s` adds (see below).
 4. **Open a pull request** against `main` and fill in the template. Keep it focused on one change.
-5. **Get the checks green.** Five checks run on every pull request: static checks (prek, including the full-history secret scan), the documentation build in strict mode, the unit tests, the Conventional Commits title and the DCO sign-off. A pull request that changes the stack also runs the stack tests in CI, as the check "Local mode (amd64, local)".
+5. **Get the checks green.** Five checks run on every pull request: static checks (prek, including the full-history secret scan), the documentation build in strict mode, the unit tests, the Conventional Commits title and the DCO sign-off. A pull request that changes the stack also runs the stack tests in CI, as the check "Local mode (amd64, local)", or, when it changes a file of server mode (`agoranomos`, `compose.yaml` or `caddy/`, for example), as the check "Server mode (amd64)" in its place.
 6. **Review and merge.** The maintainer reviews the pull request and squash-merges it. The pull request title becomes the commit title on `main`, so it must follow Conventional Commits as well.
 
 If a hook changes files when you commit (the final-newline fixer or ruff, for example), the commit stops. Review the changes, add them with `git add` and commit again.

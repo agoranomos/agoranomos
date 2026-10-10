@@ -20,7 +20,7 @@ MODES = {
     "server": frozenset({"core", "demo", "server", "ops"}),
 }
 # The services that only server mode runs: the proxy and the backups.
-SERVER_ONLY: list[str] = []
+SERVER_ONLY: list[str] = ["proxy"]
 SERVICE = re.compile(r"^  ([a-z][a-z0-9-]*):$")
 LIMIT = re.compile(r"^    mem_limit: (?:\$\{([A-Z_]+):-(\d+[mg])\}|(\d+[mg]))$")
 SWAP = re.compile(r"^    memswap_limit: (.+)$")

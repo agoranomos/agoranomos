@@ -66,4 +66,6 @@ Agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0016](0016-keep-the-metadata-of-the-marts-as-code.md) | Keep the metadata of the marts as code, with a deployment's overrides in extensions | accepted | 2026-10-07 |
 | [0017](0017-set-ai-access-in-metabase-by-levels.md) | Set the access of AI clients in Metabase by levels | accepted | 2026-10-10 |
 | [0018](0018-keep-the-content-of-the-package-in-metabase-as-code.md) | Keep the content of the package in Metabase as code, and view-only | accepted | 2026-10-10 |
+| [0019](0019-open-only-metabase-in-server-mode.md) | Open only Metabase to the internet in server mode, through Caddy | proposed | 2026-10-09 |
+| [0021](0021-leave-the-outgoing-traffic-of-metabase-open.md) | Leave the outgoing traffic of Metabase open, and close what relays it without a sign-in | proposed | 2026-10-09 |
 | [0022](0022-budget-the-memory-by-variant-and-mode.md) | Budget the memory by variant and mode | accepted | 2026-10-09 |

@@ -8,7 +8,7 @@ decision-makers: Andrei Gromov
 
 ## Context and Problem Statement
 
-[ADR-0010](0010-multi-arch-and-memory-budget.md) set one memory budget for the stack: every service at its limit, at the same time, fits 8 GB of memory as Docker reports it, 7,680 MiB. The limits come from measurements and a formula ([System requirements](../reference/system-requirements.md#memory-limits)). The CeleryExecutor variant ([ADR-0015](0015-run-localexecutor-by-default.md)) uses that budget to the last MiB, and the formula, applied to the measurements of CI in October 2026, asks 128 MiB more for its worker and 128 MiB more for its scheduler. Server mode adds two services that run all the time, the proxy (ADR-0019) and the backups (ADR-0020), both planned for v0.1.0, at the floor of the formula, 256 MiB each. The reference server of the project, a Hetzner CAX21, has 8 GB.
+[ADR-0010](0010-multi-arch-and-memory-budget.md) set one memory budget for the stack: every service at its limit, at the same time, fits 8 GB of memory as Docker reports it, 7,680 MiB. The limits come from measurements and a formula ([System requirements](../reference/system-requirements.md#memory-limits)). The CeleryExecutor variant ([ADR-0015](0015-run-localexecutor-by-default.md)) uses that budget to the last MiB, and the formula, applied to the measurements of CI in October 2026, asks 128 MiB more for its worker and 128 MiB more for its scheduler. Server mode adds two services that run all the time, the proxy ([ADR-0019](0019-open-only-metabase-in-server-mode.md)) and the backups (ADR-0020), both planned for v0.1.0, at the floor of the formula, 256 MiB each. The reference server of the project, a Hetzner CAX21, has 8 GB.
 
 What may the memory limits of the stack add up to, in each variant and each mode?
 
@@ -57,4 +57,4 @@ The other options were not chosen for these reasons:
 * This record replaces the memory budget of ADR-0010. The two architectures, and their tests in CI, stay as ADR-0010 decided.
 * The measurements, the formula and the limits of each service: [System requirements](../reference/system-requirements.md).
 * Hetzner Cloud, as of October 2026: CAX21, 4 vCPU (arm64) and 8 GB, $12.49 a month; CAX31, 8 vCPU and 16 GB, $24.99 a month.
-* **Implementation status, as of October 2026:** in place: the budgets in `tests/unit/test_memory_limits.py`, the check of `./agoranomos preflight`, and the limits of October 2026. The proxy and the backups of server mode are planned for v0.1.0.
+* **Implementation status, as of October 2026:** in place: the budgets in `tests/unit/test_memory_limits.py`, the check of `./agoranomos preflight`, and the limits of October 2026. The proxy of server mode is in place, and the backups are planned for v0.1.0.

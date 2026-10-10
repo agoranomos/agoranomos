@@ -7,6 +7,8 @@ import http.client
 import json
 import os
 import re
+import socket
+import ssl
 import subprocess
 import time
 import urllib.error
@@ -26,15 +28,32 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FILES = {"local": "compose.yaml", "celery": "compose.yaml:compose.celery.yaml"}
 
 
+# The blanks that env_get of ./agoranomos strips around a value: the characters of [ \t\r\v\f].
+BLANKS = " \t\r\v\f"
+
+
 def read_env(path: Path) -> dict[str, str]:
+    """The settings in an env file, read as ./agoranomos reads them (its env_get), which is how
+    Docker Compose reads them: the helpers then see the stack that Compose starts from that file.
+
+    A line sets the key in front of its first =; blanks or export before it make another key, which
+    nobody asks for. The last line that sets a key counts. Lines end at a newline and nowhere else,
+    as awk reads them: a carriage return, a vertical tab and a form feed stay inside the line. The
+    blanks at the start of a value do not count. A value that starts with a quote is what lies
+    between that quote and the next one, when there is one; otherwise it ends before the first " #",
+    which starts a comment, and loses the blanks at its end, the carriage return of a file that
+    Windows saved among them."""
     values: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line or line.startswith("#") or "=" not in line:
+    for line in path.read_bytes().decode("utf-8").split("\n"):
+        key, separator, value = line.partition("=")
+        if not separator or not key or key.startswith("#"):
             continue
-        key, _, value = line.partition("=")
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-            value = value[1:-1]
-        values[key] = value
+        value = value.lstrip(BLANKS)
+        if value[:1] in ("'", '"') and (end := value.find(value[0], 1)) > 0:
+            values[key] = value[1:end]
+            continue
+        comment = value.find(" #")
+        values[key] = (value if comment < 0 else value[:comment]).rstrip(BLANKS)
     return values
 
 
@@ -95,8 +114,8 @@ def rendered_config(variant: str) -> dict[str, Any]:
     """The whole configuration of a variant, as docker compose config renders it: its services,
     networks and volumes. COMPOSE_FILE and COMPOSE_PROFILES are set for the call, so neither the
     variant nor the profiles that .env selects matter, and no stack has to run: every service of
-    the variant is there, demo-init too. Cached, because the Compose files do not change during a
-    run.
+    the variant is there, demo-init and those of server mode too. Cached, because the Compose files
+    do not change during a run.
 
     The configuration holds secrets, so every object of the JSON becomes a NamesOnly dict, which
     pytest prints by its names: a frame or an assertion of a failed test that holds a service, or
@@ -107,7 +126,7 @@ def rendered_config(variant: str) -> dict[str, Any]:
             "config",
             "--format",
             "json",
-            env={"COMPOSE_FILE": FILES[variant], "COMPOSE_PROFILES": "core,demo"},
+            env={"COMPOSE_FILE": FILES[variant], "COMPOSE_PROFILES": "core,demo,server,ops"},
         ).stdout,
         object_hook=NamesOnly,
     )
@@ -303,6 +322,105 @@ def http_json(
         return status, json.loads(raw) if raw else None
     except ValueError:
         return status, raw.decode(errors="replace")
+
+
+class SiteConnection(http.client.HTTPSConnection):
+    """HTTPS to the proxy of this machine for the name of the site, as a browser that resolved the
+    name to this machine would send it: the TCP connection goes to 127.0.0.1, and the name is in
+    TLS, where the certificate is checked against it, and in the Host header."""
+
+    def __init__(self, name: str, context: ssl.SSLContext, timeout: float) -> None:
+        super().__init__(name, 443, timeout=timeout, context=context)
+        self.site_context = context
+
+    def connect(self) -> None:
+        sock = socket.create_connection(("127.0.0.1", self.port), self.timeout)
+        self.sock = self.site_context.wrap_socket(sock, server_hostname=self.host)
+
+
+def site_host(env: dict[str, str]) -> str:
+    """The name of the site, from AGORANOMOS_SITE_URL in .env."""
+    url = env.get("AGORANOMOS_SITE_URL") or ""
+    assert url.startswith("https://"), "server mode needs AGORANOMOS_SITE_URL=https://<domain>"
+    return url.removeprefix("https://").rstrip("/")
+
+
+@functools.cache
+def site_context(tls: str) -> ssl.SSLContext:
+    """What trusts the certificate of the proxy: the authorities of this machine, for one of Let's
+    Encrypt, or, with AGORANOMOS_TLS=internal, the root of the own authority of Caddy, read from
+    the proxy."""
+    if tls != "internal":
+        return ssl.create_default_context()
+    root = compose("exec", "-T", "proxy", "cat", "/data/caddy/pki/authorities/local/root.crt")
+    return ssl.create_default_context(cadata=root.stdout)
+
+
+def site_request(
+    env: dict[str, str],
+    method: str,
+    path: str,
+    body: Any = None,
+    headers: dict[str, str] | None = None,
+    timeout: float = 30,
+    name: str | None = None,
+) -> tuple[int, dict[str, str], bytes]:
+    """One request to the site through the proxy: the status, the headers in lower case and the
+    body. name sends it for another name than that of the site. As in http_json, the encoded body
+    is never bound to a name, and a failure to connect raises a ConnectionError that names the
+    method, the path and the classes of the failure, such as SSLError for a refused certificate."""
+    connection = SiteConnection(
+        name or site_host(env), site_context(env.get("AGORANOMOS_TLS") or "acme"), timeout
+    )
+    try:
+        try:
+            connection.request(
+                method,
+                path,
+                body=None if body is None else json.dumps(body).encode(),
+                headers={"Content-Type": "application/json", **(headers or {})},
+            )
+            response = connection.getresponse()
+            return (
+                response.status,
+                {k.lower(): v for k, v in response.getheaders()},
+                response.read(),
+            )
+        except (OSError, http.client.HTTPException) as error:
+            raise ConnectionError(f"{method} {path} failed: {error_classes(error)}") from None
+    finally:
+        connection.close()
+
+
+def plain_request(env: dict[str, str], path: str) -> tuple[int, str]:
+    """One GET of the site over plain HTTP, on port 80 of this machine: the status and the
+    Location header."""
+    connection = http.client.HTTPConnection("127.0.0.1", 80, timeout=30)
+    try:
+        connection.request("GET", path, headers={"Host": site_host(env)})
+        response = connection.getresponse()
+        return response.status, response.getheader("Location") or ""
+    finally:
+        connection.close()
+
+
+def site_session(env: dict[str, str]) -> SecretHeaders:
+    """The headers that sign a request through the proxy in as the admin, as the session fixture of
+    conftest.py does for Metabase itself. The sign-in has a frame of its own, which ends before the
+    next call, so that the answer to it, which holds the session twice (in the body and in the
+    cookie), is bound to no frame that pytest prints under --showlocals when a later call fails. A
+    failed sign-in names the status and never a body."""
+    status, _, body = site_request(
+        env,
+        "POST",
+        "/api/session",
+        {
+            "username": env.get("AGORANOMOS_ADMIN_EMAIL") or "admin@example.com",
+            "password": env["METABASE_ADMIN_PASSWORD"],
+        },
+    )
+    assert status == 200, f"the admin could not sign in through the proxy: HTTP {status}"
+    return SecretHeaders({"X-Metabase-Session": Secret(json.loads(body)["id"])})
 
 
 def psql(

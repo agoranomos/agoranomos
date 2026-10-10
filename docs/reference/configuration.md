@@ -15,7 +15,7 @@ Agoranomos reads its settings from the `.env` file in the root of the checkout. 
 | Setting | Default | What it does |
 |---|---|---|
 | `COMPOSE_PROJECT_NAME` | `agoranomos` | The name of the Compose project. It starts the names of the containers, networks and volumes. |
-| `COMPOSE_PROFILES` | `core,demo` | The profiles that run. `core` is the whole stack in local mode, and `demo` adds the demo: on the first start, the one-shot `demo-init` job runs the demo pipeline and creates a demo dashboard in Metabase ([See the demo](../how-to/see-the-demo.md)). Set `core` to start without it. |
+| `COMPOSE_PROFILES` | `core,demo` | The profiles that run. `core` is the whole stack in local mode, and `demo` adds the demo: on the first start, the one-shot `demo-init` job runs the demo pipeline and creates a demo dashboard in Metabase ([See the demo](../how-to/see-the-demo.md)). Set `core` to start without it. `server` adds the proxy of server mode, which `./agoranomos init --server` adds ([Server mode](#server-mode), [ADR-0019](../adr/0019-open-only-metabase-in-server-mode.md)). |
 | `COMPOSE_FILE` | `compose.yaml` | The Compose files of the stack. `compose.yaml` runs Airflow with LocalExecutor, which needs no broker. `compose.yaml:compose.celery.yaml` adds the Celery broker and a separate worker (CeleryExecutor), for which 12 GB of memory is recommended ([System requirements](system-requirements.md)). |
 
 ## Stack
@@ -28,6 +28,22 @@ Agoranomos reads its settings from the `.env` file in the root of the checkout. 
 | `METABASE_PORT` | `3000` | The port of Metabase on `127.0.0.1`. |
 | `AIRFLOW_PARALLELISM` | `4` | How many Airflow tasks run at the same time at most, in the whole stack. With LocalExecutor, each one is a process in the scheduler container, so more tasks need more memory; when the container reaches its limit, the kernel stops a task before the scheduler on a host whose kernel restricts ptrace with Yama, such as Ubuntu, and can stop the scheduler on one without it, such as Docker Desktop for macOS ([System requirements](system-requirements.md#when-a-service-reaches-its-limit)). With CeleryExecutor it caps all workers together: raise it together with `AIRFLOW_WORKER_CONCURRENCY` or the number of workers. |
 | `AIRFLOW_WORKER_CONCURRENCY` | `4` | Only with CeleryExecutor: how many tasks one Airflow worker runs at a time. More tasks need more memory: raise `AIRFLOW_TASKS_MEMORY`, the limit of the worker, with it. |
+
+## Server mode
+
+Server mode puts Metabase on the internet behind Caddy, with HTTPS, and opens the ports 80 and 443 of the host and no other ([ADR-0019](../adr/0019-open-only-metabase-in-server-mode.md)). Airflow and Metabase stay on `127.0.0.1` too, for SSH tunnels.
+
+`./agoranomos init --server <domain>` turns it on: it sets `AGORANOMOS_SITE_URL=https://<domain>`, adds the `server` profile to `COMPOSE_PROFILES`, and sets the two rules of Metabase below where they are not set. To go back to local mode, run `./agoranomos down` first, while `server` is still in `COMPOSE_PROFILES`: Compose stops only the services of the active profiles, so after you take `server` out, the `proxy` container would keep running on ports 80 and 443. Then take `server` out of `COMPOSE_PROFILES`, delete the lines `AGORANOMOS_SITE_URL`, `METABASE_PASSWORD_COMPLEXITY` and `METABASE_SESSION_TIMEOUT` of `.env`, and run `./agoranomos up`: Metabase then has its address on `localhost` again. If you took `server` out first, `./agoranomos up` and `./agoranomos down` stop and remove the `proxy` container that is left, in local mode, and say so; the volume `caddy-data` stays.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `AGORANOMOS_SITE_URL` | `http://localhost:` and `METABASE_PORT` | The address of Metabase, which it uses in its links. In server mode it is `https://` and the domain name of the server, which Caddy serves; `./agoranomos init --server <domain>` sets it. It is not in `.env.example`, so that local mode keeps the default. |
+| `AGORANOMOS_TLS` | `acme` | Where Caddy gets the certificate of the site: `acme`, from the ACME directory below, or `internal`, from its own authority, which no browser trusts, for tests. |
+| `AGORANOMOS_ACME_CA` | `https://acme-v02.api.letsencrypt.org/directory` | The ACME directory of Let's Encrypt. For a trial, its staging directory, `https://acme-staging-v02.api.letsencrypt.org/directory`, has higher limits and gives certificates that browsers do not trust. Let's Encrypt issues at most five certificates for the same names in seven days (as of October 2026). |
+| `METABASE_PASSWORD_COMPLEXITY` | `normal` | The rule of Metabase for new and changed passwords: `normal`, 6 characters with a digit, or `strong-enough`, at least 15 characters, which `./agoranomos init --server` sets. With `strong-enough`, in local mode as well, a `METABASE_ADMIN_PASSWORD` that you write by hand must have at least 15 characters too, and `./agoranomos preflight` stops on a shorter one, also when Metabase is set up already; the one that `init` generates has 32. `metabase-init` never changes the password of an admin that exists, so for a Metabase that is set up already, first change the password in Metabase (Account settings) to at least 15 characters, then put the same value in `.env`; for a new one, write a longer value, or leave it empty for `init` to generate one. Like `AGORANOMOS_SITE_URL`, it is not in `.env.example`. |
+| `METABASE_SESSION_TIMEOUT` | none | How long a person stays signed in to Metabase without activity, as JSON: `./agoranomos init --server` sets `'{"amount":24,"unit":"hours"}'`; the unit is `seconds`, `minutes` or `hours`. Empty, Metabase keeps a session until it expires, after two weeks. Not in `.env.example`. |
+
+Caddy keeps its certificates in the Docker volume `caddy-data`, which backups leave out: a lost volume means a new certificate. It sends Let's Encrypt no contact email, as Let's Encrypt has sent no expiration emails since June 2025, and Caddy renews the certificate by itself.
 
 ## Memory limits
 
@@ -42,6 +58,7 @@ Every service has a memory limit, also for swap, so that the stack stays within 
 | `AIRFLOW_TRIGGERER_MEMORY` | `640m` | `airflow-triggerer` |
 | `AIRFLOW_TASKS_MEMORY` | `1280m` | The service that runs the Airflow tasks: `airflow-scheduler` with LocalExecutor, `airflow-worker` with CeleryExecutor |
 | `METABASE_MEMORY` | `2176m` | `metabase`; half of it is the heap of Java |
+| `PROXY_MEMORY` | `256m` | Server mode only: `proxy`, the Caddy in front of Metabase |
 | `AIRFLOW_SCHEDULER_MEMORY` | `640m` | Only with CeleryExecutor: `airflow-scheduler`, which then runs no task |
 | `BROKER_MEMORY` | `256m` | Only with CeleryExecutor: `broker` |
 
@@ -59,6 +76,8 @@ Metabase keeps the addresses of its users at home too. On a sign-in from a new d
 
 dlt, dbt and Cosmos send anonymous usage statistics by default, and four variables in `compose.yaml`, which the Airflow image sets too, turn that off: `RUNTIME__DLTHUB_TELEMETRY=false` for dlt, `DBT_ENGINE_SEND_ANONYMOUS_USAGE_STATS=False` for dbt, `AIRFLOW__COSMOS__ENABLE_TELEMETRY=False` for Cosmos, and `DO_NOT_TRACK=1`, which dbt and Cosmos also honor. The dbt project says the same with `send_anonymous_usage_stats: false` in `dbt/dbt_project.yml`. Metabase reports nothing to its makers either: `MB_ANON_TRACKING_ENABLED` and `MB_CHECK_FOR_UPDATES` are `false`.
 
+A connection of Metabase to a database may go to a private network, where the warehouse is, or to a public address on the internet, but not to a loopback or link-local address, such as the metadata service of a cloud at `169.254.169.254`, or to another address that is neither private nor public, such as the documentation range `192.0.2.0/24` (checked on Metabase 0.64.1, as of October 2026): `MB_WAREHOUSE_ALLOWED_NETWORKS=allow-private`, which also covers the SSH tunnels of connections and the URLs of their authentication providers. Metabase reaches the internet only for what an admin sets up, such as email or Slack, which Agoranomos does not set up ([ADR-0021](../adr/0021-leave-the-outgoing-traffic-of-metabase-open.md)). In server mode the proxy closes the two endpoints of Metabase that forward requests to the servers of Metabase without a sign-in, `/api/analytics-proxy` and `/api/product-feedback`.
+
 dlt reads no settings or secrets from Airflow Variables: `PROVIDERS__ENABLE_AIRFLOW_SECRETS=false` is set in `compose.yaml`, and in the Airflow image too. Inside an Airflow task, dlt would otherwise also take its settings from Variables, and a person who may edit them, such as a user with the Op role of Airflow, could redirect a pipeline: for example, send the connection of a load, with its password, to another host. So a DAG in the extensions folder ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)) that follows dlt's guide for Airflow cannot keep its settings in a `dlt_secrets_toml` Variable, which dlt ignores here: the pipeline takes them from environment variables instead.
 
 The two caches from which Cosmos renders the tasks of dbt stay out of Airflow Variables: `AIRFLOW__COSMOS__ENABLE_CACHE_DBT_LS=False` and `AIRFLOW__COSMOS__ENABLE_CACHE_DBT_YAML_SELECTORS=False` are set in `compose.yaml`, and in the Airflow image too. By default Cosmos saves the output of `dbt ls`, from which it renders the tasks of dbt and their arguments, in a Variable named `cosmos_cache__<DAG>__<task group>`, and the YAML selectors of a dbt project the same way: a person who may edit Variables could then change what a dbt task runs. A `cosmos_cache__` Variable that was saved before is no longer read, and you can delete it.
@@ -66,6 +85,10 @@ The two caches from which Cosmos renders the tasks of dbt stay out of Airflow Va
 Without the caches, `dbt ls` runs each time that the DAG processor parses a DAG of Cosmos, and again when each task of such a DAG starts, since a task parses the file of its DAG first. For the demo project that takes 1.2 to 2 seconds in the DAG processor and 1.3 to 1.7 seconds at the start of each task of `agoranomos_demo_transform` (measured on an arm64 machine). That DAG has a file of its own, so the task of `agoranomos_demo_load` does not wait for `dbt ls`.
 
 A DAG in the extensions folder should not use two features of Cosmos that still keep state in Variables, and that the stack does not use: `SeedRenderingBehavior.WHEN_SEED_CHANGES`, which keeps `cosmos_seed_checksum__…` Variables, and the watcher execution mode, which keeps a backup of its XComs there.
+
+## Public links
+
+Metabase can give a question or a dashboard a public link, which anyone who has it opens without signing in. Metabase 0.64 allows them by default; `metabase-init` turns them off once, when it sets up a new Metabase, and an admin may turn them on again in Admin > Settings > Public sharing. A public link shows its question or dashboard with the values of the filters in its address, and whoever has the link can take them out of the address and see what the filters hid. A Metabase set up before this release keeps the setting that it had, so before you turn server mode on for one, check Admin > Settings > Public sharing. `metabase-init` tries three times, two seconds apart, at the first start: if all three fail, its error, which `./agoranomos logs metabase-init` shows (`./agoranomos up` does not print it), says that the links are still on and where to turn them off, and no later start tries again, so turn them off in Admin > Settings > Public sharing. The same holds if `metabase-init` stops between creating the admin and turning the links off, for any reason, such as a lost answer to the setup call: a later start finds the admin, does not try again and prints no error, so check Admin > Settings > Public sharing.
 
 ## The metadata of the marts
 

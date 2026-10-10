@@ -17,3 +17,7 @@ indent_size = 4
 
 [Makefile]
 indent_style = tab
+
+# caddy fmt indents the Caddyfile with tabs.
+[Caddyfile]
+indent_style = tab

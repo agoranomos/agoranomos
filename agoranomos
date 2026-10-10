@@ -157,12 +157,17 @@ print_banner() {
 # so a variable of the same name that is still exported in this shell, from another project, would
 # win over .env. These three therefore come from .env here, with the defaults of .env.example. The
 # files and the profiles reach Compose through these variables, never through -f and --profile
-# options, so this script and a plain docker compose in the checkout work on the same stack.
+# options, so this script and a plain docker compose in the checkout work on the same stack. A
+# command that must reach a service of a profile that .env does not list sets extra_profile
+# (compose_with_server).
 compose() {
   (
     cd "$ROOT" || exit 1
     COMPOSE_PROJECT_NAME=$(setting COMPOSE_PROJECT_NAME agoranomos)
     COMPOSE_PROFILES=$(setting COMPOSE_PROFILES core,demo)
+    if [ -n "${extra_profile:-}" ]; then
+      COMPOSE_PROFILES=$(with_profiles "$COMPOSE_PROFILES" "$extra_profile")
+    fi
     COMPOSE_FILE=$(setting COMPOSE_FILE compose.yaml)
     export COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_FILE
     docker compose "$@"
@@ -279,8 +284,71 @@ extensions_path() {
   esac
 }
 
+# True when .env runs server mode: COMPOSE_PROFILES lists server (ADR-0011, ADR-0019).
+server_mode() {
+  case ",$(setting COMPOSE_PROFILES core,demo)," in
+    *,server,*) return 0 ;;
+  esac
+  return 1
+}
+
+# True when $1 is a domain name of two labels or more, of letters, digits and hyphens, whose last
+# label starts with a letter: no scheme, port or path, and not an IP address. grep reads lines, so
+# an argument of more than one line is refused first: its other lines could be anything.
+valid_domain() {
+  domain_newline='
+'
+  case "$1" in
+    *"$domain_newline"*) return 1 ;;
+  esac
+  printf '%s\n' "$1" |
+    grep -Eq '^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$'
+}
+
+# True when Let's Encrypt can issue a certificate for the domain $1: not localhost or a name under
+# .localhost, .test, .example or .invalid, which RFC 6761 keeps for local use and tests, and not a
+# name under .local, .internal or home.arpa (or home.arpa itself), which Caddy serves only with its
+# own authority. DNS names are not case-sensitive, so the name is folded to lower case first, in
+# the C locale, where only A to Z change.
+public_name() {
+  public_lower=$(printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]')
+  case "$public_lower" in
+    localhost | *.localhost | *.test | *.example | *.invalid | *.local | *.internal | home.arpa | *.home.arpa)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+# Print the comma-separated list of profiles $1 with each profile of the other arguments added,
+# once, at its end.
+with_profiles() {
+  profile_list=$1
+  shift
+  for profile in "$@"; do
+    case ",$profile_list," in
+      *,"$profile",*) ;;
+      *) profile_list="${profile_list:+$profile_list,}$profile" ;;
+    esac
+  done
+  printf '%s' "$profile_list"
+}
+
 cmd_init() {
-  [ "$#" -eq 0 ] || die "init takes no options"
+  server_domain="" server_asked=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --server)
+        [ "$#" -ge 2 ] || die "--server needs the domain name of the server, such as --server bi.example.com"
+        server_domain=$2 server_asked=1
+        shift 2
+        ;;
+      *) die "unknown option of init: $1 (init takes --server <domain>)" ;;
+    esac
+  done
+  if [ "$server_asked" -eq 1 ] && ! valid_domain "$server_domain"; then
+    die "not a domain name: $server_domain. Write the name alone, such as bi.example.com: without https://, a port or a path, and not an IP address, which gets no certificate"
+  fi
   [ -f "$ENV_EXAMPLE" ] || die "$ENV_EXAMPLE is missing: run ./agoranomos from an Agoranomos checkout"
   if [ ! -f "$ENV_FILE" ]; then
     (umask 077 && cp "$ENV_EXAMPLE" "$ENV_FILE")
@@ -313,6 +381,25 @@ cmd_init() {
     say "Keep a copy of .env in a password manager: a restored backup needs its keys to decrypt the saved connections."
   fi
   mkdir -p "$(extensions_path)/dags" "$(extensions_path)/metadata"
+  if [ "$server_asked" -eq 1 ]; then
+    # A line is written only when its value changes, so that running init --server again changes
+    # nothing, also in a .env that a person edited: a line with quotes or a comment stays as it is.
+    [ "$(env_get AGORANOMOS_SITE_URL)" = "https://$server_domain" ] ||
+      env_set AGORANOMOS_SITE_URL "https://$server_domain"
+    current_profiles=$(setting COMPOSE_PROFILES core,demo)
+    server_profiles=$(with_profiles "$current_profiles" server)
+    [ "$server_profiles" = "$current_profiles" ] || env_set COMPOSE_PROFILES "$server_profiles"
+    # Metabase on the internet (ADR-0019): passwords of at least 15 characters, and a sign-out after
+    # 24 hours without activity. A value that a person set stays.
+    [ -n "$(env_get METABASE_PASSWORD_COMPLEXITY)" ] || env_set METABASE_PASSWORD_COMPLEXITY strong-enough
+    [ -n "$(env_get METABASE_SESSION_TIMEOUT)" ] ||
+      env_set METABASE_SESSION_TIMEOUT "'{\"amount\":24,\"unit\":\"hours\"}'"
+    say "Server mode is on: Metabase is to be at https://$server_domain. Point the A record of $server_domain at this server, then run ./agoranomos up."
+    say "If this Metabase was set up before this release, its public links stay as they were: check Admin > Settings > Public sharing."
+    if ! public_name "$server_domain" && [ "$(setting AGORANOMOS_TLS acme)" != internal ]; then
+      say "$server_domain is not a name that gets a certificate of Let's Encrypt: for a test, set AGORANOMOS_TLS=internal in .env, or ./agoranomos up stops on it."
+    fi
+  fi
 }
 
 # True when version $1 is at least version $2. A leading v and suffixes such as -rc1 are ignored.
@@ -444,6 +531,39 @@ EOF
   if ! version_ge "$server_version" "$MIN_DOCKER_VERSION"; then
     problem "Docker Engine $server_version is older than $MIN_DOCKER_VERSION: update Docker"
   fi
+  # Server mode publishes the ports of the proxy on every address of the host, and the tunnels use
+  # ports on 127.0.0.1, which Docker before 28.0.0 lets other hosts of the same network segment
+  # reach (Docker's documentation, as of October 2026).
+  if server_mode; then
+    if ! version_ge "$server_version" 28.0.0; then
+      problem "Docker Engine $server_version is older than 28.0.0, which server mode needs: before it, other hosts on the same network segment can reach the ports that Docker publishes on 127.0.0.1. Update Docker"
+    fi
+    site_tls=$(setting AGORANOMOS_TLS acme)
+    case "$site_tls" in
+      acme | internal) ;;
+      *) problem "AGORANOMOS_TLS in .env must be acme or internal" ;;
+    esac
+    site_url=$(setting AGORANOMOS_SITE_URL "")
+    site_host=${site_url#https://}
+    if [ "$site_host" = "$site_url" ] || ! valid_domain "$site_host"; then
+      problem "server mode needs AGORANOMOS_SITE_URL in .env to be https:// and the domain name of the server, without a port or a path: run ./agoranomos init --server <domain>"
+    elif [ "$site_tls" = acme ] && ! public_name "$site_host"; then
+      problem "$site_host cannot get a certificate from Let's Encrypt: run ./agoranomos init --server with the domain name of the server, or set AGORANOMOS_TLS=internal in .env for a test"
+    fi
+  fi
+  # Metabase checks the password of the admin account against its rule when metabase-init creates
+  # the account at the first start, and with strong-enough it refuses one of fewer than 15
+  # characters. init --server sets that rule, and compose.yaml hands it to Metabase in every mode, so
+  # a person can set it in local mode too. init generates a password of 32 characters, so this
+  # catches one set by hand. metabase-init never changes the password of an admin that exists, so
+  # for a Metabase that is set up already the message sends the person to Metabase first. The
+  # message names the settings, never the value. strong has other rules, and normal, the default,
+  # asks for less: they are Metabase's to check.
+  admin_password=$(env_get METABASE_ADMIN_PASSWORD)
+  if [ "$(setting METABASE_PASSWORD_COMPLEXITY normal)" = strong-enough ] &&
+    [ -n "$admin_password" ] && [ "${#admin_password}" -lt 15 ]; then
+    problem "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters, which METABASE_PASSWORD_COMPLEXITY=strong-enough asks for. For a Metabase that is set up already, first change the admin password in Metabase (Account settings) to at least 15 characters, then put the same value in .env; for a new one, write a longer value, or leave it empty for ./agoranomos init to generate one"
+  fi
   compose_version=$(docker compose version --short 2> /dev/null) || compose_version=""
   if [ -z "$compose_version" ]; then
     problem "the Docker Compose plugin is missing: see https://docs.docker.com/compose/install/"
@@ -544,11 +664,19 @@ EOF
   # A running stack holds its own ports, so the ports are checked only while it is not running.
   if [ -z "$(compose ps --quiet --status running 2> /dev/null)" ]; then
     if [ -n "$(port_tools)" ]; then
-      for port_setting in AIRFLOW_PORT:8080 METABASE_PORT:3000; do
+      port_settings="AIRFLOW_PORT:8080 METABASE_PORT:3000"
+      if server_mode; then port_settings="$port_settings HTTP:80 HTTPS:443"; fi
+      for port_setting in $port_settings; do
         name=${port_setting%%:*}
-        port=$(setting "$name" "${port_setting#*:}")
+        case "$name" in
+          HTTP | HTTPS) port=${port_setting#*:} ;;
+          *) port=$(setting "$name" "${port_setting#*:}") ;;
+        esac
         if port_in_use "$port"; then
-          problem "port $port is in use: stop what uses it, or set $name in .env to a free port"
+          case "$name" in
+            HTTP | HTTPS) problem "port $port is in use: the proxy of server mode needs it. Stop what uses it" ;;
+            *) problem "port $port is in use: stop what uses it, or set $name in .env to a free port" ;;
+          esac
         fi
       done
     else
@@ -647,6 +775,73 @@ EOF
   done
 }
 
+# Where to reach Airflow and Metabase once the stack is up: on 127.0.0.1 in local mode, and in
+# server mode the site, with Airflow on the server only, through an SSH tunnel.
+print_addresses() {
+  airflow_port=$(setting AIRFLOW_PORT 8080)
+  if server_mode; then
+    say "$(paint mute 'Airflow:' 1)  $(paint amber "http://127.0.0.1:$airflow_port" 1) on this server; from your machine: ssh -L $airflow_port:127.0.0.1:$airflow_port <user>@<server>"
+    say "$(paint mute 'Metabase:' 1) $(paint amber "$(setting AGORANOMOS_SITE_URL '')" 1)"
+  else
+    say "$(paint mute 'Airflow:' 1)  $(paint amber "http://127.0.0.1:$airflow_port" 1)"
+    say "$(paint mute 'Metabase:' 1) $(paint amber "http://127.0.0.1:$(setting METABASE_PORT 3000)" 1)"
+  fi
+  say "./agoranomos credentials shows how to sign in."
+}
+
+# In server mode with a certificate of Let's Encrypt: whether the site answers over HTTPS with a
+# certificate that this machine trusts. Caddy gets the certificate after it starts, and only when
+# the DNS record of the domain points at this server and ports 80 and 443 are open to the
+# internet, so this tries for about a minute and then only warns: the stack runs either way.
+# AGORANOMOS_CERTIFICATE_TRIES is a hook for the tests (default 12, every AGORANOMOS_WAIT_INTERVAL
+# seconds).
+check_certificate() {
+  if ! server_mode || [ "$(setting AGORANOMOS_TLS acme)" != acme ]; then
+    return 0
+  fi
+  site_host=$(setting AGORANOMOS_SITE_URL '')
+  site_host=${site_host#https://}
+  if ! command -v curl > /dev/null 2>&1; then
+    warn "cannot check the certificate of https://$site_host: install curl"
+    return 0
+  fi
+  say "Checking the certificate of https://$site_host, for about a minute."
+  tries=${AGORANOMOS_CERTIFICATE_TRIES:-12}
+  while [ "$tries" -gt 0 ]; do
+    if curl --silent --output /dev/null --max-time 10 --noproxy '*' --resolve "$site_host:443:127.0.0.1" "https://$site_host/api/health"; then
+      return 0
+    fi
+    tries=$((tries - 1))
+    [ "$tries" -eq 0 ] || sleep "${AGORANOMOS_WAIT_INTERVAL:-5}"
+  done
+  warn "https://$site_host does not answer with a certificate that this machine trusts yet. Check that the DNS record of $site_host points at this server and that ports 80 and 443 are open to the internet; ./agoranomos logs proxy shows what Let's Encrypt answered, and docker compose restart proxy makes Caddy try again at once, without waiting out the pause between its tries. With the staging directory of Let's Encrypt in AGORANOMOS_ACME_CA, no machine trusts the certificate."
+}
+
+# docker compose with the server profile added to those of .env: the proxy belongs to it.
+compose_with_server() {
+  extra_profile=server
+  compose_status=0
+  compose "$@" || compose_status=$?
+  extra_profile=""
+  return "$compose_status"
+}
+
+# In local mode, stop and remove the proxy container that server mode left. Compose does not touch
+# the container of a profile that .env no longer lists, so after a person takes server out of
+# COMPOSE_PROFILES, the old Caddy would go on serving the new Metabase on ports 80 and 443, with
+# the rules of local mode. The volume caddy-data, with the certificates, stays. In server mode, up
+# and down handle the proxy as they handle every service.
+remove_leftover_proxy() {
+  if server_mode; then
+    return 0
+  fi
+  proxy_container=$(compose_with_server ps --all --quiet proxy 2> /dev/null) || proxy_container=""
+  [ -n "$proxy_container" ] || return 0
+  compose_with_server rm --stop --force proxy ||
+    die "could not remove the proxy of server mode, which may still serve Metabase on ports 80 and 443 with the rules of local mode: run docker compose --profile server rm --stop --force proxy, then run this command again"
+  say "Server mode is off: the proxy of server mode is stopped and removed."
+}
+
 cmd_up() {
   # Check the options before init writes .env: an option that preflight would refuse must not leave
   # a .env behind.
@@ -659,14 +854,14 @@ cmd_up() {
   print_banner
   cmd_init
   cmd_preflight "$@"
+  remove_leftover_proxy
   say "Starting the stack. The first start builds the Airflow image, which takes a few minutes..."
   # Without the || a failure would end the script under set -e with only the message of docker compose.
   compose up --detach --remove-orphans ||
     die "docker compose could not start the stack; the error above names the cause, and ./agoranomos status and ./agoranomos logs <service> show more"
   wait_healthy
-  say "$(paint mute 'Airflow:' 1)  $(paint amber "http://127.0.0.1:$(setting AIRFLOW_PORT 8080)" 1)"
-  say "$(paint mute 'Metabase:' 1) $(paint amber "http://127.0.0.1:$(setting METABASE_PORT 3000)" 1)"
-  say "./agoranomos credentials shows how to sign in."
+  print_addresses
+  check_certificate
   # Only demo-init failed: Airflow and Metabase run, and its log names what to look at in them. up
   # still fails, so that a start that is not complete never passes as one.
   [ "$demo_failed" -eq 0 ] || die "the stack is up, but the demo is not ready"
@@ -675,6 +870,7 @@ cmd_up() {
 
 cmd_down() {
   [ "$#" -eq 0 ] || die "down takes no options"
+  remove_leftover_proxy
   compose down --remove-orphans
   say "The stack is stopped. Its data stays in the Docker volumes."
 }
@@ -735,8 +931,13 @@ cmd_metadata() {
 cmd_credentials() {
   [ "$#" -eq 0 ] || die "credentials takes no options"
   [ -f "$ENV_FILE" ] || die "there is no .env yet: run ./agoranomos init"
-  say "Airflow:  http://127.0.0.1:$(setting AIRFLOW_PORT 8080)  user name admin, password AIRFLOW_ADMIN_PASSWORD"
-  say "Metabase: http://127.0.0.1:$(setting METABASE_PORT 3000)  email $(setting AGORANOMOS_ADMIN_EMAIL admin@example.com), password METABASE_ADMIN_PASSWORD"
+  if server_mode; then
+    say "Airflow:  http://127.0.0.1:$(setting AIRFLOW_PORT 8080) through an SSH tunnel  user name admin, password AIRFLOW_ADMIN_PASSWORD"
+    say "Metabase: $(setting AGORANOMOS_SITE_URL '')  email $(setting AGORANOMOS_ADMIN_EMAIL admin@example.com), password METABASE_ADMIN_PASSWORD"
+  else
+    say "Airflow:  http://127.0.0.1:$(setting AIRFLOW_PORT 8080)  user name admin, password AIRFLOW_ADMIN_PASSWORD"
+    say "Metabase: http://127.0.0.1:$(setting METABASE_PORT 3000)  email $(setting AGORANOMOS_ADMIN_EMAIL admin@example.com), password METABASE_ADMIN_PASSWORD"
+  fi
   say "The passwords are the values of these settings in $ENV_FILE, which only you can read."
 }
 
@@ -750,7 +951,7 @@ usage() {
 Usage: ./agoranomos <command> [options]
 
 Commands:
-  init          Create .env from .env.example and generate the secrets that are empty
+  init          Create .env from .env.example and generate the secrets that are empty (--server <domain>: turn server mode on)
   preflight     Check that this machine can run the stack (--force: warn about low resources instead of stopping)
   up            Run init and preflight, start the stack and wait until it is healthy (--force as for preflight)
   down          Stop the stack; the data stays in its Docker volumes

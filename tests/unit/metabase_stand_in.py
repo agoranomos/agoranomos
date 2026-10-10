@@ -213,6 +213,8 @@ class FakeMetabase:
         self.cards: dict[int, dict[str, Any]] = {}
         self.dashboards: dict[int, dict[str, Any]] = {}
         self.next_id = 100
+        # The settings that the jobs write, with their default values in Metabase 0.64.1.
+        self.settings: dict[str, Any] = {"enable-public-sharing": True}
 
     def new_id(self) -> int:
         self.next_id += 1
@@ -369,6 +371,10 @@ class FakeMetabase:
             return self.dataset(body)
         if segments[:3] in (["", "api", "table"], ["", "api", "field"]) and method == "PUT":
             return self.metadata_write(segments[2], int(segments[3]), body)
+        if segments[:3] == ["", "api", "setting"] and len(segments) == 4 and method == "PUT":
+            # PUT /api/setting/<key> with {"value": ...} answers 204 with no body.
+            self.settings[segments[3]] = body["value"]
+            return 204, b""
         return self.content(method, path, query, body)
 
     def database(

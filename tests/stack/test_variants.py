@@ -46,7 +46,7 @@ TASK_RUNNER = {"local": "airflow-scheduler", "celery": "airflow-worker"}
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_a_variant_has_the_services_it_needs(variant):
     names = set(rendered(variant))
-    expected = {"warehouse-db", "platform-db", "db-init", "demo-init", "metadata-export"}
+    expected = {"warehouse-db", "platform-db", "db-init", "demo-init", "metadata-export", "proxy"}
     expected |= BASE_AIRFLOW | METABASE
     assert expected <= names
     # The broker and the worker belong to the Celery variant, and to no other.
@@ -515,6 +515,60 @@ def test_metabase_reports_nothing_to_its_makers(variant):
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_takes_its_address_from_the_setting_of_the_site(variant):
+    for site, expected in (("https://bi.example.com", "https://bi.example.com"), ("", None)):
+        config = json.loads(
+            compose(
+                "config",
+                "--format",
+                "json",
+                env={
+                    "COMPOSE_FILE": FILES[variant],
+                    "COMPOSE_PROFILES": "core,server",
+                    "AGORANOMOS_SITE_URL": site,
+                    "METABASE_PORT": "13000",
+                },
+            ).stdout,
+            object_hook=NamesOnly,
+        )["services"]
+        wanted = expected or "http://localhost:13000"
+        assert config["metabase"]["environment"]["MB_SITE_URL"] == wanted
+        assert config["proxy"]["environment"]["AGORANOMOS_SITE_URL"] == wanted
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_keeps_its_connections_off_loopback_and_does_not_redirect_itself(variant):
+    environment = rendered(variant)["metabase"]["environment"]
+    assert environment["MB_WAREHOUSE_ALLOWED_NETWORKS"] == "allow-private"
+    assert "MB_REDIRECT_ALL_REQUESTS_TO_HTTPS" not in environment
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_takes_its_rules_of_passwords_and_sessions_from_the_settings(variant):
+    # ./agoranomos init --server writes the two settings; without them, Metabase keeps its own
+    # defaults: normal, and no timeout.
+    timeout = '{"amount":24,"unit":"hours"}'
+    for settings, expected in (
+        (
+            {"METABASE_PASSWORD_COMPLEXITY": "strong-enough", "METABASE_SESSION_TIMEOUT": timeout},
+            ("strong-enough", timeout),
+        ),
+        ({"METABASE_PASSWORD_COMPLEXITY": "", "METABASE_SESSION_TIMEOUT": ""}, ("normal", "")),
+    ):
+        environment = json.loads(
+            compose(
+                "config",
+                "--format",
+                "json",
+                env={"COMPOSE_FILE": FILES[variant], "COMPOSE_PROFILES": "core", **settings},
+            ).stdout,
+            object_hook=NamesOnly,
+        )["services"]["metabase"]["environment"]
+        found = (environment["MB_PASSWORD_COMPLEXITY"], environment["MB_SESSION_TIMEOUT"])
+        assert found == expected
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
 def test_the_pool_of_metabase_fits_the_connections_of_its_role(variant):
     # The warehouse gives metabase_reader 20 connections (postgres/warehouse.sql), and Metabase
     # keeps up to 15 in its pool by default: a pool set here could take more than the role has.
@@ -542,6 +596,42 @@ def test_metabase_publishes_only_its_own_port_on_localhost(variant):
     published = {int(port["published"]) for port in ports} | {int(port["target"]) for port in ports}
     assert int(metrics) not in published
     assert "ports" not in services["metabase-init"]
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_the_proxy_is_the_only_service_that_publishes_on_every_address(variant):
+    # Server mode opens TCP 80 and 443 to the network and nothing else (ADR-0019); every other
+    # port is on 127.0.0.1, for SSH tunnels. Compose renders a port without a host address with
+    # no host_ip, which is every address of the host.
+    services = rendered(variant)
+    for name, service in services.items():
+        for port in service.get("ports", []):
+            expected = "" if name == "proxy" else "127.0.0.1"
+            assert port.get("host_ip", "") == expected, (name, port["target"])
+    ports = services["proxy"]["ports"]
+    published = sorted((int(p["target"]), int(p["published"]), p["protocol"]) for p in ports)
+    assert published == [(80, 80, "tcp"), (443, 443, "tcp")]
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_the_proxy_starts_only_after_metabase_init_has_set_metabase_up(variant):
+    # Until its first user exists, Metabase hands its setup token to anyone (ADR-0019).
+    depends_on = rendered(variant)["proxy"]["depends_on"]
+    assert {name: needed["condition"] for name, needed in depends_on.items()} == {
+        "metabase-init": "service_completed_successfully"
+    }
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_the_proxy_runs_read_only_as_nobody_on_the_default_network(variant):
+    proxy = rendered(variant)["proxy"]
+    assert proxy["profiles"] == ["server"]
+    assert proxy["user"] == "65534:65534"
+    assert proxy["read_only"] is True
+    assert set(proxy["networks"]) == {"default"}
+    assert [(mount["type"], mount["target"]) for mount in proxy["volumes"]] == [("volume", "/data")]
+    assert proxy["image"] == "agoranomos-caddy:local"
+    assert proxy["pull_policy"] == "build"
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
