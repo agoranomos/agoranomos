@@ -29,6 +29,18 @@ Agoranomos reads its settings from the `.env` file in the root of the checkout. 
 | `AIRFLOW_PARALLELISM` | `4` | How many Airflow tasks run at the same time at most, in the whole stack. With LocalExecutor, each one is a process in the scheduler container, so more tasks need more memory; when the container reaches its limit, the kernel stops a task before the scheduler on a host whose kernel restricts ptrace with Yama, such as Ubuntu, and can stop the scheduler on one without it, such as Docker Desktop for macOS ([System requirements](system-requirements.md#when-a-service-reaches-its-limit)). With CeleryExecutor it caps all workers together: raise it together with `AIRFLOW_WORKER_CONCURRENCY` or the number of workers. |
 | `AIRFLOW_WORKER_CONCURRENCY` | `4` | Only with CeleryExecutor: how many tasks one Airflow worker runs at a time. More tasks need more memory: raise `AIRFLOW_TASKS_MEMORY`, the limit of the worker, with it. |
 
+## Server mode
+
+Server mode puts Metabase on the internet behind Caddy, with HTTPS, and opens the ports 80 and 443 of the host and no other ([ADR-0019](../adr/0019-open-only-metabase-in-server-mode.md)). Airflow and Metabase stay on `127.0.0.1` too, for SSH tunnels.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `AGORANOMOS_SITE_URL` | `http://localhost:` and `METABASE_PORT` | The address of Metabase, which it uses in its links. In server mode it is `https://` and the domain name of the server, which Caddy serves; `./agoranomos init --server <domain>` sets it. It is not in `.env.example`, so that local mode keeps the default. |
+| `AGORANOMOS_TLS` | `acme` | Where Caddy gets the certificate of the site: `acme`, from the ACME directory below, or `internal`, from its own authority, which no browser trusts, for tests. |
+| `AGORANOMOS_ACME_CA` | `https://acme-v02.api.letsencrypt.org/directory` | The ACME directory of Let's Encrypt. For a trial, its staging directory, `https://acme-staging-v02.api.letsencrypt.org/directory`, has higher limits and gives certificates that browsers do not trust. Let's Encrypt issues at most five certificates for the same names in seven days (as of October 2026). |
+
+Caddy keeps its certificates in the Docker volume `caddy-data`, which backups leave out: a lost volume means a new certificate. It sends Let's Encrypt no contact email, as Let's Encrypt has sent no expiration emails since June 2025, and Caddy renews the certificate by itself.
+
 ## Memory limits
 
 Every service has a memory limit, also for swap, so that the stack stays within the memory of [System requirements](system-requirements.md) and, on the recommended memory (8 GB, or 12 GB for the CeleryExecutor variant), a service that runs short of memory cannot take it from the others ([System requirements](system-requirements.md#memory-limits) says what holds on the minimum of 6 GB). The limits of the services that run all the time are these settings, with defaults from measurements on the demo; those of the one-shot setup jobs are fixed in `compose.yaml`. A value is a number of MiB with `m`, or of GiB with `g`: `preflight` stops on a number without a unit, which Compose would read as bytes, and on a size below 6 MiB, the smallest limit that Docker accepts.
@@ -42,6 +54,7 @@ Every service has a memory limit, also for swap, so that the stack stays within 
 | `AIRFLOW_TRIGGERER_MEMORY` | `640m` | `airflow-triggerer` |
 | `AIRFLOW_TASKS_MEMORY` | `1280m` | The service that runs the Airflow tasks: `airflow-scheduler` with LocalExecutor, `airflow-worker` with CeleryExecutor |
 | `METABASE_MEMORY` | `2176m` | `metabase`; half of it is the heap of Java |
+| `PROXY_MEMORY` | `256m` | Server mode only: `proxy`, the Caddy in front of Metabase |
 | `AIRFLOW_SCHEDULER_MEMORY` | `640m` | Only with CeleryExecutor: `airflow-scheduler`, which then runs no task |
 | `BROKER_MEMORY` | `256m` | Only with CeleryExecutor: `broker` |
 

@@ -95,8 +95,8 @@ def rendered_config(variant: str) -> dict[str, Any]:
     """The whole configuration of a variant, as docker compose config renders it: its services,
     networks and volumes. COMPOSE_FILE and COMPOSE_PROFILES are set for the call, so neither the
     variant nor the profiles that .env selects matter, and no stack has to run: every service of
-    the variant is there, demo-init too. Cached, because the Compose files do not change during a
-    run.
+    the variant is there, demo-init and those of server mode too. Cached, because the Compose files
+    do not change during a run.
 
     The configuration holds secrets, so every object of the JSON becomes a NamesOnly dict, which
     pytest prints by its names: a frame or an assertion of a failed test that holds a service, or
@@ -107,7 +107,7 @@ def rendered_config(variant: str) -> dict[str, Any]:
             "config",
             "--format",
             "json",
-            env={"COMPOSE_FILE": FILES[variant], "COMPOSE_PROFILES": "core,demo"},
+            env={"COMPOSE_FILE": FILES[variant], "COMPOSE_PROFILES": "core,demo,server,ops"},
         ).stdout,
         object_hook=NamesOnly,
     )

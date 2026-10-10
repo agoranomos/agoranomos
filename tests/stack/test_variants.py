@@ -46,7 +46,7 @@ TASK_RUNNER = {"local": "airflow-scheduler", "celery": "airflow-worker"}
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_a_variant_has_the_services_it_needs(variant):
     names = set(rendered(variant))
-    expected = {"warehouse-db", "platform-db", "db-init", "demo-init", "metadata-export"}
+    expected = {"warehouse-db", "platform-db", "db-init", "demo-init", "metadata-export", "proxy"}
     expected |= BASE_AIRFLOW | METABASE
     assert expected <= names
     # The broker and the worker belong to the Celery variant, and to no other.
@@ -542,6 +542,42 @@ def test_metabase_publishes_only_its_own_port_on_localhost(variant):
     published = {int(port["published"]) for port in ports} | {int(port["target"]) for port in ports}
     assert int(metrics) not in published
     assert "ports" not in services["metabase-init"]
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_the_proxy_is_the_only_service_that_publishes_on_every_address(variant):
+    # Server mode opens TCP 80 and 443 to the network and nothing else (ADR-0019); every other
+    # port is on 127.0.0.1, for SSH tunnels. Compose renders a port without a host address with
+    # no host_ip, which is every address of the host.
+    services = rendered(variant)
+    for name, service in services.items():
+        for port in service.get("ports", []):
+            expected = "" if name == "proxy" else "127.0.0.1"
+            assert port.get("host_ip", "") == expected, (name, port["target"])
+    ports = services["proxy"]["ports"]
+    published = sorted((int(p["target"]), int(p["published"]), p["protocol"]) for p in ports)
+    assert published == [(80, 80, "tcp"), (443, 443, "tcp")]
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_the_proxy_starts_only_after_metabase_init_has_set_metabase_up(variant):
+    # Until its first user exists, Metabase hands its setup token to anyone (ADR-0019).
+    depends_on = rendered(variant)["proxy"]["depends_on"]
+    assert {name: needed["condition"] for name, needed in depends_on.items()} == {
+        "metabase-init": "service_completed_successfully"
+    }
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_the_proxy_runs_read_only_as_nobody_on_the_default_network(variant):
+    proxy = rendered(variant)["proxy"]
+    assert proxy["profiles"] == ["server"]
+    assert proxy["user"] == "65534:65534"
+    assert proxy["read_only"] is True
+    assert set(proxy["networks"]) == {"default"}
+    assert [(mount["type"], mount["target"]) for mount in proxy["volumes"]] == [("volume", "/data")]
+    assert proxy["image"] == "agoranomos-caddy:local"
+    assert proxy["pull_policy"] == "build"
 
 
 @pytest.mark.parametrize("variant", VARIANTS)

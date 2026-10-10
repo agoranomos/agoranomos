@@ -85,6 +85,11 @@
       "description": "The Airflow image of Agoranomos is built from airflow/Dockerfile and has no registry to look up.",
       "matchPackageNames": ["agoranomos-airflow"],
       "enabled": false
+    },
+    {
+      "description": "The Caddy image of Agoranomos is built from caddy/Dockerfile and has no registry to look up.",
+      "matchPackageNames": ["agoranomos-caddy"],
+      "enabled": false
     }
   ]
 }

@@ -37,13 +37,14 @@ The limits are set from measurements made on 8 and 10 October 2026, as follows:
 | `metabase` | 1,720 MiB | CI, amd64 | 2,176 MiB |
 | `airflow-scheduler`, with CeleryExecutor only | 422 MiB, with its limit of 512 MiB | CI, amd64, 10 October 2026 | 640 MiB |
 | `broker`, with CeleryExecutor only | 41 MiB | Mac | 256 MiB, the minimum |
+| `proxy`, in server mode | 39 MiB, in a synthetic test of 20,000 requests; the stack measurement of the server job is to replace it | Mac | 256 MiB, the minimum |
 | `db-init` | not caught by a sample | | 128 MiB, the minimum |
 | `airflow-init` | 189 MiB | Mac | 384 MiB |
 | `metadata-export` | 128 MiB | Mac | 256 MiB |
 | `metabase-init` | 19 MiB | Mac | 128 MiB, the minimum |
 | `demo-init` | 20 MiB | Mac | 128 MiB, the minimum |
 
-Each variant has a budget for the sum of its limits, the one-shot jobs included, so that on the recommended memory every service at its limit at the same time fits what Docker reports ([ADR-0022](../adr/0022-budget-the-memory-by-variant-and-mode.md)): 7,680 MiB, 8 GB, for the default variant, and 11,776 MiB, 12 GB, for the CeleryExecutor variant. Today the limits add up to 7,040 MiB in the default variant, which leaves 640 MiB, and to 7,936 MiB in the CeleryExecutor variant. A unit test checks the sum for the defaults of both variants, in local and in server mode.
+Each variant has a budget for the sum of its limits, the one-shot jobs included, so that on the recommended memory every service at its limit at the same time fits what Docker reports ([ADR-0022](../adr/0022-budget-the-memory-by-variant-and-mode.md)): 7,680 MiB, 8 GB, for the default variant, and 11,776 MiB, 12 GB, for the CeleryExecutor variant. Today the limits add up to 7,040 MiB in the default variant, which leaves 640 MiB, and to 7,936 MiB in the CeleryExecutor variant. Server mode adds the proxy, 256 MiB: 7,296 MiB and 8,192 MiB. A unit test checks the sum for the defaults of both variants, in local and in server mode.
 
 On the minimum of 6 GB, 5,632 MiB as Docker reports it, the limits do not keep the services apart: the limits of the services of the default variant that run all the time add up to 6,016 MiB, more than that, so services that reach their limits at the same time can still run the whole machine out of memory. What holds there is that the highest measured peaks of the services of the default variant add up to at most 4,744 MiB, which fits. For the CeleryExecutor variant, 12 GB of memory for Docker is recommended, and 6 GB stays the minimum, as for the default variant.
 

@@ -17,6 +17,7 @@ Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 - `zensical.toml`: the configuration of the documentation site, including its navigation.
 - `agoranomos`, `.env.example`: the command that sets up, checks and runs the stack, and the template of its settings ([ADR-0014](docs/adr/0014-start-the-stack-with-one-script.md)).
 - `compose.yaml`, `compose.celery.yaml`, `postgres/`: the Docker Compose stack, its CeleryExecutor overlay ([ADR-0015](docs/adr/0015-run-localexecutor-by-default.md)), and the SQL that the one-shot `db-init` job runs on every start.
+- `caddy/`: the proxy image of server mode ([ADR-0019](docs/adr/0019-open-only-metabase-in-server-mode.md)), which `./agoranomos up` builds: the official image of Caddy without the file capability of its binary, with the Caddyfile.
 - `airflow/Dockerfile`, `airflow/requirements.txt`, `airflow/dbt-requirements.in`, `airflow/dbt-requirements.txt`: the Airflow image of the stack ([ADR-0002](docs/adr/0002-orchestrate-with-airflow-3.md)), which `./agoranomos up` builds: dlt and Cosmos in Airflow's environment, dbt in a virtual environment of its own, from a lock file with hashes, and the plugins of `airflow/plugins/`.
 - `airflow/dags/`: the DAGs of the base package, the `agoranomos` DAG bundle.
 - `airflow/dags/agoranomos_pipelines/`: the code that the DAGs of the base package share, such as the demo source (dlt) and the asset of the raw table; `.airflowignore` keeps the DAG processor out of it.

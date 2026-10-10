@@ -1,8 +1,8 @@
 # The Agoranomos stack. Start it with ./agoranomos up (docs/reference/command-line.md).
 # Settings and secrets come from .env, which ./agoranomos init creates from .env.example; without it,
 # docker compose stops and asks for ./agoranomos init. .env also sets COMPOSE_PROFILES: core is the whole
-# stack in local mode (ADR-0011), and demo adds the demo-init job. Images are pinned by tag and digest,
-# and Renovate updates them.
+# stack in local mode (ADR-0011), demo adds the demo-init job, and server adds the proxy of server mode
+# (ADR-0019). Images are pinned by tag and digest, and Renovate updates them.
 # Airflow runs on an image of its own, built from airflow/Dockerfile, with the LocalExecutor: the
 # scheduler runs the tasks. compose.celery.yaml adds a broker and a separate worker (CeleryExecutor);
 # select it with COMPOSE_FILE in .env (ADR-0015).
@@ -546,6 +546,63 @@ services:
     security_opt: ["no-new-privileges:true"]
     logging: *logging
 
+  # The proxy of server mode (the server profile, ADR-0019): the one service with ports on every
+  # address of the host, TCP 80 and 443, in front of Metabase and nothing else. Airflow and Metabase
+  # stay on 127.0.0.1, for SSH tunnels. It starts only after metabase-init has set Metabase up, and
+  # its Caddyfile closes the setup API of Metabase for good (caddy/Caddyfile). Its image is the
+  # official one of Caddy without the file capability of the binary, built from caddy/, with the
+  # Caddyfile in it: like airflow-init, it builds on every start, from the cache of Docker after the
+  # first time, so a changed Caddyfile recreates the proxy.
+  proxy:
+    image: agoranomos-caddy:local
+    build:
+      context: ./caddy
+    pull_policy: build
+    profiles: [server]
+    restart: unless-stopped
+    user: "65534:65534"
+    mem_limit: ${PROXY_MEMORY:-256m}
+    memswap_limit: ${PROXY_MEMORY:-256m}
+    environment:
+      AGORANOMOS_SITE_URL: ${AGORANOMOS_SITE_URL:-http://localhost:${METABASE_PORT:-3000}}
+      AGORANOMOS_TLS: ${AGORANOMOS_TLS:-acme}
+      AGORANOMOS_ACME_CA: ${AGORANOMOS_ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+    # AGORANOMOS_TLS=internal gives the site a certificate of the own authority of Caddy, for
+    # tests; acme, the default, one from AGORANOMOS_ACME_CA. The shell becomes Caddy (exec), which
+    # then gets the signals of Docker.
+    command:
+      - sh
+      - -c
+      - |
+        case "$$AGORANOMOS_TLS" in
+          acme) CADDY_TLS="" ;;
+          internal) CADDY_TLS="tls internal" ;;
+          *) echo "proxy: AGORANOMOS_TLS in .env must be acme or internal" >&2; exit 1 ;;
+        esac
+        export CADDY_TLS
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # The certificates and the key of the account of ACME. A lost volume means a new certificate,
+      # and Let's Encrypt issues at most five for the same names in a week; backups leave it out.
+      - caddy-data:/data
+    read_only: true
+    networks: [default]
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    depends_on:
+      metabase-init:
+        condition: service_completed_successfully
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
 networks:
   # The databases have no route to the internet; with CeleryExecutor, the broker joins them here.
   data:
@@ -557,3 +614,5 @@ volumes:
   airflow-logs:
   # The export of metadata-export: only that job writes it.
   metadata-export:
+  # The certificates of the proxy of server mode.
+  caddy-data:

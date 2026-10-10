@@ -1,0 +1,43 @@
+# The proxy of server mode (ADR-0019): HTTPS for Metabase at AGORANOMOS_SITE_URL, and nothing
+# else. Caddy redirects HTTP to HTTPS and gets the certificate itself, from the ACME directory
+# AGORANOMOS_ACME_CA (Let's Encrypt), or from its own authority with AGORANOMOS_TLS=internal: the
+# command of the proxy in compose.yaml then sets CADDY_TLS to "tls internal". Caddy substitutes
+# the {$...} variables before it reads the file, and an empty one leaves an empty line.
+{
+	# No admin API and no saved configuration: the configuration is this file, read at the start.
+	admin off
+	persist_config off
+	# The root of the own authority of Caddy stays out of the trust store of the container.
+	skip_install_trust
+	acme_ca {$AGORANOMOS_ACME_CA}
+	# TCP only, no HTTP/3: ports 80 and 443 over TCP are all that server mode opens.
+	servers {
+		protocols h1 h2
+	}
+}
+
+{$AGORANOMOS_SITE_URL} {
+	{$CADDY_TLS}
+
+	# Until its first user exists, Metabase hands its setup token to anyone, and the token creates
+	# the first admin. metabase-init sets Metabase up through the network of the stack, so the setup
+	# API stays closed here, also later: an empty application database would hand out a token again.
+	@setup path /api/setup /api/setup/*
+	respond @setup 404
+
+	# Two endpoints of Metabase 0.63 and 0.64 that forward what they get to servers of Metabase on
+	# the internet, with no sign-in, whatever the settings say (ADR-0021).
+	@relays path /api/analytics-proxy /api/analytics-proxy/* /api/product-feedback /api/product-feedback/*
+	respond @relays 404
+
+	# Metabase sets its own security headers, such as its Content-Security-Policy and
+	# X-Frame-Options. These fill in only what a response lacks (the ? prefix), for the answers of
+	# Metabase and of this file alike.
+	header {
+		?Strict-Transport-Security "max-age=31536000"
+		?X-Content-Type-Options "nosniff"
+		?Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	reverse_proxy metabase:3000
+}
