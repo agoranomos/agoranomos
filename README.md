@@ -31,7 +31,10 @@
 > **Pre-alpha.** Local mode runs from the main branch, and the demo goes end to end, from a demo source to a dashboard. Server mode and backups are being built, and the connectors to real sources and AI access come after them. The repository is private until v0.3.
 
 <p align="center">
-  <img alt="The demo dashboard Ad spend (demo) in Metabase: the spend of the last seven days, in total and by campaign, and the spend of every day" src="docs/assets/readme/demo-dashboard.png" width="100%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-dashboard-dark.png">
+    <img alt="The demo dashboard Ad spend (demo) in Metabase: the spend of the last seven days, in total and by campaign, and the spend of every day" src="docs/assets/readme/demo-dashboard.png" width="100%">
+  </picture>
 </p>
 <p align="center"><sub>The demo dashboard, which the first start builds from a demo source through dlt, dbt and Metabase. No accounts or keys needed.</sub></p>
 
