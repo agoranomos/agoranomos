@@ -472,7 +472,7 @@ def test_preflight_stops_on_a_session_key_that_metabase_refuses(cli, key, outcom
     [
         *[
             (value, "pass")
-            for value in ["2048m", "2g", "2G", "512M", "1024k", "2GB", "2gib", "1.5g", ""]
+            for value in ["2048m", "2g", "2G", "512M", "8192k", "2GB", "2gib", "1.5g", ""]
         ],
         *[(value, "stop") for value in ["2048", "2048b", "2 g", "2t", "lots", "g", "1.g", "-2g"]],
     ],
@@ -484,6 +484,58 @@ def test_preflight_stops_on_a_memory_limit_without_a_unit(cli, value, outcome):
     set_env(cli, AIRFLOW_TASKS_MEMORY=value)
     result = cli.run("preflight")
     check_limit(result, outcome, "AIRFLOW_TASKS_MEMORY")
+
+
+def test_preflight_reads_an_env_that_windows_saved(cli):
+    # A .env with the line endings of Windows, and a comment after a value: Compose reads every
+    # value without the carriage return and without the comment, and so does preflight.
+    cli.run("init")
+    text = cli.env_path.read_text(encoding="utf-8")
+    text = re.sub(r"^(AIRFLOW_TASKS_MEMORY=.*)$", r"\1 # for the pipelines", text, flags=re.M)
+    cli.env_path.write_bytes(text.replace("\n", "\r\n").encode())
+    result = cli.run("preflight")
+    assert result.returncode == 0, result.stderr
+    assert "Preflight passed" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("value", "outcome"),
+    [
+        *[(value, "pass") for value in ["6m", "6144k", "0.5g", "6M", "6mib"]],
+        *[(value, "stop") for value in ["5m", "5.9m", "1k", "0m", "0g"]],
+    ],
+)
+def test_preflight_stops_on_a_memory_limit_that_docker_refuses(cli, value, outcome):
+    # Docker refuses a memory limit below 6 MiB, and 0 would be no limit at all.
+    cli.run("init")
+    set_env(cli, WAREHOUSE_DB_MEMORY=value)
+    result = cli.run("preflight")
+    check_limit(result, outcome, "WAREHOUSE_DB_MEMORY")
+    if outcome == "stop":
+        assert "smaller than 6 MiB" in result.stderr
+
+
+@pytest.mark.parametrize("blank", [" ", "\t"], ids=["space", "tab"])
+def test_preflight_stops_on_a_comment_after_an_empty_value(cli, blank):
+    # Compose trims the blanks after the = before it looks for " #", so in "KEY= # rotated" the
+    # value is "# rotated": the comment would become the session key of Metabase, which passes the
+    # check of its length. The message names the setting, never the comment.
+    cli.run("init")
+    set_env(cli, METABASE_SESSION_KEY=f"{blank}# rotated on 2026-10-10")
+    result = cli.run("preflight")
+    assert result.returncode == 1
+    named = [line for line in result.stderr.splitlines() if "comment after an empty value" in line]
+    assert [line.split()[1] for line in named] == ["METABASE_SESSION_KEY"]
+    assert "rotated" not in result.stdout + result.stderr
+
+
+def test_preflight_does_not_take_a_hash_right_after_the_equals_sign_for_a_comment(cli):
+    # KEY=#abc has no blank between the = and the #: Compose reads it as the value #abc.
+    cli.run("init")
+    set_env(cli, AGORANOMOS_ADMIN_EMAIL="#not-a-comment")
+    result = cli.run("preflight")
+    assert "comment after an empty value" not in result.stderr
+    assert result.returncode == 0, result.stderr
 
 
 def test_the_check_of_the_memory_limits_names_each_setting_and_no_value(cli):
@@ -560,6 +612,39 @@ def test_eight_gigabytes_as_docker_reports_them_pass_without_a_warning(cli):
     result = cli.run("preflight", FAKE_MEMTOTAL=str(int(7.6 * GIB)))
     assert result.returncode == 0
     assert "warning" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("memory_mb", "outcome"), [(11775, "warn"), (11776, "pass"), (7680, "warn")]
+)
+def test_the_celery_variant_recommends_twelve_gigabytes(cli, memory_mb, outcome):
+    # ADR-0022: the limits of the CeleryExecutor variant add up to more than 8 GB as Docker
+    # reports it, and fit 12 GB, 11,776 MiB as Docker reports it.
+    cli.run("init")
+    set_env(cli, COMPOSE_FILE="compose.yaml:compose.celery.yaml")
+    result = cli.run("preflight", FAKE_MEMTOTAL=str(memory_mb * MIB))
+    check_limit(result, outcome, "12 GB for the CeleryExecutor variant")
+
+
+@pytest.mark.parametrize(
+    ("compose_file", "needed"),
+    [
+        ("compose.yaml", "6 GB (8 GB recommended)"),
+        (
+            "compose.yaml:compose.celery.yaml",
+            "6 GB (12 GB recommended for the CeleryExecutor variant)",
+        ),
+    ],
+    ids=["default", "celery"],
+)
+def test_the_stop_for_too_little_memory_names_what_the_variant_needs(cli, compose_file, needed):
+    cli.run("init")
+    set_env(cli, COMPOSE_FILE=compose_file)
+    result = cli.run("preflight", FAKE_MEMTOTAL=str(5000 * MIB))
+    assert result.returncode == 1
+    assert f"Docker has 5000 MB of memory, and Agoranomos needs {needed}. In Docker Desktop" in (
+        result.stderr
+    )
 
 
 def test_force_turns_resource_stops_into_warnings(cli):

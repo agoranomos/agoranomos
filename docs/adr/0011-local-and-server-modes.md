@@ -54,5 +54,5 @@ The other option was not chosen for this reason:
 
 * The Metabase MCP server needs a correct `MB_SITE_URL`, and a custom connector in the Claude desktop app cannot reach an endpoint on localhost, because Claude connects to custom connectors from Anthropic's cloud ([ADR-0006](0006-metabase-as-bi.md)). Claude Code can connect to localhost, which is why local mode works for coding agents.
 * A gateway that puts authentication in front of the Airflow, Toolbox and dbt servers may follow ([ADR-0007](0007-ai-access-via-mcp-read-only.md)). It is not needed to start.
-* Both modes have to fit the memory budget in [ADR-0010](0010-multi-arch-and-memory-budget.md).
+* Both modes have to fit the memory budget in [ADR-0022](0022-budget-the-memory-by-variant-and-mode.md).
 * [Caddy](https://caddyserver.com/docs/automatic-https) obtains and renews TLS certificates automatically.

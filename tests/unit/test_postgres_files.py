@@ -205,3 +205,12 @@ def test_the_sql_files_take_from_public_what_no_role_needs(name):
     text = normalized(name)
     missing = [statement for statement in PUBLIC_REVOKES if not runs(text, statement)]
     assert not missing, f"{name} must also run {missing}"
+
+
+def test_metabase_reader_gets_its_limits_on_every_start():
+    # A query of Metabase that runs longer than five minutes is canceled, so that a dashboard or
+    # a question cannot hold the warehouse, and Metabase holds at most 20 connections, more than
+    # the 15 of its pool. AI access to Metabase needs both first (ADR-0017).
+    text = normalized("warehouse.sql")
+    assert runs(text, "ALTER ROLE metabase_reader SET statement_timeout = '5min';")
+    assert runs(text, "ALTER ROLE metabase_reader CONNECTION LIMIT 20;")

@@ -21,18 +21,19 @@ Checks that this machine can run the stack. Each problem is reported with what t
 | Docker Engine | it is missing, not running, or older than 25.0 | — |
 | Docker Compose | the plugin is missing or older than 2.24 | it is 2.37 or 2.38, or older than 5.4 with the containerd image store |
 | CPU architecture | it is neither arm64 nor x86-64 with x86-64-v2 | — |
-| Memory available to Docker | below 6 GB | below 8 GB |
+| Memory available to Docker | below 6 GB | below 8 GB, and below 12 GB with the CeleryExecutor variant |
 | CPUs available to Docker | fewer than 2 | fewer than 4 |
 | Free disk for Docker (Linux) | below 10 GB | below 20 GB |
 | Ports `AIRFLOW_PORT` and `METABASE_PORT` | a port is in use and the stack is not running | — |
 | `METABASE_SESSION_KEY` in `.env` | it has fewer than 16 characters, with which Metabase does not start | — |
-| Each `*_MEMORY` setting in `.env` | it is not empty and not a number with the unit `k`, `m` or `g`, in either case, such as `2048m` or `2g`: Compose would read a number alone as bytes | — |
+| Each `*_MEMORY` setting in `.env` | it is not empty and not a number with the unit `k`, `m` or `g`, in either case, such as `2048m` or `2g`: Compose would read a number alone as bytes; or it is smaller than 6 MiB, the smallest memory limit that Docker accepts | — |
+| A comment after an empty value in `.env` | a setting has a space or a tab and then `#` after its `=`, as in `KEY= # note`: Compose trims the blanks and reads `# note` as the value, a secret or the session key of Metabase among them; a `#` right after the `=`, as in `KEY=#abc`, is a value and no problem | — |
 
 A Docker Compose that is 2.37 or 2.38, or older than 5.4 with the containerd image store, does not keep track of the image that `./agoranomos up` builds for Airflow ([docker/compose#13047](https://github.com/docker/compose/issues/13047), [docker/compose#13636](https://github.com/docker/compose/issues/13636)). The Airflow containers then restart at every start, or get an updated image only at the next one. The stack works, so preflight only warns: update Docker Compose to 5.4 or newer.
 
 Ports are checked with `ss`, `netstat` and `lsof`, whichever of them are installed: a port counts as in use when any of them lists a listener on it. Without any of them, preflight warns that it cannot check the ports.
 
-Docker reports a little less memory than its VM or machine has, so a machine or VM with 8 GB passes without a warning.
+Docker reports a little less memory than its VM or machine has, so a machine or VM with 8 GB passes without a warning for the default variant, and one with 12 GB for the CeleryExecutor variant. Preflight takes the CeleryExecutor variant to be the one whose `COMPOSE_FILE` lists `compose.celery.yaml`.
 
 `--force` turns the stops on memory, CPUs and disk into warnings. Use it only if you accept that the stack may run slowly or fail.
 

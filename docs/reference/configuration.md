@@ -8,7 +8,7 @@ Agoranomos reads its settings from the `.env` file in the root of the checkout. 
 
     Before an upgrade of Metabase, back up its database as well: [Back up Metabase before an upgrade](#back-up-metabase-before-an-upgrade).
 
-Each value is used as written: keep it on one line, do not put a comment after it, and put a value with spaces or a `$` in single quotes.
+`./agoranomos` reads each setting as Docker Compose does (compose-go 2.16.1, as of October 2026) for lines of the form `KEY=value`: the last line that sets a setting counts, a value in single or double quotes is what is between the quotes, and a value without quotes ends where a space and `#` start a comment, without the blanks and the carriage return at its end, which a `.env` saved with the line endings of Windows has. After an empty value, a space and `#` do not start a comment: Compose reads `KEY= # note` as the value `# note`, and `./agoranomos preflight` stops on such a line, so put a comment on a line of its own. Write each setting at the start of its line, without `export` and without blanks around the `=`, keep each value on one line, and put a value with spaces, a `#` or a `$` in single quotes: Compose expands `$` and reads escapes such as `\"` in quotes, and `./agoranomos` does neither.
 
 ## Docker Compose
 
@@ -16,7 +16,7 @@ Each value is used as written: keep it on one line, do not put a comment after i
 |---|---|---|
 | `COMPOSE_PROJECT_NAME` | `agoranomos` | The name of the Compose project. It starts the names of the containers, networks and volumes. |
 | `COMPOSE_PROFILES` | `core,demo` | The profiles that run. `core` is the whole stack in local mode, and `demo` adds the demo: on the first start, the one-shot `demo-init` job runs the demo pipeline and creates a demo dashboard in Metabase ([See the demo](../how-to/see-the-demo.md)). Set `core` to start without it. |
-| `COMPOSE_FILE` | `compose.yaml` | The Compose files of the stack. `compose.yaml` runs Airflow with LocalExecutor, which needs no broker. `compose.yaml:compose.celery.yaml` adds the Celery broker and a separate worker (CeleryExecutor), which needs the recommended 8 GB of memory ([System requirements](system-requirements.md)). |
+| `COMPOSE_FILE` | `compose.yaml` | The Compose files of the stack. `compose.yaml` runs Airflow with LocalExecutor, which needs no broker. `compose.yaml:compose.celery.yaml` adds the Celery broker and a separate worker (CeleryExecutor), for which 12 GB of memory is recommended ([System requirements](system-requirements.md)). |
 
 ## Stack
 
@@ -31,7 +31,7 @@ Each value is used as written: keep it on one line, do not put a comment after i
 
 ## Memory limits
 
-Every service has a memory limit, also for swap, so that the stack stays within the memory of [System requirements](system-requirements.md) and, on the recommended 8 GB, a service that runs short of memory cannot take it from the others ([System requirements](system-requirements.md#memory-limits) says what holds on the minimum of 6 GB). The limits of the services that run all the time are these settings, with defaults from measurements on the demo; those of the one-shot setup jobs are fixed in `compose.yaml`. A value is a number of MiB with `m`, or of GiB with `g`: `preflight` stops on a number without a unit, which Compose would read as bytes.
+Every service has a memory limit, also for swap, so that the stack stays within the memory of [System requirements](system-requirements.md) and, on the recommended memory (8 GB, or 12 GB for the CeleryExecutor variant), a service that runs short of memory cannot take it from the others ([System requirements](system-requirements.md#memory-limits) says what holds on the minimum of 6 GB). The limits of the services that run all the time are these settings, with defaults from measurements on the demo; those of the one-shot setup jobs are fixed in `compose.yaml`. A value is a number of MiB with `m`, or of GiB with `g`: `preflight` stops on a number without a unit, which Compose would read as bytes, and on a size below 6 MiB, the smallest limit that Docker accepts.
 
 | Setting | Default | Service |
 |---|---|---|
@@ -40,9 +40,9 @@ Every service has a memory limit, also for swap, so that the stack stays within 
 | `AIRFLOW_APISERVER_MEMORY` | `512m` | `airflow-apiserver` |
 | `AIRFLOW_DAG_PROCESSOR_MEMORY` | `768m` | `airflow-dag-processor`, which runs `dbt ls` each time that it parses the transform DAG (below) |
 | `AIRFLOW_TRIGGERER_MEMORY` | `640m` | `airflow-triggerer` |
-| `AIRFLOW_TASKS_MEMORY` | `1152m` | The service that runs the Airflow tasks: `airflow-scheduler` with LocalExecutor, `airflow-worker` with CeleryExecutor |
+| `AIRFLOW_TASKS_MEMORY` | `1280m` | The service that runs the Airflow tasks: `airflow-scheduler` with LocalExecutor, `airflow-worker` with CeleryExecutor |
 | `METABASE_MEMORY` | `2176m` | `metabase`; half of it is the heap of Java |
-| `AIRFLOW_SCHEDULER_MEMORY` | `512m` | Only with CeleryExecutor: `airflow-scheduler`, which then runs no task |
+| `AIRFLOW_SCHEDULER_MEMORY` | `640m` | Only with CeleryExecutor: `airflow-scheduler`, which then runs no task |
 | `BROKER_MEMORY` | `256m` | Only with CeleryExecutor: `broker` |
 
 When a service needs more, raise its limit in `.env` and run `./agoranomos up`, which starts it again with the new limit. A one-shot job has no setting here: [System requirements](system-requirements.md#when-a-service-reaches-its-limit) says how one that reaches its limit shows, and what to do. The tasks of heavier pipelines need more than the demo, and so do more tasks at the same time: with LocalExecutor, up to `AIRFLOW_PARALLELISM` tasks run in the scheduler at once, so raise `AIRFLOW_TASKS_MEMORY` with it. Each limit that you raise needs memory on the machine as well: [System requirements](system-requirements.md#memory-limits) says how the defaults add up. When a service reaches its limit, the kernel stops one of its processes ([System requirements](system-requirements.md#when-a-service-reaches-its-limit)).
@@ -114,6 +114,8 @@ A mart, or a column that a release adds or renames, reaches the warehouse with t
 | `METABASE_ADMIN_PASSWORD` | The password of the Metabase admin account | The first-start setup signs in with it on every start, and so does `demo-init`. If you change the password in Metabase, put the same value here. |
 
 On every start, the setup job `db-init` sets each role of the warehouse (`loader`, `transformer` and `metabase_reader`) and of the platform instance (`airflow` and `metabase`) to `LOGIN`, with no `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION` or `BYPASSRLS` attribute, and gives it the password from `.env`. So if you give one of these roles such a power by hand, the next `./agoranomos up` takes it back. On both instances, no role but the superuser can connect to the `postgres` and `template1` databases or read the statistics of the statements (`pg_stat_statements`): `airflow` and `metabase` connect only to the database that each owns, and the roles of the warehouse only to `warehouse`. `db-init` also gives `loader` and `transformer` a lock timeout of one minute: a statement that waits longer for a lock fails with `canceling statement due to lock timeout`. A load then fails and is tried again instead of waiting without end. A dbt run fails too, and the mart keeps its data: dbt renames a table that it rebuilds, which waits for the queries that read the table, and the queries that come later, such as those of Metabase, wait behind it.
+
+`db-init` also gives `metabase_reader` a statement timeout of five minutes and a limit of 20 connections. A question or a dashboard card whose query runs longer fails with `canceling statement due to statement timeout`, before the query timeout of Metabase itself, 20 minutes; and Metabase, whose pool holds up to 15 connections to the warehouse, cannot take the connections that the pipelines need (both defaults of Metabase 0.64.1, as of October 2026).
 
 `AIRFLOW_DB_PASSWORD` and `VALKEY_PASSWORD` are written into connection URLs. If you choose them yourself instead of letting `init` generate them, use letters and digits only: a character such as `@`, `/` or `:` breaks the URL.
 

@@ -74,7 +74,7 @@ git pull
 ./agoranomos init
 ```
 
-`init` names the settings that it adds, with their defaults or new secrets, and changes no value that is set. Look at them before you start the stack: an update can bring limits, such as the memory limits that every service got in October 2026, whose defaults fit the demo. If your own DAGs, a higher `AIRFLOW_PARALLELISM` or the questions and dashboards of your Metabase need more, raise the limits now ([Give a service more memory](#give-a-service-more-memory)). With its limit, Metabase gives half of `METABASE_MEMORY` to its heap, 1,088 MiB by default; without one, Java gave the heap a quarter of the memory of Docker, about 1.9 GiB on 8 GB. Then start the stack:
+`init` names the settings that it adds, with their defaults or new secrets, and changes no value that is set: an `.env` keeps the values it has. Look at them before you start the stack: an update can bring limits, such as the memory limits that every service got in October 2026, whose defaults fit the demo. A default that an update raises does not reach a setting that `.env` already has, which keeps its old value until you raise it: compare the `*_MEMORY` settings of `.env` with those of `.env.example`. In October 2026 the default of `AIRFLOW_TASKS_MEMORY` went from `1152m` to `1280m`, and that of `AIRFLOW_SCHEDULER_MEMORY`, which only the CeleryExecutor variant uses, from `512m` to `640m`. If your own DAGs, a higher `AIRFLOW_PARALLELISM` or the questions and dashboards of your Metabase need more, raise the limits now ([Give a service more memory](#give-a-service-more-memory)). With its limit, Metabase gives half of `METABASE_MEMORY` to its heap, 1,088 MiB by default; without one, Java gave the heap a quarter of the memory of Docker, about 1.9 GiB on 8 GB. Then start the stack:
 
 ```bash
 ./agoranomos up
@@ -95,7 +95,7 @@ When the first command prints nothing, `db-init` has no volume, and there is not
 
 ## Run the tasks on a separate worker
 
-By default the scheduler of Airflow runs the tasks itself, with the LocalExecutor ([ADR-0015](../adr/0015-run-localexecutor-by-default.md)). The CeleryExecutor variant runs them on a separate worker, as a deployment that grows to more than one machine needs: it adds the Valkey broker and the `airflow-worker` service, and it needs the recommended 8 GB of memory ([System requirements](../reference/system-requirements.md)).
+By default the scheduler of Airflow runs the tasks itself, with the LocalExecutor ([ADR-0015](../adr/0015-run-localexecutor-by-default.md)). The CeleryExecutor variant runs them on a separate worker, as a deployment that grows to more than one machine needs: it adds the Valkey broker and the `airflow-worker` service, and 12 GB of memory is recommended for it ([System requirements](../reference/system-requirements.md)).
 
 To switch a running stack to it:
 

@@ -44,6 +44,7 @@ nav = [
     { "ADR-0016: Keep the metadata of the marts as code, with a deployment's overrides in extensions" = "adr/0016-keep-the-metadata-of-the-marts-as-code.md" },
     { "ADR-0017: Set the access of AI clients in Metabase by levels" = "adr/0017-set-ai-access-in-metabase-by-levels.md" },
     { "ADR-0018: Keep the content of the package in Metabase as code, and view-only" = "adr/0018-keep-the-content-of-the-package-in-metabase-as-code.md" },
+    { "ADR-0022: Budget the memory by variant and mode" = "adr/0022-budget-the-memory-by-variant-and-mode.md" },
   ] },
 ]
 

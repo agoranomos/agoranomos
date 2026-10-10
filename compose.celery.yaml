@@ -76,8 +76,8 @@ services:
   # It runs no task here: the worker, which extends the scheduler of compose.yaml, gets the limit of
   # the tasks from there.
   airflow-scheduler:
-    mem_limit: ${AIRFLOW_SCHEDULER_MEMORY:-512m}
-    memswap_limit: ${AIRFLOW_SCHEDULER_MEMORY:-512m}
+    mem_limit: ${AIRFLOW_SCHEDULER_MEMORY:-640m}
+    memswap_limit: ${AIRFLOW_SCHEDULER_MEMORY:-640m}
     environment:
       <<: [*airflow-celery-environment, *airflow-celery-queue-environment]
       # With CeleryExecutor the scheduler runs no task, so the worker alone gets the passwords of the
