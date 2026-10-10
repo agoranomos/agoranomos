@@ -223,9 +223,11 @@ def test_metabase_reader_gets_its_limits_on_every_start():
 )
 def test_the_backup_role_reads_every_table_and_writes_nothing(name, databases):
     # backup takes the backups (ADR-0020): pg_read_all_data and CONNECT on the databases of the
-    # stack are all that it is given, and its sessions start read-only.
+    # stack are all that it is given, and its sessions start read-only. Every GRANT that names
+    # backup counts, also one to a list of roles, one WITH GRANT OPTION, and one that gives the
+    # role itself to another.
     text = normalized(name)
-    granted = re.findall(r"\bGRANT [^;]*\bTO backup;", text, re.IGNORECASE)
+    granted = re.findall(r"\bGRANT\b[^;]*\bbackup\b[^;]*;", text, re.IGNORECASE)
     assert granted == [
         "GRANT pg_read_all_data TO backup;",
         f"GRANT CONNECT ON DATABASE {databases} TO backup;",

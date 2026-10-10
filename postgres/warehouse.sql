@@ -53,9 +53,11 @@ SELECT format(
 ) \gexec
 GRANT CONNECT ON DATABASE warehouse TO loader, transformer, metabase_reader;
 
--- backup takes the backups (ADR-0020). It may read every table of every database of this instance
--- (pg_read_all_data), the hashes of the passwords of the roles in pg_authid among them, and it
--- writes nothing: no other grant, and sessions that start read-only. It connects to warehouse only.
+-- backup takes the backups (ADR-0020). On this instance it connects to warehouse only, and it may
+-- read every table there (pg_read_all_data), the hashes of the passwords of the roles in pg_authid
+-- among them. It writes nothing: no other grant, and sessions that start read-only. The members of
+-- pg_read_all_data may select from the views of pg_stat_statements, but the functions behind them
+-- are revoked from PUBLIC above and not given to backup, so it reads no statistics of the statements.
 SELECT 'CREATE ROLE backup' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'backup') \gexec
 SELECT format(
   'ALTER ROLE backup WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
