@@ -1642,6 +1642,42 @@ def test_the_context_of_the_site_reads_the_root_of_caddy_only_with_internal_tls(
         stack_helpers.site_context.cache_clear()
 
 
+SESSION = "a-session-that-must-stay-out-of-the-report"
+
+
+def test_the_admin_signs_in_through_the_proxy_and_the_session_comes_back_wrapped(monkeypatch):
+    calls = []
+
+    def answer(env, method, path, body=None, headers=None, timeout=30, name=None):
+        calls.append((method, path, body))
+        cookie = {"set-cookie": f"metabase.SESSION={SESSION}; HttpOnly"}
+        return 200, cookie, json.dumps({"id": SESSION}).encode()
+
+    monkeypatch.setattr(stack_helpers, "site_request", answer)
+    site = {"AGORANOMOS_ADMIN_EMAIL": "admin@bi.example.com", "METABASE_ADMIN_PASSWORD": PASSWORD}
+    session = stack_helpers.site_session(site)
+    assert calls == [
+        ("POST", "/api/session", {"username": "admin@bi.example.com", "password": PASSWORD})
+    ]
+    # Only the wrapped headers come back, and they print without the session.
+    assert type(session) is stack_helpers.SecretHeaders
+    assert session == {"X-Metabase-Session": SESSION}
+    assert type(session["X-Metabase-Session"]) is stack_helpers.Secret
+    assert SESSION not in repr(session) + repr(session["X-Metabase-Session"])
+    # The default of the name, as the session fixture has it.
+    del site["AGORANOMOS_ADMIN_EMAIL"]
+    stack_helpers.site_session(site)
+    assert calls[-1][2]["username"] == "admin@example.com"
+
+
+def test_a_failed_sign_in_through_the_proxy_names_the_status_and_shows_no_body(monkeypatch):
+    refusal = json.dumps({"errors": {"password": "a body that must stay out of the report"}})
+    monkeypatch.setattr(stack_helpers, "site_request", lambda *a, **k: (401, {}, refusal.encode()))
+    with pytest.raises(AssertionError) as raised:
+        stack_helpers.site_session({"METABASE_ADMIN_PASSWORD": PASSWORD})
+    assert str(raised.value) == "the admin could not sign in through the proxy: HTTP 401"
+
+
 def test_the_celery_variant_adds_the_worker_to_the_airflow_services():
     local = services.airflow_names("local")
     celery = services.airflow_names("celery")

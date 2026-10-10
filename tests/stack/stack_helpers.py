@@ -404,6 +404,25 @@ def plain_request(env: dict[str, str], path: str) -> tuple[int, str]:
         connection.close()
 
 
+def site_session(env: dict[str, str]) -> SecretHeaders:
+    """The headers that sign a request through the proxy in as the admin, as the session fixture of
+    conftest.py does for Metabase itself. The sign-in has a frame of its own, which ends before the
+    next call, so that the answer to it, which holds the session twice (in the body and in the
+    cookie), is bound to no frame that pytest prints under --showlocals when a later call fails. A
+    failed sign-in names the status and never a body."""
+    status, _, body = site_request(
+        env,
+        "POST",
+        "/api/session",
+        {
+            "username": env.get("AGORANOMOS_ADMIN_EMAIL") or "admin@example.com",
+            "password": env["METABASE_ADMIN_PASSWORD"],
+        },
+    )
+    assert status == 200, f"the admin could not sign in through the proxy: HTTP {status}"
+    return SecretHeaders({"X-Metabase-Session": Secret(json.loads(body)["id"])})
+
+
 def psql(
     service: str, user: str, password: str, database: str, sql: str
 ) -> subprocess.CompletedProcess[str]:

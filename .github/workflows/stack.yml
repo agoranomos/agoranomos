@@ -81,7 +81,8 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           pattern='^(agoranomos|compose\.yaml|postgres/backup\.sh|tests/stack/test_(server|backup|backup_roundtrip)\.py)$|^caddy/'
-          if git diff --name-only "${BASE_SHA}...${HEAD_SHA}" | grep -Eq "$pattern"; then
+          files=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")
+          if printf '%s\n' "$files" | grep -Eq "$pattern"; then
             echo "server=true" >> "$GITHUB_OUTPUT"
           else
             echo "server=false" >> "$GITHUB_OUTPUT"

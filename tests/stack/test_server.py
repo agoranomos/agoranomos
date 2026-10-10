@@ -13,8 +13,6 @@ import pytest
 from services import SERVER
 from stack_helpers import (
     NamesOnly,
-    Secret,
-    SecretHeaders,
     compose,
     containers,
     http_json,
@@ -22,6 +20,7 @@ from stack_helpers import (
     process_uids,
     site_host,
     site_request,
+    site_session,
 )
 
 pytestmark = pytest.mark.skipif(not SERVER, reason="server mode is off: .env selects no server")
@@ -38,7 +37,8 @@ def test_http_redirects_to_https_with_the_path_and_the_query(env):
 def test_metabase_answers_over_https_with_a_certificate_for_the_site(env):
     status, _, body = site_request(env, "GET", "/api/health")
     assert status == 200
-    assert json.loads(body) == {"status": "ok"}
+    answer = json.loads(body, object_hook=NamesOnly)
+    assert answer.get("status") == "ok", f"Metabase said {answer.get('status')!r}"
 
 
 def test_a_name_that_is_not_the_site_gets_no_certificate(env):
@@ -50,7 +50,9 @@ def test_a_name_that_is_not_the_site_gets_no_certificate(env):
 
 def test_airflow_is_not_behind_the_proxy(env):
     status, _, body = site_request(env, "GET", "/api/v2/monitor/health")
-    assert b"metadatabase" not in body, f"Airflow answered through the proxy: HTTP {status}"
+    # A bool, so that a failure explains itself with the message and not with the body.
+    answered = b"metadatabase" in body
+    assert not answered, f"Airflow answered through the proxy: HTTP {status}"
 
 
 def test_the_responses_carry_the_security_headers(env):
@@ -58,15 +60,17 @@ def test_the_responses_carry_the_security_headers(env):
         _, headers, _ = site_request(env, "GET", path)
         assert headers["strict-transport-security"].startswith("max-age=31536000"), path
         assert headers["x-content-type-options"] == "nosniff", path
-        assert "referrer-policy" in headers, path
+        # Metabase 0.64.1 sets none of the three on these paths, so the value is the proxy's.
+        assert headers.get("referrer-policy") == "strict-origin-when-cross-origin", path
 
 
 # Caddy's path matcher is case-insensitive, merges repeated slashes and matches the unescaped
 # path (caddyserver.com/docs/caddyfile/matchers#path, read 2026-10-10), so each of these is closed.
 # The setup API of Metabase 0.64.1 has one endpoint, POST /api/setup (src/metabase/setup_rest/
-# api.clj), so closing it takes nothing from a signed-in admin. Jetty, under Metabase, drops the
-# parameters of a path segment (;x=1), so a path that the proxy let through with one would reach
-# the setup API: the proxy must close it too.
+# api.clj), so closing it takes nothing from a signed-in admin. Metabase 0.64.1 answers 404 to
+# /api/setup;x=1 and to /api/%73etup by itself (checked on 2026-10-10: it neither drops the
+# parameter of a path segment nor decodes the escape). These two cases guard against a later
+# version of Metabase, or a rule of the proxy, that would map such a form to the setup API.
 @pytest.mark.parametrize(
     ("method", "path"),
     [
@@ -157,25 +161,25 @@ def test_metabase_asks_for_15_characters_and_signs_out_after_a_day_without_activ
     assert (timeout["is_env_setting"], timeout["env_name"]) == (True, "MB_SESSION_TIMEOUT")
 
 
-def test_a_question_that_runs_longer_than_a_minute_comes_back_through_the_proxy(env):
-    # Caddy 2.11.6 and later have idle timeouts of a minute, and Metabase lets a query run for 20
-    # minutes: the answer of a query of 70 seconds must still come back through the proxy.
-    status, _, body = site_request(
-        env,
-        "POST",
-        "/api/session",
-        {
-            "username": env.get("AGORANOMOS_ADMIN_EMAIL") or "admin@example.com",
-            "password": env["METABASE_ADMIN_PASSWORD"],
-        },
-    )
-    assert status == 200, f"the admin could not sign in through the proxy: HTTP {status}"
-    session = SecretHeaders({"X-Metabase-Session": Secret(json.loads(body)["id"])})
+def warehouse_id(env, session):
+    """The id of the warehouse in Metabase, asked through the proxy. The frame ends before the next
+    call, so that the list of the databases, whose details name hosts and users, is bound to no
+    frame that pytest prints when a later call fails."""
     status, _, body = site_request(env, "GET", "/api/database", headers=session)
-    assert status == 200
+    assert status == 200, f"the list of databases: HTTP {status}"
     databases = json.loads(body, object_hook=NamesOnly)
     items = databases["data"] if isinstance(databases, dict) else databases
     [warehouse] = [item["id"] for item in items if item["name"] == WAREHOUSE_NAME]
+    return warehouse
+
+
+def test_a_question_that_runs_longer_than_a_minute_comes_back_through_the_proxy(env):
+    # Caddy 2.11.6 and later have idle timeouts of a minute, and Metabase lets a query run for 20
+    # minutes: the answer of a query of 70 seconds must still come back through the proxy. The
+    # session and the list of databases are made in helpers whose frames end first: a call that
+    # fails after 150 seconds must not show them under --showlocals.
+    session = site_session(env)
+    warehouse = warehouse_id(env, session)
     status, _, body = site_request(
         env,
         "POST",
@@ -184,5 +188,6 @@ def test_a_question_that_runs_longer_than_a_minute_comes_back_through_the_proxy(
         headers=session,
         timeout=150,
     )
-    assert status in (200, 202)
-    assert json.loads(body)["status"] == "completed"
+    assert status in (200, 202), f"the query: HTTP {status}"
+    answer = json.loads(body, object_hook=NamesOnly)
+    assert answer.get("status") == "completed", f"the query ended {answer.get('status')!r}"
