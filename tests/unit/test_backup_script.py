@@ -115,6 +115,13 @@ exec @REAL@ "$@"
 # date: the real date of this machine, for the time of the clock: FAKE_CLOCK when that file exists,
 # else FAKE_NOW. It formats in the zone of TZ, and in UTC with -u, as the date of the image does.
 FAKE_DATE = """#!/bin/sh
+# FAKE_DATE_FAIL_AT=N: the Nth call of date fails (the calls are counted in a file).
+if [ -n "${FAKE_DATE_FAIL_AT:-}" ]; then
+  count=$(cat "$FAKE_LOG.date" 2> /dev/null || echo 0)
+  count=$((count + 1))
+  echo "$count" > "$FAKE_LOG.date"
+  [ "$count" -ne "$FAKE_DATE_FAIL_AT" ] || exit 1
+fi
 now=${FAKE_NOW:-}
 if [ -n "${FAKE_CLOCK:-}" ] && [ -f "$FAKE_CLOCK" ]; then read -r now < "$FAKE_CLOCK"; fi
 if [ -z "$now" ]; then exec @REAL@ "$@"; fi
@@ -395,14 +402,18 @@ def test_a_failed_step_leaves_no_partial_backup_and_keeps_the_last_good_one(shel
 def test_a_backup_by_hand_waits_for_one_that_runs_and_the_schedule_does_not(shell, backups):
     result = run(shell, backups, "now", FAKE_FLOCK_BUSY="1")
     assert result.returncode == 1
-    assert "waiting for it, at most 10 minutes" in result.stdout
-    assert "another backup still runs after 10 minutes" in result.stderr
+    assert "or a check of one is running: waiting for it, at most 10 minutes" in result.stdout
+    assert "or a check of one, still runs after 10 minutes" in result.stderr
     assert tool_calls(backups) == ["flock -n 9", "flock -w 600 9"]
     assert not (backups / "latest.json").exists()
     (backups.parent / "tools.log").unlink()
     result = run(shell, backups, "scheduled", FAKE_FLOCK_BUSY="1")
     assert result.returncode == 1
-    assert "another backup is running: the schedule tries again in an hour" in result.stderr
+    # A check of a backup (verify) holds the shared lock too: the words do not blame a backup only.
+    assert (
+        "another backup or a check of one is running: the schedule tries again in an hour"
+        in result.stderr
+    )
     assert tool_calls(backups) == ["flock -n 9"]
 
 
@@ -714,7 +725,45 @@ def test_verify_stops_on_a_folder_without_its_manifest(backups):
     result = run("/bin/sh", backups, "verify", NAME)
     assert result.returncode == 1
     assert "is not a complete backup" in result.stderr
-    assert tool_calls(backups) == []  # no lock file, so no backup was ever taken and none runs
+    # The folder had no lock file and is writable: verify made one and took the shared lock on it.
+    assert tool_calls(backups) == ["flock -s -n 9"]
+    assert stat.S_IMODE((backups / ".lock").stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_verify_in_a_read_only_folder_with_no_lock_file_says_so_and_goes_on(shell, backups):
+    assert run(shell, backups, "now").returncode == 0
+    (backups / ".lock").unlink()
+    (backups.parent / "tools.log").unlink()
+    backups.chmod(0o500)
+    try:
+        result = run(shell, backups, "verify", NAME)
+    finally:
+        backups.chmod(0o700)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[0] == (
+        "backup: the backups folder is read-only and has no lock file: checking without a lock"
+    )
+    assert "checked the files only" in result.stdout
+    assert not (backups / ".lock").exists()
+    assert tool_calls(backups) == []
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_verify_stops_with_one_line_when_it_cannot_read_the_lock_file(shell, backups):
+    assert run(shell, backups, "now").returncode == 0
+    (backups.parent / "tools.log").unlink()
+    lock = backups / ".lock"
+    lock.chmod(0)
+    try:
+        result = run(shell, backups, "verify", NAME, "warehouse")
+    finally:
+        lock.chmod(0o600)
+    assert result.returncode == 1
+    lines = result.stderr.splitlines()
+    assert len(lines) == 1, result.stderr
+    assert lines[0].startswith(f"backup: error: cannot read the lock file {lock}")
+    assert tool_calls(backups) == []  # it did not go on to lock a descriptor that is not open
 
 
 def test_the_schedule_takes_the_first_backup_at_once_and_stops_on_sigterm(backups):
@@ -1116,6 +1165,19 @@ def test_a_name_that_is_taken_stops_the_backup_and_leaves_that_folder_as_it_is(s
     assert result.stderr.splitlines() == [f"backup: error: the backup {NAME} failed at: {step}"]
     assert latest(backups)["step"] == step
     assert [path.name for path in taken.iterdir()] == ["keep"]
+    assert not list(backups.glob(".partial-*"))
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_command_that_fails_between_two_steps_does_not_blame_the_step_before(shell, backups):
+    # The fifth call of date is the one that takes the time of the end, after the checksums.
+    result = run(shell, backups, "now", FAKE_DATE_FAIL_AT="5")
+    assert result.returncode == 1
+    assert result.stderr.splitlines() == [
+        f"backup: error: the backup {NAME} failed at: the work between two steps"
+    ]
+    assert latest(backups)["step"] == "the work between two steps"
+    assert backup_names(backups) == []
     assert not list(backups.glob(".partial-*"))
 
 

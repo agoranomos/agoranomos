@@ -107,11 +107,12 @@ write_latest() {
 
 # Run one step of a backup. set -e is in effect in it, in the functions too (it would not be in an
 # if or an ||), so the first command that fails stops the shell, and abort, the trap on EXIT, says
-# which step it was.
+# which step it was. A command between two steps is not the step before.
 step() {
   current_step=$1
   shift
   "$@"
+  current_step="the work between two steps"
 }
 
 # When a step has failed, remove the partial backup, record the step in latest.json, and stop with
@@ -238,12 +239,12 @@ take_backup() {
   fi
   if [ "$kind" = manual ]; then
     if ! flock -n 9; then
-      say "another backup is running: waiting for it, at most $((LOCK_WAIT_SECONDS / 60)) minutes"
+      say "another backup or a check of one is running: waiting for it, at most $((LOCK_WAIT_SECONDS / 60)) minutes"
       flock -w "$LOCK_WAIT_SECONDS" 9 ||
-        fail "another backup still runs after $((LOCK_WAIT_SECONDS / 60)) minutes: see ./agoranomos logs backup"
+        fail "another backup, or a check of one, still runs after $((LOCK_WAIT_SECONDS / 60)) minutes: see ./agoranomos logs backup"
     fi
   else
-    flock -n 9 || fail "another backup is running: the schedule tries again in an hour"
+    flock -n 9 || fail "another backup or a check of one is running: the schedule tries again in an hour"
   fi
   started_epoch=$(date +%s)
   started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -388,10 +389,17 @@ verify() {
     *) fail "not the name of a backup: $backup" ;;
   esac
   # A shared lock, so that the retention of a backup that runs cannot remove this one while it is
-  # checked. The lock file is opened to read: the folder may be a read-only mount. With no lock file
-  # no backup was ever taken, and none can run.
+  # checked. A folder that is writable gets its lock file now if it has none, so that a first backup
+  # that starts meanwhile finds the lock. The file is opened to read, so that a read-only mount will
+  # do; a read-only folder with no lock file cannot be locked against a backup that another
+  # container starts, and the check says so and goes on.
   lock="$BACKUP_ROOT/.lock"
-  if [ -e "$lock" ]; then
+  if [ ! -e "$lock" ] && [ -w "$BACKUP_ROOT" ]; then
+    { : >> "$lock"; } 2> /dev/null || true
+  fi
+  if [ ! -e "$lock" ]; then
+    say "the backups folder is read-only and has no lock file: checking without a lock"
+  else
     if ! { command exec 9< "$lock"; } 2> /dev/null; then
       fail "cannot read the lock file $lock: it must belong to the user of AGORANOMOS_UID in .env, $(id -u)"
     fi
