@@ -16,7 +16,7 @@ Agoranomos reads its settings from the `.env` file in the root of the checkout. 
 |---|---|---|
 | `COMPOSE_PROJECT_NAME` | `agoranomos` | The name of the Compose project. It starts the names of the containers, networks and volumes. |
 | `COMPOSE_PROFILES` | `core,demo` | The profiles that run. `core` is the whole stack in local mode, and `demo` adds the demo: on the first start, the one-shot `demo-init` job runs the demo pipeline and creates a demo dashboard in Metabase ([See the demo](../how-to/see-the-demo.md)). Set `core` to start without it. |
-| `COMPOSE_FILE` | `compose.yaml` | The Compose files of the stack. `compose.yaml` runs Airflow with LocalExecutor, which needs no broker. `compose.yaml:compose.celery.yaml` adds the Celery broker and a separate worker (CeleryExecutor), which needs the recommended 8 GB of memory ([System requirements](system-requirements.md)). |
+| `COMPOSE_FILE` | `compose.yaml` | The Compose files of the stack. `compose.yaml` runs Airflow with LocalExecutor, which needs no broker. `compose.yaml:compose.celery.yaml` adds the Celery broker and a separate worker (CeleryExecutor), for which 12 GB of memory is recommended ([System requirements](system-requirements.md)). |
 
 ## Stack
 
@@ -40,9 +40,9 @@ Every service has a memory limit, also for swap, so that the stack stays within 
 | `AIRFLOW_APISERVER_MEMORY` | `512m` | `airflow-apiserver` |
 | `AIRFLOW_DAG_PROCESSOR_MEMORY` | `768m` | `airflow-dag-processor`, which runs `dbt ls` each time that it parses the transform DAG (below) |
 | `AIRFLOW_TRIGGERER_MEMORY` | `640m` | `airflow-triggerer` |
-| `AIRFLOW_TASKS_MEMORY` | `1152m` | The service that runs the Airflow tasks: `airflow-scheduler` with LocalExecutor, `airflow-worker` with CeleryExecutor |
+| `AIRFLOW_TASKS_MEMORY` | `1280m` | The service that runs the Airflow tasks: `airflow-scheduler` with LocalExecutor, `airflow-worker` with CeleryExecutor |
 | `METABASE_MEMORY` | `2176m` | `metabase`; half of it is the heap of Java |
-| `AIRFLOW_SCHEDULER_MEMORY` | `512m` | Only with CeleryExecutor: `airflow-scheduler`, which then runs no task |
+| `AIRFLOW_SCHEDULER_MEMORY` | `640m` | Only with CeleryExecutor: `airflow-scheduler`, which then runs no task |
 | `BROKER_MEMORY` | `256m` | Only with CeleryExecutor: `broker` |
 
 When a service needs more, raise its limit in `.env` and run `./agoranomos up`, which starts it again with the new limit. A one-shot job has no setting here: [System requirements](system-requirements.md#when-a-service-reaches-its-limit) says how one that reaches its limit shows, and what to do. The tasks of heavier pipelines need more than the demo, and so do more tasks at the same time: with LocalExecutor, up to `AIRFLOW_PARALLELISM` tasks run in the scheduler at once, so raise `AIRFLOW_TASKS_MEMORY` with it. Each limit that you raise needs memory on the machine as well: [System requirements](system-requirements.md#memory-limits) says how the defaults add up. When a service reaches its limit, the kernel stops one of its processes ([System requirements](system-requirements.md#when-a-service-reaches-its-limit)).

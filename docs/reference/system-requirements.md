@@ -1,6 +1,6 @@
 # System requirements
 
-Agoranomos runs on any machine with Docker that has the resources below ([ADR-0010](../adr/0010-multi-arch-and-memory-budget.md)). `./agoranomos preflight` checks them before every start ([Command line](command-line.md#preflight)).
+Agoranomos runs on any machine with Docker that has the resources below ([ADR-0010](../adr/0010-multi-arch-and-memory-budget.md), and [ADR-0022](../adr/0022-budget-the-memory-by-variant-and-mode.md) for the memory). `./agoranomos preflight` checks them before every start ([Command line](command-line.md#preflight)).
 
 | Resource | Minimum | Recommended |
 |---|---|---|
@@ -11,31 +11,31 @@ Agoranomos runs on any machine with Docker that has the resources below ([ADR-00
 | Docker Engine | 25.0 | |
 | Docker Compose | 2.24 | 5.4 or newer |
 
-On macOS, Docker Desktop sets the memory, CPUs and disk of its virtual machine in Settings → Resources → Advanced. Windows is supported through WSL2: run the commands of Agoranomos in a WSL2 terminal, with the checkout in the Linux file system of WSL, not under `/mnt/c`, where by default `chmod` cannot make `.env` readable only by its owner ([Run Agoranomos locally](../how-to/run-locally.md#before-you-begin)). With WSL2, Docker Desktop leaves the memory and the CPUs to WSL, which gives its virtual machine half of the memory of Windows and all of its logical processors by default: `memory=` and `processors=` in the `[wsl2]` section of `.wslconfig`, in the Windows user folder, change them, and `wsl --shutdown`, run in PowerShell, restarts WSL with them. `.wslconfig` does not exist by default: create it (as of October 2026, Docker's and Microsoft's documentation). Docker reports a little less memory than its machine has, so preflight counts 5,632 MiB as 6 GB and 7,680 MiB as 8 GB.
+On macOS, Docker Desktop sets the memory, CPUs and disk of its virtual machine in Settings → Resources → Advanced. Windows is supported through WSL2: run the commands of Agoranomos in a WSL2 terminal, with the checkout in the Linux file system of WSL, not under `/mnt/c`, where by default `chmod` cannot make `.env` readable only by its owner ([Run Agoranomos locally](../how-to/run-locally.md#before-you-begin)). With WSL2, Docker Desktop leaves the memory and the CPUs to WSL, which gives its virtual machine half of the memory of Windows and all of its logical processors by default: `memory=` and `processors=` in the `[wsl2]` section of `.wslconfig`, in the Windows user folder, change them, and `wsl --shutdown`, run in PowerShell, restarts WSL with them. `.wslconfig` does not exist by default: create it (as of October 2026, Docker's and Microsoft's documentation). Docker reports a little less memory than its machine has, so preflight counts 5,632 MiB as 6 GB, 7,680 MiB as 8 GB and 11,776 MiB as 12 GB.
 
-The CeleryExecutor variant needs the recommended 8 GB: its broker and its worker come on top of the services of the default variant, and its memory limits add up to 7,680 MiB ([Configuration](configuration.md#docker-compose)).
+The CeleryExecutor variant needs more: its broker and its worker come on top of the services of the default variant, and 12 GB of memory for Docker is recommended for it, which `preflight` checks ([ADR-0022](../adr/0022-budget-the-memory-by-variant-and-mode.md)); the minimum stays 6 GB.
 
 ## Memory limits
 
 Every service has a memory limit, with no swap ([Configuration](configuration.md#memory-limits)). On the recommended 8 GB, a limit keeps a service that runs short of memory from taking it from the others: the kernel stops a process of that service when the service reaches its limit, and the other services go on. On the minimum of 6 GB the limits do less, as the end of this section says.
 
-The limits are set from measurements without limits, made on 8 October 2026, as follows:
+The limits are set from measurements made on 8 and 10 October 2026, as follows:
 
 - A service that runs all the time gets 1.25 times its highest peak, rounded up to a multiple of 128 MiB, and at least 256 MiB.
 - A one-shot setup job gets 1.5 times its highest peak, rounded up to a multiple of 128 MiB, and at least 128 MiB: it runs for seconds, and a sample can miss the moment of its peak.
-- The peaks are the highest of every measurement without limits: on a Mac (arm64) at the first start, during the stack tests and idle, and in CI on amd64 and arm64 during the stack tests, each in both variants. The one-shot jobs are measured at the first start. `db-init` ends before a sample catches it, so it gets the minimum.
+- The peaks are the highest of every measurement, with the limits or without them: a peak under a limit is never higher than without it, so this can only raise a limit. They come from measurements on a Mac (arm64) at the first start, during the stack tests and idle, and in CI on amd64 and arm64 during the stack tests, each in both variants. The one-shot jobs are measured at the first start. `db-init` ends before a sample catches it, so it gets the minimum.
 - Metabase gives half of its limit to the heap of Java (`-XX:MaxRAMPercentage=50`). The other half holds what Java needs besides the heap, about 0.5 GiB for Metabase 0.64.1. Its limit is at least 2,048 MiB.
 
-| Service | Highest peak without limits | Where | Limit |
+| Service | Highest peak | Where | Limit |
 |---|---:|---|---:|
 | `warehouse-db` | 77 MiB | Mac | 256 MiB, the minimum |
 | `platform-db` | 276 MiB | Mac | 384 MiB |
 | `airflow-apiserver` | 356 MiB | Mac | 512 MiB |
 | `airflow-dag-processor` | 522 MiB | CI, amd64 | 768 MiB |
 | `airflow-triggerer` | 439 MiB | Mac | 640 MiB |
-| The tasks: `airflow-scheduler` with LocalExecutor, `airflow-worker` with CeleryExecutor | 861 MiB, the worker; under the limit it reached 870 MiB (Mac, below), which gives the same limit | CI, amd64 | 1,152 MiB |
+| The tasks: `airflow-scheduler` with LocalExecutor, `airflow-worker` with CeleryExecutor | 963 MiB, the worker, with its limit of 1,152 MiB | CI, amd64 | 1,280 MiB |
 | `metabase` | 1,720 MiB | CI, amd64 | 2,176 MiB |
-| `airflow-scheduler`, with CeleryExecutor only | 404 MiB | CI, arm64 | 512 MiB |
+| `airflow-scheduler`, with CeleryExecutor only | 422 MiB, with its limit of 512 MiB | CI, amd64 | 640 MiB |
 | `broker`, with CeleryExecutor only | 41 MiB | Mac | 256 MiB, the minimum |
 | `db-init` | not caught by a sample | | 128 MiB, the minimum |
 | `airflow-init` | 189 MiB | Mac | 384 MiB |
@@ -43,15 +43,17 @@ The limits are set from measurements without limits, made on 8 October 2026, as 
 | `metabase-init` | 19 MiB | Mac | 128 MiB, the minimum |
 | `demo-init` | 20 MiB | Mac | 128 MiB, the minimum |
 
-The limits of every service of a variant, the one-shot jobs too, add up to 6,912 MiB in the default variant and to 7,680 MiB in the CeleryExecutor variant. That is at most 7,680 MiB, the recommended 8 GB as Docker reports it, so that on 8 GB even every service at its limit at the same time fits the memory that Docker reports: in the default variant with 768 MiB to spare, and in the CeleryExecutor variant exactly, which leaves nothing for the processes of Docker itself. A unit test checks the sum of the limits for the defaults of both variants.
+Each variant has a budget for the sum of its limits, the one-shot jobs included, so that on the recommended memory every service at its limit at the same time fits what Docker reports ([ADR-0022](../adr/0022-budget-the-memory-by-variant-and-mode.md)): 7,680 MiB, 8 GB, for the default variant, and 11,776 MiB, 12 GB, for the CeleryExecutor variant. Today the limits add up to 7,040 MiB in the default variant, which leaves 640 MiB, and to 7,936 MiB in the CeleryExecutor variant. A unit test checks the sum for the defaults of both variants, in local and in server mode.
 
-On the minimum of 6 GB, 5,632 MiB as Docker reports it, the limits do not keep the services apart: the limits of the services of the default variant that run all the time add up to 5,888 MiB, more than that, so services that reach their limits at the same time can still run the whole machine out of memory. What holds there is that the highest measured peaks of the services of the default variant add up to at most 4,607 MiB, which fits. The CeleryExecutor variant needs the recommended 8 GB.
+On the minimum of 6 GB, 5,632 MiB as Docker reports it, the limits do not keep the services apart: the limits of the services of the default variant that run all the time add up to 6,016 MiB, more than that, so services that reach their limits at the same time can still run the whole machine out of memory. What holds there is that the highest measured peaks of the services of the default variant add up to at most 4,709 MiB, which fits. The CeleryExecutor variant needs the recommended 12 GB.
 
 ## Measured memory
 
 These tables were measured on 8 October 2026, with Airflow 3.3.2, Metabase 0.64.1, PostgreSQL 18.6 and Valkey 9.1.2 and with the default limits, on a Mac with Apple Silicon (arm64) in Docker Desktop 4.93.0 (Docker Engine 29.8.1, Docker Compose 5.5.1), with 7,935 MiB of memory and 4 CPUs as Docker reports them. Each variant started from empty volumes (first start), then ran the stack tests, then stood idle for 10 minutes. Every peak stays below its limit, and no process was killed and no container restarted.
 
-CI measures the stack in the same way in every run of the stack tests, on the GitHub-hosted runners `ubuntu-24.04` (amd64) and `ubuntu-24.04-arm` (arm64), and adds the table to the summary of each job of the Stack workflow. As of October 2026, the tables with the limits on this page come from the Mac; the CI peaks in the table of the limits above come from runs without limits.
+These tables were measured with the limits of 8 October 2026; the limits of the tasks and of the Celery scheduler have grown since, as the table above says.
+
+CI measures the stack in the same way in every run of the stack tests, on the GitHub-hosted runners `ubuntu-24.04` (amd64) and `ubuntu-24.04-arm` (arm64), and adds the table to the summary of each job of the Stack workflow. As of October 2026, the tables with the limits on this page come from the Mac; the CI peaks in the table of the limits above come from runs without limits, except those of the tasks and of the Celery scheduler, which come from runs with the limits of 8 October 2026.
 
 "Since start" counts the page cache too, most of which the kernel takes back before it stops a process, so it can come close to a limit without harm. Without limits, `platform-db` reached 389 MiB since its start, most of it page cache, which is more than its limit of 384 MiB; with the limit, the kernel keeps less page cache for it.
 

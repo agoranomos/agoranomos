@@ -95,7 +95,7 @@ When the first command prints nothing, `db-init` has no volume, and there is not
 
 ## Run the tasks on a separate worker
 
-By default the scheduler of Airflow runs the tasks itself, with the LocalExecutor ([ADR-0015](../adr/0015-run-localexecutor-by-default.md)). The CeleryExecutor variant runs them on a separate worker, as a deployment that grows to more than one machine needs: it adds the Valkey broker and the `airflow-worker` service, and it needs the recommended 8 GB of memory ([System requirements](../reference/system-requirements.md)).
+By default the scheduler of Airflow runs the tasks itself, with the LocalExecutor ([ADR-0015](../adr/0015-run-localexecutor-by-default.md)). The CeleryExecutor variant runs them on a separate worker, as a deployment that grows to more than one machine needs: it adds the Valkey broker and the `airflow-worker` service, and 12 GB of memory is recommended for it ([System requirements](../reference/system-requirements.md)).
 
 To switch a running stack to it:
 

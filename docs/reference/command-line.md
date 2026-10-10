@@ -21,7 +21,7 @@ Checks that this machine can run the stack. Each problem is reported with what t
 | Docker Engine | it is missing, not running, or older than 25.0 | — |
 | Docker Compose | the plugin is missing or older than 2.24 | it is 2.37 or 2.38, or older than 5.4 with the containerd image store |
 | CPU architecture | it is neither arm64 nor x86-64 with x86-64-v2 | — |
-| Memory available to Docker | below 6 GB | below 8 GB |
+| Memory available to Docker | below 6 GB | below 8 GB, and below 12 GB with the CeleryExecutor variant |
 | CPUs available to Docker | fewer than 2 | fewer than 4 |
 | Free disk for Docker (Linux) | below 10 GB | below 20 GB |
 | Ports `AIRFLOW_PORT` and `METABASE_PORT` | a port is in use and the stack is not running | — |

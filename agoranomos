@@ -8,12 +8,15 @@ ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 ENV_FILE="$ROOT/.env"
 ENV_EXAMPLE="$ROOT/.env.example"
 
-# Preflight limits (ADR-0010). Docker reports a little less memory than the machine or VM has, because
-# the kernel keeps some for itself, so the memory limits sit slightly below 6 GB and 8 GB.
+# Preflight limits (ADR-0010, and ADR-0022 for the memory). Docker reports a little less memory than
+# the machine or VM has, because the kernel keeps some for itself, so the memory limits sit slightly
+# below 6 GB, 8 GB and 12 GB.
 MIN_DOCKER_VERSION=25.0.0
 MIN_COMPOSE_VERSION=2.24.0
 MIN_MEMORY_MB=5632
 RECOMMENDED_MEMORY_MB=7680
+# The CeleryExecutor variant needs more: 12 GB as Docker reports it (ADR-0022).
+RECOMMENDED_CELERY_MEMORY_MB=11776
 MIN_CPUS=2
 RECOMMENDED_CPUS=4
 MIN_DISK_GB=10
@@ -459,11 +462,23 @@ EOF
   # documentation). Docker Engine on Linux has the memory and the CPUs of its machine.
   raise_memory="In Docker Desktop, raise it in Settings → Resources → Advanced → Memory limit; on Windows with WSL2, set memory= in the [wsl2] section of .wslconfig in your Windows user folder (create the file if there is none), then run wsl --shutdown in PowerShell. With Docker Engine on Linux, Docker has the memory of the machine."
   raise_cpus="In Docker Desktop, raise it in Settings → Resources → Advanced → CPU limit; on Windows with WSL2, set processors= in the [wsl2] section of .wslconfig in your Windows user folder (create the file if there is none), then run wsl --shutdown in PowerShell. With Docker Engine on Linux, Docker has the CPUs of the machine."
+  # How much memory the variant needs (ADR-0022): the CeleryExecutor variant is the one whose
+  # COMPOSE_FILE lists compose.celery.yaml.
+  case ":$(setting COMPOSE_FILE compose.yaml):" in
+    *compose.celery.yaml:*)
+      recommended_mb=$RECOMMENDED_CELERY_MEMORY_MB
+      recommended="12 GB for the CeleryExecutor variant"
+      ;;
+    *)
+      recommended_mb=$RECOMMENDED_MEMORY_MB
+      recommended="8 GB"
+      ;;
+  esac
   mem_mb=$((mem_total / 1048576))
   if [ "$mem_mb" -lt "$MIN_MEMORY_MB" ]; then
-    resource_problem "Docker has $mem_mb MB of memory, and Agoranomos needs 6 GB (8 GB recommended). $raise_memory"
-  elif [ "$mem_mb" -lt "$RECOMMENDED_MEMORY_MB" ]; then
-    warn "Docker has $mem_mb MB of memory; 8 GB is recommended. $raise_memory"
+    resource_problem "Docker has $mem_mb MB of memory, and Agoranomos needs 6 GB ($recommended recommended). $raise_memory"
+  elif [ "$mem_mb" -lt "$recommended_mb" ]; then
+    warn "Docker has $mem_mb MB of memory; $recommended is recommended. $raise_memory"
   fi
   if [ "$ncpu" -lt "$MIN_CPUS" ]; then
     resource_problem "Docker has $ncpu CPU, and Agoranomos needs $MIN_CPUS ($RECOMMENDED_CPUS recommended). $raise_cpus"

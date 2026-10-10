@@ -591,6 +591,18 @@ def test_eight_gigabytes_as_docker_reports_them_pass_without_a_warning(cli):
     assert "warning" not in result.stderr
 
 
+@pytest.mark.parametrize(
+    ("memory_mb", "outcome"), [(11775, "warn"), (11776, "pass"), (7680, "warn")]
+)
+def test_the_celery_variant_recommends_twelve_gigabytes(cli, memory_mb, outcome):
+    # ADR-0022: the limits of the CeleryExecutor variant add up to more than 8 GB as Docker
+    # reports it, and fit 12 GB, 11,776 MiB as Docker reports it.
+    cli.run("init")
+    set_env(cli, COMPOSE_FILE="compose.yaml:compose.celery.yaml")
+    result = cli.run("preflight", FAKE_MEMTOTAL=str(memory_mb * MIB))
+    check_limit(result, outcome, "12 GB for the CeleryExecutor variant")
+
+
 def test_force_turns_resource_stops_into_warnings(cli):
     result = cli.run("preflight", "--force", FAKE_MEMTOTAL=str(4 * GIB), FAKE_NCPU="1")
     assert result.returncode == 0, result.stderr

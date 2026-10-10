@@ -7,7 +7,7 @@
 # scheduler runs the tasks. compose.celery.yaml adds a broker and a separate worker (CeleryExecutor);
 # select it with COMPOSE_FILE in .env (ADR-0015).
 # Every service has a memory limit, without swap, so that the stack stays within the memory budget of
-# ADR-0010: those of the services that run all the time are settings of .env, from measurements
+# ADR-0022: those of the services that run all the time are settings of .env, from measurements
 # (docs/reference/system-requirements.md), and those of the one-shot jobs are fixed here.
 
 x-logging: &logging
@@ -283,8 +283,8 @@ services:
   airflow-scheduler:
     <<: *airflow
     # It runs the tasks, so it gets the limit of the tasks; with CeleryExecutor the worker does.
-    mem_limit: ${AIRFLOW_TASKS_MEMORY:-1152m}
-    memswap_limit: ${AIRFLOW_TASKS_MEMORY:-1152m}
+    mem_limit: ${AIRFLOW_TASKS_MEMORY:-1280m}
+    memswap_limit: ${AIRFLOW_TASKS_MEMORY:-1280m}
     command: ["scheduler"]
     environment:
       <<: *airflow-environment
