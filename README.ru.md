@@ -31,7 +31,10 @@
 > **Pre-alpha.** Локальный режим запускается из ветки main, а демо проходит весь путь — от демо-источника до дашборда. Серверный режим и резервные копии строятся сейчас, коннекторы к настоящим источникам и доступ AI-клиентов появятся после них. Репозиторий приватный до версии v0.3.
 
 <p align="center">
-  <img alt="Демо-дашборд Ad spend (demo) в Metabase: расходы за последние семь дней, всего и по кампаниям, и расходы по дням" src="docs/assets/readme/demo-dashboard.png" width="100%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-dashboard-dark.png">
+    <img alt="Демо-дашборд Ad spend (demo) в Metabase: расходы за последние семь дней, всего и по кампаниям, и расходы по дням" src="docs/assets/readme/demo-dashboard.png" width="100%">
+  </picture>
 </p>
 <p align="center"><sub>Демо-дашборд, который первый запуск строит из демо-источника через dlt, dbt и Metabase. Ни аккаунты, ни ключи не нужны.</sub></p>
 
