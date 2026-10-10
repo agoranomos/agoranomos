@@ -32,12 +32,12 @@
 
 	# Metabase sets its own security headers, such as its Content-Security-Policy and
 	# X-Frame-Options. These fill in only what a response lacks (the ? prefix), for the answers of
-	# Metabase and of this file alike.
-	header {
-		?Strict-Transport-Security "max-age=31536000"
-		?X-Content-Type-Options "nosniff"
-		?Referrer-Policy "strict-origin-when-cross-origin"
-	}
+	# Metabase and of this file alike. One directive for each header: Caddy applies the defaults of
+	# one header block only when the response lacks all of them (as of Caddy 2.11.7, October 2026),
+	# and Metabase sends two of the three.
+	header ?Strict-Transport-Security "max-age=31536000"
+	header ?X-Content-Type-Options "nosniff"
+	header ?Referrer-Policy "strict-origin-when-cross-origin"
 
 	reverse_proxy metabase:3000
 }

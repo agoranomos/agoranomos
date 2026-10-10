@@ -50,7 +50,7 @@
       "enabled": false
     },
     {
-      "description": "The images in compose.yaml and the base image in airflow/Dockerfile are pinned by tag and digest. Official images are rebuilt often, so the updates that change only a digest come together, once a week.",
+      "description": "The images in compose.yaml and the base images in airflow/Dockerfile and caddy/Dockerfile are pinned by tag and digest. Official images are rebuilt often, so the updates that change only a digest come together, once a week.",
       "matchManagers": ["docker-compose", "dockerfile"],
       "matchUpdateTypes": ["digest"],
       "groupName": "Docker image digests",

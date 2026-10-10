@@ -46,7 +46,7 @@ def test_the_doors_of_metabase_that_need_no_sign_in_are_closed():
 
 def test_the_headers_fill_in_only_what_metabase_does_not_set():
     text = caddyfile()
-    assert re.findall(r'^\?(\S+) "(.+)"$', text, re.M) == [
+    assert re.findall(r'^header \?(\S+) "(.+)"$', text, re.M) == [
         ("Strict-Transport-Security", "max-age=31536000"),
         ("X-Content-Type-Options", "nosniff"),
         ("Referrer-Policy", "strict-origin-when-cross-origin"),
