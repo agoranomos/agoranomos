@@ -469,6 +469,8 @@ def test_init_with_server_turns_server_mode_on(cli):
     # In single quotes in .env, which Compose reads as the JSON between them.
     assert env["METABASE_SESSION_TIMEOUT"] == "'" + '{"amount":24,"unit":"hours"}' + "'"
     assert "Point the A record of bi.example.com at this server" in result.stdout
+    # An AAAA record that still points elsewhere stops the certificate as well.
+    assert "(and its AAAA record, if it has one)" in result.stdout
     assert "with a backup every day at 03:00 UTC into " in result.stdout
     # Again, and with a list of profiles of one's own: each profile once, in its place; a rule of
     # Metabase that a person set stays.
@@ -1075,7 +1077,7 @@ def test_up_warns_when_the_site_has_no_trusted_certificate_yet(cli, tmp_path):
     assert "https://bi.example.com does not answer with a certificate that this machine trusts" in (
         result.stderr
     )
-    assert "A record of bi.example.com" in result.stderr
+    assert "A record of bi.example.com (and its AAAA record, if it has one)" in result.stderr
     assert "./agoranomos logs proxy" in result.stderr
     assert "docker compose restart proxy" in result.stderr
 

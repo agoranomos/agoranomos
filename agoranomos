@@ -539,7 +539,7 @@ cmd_init() {
     [ -n "$(env_get METABASE_PASSWORD_COMPLEXITY)" ] || env_set METABASE_PASSWORD_COMPLEXITY strong-enough
     [ -n "$(env_get METABASE_SESSION_TIMEOUT)" ] ||
       env_set METABASE_SESSION_TIMEOUT "'{\"amount\":24,\"unit\":\"hours\"}'"
-    say "Server mode is on: Metabase is to be at https://$server_domain, with a backup every day at $(setting BACKUP_TIME 03:00) $(setting BACKUP_TZ UTC) into $(backups_path). Point the A record of $server_domain at this server, then run ./agoranomos up."
+    say "Server mode is on: Metabase is to be at https://$server_domain, with a backup every day at $(setting BACKUP_TIME 03:00) $(setting BACKUP_TZ UTC) into $(backups_path). Point the A record of $server_domain at this server (and its AAAA record, if it has one), then run ./agoranomos up."
     say "If this Metabase was set up before this release, its public links stay as they were: check Admin > Settings > Public sharing."
     if ! public_name "$server_domain" && [ "$(setting AGORANOMOS_TLS acme)" != internal ]; then
       say "$server_domain is not a name that gets a certificate of Let's Encrypt: for a test, set AGORANOMOS_TLS=internal in .env, or ./agoranomos up stops on it."
@@ -1023,10 +1023,10 @@ print_addresses() {
 
 # In server mode with a certificate of Let's Encrypt: whether the site answers over HTTPS with a
 # certificate that this machine trusts. Caddy gets the certificate after it starts, and only when
-# the A record of the domain points at this server and ports 80 and 443 are open to the
-# internet, so this tries for about a minute and then only warns: the stack runs either way.
-# AGORANOMOS_CERTIFICATE_TRIES is a hook for the tests (default 12, every AGORANOMOS_WAIT_INTERVAL
-# seconds).
+# the A record of the domain, and its AAAA record if it has one, points at this server and ports 80
+# and 443 are open to the internet, so this tries for about a minute and then only warns: the stack
+# runs either way. AGORANOMOS_CERTIFICATE_TRIES is a hook for the tests (default 12, every
+# AGORANOMOS_WAIT_INTERVAL seconds).
 check_certificate() {
   if ! server_mode || [ "$(setting AGORANOMOS_TLS acme)" != acme ]; then
     return 0
@@ -1046,7 +1046,7 @@ check_certificate() {
     tries=$((tries - 1))
     [ "$tries" -eq 0 ] || sleep "${AGORANOMOS_WAIT_INTERVAL:-5}"
   done
-  warn "https://$site_host does not answer with a certificate that this machine trusts yet. Check that the A record of $site_host points at this server and that ports 80 and 443 are open to the internet; ./agoranomos logs proxy shows what Let's Encrypt answered, and docker compose restart proxy makes Caddy try again at once, without waiting out the pause between its tries. With the staging directory of Let's Encrypt in AGORANOMOS_ACME_CA, no machine trusts the certificate."
+  warn "https://$site_host does not answer with a certificate that this machine trusts yet. Check that the A record of $site_host (and its AAAA record, if it has one) points at this server and that ports 80 and 443 are open to the internet; ./agoranomos logs proxy shows what Let's Encrypt answered, and docker compose restart proxy makes Caddy try again at once, without waiting out the pause between its tries. With the staging directory of Let's Encrypt in AGORANOMOS_ACME_CA, no machine trusts the certificate."
 }
 
 # docker compose with the profile $1 added to those of .env, for a service of that profile: the
