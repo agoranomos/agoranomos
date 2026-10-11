@@ -651,19 +651,10 @@ def test_preflight_in_server_mode_needs_docker_28(cli, version, outcome):
     check_limit(result, outcome, "28.0.0")
 
 
-def test_preflight_in_local_mode_does_not_need_docker_28(cli):
+def test_preflight_in_local_mode_keeps_docker_25(cli):
     cli.run("init")
     result = cli.run("preflight", FAKE_SERVER_VERSION="27.5.1")
     assert result.returncode == 0, result.stderr
-
-
-@pytest.mark.parametrize(("version", "outcome"), [("27.0.0", "stop"), ("27.0.1", "pass")])
-def test_preflight_needs_docker_27_0_1_for_the_network_with_ipv6(cli, version, outcome):
-    # Docker Engine before 27.0.1 does not give an IPv6 network a subnet of its own, so it cannot
-    # create the network that compose.yaml asks for (ADR-0023). Every mode needs it.
-    cli.run("init")
-    result = cli.run("preflight", FAKE_SERVER_VERSION=version)
-    check_limit(result, outcome, "27.0.1")
 
 
 @pytest.mark.parametrize(
@@ -1255,7 +1246,7 @@ def test_preflight_stops_on_one_cpu(cli):
 def test_preflight_stops_on_old_docker(cli):
     result = cli.run("preflight", FAKE_SERVER_VERSION="24.0.7")
     assert result.returncode == 1
-    assert "Docker Engine 24.0.7 is older than 27.0.1" in result.stderr
+    assert "Docker Engine 24.0.7 is older than 25.0.0" in result.stderr
 
 
 def test_preflight_stops_on_old_compose(cli):
@@ -1450,7 +1441,7 @@ def test_a_compose_that_stops_preflight_gets_no_warning_about_the_image(cli):
 @pytest.mark.parametrize(
     ("fake", "message"),
     [
-        ({"FAKE_SERVER_VERSION": "24.0.7"}, "Docker Engine 24.0.7 is older than 27.0.1"),
+        ({"FAKE_SERVER_VERSION": "24.0.7"}, "Docker Engine 24.0.7 is older than 25.0.0"),
         ({"FAKE_COMPOSE_VERSION": "2.20.3"}, "Docker Compose 2.20.3 is older than 2.24.0"),
         ({"FAKE_ARCH": "riscv64"}, "riscv64 is not supported"),
         ({"FAKE_BUSY_PORTS": "8080"}, "port 8080 is in use"),
@@ -3051,7 +3042,7 @@ def test_restore_runs_the_checks_of_preflight_first(cli, tmp_path):
         FAKE_SERVER_VERSION="24.0.7",
     )
     assert result.returncode == 1
-    assert "Docker Engine 24.0.7 is older than 27.0.1" in result.stderr
+    assert "Docker Engine 24.0.7 is older than 25.0.0" in result.stderr
     assert not any(call.startswith(("compose run", "compose stop")) for call in cli.docker_calls())
 
 

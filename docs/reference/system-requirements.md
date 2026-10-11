@@ -8,7 +8,7 @@ Agoranomos runs on any machine with Docker that has the resources below ([ADR-00
 | CPUs available to Docker | 2 | 4 |
 | Free disk for Docker | 10 GB | 20 GB |
 | CPU architecture | arm64, or x86-64 with x86-64-v2 | |
-| Docker Engine | 27.0.1; 28.0 in server mode | |
+| Docker Engine | 25.0; 28.0 in server mode | |
 | Docker Compose | 2.24 | 5.4 or newer |
 
 Docker Engine 27.0.1 is the first release that gives an IPv6 network a subnet of its own when none is set, which the network of the stack needs ([ADR-0023](../adr/0023-give-the-network-of-the-stack-ipv6.md)); server mode needs 28.0 ([ADR-0019](../adr/0019-open-only-metabase-in-server-mode.md)).

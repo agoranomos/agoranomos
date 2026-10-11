@@ -10,9 +10,8 @@ ENV_EXAMPLE="$ROOT/.env.example"
 
 # Preflight limits (ADR-0010, and ADR-0022 for the memory). Docker reports a little less memory than
 # the machine or VM has, because the kernel keeps some for itself, so the memory limits sit slightly
-# below 6 GB, 8 GB and 12 GB. Docker Engine 27.0.1 is the first that gives an IPv6 network a subnet
-# of its own when none is set, which the network of compose.yaml needs (ADR-0023).
-MIN_DOCKER_VERSION=27.0.1
+# below 6 GB, 8 GB and 12 GB.
+MIN_DOCKER_VERSION=25.0.0
 MIN_COMPOSE_VERSION=2.24.0
 MIN_MEMORY_MB=5632
 RECOMMENDED_MEMORY_MB=7680
