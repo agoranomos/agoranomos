@@ -2293,6 +2293,74 @@ def test_up_of_a_server_without_the_setting_adds_it_and_stops_the_stack_for_the_
     assert calls.index(STOP_FOR_THE_NETWORK) < calls.index(UP_CALL)
 
 
+PROBE = "network create --ipv6 agoranomos-ipv6-probe-"
+IPV6_NOT_POSSIBLE = "failed to create network: ip6tables is not functional"
+
+
+def probe_calls(cli):
+    return [call for call in cli.docker_calls() if call.startswith(PROBE)]
+
+
+def test_up_probes_for_an_ipv6_network_before_it_stops_the_stack_for_one(cli, tmp_path):
+    result = up_with_a_network(cli, tmp_path, "true", "false")
+    assert result.returncode == 0, result.stderr
+    calls = cli.docker_calls()
+    [probe] = probe_calls(cli)
+    name = probe.removeprefix("network create --ipv6 ")
+    removal = f"network rm {name}"
+    assert calls.index(NETWORK_LOOKUP) < calls.index(probe) < calls.index(removal)
+    assert calls.index(removal) < calls.index(STOP_FOR_THE_NETWORK) < calls.index(UP_CALL)
+
+
+def test_up_that_cannot_make_an_ipv6_network_stops_before_it_stops_the_stack(cli, tmp_path):
+    result = up_with_a_network(
+        cli, tmp_path, "true", "false", FAKE_NETWORK_CREATE_FAIL=IPV6_NOT_POSSIBLE
+    )
+    assert result.returncode == 1
+    assert "Docker cannot make an IPv6 network on this host" in result.stderr
+    assert IPV6_NOT_POSSIBLE in result.stderr
+    assert "the stack is not stopped" in result.stderr
+    assert "Set AGORANOMOS_IPV6=false in .env and run ./agoranomos up again" in result.stderr
+    calls = cli.docker_calls()
+    assert len(probe_calls(cli)) == 1
+    assert STOP_FOR_THE_NETWORK not in calls
+    assert UP_CALL not in calls
+    assert not any(call.startswith("network rm") for call in calls)
+
+
+def test_up_warns_when_the_network_of_the_probe_cannot_be_removed(cli, tmp_path):
+    result = up_with_a_network(cli, tmp_path, "true", "false", FAKE_NETWORK_RM_FAIL="1")
+    assert result.returncode == 0, result.stderr
+    assert "could not remove the network agoranomos-ipv6-probe-" in result.stderr
+    assert STOP_FOR_THE_NETWORK in cli.docker_calls()
+
+
+@pytest.mark.parametrize(
+    ("wanted", "actual"),
+    [("false", "true"), (None, "true"), ("true", "true"), ("true", ""), (None, "")],
+    ids=["off", "default-off", "on-on", "no-network-on", "no-network-default"],
+)
+def test_up_probes_only_when_it_is_to_stop_the_stack_for_an_ipv6_network(
+    cli, tmp_path, wanted, actual
+):
+    result = up_with_a_network(
+        cli, tmp_path, wanted, actual, FAKE_NETWORK_CREATE_FAIL=IPV6_NOT_POSSIBLE
+    )
+    assert result.returncode == 0, result.stderr
+    assert probe_calls(cli) == []
+
+
+@pytest.mark.parametrize(("wanted", "hinted"), [("true", True), ("false", False)])
+def test_a_stack_that_does_not_start_names_the_way_out_of_ipv6(cli, tmp_path, wanted, hinted):
+    result = up_with_a_network(
+        cli, tmp_path, wanted, "", FAKE_COMPOSE_EXIT="1", FAKE_COMPOSE_ERROR="Docker said no"
+    )
+    assert result.returncode == 1
+    assert "docker compose could not start the stack" in result.stderr
+    hint = "if the error above is about IPv6 or ip6tables, set AGORANOMOS_IPV6=false in .env"
+    assert (hint in result.stderr) is hinted
+
+
 def test_up_looks_at_the_network_only_after_preflight_has_passed(cli, tmp_path):
     # A setting that preflight refuses, such as True, must not stop the stack first and then fail.
     result = up_with_a_network(cli, tmp_path, "true", "false", "false")

@@ -11,8 +11,9 @@ that interrupts the script. FAKE_READ_STDIN makes a call of run or exec read all
 input and log it (the log with the suffix .stdin), as docker compose does for a command in a
 container. FAKE_NETWORK_IPV6 and FAKE_NETWORK_LABEL are what docker network inspect prints for the
 IPv6 setting and the label dev.agoranomos.ipv6 of the network default of the stack: true or false,
-and without FAKE_NETWORK_IPV6 the network does not exist. Cli.stub replaces a stand-in, or adds a
-tool, for one test.
+and without FAKE_NETWORK_IPV6 the network does not exist. FAKE_NETWORK_CREATE_FAIL is the error
+of a docker network create that fails, FAKE_NETWORK_RM_FAIL makes docker network rm fail. Cli.stub
+replaces a stand-in, or adds a tool, for one test.
 """
 
 from __future__ import annotations
@@ -59,6 +60,18 @@ case "$1" in
           exit 1
         fi
         printf '%s|%s\n' "$FAKE_NETWORK_IPV6" "${FAKE_NETWORK_LABEL-}"
+        ;;
+      create)
+        # The probe of ./agoranomos up (docker network create --ipv6 ...): FAKE_NETWORK_CREATE_FAIL
+        # holds the error of a Docker that cannot make an IPv6 network.
+        if [ -n "${FAKE_NETWORK_CREATE_FAIL:-}" ]; then
+          echo "$FAKE_NETWORK_CREATE_FAIL" >&2
+          exit 1
+        fi
+        echo "0123456789abcdef"
+        ;;
+      rm)
+        if [ -n "${FAKE_NETWORK_RM_FAIL:-}" ]; then exit 1; fi
         ;;
     esac
     ;;
