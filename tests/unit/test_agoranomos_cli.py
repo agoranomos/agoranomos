@@ -498,6 +498,35 @@ def test_init_with_server_keeps_an_ipv6_setting_that_is_set(cli):
     assert cli.read_env()["AGORANOMOS_IPV6"] == "false"
 
 
+def test_a_plain_init_adds_ipv6_to_the_env_of_a_server_that_lacks_it(cli):
+    # A server set up before IPv6 came to the network of the stack has the server profile and no
+    # AGORANOMOS_IPV6 (ADR-0023): the init that up runs adds the setting and says so, once.
+    assert cli.run("init", "--server", "bi.example.com").returncode == 0
+    env = cli.env_path.read_text(encoding="utf-8")
+    cli.env_path.write_text(env.replace("AGORANOMOS_IPV6=true\n", ""), encoding="utf-8")
+    assert "AGORANOMOS_IPV6" not in cli.read_env()
+    result = cli.run("init")
+    assert result.returncode == 0, result.stderr
+    assert cli.read_env()["AGORANOMOS_IPV6"] == "true"
+    assert (
+        "Added AGORANOMOS_IPV6=true to .env: server mode gives the network of the stack IPv6 "
+        "(ADR-0023). If a network of the stack exists without it, the next ./agoranomos up "
+        "stops the stack once to make it again."
+    ) in result.stdout.splitlines()
+    assert "Added AGORANOMOS_IPV6" not in cli.run("init").stdout
+
+
+def test_a_plain_init_leaves_ipv6_alone_in_local_mode_and_where_it_is_set(cli):
+    assert cli.run("init").returncode == 0
+    assert "Added AGORANOMOS_IPV6" not in cli.run("init").stdout
+    assert "AGORANOMOS_IPV6" not in cli.read_env()
+    set_env(cli, COMPOSE_PROFILES="core,demo,server,ops")
+    add_env(cli, AGORANOMOS_IPV6="false")
+    result = cli.run("init")
+    assert "Added AGORANOMOS_IPV6" not in result.stdout
+    assert cli.read_env()["AGORANOMOS_IPV6"] == "false"
+
+
 def test_init_puts_in_the_ids_of_its_user_and_keeps_ids_that_are_set(cli):
     cli.run("init")
     env = cli.read_env()
@@ -2238,6 +2267,30 @@ def test_up_stops_the_stack_first_when_the_network_is_not_the_one_the_setting_as
     # The data stays: no volume goes, and the backups folder is not touched.
     assert not any(" -v" in call or "--volumes" in call for call in calls)
     assert (cli.root / "backups").is_dir()
+
+
+def test_up_of_a_server_without_the_setting_adds_it_and_stops_the_stack_for_the_network(
+    cli, tmp_path
+):
+    # The upgrade of a server that was set up before IPv6 came: up runs init, which adds the
+    # setting, and the network that exists has no IPv6 and no label.
+    assert cli.run("init", "--server", "bi.example.com").returncode == 0
+    set_env(cli, AGORANOMOS_TLS="internal")
+    env = cli.env_path.read_text(encoding="utf-8")
+    cli.env_path.write_text(env.replace("AGORANOMOS_IPV6=true\n", ""), encoding="utf-8")
+    result = cli.run(
+        "up",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_NETWORK_IPV6="false",
+        FAKE_NETWORK_LABEL="",
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    assert cli.read_env()["AGORANOMOS_IPV6"] == "true"
+    assert STOP_LINE.format(state="on") in result.stdout.splitlines()
+    calls = cli.docker_calls()
+    assert calls.count(STOP_FOR_THE_NETWORK) == 1
+    assert calls.index(STOP_FOR_THE_NETWORK) < calls.index(UP_CALL)
 
 
 def test_up_looks_at_the_network_only_after_preflight_has_passed(cli, tmp_path):

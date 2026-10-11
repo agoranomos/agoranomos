@@ -537,14 +537,19 @@ cmd_init() {
     [ -n "$(env_get METABASE_PASSWORD_COMPLEXITY)" ] || env_set METABASE_PASSWORD_COMPLEXITY strong-enough
     [ -n "$(env_get METABASE_SESSION_TIMEOUT)" ] ||
       env_set METABASE_SESSION_TIMEOUT "'{\"amount\":24,\"unit\":\"hours\"}'"
-    # IPv6 on the network of the stack, so that Metabase sees the address of each IPv6 client
-    # (ADR-0023). A value that a person set stays.
-    [ -n "$(env_get AGORANOMOS_IPV6)" ] || env_set AGORANOMOS_IPV6 true
     say "Server mode is on: Metabase is to be at https://$server_domain, with a backup every day at $(setting BACKUP_TIME 03:00) $(setting BACKUP_TZ UTC) into $(backups_path). Point the A record of $server_domain at this server, then run ./agoranomos up."
     say "If this Metabase was set up before this release, its public links stay as they were: check Admin > Settings > Public sharing."
     if ! public_name "$server_domain" && [ "$(setting AGORANOMOS_TLS acme)" != internal ]; then
       say "$server_domain is not a name that gets a certificate of Let's Encrypt: for a test, set AGORANOMOS_TLS=internal in .env, or ./agoranomos up stops on it."
     fi
+  fi
+  # IPv6 on the network of the stack in server mode, so that Metabase sees the address of each IPv6
+  # client (ADR-0023). It is added where the server profile is on and the setting is missing, also
+  # in the .env of a server that was set up before: the init that up runs brings it. A value that a
+  # person set stays.
+  if server_mode && [ -z "$(env_get AGORANOMOS_IPV6)" ]; then
+    env_set AGORANOMOS_IPV6 true
+    say "Added AGORANOMOS_IPV6=true to .env: server mode gives the network of the stack IPv6 (ADR-0023). If a network of the stack exists without it, the next ./agoranomos up stops the stack once to make it again."
   fi
 }
 
