@@ -130,8 +130,8 @@ services:
     profiles: [core]
     restart: unless-stopped
     user: postgres
-    mem_limit: ${PLATFORM_DB_MEMORY:-384m}
-    memswap_limit: ${PLATFORM_DB_MEMORY:-384m}
+    mem_limit: ${PLATFORM_DB_MEMORY:-512m}
+    memswap_limit: ${PLATFORM_DB_MEMORY:-512m}
     environment:
       POSTGRES_PASSWORD: ${PLATFORM_POSTGRES_PASSWORD:?run ./agoranomos init}
     command:

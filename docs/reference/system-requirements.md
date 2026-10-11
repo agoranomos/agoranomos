@@ -29,7 +29,7 @@ The limits are set from measurements made on 8 and 10 October 2026, as follows:
 | Service | Highest peak | Where | Limit |
 |---|---:|---|---:|
 | `warehouse-db` | 84 MiB | CI, arm64 | 256 MiB, the minimum |
-| `platform-db` | 276 MiB | Mac | 384 MiB |
+| `platform-db` | 321 MiB in the stack tests and the restore of Metabase into the running stack (276 MiB in the first measurements, and 256 MiB in CI on amd64 in the stack tests of server mode) | Mac, 11 October 2026 | 512 MiB |
 | `airflow-apiserver` | 356 MiB | Mac | 512 MiB |
 | `airflow-dag-processor` | 522 MiB | CI, amd64 | 768 MiB |
 | `airflow-triggerer` | 467 MiB | CI, amd64 | 640 MiB |
@@ -38,18 +38,18 @@ The limits are set from measurements made on 8 and 10 October 2026, as follows:
 | `airflow-scheduler`, with CeleryExecutor only | 422 MiB, with its limit of 512 MiB | CI, amd64, 10 October 2026 | 640 MiB |
 | `broker`, with CeleryExecutor only | 41 MiB | Mac | 256 MiB, the minimum |
 | `proxy`, in server mode | 77 MiB in the stack tests of server mode on a Mac (39 MiB in a synthetic test of 20,000 requests); 20 MiB in the stack tests of the server job, in CI on amd64 on 10 October 2026 | Mac, 11 October 2026 | 256 MiB, the minimum |
-| `backup`, with the ops profile | 66 MiB with its page cache, for a dump of 162 MB (2 MiB in the stack tests of 11 October 2026, with the 1.3 MB of dumps of the demo); the measurement of the server job in CI is to add to them | Mac, 8 October 2026 | 256 MiB, the minimum |
+| `backup`, with the ops profile | 66 MiB with its page cache, for a dump of 162 MB; with the 1.3 MB of dumps of the demo, 2 MiB in the stack tests on the Mac (11 October 2026) and 4 MiB in the stack tests of the server job, CI amd64, 11 October 2026 | Mac, 8 October 2026 | 256 MiB, the minimum |
 | `db-init` | not caught by a sample | | 128 MiB, the minimum |
 | `airflow-init` | 189 MiB | Mac | 384 MiB |
 | `metadata-export` | 128 MiB | Mac | 256 MiB |
 | `metabase-init` | 19 MiB | Mac | 128 MiB, the minimum |
 | `demo-init` | 20 MiB | Mac | 128 MiB, the minimum |
 
-A restore runs inside the memory limit of the database that it restores ([`restore`](command-line.md#restore)). With the demo data, whose dumps are 1.3 MB, the restore of `metabase` into the running stack took `platform-db` to 154 MiB and `warehouse-db` to 50 MiB, and the restore of all three databases on empty volumes took them to 138 MiB and 49 MiB (Mac, 11 October 2026), well below their limits of 384 MiB and 256 MiB. A restore of a warehouse of several GB takes more memory in `warehouse-db`: raise `WAREHOUSE_DB_MEMORY` before it.
+A restore runs inside the memory limit of the database that it restores ([`restore`](command-line.md#restore)). With the demo data, whose dumps are 1.3 MB, the restore of `metabase` into the running stack took `platform-db` to 154 MiB and `warehouse-db` to 50 MiB, and the restore of all three databases on empty volumes took them to 138 MiB and 49 MiB (Mac, 11 October 2026). In CI on amd64 on 11 October 2026, the restore of Metabase into the running stack took `platform-db` to 251 MiB and `warehouse-db` to 61 MiB, and the restore on empty volumes took them to 134 MiB and 54 MiB. All of them are below the limits of 512 MiB and 256 MiB. A restore of a warehouse of several GB takes more memory in `warehouse-db`: raise `WAREHOUSE_DB_MEMORY` before it.
 
-Each variant has a budget for the sum of its limits, the one-shot jobs included, so that on the recommended memory every service at its limit at the same time fits what Docker reports ([ADR-0022](../adr/0022-budget-the-memory-by-variant-and-mode.md)): 7,680 MiB, 8 GB, for the default variant, and 11,776 MiB, 12 GB, for the CeleryExecutor variant. Today the limits add up to 7,040 MiB in the default variant, which leaves 640 MiB, and to 7,936 MiB in the CeleryExecutor variant. Server mode adds the proxy and the backups, 256 MiB each: 7,552 MiB in the default variant, which leaves 128 MiB, and 8,448 MiB in the CeleryExecutor variant. A unit test checks the sum for the defaults of both variants, in local and in server mode.
+Each variant has a budget for the sum of its limits, the one-shot jobs included, so that on the recommended memory every service at its limit at the same time fits what Docker reports ([ADR-0022](../adr/0022-budget-the-memory-by-variant-and-mode.md)): 7,680 MiB, 8 GB, for the default variant, and 11,776 MiB, 12 GB, for the CeleryExecutor variant. Today the limits add up to 7,168 MiB in the default variant, which leaves 512 MiB, and to 8,064 MiB in the CeleryExecutor variant. Server mode adds the proxy and the backups, 256 MiB each: 7,680 MiB in the default variant, which is the whole budget, and 8,576 MiB in the CeleryExecutor variant. A unit test checks the sum for the defaults of both variants, in local and in server mode.
 
-On the minimum of 6 GB, 5,632 MiB as Docker reports it, the limits do not keep the services apart: in local mode, the limits of the services of the default variant that run all the time add up to 6,016 MiB, more than that, so services that reach their limits at the same time can still run the whole machine out of memory. What holds there is that the highest measured peaks of the services of the default variant add up to at most 4,744 MiB, which fits. In server mode, with the proxy and the backup service, the limits add up to 6,528 MiB and the highest peaks, with the 77 MiB of the proxy and the 66 MiB of the backup service, to at most 4,887 MiB, which fits as well. For the CeleryExecutor variant, 12 GB of memory for Docker is recommended, and 6 GB stays the minimum, as for the default variant.
+On the minimum of 6 GB, 5,632 MiB as Docker reports it, the limits do not keep the services apart: in local mode, the limits of the services of the default variant that run all the time add up to 6,144 MiB, more than that, so services that reach their limits at the same time can still run the whole machine out of memory. What holds there is that the highest measured peaks of the services of the default variant add up to at most 4,789 MiB, which fits. In server mode, with the proxy and the backup service, the limits add up to 6,656 MiB and the highest peaks, with the 77 MiB of the proxy and the 66 MiB of the backup service, to at most 4,932 MiB, which fits as well. For the CeleryExecutor variant, 12 GB of memory for Docker is recommended, and 6 GB stays the minimum, as for the default variant.
 
 ## Measured memory
 
@@ -59,7 +59,7 @@ These tables were measured with the limits of 8 October 2026; the limits of the 
 
 CI measures the stack in the same way in every run of the stack tests, on the GitHub-hosted runners `ubuntu-24.04` (amd64) and `ubuntu-24.04-arm` (arm64), and adds the table to the summary of each job of the Stack workflow. As of October 2026, the tables with the limits on this page come from the Mac; the CI peaks in the table of the limits above come from runs without limits, except those of `warehouse-db`, `airflow-triggerer`, the tasks and the Celery scheduler, which come from runs with the limits of 8 October 2026.
 
-"Since start" counts the page cache too, most of which the kernel takes back before it stops a process, so it can come close to a limit without harm. Without limits, `platform-db` reached 389 MiB since its start, most of it page cache, which is more than its limit of 384 MiB; with the limit, the kernel keeps less page cache for it.
+"Since start" counts the page cache too, most of which the kernel takes back before it stops a process, so it can come close to a limit without harm. Without limits, `platform-db` reached 389 MiB since its start, most of it page cache, which was more than its earlier limit of 384 MiB; with the limit, the kernel keeps less page cache for it. With that limit, the stack tests of 11 October 2026 showed 384 MiB since the start and a peak of 321 MiB, which is why the limit is 512 MiB now.
 
 ### Mac arm64, local, first start (aarch64)
 

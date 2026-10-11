@@ -36,7 +36,7 @@ In practice this means:
 * **The second level stays.** The measured peaks of the services of the default variant in local mode fit the minimum of 6 GB, 5,632 MiB as Docker reports it.
 * **Preflight.** It stops below 6 GB in every variant, as before, and warns below 8 GB for the LocalExecutor and below 12 GB for the CeleryExecutor.
 * **The peaks of the formula.** A peak is the highest of every measurement of the service, with its limit or without one. A peak under a limit is never higher than it would be without, so this can only raise a limit.
-* **The limits of October 2026.** The service that runs the tasks gets 1,280 MiB (the Celery worker reached 963 MiB in CI on amd64 on 8 October 2026), and the scheduler of the CeleryExecutor variant 640 MiB (422 MiB in CI on amd64 on 10 October 2026). The sums are then 7,040 MiB for the LocalExecutor and 7,936 MiB for the CeleryExecutor in local mode, and 7,552 MiB and 8,448 MiB in server mode, with the proxy and the backups.
+* **The limits of October 2026.** The service that runs the tasks gets 1,280 MiB (the Celery worker reached 963 MiB in CI on amd64 on 8 October 2026), and the scheduler of the CeleryExecutor variant 640 MiB (422 MiB in CI on amd64 on 10 October 2026), and `platform-db` gets 512 MiB (321 MiB on a Mac on 11 October 2026, during the stack tests and a restore of the backups). The sums are then 7,168 MiB for the LocalExecutor and 8,064 MiB for the CeleryExecutor in local mode, and 7,680 MiB and 8,576 MiB in server mode, with the proxy and the backups.
 
 The other options were not chosen for these reasons:
 
@@ -49,8 +49,8 @@ The other options were not chosen for these reasons:
 * Good, because the default variant runs server mode on the 8 GB reference server.
 * Good, because the unit test of the budget fails as soon as a new service or a higher default does not fit.
 * Bad, because the CeleryExecutor variant needs 12 GB, and machines are rarely sold with exactly that much: on Hetzner Cloud, the next size of the CAX line after 8 GB has 16 GB (as of October 2026).
-* Bad, because the LocalExecutor in server mode keeps 128 MiB of its budget free, so the next service that it runs needs room first.
-* Bad, because a `.env` keeps its limits: `./agoranomos init` never changes a value that is set, so a deployment set up before keeps 1,152 MiB and 512 MiB until someone raises them.
+* Bad, because the LocalExecutor in server mode uses the whole of its budget, so the next service that it runs needs room first.
+* Bad, because a `.env` keeps its limits: `./agoranomos init` never changes a value that is set, so a deployment set up before keeps 1,152 MiB, 512 MiB and, for `platform-db`, 384 MiB until someone raises them.
 
 ## More Information
 
