@@ -2,9 +2,9 @@
 
 This guide puts Agoranomos on a server of your own in server mode: Metabase on the internet over HTTPS with a certificate of Let's Encrypt, Airflow behind an SSH tunnel, and a backup of the databases every day ([ADR-0019](../adr/0019-open-only-metabase-in-server-mode.md), [ADR-0020](../adr/0020-back-up-the-databases-every-day.md)). The example is a server of Hetzner Cloud with Ubuntu; any Linux server with Docker works the same way.
 
-!!! note "Pre-release"
+!!! note "Pre-alpha"
 
-    Server mode and the backups run from the `main` branch, and v0.1.0 is to be their first release. The repository is private until v0.3, so cloning it needs an invitation.
+    Server mode and the backups run from the `main` branch, and v0.1.0, released on 11 October 2026, is their first release. The repository is private until v0.3, so cloning it needs an invitation.
 
 ## Before you begin
 
