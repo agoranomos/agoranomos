@@ -11,6 +11,8 @@ Agoranomos runs on any machine with Docker that has the resources below ([ADR-00
 | Docker Engine | 27.0.1; 28.0 in server mode | |
 | Docker Compose | 2.24 | 5.4 or newer |
 
+Docker Engine 27.0.1 is the first release that gives an IPv6 network a subnet of its own when none is set, which the network of the stack needs ([ADR-0023](../adr/0023-give-the-network-of-the-stack-ipv6.md)); server mode needs 28.0 ([ADR-0019](../adr/0019-open-only-metabase-in-server-mode.md)).
+
 Docker runs as root, the default of Docker Engine: rootless Docker and `userns-remap`, which map the users of containers to other users of the host, are not supported with the backups, which would belong to another user ([Configuration](configuration.md#backups)).
 
 On macOS, Docker Desktop sets the memory, CPUs and disk of its virtual machine in Settings → Resources → Advanced. Windows is supported through WSL2: run the commands of Agoranomos in a WSL2 terminal, with the checkout in the Linux file system of WSL, not under `/mnt/c`, where by default `chmod` cannot make `.env` readable only by its owner ([Run Agoranomos locally](../how-to/run-locally.md#before-you-begin)). With WSL2, Docker Desktop leaves the memory and the CPUs to WSL, which gives its virtual machine half of the memory of Windows and all of its logical processors by default: `memory=` and `processors=` in the `[wsl2]` section of `.wslconfig`, in the Windows user folder, change them, and `wsl --shutdown`, run in PowerShell, restarts WSL with them. `.wslconfig` does not exist by default: create it (as of October 2026, Docker's and Microsoft's documentation). Docker reports a little less memory than its machine has, so preflight counts 5,632 MiB as 6 GB, 7,680 MiB as 8 GB and 11,776 MiB as 12 GB.

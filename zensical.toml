@@ -50,6 +50,7 @@ nav = [
     { "ADR-0020: Back up the databases every day with pg_dump, into a folder of the host" = "adr/0020-back-up-the-databases-every-day.md" },
     { "ADR-0021: Leave the outgoing traffic of Metabase open, and close what relays it without a sign-in" = "adr/0021-leave-the-outgoing-traffic-of-metabase-open.md" },
     { "ADR-0022: Budget the memory by variant and mode" = "adr/0022-budget-the-memory-by-variant-and-mode.md" },
+    { "ADR-0023: Give the network of the stack IPv6" = "adr/0023-give-the-network-of-the-stack-ipv6.md" },
   ] },
 ]
 
