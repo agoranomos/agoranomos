@@ -51,17 +51,17 @@ Caddy keeps its certificates in the Docker volume `caddy-data`, which backups le
 
 | Setting | Default | What it does |
 |---|---|---|
-| `AGORANOMOS_BACKUP_DIR` | `./backups` | The folder of the backups, which git ignores. `init` creates it, open to its owner only. A relative path starts at the checkout. |
+| `AGORANOMOS_BACKUP_DIR` | `./backups` | The folder of the backups. The default folder, `backups/`, is ignored by git; another path is not, unless you ignore it yourself. `init` creates it, open to its owner only. A relative path starts at the checkout. |
 | `BACKUP_TIME` | `03:00` | With the `ops` profile: the time of the daily backup, as `HH:MM`. A backup that the stack missed, because it was down, comes at its next start. Choose a time when no pipeline runs: a dump holds a shared lock on each table of its database until it ends, and a change of a table by dbt or dlt waits behind it for at most a minute and then fails. No DAG of the base package runs at 03:00 UTC. |
 | `BACKUP_TZ` | `UTC` | The time zone of `BACKUP_TIME`, such as `Europe/Berlin`. `preflight` checks the name. |
 | `BACKUP_KEEP_DAILY` | `7` | How many days back the newest scheduled backup of each day stays; at least 1. |
 | `BACKUP_KEEP_WEEKLY` | `4` | How many weeks back, Monday to Sunday, the newest scheduled backup of each week stays. |
 | `BACKUP_KEEP_MONTHLY` | `3` | How many months back the newest scheduled backup of each month stays. |
-| `AGORANOMOS_UID`, `AGORANOMOS_GID` | `auto` | The user and the group that write the backups, so that they belong to you: `init` replaces `auto` with yours. `preflight` and `backup` stop on 0, root. |
+| `AGORANOMOS_UID`, `AGORANOMOS_GID` | `auto` | The user and the group that write the backups, so that they belong to you: `init` replaces `auto` with yours. `preflight` and `backup` stop on 0, root. On Linux they stop too when the backups folder belongs to another user, because the service runs as `AGORANOMOS_UID` and cannot write into a folder of mode 700 that another user owns: a `.env` that you move to another machine keeps the IDs of the first, so set them to `auto` there and run `./agoranomos init`. |
 
 A backup holds the dumps of the databases, the global objects of both instances without passwords, an archive of the extensions folder, the SHA-256 of each file and a manifest, which records the images of the checkout. It does not hold `.env`, whose keys a restore needs, or the certificates of server mode. The days, weeks and months of the retention are those of UTC.
 
-The retention removes scheduled backups only, after each good backup. A backup that `./agoranomos backup` took, such as the one before an upgrade, stays until you delete its folder with `rm -r backups/<name>`; `./agoranomos status` lists these backups with their size and age. When the disk is full, every backup fails and the retention removes none: delete old backups to free space.
+The retention removes scheduled backups only, after each good backup. A backup that `./agoranomos backup` took, such as the one before an upgrade, stays until you delete its folder with `rm -r backups/<name>`; `./agoranomos status` lists these backups with their size and age. Take it before you update the checkout with `git pull`: a backup in a container of its own records the images of the checkout as they are when it runs. When the disk is full, every backup fails and the retention removes none: delete old backups to free space.
 
 A backup is written as `.partial-<name>` and renamed when it is complete, so a folder with the name of a backup is a complete one. A stop of the `backup` service during a backup, such as `./agoranomos down`, ends it: the next backup removes the partial folder, and `latest.json`, in the backups folder, keeps the result of the last backup. To turn the daily backups off, take `ops` out of `COMPOSE_PROFILES`; the backups stay ([Server mode](#server-mode) says what `up` and `down` do with the `backup` container that is left).
 

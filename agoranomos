@@ -340,14 +340,53 @@ ops_mode() {
   return 1
 }
 
-# Print what is wrong with the user that the backups are written as, or nothing.
+# Print what is wrong with the user that the backups are written as, or nothing. Each of the user ID
+# and the group ID must be a number, of digits only; a user ID of zeros only, such as 0 or 00, which
+# Docker reads as 0, is root.
 backup_user_problem() {
   backup_uid=$(env_get AGORANOMOS_UID)
   backup_gid=$(env_get AGORANOMOS_GID)
-  case "$backup_uid:$backup_gid" in
-    0:*) printf '%s' "AGORANOMOS_UID in .env is 0: the backup service would run as root, and the backups would belong to root. Run ./agoranomos as the user who owns the checkout, with AGORANOMOS_UID=auto and AGORANOMOS_GID=auto in .env, and run ./agoranomos init" ;;
-    *[!0-9:]* | :* | *:) printf '%s' "AGORANOMOS_UID and AGORANOMOS_GID in .env must be numbers: set them to auto and run ./agoranomos init, which puts in yours" ;;
+  case "$backup_uid" in
+    '' | *[!0-9]*) backup_uid_problem=numbers ;;
+    *[!0]*) backup_uid_problem="" ;;
+    *) backup_uid_problem=root ;;
   esac
+  case "$backup_gid" in
+    '' | *[!0-9]*) backup_gid_problem=numbers ;;
+    *) backup_gid_problem="" ;;
+  esac
+  if [ "$backup_uid_problem" = root ]; then
+    printf '%s' "AGORANOMOS_UID in .env is 0: the backup service would run as root, and the backups would belong to root. Run ./agoranomos as the user who owns the checkout, with AGORANOMOS_UID=auto and AGORANOMOS_GID=auto in .env, and run ./agoranomos init"
+  elif [ "$backup_uid_problem" = numbers ] || [ "$backup_gid_problem" = numbers ]; then
+    printf '%s' "AGORANOMOS_UID and AGORANOMOS_GID in .env must be numbers: set them to auto and run ./agoranomos init, which puts in yours"
+  fi
+}
+
+# Make the backups folder, open to its owner only (ADR-0020). Docker would create a missing one as
+# root, and on Linux nobody but root could then use it.
+make_backups_folder() {
+  backups=$(backups_path)
+  mkdir -p "$backups" || die "could not create the backups folder $backups"
+  chmod 700 "$backups" ||
+    die "could not make the backups folder $backups open to its owner only: it must belong to you"
+}
+
+# True when the backups folder exists and does not belong to AGORANOMOS_UID, the user that the
+# backup service and the container of ./agoranomos backup run as. It sets owned_folder and
+# folder_owner. A folder that does not exist yet has no owner to compare: init makes it.
+backup_folder_foreign() {
+  owned_folder=$(backups_path)
+  [ -d "$owned_folder" ] || return 1
+  # ls -ldn gives the numeric owner of one path on Linux and macOS alike; stat has other options on each.
+  # shellcheck disable=SC2012
+  folder_owner=$(ls -ldn "$owned_folder" | awk '{ print $3 }')
+  [ "$folder_owner" != "$(env_get AGORANOMOS_UID)" ]
+}
+
+# On Linux a bind mount keeps the owner of the host, so the backup service cannot write into a
+# folder of mode 700 that another user owns; Docker Desktop maps the owner of a shared folder.
+backups_folder_unwritable() {
+  printf '%s' "the backup service (AGORANOMOS_UID=$(env_get AGORANOMOS_UID)) cannot write $owned_folder, which belongs to UID $folder_owner: set AGORANOMOS_UID and AGORANOMOS_GID in .env to the user and the group that own the folder, or give the folder to UID $(env_get AGORANOMOS_UID) with chown"
 }
 
 # True when .env runs server mode: COMPOSE_PROFILES lists server (ADR-0011, ADR-0019).
@@ -449,11 +488,7 @@ cmd_init() {
   # The user and the group that write the backups: those of the user who runs init (ADR-0020).
   if [ "$(env_get AGORANOMOS_UID)" = auto ]; then env_set AGORANOMOS_UID "$(id -u)"; fi
   if [ "$(env_get AGORANOMOS_GID)" = auto ]; then env_set AGORANOMOS_GID "$(id -g)"; fi
-  # The backups folder, open to its owner only. Docker would create a missing one as root.
-  backups=$(backups_path)
-  mkdir -p "$backups" || die "could not create the backups folder $backups"
-  chmod 700 "$backups" ||
-    die "could not make the backups folder $backups open to its owner only: it must belong to you"
+  make_backups_folder
   mkdir -p "$(extensions_path)/dags" "$(extensions_path)/metadata"
   if [ "$server_asked" -eq 1 ]; then
     # A line is written only when its value changes, so that running init --server again changes
@@ -630,8 +665,12 @@ EOF
     message=$(backup_user_problem)
     if [ -n "$message" ]; then
       problem "$message"
-    elif [ "$(env_get AGORANOMOS_UID)" != "$(id -u)" ]; then
-      warn "the backups are written as the user $(env_get AGORANOMOS_UID) of AGORANOMOS_UID in .env, and you are $(id -u): you may not be able to read them"
+    elif backup_folder_foreign; then
+      if [ "$(uname -s)" = Linux ]; then
+        problem "$(backups_folder_unwritable)"
+      else
+        warn "the backup service runs as UID $(env_get AGORANOMOS_UID) (AGORANOMOS_UID in .env), and the backups folder $owned_folder belongs to UID $folder_owner: Docker Desktop maps the owner of a shared folder, so the service can write there, but a Linux server would not let it"
+      fi
     fi
     case "$(setting BACKUP_TIME 03:00)" in
       [01][0-9]:[0-5][0-9] | 2[0-3]:[0-5][0-9]) ;;
@@ -805,8 +844,8 @@ EOF
 # start with another profile left behind, such as a failed demo-init after COMPOSE_PROFILES=core. A
 # failed demo-init alone does not stop the wait: the rest of the stack works without the demo, so
 # the wait goes on until the rest is ready, and then sets demo_failed=1 for cmd_up. An unhealthy
-# backup service does not stop it either: the stack works without a fresh backup, so the wait warns
-# and goes on.
+# backup service does not stop it either: it is unhealthy when there is no good backup in the last 26
+# hours, and the stack works without a fresh backup, so the wait warns and goes on.
 # AGORANOMOS_WAIT_TIMEOUT and AGORANOMOS_WAIT_INTERVAL, in seconds, are hooks for the tests: how long
 # to wait at most (default 900) and how long to sleep between two looks (default 5).
 # The line that names a service that failed while up waited, and the command that shows its logs.
@@ -846,8 +885,8 @@ wait_healthy() {
           esac
           ;;
         backup)
-          # A backup older than 26 hours makes the service unhealthy: up says so and goes on,
-          # because the stack works without a fresh backup; status shows how old it is.
+          # No good backup in the last 26 hours makes the service unhealthy: up says so and goes on,
+          # because the stack works without a fresh backup; status shows when the last one was.
           case "$state:$health:$exit_code" in
             running:healthy:* | running::*) ;;
             running:unhealthy:*) stale_backup=1 ;;
@@ -1042,18 +1081,24 @@ cmd_backup() {
   if ! running_service warehouse-db || ! running_service platform-db; then
     die "the databases are not running: start the stack with ./agoranomos up"
   fi
+  if [ "$(uname -s)" = Linux ] && backup_folder_foreign; then
+    die "$(backups_folder_unwritable)"
+  fi
+  make_backups_folder
   if ops_mode && running_service backup; then
     compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh now ||
-      die "the backup failed: the lines above say at which step"
+      die "the backup failed: the lines above say at which step. The backups folder is $(backups_path)"
   else
     compose run --rm --no-deps -T backup now ||
-      die "the backup failed: the lines above say at which step"
+      die "the backup failed: the lines above say at which step. The backups folder is $(backups_path)"
   fi
 }
 
 # The last backups, after the table of the services: when the last good one was, the backups by
 # hand with their size and age, and the warnings. The table (status_table) tells whether the backup
-# service is unhealthy, so that status asks Compose once.
+# service is unhealthy, so that status asks Compose once. The age of the last good backup is a
+# warning only with the ops profile, which promises a backup every day; otherwise status just says
+# it, as a person takes backups by hand when they like.
 backup_status() {
   backups_folder=$(backups_path)
   latest="$backups_folder/latest.json"
@@ -1061,44 +1106,48 @@ backup_status() {
   if printf '%s\n' "$status_table" | awk '$1 == "backup" && /\(unhealthy\)/ { found = 1 } END { exit !found }'; then
     stale=1
   fi
-  if [ ! -f "$latest" ]; then
-    say "Backups: none yet in $backups_folder. ./agoranomos backup takes one."
-  else
+  set -- "$backups_folder"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z
+  if [ -f "$latest" ]; then
     last_ok=$(json_field "$latest" last_ok)
     if [ -n "$last_ok" ]; then
       last_ok_epoch=$(json_field "$latest" last_ok_epoch)
       case "$last_ok_epoch" in '' | *[!0-9]*) last_ok_epoch=0 ;; esac
       age=$(($(date +%s) - last_ok_epoch))
       say "Backups: the last good backup is $last_ok, $((age / 3600)) hours old, in $backups_folder."
-      [ "$age" -le "$BACKUP_FRESH_SECONDS" ] || stale=1
+      if [ "$age" -gt "$BACKUP_FRESH_SECONDS" ] && ops_mode; then stale=1; fi
     else
       say "Backups: no good backup yet in $backups_folder."
     fi
-    # The backups by hand, which the retention never removes (ADR-0020): their size and age.
-    listed=0
-    for folder in "$backups_folder"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z; do
-      [ "$(json_field "$folder/manifest.json" kind)" = manual ] || continue
-      if [ "$listed" -eq 0 ]; then
-        say "Backups by hand, which the retention never removes; rm -r \"$backups_folder/<name>\" deletes one:"
-        listed=1
-      fi
-      finished=$(json_field "$folder/manifest.json" finished_epoch)
-      case "$finished" in
-        '' | *[!0-9]*) age_text="of an unknown age" ;;
-        *) age_text="$((($(date +%s) - finished) / 86400)) days old" ;;
-      esac
-      say "  ${folder##*/}: $(du -sk "$folder" | cut -f1) KiB, $age_text"
-    done
-    if [ "$(json_field "$latest" result)" = failed ]; then
-      # The schedule's output is in the logs of the service; a person who took a backup read
-      # why on the screen.
-      if [ "$(json_field "$latest" kind)" = manual ]; then
-        failed_hint="The lines that ./agoranomos backup printed said why."
-      else
-        failed_hint="./agoranomos logs backup shows why."
-      fi
-      warn "the last backup, at $(json_field "$latest" attempted), failed at: $(json_field "$latest" step). $failed_hint When the disk is full, every backup fails and the retention removes none: free space, such as by deleting old backups with rm -r \"$backups_folder/<name>\"."
+  elif [ -d "$1" ]; then
+    say "Backups: there is no latest.json in $backups_folder, which says when the last good backup was."
+  else
+    say "Backups: none yet in $backups_folder. ./agoranomos backup takes one."
+  fi
+  # The backups by hand, which the retention never removes (ADR-0020): their size and age. They are
+  # listed without latest.json too, as they take disk space whether it is there or not.
+  listed=0
+  for folder in "$@"; do
+    [ "$(json_field "$folder/manifest.json" kind)" = manual ] || continue
+    if [ "$listed" -eq 0 ]; then
+      say "Backups by hand, which the retention never removes; rm -r \"$backups_folder/<name>\" deletes one:"
+      listed=1
     fi
+    finished=$(json_field "$folder/manifest.json" finished_epoch)
+    case "$finished" in
+      '' | *[!0-9]*) age_text="of an unknown age" ;;
+      *) age_text="$((($(date +%s) - finished) / 86400)) days old" ;;
+    esac
+    say "  ${folder##*/}: $(du -sk "$folder" | cut -f1) KiB, $age_text"
+  done
+  if [ "$(json_field "$latest" result)" = failed ]; then
+    # The schedule's output is in the logs of the service; a person who took a backup read why on
+    # the screen.
+    if [ "$(json_field "$latest" kind)" = manual ]; then
+      failed_hint="The lines that ./agoranomos backup printed said why."
+    else
+      failed_hint="./agoranomos logs backup shows why."
+    fi
+    warn "the last backup, at $(json_field "$latest" attempted), failed at: $(json_field "$latest" step). $failed_hint When the disk is full, every backup fails and the retention removes none: free space, such as by deleting old backups with rm -r \"$backups_folder/<name>\"."
   fi
   if [ "$stale" -eq 1 ]; then
     warn "$NO_RECENT_BACKUP: ./agoranomos logs backup shows why"

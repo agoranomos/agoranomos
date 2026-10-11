@@ -9,10 +9,11 @@ import re
 import stat
 import subprocess
 import time
+from datetime import UTC, datetime
 
 import pytest
 from services import OPS
-from stack_helpers import REPO_ROOT, compose, containers, process_uids, read_env
+from stack_helpers import REPO_ROOT, compose, containers, docker, process_uids, read_env
 
 # The env fixture says what is missing when there is no .env: the module still collects without it.
 ENV_FILE = REPO_ROOT / ".env"
@@ -115,24 +116,49 @@ def test_the_backup_service_runs_as_the_owner_of_the_checkout_and_is_healthy():
     assert uids[:2] == ["Uid:", str(os.getuid())]
 
 
+def scheduled_backups() -> list[str]:
+    """The names of the scheduled backups in the backups folder, oldest first."""
+    return [
+        folder.name
+        for folder in sorted(BACKUPS.iterdir())
+        if NAME.fullmatch(folder.name)
+        and '"kind": "scheduled"' in (folder / "manifest.json").read_text(encoding="utf-8")
+    ]
+
+
+def backup_time(name: str) -> datetime:
+    """The start of a backup, from its name, in UTC."""
+    return datetime.strptime(name, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+
+
+def service_started_at() -> datetime:
+    """When the container of the backup service last started, in UTC, to the second."""
+    started = docker(
+        "inspect", "--format", "{{.State.StartedAt}}", containers()["backup"]["ID"]
+    ).stdout.strip()
+    # Docker gives nanoseconds and a Z: fromisoformat reads them, and drops what is finer.
+    return datetime.fromisoformat(started).astimezone(UTC).replace(microsecond=0)
+
+
 @pytest.mark.skipif(not OPS, reason="the ops profile is off: no backup service runs")
 def test_the_backup_service_takes_a_scheduled_backup_by_itself():
     # With no scheduled backup yet, the first is due at once (ADR-0020), so it comes within
-    # minutes of the start, with no help from this test.
+    # minutes of the start, with no help from this test. It must be one that this container took:
+    # a stand that has run before holds older ones, and the first is then not due at the start.
+    started = service_started_at()
+    if any(backup_time(name) < started for name in scheduled_backups()):
+        pytest.skip(
+            "a scheduled backup from before this start exists: the first is not due at once"
+        )
     deadline = time.monotonic() + 300
-    scheduled = []
+    taken = []
     while time.monotonic() < deadline:
-        scheduled = [
-            folder.name
-            for folder in sorted(BACKUPS.iterdir())
-            if NAME.fullmatch(folder.name)
-            and '"kind": "scheduled"' in (folder / "manifest.json").read_text(encoding="utf-8")
-        ]
-        if scheduled:
+        taken = [name for name in scheduled_backups() if backup_time(name) >= started]
+        if taken:
             break
         time.sleep(5)
-    assert scheduled, "the backup service took no scheduled backup in five minutes"
-    folder = BACKUPS / scheduled[-1]
+    assert taken, "the backup service took no scheduled backup in five minutes after its start"
+    folder = BACKUPS / taken[-1]
     assert {path.name for path in folder.iterdir()} == FILES
     assert stat.S_IMODE(folder.stat().st_mode) == 0o700
     assert folder.stat().st_uid == os.getuid()

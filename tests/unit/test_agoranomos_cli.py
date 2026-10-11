@@ -272,7 +272,17 @@ def test_messages_stay_plain_when_the_terminal_wants_no_color(cli, terminal):
 def test_help_lists_the_commands(cli):
     result = cli.run("help")
     assert result.returncode == 0
-    commands = ("init", "preflight", "up", "down", "status", "logs", "metadata", "credentials")
+    commands = (
+        "init",
+        "preflight",
+        "up",
+        "down",
+        "status",
+        "backup",
+        "logs",
+        "metadata",
+        "credentials",
+    )
     for command in (*commands, "help"):
         assert re.search(rf"^  {command}\s", result.stdout, flags=re.MULTILINE)
 
@@ -819,11 +829,71 @@ def test_preflight_stops_when_the_backups_would_be_written_as_root(cli):
     assert cli.run("preflight").returncode == 0
 
 
-def test_preflight_warns_when_the_backups_would_belong_to_another_user(cli):
-    ops_env(cli, AGORANOMOS_UID=str(os.getuid() + 1))
+def stub_uname(cli, system):
+    """Make uname -s answer system, as on a Linux server or a Mac."""
+    cli.stub("uname", f"echo {system}")
+
+
+def test_preflight_on_linux_stops_when_the_backups_folder_belongs_to_another_user(cli):
+    # The service runs as AGORANOMOS_UID, and a bind mount keeps the owner of the host: it cannot
+    # write into the folder of mode 700 that init made for the user who ran it. A .env that moved
+    # from a Mac to a server keeps the IDs of the Mac.
+    stub_uname(cli, "Linux")
+    other = os.getuid() + 1
+    ops_env(cli, AGORANOMOS_UID=str(other))
+    result = cli.run("preflight")
+    assert result.returncode == 1
+    folder = cli.root / "backups"
+    assert (
+        f"the backup service (AGORANOMOS_UID={other}) cannot write {folder}, which belongs to "
+        f"UID {os.getuid()}: set AGORANOMOS_UID and AGORANOMOS_GID in .env to the user and the "
+        f"group that own the folder, or give the folder to UID {other} with chown"
+    ) in result.stderr
+    # The folder of the user is fine for the user.
+    set_env(cli, AGORANOMOS_UID=str(os.getuid()))
+    assert cli.run("preflight").returncode == 0
+    # Without the ops profile no backup service runs.
+    set_env(cli, AGORANOMOS_UID=str(other), COMPOSE_PROFILES="core,demo")
+    assert cli.run("preflight").returncode == 0
+
+
+def test_preflight_on_a_mac_only_warns_when_the_backups_folder_belongs_to_another_user(cli):
+    stub_uname(cli, "Darwin")
+    other = os.getuid() + 1
+    ops_env(cli, AGORANOMOS_UID=str(other))
     result = cli.run("preflight")
     assert result.returncode == 0, result.stderr
-    assert f"the backups are written as the user {os.getuid() + 1}" in result.stderr
+    assert (
+        f"the backup service runs as UID {other} (AGORANOMOS_UID in .env), and the backups folder "
+        f"{cli.root / 'backups'} belongs to UID {os.getuid()}: Docker Desktop maps the owner of "
+        "a shared folder, so the service can write there, but a Linux server would not let it"
+    ) in result.stderr
+
+
+def test_preflight_takes_the_owner_of_the_folder_and_not_the_user_who_runs_it(cli):
+    # Whoever runs ./agoranomos, the service runs as AGORANOMOS_UID and needs a folder of its own
+    # user: a folder that belongs to UID 4242 is fine for 4242 and not for the user who runs this.
+    stub_uname(cli, "Linux")
+    cli.stub("ls", 'echo "drwx------ 2 4242 20 64 Oct 11 04:44 $2"')
+    ops_env(cli, AGORANOMOS_UID="4242")
+    result = cli.run("preflight")
+    assert result.returncode == 0, result.stderr
+    set_env(cli, AGORANOMOS_UID=str(os.getuid()))
+    result = cli.run("preflight")
+    assert result.returncode == 1
+    assert "which belongs to UID 4242: set AGORANOMOS_UID and AGORANOMOS_GID" in result.stderr
+
+
+@pytest.mark.parametrize("system", ["Linux", "Darwin"])
+def test_preflight_compares_nothing_for_a_backups_folder_that_does_not_exist_yet(cli, system):
+    # init makes it, for the user who runs it.
+    stub_uname(cli, system)
+    ops_env(cli, AGORANOMOS_UID=str(os.getuid() + 1))
+    (cli.root / "backups").rmdir()
+    result = cli.run("preflight")
+    assert result.returncode == 0, result.stderr
+    assert "backups folder" not in result.stderr
+    assert "cannot write" not in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -1679,6 +1749,53 @@ def test_a_failed_backup_fails_the_command(cli, tmp_path, ops):
     result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING), **fail)
     assert result.returncode == 1
     assert "the backup failed" in result.stderr
+    # The script of the container says /backups; the person needs the folder of the host.
+    assert f"The backups folder is {cli.root / 'backups'}" in result.stderr
+
+
+@pytest.mark.parametrize("ops", [False, True])
+def test_backup_makes_the_backups_folder_before_docker_could_make_it_as_root(cli, tmp_path, ops):
+    # After a new AGORANOMOS_BACKUP_DIR, or a deleted folder, and before up: a missing folder of a
+    # bind mount would be made by Docker, as root, and on Linux nobody else could use it.
+    if ops:
+        ops_env(cli)
+    else:
+        cli.run("init")
+    folder = cli.root / "backups"
+    folder.rmdir()
+    result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING))
+    assert result.returncode == 0, result.stderr
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+    folder.chmod(0o755)
+    assert cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING)).returncode == 0
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+
+
+def test_backup_stops_before_docker_when_the_folder_cannot_be_made(cli, tmp_path):
+    cli.run("init")
+    (cli.root / "taken").write_text("a file", encoding="utf-8")
+    set_env(cli, AGORANOMOS_BACKUP_DIR="./taken/backups")
+    result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert result.returncode == 1
+    assert "could not create the backups folder" in result.stderr
+    assert not any(call.startswith(("compose run", "compose exec")) for call in cli.docker_calls())
+
+
+def test_backup_on_linux_stops_when_the_backups_folder_belongs_to_another_user(cli, tmp_path):
+    cli.run("init")
+    other = os.getuid() + 1
+    set_env(cli, AGORANOMOS_UID=str(other))
+    stub_uname(cli, "Linux")
+    result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert result.returncode == 1
+    assert (
+        f"the backup service (AGORANOMOS_UID={other}) cannot write {cli.root / 'backups'}, "
+        f"which belongs to UID {os.getuid()}"
+    ) in result.stderr
+    assert not any(call.startswith(("compose run", "compose exec")) for call in cli.docker_calls())
+    # Docker Desktop maps the owner of a shared folder: on a Mac the backup goes on.
+    stub_uname(cli, "Darwin")
+    assert cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS)).returncode == 0
 
 
 def test_compose_gets_the_images_of_the_checkout(cli, tmp_path):
@@ -1751,7 +1868,7 @@ def test_status_says_when_the_last_good_backup_was(cli):
 
 
 def test_status_warns_about_a_failed_run_and_an_old_backup(cli):
-    cli.run("init")
+    ops_env(cli)
     write_latest(
         cli,
         **good_backup(
@@ -1786,13 +1903,24 @@ def test_status_warns_about_a_failed_run_and_an_old_backup(cli):
 
 @pytest.mark.parametrize(("age", "warns"), [(26 * 3600 - 300, False), (26 * 3600 + 300, True)])
 def test_status_warns_when_the_last_good_backup_is_older_than_26_hours(cli, age, warns):
-    # The service counts in seconds: 93,600 of them are fresh, and status counts the same.
-    cli.run("init")
+    # The service counts in seconds: 93,600 of them are fresh, and status counts the same. With the
+    # ops profile, a backup a day is promised.
+    ops_env(cli)
     write_latest(cli, **good_backup(age / 3600))
     result = cli.run("status")
     assert result.returncode == 0, result.stderr
     assert (NO_RECENT_BACKUP in result.stderr) is warns
     assert "failed at" not in result.stderr
+
+
+def test_status_only_says_how_old_the_last_backup_is_without_the_ops_profile(cli):
+    # A person who takes backups by hand takes them when they like: no daily backup was promised.
+    cli.run("init")
+    write_latest(cli, **good_backup(50))
+    result = cli.run("status")
+    assert result.returncode == 0, result.stderr
+    assert "Backups: the last good backup is 20261011T030012Z, 50 hours old" in result.stdout
+    assert result.stderr == ""
 
 
 STATUS_TABLE = "SERVICE   STATE     STATUS\nwarehouse-db   running   Up 2 hours (healthy)\n"
@@ -1820,7 +1948,7 @@ def test_status_warns_when_the_backup_service_is_unhealthy(cli, tmp_path, line, 
 
 
 def test_status_warns_once_when_both_the_service_and_the_file_say_it(cli, tmp_path):
-    cli.run("init")
+    ops_env(cli)
     write_latest(cli, **good_backup(50))
     table = ps_file(tmp_path, STATUS_TABLE + "backup   running   Up 2 hours (unhealthy)\n")
     result = cli.run("status", FAKE_PS_FILE=table)
@@ -1866,6 +1994,24 @@ def test_status_lists_the_backups_by_hand_with_their_size_and_age(cli):
     )
     assert re.search(r"^  20261001T120000Z: \d+ KiB, 5 days old$", result.stdout, re.M)
     assert "20261002T030000Z:" not in result.stdout
+
+
+def test_status_lists_the_backups_by_hand_also_without_latest_json(cli):
+    # Backups copied in, or a latest.json that was deleted: they take disk space all the same.
+    cli.run("init")
+    folder = cli.root / "backups" / "20261001T120000Z"
+    folder.mkdir()
+    (folder / "metabase.dump").write_bytes(b"x" * 1000)
+    (folder / "manifest.json").write_text(
+        f'{{\n  "kind": "manual",\n  "finished_epoch": {int(time.time()) - 86400}\n}}\n',
+        encoding="utf-8",
+    )
+    assert not (cli.root / "backups" / "latest.json").exists()
+    result = cli.run("status")
+    assert result.returncode == 0, result.stderr
+    assert "Backups: there is no latest.json in " in result.stdout
+    assert "none yet" not in result.stdout
+    assert re.search(r"^  20261001T120000Z: \d+ KiB, 1 days old$", result.stdout, re.M)
 
 
 def test_status_says_when_there_is_no_backup_yet(cli):

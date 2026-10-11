@@ -546,6 +546,16 @@ def test_backups_path_is_absolute_and_a_relative_path_starts_at_the_checkout(
         ("OTHER=1", "must be numbers"),
         ("AGORANOMOS_UID=-1\nAGORANOMOS_GID=1000", "must be numbers"),
         ("AGORANOMOS_UID=10x0\nAGORANOMOS_GID=1000", "must be numbers"),
+        # Docker reads 00 as 0, which is root; a colon makes a value no number, whatever the other
+        # one is, and the group ID is judged on its own.
+        ("AGORANOMOS_UID=00\nAGORANOMOS_GID=1000", "AGORANOMOS_UID in .env is 0"),
+        ("AGORANOMOS_UID=0000\nAGORANOMOS_GID=00", "AGORANOMOS_UID in .env is 0"),
+        ("AGORANOMOS_UID=1000:1000\nAGORANOMOS_GID=1000", "must be numbers"),
+        ("AGORANOMOS_UID=1000\nAGORANOMOS_GID=1000:1000", "must be numbers"),
+        ("AGORANOMOS_UID=:\nAGORANOMOS_GID=1000", "must be numbers"),
+        ("AGORANOMOS_UID=auto\nAGORANOMOS_GID=0", "must be numbers"),
+        ("AGORANOMOS_UID=1000\nAGORANOMOS_GID=00", ""),
+        ("AGORANOMOS_UID=1001\nAGORANOMOS_GID=20", ""),
     ],
     ids=repr,
 )

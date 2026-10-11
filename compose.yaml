@@ -627,8 +627,8 @@ services:
   # BACKUP_TIME, into AGORANOMOS_BACKUP_DIR on the host, and on demand with ./agoranomos backup. It
   # runs the image of the databases, so that pg_dump has their version, as the user of the checkout,
   # so that the backups belong to that user, and it reads as the role backup, which may read every
-  # table and write none (postgres/*.sql). Its health check fails when the last good backup is older
-  # than 26 hours, which ./agoranomos up and status report without stopping the stack.
+  # table and write none (postgres/*.sql). Its health check fails when there is no good backup in the
+  # last 26 hours, which ./agoranomos up and status report without stopping the stack.
   backup:
     image: postgres:18.6-trixie@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
     profiles: [ops]
