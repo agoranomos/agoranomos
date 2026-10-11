@@ -245,6 +245,26 @@ jobs:
           docker compose ps --quiet --status running | sort > containers-after.txt
           diff containers-before.txt containers-after.txt
           uv run pytest tests/stack -v
+      # The round trip of a backup (ADR-0020): a refused restore of a damaged backup; a mark in
+      # each database and a backup; a restore of Metabase into the running stack, then the tests of
+      # the site again; the volumes of the stack removed, a restore on empty volumes, and the marks
+      # again. memory_report.py measures both restores, whose peaks the databases must hold. The
+      # tests that run a restore are destructive by design and run only with their opt-in.
+      - name: Back up, restore into the running stack, remove the volumes, and restore
+        env:
+          AGORANOMOS_ROUNDTRIP_FILE: ${{ runner.temp }}/roundtrip.json
+          LIVE: Server mode, a restore of Metabase into the running stack
+          EMPTY: Server mode, a restore on empty volumes
+        run: |
+          AGORANOMOS_RESTORE_TESTS=1 uv run pytest tests/stack/test_backup.py -v -k refuses_a_damaged_backup
+          AGORANOMOS_ROUNDTRIP=before uv run pytest tests/stack/test_backup_roundtrip.py -v
+          AGORANOMOS_ROUNDTRIP=live uv run python scripts/memory_report.py --title "$LIVE" --output "$GITHUB_STEP_SUMMARY" -- uv run pytest tests/stack/test_backup_roundtrip.py -v
+          uv run pytest tests/stack/test_server.py -v -k "not longer_than_a_minute"
+          docker compose down --volumes --remove-orphans
+          backup=$(uv run python -c 'import json, os; print(json.load(open(os.environ["AGORANOMOS_ROUNDTRIP_FILE"]))["backup"])')
+          test -n "$backup"
+          uv run python scripts/memory_report.py --title "$EMPTY" --output "$GITHUB_STEP_SUMMARY" -- ./agoranomos restore "$backup" --yes
+          AGORANOMOS_ROUNDTRIP=after uv run pytest tests/stack/test_backup_roundtrip.py -v
       - name: Collect the logs
         if: ${{ failure() }}
         run: |

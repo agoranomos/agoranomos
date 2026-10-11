@@ -22,17 +22,27 @@ RECOMMENDED_CPUS=4
 MIN_DISK_GB=10
 RECOMMENDED_DISK_GB=20
 
+# What up and status say when the backups are not fresh: the service is unhealthy, or the last good
+# backup finished more than 26 hours (93,600 seconds, as postgres/backup.sh counts) ago.
+NO_RECENT_BACKUP="no good backup in the last 26 hours"
+BACKUP_FRESH_SECONDS=93600
+
 # The state that problem and resource_problem work on. cmd_preflight resets it; it is set here so that
 # the two functions also work when another command calls them.
 problems=0
 force=0
 
+# The profile that compose adds to those of .env for one call (compose_with_profile sets it). It is
+# set here, empty, so that a variable of the same name in the environment of the person never
+# reaches Compose.
+extra_profile=""
+
 # The settings that init generates when they are empty.
 SECRET_KEYS="WAREHOUSE_POSTGRES_PASSWORD PLATFORM_POSTGRES_PASSWORD AIRFLOW_DB_PASSWORD
 METABASE_DB_PASSWORD METABASE_READER_PASSWORD WAREHOUSE_LOADER_PASSWORD
-WAREHOUSE_TRANSFORMER_PASSWORD VALKEY_PASSWORD AIRFLOW_FERNET_KEY AIRFLOW_JWT_SECRET
-AIRFLOW_API_SECRET_KEY AIRFLOW_ADMIN_PASSWORD METABASE_ENCRYPTION_KEY METABASE_SESSION_KEY
-METABASE_ADMIN_PASSWORD"
+WAREHOUSE_TRANSFORMER_PASSWORD BACKUP_DB_PASSWORD VALKEY_PASSWORD AIRFLOW_FERNET_KEY
+AIRFLOW_JWT_SECRET AIRFLOW_API_SECRET_KEY AIRFLOW_ADMIN_PASSWORD METABASE_ENCRYPTION_KEY
+METABASE_SESSION_KEY METABASE_ADMIN_PASSWORD"
 
 say() { printf '%s\n' "$*"; }
 warn() { printf '%s %s\n' "$(paint amber 'warning:' 2)" "$*" >&2; }
@@ -159,7 +169,10 @@ print_banner() {
 # files and the profiles reach Compose through these variables, never through -f and --profile
 # options, so this script and a plain docker compose in the checkout work on the same stack. A
 # command that must reach a service of a profile that .env does not list sets extra_profile
-# (compose_with_server).
+# (compose_with_profile). The one exception is AGORANOMOS_IMAGES, the images of the checkout, which
+# the backup service writes into each manifest (ADR-0020): a plain docker compose up gives that
+# service an empty list, so the next ./agoranomos up recreates it, and its backups record no
+# images until then.
 compose() {
   (
     cd "$ROOT" || exit 1
@@ -169,7 +182,10 @@ compose() {
       COMPOSE_PROFILES=$(with_profiles "$COMPOSE_PROFILES" "$extra_profile")
     fi
     COMPOSE_FILE=$(setting COMPOSE_FILE compose.yaml)
-    export COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_FILE
+    # The images of the checkout, which the backup service writes into each backup (ADR-0020).
+    AGORANOMOS_IMAGES=$(image_refs | tr '\n' ' ')
+    AGORANOMOS_IMAGES=${AGORANOMOS_IMAGES% }
+    export COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_FILE AGORANOMOS_IMAGES
     docker compose "$@"
   )
 }
@@ -275,13 +291,122 @@ generate_secret() {
   esac
 }
 
+# The absolute path of a folder that a setting names, as Compose reads it for a bind mount: an
+# absolute path stays, a leading ~ is the home folder of the user, and a relative path starts at the
+# checkout.
+folder_path() {
+  # shellcheck disable=SC2088 # a literal ~ in a value of .env, which no shell has expanded
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    '~') printf '%s' "${HOME%/}" ;;
+    '~/'*) printf '%s/%s' "${HOME%/}" "${1#\~/}" ;;
+    *) printf '%s/%s' "$ROOT" "${1#./}" ;;
+  esac
+}
+
+# True when $1 is a value that Compose reads as a path for a bind mount: absolute, or starting with
+# ., .. or ~. Anything else, such as backups, it reads as the name of a volume.
+is_folder_path() {
+  # shellcheck disable=SC2088 # a literal ~ in a value of .env, which no shell has expanded
+  case "$1" in
+    /* | . | .. | ./* | ../* | '~' | '~/'*) return 0 ;;
+  esac
+  return 1
+}
+
 # The absolute path of the extensions folder (ADR-0013).
 extensions_path() {
-  extensions_dir=$(setting AGORANOMOS_EXTENSIONS_DIR ./extensions)
-  case "$extensions_dir" in
-    /*) printf '%s' "$extensions_dir" ;;
-    *) printf '%s/%s' "$ROOT" "${extensions_dir#./}" ;;
+  folder_path "$(setting AGORANOMOS_EXTENSIONS_DIR ./extensions)"
+}
+
+# The images of the checkout, one reference to a line, sorted: the image: lines of the Compose
+# files and the FROM lines of the Dockerfiles of the images that the stack builds, without those
+# built images. A backup records them, and restore compares them.
+image_refs() {
+  for image_file in compose.yaml compose.celery.yaml airflow/Dockerfile caddy/Dockerfile; do
+    [ -f "$ROOT/$image_file" ] || continue
+    sed -n -e 's/^[[:space:]]*image:[[:space:]]*\([^[:space:]]*\).*/\1/p' \
+      -e 's/^FROM[[:space:]][[:space:]]*\([^[:space:]]*\).*/\1/p' "$ROOT/$image_file"
+  done | grep -v ':local$' | LC_ALL=C sort -u
+}
+
+# The absolute path of the backups folder (ADR-0020).
+backups_path() {
+  folder_path "$(setting AGORANOMOS_BACKUP_DIR ./backups)"
+}
+
+# Print a field of a JSON file that postgres/backup.sh wrote, which has one field to a line.
+json_field() {
+  [ -f "$1" ] || return 0
+  sed -n "s/^  \"$2\": \"\{0,1\}\([^\",]*\)\"\{0,1\},\{0,1\}\$/\1/p" "$1"
+}
+
+# True when the container of the service $1 runs.
+running_service() {
+  compose ps --all --format '{{.Service}}|{{.State}}|{{.Health}}|{{.ExitCode}}' 2> /dev/null |
+    grep -q "^$1|running|"
+}
+
+# True when .env runs the backup service: COMPOSE_PROFILES lists ops (ADR-0020).
+ops_mode() {
+  case ",$(setting COMPOSE_PROFILES core,demo)," in
+    *,ops,*) return 0 ;;
   esac
+  return 1
+}
+
+# Print what is wrong with the user that the backups are written as, or nothing. Each of the user ID
+# and the group ID must be a number, of digits only; a user ID of zeros only, such as 0 or 00, which
+# Docker reads as 0, is root.
+backup_user_problem() {
+  backup_uid=$(env_get AGORANOMOS_UID)
+  backup_gid=$(env_get AGORANOMOS_GID)
+  case "$backup_uid" in
+    '' | *[!0-9]*) backup_uid_problem=numbers ;;
+    *[!0]*) backup_uid_problem="" ;;
+    *) backup_uid_problem=root ;;
+  esac
+  case "$backup_gid" in
+    '' | *[!0-9]*) backup_gid_problem=numbers ;;
+    *) backup_gid_problem="" ;;
+  esac
+  if [ "$backup_uid_problem" = root ]; then
+    printf '%s' "AGORANOMOS_UID in .env is 0: the backup service would run as root, and the backups would belong to root. Run ./agoranomos as the user who owns the checkout, with AGORANOMOS_UID=auto and AGORANOMOS_GID=auto in .env, and run ./agoranomos init"
+  elif [ "$backup_uid_problem" = numbers ] || [ "$backup_gid_problem" = numbers ]; then
+    printf '%s' "AGORANOMOS_UID and AGORANOMOS_GID in .env must be numbers: set them to auto and run ./agoranomos init, which puts in yours"
+  fi
+}
+
+# Make the backups folder, open to its owner only (ADR-0020). Docker would create a missing one as
+# root, and on Linux nobody but root could then use it.
+make_backups_folder() {
+  backups=$(backups_path)
+  mkdir -p "$backups" || die "could not create the backups folder $backups"
+  chmod 700 "$backups" ||
+    die "could not make the backups folder $backups open to its owner only: it must belong to you"
+}
+
+# True when the backups folder exists and does not belong to AGORANOMOS_UID, the user that the
+# backup service and the container of ./agoranomos backup run as. It sets owned_folder and
+# folder_owner. A folder that does not exist yet has no owner to compare: init makes it.
+backup_folder_foreign() {
+  owned_folder=$(backups_path)
+  [ -d "$owned_folder" ] || return 1
+  # ls -ldn gives the numeric owner of one path on Linux and macOS alike; stat has other options on
+  # each. The slash after the path makes ls look at the folder that a link points to, which is the
+  # folder that the service writes into, and not at the link.
+  # shellcheck disable=SC2012
+  folder_owner=$(ls -ldn "$owned_folder/" | awk '{ print $3 }')
+  # The IDs are numbers, so that 0501 is 501.
+  owner_number=$(printf '%s' "$folder_owner" | sed 's/^0*\([0-9]\)/\1/')
+  uid_number=$(env_get AGORANOMOS_UID | sed 's/^0*\([0-9]\)/\1/')
+  [ "$owner_number" != "$uid_number" ]
+}
+
+# On Linux a bind mount keeps the owner of the host, so the backup service cannot write into a
+# folder of mode 700 that another user owns; Docker Desktop maps the owner of a shared folder.
+backups_folder_unwritable() {
+  printf '%s' "the backup service (AGORANOMOS_UID=$(env_get AGORANOMOS_UID)) cannot write $owned_folder, which belongs to UID $folder_owner: set AGORANOMOS_UID and AGORANOMOS_GID in .env to the user and the group that own the folder, or give the folder to UID $(env_get AGORANOMOS_UID) with chown"
 }
 
 # True when .env runs server mode: COMPOSE_PROFILES lists server (ADR-0011, ADR-0019).
@@ -380,6 +505,10 @@ cmd_init() {
     say "Generated secrets in .env:$generated"
     say "Keep a copy of .env in a password manager: a restored backup needs its keys to decrypt the saved connections."
   fi
+  # The user and the group that write the backups: those of the user who runs init (ADR-0020).
+  if [ "$(env_get AGORANOMOS_UID)" = auto ]; then env_set AGORANOMOS_UID "$(id -u)"; fi
+  if [ "$(env_get AGORANOMOS_GID)" = auto ]; then env_set AGORANOMOS_GID "$(id -g)"; fi
+  make_backups_folder
   mkdir -p "$(extensions_path)/dags" "$(extensions_path)/metadata"
   if [ "$server_asked" -eq 1 ]; then
     # A line is written only when its value changes, so that running init --server again changes
@@ -387,14 +516,14 @@ cmd_init() {
     [ "$(env_get AGORANOMOS_SITE_URL)" = "https://$server_domain" ] ||
       env_set AGORANOMOS_SITE_URL "https://$server_domain"
     current_profiles=$(setting COMPOSE_PROFILES core,demo)
-    server_profiles=$(with_profiles "$current_profiles" server)
+    server_profiles=$(with_profiles "$current_profiles" server ops)
     [ "$server_profiles" = "$current_profiles" ] || env_set COMPOSE_PROFILES "$server_profiles"
     # Metabase on the internet (ADR-0019): passwords of at least 15 characters, and a sign-out after
     # 24 hours without activity. A value that a person set stays.
     [ -n "$(env_get METABASE_PASSWORD_COMPLEXITY)" ] || env_set METABASE_PASSWORD_COMPLEXITY strong-enough
     [ -n "$(env_get METABASE_SESSION_TIMEOUT)" ] ||
       env_set METABASE_SESSION_TIMEOUT "'{\"amount\":24,\"unit\":\"hours\"}'"
-    say "Server mode is on: Metabase is to be at https://$server_domain. Point the A record of $server_domain at this server, then run ./agoranomos up."
+    say "Server mode is on: Metabase is to be at https://$server_domain, with a backup every day at $(setting BACKUP_TIME 03:00) $(setting BACKUP_TZ UTC) into $(backups_path). Point the A record of $server_domain at this server, then run ./agoranomos up."
     say "If this Metabase was set up before this release, its public links stay as they were: check Admin > Settings > Public sharing."
     if ! public_name "$server_domain" && [ "$(setting AGORANOMOS_TLS acme)" != internal ]; then
       say "$server_domain is not a name that gets a certificate of Let's Encrypt: for a test, set AGORANOMOS_TLS=internal in .env, or ./agoranomos up stops on it."
@@ -551,18 +680,65 @@ EOF
       problem "$site_host cannot get a certificate from Let's Encrypt: run ./agoranomos init --server with the domain name of the server, or set AGORANOMOS_TLS=internal in .env for a test"
     fi
   fi
+  # Compose reads a value that is not a path, such as backups, as the name of a volume, and stops
+  # with an error that names no setting.
+  for folder_setting in AGORANOMOS_BACKUP_DIR AGORANOMOS_EXTENSIONS_DIR; do
+    if ! is_folder_path "$(setting "$folder_setting" ./folder)"; then
+      problem "$folder_setting in .env must be an absolute path or start with ./, ../ or ~/, because Compose reads anything else as the name of a volume: write ./$(setting "$folder_setting" folder)"
+    fi
+  done
+  # The backup service of the ops profile runs as AGORANOMOS_UID and reads its schedule from .env.
+  if ops_mode; then
+    message=$(backup_user_problem)
+    if [ -n "$message" ]; then
+      problem "$message"
+    elif backup_folder_foreign; then
+      if [ "$(uname -s)" = Linux ]; then
+        problem "$(backups_folder_unwritable)"
+      else
+        warn "the backup service runs as UID $(env_get AGORANOMOS_UID) (AGORANOMOS_UID in .env), and the backups folder $owned_folder belongs to UID $folder_owner: Docker Desktop maps the owner of a shared folder, so the service can write there, but a Linux server would not let it"
+      fi
+    fi
+    case "$(setting BACKUP_TIME 03:00)" in
+      [01][0-9]:[0-5][0-9] | 2[0-3]:[0-5][0-9]) ;;
+      *) problem "BACKUP_TIME in .env must be a time of day as HH:MM, such as 03:00" ;;
+    esac
+    for keep_setting in BACKUP_KEEP_DAILY BACKUP_KEEP_WEEKLY BACKUP_KEEP_MONTHLY; do
+      case "$(setting "$keep_setting" 1)" in
+        '' | *[!0-9]*) problem "$keep_setting in .env must be a whole number" ;;
+      esac
+    done
+    # Zeros only, such as 0 or 00: the service reads a number, and stops on it.
+    if [ -z "$(setting BACKUP_KEEP_DAILY 7 | tr -d 0)" ]; then
+      problem "BACKUP_KEEP_DAILY in .env must be at least 1: the newest backup always stays"
+    fi
+    # The image of the databases has the time zones of the IANA database, as Linux and macOS
+    # have them in /usr/share/zoneinfo: a machine without that folder leaves the check to it.
+    backup_tz=$(setting BACKUP_TZ UTC)
+    zoneinfo=${AGORANOMOS_ZONEINFO:-/usr/share/zoneinfo}
+    if [ "$backup_tz" != UTC ] && [ -d "$zoneinfo" ] && [ ! -f "$zoneinfo/$backup_tz" ]; then
+      problem "BACKUP_TZ in .env is not a time zone, such as Europe/Berlin: $backup_tz"
+    fi
+  elif server_mode; then
+    # A .env of server mode from before the backups lists server and not ops, and init changes a
+    # list of profiles only with --server.
+    backup_domain=$(setting AGORANOMOS_SITE_URL "")
+    backup_domain=${backup_domain#https://}
+    warn "Server mode runs without the backups of the ops profile: ./agoranomos init --server ${backup_domain:-<domain>} turns them on"
+  fi
   # Metabase checks the password of the admin account against its rule when metabase-init creates
   # the account at the first start, and with strong-enough it refuses one of fewer than 15
   # characters. init --server sets that rule, and compose.yaml hands it to Metabase in every mode, so
   # a person can set it in local mode too. init generates a password of 32 characters, so this
   # catches one set by hand. metabase-init never changes the password of an admin that exists, so
-  # for a Metabase that is set up already the message sends the person to Metabase first. The
-  # message names the settings, never the value. strong has other rules, and normal, the default,
-  # asks for less: they are Metabase's to check.
+  # for a Metabase that is set up already the message sends the person to Metabase first. This
+  # check blocks up, so with the stack stopped the message also names the command that starts
+  # Metabase alone. The message names the settings, never the value. strong has other rules, and
+  # normal, the default, asks for less: they are Metabase's to check.
   admin_password=$(env_get METABASE_ADMIN_PASSWORD)
   if [ "$(setting METABASE_PASSWORD_COMPLEXITY normal)" = strong-enough ] &&
     [ -n "$admin_password" ] && [ "${#admin_password}" -lt 15 ]; then
-    problem "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters, which METABASE_PASSWORD_COMPLEXITY=strong-enough asks for. For a Metabase that is set up already, first change the admin password in Metabase (Account settings) to at least 15 characters, then put the same value in .env; for a new one, write a longer value, or leave it empty for ./agoranomos init to generate one"
+    problem "METABASE_ADMIN_PASSWORD in .env has fewer than 15 characters, which METABASE_PASSWORD_COMPLEXITY=strong-enough asks for. For a Metabase that is set up already, first change the admin password in Metabase (Account settings) to at least 15 characters (with the stack stopped, docker compose up -d metabase in this folder starts Metabase alone, with the databases it needs and without the proxy, at 127.0.0.1 on METABASE_PORT, which on a server you reach through an SSH tunnel), then put the same value in .env; for a new one, write a longer value, or leave it empty for ./agoranomos init to generate one"
   fi
   compose_version=$(docker compose version --short 2> /dev/null) || compose_version=""
   if [ -z "$compose_version" ]; then
@@ -695,7 +871,9 @@ EOF
 # the active profiles count: docker compose ps lists every container of the project, also one that a
 # start with another profile left behind, such as a failed demo-init after COMPOSE_PROFILES=core. A
 # failed demo-init alone does not stop the wait: the rest of the stack works without the demo, so
-# the wait goes on until the rest is ready, and then sets demo_failed=1 for cmd_up.
+# the wait goes on until the rest is ready, and then sets demo_failed=1 for cmd_up. A backup
+# service that is unhealthy (no good backup in the last 26 hours), restarting or exited does not
+# stop it either: the stack works without a fresh backup, so the wait warns and goes on.
 # AGORANOMOS_WAIT_TIMEOUT and AGORANOMOS_WAIT_INTERVAL, in seconds, are hooks for the tests: how long
 # to wait at most (default 900) and how long to sleep between two looks (default 5).
 # The line that names a service that failed while up waited, and the command that shows its logs.
@@ -720,7 +898,7 @@ wait_healthy() {
   while :; do
     states=$(compose ps --all --format '{{.Service}}|{{.State}}|{{.Health}}|{{.ExitCode}}') ||
       die "docker compose ps failed; the error above names the cause, and Docker may have stopped"
-    pending="" failed="" killed="" seen=""
+    pending="" failed="" killed="" seen="" stale_backup=0 backup_down=""
     while IFS='|' read -r service state health exit_code; do
       [ -n "$service" ] || continue
       case "$active" in *" $service "*) ;; *) continue ;; esac
@@ -731,6 +909,16 @@ wait_healthy() {
             exited:0) ;;
             exited:137) failed="$failed $service" killed="$killed $service" ;;
             exited:* | dead:*) failed="$failed $service" ;;
+            *) pending="${pending:+$pending,} $service ($state${health:+, $health})" ;;
+          esac
+          ;;
+        backup)
+          # No good backup in the last 26 hours makes the service unhealthy: up says so and goes on,
+          # because the stack works without a fresh backup; status shows when the last one was.
+          case "$state:$health:$exit_code" in
+            running:healthy:* | running::*) ;;
+            running:unhealthy:*) stale_backup=1 ;;
+            restarting:* | exited:* | dead:*) backup_down="$state${exit_code:+ with exit code $exit_code}" ;;
             *) pending="${pending:+$pending,} $service ($state${health:+, $health})" ;;
           esac
           ;;
@@ -759,12 +947,20 @@ EOF
       die "the stack did not start"
     fi
     if [ -z "$pending" ]; then
+      [ "$stale_backup" -eq 0 ] ||
+        warn "backup: $NO_RECENT_BACKUP: ./agoranomos status shows when the last one was, and ./agoranomos logs backup why"
+      [ -z "$backup_down" ] ||
+        warn "backup: the backup service is $backup_down, so there are no new backups: ./agoranomos logs backup shows why. The stack works without it"
       if [ -n "$failed" ]; then
         warn "$(failed_service demo-init)"
         demo_failed=1
         return 0
       fi
-      say "$(paint ok 'All services are healthy.' 1)"
+      if [ "$stale_backup" -eq 0 ] && [ -z "$backup_down" ]; then
+        say "$(paint ok 'All services are healthy.' 1)"
+      else
+        say "$(paint ok 'All services but the backup are healthy.' 1)"
+      fi
       return 0
     fi
     if [ $(($(date +%s) - started)) -ge "$timeout" ]; then
@@ -791,7 +987,7 @@ print_addresses() {
 
 # In server mode with a certificate of Let's Encrypt: whether the site answers over HTTPS with a
 # certificate that this machine trusts. Caddy gets the certificate after it starts, and only when
-# the DNS record of the domain points at this server and ports 80 and 443 are open to the
+# the A record of the domain points at this server and ports 80 and 443 are open to the
 # internet, so this tries for about a minute and then only warns: the stack runs either way.
 # AGORANOMOS_CERTIFICATE_TRIES is a hook for the tests (default 12, every AGORANOMOS_WAIT_INTERVAL
 # seconds).
@@ -814,32 +1010,61 @@ check_certificate() {
     tries=$((tries - 1))
     [ "$tries" -eq 0 ] || sleep "${AGORANOMOS_WAIT_INTERVAL:-5}"
   done
-  warn "https://$site_host does not answer with a certificate that this machine trusts yet. Check that the DNS record of $site_host points at this server and that ports 80 and 443 are open to the internet; ./agoranomos logs proxy shows what Let's Encrypt answered, and docker compose restart proxy makes Caddy try again at once, without waiting out the pause between its tries. With the staging directory of Let's Encrypt in AGORANOMOS_ACME_CA, no machine trusts the certificate."
+  warn "https://$site_host does not answer with a certificate that this machine trusts yet. Check that the A record of $site_host points at this server and that ports 80 and 443 are open to the internet; ./agoranomos logs proxy shows what Let's Encrypt answered, and docker compose restart proxy makes Caddy try again at once, without waiting out the pause between its tries. With the staging directory of Let's Encrypt in AGORANOMOS_ACME_CA, no machine trusts the certificate."
 }
 
-# docker compose with the server profile added to those of .env: the proxy belongs to it.
-compose_with_server() {
-  extra_profile=server
+# docker compose with the profile $1 added to those of .env, for a service of that profile: the
+# proxy belongs to server, the backup service to ops.
+compose_with_profile() {
+  extra_profile=$1
+  shift
   compose_status=0
   compose "$@" || compose_status=$?
   extra_profile=""
   return "$compose_status"
 }
 
-# In local mode, stop and remove the proxy container that server mode left. Compose does not touch
-# the container of a profile that .env no longer lists, so after a person takes server out of
+# Stop and remove the containers that a mode with fewer profiles left. Compose does not touch the
+# container of a profile that .env no longer lists. After a person takes server out of
 # COMPOSE_PROFILES, the old Caddy would go on serving the new Metabase on ports 80 and 443, with
-# the rules of local mode. The volume caddy-data, with the certificates, stays. In server mode, up
-# and down handle the proxy as they handle every service.
-remove_leftover_proxy() {
-  if server_mode; then
-    return 0
+# the rules of local mode, and after the person takes ops out, the old backup service would go on
+# writing backups. The volume caddy-data, with the certificates, and the backups stay. In a mode
+# that lists the profile, up and down handle the service as they handle every service.
+remove_leftover_services() {
+  if ! server_mode; then
+    remove_leftover_container proxy server "the proxy of server mode" \
+      "Server mode is off: the proxy of server mode is stopped and removed." \
+      "which may still serve Metabase on ports 80 and 443 with the rules of local mode"
   fi
-  proxy_container=$(compose_with_server ps --all --quiet proxy 2> /dev/null) || proxy_container=""
-  [ -n "$proxy_container" ] || return 0
-  compose_with_server rm --stop --force proxy ||
-    die "could not remove the proxy of server mode, which may still serve Metabase on ports 80 and 443 with the rules of local mode: run docker compose --profile server rm --stop --force proxy, then run this command again"
-  say "Server mode is off: the proxy of server mode is stopped and removed."
+  if ! ops_mode; then
+    remove_leftover_container backup ops "the backup service of the ops profile" \
+      "The ops profile is off: the backup service is stopped and removed." \
+      "which may still write backups"
+  fi
+}
+
+# Stop and remove the container of the service $1 of the profile $2, if there is one. $3 names it,
+# $4 is what to say when it is gone, and $5 what it may still do, for the message when it stays.
+# The look-up only asks whether there is a container to remove: when it fails, the command that
+# follows meets the same fault and says so itself, so the look-up stays silent and goes on.
+remove_leftover_container() {
+  leftover_container=$(compose_with_profile "$2" ps --all --quiet "$1" 2> /dev/null) ||
+    leftover_container=""
+  [ -n "$leftover_container" ] || return 0
+  compose_with_profile "$2" rm --stop --force "$1" ||
+    die "could not remove $3, $5: run docker compose --profile $2 rm --stop --force $1, then run this command again"
+  say "$4"
+}
+
+# Start the stack, wait until it is healthy, print where to sign in, and in server mode check the
+# certificate of the site. It sets demo_failed, as wait_healthy does.
+start_stack() {
+  # Without the || a failure would end the script under set -e with only the message of docker compose.
+  compose up --detach --remove-orphans ||
+    die "docker compose could not start the stack; the error above names the cause, and ./agoranomos status and ./agoranomos logs <service> show more"
+  wait_healthy
+  print_addresses
+  check_certificate
 }
 
 cmd_up() {
@@ -854,14 +1079,9 @@ cmd_up() {
   print_banner
   cmd_init
   cmd_preflight "$@"
-  remove_leftover_proxy
+  remove_leftover_services
   say "Starting the stack. The first start builds the Airflow image, which takes a few minutes..."
-  # Without the || a failure would end the script under set -e with only the message of docker compose.
-  compose up --detach --remove-orphans ||
-    die "docker compose could not start the stack; the error above names the cause, and ./agoranomos status and ./agoranomos logs <service> show more"
-  wait_healthy
-  print_addresses
-  check_certificate
+  start_stack
   # Only demo-init failed: Airflow and Metabase run, and its log names what to look at in them. up
   # still fails, so that a start that is not complete never passes as one.
   [ "$demo_failed" -eq 0 ] || die "the stack is up, but the demo is not ready"
@@ -870,7 +1090,7 @@ cmd_up() {
 
 cmd_down() {
   [ "$#" -eq 0 ] || die "down takes no options"
-  remove_leftover_proxy
+  remove_leftover_services
   compose down --remove-orphans
   say "The stack is stopped. Its data stays in the Docker volumes."
 }
@@ -880,7 +1100,384 @@ cmd_down() {
 # for it and prints <no value>.
 cmd_status() {
   [ "$#" -eq 0 ] || die "status takes no options"
-  compose ps --all --format 'table {{.Service}}\t{{.State}}\t{{.Status}}'
+  status_table=$(compose ps --all --format 'table {{.Service}}\t{{.State}}\t{{.Status}}')
+  [ -z "$status_table" ] || printf '%s\n' "$status_table"
+  backup_status
+}
+
+# Take a backup now (ADR-0020): in the running backup service when .env has the ops profile and the
+# service runs, and in a container of its own otherwise, such as in local mode. The databases must
+# run.
+cmd_backup() {
+  [ "$#" -eq 0 ] || die "backup takes no options"
+  [ -f "$ENV_FILE" ] || die "there is no .env yet: run ./agoranomos up first"
+  message=$(backup_user_problem)
+  [ -z "$message" ] || die "$message"
+  if ! running_service warehouse-db || ! running_service platform-db; then
+    die "the databases are not running: start the stack with ./agoranomos up"
+  fi
+  # The folder first: one that does not exist yet would be made for the user who runs this, and
+  # then compared with the user of the service.
+  make_backups_folder
+  if [ "$(uname -s)" = Linux ] && backup_folder_foreign; then
+    die "$(backups_folder_unwritable)"
+  fi
+  if ops_mode && running_service backup; then
+    compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh now ||
+      die "the backup failed: the lines above say at which step. The backups folder is $(backups_path)"
+  else
+    compose run --rm --no-deps -T backup now ||
+      die "the backup failed: the lines above say at which step. The backups folder is $(backups_path)"
+  fi
+}
+
+# The last backups, after the table of the services: when the last good one was, the backups by
+# hand with their size and age, and the warnings. The table (status_table) tells whether the backup
+# service is unhealthy, so that status asks Compose once. The age of the last good backup is a
+# warning only with the ops profile, which promises a backup every day; otherwise status just says
+# it, as a person takes backups by hand when they like.
+backup_status() {
+  backups_folder=$(backups_path)
+  latest="$backups_folder/latest.json"
+  stale=0
+  if printf '%s\n' "$status_table" | awk '$1 == "backup" && /\(unhealthy\)/ { found = 1 } END { exit !found }'; then
+    stale=1
+  fi
+  set -- "$backups_folder"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z
+  if [ -f "$latest" ]; then
+    last_ok=$(json_field "$latest" last_ok)
+    if [ -n "$last_ok" ]; then
+      last_ok_epoch=$(json_field "$latest" last_ok_epoch)
+      case "$last_ok_epoch" in '' | *[!0-9]*) last_ok_epoch=0 ;; esac
+      age=$(($(date +%s) - last_ok_epoch))
+      say "Backups: the last good backup is $last_ok, $((age / 3600)) hours old, in $backups_folder."
+      if [ "$age" -gt "$BACKUP_FRESH_SECONDS" ] && ops_mode; then stale=1; fi
+    else
+      say "Backups: no good backup yet in $backups_folder."
+    fi
+  elif [ -d "$1" ]; then
+    say "Backups: there is no latest.json in $backups_folder, which says when the last good backup was."
+  else
+    say "Backups: none yet in $backups_folder. ./agoranomos backup takes one."
+  fi
+  # The room for the next one: the file system of the folder, which by default is the one that
+  # holds the data of Docker too. The folder may not exist yet: its first parent that does.
+  free_room=$backups_folder
+  while [ ! -d "$free_room" ] && [ "$free_room" != / ]; do free_room=$(dirname "$free_room"); done
+  free_kb=$(df -Pk "$free_room" 2> /dev/null | awk 'NR == 2 { print $4 }')
+  case "$free_kb" in
+    '' | *[!0-9]*) ;;
+    *)
+      if [ "$free_kb" -ge 1048576 ]; then
+        say "Free space on the disk of the backups folder: $((free_kb / 1048576)) GB."
+      else
+        say "Free space on the disk of the backups folder: $((free_kb / 1024)) MB."
+      fi
+      ;;
+  esac
+  # The backups by hand, which the retention never removes (ADR-0020): their size and age. They are
+  # listed without latest.json too, as they take disk space whether it is there or not.
+  listed=0
+  for folder in "$@"; do
+    [ "$(json_field "$folder/manifest.json" kind)" = manual ] || continue
+    if [ "$listed" -eq 0 ]; then
+      say "Backups by hand, which the retention never removes; rm -r \"$backups_folder/<name>\" deletes one:"
+      listed=1
+    fi
+    finished=$(json_field "$folder/manifest.json" finished_epoch)
+    case "$finished" in
+      '' | *[!0-9]*) age_text="of an unknown age" ;;
+      *) age_text="$((($(date +%s) - finished) / 86400)) days old" ;;
+    esac
+    say "  ${folder##*/}: $(du -sk "$folder" | cut -f1) KiB, $age_text"
+  done
+  if [ "$(json_field "$latest" result)" = failed ]; then
+    # The schedule's output is in the logs of the service; a person who took a backup read why on
+    # the screen.
+    if [ "$(json_field "$latest" kind)" = manual ]; then
+      failed_hint="The lines that ./agoranomos backup printed said why."
+    else
+      failed_hint="./agoranomos logs backup shows why."
+    fi
+    warn "the last backup, at $(json_field "$latest" attempted), failed at: $(json_field "$latest" step). $failed_hint When the disk is full, every backup fails and the retention removes none: free space, such as by deleting old backups with rm -r \"$backups_folder/<name>\"."
+  fi
+  if [ "$stale" -eq 1 ]; then
+    warn "$NO_RECENT_BACKUP: ./agoranomos logs backup shows why"
+  fi
+}
+
+# The databases of a backup, in the order in which restore puts them back.
+BACKUP_DATABASES="warehouse airflow metabase"
+
+# The service of the database $1.
+database_service() {
+  case "$1" in
+    warehouse) printf 'warehouse-db' ;;
+    *) printf 'platform-db' ;;
+  esac
+}
+
+# The images that the database $1 depends on: PostgreSQL, which made its dump, and the application
+# that migrated it, which reads it after a restore.
+database_images() {
+  case "$1" in
+    warehouse) printf 'postgres' ;;
+    airflow) printf 'postgres apache/airflow' ;;
+    metabase) printf 'postgres metabase/metabase' ;;
+  esac
+}
+
+# The version of each image of the repository $2 in the list of references $1, one to a line:
+# the name and the tag, without the digest, which changes with every rebuild of the same version.
+# Of PostgreSQL the major version alone, such as postgres:18: a minor update keeps the format of
+# the data, and pg_restore reads the dump, while a new major version is an upgrade of its own.
+image_tags() {
+  printf '%s\n' "$1" | tr ' ' '\n' | sed -n "s|^\($2:[^@]*\).*|\1|p" |
+    if [ "$2" = postgres ]; then sed 's|^\(postgres:[0-9]*\).*|\1|'; else cat; fi |
+    LC_ALL=C sort -u
+}
+
+# Remove the dump that restore copied into a container, if it is still there. It holds a whole
+# database, so a failure to remove it is a warning with the command to do it by hand.
+restore_remove_dump() {
+  if [ -n "$restore_dump" ]; then
+    compose exec -T "$restore_dump_service" rm -f "$restore_dump" ||
+      warn "could not remove $restore_dump in $restore_dump_service, which holds a copy of a database: remove it by hand with docker compose exec $restore_dump_service rm -f $restore_dump"
+    restore_dump=""
+  fi
+}
+
+# What a restore says when it ends in an error after it began to change things: which databases
+# are back and which are not, that the services are stopped, and what to do. restore_phase says how
+# far it got: "" before the stop, then stopping (the stop may be half done), stopped, restoring,
+# restored (the databases are back, the stack is starting) and started. restore_unsure is the
+# database whose pg_restore did not end well, which may be incomplete.
+restore_report() {
+  restore_pending=""
+  for restore_database in $databases; do
+    case " $restored " in
+      *" $restore_database "*) ;;
+      *) restore_pending="${restore_pending:+$restore_pending }$restore_database" ;;
+    esac
+  done
+  restore_again="./agoranomos restore $restore_name --only $(printf '%s' "$restore_pending" | tr ' ' ',')"
+  case "$restore_phase" in
+    stopping)
+      error_line "restore stopped before it changed a database: ${restore_pending} are as they were. Some of the services that use the databases may be stopped: ./agoranomos up starts the stack again as it was"
+      ;;
+    stopped | restoring)
+      if [ -n "$restore_unsure" ]; then
+        restore_hint=""
+        if [ "$restore_interrupted" -eq 1 ]; then
+          restore_hint=" pg_restore may still run in $(database_service "$restore_unsure"): until it has ended, a new restore stops with 'being accessed by other users' and changes nothing."
+        fi
+        error_line "restore stopped. Restored from $restore_name: ${restored:-none}. $restore_unsure was being restored and may be incomplete. Not restored: $restore_pending. The services that use the databases are stopped.$restore_hint Do not run ./agoranomos up, which would start the stack on it: run $restore_again again first"
+      elif [ -z "$restored" ]; then
+        error_line "restore stopped. Restored from $restore_name: none; $restore_pending are as they were. The services that use the databases are stopped: ./agoranomos up starts the stack again as it was, or run $restore_again again"
+      else
+        error_line "restore stopped. Restored from $restore_name: $restored. Not restored: $restore_pending, which are as they were. The services that use the databases are stopped, and ./agoranomos up would start the stack on databases from two different times: finish with $restore_again first"
+      fi
+      ;;
+    restored)
+      error_line "restore stopped. Restored from $restore_name: $restored, all of them; the stack did not come up. ./agoranomos status and ./agoranomos logs <service> show why, and ./agoranomos up starts it again"
+      ;;
+  esac
+}
+
+# The trap of EXIT once restore has begun to stop services: whatever ended it, it removes the dump
+# that it left in a container and says where it stopped.
+restore_exit() {
+  restore_code=$?
+  trap - EXIT INT TERM
+  restore_remove_dump
+  if [ "$restore_code" -ne 0 ]; then
+    restore_report
+  fi
+  exit "$restore_code"
+}
+
+# The trap of INT and TERM: end the restore, which runs the trap of EXIT.
+restore_signaled() {
+  restore_interrupted=1
+  error_line "restore was interrupted"
+  exit "$1"
+}
+
+# Put databases back as a backup has them (ADR-0020). Nothing changes until the backup has passed
+# its check in the backup service, the images of its databases match those of the checkout, and
+# the person has said yes; then it removes what a mode left behind, stops every service but the
+# databases, runs db-init, restores each database as its superuser inside its container, through
+# the socket, where the image trusts it, and starts the stack. The dump goes into the /tmp of the
+# container first, so that pg_restore reads a file. From the stop on, a failure or an interrupt
+# says which databases are back, that the services are stopped, and what to do (restore_exit).
+cmd_restore() {
+  restore_name="" restore_only="" restore_only_given=0 restore_force=0 restore_yes=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --only)
+        # An empty list must not fall back to every database, and a second one must not replace
+        # the first without a word.
+        { [ "$#" -ge 2 ] && [ -n "$2" ]; } ||
+          die "--only needs the databases to restore, such as --only metabase or --only warehouse,airflow"
+        [ "$restore_only_given" -eq 0 ] ||
+          die "--only is given once: list the databases in one list, such as --only warehouse,airflow"
+        restore_only=$2 restore_only_given=1
+        shift 2
+        ;;
+      --yes)
+        restore_yes=1
+        shift
+        ;;
+      --force)
+        restore_force=1
+        shift
+        ;;
+      -*) die "unknown option of restore: $1" ;;
+      *)
+        [ -z "$restore_name" ] || die "restore takes one backup"
+        restore_name=$1
+        shift
+        ;;
+    esac
+  done
+  [ -n "$restore_name" ] || die "usage: ./agoranomos restore <backup> [--only <databases>] [--yes] [--force]; ./agoranomos status names the last backup"
+  [ -f "$ENV_FILE" ] || die "there is no .env: restore with the .env of the deployment that took the backup, whose keys decrypt the connections that Airflow and Metabase saved"
+  root=$(backups_path)
+  if [ "$restore_name" = latest ]; then
+    restore_name=$(json_field "$root/latest.json" last_ok)
+    [ -n "$restore_name" ] || die "there is no good backup in $root yet"
+  fi
+  case "$restore_name" in
+    [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z) ;;
+    *) die "not the name of a backup: $restore_name. The names are those of the folders in $root, such as 20261011T030012Z" ;;
+  esac
+  folder="$root/$restore_name"
+  [ -f "$folder/manifest.json" ] || die "there is no complete backup $restore_name in $root"
+  wanted=$(printf '%s' "${restore_only:-$BACKUP_DATABASES}" | tr ',' ' ')
+  for database in $wanted; do
+    case " $BACKUP_DATABASES " in
+      *" $database "*) ;;
+      *) die "not a database of a backup: $database (warehouse, airflow or metabase)" ;;
+    esac
+  done
+  # The databases once each, in the order of a backup, whatever the order of the list.
+  databases=""
+  for database in $BACKUP_DATABASES; do
+    case " $wanted " in
+      *" $database "*) databases="${databases:+$databases }$database" ;;
+    esac
+  done
+  [ -n "$databases" ] || die "--only needs the databases to restore, such as --only metabase or --only warehouse,airflow"
+  if [ "$restore_yes" -eq 0 ] && [ ! -t 0 ]; then
+    die "restore replaces databases: run it in a terminal, which asks first, or pass --yes"
+  fi
+  message=$(backup_user_problem)
+  [ -z "$message" ] || die "$message"
+  # The checks of up, also on a new server: Docker, the memory, the disk and the ports. They run
+  # without --force, which here is about the images: a machine on which up needs --force stops here.
+  cmd_preflight
+  # As backup does, in every mode: the check runs as AGORANOMOS_UID, and on Linux it cannot enter
+  # a folder of mode 700 that another user owns.
+  if [ "$(uname -s)" = Linux ] && backup_folder_foreign; then
+    die "$(backups_folder_unwritable)"
+  fi
+  say "Checking the backup $restore_name..."
+  # In the running backup service when there is one, as backup does: a container more would add
+  # its limit to the sum that the memory budget holds. Either way it runs as AGORANOMOS_UID.
+  if ops_mode && running_service backup; then
+    # shellcheck disable=SC2086 # one argument for each database
+    compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh verify "$restore_name" $databases ||
+      die "the backup $restore_name did not pass its check (the lines above say why), and nothing was changed"
+  else
+    # shellcheck disable=SC2086 # one argument for each database
+    compose run --rm --no-deps -T backup verify "$restore_name" $databases ||
+      die "the backup $restore_name did not pass its check (the lines above say why), and nothing was changed"
+  fi
+  recorded=$(json_field "$folder/manifest.json" images)
+  if [ -z "$recorded" ]; then
+    warn "the backup $restore_name does not record the images that took it: check that this checkout is the release that took it"
+  else
+    current=$(image_refs | tr '\n' ' ')
+    differences=""
+    for database in $databases; do
+      for repository in $(database_images "$database"); do
+        was=$(image_tags "$recorded" "$repository" | tr '\n' ' ')
+        now=$(image_tags "$current" "$repository" | tr '\n' ' ')
+        was=${was% } now=${now% }
+        if [ "$was" != "$now" ]; then
+          differences="$differences
+  $repository: the backup has ${was:-none}, this checkout ${now:-none}"
+        fi
+      done
+    done
+    if [ -n "$differences" ]; then
+      differences=$(printf '%s\n' "$differences" | LC_ALL=C sort -u)
+      if [ "$restore_force" -eq 0 ]; then
+        die "the backup $restore_name was taken with other images than this checkout has:$differences
+Check out the release that took it and restore there, or pass --force if you know that these versions read it. Nothing was changed."
+      fi
+      warn "the backup $restore_name was made with other images (--force):$differences"
+    fi
+  fi
+  if [ "$restore_yes" -eq 0 ]; then
+    # To standard error, so that the question is seen when the output goes to a file.
+    printf 'Restore %s from %s? What they saved after it is lost. Type yes to go on: ' "$databases" "$restore_name" >&2
+    read -r answer || answer=""
+    [ "$answer" = yes ] || die "nothing was changed"
+  fi
+  # From here the restore changes things. What a mode left behind goes, as in up: no proxy or
+  # backup service of a profile that .env no longer lists runs through a restore.
+  remove_leftover_services
+  services=$(compose config --services) || die "docker compose config failed; the error above names the cause"
+  stop=""
+  for service in $services; do
+    case "$service" in
+      warehouse-db | platform-db) ;;
+      *) stop="$stop $service" ;;
+    esac
+  done
+  restored="" restore_phase=stopping restore_dump="" restore_dump_service="" restore_unsure="" restore_interrupted=0
+  trap restore_exit EXIT
+  trap 'restore_signaled 130' INT
+  trap 'restore_signaled 143' TERM
+  say "Stopping the services that use the databases..."
+  # docker compose stop with no service stops every one, the databases among them.
+  if [ -n "$stop" ]; then
+    # shellcheck disable=SC2086 # one argument for each service
+    compose stop $stop || die "docker compose could not stop the services"
+  fi
+  restore_phase=stopped
+  compose up --detach --wait warehouse-db platform-db ||
+    die "the databases did not start: see ./agoranomos logs warehouse-db and ./agoranomos logs platform-db"
+  compose run --rm --no-deps -T db-init || die "db-init failed: the lines above say why"
+  restore_phase=restoring
+  for database in $databases; do
+    service=$(database_service "$database")
+    dump=/tmp/agoranomos-restore-$database.dump
+    say "Restoring $database..."
+    restore_dump=$dump restore_dump_service=$service
+    # A failure from here to the next restore_remove_dump ends the script, and restore_exit removes
+    # the dump.
+    if ! compose exec -T "$service" sh -c "umask 077 && cat > $dump" < "$folder/$database.dump"; then
+      die "could not copy $database.dump into $service, and $database is as it was"
+    fi
+    restore_unsure=$database
+    if ! compose exec -T "$service" pg_restore --username=postgres --dbname=postgres --clean --if-exists --create --exit-on-error "$dump"; then
+      die "pg_restore failed for $database. If it says that the database is being accessed by other users, $database was not changed: stop what is connected and run restore again. After another error $database can be incomplete"
+    fi
+    restore_remove_dump
+    restore_unsure=""
+    restored="${restored:+$restored }$database"
+    compose exec -T "$service" vacuumdb --username=postgres --analyze-only --quiet --dbname="$database" ||
+      warn "ANALYZE of $database failed: it is restored, and its first queries may be slow"
+  done
+  restore_phase=restored
+  say "Restored $databases from $restore_name. The backup also holds extensions.tar.gz, which restore leaves as it is. Starting the stack..."
+  start_stack
+  restore_phase=started
+  trap - EXIT INT TERM
+  [ "$demo_failed" -eq 0 ] || die "the databases are restored and the stack is up, but the demo is not ready"
+  say "$(paint ok 'The stack is up.' 1) ./agoranomos status shows every service."
 }
 
 cmd_logs() {
@@ -955,7 +1552,9 @@ Commands:
   preflight     Check that this machine can run the stack (--force: warn about low resources instead of stopping)
   up            Run init and preflight, start the stack and wait until it is healthy (--force as for preflight)
   down          Stop the stack; the data stays in its Docker volumes
-  status        Show the state and health of every service
+  status        Show the state and health of every service, and the last backups
+  backup        Take a backup of the databases now, into the backups folder
+  restore       restore <backup>: put the databases back as a backup has them (--only, --yes, --force)
   logs          Show the logs: the last 200 lines, or pass options and services to docker compose logs
   metadata      metadata diff: show what up would change in the metadata of the marts in Metabase
   credentials   Show where to sign in to Airflow and Metabase, and where the passwords are
@@ -975,6 +1574,8 @@ main() {
     up) cmd_up "$@" ;;
     down) cmd_down "$@" ;;
     status) cmd_status "$@" ;;
+    backup) cmd_backup "$@" ;;
+    restore) cmd_restore "$@" ;;
     logs) cmd_logs "$@" ;;
     metadata) cmd_metadata "$@" ;;
     credentials) cmd_credentials "$@" ;;

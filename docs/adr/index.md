@@ -67,5 +67,6 @@ Agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0017](0017-set-ai-access-in-metabase-by-levels.md) | Set the access of AI clients in Metabase by levels | accepted | 2026-10-10 |
 | [0018](0018-keep-the-content-of-the-package-in-metabase-as-code.md) | Keep the content of the package in Metabase as code, and view-only | accepted | 2026-10-10 |
 | [0019](0019-open-only-metabase-in-server-mode.md) | Open only Metabase to the internet in server mode, through Caddy | accepted | 2026-10-09 |
+| [0020](0020-back-up-the-databases-every-day.md) | Back up the databases every day with pg_dump, into a folder of the host | proposed | 2026-10-09 |
 | [0021](0021-leave-the-outgoing-traffic-of-metabase-open.md) | Leave the outgoing traffic of Metabase open, and close what relays it without a sign-in | accepted | 2026-10-09 |
 | [0022](0022-budget-the-memory-by-variant-and-mode.md) | Budget the memory by variant and mode | accepted | 2026-10-09 |

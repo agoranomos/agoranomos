@@ -392,3 +392,288 @@ def test_server_mode_is_on_when_compose_profiles_lists_server(shell, tmp_path, l
     if line is not None:
         (tmp_path / ".env").write_text(f"OTHER=1\n{line}\n", encoding="utf-8")
     assert answers(shell, tmp_path, "server_mode") is server
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("line", "ops"),
+    [
+        (None, False),
+        ("COMPOSE_PROFILES=core,demo", False),
+        ("COMPOSE_PROFILES=core,demo,server", False),
+        ("COMPOSE_PROFILES=core,demo,server,ops", True),
+        ("COMPOSE_PROFILES=ops", True),
+        ('COMPOSE_PROFILES="core,ops" # mine', True),
+        ("COMPOSE_PROFILES=opsx,core", False),
+        ("COMPOSE_PROFILES=core,xops", False),
+    ],
+    ids=repr,
+)
+def test_ops_mode_is_on_when_compose_profiles_lists_ops(shell, tmp_path, line, ops):
+    if line is not None:
+        (tmp_path / ".env").write_text(f"OTHER=1\n{line}\n", encoding="utf-8")
+    assert answers(shell, tmp_path, "ops_mode") is ops
+
+
+LATEST = (
+    "{\n"
+    '  "result": "ok",\n'
+    '  "attempted": "2026-10-11T03:00:12Z",\n'
+    '  "step": "",\n'
+    '  "last_ok": "20261011T030012Z",\n'
+    '  "last_ok_epoch": 1791687612,\n'
+    '  "last_scheduled_local": "2026-10-11 03:00"\n'
+    "}\n"
+)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("result", "ok"),
+        ("attempted", "2026-10-11T03:00:12Z"),
+        ("step", ""),
+        ("last_ok", "20261011T030012Z"),
+        # A number has no quotes, and a last field has no comma.
+        ("last_ok_epoch", "1791687612"),
+        ("last_scheduled_local", "2026-10-11 03:00"),
+        ("missing", ""),
+        # A key that only starts with the name is another key.
+        ("last", ""),
+    ],
+)
+def test_json_field_reads_the_fields_that_the_backup_script_writes(shell, tmp_path, key, value):
+    (tmp_path / "latest.json").write_text(LATEST, encoding="utf-8")
+    result = run_with_script_functions(shell, 'json_field latest.json "$1"', key, cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    # The caller reads it with $(...), which drops the newline.
+    assert result.stdout.rstrip("\n") == value
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_json_field_of_a_file_that_is_not_there_prints_nothing_and_succeeds(shell, tmp_path):
+    result = run_with_script_functions(shell, "json_field none.json result", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_image_refs_lists_the_images_of_the_checkout_once_each_and_leaves_out_built_images(
+    shell, tmp_path
+):
+    (tmp_path / "compose.yaml").write_text(
+        "services:\n"
+        "  a:\n"
+        "    image: postgres:18.6-trixie@sha256:aaa\n"
+        "  b:\n"
+        "    image:   metabase/metabase:v0.64.1@sha256:bbb   # a comment\n"
+        "  c:\n"
+        "    image: postgres:18.6-trixie@sha256:aaa\n"
+        "  d:\n"
+        "    image: agoranomos-airflow:local\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "compose.celery.yaml").write_text(
+        "services:\n  e:\n    image: valkey/valkey:9.1.2-trixie@sha256:ccc\n", encoding="utf-8"
+    )
+    (tmp_path / "airflow").mkdir()
+    (tmp_path / "airflow" / "Dockerfile").write_text(
+        "# FROM not/an-image:1\n"
+        "FROM apache/airflow:3.3.2-python3.13@sha256:ddd AS base\n"
+        "RUN true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "caddy").mkdir()
+    (tmp_path / "caddy" / "Dockerfile").write_text(
+        "FROM caddy:2.11.7-alpine@sha256:eee\nRUN true\n", encoding="utf-8"
+    )
+    result = run_with_script_functions(shell, "image_refs", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "apache/airflow:3.3.2-python3.13@sha256:ddd",
+        "caddy:2.11.7-alpine@sha256:eee",
+        "metabase/metabase:v0.64.1@sha256:bbb",
+        "postgres:18.6-trixie@sha256:aaa",
+        "valkey/valkey:9.1.2-trixie@sha256:ccc",
+    ]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_image_refs_of_a_checkout_without_files_prints_nothing_and_succeeds(shell, tmp_path):
+    result = run_with_script_functions(shell, "image_refs", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("line", "path"),
+    [
+        (None, "{root}/backups"),
+        ("AGORANOMOS_BACKUP_DIR=./backups", "{root}/backups"),
+        ("AGORANOMOS_BACKUP_DIR=./data/backups", "{root}/data/backups"),
+        ("AGORANOMOS_BACKUP_DIR=other", "{root}/other"),
+        ("AGORANOMOS_BACKUP_DIR=/srv/backups", "/srv/backups"),
+        ("AGORANOMOS_BACKUP_DIR=", "{root}/backups"),
+    ],
+    ids=repr,
+)
+def test_backups_path_is_absolute_and_a_relative_path_starts_at_the_checkout(
+    shell, tmp_path, line, path
+):
+    if line is not None:
+        (tmp_path / ".env").write_text(f"{line}\n", encoding="utf-8")
+    result = run_with_script_functions(shell, "backups_path", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    # The script finds its folder with pwd, which resolves a link such as /var on macOS.
+    assert result.stdout == path.format(root=tmp_path.resolve())
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("ids", "problem"),
+    [
+        ("AGORANOMOS_UID=1000\nAGORANOMOS_GID=1000", ""),
+        ("AGORANOMOS_UID=1000\nAGORANOMOS_GID=0", ""),
+        ("AGORANOMOS_UID=0\nAGORANOMOS_GID=1000", "AGORANOMOS_UID in .env is 0"),
+        ("AGORANOMOS_UID=0\nAGORANOMOS_GID=auto", "AGORANOMOS_UID in .env is 0"),
+        ("AGORANOMOS_UID=auto\nAGORANOMOS_GID=auto", "must be numbers"),
+        ("AGORANOMOS_UID=1000\nAGORANOMOS_GID=auto", "must be numbers"),
+        ("AGORANOMOS_UID=1000\nAGORANOMOS_GID=", "must be numbers"),
+        ("AGORANOMOS_UID=\nAGORANOMOS_GID=1000", "must be numbers"),
+        ("AGORANOMOS_UID=1000", "must be numbers"),
+        ("OTHER=1", "must be numbers"),
+        ("AGORANOMOS_UID=-1\nAGORANOMOS_GID=1000", "must be numbers"),
+        ("AGORANOMOS_UID=10x0\nAGORANOMOS_GID=1000", "must be numbers"),
+        # Docker reads 00 as 0, which is root; a colon makes a value no number, whatever the other
+        # one is, and the group ID is judged on its own.
+        ("AGORANOMOS_UID=00\nAGORANOMOS_GID=1000", "AGORANOMOS_UID in .env is 0"),
+        ("AGORANOMOS_UID=0000\nAGORANOMOS_GID=00", "AGORANOMOS_UID in .env is 0"),
+        ("AGORANOMOS_UID=1000:1000\nAGORANOMOS_GID=1000", "must be numbers"),
+        ("AGORANOMOS_UID=1000\nAGORANOMOS_GID=1000:1000", "must be numbers"),
+        ("AGORANOMOS_UID=:\nAGORANOMOS_GID=1000", "must be numbers"),
+        ("AGORANOMOS_UID=auto\nAGORANOMOS_GID=0", "must be numbers"),
+        ("AGORANOMOS_UID=1000\nAGORANOMOS_GID=00", ""),
+        ("AGORANOMOS_UID=1001\nAGORANOMOS_GID=20", ""),
+    ],
+    ids=repr,
+)
+def test_backup_user_problem_names_root_and_anything_that_is_not_a_number(
+    shell, tmp_path, ids, problem
+):
+    (tmp_path / ".env").write_text(f"{ids}\n", encoding="utf-8")
+    result = run_with_script_functions(shell, "backup_user_problem", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (problem in result.stdout) if problem else (result.stdout == "")
+
+
+REFS = (
+    "apache/airflow:3.3.2-python3.13@sha256:bbb metabase/metabase:v0.64.1@sha256:ccc "
+    "postgres:18.6-trixie@sha256:aaa postgres:18.6-trixie@sha256:zzz valkey/valkey:9.1.2-trixie"
+)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("refs", "repository", "tags"),
+    [
+        # The tag without the digest, which changes with every rebuild of the same version.
+        (REFS, "apache/airflow", ["apache/airflow:3.3.2-python3.13"]),
+        (REFS, "metabase/metabase", ["metabase/metabase:v0.64.1"]),
+        # PostgreSQL by its major version, whatever the number of images that name it.
+        (REFS, "postgres", ["postgres:18"]),
+        ("postgres:18.7-trixie@sha256:eee", "postgres", ["postgres:18"]),
+        ("postgres:18.7-trixie", "postgres", ["postgres:18"]),
+        ("postgres:17.2-trixie postgres:18.6-trixie", "postgres", ["postgres:17", "postgres:18"]),
+        ("postgres:9.6.24", "postgres", ["postgres:9"]),
+        # An image that the list does not hold, and a name that only starts like the repository.
+        (REFS, "caddy", []),
+        ("postgres-exporter:1.0 mypostgres:18.6 postgres:18.6", "postgres", ["postgres:18"]),
+        ("", "postgres", []),
+    ],
+    ids=repr,
+)
+def test_image_tags_name_the_version_of_a_repository_without_its_digest(
+    shell, tmp_path, refs, repository, tags
+):
+    result = run_with_script_functions(
+        shell, 'image_tags "$1" "$2"', refs, repository, cwd=tmp_path
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == tags
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("database", "service", "images"),
+    [
+        ("warehouse", "warehouse-db", "postgres"),
+        ("airflow", "platform-db", "postgres apache/airflow"),
+        ("metabase", "platform-db", "postgres metabase/metabase"),
+    ],
+)
+def test_a_database_belongs_to_a_service_and_depends_on_the_images_that_read_it(
+    shell, tmp_path, database, service, images
+):
+    result = run_with_script_functions(
+        shell,
+        'printf "%s|%s" "$(database_service "$1")" "$(database_images "$1")"',
+        database,
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"{service}|{images}"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("value", "path"),
+    [
+        ("./backups", "{root}/backups"),
+        ("backups", "{root}/backups"),
+        ("../backups", "{root}/../backups"),
+        ("/srv/backups", "/srv/backups"),
+        # Compose reads a leading ~ as the home folder of the user.
+        ("~/backups", "/home/someone/backups"),
+        ("~", "/home/someone"),
+        ("~/my backups", "/home/someone/my backups"),
+        # A tilde that is not the first character is a character of the name.
+        ("./~/backups", "{root}/~/backups"),
+    ],
+    ids=repr,
+)
+def test_folder_path_reads_a_folder_as_compose_does(shell, tmp_path, value, path):
+    script, _, _ = SCRIPT.rpartition('\nmain "$@"')
+    result = subprocess.run(
+        [shell, "-c", f'{script}\nfolder_path "$1"\n', "sh", value],
+        cwd=tmp_path,
+        env={"PATH": os.environ["PATH"], "HOME": "/home/someone/"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == path.format(root=tmp_path.resolve())
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("value", "is_path"),
+    [
+        ("./backups", True),
+        ("../backups", True),
+        ("/srv/backups", True),
+        ("~/backups", True),
+        (".", True),
+        ("..", True),
+        ("~", True),
+        ("backups", False),
+        ("data/backups", False),
+        ("", False),
+    ],
+    ids=repr,
+)
+def test_is_folder_path_tells_a_path_from_the_name_of_a_volume(shell, tmp_path, value, is_path):
+    assert answers(shell, tmp_path, "is_folder_path", value) is is_path

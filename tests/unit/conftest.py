@@ -3,8 +3,11 @@
 The cli fixture copies the script and .env.example into a temporary checkout whose path contains a
 space, and puts stand-ins for docker, ss, netstat, lsof and df first on PATH. The stand-ins answer
 from FAKE_* environment variables, which a test passes to Cli.run, and the docker stand-in logs
-every call and the COMPOSE_* settings that every docker compose call got. Cli.stub replaces a
-stand-in, or adds a tool, for one test.
+every call, the COMPOSE_* settings that every docker compose call got, and the AGORANOMOS_IMAGES
+that it got (the log with the suffix .images). FAKE_RUN_FAIL and FAKE_EXEC_FAIL name a word of a
+call of run or exec that fails, such as verify, db-init or pg_restore, FAKE_COMPOSE_FAIL one of any
+other call, such as stop, and FAKE_HANG makes a call of run or exec last half a minute, for a test
+that interrupts the script. Cli.stub replaces a stand-in, or adds a tool, for one test.
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ case "$1" in
     if [ "$1" != version ]; then
       printf '%s|%s|%s\n' "${COMPOSE_PROJECT_NAME-unset}" "${COMPOSE_PROFILES-unset}" \
         "${COMPOSE_FILE-unset}" >> "$FAKE_LOG.settings"
+      printf '%s\n' "${AGORANOMOS_IMAGES-unset}" >> "$FAKE_LOG.images"
     fi
     case "$1" in
       version)
@@ -65,7 +69,24 @@ case "$1" in
         case " $* " in
           # The container of the proxy of server mode, as docker compose ps --all --quiet proxy
           # lists it: FAKE_PROXY holds its ID, and nothing means that there is none.
-          *" --quiet proxy "*) printf '%s' "${FAKE_PROXY:-}" ;;
+          # FAKE_PROXY_PS_EXIT makes this look-up, and no other call to ps, fail with that status
+          # (FAKE_PS_EXIT does that for the polls).
+          *" --quiet proxy "*)
+            if [ -n "${FAKE_PROXY_PS_EXIT:-}" ]; then
+              echo "Cannot connect to the Docker daemon" >&2
+              exit "$FAKE_PROXY_PS_EXIT"
+            fi
+            printf '%s' "${FAKE_PROXY:-}"
+            ;;
+          # The same for the container of the backup service of the ops profile: FAKE_BACKUP
+          # holds its ID, and FAKE_BACKUP_PS_EXIT makes this look-up fail.
+          *" --quiet backup "*)
+            if [ -n "${FAKE_BACKUP_PS_EXIT:-}" ]; then
+              echo "Cannot connect to the Docker daemon" >&2
+              exit "$FAKE_BACKUP_PS_EXIT"
+            fi
+            printf '%s' "${FAKE_BACKUP:-}"
+            ;;
           *" --quiet "*) printf '%s' "${FAKE_RUNNING:-}" ;;
           *)
             # FAKE_PS_EXIT makes every poll fail. Otherwise FAKE_PS_FILE answers every poll, and
@@ -84,6 +105,36 @@ case "$1" in
         esac
         ;;
       *)
+        # FAKE_RUN_FAIL and FAKE_EXEC_FAIL name a word of a call of run or exec, such as verify,
+        # db-init or pg_restore: such a call fails, as that job or that command would.
+        if [ "$1" = run ] && [ -n "${FAKE_RUN_FAIL:-}" ]; then
+          case " $* " in *" $FAKE_RUN_FAIL "*) exit 1 ;; esac
+        fi
+        # FAKE_EXEC_FAIL may list several such runs, separated by a semicolon.
+        if [ "$1" = exec ] && [ -n "${FAKE_EXEC_FAIL:-}" ]; then
+          old_ifs=$IFS
+          IFS=';'
+          for fail_run in $FAKE_EXEC_FAIL; do
+            IFS=$old_ifs
+            case " $* " in *" $fail_run "*) exit 1 ;; esac
+            IFS=';'
+          done
+          IFS=$old_ifs
+        fi
+        # FAKE_COMPOSE_FAIL is the same for any other call, such as stop, --wait (the start of the
+        # databases) or --remove-orphans (the start of the stack).
+        if [ -n "${FAKE_COMPOSE_FAIL:-}" ]; then
+          case " $* " in *" $FAKE_COMPOSE_FAIL "*) exit 1 ;; esac
+        fi
+        # FAKE_HANG makes such a call of run or exec last half a minute, as a check or a pg_restore
+        # does that a test interrupts.
+        if { [ "$1" = run ] || [ "$1" = exec ]; } && [ -n "${FAKE_HANG:-}" ]; then
+          case " $* " in *" $FAKE_HANG "*) exec sleep 30 ;; esac
+        fi
+        # The check of a backup says what the backup service says when it passes.
+        if [ "$1" = run ] || [ "$1" = exec ]; then
+          case " $* " in *" verify "*) echo "backup: complete, its dumps read to their end" ;; esac
+        fi
         # FAKE_COMPOSE_EXIT is the exit status of every other subcommand (up, down, logs), and
         # FAKE_COMPOSE_ERROR is what it prints on stderr, as a failing docker compose does.
         if [ -n "${FAKE_COMPOSE_ERROR:-}" ]; then echo "$FAKE_COMPOSE_ERROR" >&2; fi
@@ -202,15 +253,43 @@ class Cli:
     def run(
         self, *args: str, cwd: Path | None = None, **fake: str
     ) -> subprocess.CompletedProcess[str]:
+        # The input is closed, so that a script under test never reads the terminal of the person
+        # who runs pytest with -s: restore asks on a terminal.
         return subprocess.run(
             [str(self.root / "agoranomos"), *args],
             cwd=cwd or self.root,
             env=self.environment(fake),
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=60,
             check=False,
         )
+
+    def run_asked(
+        self, answer: str, *args: str, together: bool = False, **fake: str
+    ) -> subprocess.CompletedProcess[str]:
+        """Like run, with a pseudo-terminal as the input of the script, on which the person has
+        typed answer and Enter before the script asks: a command that asks on a terminal, such as
+        restore, then reads it. With together, the standard error goes to the standard output, so
+        that the order of what the script says on the two shows in one text."""
+        terminal, script_side = pty.openpty()
+        try:
+            os.write(terminal, f"{answer}\n".encode())
+            return subprocess.run(
+                [str(self.root / "agoranomos"), *args],
+                cwd=self.root,
+                env=self.environment(fake),
+                stdin=script_side,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT if together else subprocess.PIPE,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        finally:
+            os.close(terminal)
+            os.close(script_side)
 
     def run_on_terminal(
         self, *args: str, streams: tuple[str, ...] = ("stdout",), **fake: str

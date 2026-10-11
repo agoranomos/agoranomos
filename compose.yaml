@@ -1,8 +1,9 @@
 # The Agoranomos stack. Start it with ./agoranomos up (docs/reference/command-line.md).
 # Settings and secrets come from .env, which ./agoranomos init creates from .env.example; without it,
 # docker compose stops and asks for ./agoranomos init. .env also sets COMPOSE_PROFILES: core is the whole
-# stack in local mode (ADR-0011), demo adds the demo-init job, and server adds the proxy of server mode
-# (ADR-0019). Images are pinned by tag and digest, and Renovate updates them.
+# stack in local mode (ADR-0011), demo adds the demo-init job, server adds the proxy of server mode
+# (ADR-0019), and ops the backup service (ADR-0020). Images are pinned by tag and digest, and Renovate
+# updates them.
 # Airflow runs on an image of its own, built from airflow/Dockerfile, with the LocalExecutor: the
 # scheduler runs the tasks. compose.celery.yaml adds a broker and a separate worker (CeleryExecutor);
 # select it with COMPOSE_FILE in .env (ADR-0015).
@@ -172,6 +173,7 @@ services:
       METABASE_READER_PASSWORD: ${METABASE_READER_PASSWORD:?run ./agoranomos init}
       WAREHOUSE_LOADER_PASSWORD: ${WAREHOUSE_LOADER_PASSWORD:?run ./agoranomos init}
       WAREHOUSE_TRANSFORMER_PASSWORD: ${WAREHOUSE_TRANSFORMER_PASSWORD:?run ./agoranomos init}
+      BACKUP_DB_PASSWORD: ${BACKUP_DB_PASSWORD:?run ./agoranomos init}
     volumes:
       - ./postgres:/opt/agoranomos/postgres:ro
     # psql writes nothing. The image declares a volume for the data of PostgreSQL, which db-init
@@ -616,6 +618,64 @@ services:
       start_period: 10s
     depends_on:
       metabase-init:
+        condition: service_completed_successfully
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+  # The backups (the ops profile, ADR-0020): a backup of the three databases every day at
+  # BACKUP_TIME, into AGORANOMOS_BACKUP_DIR on the host, and on demand with ./agoranomos backup. It
+  # runs the image of the databases, so that pg_dump has their version, as the user of the checkout,
+  # so that the backups belong to that user, and it reads as the role backup, which may read every
+  # table and write none (postgres/*.sql). Its health check fails when there is no good backup in the
+  # last 26 hours, which ./agoranomos up and status report without stopping the stack.
+  backup:
+    image: postgres:18.6-trixie@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
+    profiles: [ops]
+    restart: unless-stopped
+    user: "${AGORANOMOS_UID:-1000}:${AGORANOMOS_GID:-1000}"
+    mem_limit: ${BACKUP_MEMORY:-256m}
+    memswap_limit: ${BACKUP_MEMORY:-256m}
+    entrypoint: ["/bin/sh", "/opt/agoranomos/postgres/backup.sh"]
+    command: ["schedule"]
+    environment:
+      PGUSER: backup
+      PGPASSWORD: ${BACKUP_DB_PASSWORD:?run ./agoranomos init}
+      # libpq looks for a password file in the home folder, and this user has none.
+      HOME: /tmp
+      TZ: ${BACKUP_TZ:-UTC}
+      BACKUP_TIME: ${BACKUP_TIME:-03:00}
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-7}
+      BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-4}
+      BACKUP_KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-3}
+      # The images of the checkout, for the manifest of each backup: ./agoranomos passes them on.
+      AGORANOMOS_IMAGES: ${AGORANOMOS_IMAGES:-}
+    volumes:
+      - ./postgres:/opt/agoranomos/postgres:ro
+      - ${AGORANOMOS_EXTENSIONS_DIR:-./extensions}:/opt/agoranomos/extensions:ro
+      - ${AGORANOMOS_BACKUP_DIR:-./backups}:/backups
+    # It writes into /backups only. The image declares a volume for the data of PostgreSQL, which
+    # this service does not use: the tmpfs takes its place, as for db-init.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/lib/postgresql
+    networks: [data]
+    healthcheck:
+      test: ["CMD", "/bin/sh", "/opt/agoranomos/postgres/backup.sh", "health"]
+      # The probe reads one small file, so it runs every minute: up sees an unhealthy service about
+      # a minute after the start period, not five.
+      interval: 1m
+      timeout: 10s
+      retries: 1
+      start_period: 1m
+      start_interval: 5s
+    depends_on:
+      warehouse-db:
+        condition: service_healthy
+      platform-db:
+        condition: service_healthy
+      db-init:
         condition: service_completed_successfully
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]

@@ -14,6 +14,7 @@ SET pg_stat_statements.track_utility = off;
 \getenv loader_password WAREHOUSE_LOADER_PASSWORD
 \getenv transformer_password WAREHOUSE_TRANSFORMER_PASSWORD
 \getenv metabase_reader_password METABASE_READER_PASSWORD
+\getenv backup_password BACKUP_DB_PASSWORD
 
 -- Run again, this file would print a notice for every object that exists already.
 SET client_min_messages = warning;
@@ -51,6 +52,20 @@ SELECT format(
   :'metabase_reader_password'
 ) \gexec
 GRANT CONNECT ON DATABASE warehouse TO loader, transformer, metabase_reader;
+
+-- backup takes the backups (ADR-0020). On this instance it connects to warehouse only, and it may
+-- read every table there (pg_read_all_data), the hashes of the passwords of the roles in pg_authid
+-- among them. It writes nothing: no other grant, and sessions that start read-only. The members of
+-- pg_read_all_data may select from the views of pg_stat_statements, but the functions behind them
+-- are revoked from PUBLIC above and not given to backup, so it reads no statistics of the statements.
+SELECT 'CREATE ROLE backup' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'backup') \gexec
+SELECT format(
+  'ALTER ROLE backup WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+  :'backup_password'
+) \gexec
+GRANT pg_read_all_data TO backup;
+GRANT CONNECT ON DATABASE warehouse TO backup;
+ALTER ROLE backup SET default_transaction_read_only = on;
 
 -- raw_demo holds the demo data, and dlt merges into it through raw_demo_staging. loader owns both,
 -- so that it can create its tables there; transformer may read raw_demo.

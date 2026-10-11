@@ -1576,6 +1576,16 @@ def test_server_mode_adds_the_proxy_to_the_long_running_services():
         assert services.long_running(variant, {"core", "demo"}) == alone
 
 
+def test_the_ops_profile_adds_the_backups_to_the_long_running_services():
+    for variant in ("local", "celery"):
+        alone = services.long_running(variant)
+        assert services.long_running(variant, {"core", "ops"}) == alone | {"backup"}
+        assert services.long_running(variant, {"core", "server", "ops"}) == alone | {
+            "proxy",
+            "backup",
+        }
+
+
 def test_the_name_of_the_site_is_its_address_without_the_scheme():
     site = {"AGORANOMOS_SITE_URL": "https://bi.example.com/"}
     assert stack_helpers.site_host(site) == "bi.example.com"
