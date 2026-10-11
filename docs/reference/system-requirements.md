@@ -47,7 +47,7 @@ The limits are set from measurements made on 8 and 10 October 2026, as follows:
 | `metabase-init` | 19 MiB | Mac | 128 MiB, the minimum |
 | `demo-init` | 20 MiB | Mac | 128 MiB, the minimum |
 
-A restore runs inside the memory limit of the database that it restores ([`restore`](command-line.md#restore)). With the demo data, whose dumps are 1.3 MB, the restore of `metabase` into the running stack took `platform-db` to 154 MiB and `warehouse-db` to 50 MiB, and the restore of all three databases on empty volumes took them to 138 MiB and 49 MiB (Mac, 11 October 2026). In CI on amd64 on 11 October 2026, the restore of Metabase into the running stack took `platform-db` to 251 MiB and `warehouse-db` to 61 MiB, and the restore on empty volumes took them to 134 MiB and 54 MiB. All of them are below the limits of 512 MiB and 256 MiB. A restore of a warehouse of several GB takes more memory in `warehouse-db`: raise `WAREHOUSE_DB_MEMORY` before it.
+A restore runs inside the memory limit of the database that it restores ([`restore`](command-line.md#restore)). With the demo data, whose dumps are 1.3 MB, the restore of `metabase` into the running stack took `platform-db` to 154 MiB and `warehouse-db` to 50 MiB, and the restore of all three databases on empty volumes took them to 138 MiB and 49 MiB (Mac, 11 October 2026). In CI on amd64 on 11 October 2026, the restore of Metabase into the running stack took `platform-db` to 251 MiB and `warehouse-db` to 61 MiB, and the restore on empty volumes took them to 134 MiB and 54 MiB; on the Hetzner CAX21 on the same day, 227 MiB and 52 MiB, and 131 MiB and 48 MiB. The restore of all three databases on empty volumes took 91 seconds there. All of them are below the limits of 512 MiB and 256 MiB. A restore of a warehouse of several GB takes more memory in `warehouse-db`: raise `WAREHOUSE_DB_MEMORY` before it.
 
 Each variant has a budget for the sum of its limits, the one-shot jobs included, so that on the recommended memory every service at its limit at the same time fits what Docker reports ([ADR-0022](../adr/0022-budget-the-memory-by-variant-and-mode.md)): 7,680 MiB, 8 GB, for the default variant, and 11,776 MiB, 12 GB, for the CeleryExecutor variant. Today the limits add up to 7,168 MiB in the default variant, which leaves 512 MiB, and to 8,064 MiB in the CeleryExecutor variant. Server mode adds the proxy and the backups, 256 MiB each: 7,680 MiB in the default variant, which is the whole budget, and 8,576 MiB in the CeleryExecutor variant. A unit test checks the sum for the defaults of both variants, in local and in server mode.
 
@@ -176,6 +176,48 @@ CI measures the stack in the same way in every run of the stack tests, on the Gi
 | platform-db | 384 MiB | 161 MiB | 273 MiB | 0 | 0 |
 | warehouse-db | 256 MiB | 54 MiB | 123 MiB | 0 | 0 |
 | **Running services, total** | **6656 MiB** | **3772 MiB** | | | |
+
+On 11 October 2026 the stack also ran in server mode on a Hetzner Cloud CAX21, the reference server of the project (arm64, 4 vCPUs, 8 GB; Ubuntu 26.04, Docker Engine 29.9.0, Docker Compose 5.6.0, 7,720 MiB of memory as Docker reports it, no swap), set up as [Deploy on a server](../how-to/deploy-on-a-server.md) says, with a certificate of Let's Encrypt and the default limits of that day. It ran the stack tests, all of which passed, and then stood idle for 10 minutes. Every peak stays below its limit, and no process was killed and no container restarted.
+
+### Hetzner CAX21 arm64, server mode, the stack tests (aarch64)
+
+| Service | Limit | Peak | Since start | OOM kills | Restarts |
+|---|---:|---:|---:|---:|---:|
+| airflow-apiserver | 512 MiB | 339 MiB | 383 MiB | 0 | 0 |
+| airflow-dag-processor | 768 MiB | 435 MiB | 591 MiB | 0 | 0 |
+| airflow-init | 384 MiB | n/a | n/a | n/a | 0 |
+| airflow-scheduler | 1280 MiB | 707 MiB | 774 MiB | 0 | 0 |
+| airflow-triggerer | 640 MiB | 431 MiB | 469 MiB | 0 | 0 |
+| backup | 256 MiB | 6 MiB | 23 MiB | 0 | 0 |
+| db-init | 128 MiB | n/a | n/a | n/a | 0 |
+| demo-init | 128 MiB | n/a | n/a | n/a | 0 |
+| metabase | 2176 MiB | 1445 MiB | 1671 MiB | 0 | 0 |
+| metabase-init | 128 MiB | n/a | n/a | n/a | 0 |
+| metadata-export | 256 MiB | n/a | n/a | n/a | 0 |
+| platform-db | 512 MiB | 245 MiB | 290 MiB | 0 | 0 |
+| proxy | 256 MiB | 31 MiB | 37 MiB | 0 | 0 |
+| warehouse-db | 256 MiB | 62 MiB | 100 MiB | 0 | 0 |
+| **Running services, total** | **6656 MiB** | **3702 MiB** | | | |
+
+### Hetzner CAX21 arm64, server mode, idle (aarch64)
+
+| Service | Limit | Peak | Since start | OOM kills | Restarts |
+|---|---:|---:|---:|---:|---:|
+| airflow-apiserver | 512 MiB | 339 MiB | 383 MiB | 0 | 0 |
+| airflow-dag-processor | 768 MiB | 529 MiB | 615 MiB | 0 | 0 |
+| airflow-init | 384 MiB | n/a | n/a | n/a | 0 |
+| airflow-scheduler | 1280 MiB | 455 MiB | 774 MiB | 0 | 0 |
+| airflow-triggerer | 640 MiB | 432 MiB | 469 MiB | 0 | 0 |
+| backup | 256 MiB | 5 MiB | 23 MiB | 0 | 0 |
+| db-init | 128 MiB | n/a | n/a | n/a | 0 |
+| demo-init | 128 MiB | n/a | n/a | n/a | 0 |
+| metabase | 2176 MiB | 1451 MiB | 1671 MiB | 0 | 0 |
+| metabase-init | 128 MiB | n/a | n/a | n/a | 0 |
+| metadata-export | 256 MiB | n/a | n/a | n/a | 0 |
+| platform-db | 512 MiB | 258 MiB | 290 MiB | 0 | 0 |
+| proxy | 256 MiB | 30 MiB | 37 MiB | 0 | 0 |
+| warehouse-db | 256 MiB | 64 MiB | 100 MiB | 0 | 0 |
+| **Running services, total** | **6656 MiB** | **3562 MiB** | | | |
 
 ## When a service reaches its limit
 
