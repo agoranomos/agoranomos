@@ -45,27 +45,39 @@ Give the backup a time when no pipeline runs: set `BACKUP_TIME`, as `HH:MM`, and
 
 A backup on the server is lost with the server. Copy the backups folder elsewhere every day, a little after the time of the backup. A folder that starts with `.partial-` is a backup that is still being written: leave it out. This section copies with rsync to another server over SSH, and then with rclone.
 
-**Set up the copy.** On the other machine, rsync is installed, and a user `backup` owns an empty folder of its own, which you make as root there: `install -d -m 700 -o backup -g backup /srv/agoranomos-backups`. On the server, as `agoranomos`, make a key for the job, without a passphrase so that cron can use it, and give its public half to `backup`: `ssh-copy-id -i ~/.ssh/id_ed25519.pub backup@other-server` if that machine accepts a password once, or add the content of `~/.ssh/id_ed25519.pub` to `/home/backup/.ssh/authorized_keys` there. Whoever controls the server can then write into that folder, so give `backup` no other rights.
+**Set up the copy.** The other machine needs rsync and a user of its own for the job. Do not use the account `backup`: Debian and Ubuntu already have it as a system account, with no password, a home of `/var/backups` and the shell `nologin`, so SSH cannot sign in to it or run rsync as it (as of October 2026, `passwd.master` of `base-passwd`). On the server, as `agoranomos`, make a key for the job, without a passphrase so that cron can use it, and print its public half, which is no secret:
 
 ```bash
 ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
+cat ~/.ssh/id_ed25519.pub
 ```
 
-**Run it once by hand**, as `agoranomos` on the server. It asks you to trust the host key of the other machine, which cron could not answer, and it shows that a backup arrives, which `ls -t /srv/agoranomos-backups` on the other machine confirms. The path of the source is absolute, as it must be in cron:
+On the other machine, as root, make the user (`--create-home` makes its home folder and `--shell` sets its shell: `useradd(8)`, as of October 2026), its empty folder for the copies, and its file of keys, and append the line that `cat` printed; this needs no password for the user:
 
 ```bash
-rsync -a --exclude='.partial-*' /home/agoranomos/agoranomos/backups/ backup@other-server:/srv/agoranomos-backups/
+useradd --create-home --shell /bin/bash agoranomos-copy
+install -d -m 700 -o agoranomos-copy -g agoranomos-copy /srv/agoranomos-backups /home/agoranomos-copy/.ssh
+install -m 600 -o agoranomos-copy -g agoranomos-copy /dev/null /home/agoranomos-copy/.ssh/authorized_keys
+echo '<the line that cat printed>' >> /home/agoranomos-copy/.ssh/authorized_keys
+```
+
+Whoever controls the server can then write into that folder, so give `agoranomos-copy` no other rights.
+
+**Run it once by hand**, as `agoranomos` on the server. It asks you to trust the host key of the other machine, which cron could not answer, and it shows that a backup arrives, which `ls -t /srv/agoranomos-backups` on the other machine, as `agoranomos-copy` or root, confirms. The path of the source is absolute, as it must be in cron:
+
+```bash
+rsync -a --exclude='.partial-*' /home/agoranomos/agoranomos/backups/ agoranomos-copy@other-server:/srv/agoranomos-backups/
 ```
 
 **Run it every day** with `crontab -e`, as `agoranomos`, in the time zone of the server (`timedatectl` shows it), after the backup has ended. The line writes the output of rsync into a log file, and a date after each run that worked:
 
 ```text
-30 4 * * * rsync -a --exclude='.partial-*' /home/agoranomos/agoranomos/backups/ backup@other-server:/srv/agoranomos-backups/ >> /home/agoranomos/backup-copy.log 2>&1 && date -u >> /home/agoranomos/backup-copy.log
+30 4 * * * rsync -a --exclude='.partial-*' /home/agoranomos/agoranomos/backups/ agoranomos-copy@other-server:/srv/agoranomos-backups/ >> /home/agoranomos/backup-copy.log 2>&1 && date -u >> /home/agoranomos/backup-copy.log
 ```
 
 `tail /home/agoranomos/backup-copy.log` shows the date of the last run that worked, and the message of rsync after one that failed; rsync prints nothing when it succeeds. Look at it after the first night. Do not count on cron to mail the output: a fresh server usually has no mail server, so the log is where the result is.
 
-**With rclone**, to an SFTP storage such as a Hetzner Storage Box, install rclone on the server as [its installation page](https://rclone.org/install/) says (as of October 2026: its install script, Homebrew or MacPorts on a Mac, or a precompiled binary; the package of a Linux distribution is often older), and make the remote `storagebox` first, as `agoranomos`, with `rclone config`, of the type `sftp`. A Hetzner Storage Box listens for SFTP on port 23 (`port = 23` in the remote) and wants paths without a leading slash (as of October 2026, the documentation of rclone and of Hetzner). Run the copy once by hand, then in cron with the full path of `rclone`, which `command -v rclone` prints, since cron has a short `PATH`:
+**With rclone**, to an SFTP storage such as a Hetzner Storage Box, install rclone on the server as root, or with `sudo` as a user who has it, since `agoranomos` has none, as [its installation page](https://rclone.org/install/) says (as of October 2026: its install script, Homebrew or MacPorts on a Mac, or a precompiled binary; the package of a Linux distribution is often older), and make the remote `storagebox` first, as `agoranomos`, with `rclone config`, of the type `sftp`. A Hetzner Storage Box listens for SFTP on port 23 (`port = 23` in the remote) and wants paths without a leading slash (as of October 2026, the documentation of rclone and of Hetzner). Run the copy once by hand, then in cron with the full path of `rclone`, which `command -v rclone` prints, since cron has a short `PATH`:
 
 ```bash
 rclone copy --exclude "/.partial-*/**" /home/agoranomos/agoranomos/backups storagebox:agoranomos-backups
@@ -79,7 +91,7 @@ The copies hold everything that the databases hold: send them only to storage th
 
 None of these commands deletes anything at the destination, on purpose: with `rsync --delete` or `rclone sync`, a server that is rebuilt, or a `backups/` that is lost and recreated empty, would empty the copy that the restore needs. So the copy keeps what the retention removes on the server, it grows, and a full destination makes the next copy fail, which under a timer nobody sees: look at the log of the job, `backup-copy.log` above, and at the free space of the copy.
 
-You delete old copies by hand. On another server, `find /srv/agoranomos-backups -maxdepth 1 -name '20*' -mtime +100` lists the backups that are older than 100 days, which is longer than the 3 months that the server keeps by default, and `rm -r /srv/agoranomos-backups/20260901T030012Z` deletes one. With rclone, `rclone lsd storagebox:agoranomos-backups` lists them with their times, and `rclone purge --dry-run storagebox:agoranomos-backups/20260901T030012Z` shows what a purge of one would remove; run it again without `--dry-run` to remove it. The path must end in the name of a backup: if you leave the name out, `rclone purge` removes the whole copy. A copy job that has stopped makes every backup look old, so check that new copies arrive before you delete any, and keep the backup before an upgrade for as long as you may go back to it.
+You delete old copies by hand, as `agoranomos-copy` or root on the other machine, which owns them. There, `find /srv/agoranomos-backups -maxdepth 1 -name '20*' -mtime +100` lists the backups that are older than 100 days, which is longer than the 3 months that the server keeps by default, and `rm -r /srv/agoranomos-backups/20260901T030012Z` deletes one. With rclone, `rclone lsd storagebox:agoranomos-backups` lists them with their times, and `rclone purge --dry-run storagebox:agoranomos-backups/20260901T030012Z` shows what a purge of one would remove; run it again without `--dry-run` to remove it. The path must end in the name of a backup: if you leave the name out, `rclone purge` removes the whole copy. A copy job that has stopped makes every backup look old, so check that new copies arrive before you delete any, and keep the backup before an upgrade for as long as you may go back to it.
 
 ## Restore
 
@@ -138,7 +150,7 @@ If `restore` stops because the images of the backup differ from those of the che
 
 2. Put `.env` into the checkout: save the attachment of the password manager to your own machine as `env-copy`, run `scp env-copy agoranomos@<new-server>:agoranomos/.env`, and delete `env-copy`; or open `.env` in an editor on the server, such as `nano .env`, and paste the text. Do not use `cat` or a pasted here-document: bash keeps what you type in its history.
 3. In `.env`, set `AGORANOMOS_UID=auto` and `AGORANOMOS_GID=auto`, and run `./agoranomos init`, which puts in the IDs of the user of the new server and makes `backups/` its own; with a new domain name, run `./agoranomos init --server <domain>`. The `.env` of another machine keeps the IDs of that one, and `preflight` stops on them with the `ops` profile; on Linux, `restore` stops on them whenever the backups folder belongs to another user.
-4. Copy the backup that you restore into `backups/`: its folder, and `latest.json` too if you restore `latest`. Do not copy the whole copy: it has grown with every backup, and may not fit next to the data of Docker. From the machine that holds the copies, with your own key, which the new server accepts: `rsync -a /srv/agoranomos-backups/20261011T030012Z agoranomos@<new-server>:agoranomos/backups/`. With rclone, on the new server, after `rclone config` has made the same remotes as in [Copy the backups to another machine](#copy-the-backups-to-another-machine), with the same crypt password and salt: `rclone copy <crypt remote>:20261011T030012Z backups/20261011T030012Z` if the copies are encrypted, or `rclone copy storagebox:agoranomos-backups/20261011T030012Z backups/20261011T030012Z` if they are not, followed by `chmod -R go-rwx backups`. The files belong to the user who copied them. If you copied as another user, give them to the user of the stack as root (`ssh root@<new-server>`): `chown -R agoranomos:agoranomos /home/agoranomos/agoranomos/backups`.
+4. Copy the backup that you restore into `backups/`: its folder, and `latest.json` too if you restore `latest`. Do not copy the whole copy: it has grown with every backup, and may not fit next to the data of Docker. The copies are readable only by their owner, `agoranomos-copy`, so push them from a terminal on the machine that holds them, signed in there as `agoranomos-copy` or as root, and signed in with `ssh -A` from your own machine, so that your key, which the new server accepts, reaches the new server: `rsync -a /srv/agoranomos-backups/20261011T030012Z agoranomos@<new-server>:agoranomos/backups/`, with `/srv/agoranomos-backups/latest.json` after the folder for `latest`. With rclone, on the new server, after `rclone config` has made the same remotes as in [Copy the backups to another machine](#copy-the-backups-to-another-machine), with the same crypt password and salt: `rclone copy <crypt remote>:20261011T030012Z backups/20261011T030012Z` if the copies are encrypted, or `rclone copy storagebox:agoranomos-backups/20261011T030012Z backups/20261011T030012Z` if they are not, and `rclone copy <crypt remote>:latest.json backups/` for `latest` (`storagebox:agoranomos-backups/latest.json` for copies that are not encrypted), followed by `chmod -R go-rwx backups`. The files belong to the user who copied them. If you copied as another user, give them to the user of the stack as root (`ssh root@<new-server>`): `chown -R agoranomos:agoranomos /home/agoranomos/agoranomos/backups`.
 5. Run `./agoranomos preflight`, which checks Docker, the memory, the disk and the ports of the new server. `restore` runs the same checks without `--force`, so a server below the minimum of [System requirements](../reference/system-requirements.md) stops it, and its own `--force` does not change that: size an emergency server for the minimum at least.
 6. Put the extensions folder back: `tar -xzf backups/20261011T030012Z/extensions.tar.gz -C extensions`.
 7. Run `./agoranomos restore 20261011T030012Z`. It starts the databases on empty volumes, restores them, and starts the stack.
