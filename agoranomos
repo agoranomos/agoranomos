@@ -175,7 +175,9 @@ print_banner() {
 # images until then. A call of exec or run passes the standard input of this script to the command in
 # the container, also with -T, so a script that is fed to the shell (ssh host bash -s) would lose
 # its next lines to it: every such call reads /dev/null, but the one that copies a dump into a
-# container, which reads the file.
+# container, which reads the file. So does a call of up, which asks on that input whether to
+# recreate a volume whose definition changed (cmd/prompt/prompt.go and pkg/compose/reconcile.go of
+# Compose 5.5.1), and takes /dev/null for the answer no.
 compose() {
   (
     cd "$ROOT" || exit 1
@@ -1098,7 +1100,7 @@ start_stack() {
   if [ "$(setting AGORANOMOS_IPV6 false)" = true ]; then
     ipv6_hint="; if the error above is about IPv6 or ip6tables, set AGORANOMOS_IPV6=false in .env and run ./agoranomos up again (ADR-0023)"
   fi
-  compose up --detach --remove-orphans ||
+  compose up --detach --remove-orphans < /dev/null ||
     die "docker compose could not start the stack; the error above names the cause, and ./agoranomos status and ./agoranomos logs <service> show more$ipv6_hint"
   wait_healthy
   print_addresses
@@ -1527,6 +1529,8 @@ Check out the release that took it and restore there, or pass --force if you kno
   # From here the restore changes things. What a mode left behind goes, as in up: no proxy or
   # backup service of a profile that .env no longer lists runs through a restore.
   remove_leftover_services
+  # So that the up at the end makes the network and the containers together (ADR-0023).
+  stop_for_changed_network
   services=$(compose config --services) || die "docker compose config failed; the error above names the cause"
   stop=""
   for service in $services; do
@@ -1547,7 +1551,7 @@ Check out the release that took it and restore there, or pass --force if you kno
     compose stop $stop || die "docker compose could not stop the services"
   fi
   restore_phase=stopped
-  compose up --detach --wait warehouse-db platform-db ||
+  compose up --detach --wait warehouse-db platform-db < /dev/null ||
     die "the databases did not start: see ./agoranomos logs warehouse-db and ./agoranomos logs platform-db"
   compose run --rm --no-deps -T db-init < /dev/null || die "db-init failed: the lines above say why"
   restore_phase=restoring

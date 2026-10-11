@@ -2361,6 +2361,22 @@ def test_a_stack_that_does_not_start_names_the_way_out_of_ipv6(cli, tmp_path, wa
     assert (hint in result.stderr) is hinted
 
 
+def test_up_leaves_standard_input_alone(cli, tmp_path):
+    # docker compose up reads one line of its input when it asks whether to recreate a volume
+    # whose definition changed: the script gives it none, so the answer is no, the safe one.
+    result = cli.run(
+        "up",
+        stdin=f"{REST_OF_THE_SCRIPT}\n",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_READ_STDIN="1",
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    reads = cli.stdin_reads()
+    assert [call for call, _received in reads] == ["up --detach --remove-orphans"]
+    assert [received for _call, received in reads] == [""]
+
+
 def test_up_looks_at_the_network_only_after_preflight_has_passed(cli, tmp_path):
     # A setting that preflight refuses, such as True, must not stop the stack first and then fail.
     result = up_with_a_network(cli, tmp_path, "true", "false", "false")
@@ -4163,6 +4179,71 @@ def test_the_check_of_a_backup_leaves_standard_input_alone(cli, tmp_path, in_the
     assert dump == "a dump of warehouse"
 
 
+def restore_on_a_network(cli, tmp_path, actual, label=None, wanted=None, **fake):
+    """Restore the backup on a network that Docker made with IPv6 as actual and the label of the
+    project as label (None: the same as actual; "": none), with AGORANOMOS_IPV6 in .env as wanted
+    (None: not set)."""
+    ready_to_restore(cli)
+    if wanted is not None:
+        add_env(cli, AGORANOMOS_IPV6=wanted)
+    if actual:
+        fake["FAKE_NETWORK_IPV6"] = actual
+        fake["FAKE_NETWORK_LABEL"] = actual if label is None else label
+    return cli.run(
+        "restore", BACKUP, "--yes", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK, **fake
+    )
+
+
+@pytest.mark.parametrize(
+    ("actual", "label", "wanted", "state"),
+    [("false", "false", "true", "on"), ("true", "true", None, "off"), ("false", "", None, "off")],
+    ids=["on", "off", "no-label"],
+)
+def test_restore_stops_the_stack_first_when_the_network_is_not_the_one_the_setting_asks_for(
+    cli, tmp_path, actual, label, wanted, state
+):
+    # Compose would recreate the network in the up that ends the restore, and lose the aliases of
+    # the containers that it keeps (ADR-0023): so the stack goes down before the restore stops the
+    # services, and the up at its end makes the network and the containers together.
+    result = restore_on_a_network(cli, tmp_path, actual, label, wanted)
+    assert result.returncode == 0, result.stderr
+    assert STOP_LINE.format(state=state) in result.stdout.splitlines()
+    calls = cli.docker_calls()
+    assert calls.count(STOP_FOR_THE_NETWORK) == 1
+    order = calls_in_order(
+        cli,
+        f"compose run --rm --no-deps -T backup verify {BACKUP}",
+        "network inspect",
+        STOP_FOR_THE_NETWORK,
+        "compose stop ",
+        "compose up --detach --wait warehouse-db platform-db",
+        "compose up --detach --remove-orphans",
+    )
+    assert order == sorted(order)
+    assert not any(" -v" in call or "--volumes" in call for call in calls)
+
+
+def test_restore_leaves_a_network_alone_that_is_the_one_the_setting_asks_for(cli, tmp_path):
+    result = restore_on_a_network(cli, tmp_path, "false")
+    assert result.returncode == 0, result.stderr
+    assert STOP_FOR_THE_NETWORK not in cli.docker_calls()
+    assert "The network of the stack changes" not in result.stdout
+
+
+def test_restore_changes_nothing_when_docker_cannot_make_the_ipv6_network(cli, tmp_path):
+    result = restore_on_a_network(
+        cli, tmp_path, "false", wanted="true", FAKE_NETWORK_CREATE_FAIL=IPV6_NOT_POSSIBLE
+    )
+    assert result.returncode == 1
+    assert "Docker cannot make an IPv6 network on this host" in result.stderr
+    assert not any(
+        call.startswith(
+            ("compose stop", "compose up", "compose down", "compose run --rm --no-deps -T db-init")
+        )
+        for call in cli.docker_calls()
+    )
+
+
 def test_restore_leaves_standard_input_alone_but_for_the_copy_of_a_dump(cli, tmp_path):
     # Every call of docker in a container reads the input of the script unless the script gives it
     # another: the check, db-init, the removal of a dump, pg_restore and vacuumdb alike. The copy
@@ -4180,7 +4261,14 @@ def test_restore_leaves_standard_input_alone_but_for_the_copy_of_a_dump(cli, tmp
     assert result.returncode == 0, result.stderr
     reads = cli.stdin_reads()
     calls = " | ".join(call for call, _received in reads)
-    for word in (" verify ", " db-init", " rm -f ", " pg_restore ", " vacuumdb "):
+    for word in (
+        " verify ",
+        " db-init",
+        " rm -f ",
+        " pg_restore ",
+        " vacuumdb ",
+        "up --detach --wait",
+    ):
         assert word in f" {calls}", word
     assert [call for call, received in reads if REST_OF_THE_SCRIPT in received] == []
     dumps = [received for call, received in reads if "cat > /tmp/agoranomos-restore-" in call]
