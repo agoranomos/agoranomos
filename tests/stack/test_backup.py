@@ -3,9 +3,11 @@ of the ops profile, and ./agoranomos status. The tests take real backups by hand
 folder of the checkout, which stay there, as any backup by hand, until someone deletes them. They
 print names, sizes and modes, never what a dump holds."""
 
+import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import time
@@ -13,7 +15,15 @@ from datetime import UTC, datetime
 
 import pytest
 from services import OPS
-from stack_helpers import REPO_ROOT, compose, containers, docker, process_uids, read_env
+from stack_helpers import (
+    REPO_ROOT,
+    compose,
+    containers,
+    docker,
+    process_uids,
+    read_env,
+    warehouse_output,
+)
 
 # The env fixture says what is missing when there is no .env: the module still collects without it.
 ENV_FILE = REPO_ROOT / ".env"
@@ -33,6 +43,8 @@ FILES = {
 }
 # A backup folder is named after the start of the backup in UTC.
 NAME = re.compile(r"\d{8}T\d{6}Z")
+# The name of the copy of a backup that a test damages: the oldest name there can be.
+DAMAGED = "20000101T000000Z"
 
 
 def agoranomos(*args: str) -> subprocess.CompletedProcess[str]:
@@ -163,3 +175,38 @@ def test_the_backup_service_takes_a_scheduled_backup_by_itself():
     assert stat.S_IMODE(folder.stat().st_mode) == 0o700
     assert folder.stat().st_uid == os.getuid()
     assert latest()["last_scheduled_local"]
+
+
+@pytest.mark.parametrize("damage", ["truncated", "truncated with its checksum"])
+def test_restore_refuses_a_damaged_backup_and_changes_nothing(env, taken, damage):
+    # A dump cut short passes pg_restore --list, and a restore from it would drop the database and
+    # leave it empty: restore must stop before it stops a service or drops anything.
+    damaged = BACKUPS / DAMAGED
+    shutil.copytree(BACKUPS / taken, damaged)
+    try:
+        dump = damaged / "warehouse.dump"
+        data = dump.read_bytes()
+        dump.write_bytes(data[: len(data) * 3 // 5])
+        if damage == "truncated with its checksum":
+            sums = (damaged / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
+            digest = hashlib.sha256(dump.read_bytes()).hexdigest()
+            (damaged / "SHA256SUMS").write_text(
+                "".join(
+                    f"{digest}  warehouse.dump\n"
+                    if line.endswith(" warehouse.dump")
+                    else f"{line}\n"
+                    for line in sums
+                ),
+                encoding="utf-8",
+            )
+        tables = "SELECT count(*) FROM pg_class WHERE relnamespace = 'marts'::regnamespace"
+        before = warehouse_output(env, tables)
+        result = agoranomos("restore", DAMAGED, "--only", "warehouse", "--yes")
+        assert result.returncode == 1
+        assert "nothing was changed" in result.stderr
+        expected = "is damaged" if damage == "truncated" else "does not read to its end"
+        assert expected in result.stdout + result.stderr
+        assert warehouse_output(env, tables) == before
+        assert containers()["metabase"]["State"] == "running"
+    finally:
+        shutil.rmtree(damaged)
