@@ -103,6 +103,12 @@ To add one:
 
 An accepted record keeps its decision: its status, the implementation status of what it decided, factual corrections and editorial fixes may be edited, and the pull request says which, but a changed decision needs a new ADR that supersedes the old one, as the index describes.
 
+## Releases
+
+release-please keeps a pull request of the next release open, titled `chore(main): release <version>`, which it updates after every merge into `main`: the version from the Conventional Commits since the last release (a `feat` raises the minor version and a `fix` the patch version; versions stay 0.x, and a breaking change raises the minor version too) and the new part of `CHANGELOG.md`. The maintainer merges it, and release-please then tags the release and publishes it on GitHub. Its commits are signed off by the bot of the GitHub App of the releases.
+
+Because the pull request title becomes the commit title, the title is what release-please reads, so the type of the title decides what the changelog says. The changelog has the sections Features, Bug Fixes, Performance Improvements, Reverts and Documentation, so a `docs` commit appears in the notes of a release while it raises no version; `chore`, `ci`, `test`, `build`, `refactor` and `style` commits appear nowhere. Do not edit `version.txt`, `.release-please-manifest.json` or `CHANGELOG.md` by hand, and leave `version` in `pyproject.toml` at `0.0.0`: the root is never built, and another value would put `uv.lock` out of date. The configuration is in `release-please-config.json`, and the workflow in `.github/workflows/release.yml`.
+
 ## Things that can surprise you
 
 - ruff also formats the `python` code blocks in Markdown files, so `ruff-format` can rewrite a code sample in the documentation. Write samples the way ruff formats them.

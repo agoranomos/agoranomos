@@ -1,0 +1,42 @@
+name: Release
+
+# Opens and updates the pull request of the next release with release-please, from the Conventional
+# Commits on main, and, when the owner merges that pull request, tags the release and publishes it
+# on GitHub with its part of CHANGELOG.md (ADR-0012). It acts as the GitHub App of the releases:
+# a pull request that GITHUB_TOKEN opens starts no workflow, and the checks of CI must run on it.
+# The app's client ID is the repository variable RELEASE_APP_CLIENT_ID, and its private key the
+# repository secret RELEASE_APP_PRIVATE_KEY.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # The job needs no GITHUB_TOKEN permissions: release-please acts with the app's token.
+    permissions: {}
+    steps:
+      - name: Create an installation token for the app
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+      - name: Open the release pull request, or release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
