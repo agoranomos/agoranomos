@@ -1191,20 +1191,91 @@ image_tags() {
     LC_ALL=C sort -u
 }
 
+# Remove the dump that restore copied into a container, if it is still there. It holds a whole
+# database, so a failure to remove it is a warning with the command to do it by hand.
+restore_remove_dump() {
+  if [ -n "$restore_dump" ]; then
+    compose exec -T "$restore_dump_service" rm -f "$restore_dump" ||
+      warn "could not remove $restore_dump in $restore_dump_service, which holds a copy of a database: remove it by hand with docker compose exec $restore_dump_service rm -f $restore_dump"
+    restore_dump=""
+  fi
+}
+
+# What a restore says when it ends in an error after it began to change things: which databases
+# are back and which are not, that the services are stopped, and what to do. restore_phase says how
+# far it got: "" before the stop, then stopping (the stop may be half done), stopped, restoring,
+# restored (the databases are back, the stack is starting) and started. restore_unsure is the
+# database whose pg_restore did not end well, which may be incomplete.
+restore_report() {
+  restore_pending=""
+  for restore_database in $databases; do
+    case " $restored " in
+      *" $restore_database "*) ;;
+      *) restore_pending="${restore_pending:+$restore_pending }$restore_database" ;;
+    esac
+  done
+  restore_again="./agoranomos restore $restore_name --only $(printf '%s' "$restore_pending" | tr ' ' ',')"
+  case "$restore_phase" in
+    stopping)
+      error_line "restore stopped before it changed a database: ${restore_pending} are as they were. Some of the services that use the databases may be stopped: ./agoranomos up starts the stack again as it was"
+      ;;
+    stopped | restoring)
+      if [ -n "$restore_unsure" ]; then
+        restore_hint=""
+        if [ "$restore_interrupted" -eq 1 ]; then
+          restore_hint=" pg_restore may still run in $(database_service "$restore_unsure"): until it has ended, a new restore stops with 'being accessed by other users' and changes nothing."
+        fi
+        error_line "restore stopped. Restored from $restore_name: ${restored:-none}. $restore_unsure was being restored and may be incomplete. Not restored: $restore_pending. The services that use the databases are stopped.$restore_hint Do not run ./agoranomos up, which would start the stack on it: run $restore_again again first"
+      elif [ -z "$restored" ]; then
+        error_line "restore stopped. Restored from $restore_name: none; $restore_pending are as they were. The services that use the databases are stopped: ./agoranomos up starts the stack again as it was, or run $restore_again again"
+      else
+        error_line "restore stopped. Restored from $restore_name: $restored. Not restored: $restore_pending, which are as they were. The services that use the databases are stopped, and ./agoranomos up would start the stack on databases from two different times: finish with $restore_again first"
+      fi
+      ;;
+    restored)
+      error_line "restore stopped. Restored from $restore_name: $restored, all of them; the stack did not come up. ./agoranomos status and ./agoranomos logs <service> show why, and ./agoranomos up starts it again"
+      ;;
+  esac
+}
+
+# The trap of EXIT once restore has begun to stop services: whatever ended it, it removes the dump
+# that it left in a container and says where it stopped.
+restore_exit() {
+  restore_code=$?
+  trap - EXIT INT TERM
+  restore_remove_dump
+  if [ "$restore_code" -ne 0 ]; then
+    restore_report
+  fi
+  exit "$restore_code"
+}
+
+# The trap of INT and TERM: end the restore, which runs the trap of EXIT.
+restore_signaled() {
+  restore_interrupted=1
+  error_line "restore was interrupted"
+  exit "$1"
+}
+
 # Put databases back as a backup has them (ADR-0020). Nothing changes until the backup has passed
-# its check in the backup service and the images of its databases match those of the checkout;
-# then it stops every service but the databases, runs db-init, restores each database as its
-# superuser inside its container, through the socket, where the image trusts it, and starts the
-# stack. The dump goes into the /tmp of the container first, so that pg_restore reads a file.
+# its check in the backup service, the images of its databases match those of the checkout, and
+# the person has said yes; then it removes what a mode left behind, stops every service but the
+# databases, runs db-init, restores each database as its superuser inside its container, through
+# the socket, where the image trusts it, and starts the stack. The dump goes into the /tmp of the
+# container first, so that pg_restore reads a file. From the stop on, a failure or an interrupt
+# says which databases are back, that the services are stopped, and what to do (restore_exit).
 cmd_restore() {
-  restore_name="" restore_only="" restore_force=0 restore_yes=0
+  restore_name="" restore_only="" restore_only_given=0 restore_force=0 restore_yes=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --only)
-        # An empty list must not fall back to every database.
+        # An empty list must not fall back to every database, and a second one must not replace
+        # the first without a word.
         { [ "$#" -ge 2 ] && [ -n "$2" ]; } ||
           die "--only needs the databases to restore, such as --only metabase or --only warehouse,airflow"
-        restore_only=$2
+        [ "$restore_only_given" -eq 0 ] ||
+          die "--only is given once: list the databases in one list, such as --only warehouse,airflow"
+        restore_only=$2 restore_only_given=1
         shift 2
         ;;
       --yes)
@@ -1236,30 +1307,46 @@ cmd_restore() {
   esac
   folder="$root/$restore_name"
   [ -f "$folder/manifest.json" ] || die "there is no complete backup $restore_name in $root"
-  databases=$(printf '%s' "${restore_only:-$BACKUP_DATABASES}" | tr ',' ' ')
-  for database in $databases; do
+  wanted=$(printf '%s' "${restore_only:-$BACKUP_DATABASES}" | tr ',' ' ')
+  for database in $wanted; do
     case " $BACKUP_DATABASES " in
       *" $database "*) ;;
       *) die "not a database of a backup: $database (warehouse, airflow or metabase)" ;;
     esac
   done
-  # shellcheck disable=SC2086 # one argument for each database
-  set -- $databases
-  [ "$#" -gt 0 ] || die "--only needs the databases to restore, such as --only metabase or --only warehouse,airflow"
+  # The databases once each, in the order of a backup, whatever the order of the list.
+  databases=""
+  for database in $BACKUP_DATABASES; do
+    case " $wanted " in
+      *" $database "*) databases="${databases:+$databases }$database" ;;
+    esac
+  done
+  [ -n "$databases" ] || die "--only needs the databases to restore, such as --only metabase or --only warehouse,airflow"
   if [ "$restore_yes" -eq 0 ] && [ ! -t 0 ]; then
     die "restore replaces databases: run it in a terminal, which asks first, or pass --yes"
   fi
   message=$(backup_user_problem)
   [ -z "$message" ] || die "$message"
-  # The checks of up, also on a new server: Docker, the memory, the disk and the ports. Then what
-  # a mode left behind goes, as in up: no proxy or backup service of a profile that .env no longer
-  # lists runs through a restore.
+  # The checks of up, also on a new server: Docker, the memory, the disk and the ports. They run
+  # without --force, which here is about the images: a machine on which up needs --force stops here.
   cmd_preflight
-  remove_leftover_services
+  # As backup does, in every mode: the check runs as AGORANOMOS_UID, and on Linux it cannot enter
+  # a folder of mode 700 that another user owns.
+  if [ "$(uname -s)" = Linux ] && backup_folder_foreign; then
+    die "$(backups_folder_unwritable)"
+  fi
   say "Checking the backup $restore_name..."
-  # shellcheck disable=SC2086 # one argument for each database
-  compose run --rm --no-deps -T backup verify "$restore_name" $databases ||
-    die "the backup $restore_name did not pass its check (the lines above say why), and nothing was changed"
+  # In the running backup service when there is one, as backup does: a container more would add
+  # its limit to the sum that the memory budget holds. Either way it runs as AGORANOMOS_UID.
+  if ops_mode && running_service backup; then
+    # shellcheck disable=SC2086 # one argument for each database
+    compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh verify "$restore_name" $databases ||
+      die "the backup $restore_name did not pass its check (the lines above say why), and nothing was changed"
+  else
+    # shellcheck disable=SC2086 # one argument for each database
+    compose run --rm --no-deps -T backup verify "$restore_name" $databases ||
+      die "the backup $restore_name did not pass its check (the lines above say why), and nothing was changed"
+  fi
   recorded=$(json_field "$folder/manifest.json" images)
   if [ -z "$recorded" ]; then
     warn "the backup $restore_name does not record the images that took it: check that this checkout is the release that took it"
@@ -1287,10 +1374,14 @@ Check out the release that took it and restore there, or pass --force if you kno
     fi
   fi
   if [ "$restore_yes" -eq 0 ]; then
-    printf 'Restore %s from %s? What they saved after it is lost. Type yes to go on: ' "$databases" "$restore_name"
+    # To standard error, so that the question is seen when the output goes to a file.
+    printf 'Restore %s from %s? What they saved after it is lost. Type yes to go on: ' "$databases" "$restore_name" >&2
     read -r answer || answer=""
     [ "$answer" = yes ] || die "nothing was changed"
   fi
+  # From here the restore changes things. What a mode left behind goes, as in up: no proxy or
+  # backup service of a profile that .env no longer lists runs through a restore.
+  remove_leftover_services
   services=$(compose config --services) || die "docker compose config failed; the error above names the cause"
   stop=""
   for service in $services; do
@@ -1299,35 +1390,46 @@ Check out the release that took it and restore there, or pass --force if you kno
       *) stop="$stop $service" ;;
     esac
   done
+  restored="" restore_phase=stopping restore_dump="" restore_dump_service="" restore_unsure="" restore_interrupted=0
+  trap restore_exit EXIT
+  trap 'restore_signaled 130' INT
+  trap 'restore_signaled 143' TERM
   say "Stopping the services that use the databases..."
   # docker compose stop with no service stops every one, the databases among them.
   if [ -n "$stop" ]; then
     # shellcheck disable=SC2086 # one argument for each service
-    compose stop $stop || die "docker compose could not stop the services, and nothing was restored"
+    compose stop $stop || die "docker compose could not stop the services"
   fi
+  restore_phase=stopped
   compose up --detach --wait warehouse-db platform-db ||
-    die "the databases did not start, and nothing was restored: see ./agoranomos logs warehouse-db and ./agoranomos logs platform-db"
-  compose run --rm --no-deps -T db-init || die "db-init failed, and nothing was restored: the lines above say why"
-  restored=""
+    die "the databases did not start: see ./agoranomos logs warehouse-db and ./agoranomos logs platform-db"
+  compose run --rm --no-deps -T db-init || die "db-init failed: the lines above say why"
+  restore_phase=restoring
   for database in $databases; do
     service=$(database_service "$database")
     dump=/tmp/agoranomos-restore-$database.dump
     say "Restoring $database..."
-    # The databases restored before this one, for a message of failure.
-    before=${restored:+ Already restored from $restore_name: $restored.}
-    compose exec -T "$service" sh -c "umask 077 && cat > $dump" < "$folder/$database.dump" ||
-      die "could not copy $database.dump into $service, and $database is as it was.$before"
-    if ! compose exec -T "$service" pg_restore --username=postgres --dbname=postgres --clean --if-exists --create --exit-on-error "$dump"; then
-      compose exec -T "$service" rm -f "$dump" || true
-      die "pg_restore failed for $database.$before If it says that the database is being accessed by other users, $database was not changed: stop what is connected and run restore again. After another error $database can be incomplete: do not start the stack; fix the cause and run restore again"
+    restore_dump=$dump restore_dump_service=$service
+    # A failure from here to the next restore_remove_dump ends the script, and restore_exit removes
+    # the dump.
+    if ! compose exec -T "$service" sh -c "umask 077 && cat > $dump" < "$folder/$database.dump"; then
+      die "could not copy $database.dump into $service, and $database is as it was"
     fi
-    compose exec -T "$service" rm -f "$dump"
+    restore_unsure=$database
+    if ! compose exec -T "$service" pg_restore --username=postgres --dbname=postgres --clean --if-exists --create --exit-on-error "$dump"; then
+      die "pg_restore failed for $database. If it says that the database is being accessed by other users, $database was not changed: stop what is connected and run restore again. After another error $database can be incomplete"
+    fi
+    restore_remove_dump
+    restore_unsure=""
     restored="${restored:+$restored }$database"
     compose exec -T "$service" vacuumdb --username=postgres --analyze-only --quiet --dbname="$database" ||
       warn "ANALYZE of $database failed: it is restored, and its first queries may be slow"
   done
+  restore_phase=restored
   say "Restored $databases from $restore_name. The backup also holds extensions.tar.gz, which restore leaves as it is. Starting the stack..."
   start_stack
+  restore_phase=started
+  trap - EXIT INT TERM
   [ "$demo_failed" -eq 0 ] || die "the databases are restored and the stack is up, but the demo is not ready"
   say "$(paint ok 'The stack is up.' 1) ./agoranomos status shows every service."
 }

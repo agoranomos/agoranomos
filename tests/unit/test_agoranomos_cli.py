@@ -2,7 +2,9 @@ import base64
 import json
 import os
 import re
+import signal
 import stat
+import subprocess
 import time
 from pathlib import Path
 
@@ -2996,24 +2998,73 @@ def test_restore_runs_the_checks_of_preflight_first(cli, tmp_path):
     assert not any(call.startswith(("compose run", "compose stop")) for call in cli.docker_calls())
 
 
-def test_restore_removes_what_a_mode_left_behind_after_preflight_and_before_it_stops(cli, tmp_path):
+LEFT_BEHIND = {"FAKE_PROXY": "0123abcdef\n", "FAKE_BACKUP": "4567abcdef\n"}
+
+
+def test_restore_removes_what_a_mode_left_behind_after_the_answer_and_before_it_stops(
+    cli, tmp_path
+):
     # As up does (the proxy of server mode that .env no longer lists would go on serving through a
-    # restore): after the checks of preflight, before anything is stopped.
+    # restore), but only once the backup has passed its check and the person has said yes, so
+    # that a refused restore changes nothing.
+    ready_to_restore(cli)
+    result = cli.run_asked(
+        "yes",
+        "restore",
+        BACKUP,
+        together=True,
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        **LEFT_BEHIND,
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stdout
+    # The question has no line break of its own: the Enter of the person ends its line.
+    assert LEFTOVER_PROXY in result.stdout
+    assert LEFTOVER_BACKUP in result.stdout
+    assert result.stdout.index("Type yes to go on") < result.stdout.index(LEFTOVER_PROXY)
+    order = calls_in_order(
+        cli, "info ", "compose run --rm --no-deps -T backup verify", PROXY_REMOVAL, BACKUP_REMOVAL
+    )
+    order.append(calls_in_order(cli, "compose stop ")[0])
+    assert order == sorted(order)
+
+
+def test_restore_without_a_question_removes_what_a_mode_left_behind_after_the_check(cli, tmp_path):
     ready_to_restore(cli)
     result = cli.run(
         "restore",
         BACKUP,
         "--yes",
         FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
-        FAKE_PROXY="0123abcdef\n",
-        FAKE_BACKUP="4567abcdef\n",
+        **LEFT_BEHIND,
         **QUICK,
     )
     assert result.returncode == 0, result.stderr
-    assert LEFTOVER_PROXY in result.stdout.splitlines()
-    assert LEFTOVER_BACKUP in result.stdout.splitlines()
-    order = calls_in_order(cli, "info ", PROXY_REMOVAL, BACKUP_REMOVAL, "compose stop ")
+    order = calls_in_order(
+        cli, "info ", "compose run --rm --no-deps -T backup verify", PROXY_REMOVAL, "compose stop "
+    )
     assert order == sorted(order)
+
+
+@pytest.mark.parametrize("refusal", ["answer", "check", "images"])
+def test_a_restore_that_is_refused_removes_no_container(cli, tmp_path, refusal):
+    ready_to_restore(
+        cli, **({"metabase": "metabase/metabase:v0.65.0@sha256:ddd"} if refusal == "images" else {})
+    )
+    fake = {
+        "FAKE_PS_FILE": ps_file(tmp_path, HEALTHY_PS),
+        **LEFT_BEHIND,
+        **({"FAKE_RUN_FAIL": "verify"} if refusal == "check" else {}),
+    }
+    if refusal == "answer":
+        result = cli.run_asked("no", "restore", BACKUP, **fake)
+    else:
+        result = cli.run("restore", BACKUP, "--yes", **fake)
+    assert result.returncode == 1
+    calls = cli.docker_calls()
+    assert not any(call.startswith("compose rm") for call in calls)
+    assert LEFTOVER_PROXY not in result.stdout
+    assert LEFTOVER_BACKUP not in result.stdout
 
 
 def test_restore_runs_the_check_of_the_backup_as_the_user_of_the_backup_service(cli, tmp_path):
@@ -3135,53 +3186,224 @@ def test_a_backup_that_names_no_images_restores_with_a_warning(cli, tmp_path):
     assert "does not record the images" in result.stderr
 
 
-def test_a_failed_pg_restore_stops_before_the_stack_starts(cli, tmp_path):
+def restore_fails(cli, tmp_path, *args, **fake):
     ready_to_restore(cli)
-    result = cli.run(
-        "restore",
-        BACKUP,
-        "--yes",
-        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
-        FAKE_EXEC_FAIL="pg_restore",
+    return cli.run(
+        "restore", BACKUP, "--yes", *args, FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **fake
     )
+
+
+def test_a_failed_pg_restore_stops_before_the_stack_starts_and_says_where(cli, tmp_path):
+    result = restore_fails(cli, tmp_path, FAKE_EXEC_FAIL="pg_restore")
     assert result.returncode == 1
     assert "pg_restore failed for warehouse" in result.stderr
-    assert "Already restored" not in result.stderr
-    assert "do not start the stack" in result.stderr
     assert "compose up --detach --remove-orphans" not in cli.docker_calls()
+    assert (
+        f"restore stopped. Restored from {BACKUP}: none. warehouse was being restored and may "
+        "be incomplete. Not restored: warehouse airflow metabase. The services that use the "
+        "databases are stopped. Do not run ./agoranomos up, which would start the stack on it: "
+        f"run ./agoranomos restore {BACKUP} --only warehouse,airflow,metabase again first"
+    ) in result.stderr
 
 
 def test_a_failed_restore_names_the_databases_that_it_restored_before(cli, tmp_path):
-    ready_to_restore(cli)
-    result = cli.run(
-        "restore",
-        BACKUP,
-        "--yes",
-        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+    result = restore_fails(
+        cli,
+        tmp_path,
         FAKE_EXEC_FAIL="--exit-on-error /tmp/agoranomos-restore-airflow.dump",
     )
     assert result.returncode == 1
     assert "pg_restore failed for airflow." in result.stderr
-    assert "Already restored from 20261011T030012Z: warehouse." in result.stderr
+    assert (
+        f"Restored from {BACKUP}: warehouse. airflow was being restored and may be incomplete. "
+        "Not restored: airflow metabase."
+    ) in result.stderr
+    assert f"run ./agoranomos restore {BACKUP} --only airflow,metabase again first" in result.stderr
     assert "compose up --detach --remove-orphans" not in cli.docker_calls()
 
 
 def test_a_dump_that_cannot_be_copied_into_the_container_leaves_the_database_as_it_was(
     cli, tmp_path
 ):
+    result = restore_fails(cli, tmp_path, FAKE_EXEC_FAIL="cat")
+    assert result.returncode == 1
+    assert "could not copy warehouse.dump into warehouse-db, and warehouse is as it was" in (
+        result.stderr
+    )
+    assert not any(" pg_restore " in f" {call} " for call in cli.docker_calls())
+    assert "compose up --detach --remove-orphans" not in cli.docker_calls()
+    # Nothing is incomplete: the services are stopped, and up brings the stack back as it was.
+    assert (
+        f"restore stopped. Restored from {BACKUP}: none; warehouse airflow metabase are as they "
+        "were. The services that use the databases are stopped: ./agoranomos up starts the "
+        f"stack again as it was, or run ./agoranomos restore {BACKUP} --only "
+        "warehouse,airflow,metabase again"
+    ) in result.stderr
+
+
+def test_a_failed_copy_after_another_database_is_back_says_to_finish_before_up(cli, tmp_path):
+    result = restore_fails(
+        cli, tmp_path, FAKE_EXEC_FAIL="cat > /tmp/agoranomos-restore-airflow.dump"
+    )
+    assert result.returncode == 1
+    assert (
+        f"restore stopped. Restored from {BACKUP}: warehouse. Not restored: airflow metabase, "
+        "which are as they were. The services that use the databases are stopped, and "
+        "./agoranomos up would start the stack on databases from two different times: finish "
+        f"with ./agoranomos restore {BACKUP} --only airflow,metabase first"
+    ) in result.stderr
+    assert "compose up --detach --remove-orphans" not in cli.docker_calls()
+
+
+@pytest.mark.parametrize(
+    ("fake", "message", "calls_that_stay_out"),
+    [
+        # The stop itself: some services may be stopped, none of them is a database.
+        ({"FAKE_COMPOSE_FAIL": "stop"}, "docker compose could not stop the services", ()),
+        (
+            {"FAKE_COMPOSE_FAIL": "--wait"},
+            "the databases did not start",
+            ("compose run --rm --no-deps -T db-init",),
+        ),
+        ({"FAKE_RUN_FAIL": "db-init"}, "db-init failed", ("compose exec",)),
+    ],
+    ids=["stop", "databases", "db-init"],
+)
+def test_a_failure_between_the_stop_and_the_first_database_changes_no_database(
+    cli, tmp_path, fake, message, calls_that_stay_out
+):
+    result = restore_fails(cli, tmp_path, **fake)
+    assert result.returncode == 1
+    assert message in result.stderr
+    calls = cli.docker_calls()
+    assert not any(" pg_restore " in f" {call} " for call in calls)
+    assert "compose up --detach --remove-orphans" not in calls
+    assert not any(call.startswith(calls_that_stay_out) for call in calls)
+    if "stop" in fake.values():
+        assert (
+            "restore stopped before it changed a database: warehouse airflow metabase are as "
+            "they were. Some of the services that use the databases may be stopped: "
+            "./agoranomos up starts the stack again as it was"
+        ) in result.stderr
+    else:
+        assert (
+            f"restore stopped. Restored from {BACKUP}: none; warehouse airflow metabase are as "
+            "they were. The services that use the databases are stopped: ./agoranomos up "
+            "starts the stack again as it was"
+        ) in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("fake", "message"),
+    [
+        ({"FAKE_COMPOSE_FAIL": "--remove-orphans"}, "docker compose could not start the stack"),
+        ({"FAKE_PS_FILE": "unhealthy"}, "the stack did not start"),
+    ],
+    ids=["compose", "healthy"],
+)
+def test_a_stack_that_does_not_start_after_the_restore_says_that_the_databases_are_back(
+    cli, tmp_path, fake, message
+):
+    ready_to_restore(cli)
+    if "FAKE_PS_FILE" in fake:
+        fake = {"FAKE_PS_FILE": ps_file(tmp_path, ps_with("metabase|running|unhealthy|0"))}
+    else:
+        fake = {**fake, "FAKE_PS_FILE": ps_file(tmp_path, HEALTHY_PS)}
+    result = cli.run("restore", BACKUP, "--yes", **fake, **QUICK)
+    assert result.returncode == 1
+    assert message in result.stderr
+    assert (
+        f"restore stopped. Restored from {BACKUP}: warehouse airflow metabase, all of them; the "
+        "stack did not come up. ./agoranomos status and ./agoranomos logs <service> show why, "
+        "and ./agoranomos up starts it again"
+    ) in result.stderr
+
+
+def test_a_demo_that_is_not_ready_after_the_restore_is_no_failure_of_the_restore(cli, tmp_path):
+    ready_to_restore(cli)
+    failed_demo = ps_file(tmp_path, HEALTHY_PS + "demo-init|exited||1\n")
+    result = cli.run("restore", BACKUP, "--yes", FAKE_PS_FILE=failed_demo, **QUICK)
+    assert result.returncode == 1
+    assert "the databases are restored and the stack is up, but the demo is not ready" in (
+        result.stderr
+    )
+    assert "restore stopped" not in result.stderr
+
+
+def test_the_dump_is_copied_with_a_private_umask_and_removed_after_each_restore(cli, tmp_path):
     ready_to_restore(cli)
     result = cli.run(
         "restore",
         BACKUP,
+        "--only",
+        "metabase",
         "--yes",
         FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
-        FAKE_EXEC_FAIL="sh",
+        **QUICK,
     )
+    assert result.returncode == 0, result.stderr
+    dump = "/tmp/agoranomos-restore-metabase.dump"  # noqa: S108 (a path in the container)
+    order = calls_in_order(
+        cli,
+        f"compose exec -T platform-db sh -c umask 077 && cat > {dump}",
+        "compose exec -T platform-db pg_restore",
+        f"compose exec -T platform-db rm -f {dump}",
+        "compose exec -T platform-db vacuumdb",
+    )
+    assert order == sorted(order)
+
+
+@pytest.mark.parametrize(
+    ("fake", "cleaned_after"),
+    [
+        ({"FAKE_EXEC_FAIL": "cat"}, "cat"),
+        ({"FAKE_EXEC_FAIL": "pg_restore"}, "pg_restore"),
+    ],
+)
+def test_a_failed_copy_or_restore_removes_the_dump_that_it_left(cli, tmp_path, fake, cleaned_after):
+    result = restore_fails(cli, tmp_path, **fake)
     assert result.returncode == 1
-    assert "could not copy warehouse.dump into warehouse-db, and warehouse is as it was." in (
+    calls = cli.docker_calls()
+    removal = "compose exec -T warehouse-db rm -f /tmp/agoranomos-restore-warehouse.dump"
+    assert removal in calls
+    assert calls.index(removal) > next(
+        i for i, call in enumerate(calls) if f" {cleaned_after} " in f" {call} "
+    )
+
+
+@pytest.mark.parametrize("failing", ["cat;rm", "pg_restore;rm"])
+def test_a_dump_that_cannot_be_removed_after_a_failure_is_a_warning_and_the_failure_stays(
+    cli, tmp_path, failing
+):
+    result = restore_fails(cli, tmp_path, FAKE_EXEC_FAIL=failing)
+    assert result.returncode == 1
+    assert "could not remove /tmp/agoranomos-restore-warehouse.dump in warehouse-db" in (
         result.stderr
     )
-    assert not any(" pg_restore " in f" {call} " for call in cli.docker_calls())
+    assert "docker compose exec warehouse-db rm -f /tmp/agoranomos-restore-warehouse.dump" in (
+        result.stderr
+    )
+    assert "restore stopped." in result.stderr
+
+
+def test_a_dump_that_cannot_be_removed_after_a_good_restore_is_a_warning_and_the_stack_starts(
+    cli, tmp_path
+):
+    ready_to_restore(cli)
+    result = cli.run(
+        "restore",
+        BACKUP,
+        "--only",
+        "metabase",
+        "--yes",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_EXEC_FAIL="rm",
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "could not remove /tmp/agoranomos-restore-metabase.dump in platform-db" in result.stderr
+    assert "compose up --detach --remove-orphans" in cli.docker_calls()
+    assert "restore stopped" not in result.stderr
 
 
 def test_a_failed_analyze_warns_and_the_restore_goes_on(cli, tmp_path):
@@ -3231,8 +3453,10 @@ def test_restore_on_a_terminal_changes_nothing_unless_the_answer_is_yes(cli, tmp
     ready_to_restore(cli)
     result = cli.run_asked(answer, "restore", BACKUP, FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
     assert result.returncode == 1
-    assert f"Restore warehouse airflow metabase from {BACKUP}?" in result.stdout
-    assert "Type yes to go on" in result.stdout
+    # The question goes to standard error, so that it is seen when the output goes to a file.
+    assert f"Restore warehouse airflow metabase from {BACKUP}?" in result.stderr
+    assert "Type yes to go on" in result.stderr
+    assert "Type yes" not in result.stdout
     assert "nothing was changed" in result.stderr
     assert not any(
         call.startswith(("compose stop", "compose exec", "compose up"))
@@ -3240,16 +3464,59 @@ def test_restore_on_a_terminal_changes_nothing_unless_the_answer_is_yes(cli, tmp
     )
 
 
-def test_restore_on_a_terminal_goes_on_after_yes(cli, tmp_path):
+def test_restore_on_a_terminal_goes_on_after_yes_and_asks_after_the_check(cli, tmp_path):
     ready_to_restore(cli)
     result = cli.run_asked(
-        "yes", "restore", BACKUP, FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK
+        "yes",
+        "restore",
+        BACKUP,
+        together=True,
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stdout
+    assert f"Restored warehouse airflow metabase from {BACKUP}" in result.stdout
+    # The question comes after the check of the backup (the stand-in says what the service says
+    # when it passes), so that a damaged one is not asked about, and before the stop.
+    checked = result.stdout.index("its dumps read to their end")
+    asked = result.stdout.index("Type yes to go on")
+    stopping = result.stdout.index("Stopping the services")
+    assert checked < asked < stopping
+
+
+@pytest.mark.parametrize("refusal", ["check", "images"])
+def test_restore_does_not_ask_about_a_backup_that_it_will_not_restore(cli, tmp_path, refusal):
+    ready_to_restore(
+        cli, **({"metabase": "metabase/metabase:v0.65.0@sha256:ddd"} if refusal == "images" else {})
+    )
+    result = cli.run_asked(
+        "yes",
+        "restore",
+        BACKUP,
+        together=True,
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        **({"FAKE_RUN_FAIL": "verify"} if refusal == "check" else {}),
+    )
+    assert result.returncode == 1
+    assert "Type yes to go on" not in result.stdout
+
+
+def test_restore_lists_the_databases_once_in_the_order_of_a_backup(cli, tmp_path):
+    ready_to_restore(cli)
+    result = cli.run_asked(
+        "yes",
+        "restore",
+        BACKUP,
+        "--only",
+        "metabase,warehouse,metabase",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        **QUICK,
     )
     assert result.returncode == 0, result.stderr
-    assert f"Restored warehouse airflow metabase from {BACKUP}" in result.stdout
-    # The question comes after the checks of the backup, so that a damaged one is not asked about.
-    order = calls_in_order(cli, "compose run --rm --no-deps -T backup verify", "compose stop ")
-    assert order == sorted(order)
+    assert f"Restore warehouse metabase from {BACKUP}?" in result.stderr
+    assert f"backup verify {BACKUP} warehouse metabase" in " ".join(cli.docker_calls())
+    restores = [call for call in cli.docker_calls() if " pg_restore " in f" {call} "]
+    assert [call.split()[3] for call in restores] == ["warehouse-db", "platform-db"]
 
 
 @pytest.mark.parametrize(
@@ -3263,6 +3530,7 @@ def test_restore_on_a_terminal_goes_on_after_yes(cli, tmp_path):
         # An empty list must not mean every database.
         ((BACKUP, "--only", "", "--yes"), "--only needs the databases"),
         ((BACKUP, "--only", ",", "--yes"), "--only needs the databases"),
+        ((BACKUP, "--only", "metabase", "--only", "warehouse", "--yes"), "--only is given once"),
         ((BACKUP, "--only"), "--only needs the databases"),
         ((BACKUP, BACKUP, "--yes"), "restore takes one backup"),
         ((BACKUP, "--now"), "unknown option of restore: --now"),
@@ -3305,3 +3573,157 @@ def test_restore_reads_the_backups_folder_that_env_names(cli, tmp_path):
         "restore", BACKUP, "--yes", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK
     )
     assert result.returncode == 0, result.stderr
+
+
+def restore_interrupted_in(cli, tmp_path, hanging, sent):
+    """Start a restore whose call that names hanging does not end, wait until it is called, and
+    send the signal to the whole process group, as Ctrl-C does to the foreground group of a
+    terminal."""
+    ready_to_restore(cli)
+    process = subprocess.Popen(
+        [str(cli.root / "agoranomos"), "restore", BACKUP, "--yes"],
+        cwd=cli.root,
+        env=cli.environment(
+            {"FAKE_PS_FILE": ps_file(tmp_path, HEALTHY_PS), "FAKE_HANG": hanging, **QUICK}
+        ),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        deadline = time.monotonic() + 30
+        while not any(f" {hanging} " in f" {call} " for call in cli.docker_calls()):
+            assert process.poll() is None, "the restore ended before it reached the call"
+            assert time.monotonic() < deadline, "the restore did not reach the call"
+            time.sleep(0.05)
+        time.sleep(0.2)
+        os.killpg(process.pid, sent)
+        stdout, stderr = process.communicate(timeout=30)
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate()
+    return process.returncode, stdout, stderr
+
+
+@pytest.mark.parametrize(
+    ("sent", "code"), [(signal.SIGTERM, 143), (signal.SIGINT, 130)], ids=["TERM", "INT"]
+)
+def test_an_interrupted_pg_restore_removes_the_dump_and_says_where_it_stopped(
+    cli, tmp_path, sent, code
+):
+    returncode, _, stderr = restore_interrupted_in(cli, tmp_path, "pg_restore", sent)
+    assert returncode == code
+    calls = cli.docker_calls()
+    removal = "compose exec -T warehouse-db rm -f /tmp/agoranomos-restore-warehouse.dump"
+    assert removal in calls
+    assert calls.index(removal) > next(i for i, call in enumerate(calls) if " pg_restore " in call)
+    assert "compose up --detach --remove-orphans" not in calls
+    assert "restore was interrupted" in stderr
+    assert (
+        f"restore stopped. Restored from {BACKUP}: none. warehouse was being restored and may be "
+        "incomplete. Not restored: warehouse airflow metabase. The services that use the "
+        "databases are stopped. pg_restore may still run in warehouse-db: until it has ended, a "
+        "new restore stops with 'being accessed by other users' and changes nothing. Do not run "
+        "./agoranomos up, which would start the stack on it: run "
+        f"./agoranomos restore {BACKUP} --only warehouse,airflow,metabase again first"
+    ) in stderr
+
+
+def test_an_interrupt_during_the_copy_leaves_the_database_as_it_was(cli, tmp_path):
+    returncode, _, stderr = restore_interrupted_in(cli, tmp_path, "cat", signal.SIGTERM)
+    assert returncode == 143
+    assert "compose exec -T warehouse-db rm -f /tmp/agoranomos-restore-warehouse.dump" in (
+        cli.docker_calls()
+    )
+    assert "may be incomplete" not in stderr
+    assert f"Restored from {BACKUP}: none; warehouse airflow metabase are as they were" in stderr
+
+
+def test_an_interrupt_before_the_services_are_stopped_just_ends_the_restore(cli, tmp_path):
+    # The check of the backup has changed nothing: no report, no removal, no stop.
+    returncode, _, stderr = restore_interrupted_in(cli, tmp_path, "verify", signal.SIGTERM)
+    assert returncode != 0
+    assert "restore stopped" not in stderr
+    assert not any(
+        call.startswith(("compose stop", "compose exec", "compose up"))
+        for call in cli.docker_calls()
+    )
+
+
+def test_restore_on_linux_stops_before_the_check_when_the_backups_folder_is_another_users(
+    cli, tmp_path
+):
+    # The check runs as AGORANOMOS_UID: it cannot enter a folder of mode 700 that another user
+    # owns, and its answer, that the backup is not complete, would mislead. Also without ops.
+    ready_to_restore(cli)
+    other = os.getuid() + 1
+    set_env(cli, AGORANOMOS_UID=str(other))
+    stub_uname(cli, "Linux")
+    result = cli.run("restore", BACKUP, "--yes", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert result.returncode == 1
+    assert (
+        f"the backup service (AGORANOMOS_UID={other}) cannot write {cli.root / 'backups'}, "
+        f"which belongs to UID {os.getuid()}"
+    ) in result.stderr
+    assert not any(call.startswith(("compose run", "compose stop")) for call in cli.docker_calls())
+    # Docker Desktop maps the owner of a shared folder: on a Mac the restore goes on.
+    stub_uname(cli, "Darwin")
+    again = cli.run("restore", BACKUP, "--yes", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
+    assert again.returncode == 0, again.stderr
+
+
+VERIFY_IN_THE_SERVICE = (
+    "compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh verify "
+    f"{BACKUP} warehouse airflow metabase"
+)
+
+
+def test_restore_checks_the_backup_in_the_running_backup_service(cli, tmp_path):
+    # A container more would add its limit to the sum of the budget of ADR-0022. Both paths run as
+    # the user of the service.
+    ready_to_restore(cli)
+    set_env(cli, COMPOSE_PROFILES="core,demo,ops")
+    result = cli.run(
+        "restore", BACKUP, "--yes", FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING), **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    calls = cli.docker_calls()
+    assert VERIFY_IN_THE_SERVICE in calls
+    assert not any(" backup verify " in call for call in calls)
+    order = calls_in_order(cli, VERIFY_IN_THE_SERVICE, "compose stop ")
+    assert order == sorted(order)
+
+
+def test_restore_checks_the_backup_in_a_container_of_its_own_when_the_service_is_not_running(
+    cli, tmp_path
+):
+    ready_to_restore(cli)
+    set_env(cli, COMPOSE_PROFILES="core,demo,ops")
+    result = cli.run(
+        "restore", BACKUP, "--yes", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    calls = cli.docker_calls()
+    assert (
+        f"compose run --rm --no-deps -T backup verify {BACKUP} warehouse airflow metabase" in calls
+    )
+    assert VERIFY_IN_THE_SERVICE not in calls
+
+
+def test_a_backup_that_fails_its_check_in_the_service_changes_nothing(cli, tmp_path):
+    ready_to_restore(cli)
+    set_env(cli, COMPOSE_PROFILES="core,demo,ops")
+    result = cli.run(
+        "restore",
+        BACKUP,
+        "--yes",
+        FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING),
+        FAKE_EXEC_FAIL="verify",
+    )
+    assert result.returncode == 1
+    assert "did not pass its check" in result.stderr
+    assert "nothing was changed" in result.stderr
+    assert not any(call.startswith(("compose stop", "compose up")) for call in cli.docker_calls())

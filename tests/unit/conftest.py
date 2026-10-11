@@ -5,8 +5,9 @@ space, and puts stand-ins for docker, ss, netstat, lsof and df first on PATH. Th
 from FAKE_* environment variables, which a test passes to Cli.run, and the docker stand-in logs
 every call, the COMPOSE_* settings that every docker compose call got, and the AGORANOMOS_IMAGES
 that it got (the log with the suffix .images). FAKE_RUN_FAIL and FAKE_EXEC_FAIL name a word of a
-call of run or exec that fails, such as verify, db-init or pg_restore. Cli.stub replaces a
-stand-in, or adds a tool, for one test.
+call of run or exec that fails, such as verify, db-init or pg_restore, FAKE_COMPOSE_FAIL one of any
+other call, such as stop, and FAKE_HANG makes a call of run or exec last half a minute, for a test
+that interrupts the script. Cli.stub replaces a stand-in, or adds a tool, for one test.
 """
 
 from __future__ import annotations
@@ -109,8 +110,30 @@ case "$1" in
         if [ "$1" = run ] && [ -n "${FAKE_RUN_FAIL:-}" ]; then
           case " $* " in *" $FAKE_RUN_FAIL "*) exit 1 ;; esac
         fi
+        # FAKE_EXEC_FAIL may list several such runs, separated by a semicolon.
         if [ "$1" = exec ] && [ -n "${FAKE_EXEC_FAIL:-}" ]; then
-          case " $* " in *" $FAKE_EXEC_FAIL "*) exit 1 ;; esac
+          old_ifs=$IFS
+          IFS=';'
+          for fail_run in $FAKE_EXEC_FAIL; do
+            IFS=$old_ifs
+            case " $* " in *" $fail_run "*) exit 1 ;; esac
+            IFS=';'
+          done
+          IFS=$old_ifs
+        fi
+        # FAKE_COMPOSE_FAIL is the same for any other call, such as stop, --wait (the start of the
+        # databases) or --remove-orphans (the start of the stack).
+        if [ -n "${FAKE_COMPOSE_FAIL:-}" ]; then
+          case " $* " in *" $FAKE_COMPOSE_FAIL "*) exit 1 ;; esac
+        fi
+        # FAKE_HANG makes such a call of run or exec last half a minute, as a check or a pg_restore
+        # does that a test interrupts.
+        if { [ "$1" = run ] || [ "$1" = exec ]; } && [ -n "${FAKE_HANG:-}" ]; then
+          case " $* " in *" $FAKE_HANG "*) exec sleep 30 ;; esac
+        fi
+        # The check of a backup says what the backup service says when it passes.
+        if [ "$1" = run ] || [ "$1" = exec ]; then
+          case " $* " in *" verify "*) echo "backup: complete, its dumps read to their end" ;; esac
         fi
         # FAKE_COMPOSE_EXIT is the exit status of every other subcommand (up, down, logs), and
         # FAKE_COMPOSE_ERROR is what it prints on stderr, as a failing docker compose does.
@@ -243,10 +266,13 @@ class Cli:
             check=False,
         )
 
-    def run_asked(self, answer: str, *args: str, **fake: str) -> subprocess.CompletedProcess[str]:
+    def run_asked(
+        self, answer: str, *args: str, together: bool = False, **fake: str
+    ) -> subprocess.CompletedProcess[str]:
         """Like run, with a pseudo-terminal as the input of the script, on which the person has
         typed answer and Enter before the script asks: a command that asks on a terminal, such as
-        restore, then reads it."""
+        restore, then reads it. With together, the standard error goes to the standard output, so
+        that the order of what the script says on the two shows in one text."""
         terminal, script_side = pty.openpty()
         try:
             os.write(terminal, f"{answer}\n".encode())
@@ -255,7 +281,8 @@ class Cli:
                 cwd=self.root,
                 env=self.environment(fake),
                 stdin=script_side,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT if together else subprocess.PIPE,
                 text=True,
                 timeout=60,
                 check=False,
