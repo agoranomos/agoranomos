@@ -1027,6 +1027,17 @@ remove_leftover_container() {
   say "$4"
 }
 
+# Start the stack, wait until it is healthy, print where to sign in, and in server mode check the
+# certificate of the site. It sets demo_failed, as wait_healthy does.
+start_stack() {
+  # Without the || a failure would end the script under set -e with only the message of docker compose.
+  compose up --detach --remove-orphans ||
+    die "docker compose could not start the stack; the error above names the cause, and ./agoranomos status and ./agoranomos logs <service> show more"
+  wait_healthy
+  print_addresses
+  check_certificate
+}
+
 cmd_up() {
   # Check the options before init writes .env: an option that preflight would refuse must not leave
   # a .env behind.
@@ -1041,12 +1052,7 @@ cmd_up() {
   cmd_preflight "$@"
   remove_leftover_services
   say "Starting the stack. The first start builds the Airflow image, which takes a few minutes..."
-  # Without the || a failure would end the script under set -e with only the message of docker compose.
-  compose up --detach --remove-orphans ||
-    die "docker compose could not start the stack; the error above names the cause, and ./agoranomos status and ./agoranomos logs <service> show more"
-  wait_healthy
-  print_addresses
-  check_certificate
+  start_stack
   # Only demo-init failed: Airflow and Metabase run, and its log names what to look at in them. up
   # still fails, so that a start that is not complete never passes as one.
   [ "$demo_failed" -eq 0 ] || die "the stack is up, but the demo is not ready"
