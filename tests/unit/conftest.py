@@ -4,16 +4,16 @@ The cli fixture copies the script and .env.example into a temporary checkout who
 space, and puts stand-ins for docker, ss, netstat, lsof and df first on PATH. The stand-ins answer
 from FAKE_* environment variables, which a test passes to Cli.run, and the docker stand-in logs
 every call, the COMPOSE_* settings that every docker compose call got, and the AGORANOMOS_IMAGES
-that it got (the log with the suffix .images). FAKE_RUN_FAIL and FAKE_EXEC_FAIL name a word of a
-call of run or exec that fails, such as verify, db-init or pg_restore, FAKE_COMPOSE_FAIL one of any
-other call, such as stop, and FAKE_HANG makes a call of run or exec last half a minute, for a test
-that interrupts the script. FAKE_READ_STDIN makes a call of run, exec or up read all of its standard
-input and log it (the log with the suffix .stdin), as docker compose does for a command in a
-container. FAKE_NETWORK_IPV6 and FAKE_NETWORK_LABEL are what docker network inspect prints for the
-IPv6 setting and the label dev.agoranomos.ipv6 of the network default of the stack: true or false,
-and without FAKE_NETWORK_IPV6 the network does not exist. FAKE_NETWORK_CREATE_FAIL is the error
-of a docker network create that fails, FAKE_NETWORK_RM_FAIL makes docker network rm fail. Cli.stub
-replaces a stand-in, or adds a tool, for one test.
+that it got (the log with the suffix .images) and the AGORANOMOS_IPV6 (suffix .ipv6). FAKE_RUN_FAIL
+and FAKE_EXEC_FAIL name a word of a call of run or exec that fails, such as verify, db-init or
+pg_restore, FAKE_COMPOSE_FAIL one of any other call, such as stop, and FAKE_HANG makes a call of
+run or exec last half a minute, for a test that interrupts the script. FAKE_READ_STDIN makes a call
+of run, exec or up read all of its standard input and log it (the log with the suffix .stdin), as
+docker compose does for a command in a container. FAKE_NETWORK_IPV6 and FAKE_NETWORK_LABEL are what
+docker network inspect prints for the IPv6 setting and the label dev.agoranomos.ipv6 of the network
+default of the stack: true or false, and without FAKE_NETWORK_IPV6 the network does not exist.
+FAKE_NETWORK_CREATE_FAIL is the error of a docker network create that fails, FAKE_NETWORK_RM_FAIL
+makes docker network rm fail. Cli.stub replaces a stand-in, or adds a tool, for one test.
 """
 
 from __future__ import annotations
@@ -83,6 +83,7 @@ case "$1" in
       printf '%s|%s|%s\n' "${COMPOSE_PROJECT_NAME-unset}" "${COMPOSE_PROFILES-unset}" \
         "${COMPOSE_FILE-unset}" >> "$FAKE_LOG.settings"
       printf '%s\n' "${AGORANOMOS_IMAGES-unset}" >> "$FAKE_LOG.images"
+      printf '%s\n' "${AGORANOMOS_IPV6-unset}" >> "$FAKE_LOG.ipv6"
     fi
     case "$1" in
       version)
@@ -430,6 +431,12 @@ class Cli:
             call, _, received = line.partition("\t")
             reads.append((call, received))
         return reads
+
+    def compose_ipv6(self) -> list[str]:
+        """What each docker compose call (but version) got in AGORANOMOS_IPV6, in call order:
+        "unset" for a call that got none."""
+        path = self.log.with_name(f"{self.log.name}.ipv6")
+        return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
 
     def compose_settings(self) -> list[tuple[str, ...]]:
         """What each docker compose call (but version) got in COMPOSE_PROJECT_NAME,

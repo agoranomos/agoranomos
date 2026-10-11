@@ -140,7 +140,7 @@ def test_the_network_that_docker_made_has_the_ipv6_that_env_asks_for(env):
     # compose config shows the option. This looks at what Docker made of it: IPv6 on, and a subnet
     # of IPv6 addresses that Docker picked because the file sets none, when AGORANOMOS_IPV6 is true
     # (init --server sets it), and no IPv6 otherwise. The data network never has it (ADR-0023).
-    project = env.get("COMPOSE_PROJECT_NAME", "agoranomos")
+    project = env.get("COMPOSE_PROJECT_NAME") or "agoranomos"
     asked = (env.get("AGORANOMOS_IPV6") or "false") == "true"
     [default] = json.loads(docker("network", "inspect", f"{project}_default").stdout)
     assert default["EnableIPv6"] is asked

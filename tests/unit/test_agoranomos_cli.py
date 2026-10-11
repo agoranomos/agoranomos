@@ -512,8 +512,8 @@ def test_a_plain_init_adds_ipv6_to_the_env_of_a_server_that_lacks_it(cli):
     assert cli.read_env()["AGORANOMOS_IPV6"] == "true"
     assert (
         "Added AGORANOMOS_IPV6=true to .env: server mode gives the network of the stack IPv6 "
-        "(ADR-0023). If a network of the stack exists without it, the next ./agoranomos up "
-        "stops the stack once to make it again."
+        "(ADR-0023). If a network of the stack exists without it, up stops the stack once to "
+        "make it again."
     ) in result.stdout.splitlines()
     assert "Added AGORANOMOS_IPV6" not in cli.run("init").stdout
 
@@ -2319,10 +2319,13 @@ def test_up_that_cannot_make_an_ipv6_network_stops_before_it_stops_the_stack(cli
         cli, tmp_path, "true", "false", FAKE_NETWORK_CREATE_FAIL=IPV6_NOT_POSSIBLE
     )
     assert result.returncode == 1
-    assert "Docker cannot make an IPv6 network on this host" in result.stderr
+    assert "Docker could not make a test network with IPv6" in result.stderr
     assert IPV6_NOT_POSSIBLE in result.stderr
     assert "the stack is not stopped" in result.stderr
-    assert "Set AGORANOMOS_IPV6=false in .env and run ./agoranomos up again" in result.stderr
+    # Not a claim about the cause: another error, such as used-up address pools, needs another fix.
+    assert "If the error says something else" in result.stderr
+    assert "One way out is AGORANOMOS_IPV6=false in .env" in result.stderr
+    assert "then run ./agoranomos up again" in result.stderr
     calls = cli.docker_calls()
     assert len(probe_calls(cli)) == 1
     assert STOP_FOR_THE_NETWORK not in calls
@@ -2377,6 +2380,70 @@ def test_up_leaves_standard_input_alone(cli, tmp_path):
     reads = cli.stdin_reads()
     assert [call for call, _received in reads] == ["up --detach --remove-orphans"]
     assert [received for _call, received in reads] == [""]
+
+
+def test_up_builds_and_pulls_the_images_before_it_stops_the_stack_for_the_network(cli, tmp_path):
+    # A build or a pull that fails must leave the running stack up, as it did before the guard.
+    result = up_with_a_network(cli, tmp_path, "false", "true")
+    assert result.returncode == 0, result.stderr
+    calls = cli.docker_calls()
+    build = "compose build"
+    pull = "compose pull --policy missing --ignore-buildable --quiet"
+    assert calls.count(build) == calls.count(pull) == 1
+    assert calls.index(NETWORK_LOOKUP) < calls.index(build) < calls.index(pull)
+    assert calls.index(pull) < calls.index(STOP_FOR_THE_NETWORK) < calls.index(UP_CALL)
+
+
+def test_up_that_needs_no_stop_for_the_network_builds_and_pulls_nothing_of_its_own(cli, tmp_path):
+    result = up_with_a_network(cli, tmp_path, "false", "false")
+    assert result.returncode == 0, result.stderr
+    assert not any(
+        call.startswith(("compose build", "compose pull")) for call in cli.docker_calls()
+    )
+
+
+@pytest.mark.parametrize(("failing", "word"), [("build", "build"), ("pull", "pull")])
+def test_up_whose_images_fail_leaves_the_running_stack_up(cli, tmp_path, failing, word):
+    result = up_with_a_network(cli, tmp_path, "false", "true", FAKE_COMPOSE_FAIL=failing)
+    assert result.returncode == 1
+    assert f"could not {word} the images" in result.stderr
+    assert "the stack is not stopped" in result.stderr
+    calls = cli.docker_calls()
+    assert STOP_FOR_THE_NETWORK not in calls
+    assert UP_CALL not in calls
+
+
+def test_the_images_of_the_guard_are_built_with_the_probe_first_and_without_input(cli, tmp_path):
+    result = up_with_a_network(
+        cli, tmp_path, "true", "false", FAKE_READ_STDIN="1", stdin=f"{REST_OF_THE_SCRIPT}\n"
+    )
+    assert result.returncode == 0, result.stderr
+    calls = cli.docker_calls()
+    [probe] = probe_calls(cli)
+    assert calls.index(probe) < calls.index("compose build")
+    assert [r for r in cli.stdin_reads() if REST_OF_THE_SCRIPT in r[1]] == []
+
+
+@pytest.mark.parametrize(
+    ("shell", "env", "sent"), [("true", None, "false"), ("false", "true", "true")]
+)
+def test_compose_gets_ipv6_from_env_whatever_the_shell_exports(cli, tmp_path, shell, env, sent):
+    # The checks and the guard read .env, so Compose must read the same value: a shell that
+    # exports the setting would otherwise make a network that the guard stops the stack for again
+    # at every up.
+    result = up_with_a_network(cli, tmp_path, env, sent, label=sent, AGORANOMOS_IPV6=shell)
+    assert result.returncode == 0, result.stderr
+    assert STOP_FOR_THE_NETWORK not in cli.docker_calls()
+    sent_to_compose = cli.compose_ipv6()
+    assert len(sent_to_compose) == len(compose_calls(cli)) >= 3
+    assert {*sent_to_compose} == {sent}
+
+
+def test_compose_gets_false_for_ipv6_when_env_does_not_set_it(cli):
+    cli.env_path.write_text("AIRFLOW_PORT=8080\n", encoding="utf-8")
+    result = cli.run("status", AGORANOMOS_IPV6="true")
+    assert result.returncode == 0, result.stderr
+    assert {*cli.compose_ipv6()} == {"false"}
 
 
 def test_up_looks_at_the_network_only_after_preflight_has_passed(cli, tmp_path):
@@ -3176,6 +3243,45 @@ def test_metadata_diff_runs_the_dry_run_of_metabase_init_and_passes_on_its_answe
         "metadata", "diff", FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP), FAKE_COMPOSE_EXIT=str(job)
     )
     assert result.returncode == code, result.stderr
+    assert DIFF in cli.docker_calls()
+
+
+@pytest.mark.parametrize(
+    ("actual", "label", "wanted"),
+    [("false", "", None), ("false", "false", "true"), ("true", "true", None)],
+)
+def test_metadata_diff_before_the_first_up_after_an_update_says_to_run_up_first(
+    cli, tmp_path, actual, label, wanted
+):
+    # Compose would stop on the network that this release changes (active endpoints) and the dry
+    # run would end with an error of Compose and no word of the cause.
+    cli.run("init")
+    if wanted is not None:
+        add_env(cli, AGORANOMOS_IPV6=wanted)
+    result = cli.run(
+        "metadata",
+        "diff",
+        FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP),
+        FAKE_NETWORK_IPV6=actual,
+        FAKE_NETWORK_LABEL=label,
+    )
+    assert result.returncode == 2
+    assert "the network of the stack is not the one that this release asks for" in result.stderr
+    assert "run ./agoranomos up first" in result.stderr
+    assert not any(call.startswith("compose run") for call in cli.docker_calls())
+    assert STOP_FOR_THE_NETWORK not in cli.docker_calls()
+
+
+def test_metadata_diff_runs_on_a_network_that_is_the_one_the_setting_asks_for(cli, tmp_path):
+    cli.run("init")
+    result = cli.run(
+        "metadata",
+        "diff",
+        FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP),
+        FAKE_NETWORK_IPV6="false",
+        FAKE_NETWORK_LABEL="false",
+    )
+    assert result.returncode == 0, result.stderr
     assert DIFF in cli.docker_calls()
 
 
@@ -4237,7 +4343,7 @@ def test_restore_changes_nothing_when_docker_cannot_make_the_ipv6_network(cli, t
         cli, tmp_path, "false", wanted="true", FAKE_NETWORK_CREATE_FAIL=IPV6_NOT_POSSIBLE
     )
     assert result.returncode == 1
-    assert "Docker cannot make an IPv6 network on this host" in result.stderr
+    assert "Docker could not make a test network with IPv6" in result.stderr
     assert not any(
         call.startswith(
             ("compose stop", "compose up", "compose down", "compose run --rm --no-deps -T db-init")

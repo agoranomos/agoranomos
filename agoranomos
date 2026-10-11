@@ -165,7 +165,9 @@ print_banner() {
 # Run docker compose in the checkout, where Compose finds compose.yaml and .env. Compose reads
 # COMPOSE_PROJECT_NAME, COMPOSE_PROFILES and COMPOSE_FILE from its environment before it reads .env,
 # so a variable of the same name that is still exported in this shell, from another project, would
-# win over .env. These three therefore come from .env here, with the defaults of .env.example. The
+# win over .env. These three therefore come from .env here, with the defaults of .env.example, and
+# so does AGORANOMOS_IPV6, which compose.yaml reads and which the checks of this script read from
+# .env: a value exported in the shell cannot make another network than the guard compares. The
 # files and the profiles reach Compose through these variables, never through -f and --profile
 # options, so this script and a plain docker compose in the checkout work on the same stack. A
 # command that must reach a service of a profile that .env does not list sets extra_profile
@@ -190,7 +192,9 @@ compose() {
     # The images of the checkout, which the backup service writes into each backup (ADR-0020).
     AGORANOMOS_IMAGES=$(image_refs | tr '\n' ' ')
     AGORANOMOS_IMAGES=${AGORANOMOS_IMAGES% }
-    export COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_FILE AGORANOMOS_IMAGES
+    # The checks and the guard of the network read this setting from .env, so Compose does too.
+    AGORANOMOS_IPV6=$(setting AGORANOMOS_IPV6 false)
+    export COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_FILE AGORANOMOS_IMAGES AGORANOMOS_IPV6
     docker compose "$@"
   )
 }
@@ -551,7 +555,7 @@ cmd_init() {
   # person set stays.
   if server_mode && [ -z "$(env_get AGORANOMOS_IPV6)" ]; then
     env_set AGORANOMOS_IPV6 true
-    say "Added AGORANOMOS_IPV6=true to .env: server mode gives the network of the stack IPv6 (ADR-0023). If a network of the stack exists without it, the next ./agoranomos up stops the stack once to make it again."
+    say "Added AGORANOMOS_IPV6=true to .env: server mode gives the network of the stack IPv6 (ADR-0023). If a network of the stack exists without it, up stops the stack once to make it again."
   fi
 }
 
@@ -1133,19 +1137,32 @@ can_make_an_ipv6_network() {
   return 1
 }
 
-stop_for_changed_network() {
+# Whether the network default that exists is not the one that AGORANOMOS_IPV6 asks for: it lacks the
+# label dev.agoranomos.ipv6, has another value in it, or has the other IPv6 setting. It changes
+# nothing, and it is false when there is no network or Docker gives no answer. It sets
+# wanted_ipv6.
+network_is_stale() {
   network_state=$(docker network inspect --format '{{.EnableIPv6}}|{{index .Labels "dev.agoranomos.ipv6"}}' "$(setting COMPOSE_PROJECT_NAME agoranomos)_default" 2> /dev/null) ||
-    return 0
+    return 1
   network_ipv6=${network_state%%|*} network_label=${network_state#*|}
   wanted_ipv6=$(setting AGORANOMOS_IPV6 false)
-  case "$network_ipv6" in true | false) ;; *) return 0 ;; esac
-  { [ "$network_ipv6" != "$wanted_ipv6" ] || [ "$network_label" != "$wanted_ipv6" ]; } || return 0
+  case "$network_ipv6" in true | false) ;; *) return 1 ;; esac
+  [ "$network_ipv6" != "$wanted_ipv6" ] || [ "$network_label" != "$wanted_ipv6" ]
+}
+
+stop_for_changed_network() {
+  network_is_stale || return 0
   if [ "$wanted_ipv6" = true ]; then ipv6_state=on; else ipv6_state=off; fi
-  # Before the stack stops: on a host where Docker cannot make the network, it would come down and
-  # not come up again.
+  # Before the stack stops: on a host where Docker cannot make the network, or cannot build or pull
+  # an image, it would come down and not come up again.
   if [ "$wanted_ipv6" = true ] && ! can_make_an_ipv6_network; then
-    die "Docker cannot make an IPv6 network on this host, which AGORANOMOS_IPV6=true in .env asks for, so the stack is not stopped. Docker says: $probe_error. Set AGORANOMOS_IPV6=false in .env and run ./agoranomos up again (ADR-0023)"
+    die "Docker could not make a test network with IPv6 on this host (Docker says: $probe_error), so the stack is not stopped. One way out is AGORANOMOS_IPV6=false in .env, with no IPv6 on the network of the stack and no AAAA record for the site: then run ./agoranomos up again. If the error says something else, such as that the address pools are used up, fix that instead (ADR-0023)"
   fi
+  say "Building and pulling the images before the stack stops, so that a failure leaves it as it is..."
+  compose build < /dev/null ||
+    die "docker compose could not build the images, so the stack is not stopped; the error above names the cause"
+  compose pull --policy missing --ignore-buildable --quiet < /dev/null ||
+    die "docker compose could not pull the images, so the stack is not stopped; the error above names the cause"
   say "The network of the stack changes (IPv6 $ipv6_state): stopping the stack first, the data stays."
   compose down --remove-orphans ||
     die "docker compose could not stop the stack to change its network; the error above names the cause"
@@ -1613,6 +1630,11 @@ cmd_metadata() {
     check_failed "usage: ./agoranomos metadata diff"
   fi
   metabase_is_up || check_failed "Metabase is not running: start the stack with ./agoranomos up"
+  # Compose would stop on the network that a release changes (it has containers on it) and end the
+  # dry run with its own error, which does not say why.
+  if network_is_stale; then
+    check_failed "the network of the stack is not the one that this release asks for, so Compose cannot run the dry run: run ./agoranomos up first, which makes it again (ADR-0023)"
+  fi
   # The job answers 0, 3 for a plan to apply, or 2. docker compose run exits with 1 when it fails
   # itself (Compose 5.5.1), so the job keeps 1 out of its answers, and any code that it does not
   # give is a check that could not run.
