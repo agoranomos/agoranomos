@@ -126,10 +126,10 @@ tar -xzf backups/20261011T030012Z/extensions.tar.gz -C extensions
 
 ### Go back from an upgrade
 
-An upgrade of Metabase migrates its database one way, and the backup that you took before it is the way back: restore `--only metabase`. When the same update also changed the Airflow image, which migrates the database of Airflow one way too, restore `--only metabase,airflow`, or `airflow-init` fails on the schema of the newer Airflow; you lose the runs of Airflow since the backup. See whether the image changed before you return the checkout, while it is still at the new release:
+An upgrade of Metabase migrates its database one way, and the backup that you took before it is the way back: restore `--only metabase`. When the same update also changed the Airflow image, which migrates the database of Airflow one way too, restore `--only metabase,airflow`, or `airflow-init` fails on the schema of the newer Airflow; you lose the runs of Airflow since the backup. See whether the image changed before you return the checkout, while it is still at the new release: the first command prints the old and the new `FROM` line of the Airflow image when it changed, and nothing when it did not.
 
 ```bash
-git diff <the commit that you came from> HEAD -- airflow/Dockerfile compose.yaml
+git diff <the commit that you came from> HEAD -- airflow/Dockerfile | grep '^[-+]FROM'
 git checkout <the commit that you came from>
 ./agoranomos restore 20261011T030012Z --only metabase
 # when the Airflow image changed as well:
