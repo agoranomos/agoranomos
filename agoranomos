@@ -1160,6 +1160,178 @@ backup_status() {
   fi
 }
 
+# The databases of a backup, in the order in which restore puts them back.
+BACKUP_DATABASES="warehouse airflow metabase"
+
+# The service of the database $1.
+database_service() {
+  case "$1" in
+    warehouse) printf 'warehouse-db' ;;
+    *) printf 'platform-db' ;;
+  esac
+}
+
+# The images that the database $1 depends on: PostgreSQL, which made its dump, and the application
+# that migrated it, which reads it after a restore.
+database_images() {
+  case "$1" in
+    warehouse) printf 'postgres' ;;
+    airflow) printf 'postgres apache/airflow' ;;
+    metabase) printf 'postgres metabase/metabase' ;;
+  esac
+}
+
+# The version of each image of the repository $2 in the list of references $1, one to a line:
+# the name and the tag, without the digest, which changes with every rebuild of the same version.
+# Of PostgreSQL the major version alone, such as postgres:18: a minor update keeps the format of
+# the data, and pg_restore reads the dump, while a new major version is an upgrade of its own.
+image_tags() {
+  printf '%s\n' "$1" | tr ' ' '\n' | sed -n "s|^\($2:[^@]*\).*|\1|p" |
+    if [ "$2" = postgres ]; then sed 's|^\(postgres:[0-9]*\).*|\1|'; else cat; fi |
+    LC_ALL=C sort -u
+}
+
+# Put databases back as a backup has them (ADR-0020). Nothing changes until the backup has passed
+# its check in the backup service and the images of its databases match those of the checkout;
+# then it stops every service but the databases, runs db-init, restores each database as its
+# superuser inside its container, through the socket, where the image trusts it, and starts the
+# stack. The dump goes into the /tmp of the container first, so that pg_restore reads a file.
+cmd_restore() {
+  restore_name="" restore_only="" restore_force=0 restore_yes=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --only)
+        # An empty list must not fall back to every database.
+        { [ "$#" -ge 2 ] && [ -n "$2" ]; } ||
+          die "--only needs the databases to restore, such as --only metabase or --only warehouse,airflow"
+        restore_only=$2
+        shift 2
+        ;;
+      --yes)
+        restore_yes=1
+        shift
+        ;;
+      --force)
+        restore_force=1
+        shift
+        ;;
+      -*) die "unknown option of restore: $1" ;;
+      *)
+        [ -z "$restore_name" ] || die "restore takes one backup"
+        restore_name=$1
+        shift
+        ;;
+    esac
+  done
+  [ -n "$restore_name" ] || die "usage: ./agoranomos restore <backup> [--only <databases>] [--yes] [--force]; ./agoranomos status names the last backup"
+  [ -f "$ENV_FILE" ] || die "there is no .env: restore with the .env of the deployment that took the backup, whose keys decrypt the connections that Airflow and Metabase saved"
+  root=$(backups_path)
+  if [ "$restore_name" = latest ]; then
+    restore_name=$(json_field "$root/latest.json" last_ok)
+    [ -n "$restore_name" ] || die "there is no good backup in $root yet"
+  fi
+  case "$restore_name" in
+    [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z) ;;
+    *) die "not the name of a backup: $restore_name. The names are those of the folders in $root, such as 20261011T030012Z" ;;
+  esac
+  folder="$root/$restore_name"
+  [ -f "$folder/manifest.json" ] || die "there is no complete backup $restore_name in $root"
+  databases=$(printf '%s' "${restore_only:-$BACKUP_DATABASES}" | tr ',' ' ')
+  for database in $databases; do
+    case " $BACKUP_DATABASES " in
+      *" $database "*) ;;
+      *) die "not a database of a backup: $database (warehouse, airflow or metabase)" ;;
+    esac
+  done
+  # shellcheck disable=SC2086 # one argument for each database
+  set -- $databases
+  [ "$#" -gt 0 ] || die "--only needs the databases to restore, such as --only metabase or --only warehouse,airflow"
+  if [ "$restore_yes" -eq 0 ] && [ ! -t 0 ]; then
+    die "restore replaces databases: run it in a terminal, which asks first, or pass --yes"
+  fi
+  message=$(backup_user_problem)
+  [ -z "$message" ] || die "$message"
+  # The checks of up, also on a new server: Docker, the memory, the disk and the ports. Then what
+  # a mode left behind goes, as in up: no proxy or backup service of a profile that .env no longer
+  # lists runs through a restore.
+  cmd_preflight
+  remove_leftover_services
+  say "Checking the backup $restore_name..."
+  # shellcheck disable=SC2086 # one argument for each database
+  compose run --rm --no-deps -T backup verify "$restore_name" $databases ||
+    die "the backup $restore_name did not pass its check (the lines above say why), and nothing was changed"
+  recorded=$(json_field "$folder/manifest.json" images)
+  if [ -z "$recorded" ]; then
+    warn "the backup $restore_name does not record the images that took it: check that this checkout is the release that took it"
+  else
+    current=$(image_refs | tr '\n' ' ')
+    differences=""
+    for database in $databases; do
+      for repository in $(database_images "$database"); do
+        was=$(image_tags "$recorded" "$repository" | tr '\n' ' ')
+        now=$(image_tags "$current" "$repository" | tr '\n' ' ')
+        was=${was% } now=${now% }
+        if [ "$was" != "$now" ]; then
+          differences="$differences
+  $repository: the backup has ${was:-none}, this checkout ${now:-none}"
+        fi
+      done
+    done
+    if [ -n "$differences" ]; then
+      differences=$(printf '%s\n' "$differences" | LC_ALL=C sort -u)
+      if [ "$restore_force" -eq 0 ]; then
+        die "the backup $restore_name was taken with other images than this checkout has:$differences
+Check out the release that took it and restore there, or pass --force if you know that these versions read it. Nothing was changed."
+      fi
+      warn "the backup $restore_name was made with other images (--force):$differences"
+    fi
+  fi
+  if [ "$restore_yes" -eq 0 ]; then
+    printf 'Restore %s from %s? What they saved after it is lost. Type yes to go on: ' "$databases" "$restore_name"
+    read -r answer || answer=""
+    [ "$answer" = yes ] || die "nothing was changed"
+  fi
+  services=$(compose config --services) || die "docker compose config failed; the error above names the cause"
+  stop=""
+  for service in $services; do
+    case "$service" in
+      warehouse-db | platform-db) ;;
+      *) stop="$stop $service" ;;
+    esac
+  done
+  say "Stopping the services that use the databases..."
+  # docker compose stop with no service stops every one, the databases among them.
+  if [ -n "$stop" ]; then
+    # shellcheck disable=SC2086 # one argument for each service
+    compose stop $stop || die "docker compose could not stop the services, and nothing was restored"
+  fi
+  compose up --detach --wait warehouse-db platform-db ||
+    die "the databases did not start, and nothing was restored: see ./agoranomos logs warehouse-db and ./agoranomos logs platform-db"
+  compose run --rm --no-deps -T db-init || die "db-init failed, and nothing was restored: the lines above say why"
+  restored=""
+  for database in $databases; do
+    service=$(database_service "$database")
+    dump=/tmp/agoranomos-restore-$database.dump
+    say "Restoring $database..."
+    # The databases restored before this one, for a message of failure.
+    before=${restored:+ Already restored from $restore_name: $restored.}
+    compose exec -T "$service" sh -c "umask 077 && cat > $dump" < "$folder/$database.dump" ||
+      die "could not copy $database.dump into $service, and $database is as it was.$before"
+    if ! compose exec -T "$service" pg_restore --username=postgres --dbname=postgres --clean --if-exists --create --exit-on-error "$dump"; then
+      compose exec -T "$service" rm -f "$dump" || true
+      die "pg_restore failed for $database.$before If it says that the database is being accessed by other users, $database was not changed: stop what is connected and run restore again. After another error $database can be incomplete: do not start the stack; fix the cause and run restore again"
+    fi
+    compose exec -T "$service" rm -f "$dump"
+    restored="${restored:+$restored }$database"
+    compose exec -T "$service" vacuumdb --username=postgres --analyze-only --quiet --dbname="$database" ||
+      warn "ANALYZE of $database failed: it is restored, and its first queries may be slow"
+  done
+  say "Restored $databases from $restore_name. The backup also holds extensions.tar.gz, which restore leaves as it is. Starting the stack..."
+  start_stack
+  [ "$demo_failed" -eq 0 ] || die "the databases are restored and the stack is up, but the demo is not ready"
+  say "$(paint ok 'The stack is up.' 1) ./agoranomos status shows every service."
+}
+
 cmd_logs() {
   if [ "$#" -eq 0 ]; then
     compose logs --tail=200
@@ -1234,6 +1406,7 @@ Commands:
   down          Stop the stack; the data stays in its Docker volumes
   status        Show the state and health of every service, and the last backups
   backup        Take a backup of the databases now, into the backups folder
+  restore       restore <backup>: put the databases back as a backup has them (--only, --yes, --force)
   logs          Show the logs: the last 200 lines, or pass options and services to docker compose logs
   metadata      metadata diff: show what up would change in the metadata of the marts in Metabase
   credentials   Show where to sign in to Airflow and Metabase, and where the passwords are
@@ -1254,6 +1427,7 @@ main() {
     down) cmd_down "$@" ;;
     status) cmd_status "$@" ;;
     backup) cmd_backup "$@" ;;
+    restore) cmd_restore "$@" ;;
     logs) cmd_logs "$@" ;;
     metadata) cmd_metadata "$@" ;;
     credentials) cmd_credentials "$@" ;;

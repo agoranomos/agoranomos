@@ -2853,3 +2853,455 @@ def test_metadata_takes_the_subcommand_diff_only(cli, arguments):
     assert result.returncode == 2
     assert "usage: ./agoranomos metadata diff" in result.stderr
     assert cli.docker_calls() == []
+
+
+# ./agoranomos restore (ADR-0020): it checks the backup and the images before it changes anything,
+# then puts each database back inside its container.
+IMAGES = {
+    "postgres": "postgres:18.6-trixie@sha256:aaa",
+    "airflow": "apache/airflow:3.3.2-python3.13@sha256:bbb",
+    "metabase": "metabase/metabase:v0.64.1@sha256:ccc",
+}
+BACKUP = "20261011T030012Z"
+RECORDED_IMAGES = " ".join(sorted(IMAGES.values()))
+
+
+def checkout_with_images(cli, **images):
+    """compose.yaml and airflow/Dockerfile of a checkout with these images."""
+    chosen = {**IMAGES, **images}
+    (cli.root / "compose.yaml").write_text(
+        "services:\n"
+        f"  warehouse-db:\n    image: {chosen['postgres']}\n"
+        f"  metabase:\n    image: {chosen['metabase']}\n",
+        encoding="utf-8",
+    )
+    (cli.root / "airflow").mkdir(exist_ok=True)
+    (cli.root / "airflow" / "Dockerfile").write_text(
+        f"FROM {chosen['airflow']}\n", encoding="utf-8"
+    )
+
+
+def make_backup(cli, name=BACKUP, images=RECORDED_IMAGES):
+    """A backup folder as postgres/backup.sh writes it, as far as restore reads it."""
+    folder = cli.root / "backups" / name
+    folder.mkdir(parents=True)
+    for database in ("warehouse", "airflow", "metabase"):
+        (folder / f"{database}.dump").write_text(f"a dump of {database}\n", encoding="utf-8")
+    (folder / "SHA256SUMS").write_text("checked in the backup service\n", encoding="utf-8")
+    (folder / "manifest.json").write_text(
+        f'{{\n  "format": 1,\n  "name": "{name}",\n  "images": "{images}",\n  "files": []\n}}\n',
+        encoding="utf-8",
+    )
+    return folder
+
+
+def ready_to_restore(cli, **images):
+    cli.run("init")
+    checkout_with_images(cli, **images)
+    make_backup(cli)
+
+
+def calls_in_order(cli, *starts):
+    """The indexes of the first call that starts with each of starts."""
+    calls = cli.docker_calls()
+    return [next(i for i, call in enumerate(calls) if call.startswith(start)) for start in starts]
+
+
+def test_restore_replaces_each_database_inside_its_container_and_starts_the_stack(cli, tmp_path):
+    ready_to_restore(cli)
+    result = cli.run(
+        "restore", BACKUP, "--yes", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    calls = cli.docker_calls()
+    restores = [call for call in calls if " pg_restore " in f" {call} "]
+    assert restores == [
+        f"compose exec -T {service} pg_restore --username=postgres --dbname=postgres --clean "
+        f"--if-exists --create --exit-on-error /tmp/agoranomos-restore-{database}.dump"
+        for service, database in (
+            ("warehouse-db", "warehouse"),
+            ("platform-db", "airflow"),
+            ("platform-db", "metabase"),
+        )
+    ]
+    order = calls_in_order(
+        cli,
+        f"compose run --rm --no-deps -T backup verify {BACKUP} warehouse airflow metabase",
+        "compose stop ",
+        "compose up --detach --wait warehouse-db platform-db",
+        "compose run --rm --no-deps -T db-init",
+        "compose exec -T warehouse-db pg_restore",
+        "compose exec -T warehouse-db vacuumdb --username=postgres --analyze-only --quiet "
+        "--dbname=warehouse",
+        "compose up --detach --remove-orphans",
+    )
+    assert order == sorted(order)
+    stopped = next(call for call in calls if call.startswith("compose stop ")).split()[2:]
+    assert "warehouse-db" not in stopped
+    assert "platform-db" not in stopped
+    assert "Restored warehouse airflow metabase from 20261011T030012Z" in result.stdout
+    assert "Preflight passed:" in result.stdout
+
+
+def test_restore_of_one_database_restores_that_one(cli, tmp_path):
+    ready_to_restore(cli)
+    result = cli.run(
+        "restore",
+        BACKUP,
+        "--only",
+        "metabase",
+        "--yes",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    restores = [call for call in cli.docker_calls() if " pg_restore " in f" {call} "]
+    assert [call.split()[3] for call in restores] == ["platform-db"]
+    assert f"compose run --rm --no-deps -T backup verify {BACKUP} metabase" in cli.docker_calls()
+
+
+def test_restore_latest_takes_the_last_good_backup(cli, tmp_path):
+    ready_to_restore(cli)
+    (cli.root / "backups" / "latest.json").write_text(
+        f'{{\n  "result": "failed",\n  "last_ok": "{BACKUP}",\n  "last_ok_epoch": 1\n}}\n',
+        encoding="utf-8",
+    )
+    result = cli.run(
+        "restore", "latest", "--yes", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    assert any(f"backup verify {BACKUP} " in call for call in cli.docker_calls())
+
+
+def test_restore_latest_needs_a_good_backup(cli):
+    ready_to_restore(cli)
+    result = cli.run("restore", "latest", "--yes")
+    assert result.returncode == 1
+    assert "there is no good backup in" in result.stderr
+    assert compose_calls(cli) == []
+
+
+def test_restore_runs_the_checks_of_preflight_first(cli, tmp_path):
+    # On a new server too: Docker, the memory, the disk and the ports before anything changes.
+    ready_to_restore(cli)
+    result = cli.run(
+        "restore",
+        BACKUP,
+        "--yes",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_SERVER_VERSION="24.0.7",
+    )
+    assert result.returncode == 1
+    assert "Docker Engine 24.0.7 is older than 25.0.0" in result.stderr
+    assert not any(call.startswith(("compose run", "compose stop")) for call in cli.docker_calls())
+
+
+def test_restore_removes_what_a_mode_left_behind_after_preflight_and_before_it_stops(cli, tmp_path):
+    # As up does (the proxy of server mode that .env no longer lists would go on serving through a
+    # restore): after the checks of preflight, before anything is stopped.
+    ready_to_restore(cli)
+    result = cli.run(
+        "restore",
+        BACKUP,
+        "--yes",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_PROXY="0123abcdef\n",
+        FAKE_BACKUP="4567abcdef\n",
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    assert LEFTOVER_PROXY in result.stdout.splitlines()
+    assert LEFTOVER_BACKUP in result.stdout.splitlines()
+    order = calls_in_order(cli, "info ", PROXY_REMOVAL, BACKUP_REMOVAL, "compose stop ")
+    assert order == sorted(order)
+
+
+def test_restore_runs_the_check_of_the_backup_as_the_user_of_the_backup_service(cli, tmp_path):
+    # A lock file that the check made as another user would stop every later backup. The service
+    # sets its user, so a run of it must not pass another one.
+    ready_to_restore(cli)
+    result = cli.run(
+        "restore", BACKUP, "--yes", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    [verify] = [call for call in cli.docker_calls() if " backup verify " in call]
+    assert verify.split() == [
+        *("compose", "run", "--rm", "--no-deps", "-T", "backup", "verify"),
+        BACKUP,
+        *("warehouse", "airflow", "metabase"),
+    ]
+
+
+def test_a_backup_that_fails_its_check_changes_nothing(cli, tmp_path):
+    ready_to_restore(cli)
+    result = cli.run(
+        "restore",
+        BACKUP,
+        "--yes",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_RUN_FAIL="verify",
+    )
+    assert result.returncode == 1
+    assert "did not pass its check" in result.stderr
+    assert "nothing was changed" in result.stderr
+    assert not any(
+        call.startswith(("compose stop", "compose exec", "compose up"))
+        for call in cli.docker_calls()
+    )
+
+
+def test_a_backup_of_other_images_needs_force(cli, tmp_path):
+    ready_to_restore(cli, metabase="metabase/metabase:v0.65.0@sha256:ddd")
+    result = cli.run("restore", BACKUP, "--yes", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert result.returncode == 1
+    assert (
+        "metabase/metabase: the backup has metabase/metabase:v0.64.1, this checkout "
+        "metabase/metabase:v0.65.0"
+    ) in result.stderr
+    assert not any(call.startswith("compose stop") for call in cli.docker_calls())
+    forced = cli.run(
+        "restore", BACKUP, "--yes", "--force", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK
+    )
+    assert forced.returncode == 0, forced.stderr
+    assert "was made with other images (--force)" in forced.stderr
+
+
+def test_a_backup_of_another_airflow_counts_for_the_airflow_database_only(cli, tmp_path):
+    ready_to_restore(cli, airflow="apache/airflow:3.4.0-python3.13@sha256:eee")
+    fake = {"FAKE_PS_FILE": ps_file(tmp_path, HEALTHY_PS), **QUICK}
+    result = cli.run("restore", BACKUP, "--only", "airflow", "--yes", **fake)
+    assert result.returncode == 1
+    assert (
+        "apache/airflow: the backup has apache/airflow:3.3.2-python3.13, this checkout "
+        "apache/airflow:3.4.0-python3.13"
+    ) in result.stderr
+    assert "metabase/metabase" not in result.stderr
+    for only in ("metabase", "warehouse"):
+        assert cli.run("restore", BACKUP, "--only", only, "--yes", **fake).returncode == 0
+
+
+def test_only_the_images_of_the_restored_databases_count_and_a_new_digest_does_not(cli, tmp_path):
+    ready_to_restore(
+        cli,
+        metabase="metabase/metabase:v0.65.0@sha256:ddd",
+        postgres="postgres:18.6-trixie@sha256:rebuilt",
+    )
+    result = cli.run(
+        "restore",
+        BACKUP,
+        "--only",
+        "warehouse",
+        "--yes",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "other images" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("postgres", "needs_force"),
+    [
+        # A minor update, such as Renovate brings: pg_restore reads the dump.
+        ("postgres:18.7-trixie@sha256:eee", False),
+        # A new major version is an upgrade of its own.
+        ("postgres:19.0-trixie@sha256:fff", True),
+    ],
+)
+def test_postgres_counts_by_its_major_version(cli, tmp_path, postgres, needs_force):
+    ready_to_restore(cli, postgres=postgres)
+    result = cli.run(
+        "restore",
+        BACKUP,
+        "--only",
+        "warehouse",
+        "--yes",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        **QUICK,
+    )
+    assert (result.returncode == 1) is needs_force, result.stderr
+    if needs_force:
+        assert "postgres: the backup has postgres:18, this checkout postgres:19" in result.stderr
+
+
+def test_a_backup_that_names_no_images_restores_with_a_warning(cli, tmp_path):
+    cli.run("init")
+    checkout_with_images(cli)
+    make_backup(cli, images="")
+    result = cli.run(
+        "restore", BACKUP, "--yes", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    assert "does not record the images" in result.stderr
+
+
+def test_a_failed_pg_restore_stops_before_the_stack_starts(cli, tmp_path):
+    ready_to_restore(cli)
+    result = cli.run(
+        "restore",
+        BACKUP,
+        "--yes",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_EXEC_FAIL="pg_restore",
+    )
+    assert result.returncode == 1
+    assert "pg_restore failed for warehouse" in result.stderr
+    assert "Already restored" not in result.stderr
+    assert "do not start the stack" in result.stderr
+    assert "compose up --detach --remove-orphans" not in cli.docker_calls()
+
+
+def test_a_failed_restore_names_the_databases_that_it_restored_before(cli, tmp_path):
+    ready_to_restore(cli)
+    result = cli.run(
+        "restore",
+        BACKUP,
+        "--yes",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_EXEC_FAIL="--exit-on-error /tmp/agoranomos-restore-airflow.dump",
+    )
+    assert result.returncode == 1
+    assert "pg_restore failed for airflow." in result.stderr
+    assert "Already restored from 20261011T030012Z: warehouse." in result.stderr
+    assert "compose up --detach --remove-orphans" not in cli.docker_calls()
+
+
+def test_a_dump_that_cannot_be_copied_into_the_container_leaves_the_database_as_it_was(
+    cli, tmp_path
+):
+    ready_to_restore(cli)
+    result = cli.run(
+        "restore",
+        BACKUP,
+        "--yes",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_EXEC_FAIL="sh",
+    )
+    assert result.returncode == 1
+    assert "could not copy warehouse.dump into warehouse-db, and warehouse is as it was." in (
+        result.stderr
+    )
+    assert not any(" pg_restore " in f" {call} " for call in cli.docker_calls())
+
+
+def test_a_failed_analyze_warns_and_the_restore_goes_on(cli, tmp_path):
+    ready_to_restore(cli)
+    result = cli.run(
+        "restore",
+        BACKUP,
+        "--only",
+        "metabase",
+        "--yes",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_EXEC_FAIL="vacuumdb",
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "ANALYZE of metabase failed: it is restored" in result.stderr
+    assert "compose up --detach --remove-orphans" in cli.docker_calls()
+
+
+def test_restore_never_stops_the_databases_or_everything_when_nothing_else_is_active(cli, tmp_path):
+    # docker compose stop with no service stops them all, the databases among them.
+    ready_to_restore(cli)
+    result = cli.run(
+        "restore",
+        BACKUP,
+        "--only",
+        "metabase",
+        "--yes",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_SERVICES="warehouse-db platform-db",
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not any(call.rstrip() == "compose stop" for call in cli.docker_calls())
+
+
+def test_restore_outside_a_terminal_needs_yes(cli, tmp_path):
+    ready_to_restore(cli)
+    result = cli.run("restore", BACKUP, FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert result.returncode == 1
+    assert "pass --yes" in result.stderr
+    assert compose_calls(cli) == []
+
+
+@pytest.mark.parametrize("answer", ["no", "", "y", "YES", "yes please"])
+def test_restore_on_a_terminal_changes_nothing_unless_the_answer_is_yes(cli, tmp_path, answer):
+    ready_to_restore(cli)
+    result = cli.run_asked(answer, "restore", BACKUP, FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert result.returncode == 1
+    assert f"Restore warehouse airflow metabase from {BACKUP}?" in result.stdout
+    assert "Type yes to go on" in result.stdout
+    assert "nothing was changed" in result.stderr
+    assert not any(
+        call.startswith(("compose stop", "compose exec", "compose up"))
+        for call in cli.docker_calls()
+    )
+
+
+def test_restore_on_a_terminal_goes_on_after_yes(cli, tmp_path):
+    ready_to_restore(cli)
+    result = cli.run_asked(
+        "yes", "restore", BACKUP, FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    assert f"Restored warehouse airflow metabase from {BACKUP}" in result.stdout
+    # The question comes after the checks of the backup, so that a damaged one is not asked about.
+    order = calls_in_order(cli, "compose run --rm --no-deps -T backup verify", "compose stop ")
+    assert order == sorted(order)
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        ((), "usage: ./agoranomos restore <backup>"),
+        (("../etc", "--yes"), "not the name of a backup"),
+        (("20261011", "--yes"), "not the name of a backup"),
+        (("20261012T030012Z", "--yes"), "there is no complete backup 20261012T030012Z"),
+        ((BACKUP, "--only", "warehouse,ops", "--yes"), "not a database of a backup: ops"),
+        # An empty list must not mean every database.
+        ((BACKUP, "--only", "", "--yes"), "--only needs the databases"),
+        ((BACKUP, "--only", ",", "--yes"), "--only needs the databases"),
+        ((BACKUP, "--only"), "--only needs the databases"),
+        ((BACKUP, BACKUP, "--yes"), "restore takes one backup"),
+        ((BACKUP, "--now"), "unknown option of restore: --now"),
+    ],
+)
+def test_restore_refuses_what_it_cannot_restore_before_it_calls_docker(cli, args, message):
+    ready_to_restore(cli)
+    result = cli.run("restore", *args)
+    assert result.returncode == 1
+    assert message in result.stderr
+    assert compose_calls(cli) == []
+
+
+def test_restore_needs_the_env_of_the_deployment_that_took_the_backup(cli):
+    cli.run("init")
+    checkout_with_images(cli)
+    make_backup(cli)
+    cli.env_path.unlink()
+    result = cli.run("restore", BACKUP, "--yes")
+    assert result.returncode == 1
+    assert "there is no .env" in result.stderr
+    assert compose_calls(cli) == []
+
+
+def test_restore_refuses_to_run_as_root_before_it_calls_docker(cli):
+    ready_to_restore(cli)
+    set_env(cli, AGORANOMOS_UID="0")
+    result = cli.run("restore", BACKUP, "--yes")
+    assert result.returncode == 1
+    assert "AGORANOMOS_UID in .env is 0" in result.stderr
+    assert compose_calls(cli) == []
+
+
+def test_restore_reads_the_backups_folder_that_env_names(cli, tmp_path):
+    ready_to_restore(cli)
+    elsewhere = tmp_path / "elsewhere"
+    (cli.root / "backups").rename(elsewhere)
+    set_env(cli, AGORANOMOS_BACKUP_DIR=str(elsewhere))
+    result = cli.run(
+        "restore", BACKUP, "--yes", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK
+    )
+    assert result.returncode == 0, result.stderr

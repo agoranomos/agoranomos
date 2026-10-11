@@ -230,15 +230,39 @@ class Cli:
     def run(
         self, *args: str, cwd: Path | None = None, **fake: str
     ) -> subprocess.CompletedProcess[str]:
+        # The input is closed, so that a script under test never reads the terminal of the person
+        # who runs pytest with -s: restore asks on a terminal.
         return subprocess.run(
             [str(self.root / "agoranomos"), *args],
             cwd=cwd or self.root,
             env=self.environment(fake),
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=60,
             check=False,
         )
+
+    def run_asked(self, answer: str, *args: str, **fake: str) -> subprocess.CompletedProcess[str]:
+        """Like run, with a pseudo-terminal as the input of the script, on which the person has
+        typed answer and Enter before the script asks: a command that asks on a terminal, such as
+        restore, then reads it."""
+        terminal, script_side = pty.openpty()
+        try:
+            os.write(terminal, f"{answer}\n".encode())
+            return subprocess.run(
+                [str(self.root / "agoranomos"), *args],
+                cwd=self.root,
+                env=self.environment(fake),
+                stdin=script_side,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        finally:
+            os.close(terminal)
+            os.close(script_side)
 
     def run_on_terminal(
         self, *args: str, streams: tuple[str, ...] = ("stdout",), **fake: str
