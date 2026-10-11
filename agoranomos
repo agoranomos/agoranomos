@@ -172,7 +172,10 @@ print_banner() {
 # (compose_with_profile). The one exception is AGORANOMOS_IMAGES, the images of the checkout, which
 # the backup service writes into each manifest (ADR-0020): a plain docker compose up gives that
 # service an empty list, so the next ./agoranomos up recreates it, and its backups record no
-# images until then.
+# images until then. A call of exec or run passes the standard input of this script to the command in
+# the container, also with -T, so a script that is fed to the shell (ssh host bash -s) would lose
+# its next lines to it: every such call reads /dev/null, but the one that copies a dump into a
+# container, which reads the file.
 compose() {
   (
     cd "$ROOT" || exit 1
@@ -1290,7 +1293,7 @@ image_tags() {
 # database, so a failure to remove it is a warning with the command to do it by hand.
 restore_remove_dump() {
   if [ -n "$restore_dump" ]; then
-    compose exec -T "$restore_dump_service" rm -f "$restore_dump" ||
+    compose exec -T "$restore_dump_service" rm -f "$restore_dump" < /dev/null ||
       warn "could not remove $restore_dump in $restore_dump_service, which holds a copy of a database: remove it by hand with docker compose exec $restore_dump_service rm -f $restore_dump"
     restore_dump=""
   fi
@@ -1512,7 +1515,7 @@ Check out the release that took it and restore there, or pass --force if you kno
   restore_phase=stopped
   compose up --detach --wait warehouse-db platform-db ||
     die "the databases did not start: see ./agoranomos logs warehouse-db and ./agoranomos logs platform-db"
-  compose run --rm --no-deps -T db-init || die "db-init failed: the lines above say why"
+  compose run --rm --no-deps -T db-init < /dev/null || die "db-init failed: the lines above say why"
   restore_phase=restoring
   for database in $databases; do
     service=$(database_service "$database")
@@ -1525,13 +1528,13 @@ Check out the release that took it and restore there, or pass --force if you kno
       die "could not copy $database.dump into $service, and $database is as it was"
     fi
     restore_unsure=$database
-    if ! compose exec -T "$service" pg_restore --username=postgres --dbname=postgres --clean --if-exists --create --exit-on-error "$dump"; then
+    if ! compose exec -T "$service" pg_restore --username=postgres --dbname=postgres --clean --if-exists --create --exit-on-error "$dump" < /dev/null; then
       die "pg_restore failed for $database. If it says that the database is being accessed by other users, $database was not changed: stop what is connected and run restore again. After another error $database can be incomplete"
     fi
     restore_remove_dump
     restore_unsure=""
     restored="${restored:+$restored }$database"
-    compose exec -T "$service" vacuumdb --username=postgres --analyze-only --quiet --dbname="$database" ||
+    compose exec -T "$service" vacuumdb --username=postgres --analyze-only --quiet --dbname="$database" < /dev/null ||
       warn "ANALYZE of $database failed: it is restored, and its first queries may be slow"
   done
   restore_phase=restored
@@ -1577,7 +1580,7 @@ cmd_metadata() {
   # give is a check that could not run.
   code=0
   compose run --rm --no-deps -T metabase-init \
-    python /opt/agoranomos/metabase/metabase_init.py diff || code=$?
+    python /opt/agoranomos/metabase/metabase_init.py diff < /dev/null || code=$?
   case "$code" in
     0 | 2) exit "$code" ;;
     3) exit 1 ;;

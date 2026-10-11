@@ -2994,6 +2994,22 @@ def test_metadata_diff_runs_the_dry_run_of_metabase_init_and_passes_on_its_answe
     assert DIFF in cli.docker_calls()
 
 
+def test_metadata_diff_leaves_standard_input_alone(cli, tmp_path):
+    # The dry run is a check that a script runs among other commands: it must not take their input.
+    cli.run("init")
+    result = cli.run(
+        "metadata",
+        "diff",
+        stdin=f"{REST_OF_THE_SCRIPT}\n",
+        FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP),
+        FAKE_READ_STDIN="1",
+    )
+    assert result.returncode == 0, result.stderr
+    [(call, received)] = cli.stdin_reads()
+    assert "metabase-init" in call
+    assert received == ""
+
+
 @pytest.mark.parametrize("compose_code", [1, 125])
 def test_metadata_diff_says_when_compose_itself_fails(cli, tmp_path, compose_code):
     # docker compose run exits with 1 when it fails itself, such as when Docker stops after the
@@ -3978,6 +3994,30 @@ def test_the_check_of_a_backup_leaves_standard_input_alone(cli, tmp_path, in_the
         read for read in reads if "cat > /tmp/agoranomos-restore-warehouse" in read[0]
     ]
     assert dump == "a dump of warehouse"
+
+
+def test_restore_leaves_standard_input_alone_but_for_the_copy_of_a_dump(cli, tmp_path):
+    # Every call of docker in a container reads the input of the script unless the script gives it
+    # another: the check, db-init, the removal of a dump, pg_restore and vacuumdb alike. The copy
+    # of a dump into the container is the one that is meant to read, and reads the file.
+    ready_to_restore(cli)
+    result = cli.run(
+        "restore",
+        BACKUP,
+        "--yes",
+        stdin=f"{REST_OF_THE_SCRIPT}\n",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_READ_STDIN="1",
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    reads = cli.stdin_reads()
+    calls = " | ".join(call for call, _received in reads)
+    for word in (" verify ", " db-init", " rm -f ", " pg_restore ", " vacuumdb "):
+        assert word in f" {calls}", word
+    assert [call for call, received in reads if REST_OF_THE_SCRIPT in received] == []
+    dumps = [received for call, received in reads if "cat > /tmp/agoranomos-restore-" in call]
+    assert dumps == ["a dump of warehouse", "a dump of airflow", "a dump of metabase"]
 
 
 def test_a_backup_that_fails_its_check_in_the_service_changes_nothing(cli, tmp_path):
