@@ -566,3 +566,61 @@ def test_backup_user_problem_names_root_and_anything_that_is_not_a_number(
     result = run_with_script_functions(shell, "backup_user_problem", cwd=tmp_path)
     assert result.returncode == 0, result.stderr
     assert (problem in result.stdout) if problem else (result.stdout == "")
+
+
+REFS = (
+    "apache/airflow:3.3.2-python3.13@sha256:bbb metabase/metabase:v0.64.1@sha256:ccc "
+    "postgres:18.6-trixie@sha256:aaa postgres:18.6-trixie@sha256:zzz valkey/valkey:9.1.2-trixie"
+)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("refs", "repository", "tags"),
+    [
+        # The tag without the digest, which changes with every rebuild of the same version.
+        (REFS, "apache/airflow", ["apache/airflow:3.3.2-python3.13"]),
+        (REFS, "metabase/metabase", ["metabase/metabase:v0.64.1"]),
+        # PostgreSQL by its major version, whatever the number of images that name it.
+        (REFS, "postgres", ["postgres:18"]),
+        ("postgres:18.7-trixie@sha256:eee", "postgres", ["postgres:18"]),
+        ("postgres:18.7-trixie", "postgres", ["postgres:18"]),
+        ("postgres:17.2-trixie postgres:18.6-trixie", "postgres", ["postgres:17", "postgres:18"]),
+        ("postgres:9.6.24", "postgres", ["postgres:9"]),
+        # An image that the list does not hold, and a name that only starts like the repository.
+        (REFS, "caddy", []),
+        ("postgres-exporter:1.0 mypostgres:18.6 postgres:18.6", "postgres", ["postgres:18"]),
+        ("", "postgres", []),
+    ],
+    ids=repr,
+)
+def test_image_tags_name_the_version_of_a_repository_without_its_digest(
+    shell, tmp_path, refs, repository, tags
+):
+    result = run_with_script_functions(
+        shell, 'image_tags "$1" "$2"', refs, repository, cwd=tmp_path
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == tags
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("database", "service", "images"),
+    [
+        ("warehouse", "warehouse-db", "postgres"),
+        ("airflow", "platform-db", "postgres apache/airflow"),
+        ("metabase", "platform-db", "postgres metabase/metabase"),
+    ],
+)
+def test_a_database_belongs_to_a_service_and_depends_on_the_images_that_read_it(
+    shell, tmp_path, database, service, images
+):
+    result = run_with_script_functions(
+        shell,
+        'printf "%s|%s" "$(database_service "$1")" "$(database_images "$1")"',
+        database,
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"{service}|{images}"
