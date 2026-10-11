@@ -478,6 +478,26 @@ def test_init_with_server_turns_server_mode_on(cli):
     assert cli.read_env()["METABASE_PASSWORD_COMPLEXITY"] == "strong"
 
 
+def test_init_with_server_turns_ipv6_on_and_a_plain_init_does_not(cli):
+    # IPv6 on the network of the stack comes with server mode only (ADR-0023): the setting is not
+    # in .env.example, as AGORANOMOS_SITE_URL is not.
+    assert cli.run("init").returncode == 0
+    assert "AGORANOMOS_IPV6" not in cli.read_env()
+    example = (cli.root / ".env.example").read_text(encoding="utf-8")
+    assert not re.search(r"^AGORANOMOS_IPV6=", example, flags=re.M)
+    assert cli.run("init", "--server", "bi.example.com").returncode == 0
+    assert cli.read_env()["AGORANOMOS_IPV6"] == "true"
+    assert cli.run("init").returncode == 0
+    assert cli.read_env()["AGORANOMOS_IPV6"] == "true"
+
+
+def test_init_with_server_keeps_an_ipv6_setting_that_is_set(cli):
+    assert cli.run("init").returncode == 0
+    add_env(cli, AGORANOMOS_IPV6="false")
+    assert cli.run("init", "--server", "bi.example.com").returncode == 0
+    assert cli.read_env()["AGORANOMOS_IPV6"] == "false"
+
+
 def test_init_puts_in_the_ids_of_its_user_and_keeps_ids_that_are_set(cli):
     cli.run("init")
     env = cli.read_env()
@@ -655,6 +675,33 @@ def test_preflight_in_local_mode_keeps_docker_25(cli):
     cli.run("init")
     result = cli.run("preflight", FAKE_SERVER_VERSION="27.5.1")
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("value", ["yes", "1", "True", "on", "maybe"])
+def test_preflight_stops_on_an_ipv6_setting_that_is_not_true_or_false(cli, value):
+    # Compose reads the setting as a boolean and stops on anything else, without a name.
+    cli.run("init")
+    add_env(cli, AGORANOMOS_IPV6=value)
+    result = cli.run("preflight")
+    assert result.returncode == 1
+    assert "AGORANOMOS_IPV6 in .env must be true or false" in result.stderr
+
+
+@pytest.mark.parametrize("value", ["true", "false"])
+def test_preflight_accepts_true_and_false_for_ipv6(cli, value):
+    cli.run("init")
+    add_env(cli, AGORANOMOS_IPV6=value)
+    assert cli.run("preflight").returncode == 0
+
+
+@pytest.mark.parametrize(("version", "outcome"), [("27.0.0", "stop"), ("27.0.1", "pass")])
+def test_preflight_needs_docker_27_0_1_for_ipv6_in_local_mode(cli, version, outcome):
+    # Before 27.0.1, Docker does not give an IPv6 network a subnet of its own (ADR-0023). Server
+    # mode needs 28.0.0 anyway; this is for a person who turns IPv6 on in local mode.
+    cli.run("init")
+    add_env(cli, AGORANOMOS_IPV6="true")
+    result = cli.run("preflight", FAKE_SERVER_VERSION=version)
+    check_limit(result, outcome, "27.0.1")
 
 
 @pytest.mark.parametrize(
@@ -1673,6 +1720,13 @@ def set_env(cli, **values):
     cli.env_path.write_text(text, encoding="utf-8")
 
 
+def add_env(cli, **values):
+    """Add settings that .env.example does not list, as a person writes them into .env."""
+    with cli.env_path.open("a", encoding="utf-8") as env:
+        for key, value in values.items():
+            env.write(f"{key}={value}\n")
+
+
 def compose_calls(cli):
     """The docker compose calls that go through the script's compose function: all but version."""
     return [
@@ -2111,6 +2165,79 @@ def test_up_still_stops_for_another_service_that_has_exited_with_the_backup_down
     result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps), **QUICK)
     assert result.returncode == 1
     assert "platform-db failed: see ./agoranomos logs platform-db" in result.stderr
+
+
+NETWORK_LOOKUP = "network inspect --format {{.EnableIPv6}} agoranomos_default"
+STOP_FOR_THE_NETWORK = "compose down --remove-orphans"
+UP_CALL = "compose up --detach --remove-orphans"
+
+
+def up_with_a_network(cli, tmp_path, wanted, actual, **fake):
+    """Run up with AGORANOMOS_IPV6 in .env as wanted (None: not set), on a network that Docker
+    made with IPv6 as actual (true or false; "" for no network yet)."""
+    cli.run("init")
+    if wanted is not None:
+        add_env(cli, AGORANOMOS_IPV6=wanted)
+    if actual:
+        fake["FAKE_NETWORK_IPV6"] = actual
+    return cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK, **fake)
+
+
+@pytest.mark.parametrize(
+    ("wanted", "actual", "state"),
+    [("true", "false", "on"), ("false", "true", "off"), (None, "true", "off")],
+    ids=["on", "off", "default-off"],
+)
+def test_up_stops_the_stack_first_when_the_network_has_the_other_ipv6_setting(
+    cli, tmp_path, wanted, actual, state
+):
+    # Compose recreates the network, but keeps the containers and joins them to it without the
+    # names of their services, so metabase-init cannot find Metabase (ADR-0023): the stack goes
+    # down first, and up makes the network and the containers together.
+    result = up_with_a_network(cli, tmp_path, wanted, actual)
+    assert result.returncode == 0, result.stderr
+    assert (
+        f"The network of the stack changes (IPv6 {state}): "
+        "stopping the stack first, the data stays."
+    ) in result.stdout.splitlines()
+    calls = cli.docker_calls()
+    assert calls.count(STOP_FOR_THE_NETWORK) == 1
+    assert calls.index(NETWORK_LOOKUP) < calls.index(STOP_FOR_THE_NETWORK) < calls.index(UP_CALL)
+    # The data stays: no volume goes, and the backups folder is not touched.
+    assert not any(" -v" in call or "--volumes" in call for call in calls)
+    assert (cli.root / "backups").is_dir()
+
+
+@pytest.mark.parametrize(
+    ("wanted", "actual"),
+    [("true", "true"), ("false", "false"), (None, "false"), ("true", ""), (None, "")],
+    ids=["on-on", "off-off", "default-off", "no-network-on", "no-network-default"],
+)
+def test_up_leaves_a_network_alone_that_has_the_ipv6_setting_or_does_not_exist(
+    cli, tmp_path, wanted, actual
+):
+    result = up_with_a_network(cli, tmp_path, wanted, actual)
+    assert result.returncode == 0, result.stderr
+    calls = cli.docker_calls()
+    assert NETWORK_LOOKUP in calls
+    assert STOP_FOR_THE_NETWORK not in calls
+    assert "The network of the stack changes" not in result.stdout
+    assert UP_CALL in calls
+
+
+def test_up_looks_for_the_network_of_the_project_that_env_names(cli, tmp_path):
+    cli.run("init")
+    set_env(cli, COMPOSE_PROJECT_NAME="my-stack_2")
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
+    assert result.returncode == 0, result.stderr
+    assert "network inspect --format {{.EnableIPv6}} my-stack_2_default" in cli.docker_calls()
+
+
+def test_up_does_not_start_when_the_stack_cannot_be_stopped_for_the_network(cli, tmp_path):
+    result = up_with_a_network(cli, tmp_path, "true", "false", FAKE_COMPOSE_FAIL="down")
+    assert result.returncode == 1
+    assert "could not stop the stack to change its network" in result.stderr
+    assert UP_CALL not in cli.docker_calls()
 
 
 def test_up_starts_the_stack_and_waits_until_healthy(cli, tmp_path):

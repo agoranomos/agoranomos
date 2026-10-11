@@ -534,6 +534,9 @@ cmd_init() {
     [ -n "$(env_get METABASE_PASSWORD_COMPLEXITY)" ] || env_set METABASE_PASSWORD_COMPLEXITY strong-enough
     [ -n "$(env_get METABASE_SESSION_TIMEOUT)" ] ||
       env_set METABASE_SESSION_TIMEOUT "'{\"amount\":24,\"unit\":\"hours\"}'"
+    # IPv6 on the network of the stack, so that Metabase sees the address of each IPv6 client
+    # (ADR-0023). A value that a person set stays.
+    [ -n "$(env_get AGORANOMOS_IPV6)" ] || env_set AGORANOMOS_IPV6 true
     say "Server mode is on: Metabase is to be at https://$server_domain, with a backup every day at $(setting BACKUP_TIME 03:00) $(setting BACKUP_TZ UTC) into $(backups_path). Point the A record of $server_domain at this server, then run ./agoranomos up."
     say "If this Metabase was set up before this release, its public links stay as they were: check Admin > Settings > Public sharing."
     if ! public_name "$server_domain" && [ "$(setting AGORANOMOS_TLS acme)" != internal ]; then
@@ -671,6 +674,18 @@ EOF
   if ! version_ge "$server_version" "$MIN_DOCKER_VERSION"; then
     problem "Docker Engine $server_version is older than $MIN_DOCKER_VERSION: update Docker"
   fi
+  # IPv6 on the network of the stack (ADR-0023): Compose reads the setting as a boolean. Docker
+  # Engine 27.0.1 is the first that gives an IPv6 network a subnet of its own when none is set
+  # (its release notes); server mode needs 28.0.0 anyway.
+  case "$(setting AGORANOMOS_IPV6 false)" in
+    false) ;;
+    true)
+      if ! version_ge "$server_version" 27.0.1; then
+        problem "AGORANOMOS_IPV6=true in .env needs Docker Engine 27.0.1 or newer, which gives the IPv6 network a subnet of its own: Docker Engine $server_version is older. Update Docker, or set AGORANOMOS_IPV6=false"
+      fi
+      ;;
+    *) problem "AGORANOMOS_IPV6 in .env must be true or false" ;;
+  esac
   # Server mode publishes the ports of the proxy on every address of the host, and the tunnels use
   # ports on 127.0.0.1, which Docker before 28.0.0 lets other hosts of the same network segment
   # reach (Docker's documentation, as of October 2026).
@@ -1078,6 +1093,25 @@ start_stack() {
   check_certificate
 }
 
+# The network default of the stack has IPv6 when AGORANOMOS_IPV6 says so (ADR-0023). Docker Compose
+# recreates a network whose options changed, but it keeps the containers that were on it and joins
+# them to the new network without the names of their services (checked with Docker Engine 29.8.1
+# and Compose 5.5.1 of Docker Desktop, October 2026): metabase-init then cannot find Metabase, and
+# up waits ten minutes and fails. So when the network that exists has the other setting, the stack
+# goes down first, without its volumes, and up makes the network and the containers together.
+# COMPOSE_PROJECT_NAME is a valid project name as it stands, or Compose stops on it.
+stop_for_changed_network() {
+  network_ipv6=$(docker network inspect --format '{{.EnableIPv6}}' "$(setting COMPOSE_PROJECT_NAME agoranomos)_default" 2> /dev/null) ||
+    return 0
+  wanted_ipv6=$(setting AGORANOMOS_IPV6 false)
+  case "$network_ipv6" in true | false) ;; *) return 0 ;; esac
+  [ "$network_ipv6" != "$wanted_ipv6" ] || return 0
+  if [ "$wanted_ipv6" = true ]; then ipv6_state=on; else ipv6_state=off; fi
+  say "The network of the stack changes (IPv6 $ipv6_state): stopping the stack first, the data stays."
+  compose down --remove-orphans ||
+    die "docker compose could not stop the stack to change its network; the error above names the cause"
+}
+
 cmd_up() {
   # Check the options before init writes .env: an option that preflight would refuse must not leave
   # a .env behind.
@@ -1091,6 +1125,7 @@ cmd_up() {
   cmd_init
   cmd_preflight "$@"
   remove_leftover_services
+  stop_for_changed_network
   say "Starting the stack. The first start builds the Airflow image, which takes a few minutes..."
   start_stack
   # Only demo-init failed: Airflow and Metabase run, and its log names what to look at in them. up

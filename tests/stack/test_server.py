@@ -15,6 +15,7 @@ from stack_helpers import (
     NamesOnly,
     compose,
     containers,
+    docker,
     http_json,
     plain_request,
     process_uids,
@@ -26,6 +27,18 @@ from stack_helpers import (
 pytestmark = pytest.mark.skipif(not SERVER, reason="server mode is off: .env selects no server")
 
 WAREHOUSE_NAME = "Agoranomos warehouse"
+
+
+def test_server_mode_runs_the_network_of_the_proxy_with_ipv6(env):
+    # init --server sets AGORANOMOS_IPV6=true, so that Metabase sees the address of each IPv6
+    # client as it sees that of each IPv4 client (ADR-0023). A deployment that set it to false on
+    # purpose is not tested here.
+    if env.get("AGORANOMOS_IPV6") == "false":
+        pytest.skip("AGORANOMOS_IPV6=false in .env")
+    assert env.get("AGORANOMOS_IPV6") == "true"
+    network = f"{env.get('COMPOSE_PROJECT_NAME') or 'agoranomos'}_default"
+    [details] = json.loads(docker("network", "inspect", network).stdout)
+    assert details["EnableIPv6"] is True
 
 
 def test_http_redirects_to_https_with_the_path_and_the_query(env):
