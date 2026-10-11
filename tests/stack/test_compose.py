@@ -144,6 +144,7 @@ def test_the_network_that_docker_made_has_the_ipv6_that_env_asks_for(env):
     asked = (env.get("AGORANOMOS_IPV6") or "false") == "true"
     [default] = json.loads(docker("network", "inspect", f"{project}_default").stdout)
     assert default["EnableIPv6"] is asked
+    assert default["Labels"]["dev.agoranomos.ipv6"] == str(asked).lower()
     subnets = [entry["Subnet"] for entry in default["IPAM"]["Config"]]
     assert any(":" in subnet for subnet in subnets) is asked
     [data] = json.loads(docker("network", "inspect", f"{project}_data").stdout)

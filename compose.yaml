@@ -688,9 +688,15 @@ networks:
   # Metabase on failed sign-ins from one address counts all IPv6 clients together (ADR-0023). No
   # subnet is set: Docker Engine 27.0.1 and newer, and server mode needs 28.0, picks a Unique
   # Local Address subnet of its own. Local mode keeps IPv4 only: Metabase is on 127.0.0.1 there.
-  # ./agoranomos up stops the stack first when this setting changes the network.
+  # Compose recreates this network when anything in its definition changes, and then joins the
+  # containers that it keeps to it without the aliases of their services, so ./agoranomos up stops
+  # the stack first when the network that exists lacks the label below or has another value than
+  # AGORANOMOS_IPV6. A later change to the definition of this network needs a new label of its
+  # own, and a check of it in the script.
   default:
     enable_ipv6: ${AGORANOMOS_IPV6:-false}
+    labels:
+      dev.agoranomos.ipv6: "${AGORANOMOS_IPV6:-false}"
   # The databases have no route to the internet; with CeleryExecutor, the broker joins them here.
   data:
     internal: true

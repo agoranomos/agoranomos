@@ -1096,19 +1096,24 @@ start_stack() {
   check_certificate
 }
 
-# The network default of the stack has IPv6 when AGORANOMOS_IPV6 says so (ADR-0023). Docker Compose
-# recreates a network whose options changed, but it keeps the containers that were on it and joins
-# them to the new network without the names of their services (checked with Docker Engine 29.8.1
-# and Compose 5.5.1 of Docker Desktop, October 2026): metabase-init then cannot find Metabase, and
-# up waits ten minutes and fails. So when the network that exists has the other setting, the stack
-# goes down first, without its volumes, and up makes the network and the containers together.
-# COMPOSE_PROJECT_NAME is a valid project name as it stands, or Compose stops on it.
+# The network default of the stack has IPv6 when AGORANOMOS_IPV6 says so, and the label
+# dev.agoranomos.ipv6 of compose.yaml carries the same value (ADR-0023). Docker Compose recreates a
+# network when anything in its definition changes, also when the network was an implicit one and a
+# release declares it, and then it reconnects the containers that it keeps without the aliases of
+# their services (execConnectNetwork in pkg/compose/executor_ops.go, the same in Compose 5.5.1 and
+# 5.6.0, checked with Compose 5.5.1 of Docker Desktop, October 2026): metabase-init, which is on
+# this network only, cannot find Metabase then, and up waits ten minutes and fails. So when the
+# network that exists has the other IPv6 setting, or lacks the label (it was made by an earlier
+# release) or has another value in it, the stack goes down first, without its volumes, and up makes
+# the network and the containers together. COMPOSE_PROJECT_NAME is a valid project name as it
+# stands, or Compose stops on it.
 stop_for_changed_network() {
-  network_ipv6=$(docker network inspect --format '{{.EnableIPv6}}' "$(setting COMPOSE_PROJECT_NAME agoranomos)_default" 2> /dev/null) ||
+  network_state=$(docker network inspect --format '{{.EnableIPv6}}|{{index .Labels "dev.agoranomos.ipv6"}}' "$(setting COMPOSE_PROJECT_NAME agoranomos)_default" 2> /dev/null) ||
     return 0
+  network_ipv6=${network_state%%|*} network_label=${network_state#*|}
   wanted_ipv6=$(setting AGORANOMOS_IPV6 false)
   case "$network_ipv6" in true | false) ;; *) return 0 ;; esac
-  [ "$network_ipv6" != "$wanted_ipv6" ] || return 0
+  { [ "$network_ipv6" != "$wanted_ipv6" ] || [ "$network_label" != "$wanted_ipv6" ]; } || return 0
   if [ "$wanted_ipv6" = true ]; then ipv6_state=on; else ipv6_state=off; fi
   say "The network of the stack changes (IPv6 $ipv6_state): stopping the stack first, the data stays."
   compose down --remove-orphans ||

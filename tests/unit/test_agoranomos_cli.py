@@ -2167,45 +2167,91 @@ def test_up_still_stops_for_another_service_that_has_exited_with_the_backup_down
     assert "platform-db failed: see ./agoranomos logs platform-db" in result.stderr
 
 
-NETWORK_LOOKUP = "network inspect --format {{.EnableIPv6}} agoranomos_default"
+NETWORK_LOOKUP = (
+    'network inspect --format {{.EnableIPv6}}|{{index .Labels "dev.agoranomos.ipv6"}} '
+    "agoranomos_default"
+)
 STOP_FOR_THE_NETWORK = "compose down --remove-orphans"
 UP_CALL = "compose up --detach --remove-orphans"
+STOP_LINE = (
+    "The network of the stack changes (IPv6 {state}): stopping the stack first, the data stays."
+)
 
 
-def up_with_a_network(cli, tmp_path, wanted, actual, **fake):
+def up_with_a_network(cli, tmp_path, wanted, actual, label=None, **fake):
     """Run up with AGORANOMOS_IPV6 in .env as wanted (None: not set), on a network that Docker
-    made with IPv6 as actual (true or false; "" for no network yet)."""
+    made with IPv6 as actual (true or false; "" for no network yet) and with the label of the
+    project as label (None: the same as actual; "": no label, as on a network that an earlier
+    release made)."""
     cli.run("init")
     if wanted is not None:
         add_env(cli, AGORANOMOS_IPV6=wanted)
     if actual:
         fake["FAKE_NETWORK_IPV6"] = actual
+        fake["FAKE_NETWORK_LABEL"] = actual if label is None else label
     return cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK, **fake)
 
 
 @pytest.mark.parametrize(
-    ("wanted", "actual", "state"),
-    [("true", "false", "on"), ("false", "true", "off"), (None, "true", "off")],
-    ids=["on", "off", "default-off"],
+    ("wanted", "actual", "label", "state"),
+    [
+        ("true", "false", "false", "on"),
+        ("false", "true", "true", "off"),
+        (None, "true", "true", "off"),
+        # The network was made by a release that did not declare it, or by one that did with
+        # another label: Compose recreates it when this release declares it, and loses the aliases
+        # of the containers (ADR-0023), whatever the setting is.
+        (None, "false", "", "off"),
+        ("false", "false", "", "off"),
+        ("true", "true", "", "on"),
+        ("false", "false", "true", "off"),
+        ("true", "true", "false", "on"),
+        # A network that was changed by hand, with the label of the setting and the other IPv6.
+        ("true", "false", "true", "on"),
+        ("false", "true", "false", "off"),
+    ],
+    ids=[
+        "on",
+        "off",
+        "default-off",
+        "no-label-default-off",
+        "no-label-off",
+        "no-label-on",
+        "other-label-off",
+        "other-label-on",
+        "label-fits-ipv6-off-on",
+        "label-fits-ipv6-on-off",
+    ],
 )
-def test_up_stops_the_stack_first_when_the_network_has_the_other_ipv6_setting(
-    cli, tmp_path, wanted, actual, state
+def test_up_stops_the_stack_first_when_the_network_is_not_the_one_the_setting_asks_for(
+    cli, tmp_path, wanted, actual, label, state
 ):
     # Compose recreates the network, but keeps the containers and joins them to it without the
     # names of their services, so metabase-init cannot find Metabase (ADR-0023): the stack goes
     # down first, and up makes the network and the containers together.
-    result = up_with_a_network(cli, tmp_path, wanted, actual)
+    result = up_with_a_network(cli, tmp_path, wanted, actual, label)
     assert result.returncode == 0, result.stderr
-    assert (
-        f"The network of the stack changes (IPv6 {state}): "
-        "stopping the stack first, the data stays."
-    ) in result.stdout.splitlines()
+    assert STOP_LINE.format(state=state) in result.stdout.splitlines()
     calls = cli.docker_calls()
     assert calls.count(STOP_FOR_THE_NETWORK) == 1
     assert calls.index(NETWORK_LOOKUP) < calls.index(STOP_FOR_THE_NETWORK) < calls.index(UP_CALL)
     # The data stays: no volume goes, and the backups folder is not touched.
     assert not any(" -v" in call or "--volumes" in call for call in calls)
     assert (cli.root / "backups").is_dir()
+
+
+def test_up_looks_at_the_network_only_after_preflight_has_passed(cli, tmp_path):
+    # A setting that preflight refuses, such as True, must not stop the stack first and then fail.
+    result = up_with_a_network(cli, tmp_path, "true", "false", "false")
+    assert result.returncode == 0, result.stderr
+    calls = cli.docker_calls()
+    assert next(i for i, call in enumerate(calls) if call.startswith("info --format")) < (
+        calls.index(NETWORK_LOOKUP)
+    )
+    refused = up_with_a_network(cli, tmp_path, "True", "false", "false")
+    assert refused.returncode == 1
+    assert "AGORANOMOS_IPV6 in .env must be true or false" in refused.stderr
+    assert STOP_FOR_THE_NETWORK not in cli.docker_calls()[len(calls) :]
 
 
 @pytest.mark.parametrize(
@@ -2230,7 +2276,7 @@ def test_up_looks_for_the_network_of_the_project_that_env_names(cli, tmp_path):
     set_env(cli, COMPOSE_PROJECT_NAME="my-stack_2")
     result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
     assert result.returncode == 0, result.stderr
-    assert "network inspect --format {{.EnableIPv6}} my-stack_2_default" in cli.docker_calls()
+    assert NETWORK_LOOKUP.replace("agoranomos_default", "my-stack_2_default") in cli.docker_calls()
 
 
 def test_up_does_not_start_when_the_stack_cannot_be_stopped_for_the_network(cli, tmp_path):

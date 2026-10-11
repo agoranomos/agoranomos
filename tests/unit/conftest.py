@@ -9,9 +9,10 @@ call of run or exec that fails, such as verify, db-init or pg_restore, FAKE_COMP
 other call, such as stop, and FAKE_HANG makes a call of run or exec last half a minute, for a test
 that interrupts the script. FAKE_READ_STDIN makes a call of run or exec read all of its standard
 input and log it (the log with the suffix .stdin), as docker compose does for a command in a
-container. FAKE_NETWORK_IPV6 is what docker network inspect prints for the IPv6 setting of the
-network default of the stack: true or false, and nothing for a network that does not exist.
-Cli.stub replaces a stand-in, or adds a tool, for one test.
+container. FAKE_NETWORK_IPV6 and FAKE_NETWORK_LABEL are what docker network inspect prints for the
+IPv6 setting and the label dev.agoranomos.ipv6 of the network default of the stack: true or false,
+and without FAKE_NETWORK_IPV6 the network does not exist. Cli.stub replaces a stand-in, or adds a
+tool, for one test.
 """
 
 from __future__ import annotations
@@ -47,13 +48,19 @@ case "$1" in
     printf '%s\n' "${FAKE_INSPECT:-}"
     ;;
   network)
-    # docker network inspect --format '{{.EnableIPv6}}' <project>_default: FAKE_NETWORK_IPV6 holds
-    # what it prints, true or false, and nothing means that the network does not exist yet.
-    if [ -z "${FAKE_NETWORK_IPV6:-}" ]; then
-      echo "Error response from daemon: network not found" >&2
-      exit 1
-    fi
-    printf '%s\n' "$FAKE_NETWORK_IPV6"
+    case "$2" in
+      inspect)
+        # docker network inspect --format '{{.EnableIPv6}}|{{index .Labels "dev.agoranomos.ipv6"}}'
+        # <project>_default: FAKE_NETWORK_IPV6 is the first part, true or false, and
+        # FAKE_NETWORK_LABEL the second (nothing: the network has no such label). Without
+        # FAKE_NETWORK_IPV6 the network does not exist yet.
+        if [ -z "${FAKE_NETWORK_IPV6:-}" ]; then
+          echo "Error response from daemon: network not found" >&2
+          exit 1
+        fi
+        printf '%s|%s\n' "$FAKE_NETWORK_IPV6" "${FAKE_NETWORK_LABEL-}"
+        ;;
+    esac
     ;;
   compose)
     shift

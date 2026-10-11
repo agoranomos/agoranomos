@@ -640,6 +640,8 @@ def test_the_default_network_has_ipv6_with_server_mode_only(variant, setting, ex
     # picks one.
     networks = rendered_config(variant, setting)["networks"]
     assert networks["default"].get("enable_ipv6", False) is expected
+    # The label that ./agoranomos up compares with the setting, to catch any change of the network.
+    assert networks["default"]["labels"]["dev.agoranomos.ipv6"] == str(expected).lower()
     assert not networks["default"].get("ipam", {}).get("config")
     assert networks["data"].get("enable_ipv6", False) is False
 
