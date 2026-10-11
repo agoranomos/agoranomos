@@ -47,7 +47,7 @@ The limits are set from measurements made on 8 and 10 October 2026, as follows:
 | `metabase-init` | 19 MiB | Mac | 128 MiB, the minimum |
 | `demo-init` | 20 MiB | Mac | 128 MiB, the minimum |
 
-A restore runs inside the memory limit of the database that it restores ([`restore`](command-line.md#restore)). With the demo data, whose dumps are 1.3 MB, the restore of `metabase` into the running stack took `platform-db` to 154 MiB and `warehouse-db` to 50 MiB, and the restore of all three databases on empty volumes took them to 138 MiB and 49 MiB (Mac, 11 October 2026). In CI on amd64 on 11 October 2026, the restore of Metabase into the running stack took `platform-db` to 251 MiB and `warehouse-db` to 61 MiB, and the restore on empty volumes took them to 134 MiB and 54 MiB. All of them are below the limits of 512 MiB and 256 MiB. A restore of a warehouse of several GB takes more memory in `warehouse-db`: raise `WAREHOUSE_DB_MEMORY` before it.
+A restore runs inside the memory limit of the database that it restores ([`restore`](command-line.md#restore)). With the demo data, whose dumps are 1.3 MB, the restore of `metabase` into the running stack took `platform-db` to 154 MiB and `warehouse-db` to 50 MiB, and the restore of all three databases on empty volumes took them to 138 MiB and 49 MiB (Mac, 11 October 2026). In CI on amd64 on 11 October 2026, the restore of Metabase into the running stack took `platform-db` to 251 MiB and `warehouse-db` to 61 MiB, and the restore on empty volumes took them to 134 MiB and 54 MiB; on the Hetzner CAX21 on the same day, 227 MiB and 52 MiB, and 131 MiB and 48 MiB. The restore of all three databases on empty volumes took 91 seconds there. All of them are below the limits of 512 MiB and 256 MiB. A restore of a warehouse of several GB takes more memory in `warehouse-db`: raise `WAREHOUSE_DB_MEMORY` before it.
 
 Each variant has a budget for the sum of its limits, the one-shot jobs included, so that on the recommended memory every service at its limit at the same time fits what Docker reports ([ADR-0022](../adr/0022-budget-the-memory-by-variant-and-mode.md)): 7,680 MiB, 8 GB, for the default variant, and 11,776 MiB, 12 GB, for the CeleryExecutor variant. Today the limits add up to 7,168 MiB in the default variant, which leaves 512 MiB, and to 8,064 MiB in the CeleryExecutor variant. Server mode adds the proxy and the backups, 256 MiB each: 7,680 MiB in the default variant, which is the whole budget, and 8,576 MiB in the CeleryExecutor variant. A unit test checks the sum for the defaults of both variants, in local and in server mode.
 
@@ -177,6 +177,48 @@ CI measures the stack in the same way in every run of the stack tests, on the Gi
 | warehouse-db | 256 MiB | 54 MiB | 123 MiB | 0 | 0 |
 | **Running services, total** | **6656 MiB** | **3772 MiB** | | | |
 
+On 11 October 2026 the stack also ran in server mode on a Hetzner Cloud CAX21, the reference server of the project (arm64, 4 vCPUs, 8 GB; Ubuntu 26.04, Docker Engine 29.9.0, Docker Compose 5.6.0, 7,720 MiB of memory as Docker reports it, no swap), set up as [Deploy on a server](../how-to/deploy-on-a-server.md) says, with a certificate of Let's Encrypt and the default limits of that day. It ran the stack tests, with the memory report around them: the pytest summary of that run was lost, and a repeat run passed (519 passed and 9 skipped, the skips being the CeleryExecutor variant and the opt-in restore tests). It then stood idle for 10 minutes. Every peak stays below its limit, and no process was killed and no container restarted.
+
+### Hetzner CAX21 arm64, server mode, the stack tests (aarch64)
+
+| Service | Limit | Peak | Since start | OOM kills | Restarts |
+|---|---:|---:|---:|---:|---:|
+| airflow-apiserver | 512 MiB | 339 MiB | 383 MiB | 0 | 0 |
+| airflow-dag-processor | 768 MiB | 435 MiB | 591 MiB | 0 | 0 |
+| airflow-init | 384 MiB | n/a | n/a | n/a | 0 |
+| airflow-scheduler | 1280 MiB | 707 MiB | 774 MiB | 0 | 0 |
+| airflow-triggerer | 640 MiB | 431 MiB | 469 MiB | 0 | 0 |
+| backup | 256 MiB | 6 MiB | 23 MiB | 0 | 0 |
+| db-init | 128 MiB | n/a | n/a | n/a | 0 |
+| demo-init | 128 MiB | n/a | n/a | n/a | 0 |
+| metabase | 2176 MiB | 1445 MiB | 1671 MiB | 0 | 0 |
+| metabase-init | 128 MiB | n/a | n/a | n/a | 0 |
+| metadata-export | 256 MiB | n/a | n/a | n/a | 0 |
+| platform-db | 512 MiB | 245 MiB | 290 MiB | 0 | 0 |
+| proxy | 256 MiB | 31 MiB | 37 MiB | 0 | 0 |
+| warehouse-db | 256 MiB | 62 MiB | 100 MiB | 0 | 0 |
+| **Running services, total** | **6656 MiB** | **3702 MiB** | | | |
+
+### Hetzner CAX21 arm64, server mode, idle (aarch64)
+
+| Service | Limit | Peak | Since start | OOM kills | Restarts |
+|---|---:|---:|---:|---:|---:|
+| airflow-apiserver | 512 MiB | 339 MiB | 383 MiB | 0 | 0 |
+| airflow-dag-processor | 768 MiB | 529 MiB | 615 MiB | 0 | 0 |
+| airflow-init | 384 MiB | n/a | n/a | n/a | 0 |
+| airflow-scheduler | 1280 MiB | 455 MiB | 774 MiB | 0 | 0 |
+| airflow-triggerer | 640 MiB | 432 MiB | 469 MiB | 0 | 0 |
+| backup | 256 MiB | 5 MiB | 23 MiB | 0 | 0 |
+| db-init | 128 MiB | n/a | n/a | n/a | 0 |
+| demo-init | 128 MiB | n/a | n/a | n/a | 0 |
+| metabase | 2176 MiB | 1451 MiB | 1671 MiB | 0 | 0 |
+| metabase-init | 128 MiB | n/a | n/a | n/a | 0 |
+| metadata-export | 256 MiB | n/a | n/a | n/a | 0 |
+| platform-db | 512 MiB | 258 MiB | 290 MiB | 0 | 0 |
+| proxy | 256 MiB | 30 MiB | 37 MiB | 0 | 0 |
+| warehouse-db | 256 MiB | 64 MiB | 100 MiB | 0 | 0 |
+| **Running services, total** | **6656 MiB** | **3562 MiB** | | | |
+
 ## When a service reaches its limit
 
 A task that writes 4 GiB of memory, more than `AIRFLOW_TASKS_MEMORY`, ran on the same Mac with the default limits, on 8 October 2026:
@@ -185,11 +227,15 @@ A task that writes 4 GiB of memory, more than `AIRFLOW_TASKS_MEMORY`, ran on the
 - With the LocalExecutor, the same happened in `airflow-scheduler`, in each of five runs: the task failed within a second, and the scheduler went on.
 - Each time, the other services went on, and `agoranomos_selfcheck` succeeded right after.
 
-The kernel stopped the task first because Agoranomos makes each task process the first that the kernel stops at the memory limit, on a host with Yama (below). A plugin of Airflow in the image, `airflow/plugins/agoranomos_oom.py`, writes 1000, the highest value, to `/proc/self/oom_score_adj` of each task process as the task starts, and the child processes of the task, such as dbt, inherit it. The scheduler, the worker and the other services keep 0. Without the plugin, the kernel stops the process that uses the most memory, and with the LocalExecutor that can be the scheduler itself, as Airflow's documentation warns ([ADR-0015](../adr/0015-run-localexecutor-by-default.md)): in one of two such runs before the plugin, it did. Docker restarted the container, and the task stayed running in Airflow until the new scheduler reset it as orphaned five minutes later and ran it again, as a second try although the task had no retries.
+The kernel stopped the task first because Agoranomos makes each task process the first that the kernel stops at the memory limit, on a host with Yama (below). A plugin of Airflow in the image, `airflow/plugins/agoranomos_oom.py`, writes 1000, the highest value, to `/proc/self/oom_score_adj` of each task process as the task starts, and the child processes of the task, such as dbt, inherit it. The scheduler, the worker and the other services keep 0, except two children of the scheduler that go between the tasks and the scheduler (below). Without the plugin, the kernel stops the process that uses the most memory, and with the LocalExecutor that can be the scheduler itself, as Airflow's documentation warns ([ADR-0015](../adr/0015-run-localexecutor-by-default.md)): in one of two such runs before the plugin, it did. Docker restarted the container, and the task stayed running in Airflow until the new scheduler reset it as orphaned five minutes later and ran it again, as a second try although the task had no retries.
 
 The plugin works only on a host whose kernel restricts ptrace with Yama, such as Ubuntu, which is the usual case on a server. Airflow marks the process of each task so that the other processes of its user cannot read its memory, and for such a process the kernel gives the files of the process in `/proc` to root. So for the write the plugin lifts that mark for the time of two system calls and puts it back, before any code of the DAG runs, and only where Yama keeps the other processes of the user out: `/proc/sys/kernel/yama/ptrace_scope` reads 1, 2 or 3, and a process that is not an ancestor of the task cannot open its memory in the meantime. Docker Desktop on macOS has no Yama: its kernel has no such file (checked on 9 October 2026), and the same may hold for Docker Desktop on Windows. On a host without Yama, the plugin leaves the task as it is and writes one line to the log of the task, which says that the task keeps its place at the memory limit. There the kernel can still stop the scheduler, as it did before the plugin: write tasks that are safe to run twice, and run heavy tasks on the CeleryExecutor ([Run the tasks on a separate worker](../how-to/run-locally.md#run-the-tasks-on-a-separate-worker)).
 
-The five runs with the LocalExecutor above were made on a Mac, with a version of the plugin that lifted the mark on every host, before it was limited to hosts with Yama. On that Mac the plugin now leaves the task as it is. Repeating the runs on an Ubuntu server, where the plugin acts, is still to be done.
+The five runs with the LocalExecutor above were made on a Mac, with a version of the plugin that lifted the mark on every host, before it was limited to hosts with Yama. On that Mac the plugin now leaves the task as it is. On 11 October 2026 the runs were repeated on an Ubuntu server, where the plugin acts: a Hetzner CAX21 (arm64, 8 GB) with Ubuntu 26.04 and Linux 7.0, Docker Engine 29.9.0 and Docker Compose 5.6.0, in server mode with the default limits. The kernel stopped the task each time, but in 5 of 39 runs it then stopped the scheduler too, a few milliseconds later, and Docker restarted the container; the task ran again when the new scheduler reset it as orphaned, five minutes later. With `AIRFLOW_PARALLELISM=2`, it happened in 2 of 10 of these runs.
+
+The cause is in the kernel. Since Linux 7.0 ([commit a72f73c4dd9b](https://github.com/torvalds/linux/commit/a72f73c4dd9b)), the kernel no longer sees a process that it has stopped once the process starts to exit. So while the task still frees its memory, which took up to a tenth of a second in these runs, the container stays at its limit, and a process that asks for memory then makes the kernel stop a second one: the largest of those that keep 0, which is the scheduler. In the runs where the log of the kernel tells which process it was, it was an `airflow` command that `docker compose exec` had just started in the container, but any process of the container can be one.
+
+So on a host with Yama, the plugin also ranks two children of the scheduler between the tasks and the scheduler: serve-logs at 800 and the health check of the scheduler at 700. The kernel stops them before the scheduler, and the stack works without them: the API server reads the log of a finished task from the volume of the logs that the Airflow containers share, and asks serve-logs only for the log of a task that runs. Without the health check, `./agoranomos status` shows `airflow-scheduler` as unhealthy, and the tasks go on, but the next `./agoranomos up` stops on it, naming the scheduler: `up` waits for a healthy scheduler and does not restart a container that runs. The scheduler starts each of them once, so they cover the first two such rounds in its life, and a third one restarts the scheduler, as before. To get them back, run `docker compose restart airflow-scheduler` in the checkout when no task runs, since a restart of the scheduler runs its tasks again. The LocalExecutor workers keep 0, like the scheduler: an idle worker that the kernel stops while it holds the lock of the queue from which the workers take their tasks leaves the other workers waiting for that lock, and no task runs until the scheduler restarts, as a run on the same server showed. In 48 runs with these ranks, the kernel stopped a second process 5 times: serve-logs 3 times, the health check once, and the scheduler once, after both had been stopped. `agoranomos_selfcheck` succeeded after each series of runs.
 
 The plugin does not help when the scheduler itself goes over its limit, or restarts for another reason. As of Airflow 3.3.2 (October 2026), a restart of the scheduler runs again every task that was running in it, whatever its retries, so every task has to be safe to run twice, as the tasks of the demo are. With the CeleryExecutor, the scheduler has a container of its own, so a task at its limit cannot stop it.
 

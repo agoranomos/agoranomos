@@ -139,6 +139,64 @@ def test_the_airflow_services_keep_their_place_at_the_memory_limit(service):
     assert result.stdout.split() == ["0"], result.stdout
 
 
+# The pid, parent, command line and oom_score_adj of each process of the container, and what the
+# kernel says about Yama, as JSON. The command lines of the Airflow services hold no secret.
+PROCESS_SCORES = """
+import json
+import pathlib
+processes = []
+for proc in pathlib.Path("/proc").iterdir():
+    if not proc.name.isdigit():
+        continue
+    try:
+        parent = (proc / "stat").read_text().rpartition(")")[2].split()[1]
+        command = (proc / "cmdline").read_bytes().replace(b"\\0", b" ").decode().strip()
+        score = (proc / "oom_score_adj").read_text().strip()
+    except OSError:
+        continue
+    processes.append({"pid": proc.name, "parent": parent, "command": command, "score": score})
+try:
+    yama = pathlib.Path("/proc/sys/kernel/yama/ptrace_scope").read_text().strip()
+except OSError:
+    yama = "absent"
+print(json.dumps({"yama": yama, "processes": processes}))
+"""
+
+
+def test_serve_logs_and_the_health_check_go_before_the_scheduler_at_the_memory_limit():
+    # Since Linux 7.0 the kernel can stop a second process right after a task, while the task still
+    # frees its memory; by memory alone, that is the scheduler. So where Yama is on, as for the
+    # tasks, the plugin of the image ranks two children of the scheduler between the tasks and it:
+    # serve-logs at 800 (the LocalExecutor only: with Celery the scheduler starts none) and the
+    # health check at 700, which keeps the command line of the scheduler. The scheduler and the
+    # LocalExecutor workers keep 0: an idle worker stopped while it holds the read lock of the
+    # queue of the executor would stop every task. Without Yama, every one of them keeps 0.
+    result = compose("exec", "-T", "airflow-scheduler", "python", "-c", PROCESS_SCORES, check=False)
+    assert result.returncode == 0, f"the probe exited with {result.returncode}"
+    found = json.loads(result.stdout)
+    processes = found["processes"]
+    [scheduler] = [
+        p for p in processes if p["parent"] == "1" and p["command"].endswith("airflow scheduler")
+    ]
+    children = [p for p in processes if p["parent"] == scheduler["pid"]]
+    scores = {
+        "scheduler": [scheduler["score"]],
+        "serve-logs": [p["score"] for p in children if p["command"] == "airflow serve-logs"],
+        "health check": [p["score"] for p in children if p["command"] == scheduler["command"]],
+        "workers": sorted(
+            {p["score"] for p in children if p["command"].startswith("airflow worker -- ")}
+        ),
+    }
+    ranked = found["yama"] in {"1", "2", "3"}
+    expected = {
+        "scheduler": ["0"],
+        "serve-logs": ["800" if ranked else "0"] if active_variant() == "local" else [],
+        "health check": ["700" if ranked else "0"],
+        "workers": ["0"] if active_variant() == "local" else [],
+    }
+    assert scores == expected, f"yama: {found['yama']}"
+
+
 @pytest.fixture(scope="module")
 def extension_run(env, airflow_url, token):
     """The DAG of the extensions folder and a run of it."""

@@ -1,5 +1,6 @@
 """A plugin of Airflow that makes each task process the first that the kernel stops when the
-container of the task reaches its memory limit.
+container of the task reaches its memory limit, and serve-logs and the health check of the scheduler
+the next, before the scheduler.
 
 The tasks run as processes of the service that runs them: the scheduler with the LocalExecutor
 (ADR-0015), and the worker with the CeleryExecutor. When that container reaches its memory limit,
@@ -23,6 +24,29 @@ the mark is back; Yama forbids that to every process that is not an ancestor of 
 the file is missing or reads 0, as on Docker Desktop, the plugin changes nothing and says so in
 one line of the log: the task keeps its place at the memory limit.
 
+The kernel can stop a second process right after the task. Since Linux 7.0 (commit a72f73c4dd9b,
+"cgroup: Don't expose dead tasks in cgroup"), the scan of the memory cgroup no longer sees a
+process once it starts to exit (css_task_iter_advance in kernel/cgroup/cgroup.c, which
+mem_cgroup_scan_tasks uses), so while the stopped task still frees its memory, the container stays
+at its limit, and any process that asks for memory then makes the kernel stop another one: by
+memory alone, the scheduler. So in the scheduler, the plugin ranks two of its children between the
+tasks and itself: serve-logs at 800, which the stack can do without, since the API server reads
+the logs from their shared volume and asks serve-logs only for the tasks that run, and then the
+health check at 700, whose loss leaves the container unhealthy until the scheduler restarts, while
+the tasks go on. The scheduler forks each of them once, so they cover the first two such rounds in
+its life. The LocalExecutor workers keep 0, like the scheduler: an idle worker blocks in the get of
+a multiprocessing.SimpleQueue, which holds the read lock of the queue while it waits (as of
+Airflow 3.3.2 and Python 3.13), and if the kernel stops the worker that holds it, the other workers
+wait for that lock for ever, and no task runs until the scheduler restarts.
+
+The plugin learns what a child of the scheduler runs from multiprocessing
+(multiprocessing.util.register_after_fork), which calls the hook in the child once the child knows
+the function that it runs; os.register_at_fork calls its hooks earlier, while the child still
+takes itself for the scheduler. This works with the start method fork, which the scheduler uses on
+Python 3.13. With forkserver, the default of Python 3.14 on Linux, a child does not run the hooks
+of the scheduler and keeps 0; the stack tests check the values. Like the tasks, the children move
+only where Yama is on: elsewhere the tasks keep 0, and the children would go before them.
+
 The image installs this folder where only root may write, and points Airflow at it
 (airflow/Dockerfile).
 """
@@ -32,6 +56,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import os
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -56,6 +81,18 @@ YAMA_PTRACE_SCOPE = Path("/proc/sys/kernel/yama/ptrace_scope")
 # the DAG processor pass their jobs instead. The class is matched by its module and name, so that
 # the services that run no task do not import the task runner.
 TASK_RUNNER = ("airflow.sdk.execution_time.task_runner", "TaskRunnerMarker")
+# What the scheduler passes to on_starting: its job, from Job.__init__, before it forks serve-logs,
+# its health check and the LocalExecutor workers (airflow/jobs/job.py and
+# airflow/cli/commands/scheduler_command.py, as of Airflow 3.3.2). The triggerer and the DAG
+# processor pass a job too, so the command line tells the scheduler apart.
+JOB = ("airflow.jobs.job", "Job")
+SCHEDULER_COMMAND = "scheduler"
+# The rank of two children of the scheduler, by the name of the function that multiprocessing runs
+# in each (airflow.utils.serve_logs and airflow.utils.scheduler_health): after every task, at 1000,
+# and before the scheduler, at 0. The kernel adds a thousandth of the pages of the limit for each
+# point, so a task at 1000 gets at least the pages of the limit, more than a child below 875 with
+# its own pages added.
+CHILD_RANKS = {"serve_logs": "800", "serve_health_check": "700"}
 
 
 def prctl(option: int, value: int = 0) -> int:
@@ -124,11 +161,62 @@ def is_task_runner(component: object) -> bool:
     return (kind.__module__, kind.__qualname__) == TASK_RUNNER
 
 
+def is_scheduler(component: object) -> bool:
+    """Whether the scheduler called on_starting, with its job."""
+    kind = type(component)
+    return (kind.__module__, kind.__qualname__) == JOB and sys.argv[1:2] == [SCHEDULER_COMMAND]
+
+
+class SchedulerChildren:
+    """The hook that ranks serve-logs and the health check, in the children of the scheduler."""
+
+    def __init__(self) -> None:
+        self.registered = False
+
+    def register(self) -> None:
+        """Have multiprocessing call rank in each child that this process forks from now on. The
+        registry of multiprocessing holds the hook by a weak reference, so the module keeps it."""
+        if self.registered:
+            return
+        from multiprocessing import util
+
+        util.register_after_fork(self, SchedulerChildren.rank)
+        self.registered = True
+
+    def rank(self) -> None:
+        """In a child of the scheduler: write its rank, if it runs serve-logs or the health check.
+        The children of the scheduler are dumpable, so the write needs no lifting of a mark."""
+        import multiprocessing
+
+        target = getattr(multiprocessing.current_process(), "_target", None)
+        rank = CHILD_RANKS.get(getattr(target, "__name__", ""))
+        if rank is None:
+            return
+        try:
+            OOM_SCORE_ADJ.write_text(rank, encoding="ascii")
+        except OSError as error:
+            # The child runs on; only the choice of the kernel at the memory limit stays as it was.
+            log.warning(
+                "%s could not be written in %s (%s): at the memory limit, the kernel may stop the "
+                "scheduler before this process",
+                OOM_SCORE_ADJ,
+                target.__name__,
+                error,
+            )
+
+
+SCHEDULER_CHILDREN = SchedulerChildren()
+
+
 class TasksFirst:
     """The listener: Airflow calls on_starting in each of its processes that loads the plugins."""
 
     @hookimpl
     def on_starting(self, component: object) -> None:
+        if is_scheduler(component):
+            if restricts_ptrace(ptrace_scope()):
+                SCHEDULER_CHILDREN.register()
+            return
         if not is_task_runner(component):
             return
         try:

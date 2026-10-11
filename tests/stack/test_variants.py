@@ -25,6 +25,7 @@ from stack_helpers import (
     leaked,
     read_env,
     rendered,
+    rendered_config,
     secrets,
 )
 
@@ -622,6 +623,27 @@ def test_the_proxy_is_the_only_service_that_publishes_on_every_address(variant):
     ports = services["proxy"]["ports"]
     published = sorted((int(p["target"]), int(p["published"]), p["protocol"]) for p in ports)
     assert published == [(80, 80, "tcp"), (443, 443, "tcp")]
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+@pytest.mark.parametrize(
+    ("setting", "expected"),
+    [("true", True), ("false", False), ("", False)],
+    ids=["server-mode", "false", "not-set"],
+)
+def test_the_default_network_has_ipv6_with_server_mode_only(variant, setting, expected):
+    # init --server sets AGORANOMOS_IPV6=true; local mode leaves it out (ADR-0023). Without IPv6
+    # on the network, Docker hands the connection of an IPv6 client to the proxy from the gateway
+    # of the network, so that Metabase records one address for every IPv6 client and counts their
+    # failed sign-ins together. In local mode Metabase is on 127.0.0.1 only. The databases and the
+    # broker, on the internal data network, have no client to tell apart. No subnet is set: Docker
+    # picks one.
+    networks = rendered_config(variant, setting)["networks"]
+    assert networks["default"].get("enable_ipv6", False) is expected
+    # The label that ./agoranomos up compares with the setting, to catch any change of the network.
+    assert networks["default"]["labels"]["dev.agoranomos.ipv6"] == str(expected).lower()
+    assert not networks["default"].get("ipam", {}).get("config")
+    assert networks["data"].get("enable_ipv6", False) is False
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
