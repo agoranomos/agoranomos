@@ -37,7 +37,7 @@ The limits are set from measurements made on 8 and 10 October 2026, as follows:
 | `metabase` | 1,720 MiB | CI, amd64 | 2,176 MiB |
 | `airflow-scheduler`, with CeleryExecutor only | 422 MiB, with its limit of 512 MiB | CI, amd64, 10 October 2026 | 640 MiB |
 | `broker`, with CeleryExecutor only | 41 MiB | Mac | 256 MiB, the minimum |
-| `proxy`, in server mode | 39 MiB, in a synthetic test of 20,000 requests; the stack measurement of the server job is to replace it | Mac | 256 MiB, the minimum |
+| `proxy`, in server mode | 39 MiB, in a synthetic test of 20,000 requests; in the stack tests of the server job it reached 20 MiB, in CI on amd64 on 10 October 2026 | Mac | 256 MiB, the minimum |
 | `db-init` | not caught by a sample | | 128 MiB, the minimum |
 | `airflow-init` | 189 MiB | Mac | 384 MiB |
 | `metadata-export` | 128 MiB | Mac | 256 MiB |

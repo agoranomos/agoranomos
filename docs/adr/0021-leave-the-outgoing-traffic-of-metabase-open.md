@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-10-09
 decision-makers: Andrei Gromov
 ---
@@ -34,7 +34,7 @@ Chosen option: "Leave the outgoing traffic open, close the two relays at the pro
 
 In practice this means:
 
-* **The relays are closed.** In server mode the proxy answers 404 to `/api/analytics-proxy` and `/api/product-feedback`, and to every path under them ([ADR-0019](0019-open-only-metabase-in-server-mode.md)). In local mode Metabase is on `127.0.0.1` only, so they are reachable from the machine itself.
+* **The relays are closed.** In server mode the proxy answers 404 to every path that begins with `/api/analytics-proxy` or `/api/product-feedback` ([ADR-0019](0019-open-only-metabase-in-server-mode.md)). In local mode Metabase is on `127.0.0.1` only, so they are reachable from the machine itself.
 * **Connections to databases.** `compose.yaml` sets `MB_WAREHOUSE_ALLOWED_NETWORKS=allow-private` in both modes: a connection of Metabase to a database, also an SSH tunnel of one or the URL of its authentication provider, may go to a private network, where the warehouse is, or to a public address on the internet, but not to a loopback or link-local address, such as the metadata service of a cloud at `169.254.169.254`, or to another address that is neither private nor public, such as the documentation range `192.0.2.0/24` (checked on Metabase 0.64.1, as of October 2026).
 * **Agoranomos sets up no email server, no Slack and no webhook** for Metabase, and its LLM providers stay off.
 * **Isolation stays an option** for a later record: Metabase on internal networks only, with the proxy and the tunnel through Caddy.
