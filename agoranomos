@@ -1133,11 +1133,14 @@ cmd_backup() {
   if [ "$(uname -s)" = Linux ] && backup_folder_foreign; then
     die "$(backups_folder_unwritable)"
   fi
+  # docker compose exec and run pass their standard input to the command in the container, even
+  # with -T: a script that is fed to the shell (ssh host bash -s) would lose its next lines to
+  # the backup. So the input of both is /dev/null.
   if ops_mode && running_service backup; then
-    compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh now ||
+    compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh now < /dev/null ||
       die "the backup failed: the lines above say at which step. The backups folder is $(backups_path)"
   else
-    compose run --rm --no-deps -T backup now ||
+    compose run --rm --no-deps -T backup now < /dev/null ||
       die "the backup failed: the lines above say at which step. The backups folder is $(backups_path)"
   fi
 }
@@ -1407,13 +1410,14 @@ cmd_restore() {
       say "The backup service has another backups folder or user than .env names now (./agoranomos up makes it again): checking in a container of its own."
     fi
   fi
+  # Neither call reads the standard input of restore, as in cmd_backup.
   if [ "$check_in_service" -eq 1 ]; then
     # shellcheck disable=SC2086 # one argument for each database
-    compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh verify "$restore_name" $databases ||
+    compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh verify "$restore_name" $databases < /dev/null ||
       die "the backup $restore_name did not pass its check (the lines above say why), and nothing was changed"
   else
     # shellcheck disable=SC2086 # one argument for each database
-    compose run --rm --no-deps -T backup verify "$restore_name" $databases ||
+    compose run --rm --no-deps -T backup verify "$restore_name" $databases < /dev/null ||
       die "the backup $restore_name did not pass its check (the lines above say why), and nothing was changed"
   fi
   recorded=$(json_field "$folder/manifest.json" images)

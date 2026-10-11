@@ -1755,6 +1755,30 @@ def test_a_failed_backup_fails_the_command(cli, tmp_path, ops):
     assert f"The backups folder is {cli.root / 'backups'}" in result.stderr
 
 
+REST_OF_THE_SCRIPT = "rest of the script"
+
+
+@pytest.mark.parametrize("ops", [False, True])
+def test_backup_leaves_standard_input_alone(cli, tmp_path, ops):
+    # docker compose exec and run pass their standard input to the command in the container: a
+    # backup in the middle of a script that is fed to the shell (ssh host bash -s) would take the
+    # rest of the script, as it did on the first server that this was checked on.
+    if ops:
+        ops_env(cli)
+    else:
+        cli.run("init")
+    result = cli.run(
+        "backup",
+        stdin=f"{REST_OF_THE_SCRIPT}\n",
+        FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING),
+        FAKE_READ_STDIN="1",
+    )
+    assert result.returncode == 0, result.stderr
+    [(call, received)] = cli.stdin_reads()
+    assert call.startswith("exec -T backup " if ops else "run --rm --no-deps -T backup now")
+    assert received == ""
+
+
 @pytest.mark.parametrize("ops", [False, True])
 def test_backup_makes_the_backups_folder_before_docker_could_make_it_as_root(cli, tmp_path, ops):
     # After a new AGORANOMOS_BACKUP_DIR, or a deleted folder, and before up: a missing folder of a
@@ -3796,6 +3820,37 @@ def test_restore_checks_the_backup_in_a_container_of_its_own_when_the_service_is
         f"compose run --rm --no-deps -T backup verify {BACKUP} warehouse airflow metabase" in calls
     )
     assert VERIFY_IN_THE_SERVICE not in calls
+
+
+@pytest.mark.parametrize("in_the_service", [True, False])
+def test_the_check_of_a_backup_leaves_standard_input_alone(cli, tmp_path, in_the_service):
+    # The check is the first call of restore that reaches into a container. A person or a script
+    # that pipes into restore must not lose the input to it. The copy of a dump into a database
+    # container is the one call that is meant to read its input: it reads the file that the
+    # script redirects to it, which shows that the stand-in reads what a call is given.
+    ready_to_restore(cli)
+    set_env(cli, COMPOSE_PROFILES="core,demo,ops")
+    service = the_running_service(cli, tmp_path)
+    if not in_the_service:
+        service["FAKE_PS_FILE"] = ps_file(tmp_path, HEALTHY_PS)
+    result = cli.run(
+        "restore",
+        BACKUP,
+        "--yes",
+        stdin=f"{REST_OF_THE_SCRIPT}\n",
+        FAKE_READ_STDIN="1",
+        **service,
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    reads = cli.stdin_reads()
+    [(check, received)] = [read for read in reads if " verify " in f" {read[0]} "]
+    assert check.startswith("exec -T backup " if in_the_service else "run --rm --no-deps -T backup")
+    assert received == ""
+    [(_copy, dump)] = [
+        read for read in reads if "cat > /tmp/agoranomos-restore-warehouse" in read[0]
+    ]
+    assert dump == "a dump of warehouse"
 
 
 def test_a_backup_that_fails_its_check_in_the_service_changes_nothing(cli, tmp_path):

@@ -7,7 +7,9 @@ every call, the COMPOSE_* settings that every docker compose call got, and the A
 that it got (the log with the suffix .images). FAKE_RUN_FAIL and FAKE_EXEC_FAIL name a word of a
 call of run or exec that fails, such as verify, db-init or pg_restore, FAKE_COMPOSE_FAIL one of any
 other call, such as stop, and FAKE_HANG makes a call of run or exec last half a minute, for a test
-that interrupts the script. Cli.stub replaces a stand-in, or adds a tool, for one test.
+that interrupts the script. FAKE_READ_STDIN makes a call of run or exec read all of its standard
+input and log it (the log with the suffix .stdin), as docker compose does for a command in a
+container. Cli.stub replaces a stand-in, or adds a tool, for one test.
 """
 
 from __future__ import annotations
@@ -110,6 +112,13 @@ case "$1" in
         esac
         ;;
       *)
+        # FAKE_READ_STDIN: a call of run or exec reads all of its standard input, as docker
+        # compose does for a command in a container (-T takes away the terminal, not the input),
+        # and logs the call with what it read, separated by a tab. Cli.run passes the input.
+        if { [ "$1" = run ] || [ "$1" = exec ]; } && [ -n "${FAKE_READ_STDIN:-}" ]; then
+          received=$(cat)
+          printf '%s\t%s\n' "$*" "$received" >> "$FAKE_LOG.stdin"
+        fi
         # FAKE_RUN_FAIL and FAKE_EXEC_FAIL name a word of a call of run or exec, such as verify,
         # db-init or pg_restore: such a call fails, as that job or that command would.
         if [ "$1" = run ] && [ -n "${FAKE_RUN_FAIL:-}" ]; then
@@ -256,15 +265,17 @@ class Cli:
         }
 
     def run(
-        self, *args: str, cwd: Path | None = None, **fake: str
+        self, *args: str, cwd: Path | None = None, stdin: str | None = None, **fake: str
     ) -> subprocess.CompletedProcess[str]:
         # The input is closed, so that a script under test never reads the terminal of the person
-        # who runs pytest with -s: restore asks on a terminal.
+        # who runs pytest with -s: restore asks on a terminal. With stdin, it is a pipe that holds
+        # that text, as when a script is fed to the shell.
+        given = {"stdin": subprocess.DEVNULL} if stdin is None else {"input": stdin}
         return subprocess.run(
             [str(self.root / "agoranomos"), *args],
             cwd=cwd or self.root,
             env=self.environment(fake),
-            stdin=subprocess.DEVNULL,
+            **given,
             capture_output=True,
             text=True,
             timeout=60,
@@ -371,6 +382,18 @@ class Cli:
 
     def docker_calls(self) -> list[str]:
         return self.log.read_text(encoding="utf-8").splitlines() if self.log.exists() else []
+
+    def stdin_reads(self) -> list[tuple[str, str]]:
+        """Each call of run or exec that read its standard input (FAKE_READ_STDIN), with the
+        call and what it read, in call order."""
+        path = self.log.with_name(f"{self.log.name}.stdin")
+        if not path.exists():
+            return []
+        reads = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            call, _, received = line.partition("\t")
+            reads.append((call, received))
+        return reads
 
     def compose_settings(self) -> list[tuple[str, ...]]:
         """What each docker compose call (but version) got in COMPOSE_PROJECT_NAME,
