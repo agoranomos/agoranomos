@@ -55,7 +55,7 @@ Sign out, and sign in as that user, `ssh agoranomos@<server>`: the rest of this 
 
 Docker publishes ports around the rules of UFW: a port that a container publishes on every address is open whatever UFW says ([Docker and ufw](https://docs.docker.com/engine/network/packet-filtering-firewalls/#docker-and-ufw), read on 11 October 2026). Agoranomos publishes TCP 80 and 443 on every address, and everything else on `127.0.0.1` only, but a firewall outside the server is what keeps the rest closed, also the ports of what else runs there.
 
-On Hetzner Cloud, a Cloud Firewall is free, and you set it up in the project and not on the server, so the rules that Docker adds there do not change it. It drops the inbound traffic that no rule allows. In the Hetzner Console, open **Firewalls** and **Create Firewall**, add inbound rules for TCP 22, TCP 80 and TCP 443 from any IPv4 and IPv6 address, and under **Apply to** choose the server. With the `hcloud` CLI, the same from a file of rules (as of October 2026):
+On Hetzner Cloud, a Cloud Firewall is free, and you set it up in the project and not on the server, so the rules that Docker adds there do not change it. It drops the inbound traffic that no rule allows. In the Hetzner Console, open **Firewalls** and **Create Firewall**, add inbound rules for TCP 22, TCP 80 and TCP 443 from any IPv4 and IPv6 address, and under **Apply to** choose the server. With the `hcloud` CLI, the same from a file of rules, which you save as `firewall.json` in the folder where you run the commands (as of October 2026):
 
 ```json
 [
@@ -68,9 +68,10 @@ On Hetzner Cloud, a Cloud Firewall is free, and you set it up in the project and
 ```bash
 hcloud firewall create --name agoranomos --rules-file firewall.json
 hcloud firewall apply-to-resource --type server --server <server> agoranomos
+hcloud firewall describe agoranomos
 ```
 
-If your own address does not change, give port 22 that address alone instead of `0.0.0.0/0` and `::/0`. Port 80 stays open: Let's Encrypt checks the domain through it, and Caddy redirects it to HTTPS.
+`describe` lists the rules and the servers that the firewall is applied to: check that the inbound rules are TCP 22, 80 and 443 and nothing else, and that your server is listed. If your own address does not change, give port 22 that address alone instead of `0.0.0.0/0` and `::/0`. Port 80 stays open: Let's Encrypt checks the domain through it, and Caddy redirects it to HTTPS.
 
 ## Start the stack
 
@@ -92,13 +93,13 @@ Then, on the server, `cd agoranomos` and `./agoranomos init --server bi.example.
 
 `init` creates `.env` with new secrets, sets `AGORANOMOS_SITE_URL=https://bi.example.com`, and adds the profiles `server` and `ops`, which run the proxy and the daily backups, to `COMPOSE_PROFILES`. It puts the user ID and the group ID of the user who runs it into `AGORANOMOS_UID` and `AGORANOMOS_GID`, makes the folder `backups/` for that user alone, and sets the rules of Metabase for the internet: new and changed passwords need at least 15 characters (`METABASE_PASSWORD_COMPLEXITY=strong-enough`), and a person who does nothing for 24 hours is signed out (`METABASE_SESSION_TIMEOUT`) ([Configuration](../reference/configuration.md#server-mode)). It tells you to point the A record of the domain at the server, if you have not yet. Keep a copy of `.env` in a password manager: a restore needs its keys. Before the first start, open `.env` and set `AGORANOMOS_ADMIN_EMAIL` to your own address, the login of the admin of Metabase. To start without the demo, set `COMPOSE_PROFILES=core,server,ops`.
 
+To try the setup first, without using up the certificates that Let's Encrypt issues for a name, at most five in seven days (as of October 2026), set `AGORANOMOS_ACME_CA=https://acme-staging-v02.api.letsencrypt.org/directory` in `.env` before `up`: no browser trusts the certificates of the staging directory, and `up` says so when it checks the certificate. Set it back to `https://acme-v02.api.letsencrypt.org/directory` and run `./agoranomos up` again for a real certificate.
+
 ```bash
 ./agoranomos up
 ```
 
 The first start builds the images of Airflow and of the proxy and takes a few minutes. When the stack is up, `up` prints the address of the site and the command of the tunnel to Airflow. It then checks for about a minute that the site answers with a certificate that this machine trusts, and warns if it does not ([If something goes wrong](#if-something-goes-wrong)).
-
-To try the setup first, without using up the certificates that Let's Encrypt issues for a name, at most five in seven days (as of October 2026), set `AGORANOMOS_ACME_CA=https://acme-staging-v02.api.letsencrypt.org/directory` in `.env` before `up`: no browser trusts the certificates of the staging directory, and `up` says so. Set it back to `https://acme-v02.api.letsencrypt.org/directory` and run `./agoranomos up` again for a real certificate.
 
 ## Sign in
 
@@ -125,25 +126,26 @@ The databases publish no port. The proxy answers 404 to the setup API of Metabas
 
 ## Backups
 
-The `ops` profile takes a backup of the three databases every day at 03:00 UTC into `./backups`, and keeps the newest of each of the last 7 days, 4 weeks and 3 months. The first one comes as soon as the service starts, and `./agoranomos status` then says when the last good backup was. A backup that you take with `./agoranomos backup` stays until you delete it, and `status` lists it with its size and age. No pipeline of the base package runs at 03:00 UTC; if pipelines of yours run at night, give the backup a time apart from them, because a change of a table by dbt or dlt waits behind a dump and fails after a minute ([Back up and restore](back-up-and-restore.md#back-up-every-day)).
+The `ops` profile takes a backup of the three databases every day at 03:00 UTC into `./backups`, and keeps the newest of each of the last 7 days, 4 weeks and 3 months. The first one comes as soon as the service starts, and `./agoranomos status` then says when the last good backup was. A backup that you take with `./agoranomos backup` stays until you delete it, and `status` lists it with its size and age. No pipeline of the base package runs at 03:00 UTC; if pipelines of yours run at night, give the backup a time apart from them, with `BACKUP_TIME` and, if it is not in UTC, `BACKUP_TZ` in `.env`, and run `./agoranomos up`, which starts the backup service again with them. A change of a table by dbt or dlt waits behind a dump and fails after a minute ([Back up and restore](back-up-and-restore.md#back-up-every-day)).
 
 A backup on the same server is lost with the server: copy the backups to another machine, as [Back up and restore](back-up-and-restore.md#copy-the-backups-to-another-machine) shows.
 
 ## Update
 
-Take a backup before you update the checkout, because a backup records the images of the checkout as they are when it runs:
+Note the commit that you run now, and take a backup, before you update the checkout: the backup records the images of the checkout as they are when it runs, and a restore needs the checkout at the commit that took it:
 
 ```bash
+git rev-parse HEAD   # note this commit: the way back needs it
 ./agoranomos backup
 git pull
 ./agoranomos up
 ```
 
-`up` adds the settings that the new release brings to `.env`, builds the images that changed and starts the services again; the data stays. A release that moves Metabase to a new major version migrates its database one way, and only the backup can undo that: [Update to the latest main](run-locally.md#update-to-the-latest-main) shows how to see whether an update does, and [Configuration](../reference/configuration.md#back-up-metabase-before-an-upgrade) how to go back.
+`up` adds the settings that the new release brings to `.env`, builds the images that changed and starts the services again; the data stays. A release that moves Metabase to a new major version migrates its database one way, and only the backup can undo that: [Update to the latest main](run-locally.md#update-to-the-latest-main) shows how to see whether an update does, and [Configuration](../reference/configuration.md#back-up-metabase-before-an-upgrade) how to go back. To go back, run `git checkout <commit>` with the commit that you noted and restore the backup ([Restore](back-up-and-restore.md#restore)); `git checkout main` returns the checkout to the branch when you update again, as `git pull` does not work on a detached `HEAD`.
 
 ## Turn server mode on or off later
 
-`./agoranomos init --server bi.example.com` also turns server mode on for a deployment that runs in local mode. It keeps every value that is set. If the `METABASE_ADMIN_PASSWORD` of that deployment has fewer than 15 characters, `preflight` stops on it ([below](#if-something-goes-wrong)).
+`./agoranomos init --server bi.example.com` also turns server mode on for a deployment that runs in local mode. It keeps every value that is set. Before you run `./agoranomos up` again, open Metabase as it runs now and check Admin > Settings > Public sharing: a public link that someone made in local mode, which only this machine reached, is open to the internet once the site is up ([Configuration](../reference/configuration.md#public-links)). If the `METABASE_ADMIN_PASSWORD` of that deployment has fewer than 15 characters, `preflight` stops on it ([below](#if-something-goes-wrong)).
 
 To go back to local mode, run `./agoranomos down` first, while `server` is still in `COMPOSE_PROFILES`: Compose stops only the services of the profiles that are on, so the proxy would keep serving Metabase on ports 80 and 443 after you take `server` out. Then edit `.env`: take `server` out of `COMPOSE_PROFILES`, and `ops` too unless you want the daily backups in local mode, delete the lines `AGORANOMOS_SITE_URL`, `METABASE_PASSWORD_COMPLEXITY` and `METABASE_SESSION_TIMEOUT`, and run `./agoranomos up`. If you took `server` or `ops` out first, `up` and `down` stop and remove the leftover `proxy` or `backup` container and say so; the volume of the certificates and the backups stay.
 
@@ -153,7 +155,7 @@ To go back to local mode, run `./agoranomos down` first, while `server` is still
 - **`preflight` stops on Docker Engine older than 28.0.0.** Install Docker from Docker's repository, as [Prepare the server](#prepare-the-server) shows.
 - **`preflight` stops because port 80 or 443 is in use.** Another web server runs on the server: stop it, or run Agoranomos on a server of its own.
 - **`preflight` stops on `AGORANOMOS_UID` 0.** You ran `./agoranomos` as root: set `AGORANOMOS_UID=auto` and `AGORANOMOS_GID=auto` in `.env`, and run `./agoranomos init` as the user of the stack.
-- **`preflight` stops because the backups folder belongs to another user than `AGORANOMOS_UID`.** The service runs as that user and cannot write into a folder of mode 700 that another user owns. It happens when you move the `.env` of a Mac or of another server to a new Linux server, which keeps the IDs of the first: set `AGORANOMOS_UID` and `AGORANOMOS_GID` to `auto` there and run `./agoranomos init`, and if `backups/` belongs to another user, give it to yours with `chown`.
+- **`preflight` stops because the backups folder belongs to another user than `AGORANOMOS_UID`.** The service runs as that user and cannot write into a folder of mode 700 that another user owns. It happens when you move the `.env` of a Mac or of another server to a new Linux server, which keeps the IDs of the first: set `AGORANOMOS_UID` and `AGORANOMOS_GID` to `auto` there and run `./agoranomos init`, and if `backups/` belongs to another user, give it to the user of the stack as root (`ssh root@<server>`): `chown -R agoranomos:agoranomos /home/agoranomos/agoranomos/backups`.
 - **`preflight` stops on `METABASE_ADMIN_PASSWORD`, which has fewer than 15 characters.** Server mode takes passwords of at least 15 characters. For a new deployment, write a longer value in `.env`, or leave it empty for `init` to generate one. A Metabase that is set up already keeps the password of its admin, so change it in Metabase first (Account settings) and then put the same value in `.env`. With the stack stopped, `docker compose up -d metabase` in the checkout starts Metabase alone, without the proxy, at `127.0.0.1` on `METABASE_PORT`, which on a server you reach through an SSH tunnel ([Configuration](../reference/configuration.md#server-mode)).
 - **`preflight` warns that server mode runs without the backups.** `COMPOSE_PROFILES` has `server` and not `ops`: `./agoranomos init --server bi.example.com` adds `ops`.
 - **The site answers 502.** Metabase is not up: `./agoranomos status` and `./agoranomos logs metabase`.
