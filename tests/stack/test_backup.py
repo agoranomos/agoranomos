@@ -1,7 +1,13 @@
 """Backups on a running stack (ADR-0020): ./agoranomos backup, what it writes, the backup service
 of the ops profile, and ./agoranomos status. The tests take real backups by hand into the backups
 folder of the checkout, which stay there, as any backup by hand, until someone deletes them. They
-print names, sizes and modes, never what a dump holds."""
+print names, sizes and modes, never what a dump holds.
+
+One test is destructive by design: test_restore_refuses_a_damaged_backup_and_changes_nothing runs a
+real ./agoranomos restore against the project that .env names, to prove that it stops before it
+changes anything. If restore were wrong, that run would stop the services and drop the warehouse.
+It runs only with AGORANOMOS_RESTORE_TESTS=1, which the server job of the Stack workflow sets and a
+person sets only on a stack that may lose its data."""
 
 import hashlib
 import json
@@ -43,6 +49,8 @@ FILES = {
 }
 # A backup folder is named after the start of the backup in UTC.
 NAME = re.compile(r"\d{8}T\d{6}Z")
+# The opt-in of the test that runs a restore.
+RESTORE_TESTS = os.environ.get("AGORANOMOS_RESTORE_TESTS") == "1"
 # The name of the copy of a backup that a test damages: the oldest name there can be.
 DAMAGED = "20000101T000000Z"
 
@@ -177,6 +185,10 @@ def test_the_backup_service_takes_a_scheduled_backup_by_itself():
     assert latest()["last_scheduled_local"]
 
 
+@pytest.mark.skipif(
+    not RESTORE_TESTS,
+    reason="it runs a restore: set AGORANOMOS_RESTORE_TESTS=1 on a stack that may lose its data",
+)
 @pytest.mark.parametrize("damage", ["truncated", "truncated with its checksum"])
 def test_restore_refuses_a_damaged_backup_and_changes_nothing(env, taken, damage):
     # A dump cut short passes pg_restore --list, and a restore from it would drop the database and

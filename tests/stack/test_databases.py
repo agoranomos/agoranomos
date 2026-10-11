@@ -1,4 +1,5 @@
 import pytest
+from services import DEMO
 from stack_helpers import (
     WAREHOUSE_ROLES,
     leaked,
@@ -432,8 +433,21 @@ BACKUP_TARGETS = [
     for service, (databases, _) in sorted(BACKUP_DATABASES.items())
     for database in databases
 ]
+# The cases of the tests that use a table of BACKUP_TABLES. The table of the warehouse is a table of
+# the demo, so without the demo profile that case has none to use and is skipped.
+BACKUP_TABLE_TARGETS = [
+    pytest.param(
+        service,
+        database,
+        marks=pytest.mark.skipif(
+            database == "warehouse" and not DEMO,
+            reason="the demo is off: the table of the warehouse comes with the demo profile",
+        ),
+    )
+    for service, database in BACKUP_TARGETS
+]
 # A table that another role owns in each of those databases, with its owner: tables that a fresh
-# stack has, with rows in them.
+# stack has, with rows in them (that of the warehouse, with the demo profile).
 BACKUP_TABLES = {
     "warehouse": ("raw_demo.ad_stats_daily", "loader"),
     "airflow": ("public.dag", "airflow"),
@@ -452,7 +466,7 @@ def test_the_backup_role_signs_in_with_its_password_and_with_no_other(env, servi
     assert "password authentication failed" in wrong.stderr
 
 
-@pytest.mark.parametrize(("service", "database"), BACKUP_TARGETS)
+@pytest.mark.parametrize(("service", "database"), BACKUP_TABLE_TARGETS)
 def test_the_backup_role_reads_a_table_that_another_role_owns(env, service, database):
     # The role reads through pg_read_all_data, which it inherits: it owns nothing and has no grant
     # of its own on the table. The result is a number of rows, not the rows.
@@ -468,7 +482,7 @@ def test_the_backup_role_reads_a_table_that_another_role_owns(env, service, data
     assert int(rows.stdout.strip()) > 0, f"{table} has no row for backup to read"
 
 
-@pytest.mark.parametrize(("service", "database"), BACKUP_TARGETS)
+@pytest.mark.parametrize(("service", "database"), BACKUP_TABLE_TARGETS)
 def test_the_backup_role_writes_nothing(env, service, database):
     # The sessions of backup start read-only, and PostgreSQL refuses a write in a read-only
     # transaction before it checks the permission: the transaction is made read-write first, so
