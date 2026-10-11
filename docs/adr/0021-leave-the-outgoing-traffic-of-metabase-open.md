@@ -55,5 +55,5 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** in place for v0.1.0: the proxy closes `/api/analytics-proxy` and `/api/product-feedback`, `compose.yaml` sets `MB_WAREHOUSE_ALLOWED_NETWORKS=allow-private`, and the job `server` of the Stack workflow checks both. Not done yet: the check on a real server.
+* **Implementation status, as of October 2026:** in place for v0.1.0: the proxy closes `/api/analytics-proxy` and `/api/product-feedback`, `compose.yaml` sets `MB_WAREHOUSE_ALLOWED_NETWORKS=allow-private`, and the job `server` of the Stack workflow checks both. Checked on a Hetzner CAX21 on 11 October 2026: the stack tests, which include both checks, passed there.
 * The ways out of Metabase 0.64.1 and the settings that close them: [Metabase's environment variables](https://www.metabase.com/docs/v0.64/configuring-metabase/environment-variables) (`docs/configuring-metabase/environment-variables.md` of the tag `v0.64.1`); the two relays are `src/metabase/analytics/api/proxy.clj` and `src/metabase/product_feedback/api.clj`, routed without `+auth` in `src/metabase/api_routes/routes.clj` of that tag.
