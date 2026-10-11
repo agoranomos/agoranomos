@@ -682,6 +682,13 @@ services:
     logging: *logging
 
 networks:
+  # IPv6 on the network of the proxy and Metabase, so that Metabase sees the address of each IPv6
+  # client as it sees that of each IPv4 client. Without it, Docker hands an IPv6 connection to the
+  # proxy from the gateway of the network, and the limit of Metabase on failed sign-ins from one
+  # address counts all IPv6 clients together (ADR-0023). No subnet is set: Docker Engine 27.0.1 and
+  # newer picks a Unique Local Address subnet of its own.
+  default:
+    enable_ipv6: true
   # The databases have no route to the internet; with CeleryExecutor, the broker joins them here.
   data:
     internal: true

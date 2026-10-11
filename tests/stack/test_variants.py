@@ -25,6 +25,7 @@ from stack_helpers import (
     leaked,
     read_env,
     rendered,
+    rendered_config,
     secrets,
 )
 
@@ -622,6 +623,18 @@ def test_the_proxy_is_the_only_service_that_publishes_on_every_address(variant):
     ports = services["proxy"]["ports"]
     published = sorted((int(p["target"]), int(p["published"]), p["protocol"]) for p in ports)
     assert published == [(80, 80, "tcp"), (443, 443, "tcp")]
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_the_default_network_has_ipv6_and_the_data_network_has_none(variant):
+    # Without IPv6 on the network, Docker hands the connection of an IPv6 client to the proxy from
+    # the gateway of the network, so that Metabase records one address for every IPv6 client and
+    # counts their failed sign-ins together (ADR-0023). The databases and the broker, on the
+    # internal data network, have no client to tell apart. No subnet is set: Docker picks one.
+    networks = rendered_config(variant)["networks"]
+    assert networks["default"].get("enable_ipv6") is True
+    assert not networks["default"].get("ipam", {}).get("config")
+    assert networks["data"].get("enable_ipv6", False) is False
 
 
 @pytest.mark.parametrize("variant", VARIANTS)

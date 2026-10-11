@@ -136,6 +136,18 @@ def test_the_network_that_docker_made_is_internal_and_the_databases_are_only_on_
         assert set(container["NetworkSettings"]["Networks"]) == {network}, service
 
 
+def test_the_network_that_docker_made_for_the_proxy_and_metabase_has_ipv6(env):
+    # compose config shows the option. This looks at what Docker made of it: a network with IPv6
+    # on and a subnet of IPv6 addresses, which Docker picked because the file sets none. The data
+    # network has none (ADR-0023).
+    project = env.get("COMPOSE_PROJECT_NAME", "agoranomos")
+    [default] = json.loads(docker("network", "inspect", f"{project}_default").stdout)
+    assert default["EnableIPv6"] is True
+    assert any(":" in entry["Subnet"] for entry in default["IPAM"]["Config"])
+    [data] = json.loads(docker("network", "inspect", f"{project}_data").stdout)
+    assert data["EnableIPv6"] is False
+
+
 def test_the_database_health_checks_connect_over_tcp():
     # On the first start with an empty volume the image runs a temporary server that listens only
     # on the Unix socket, and a check over the socket could report it ready (see compose.yaml).
