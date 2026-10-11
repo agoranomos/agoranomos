@@ -31,8 +31,9 @@ Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 - `scripts/`: the scripts of the repository's own checks. `check_docs_nav.py` compares the documentation navigation with the pages, and the `check-docs-nav` hook runs it. `check_docs_lists.py` checks that the list items of the pages are indented by multiples of four spaces, and the `check-docs-lists` hook runs it. `memory_report.py` measures the memory of each service of the running stack ([docs/reference/system-requirements.md](docs/reference/system-requirements.md)); CI runs it around the stack tests.
 - `tests/unit/`: the unit tests, run by `uv run pytest`.
 - `tests/stack/`: the stack tests, run with `uv run pytest tests/stack` against a running stack.
-- `.github/`: the workflows (`workflows/`: CI, the stack tests, the pull request checks and the daily Renovate run), the issue forms, the pull request template and `CODEOWNERS`.
+- `.github/`: the workflows (`workflows/`: CI, the stack tests, the pull request checks, the daily Renovate run and the release run), the issue forms, the pull request template and `CODEOWNERS`.
 - `renovate.json`: the [Renovate](https://docs.renovatebot.com/) configuration for keeping the pinned versions current ([ADR-0012](docs/adr/0012-python-and-tooling.md)).
+- `release-please-config.json`, `.release-please-manifest.json`, `version.txt`: the releases, which release-please makes from the Conventional Commits history (`.github/workflows/release.yml`). It writes `CHANGELOG.md` too, which does not exist before the first release. Nobody edits these files by hand.
 - `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`: the community files. `LICENSE` and `NOTICE`: Apache-2.0.
 
 ## Commands
