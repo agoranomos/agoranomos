@@ -289,3 +289,165 @@ def test_a_mark_that_cannot_be_put_back_after_a_failed_write_gives_both_lines(
     with caplog.at_level(logging.INFO):
         listener(plugin).on_starting(component=component(TASK_RUNNER, "TaskRunnerMarker"))
     assert sorted(record.levelno for record in caplog.records) == [logging.WARNING, logging.ERROR]
+
+
+# The children of the scheduler. The kernel of Linux 7.0 can stop a second process while the task
+# that it stopped first still frees its memory, and without the plugin that process is the
+# scheduler, the largest of the rest; so the plugin ranks two children of the scheduler between the
+# tasks and the scheduler: serve-logs, then the health check. The LocalExecutor workers keep their
+# place.
+SCHEDULER_ARGV = ["/home/airflow/.local/bin/airflow", "scheduler"]
+JOB = ("airflow.jobs.job", "Job")
+
+
+@pytest.fixture
+def after_fork(monkeypatch):
+    """Stands in for multiprocessing.util.register_after_fork: records each (object, function) that
+    the plugin registers, for the test to call as multiprocessing would in a child."""
+    from multiprocessing import util
+
+    registered: list[tuple[object, object]] = []
+    monkeypatch.setattr(
+        util, "register_after_fork", lambda obj, func: registered.append((obj, func))
+    )
+    return registered
+
+
+@pytest.fixture
+def scheduler(monkeypatch, kernel):
+    """The process of the scheduler, as airflow scheduler starts it: the processes that it forks
+    are dumpable, unlike those of the tasks."""
+    monkeypatch.setattr(sys, "argv", SCHEDULER_ARGV)
+    kernel.dumpable = 1
+
+
+def named(name: str):
+    """A function of this name, such as multiprocessing runs in a child that it starts."""
+
+    def target() -> None:
+        """Does nothing."""
+
+    target.__name__ = name
+    return target
+
+
+def in_child(monkeypatch, registered, target) -> None:
+    """Runs the registered hooks as multiprocessing runs them in a child that runs target."""
+    import multiprocessing
+
+    monkeypatch.setattr(
+        multiprocessing, "current_process", lambda: types.SimpleNamespace(_target=target)
+    )
+    for obj, func in registered:
+        func(obj)
+
+
+def test_the_scheduler_registers_one_hook_for_its_children_and_keeps_its_place(
+    plugin, kernel, scheduler, after_fork
+):
+    listener(plugin).on_starting(component=component(*JOB))
+    listener(plugin).on_starting(component=component(*JOB))
+    assert len(after_fork) == 1
+    assert plugin.OOM_SCORE_ADJ.read_text(encoding="ascii") == "0\n"
+    assert kernel.calls == []
+
+
+@pytest.mark.parametrize(("target", "rank"), [("serve_logs", "800"), ("serve_health_check", "700")])
+def test_serve_logs_and_the_health_check_go_after_the_tasks_and_before_the_scheduler(
+    plugin, scheduler, after_fork, monkeypatch, target, rank
+):
+    listener(plugin).on_starting(component=component(*JOB))
+    in_child(monkeypatch, after_fork, named(target))
+    assert plugin.OOM_SCORE_ADJ.read_text(encoding="ascii") == rank
+
+
+@pytest.mark.parametrize("target", ["_run_worker", "serve_logs_too", "run", None])
+def test_the_workers_and_any_other_child_of_the_scheduler_keep_their_place(
+    plugin, scheduler, after_fork, monkeypatch, target
+):
+    # An idle LocalExecutor worker that the kernel stops while it holds the read lock of the queue
+    # of the executor stops every task: such a worker must not go before the scheduler.
+    listener(plugin).on_starting(component=component(*JOB))
+    in_child(monkeypatch, after_fork, None if target is None else named(target))
+    assert plugin.OOM_SCORE_ADJ.read_text(encoding="ascii") == "0\n"
+
+
+@pytest.mark.parametrize(("content", "found"), NOT_RESTRICTED)
+def test_no_child_of_the_scheduler_moves_where_yama_does_not_restrict_ptrace(
+    plugin, scheduler, after_fork, host_yama, content, found
+):
+    # There the tasks keep 0, and serve-logs or the health check would go before them.
+    host_yama(content)
+    listener(plugin).on_starting(component=component(*JOB))
+    assert after_fork == []
+
+
+@pytest.mark.parametrize(
+    ("argv", "module", "name"),
+    [
+        # The triggerer and the DAG processor pass their jobs too.
+        (["/home/airflow/.local/bin/airflow", "triggerer"], *JOB),
+        (["/home/airflow/.local/bin/airflow", "dag-processor"], *JOB),
+        (["airflow"], *JOB),
+        # In the scheduler, only its job counts.
+        (SCHEDULER_ARGV, "airflow.jobs.scheduler_job_runner", "SchedulerJobRunner"),
+        (SCHEDULER_ARGV, "some_dag", "Job"),
+    ],
+)
+def test_no_other_process_ranks_its_children(
+    plugin, kernel, after_fork, monkeypatch, argv, module, name
+):
+    monkeypatch.setattr(sys, "argv", argv)
+    listener(plugin).on_starting(component=component(module, name))
+    assert after_fork == []
+    assert plugin.OOM_SCORE_ADJ.read_text(encoding="ascii") == "0\n"
+
+
+def test_a_rank_that_cannot_be_written_in_a_child_stops_nothing(
+    plugin, kernel, scheduler, after_fork, monkeypatch, tmp_path, caplog
+):
+    missing = tmp_path / "no-such-folder" / "oom_score_adj"
+    monkeypatch.setattr(plugin, "OOM_SCORE_ADJ", Score(missing, kernel))
+    listener(plugin).on_starting(component=component(*JOB))
+    with caplog.at_level(logging.WARNING):
+        in_child(monkeypatch, after_fork, named("serve_logs"))
+    [record] = caplog.records
+    assert record.levelno == logging.WARNING
+    assert str(missing) in record.getMessage()
+
+
+def test_the_ranks_of_the_children_stay_between_the_scheduler_and_the_tasks(plugin):
+    # The kernel ranks a process by its memory, in pages, plus its oom_score_adj times a thousandth
+    # of the pages of the limit of its container. A task at 1000 has at least the pages of the
+    # limit; a child of the scheduler has about an eighth of them, so up to 875 it stays after
+    # every task, and from 1 up before the scheduler at 0.
+    assert plugin.CHILD_RANKS
+    assert all(0 < int(rank) < 875 for rank in plugin.CHILD_RANKS.values())
+
+
+def serve_logs() -> None:
+    """Has the name of the function that Airflow runs in the child of serve-logs, and does
+    nothing."""
+
+
+@pytest.mark.skipif(
+    "fork" not in __import__("multiprocessing").get_all_start_methods(), reason="no fork here"
+)
+def test_a_child_that_multiprocessing_forks_gets_its_rank(plugin, scheduler, monkeypatch):
+    # The hook runs in the child once multiprocessing knows what the child runs, as Python 3.13
+    # does it, with the start method of the scheduler of the image (fork).
+    import multiprocessing
+    from multiprocessing import util
+
+    listener(plugin).on_starting(component=component(*JOB))
+    try:
+        child = multiprocessing.get_context("fork").Process(target=serve_logs)
+        child.start()
+        child.join(timeout=30)
+        assert child.exitcode == 0
+    finally:
+        # Take the hook back, so that no later fork of this process runs it.
+        for key, value in list(util._afterfork_registry.items()):
+            if getattr(value, "__module__", None) == plugin.__name__:
+                del util._afterfork_registry[key]
+    assert plugin.OOM_SCORE_ADJ.read_text(encoding="ascii") == "800"
