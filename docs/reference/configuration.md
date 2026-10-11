@@ -170,26 +170,18 @@ On every start, the setup job `db-init` sets each role of the warehouse (`loader
 
 A release that moves Metabase to a new major version, such as from 0.63 to 0.64, migrates the application database of Metabase, the `metabase` database of `platform-db`, at the first `./agoranomos up`. Do not count on undoing the migration: as of October 2026, Metabase 0.63.19 refuses to start on a database that 0.64.1 has migrated, and after the `migrate down` command of 0.64.1 it fails on a migration of its own. The way back is a backup made before the upgrade. A large application database can take a while to migrate, because 0.64 changes the primary key of the `query_execution` table, which logs the queries that Metabase runs, and splits that table into partitions.
 
-Before the first `./agoranomos up` of the new release, back up the database of Metabase. Run the commands in the root of the checkout, where `docker compose` finds `.env`. They need `platform-db` running, which the first command checks: it fails with `service "platform-db" is not running` after `./agoranomos down`, and `docker compose up --detach --wait platform-db` then starts it alone. The second command stops Metabase, so that nothing changes during the backup, the third makes the backup, and the last one checks that the backup reads:
+Before the first `./agoranomos up` of the new release, while the stack of the release that you come from runs, note the commit that you come from, which `git rev-parse HEAD` prints, and take a backup:
 
 ```bash
-docker compose exec -T platform-db pg_isready --quiet
-docker compose stop metabase
-(umask 077 && docker compose exec -T platform-db pg_dump --username=postgres --format=custom --dbname=metabase > ../metabase-before-upgrade.dump)
-docker compose exec -T platform-db pg_restore --list < ../metabase-before-upgrade.dump > /dev/null && echo "the backup reads"
+./agoranomos backup
 ```
 
-Go on only when the last command prints `the backup reads`. The shell creates the file even when `pg_dump` fails, and the check fails on an empty or broken file, for example with `input file is too short`.
+It prints the name of the backup, such as `20261011T030012Z`, which `./agoranomos status` shows too ([Command line](command-line.md#backup)). Later backups, scheduled or by hand, do not remove it: the retention removes scheduled backups only. Then update the checkout and run `./agoranomos up`, which starts the new version; `./agoranomos logs metabase` shows the migration.
 
-`pg_dump` runs in the `platform-db` container and connects through the socket of the container, where the PostgreSQL image accepts a connection without a password, so no password is typed or printed. The backup lands next to the checkout, outside it, so that git never sees it, and `umask 077` makes it readable only by you. Keep it as safe as `.env`: it holds what Metabase keeps, such as the hashes of the passwords of its users and the connection details, which only the `METABASE_ENCRYPTION_KEY` of this `.env` decrypts. Then run `./agoranomos up`, which starts the new version; `./agoranomos logs metabase` shows the migration.
-
-To go back, stop Metabase first, so that nothing is connected to its database, and restore the backup, which drops the `metabase` database and creates it again, with its owner and access rights, from the backup. Then return the checkout to the release that you came from, which pins the earlier version of Metabase, and start it:
+To go back, return the checkout to the commit that you came from, which pins the earlier version of Metabase, and restore the database of Metabase from the backup:
 
 ```bash
-docker compose stop metabase
-docker compose exec -T platform-db pg_restore --username=postgres --clean --if-exists --create --exit-on-error --dbname=postgres < ../metabase-before-upgrade.dump
-# Only when pg_restore ended without an error: return the checkout to the release that you came from, then:
-./agoranomos up
+./agoranomos restore 20261011T030012Z --only metabase
 ```
 
-If Metabase, or anything else, is still connected to the database, the restore stops at once with `database "metabase" is being accessed by other users` and changes nothing, because PostgreSQL does not drop a database that has connections: stop what is connected, such as Metabase, and run the restore again. `--exit-on-error` makes it stop at the first error; without it, `pg_restore` goes on after an error, and would restore what it can into the database that is still there. If the restore stops on any other error, after it dropped the database, do not start the stack: Metabase would start on an empty database. Fix the cause and run the restore again. Everything that Metabase saved after the backup is lost.
+`restore` checks the backup before it changes anything: every file against its SHA-256, and each dump read to its end. A check of the table of contents alone, with `pg_restore --list`, passes a dump that was cut short after it, and a restore from such a dump would drop the database and leave it without its rows. Then `restore` stops the services that use the databases, restores the database with its owner and its access rights, and starts the stack ([Command line](command-line.md#restore)). Everything that Metabase saved after the backup is lost. If `restore` stops because the images of the backup differ from those of the checkout, the checkout is not at the commit that you came from.
