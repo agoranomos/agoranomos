@@ -23,7 +23,7 @@ Agoranomos reads its settings from the `.env` file in the root of the checkout. 
 | Setting | Default | What it does |
 |---|---|---|
 | `AGORANOMOS_ADMIN_EMAIL` | `admin@example.com` | The email of the admin account of Metabase and Airflow (user name `admin` in Airflow), created on the first start. Change it before the first start. |
-| `AGORANOMOS_EXTENSIONS_DIR` | `./extensions` | The folder for the deployment's own extensions ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)): its DAGs, and its overrides of the metadata of the marts ([below](#the-metadata-of-the-marts)). Releases never overwrite it. A relative path starts at the checkout. |
+| `AGORANOMOS_EXTENSIONS_DIR` | `./extensions` | The folder for the deployment's own extensions ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)): its DAGs, and its overrides of the metadata of the marts ([below](#the-metadata-of-the-marts)). Releases never overwrite it. A relative path starts at the checkout, `~/` at your home folder; `preflight` stops on a value that is none of these and not absolute, which Compose would read as the name of a volume. |
 | `AIRFLOW_PORT` | `8080` | The port of the Airflow UI and API on `127.0.0.1`. |
 | `METABASE_PORT` | `3000` | The port of Metabase on `127.0.0.1`. |
 | `AIRFLOW_PARALLELISM` | `4` | How many Airflow tasks run at the same time at most, in the whole stack. With LocalExecutor, each one is a process in the scheduler container, so more tasks need more memory; when the container reaches its limit, the kernel stops a task before the scheduler on a host whose kernel restricts ptrace with Yama, such as Ubuntu, and can stop the scheduler on one without it, such as Docker Desktop for macOS ([System requirements](system-requirements.md#when-a-service-reaches-its-limit)). With CeleryExecutor it caps all workers together: raise it together with `AIRFLOW_WORKER_CONCURRENCY` or the number of workers. |
@@ -51,15 +51,15 @@ Caddy keeps its certificates in the Docker volume `caddy-data`, which backups le
 
 | Setting | Default | What it does |
 |---|---|---|
-| `AGORANOMOS_BACKUP_DIR` | `./backups` | The folder of the backups. The default folder, `backups/`, is ignored by git; another path is not, unless you ignore it yourself. `init` creates it, open to its owner only. A relative path starts at the checkout. |
+| `AGORANOMOS_BACKUP_DIR` | `./backups` | The folder of the backups. The default folder, `backups/`, is ignored by git; another path is not, unless you ignore it yourself. `init` creates it, open to its owner only. A relative path starts at the checkout, `~/` at your home folder; `preflight` stops on a value that is none of these and not absolute, which Compose would read as the name of a volume. By default the folder is on the disk that holds the data of Docker: on a small server put it on another disk, such as `/mnt/backups`, and `./agoranomos status` says how much room the disk has. |
 | `BACKUP_TIME` | `03:00` | With the `ops` profile: the time of the daily backup, as `HH:MM`. A backup that the stack missed, because it was down, comes at its next start. Choose a time when no pipeline runs: a dump holds a shared lock on each table of its database until it ends, and a change of a table by dbt or dlt waits behind it for at most a minute and then fails. No DAG of the base package runs at 03:00 UTC. |
 | `BACKUP_TZ` | `UTC` | The time zone of `BACKUP_TIME`, such as `Europe/Berlin`. `preflight` checks the name. |
 | `BACKUP_KEEP_DAILY` | `7` | How many days back the newest scheduled backup of each day stays; at least 1. |
 | `BACKUP_KEEP_WEEKLY` | `4` | How many weeks back, Monday to Sunday, the newest scheduled backup of each week stays. |
 | `BACKUP_KEEP_MONTHLY` | `3` | How many months back the newest scheduled backup of each month stays. |
-| `AGORANOMOS_UID`, `AGORANOMOS_GID` | `auto` | The user and the group that write the backups, so that they belong to you: `init` replaces `auto` with yours. `preflight` and `backup` stop on 0, root. On Linux they stop too when the backups folder belongs to another user, because the service runs as `AGORANOMOS_UID` and cannot write into a folder of mode 700 that another user owns: a `.env` that you move to another machine keeps the IDs of the first, so set them to `auto` there and run `./agoranomos init`. |
+| `AGORANOMOS_UID`, `AGORANOMOS_GID` | `auto` | The user and the group that write the backups, so that they belong to you: `init` replaces `auto` with yours. `preflight`, `backup` and `restore` stop on 0, root. On Linux they stop too when the backups folder belongs to another user, because the service runs as `AGORANOMOS_UID` and cannot write into a folder of mode 700 that another user owns: a `.env` that you move to another machine keeps the IDs of the first, so set them to `auto` there and run `./agoranomos init`. |
 
-A backup holds the dumps of the databases, the global objects of both instances without passwords, an archive of the extensions folder, the SHA-256 of each file and a manifest, which records the images of the checkout. It does not hold `.env`, whose keys a restore needs, or the certificates of server mode. The days, weeks and months of the retention are those of UTC.
+A backup holds the dumps of the databases, the global objects of both instances without passwords, an archive of the extensions folder, the SHA-256 of each file and a manifest, which records the images of the checkout. It does not hold `.env`, whose keys a restore needs, or the certificates of server mode. A backup is as sensitive as `.env`: it holds every row of the warehouse, the hashes of the passwords of the users of Metabase, and the connection details that only the `METABASE_ENCRYPTION_KEY` of this `.env` decrypts. `./agoranomos restore` puts a backup back ([Command line](command-line.md#restore)). The days, weeks and months of the retention are those of UTC.
 
 The retention removes scheduled backups only, after each good backup. A backup that `./agoranomos backup` took, such as the one before an upgrade, stays until you delete its folder with `rm -r backups/<name>`; `./agoranomos status` lists these backups with their size and age. Take it before you update the checkout with `git pull`: a backup in a container of its own records the images of the checkout as they are when it runs. When the disk is full, every backup fails and the retention removes none: delete old backups to free space.
 
@@ -178,10 +178,18 @@ Before the first `./agoranomos up` of the new release, while the stack of the re
 
 It prints the name of the backup, such as `20261011T030012Z`, which `./agoranomos status` shows too ([Command line](command-line.md#backup)). Later backups, scheduled or by hand, do not remove it: the retention removes scheduled backups only. Then update the checkout and run `./agoranomos up`, which starts the new version; `./agoranomos logs metabase` shows the migration.
 
-To go back, return the checkout to the commit that you came from, which pins the earlier version of Metabase, and restore the database of Metabase from the backup:
+To go back, return the checkout to the commit that you came from, which pins the earlier version of Metabase, and restore the database of Metabase from the backup. Airflow migrates its database one way too, so see first whether the update also changed the Airflow image, while the checkout is still at the new release:
+
+```bash
+git diff <the commit that you came from> HEAD -- airflow/Dockerfile compose.yaml
+```
+
+When only the Metabase line differs, restore the database of Metabase alone. When the Airflow image changed too, restore `metabase,airflow`, or `airflow-init` fails on the schema of the newer Airflow; you lose the runs of Airflow since the backup. Return the checkout, then run:
 
 ```bash
 ./agoranomos restore 20261011T030012Z --only metabase
+# when the Airflow image changed as well:
+./agoranomos restore 20261011T030012Z --only metabase,airflow
 ```
 
-`restore` checks the backup before it changes anything: every file against its SHA-256, and each dump read to its end. A check of the table of contents alone, with `pg_restore --list`, passes a dump that was cut short after it, and a restore from such a dump would drop the database and leave it without its rows. Then `restore` stops the services that use the databases, restores the database with its owner and its access rights, and starts the stack ([Command line](command-line.md#restore)). Everything that Metabase saved after the backup is lost. If `restore` stops because the images of the backup differ from those of the checkout, the checkout is not at the commit that you came from.
+`restore` checks the backup before it changes anything: every file against its SHA-256, and each dump that it restores read to its end. A check of the table of contents alone, with `pg_restore --list`, passes a dump that was cut short after it, and a restore from such a dump would drop the database and leave it without its rows. Then `restore` stops the services that use the databases, restores the database with its owner and its access rights, and starts the stack ([Command line](command-line.md#restore)). Everything that Metabase saved after the backup is lost. If `restore` stops because the images of the backup differ from those of the checkout, the checkout is not at the commit that you came from.
