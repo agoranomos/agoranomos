@@ -3604,18 +3604,24 @@ def restore_interrupted_in(cli, tmp_path, hanging, sent):
     send the signal to the whole process group, as Ctrl-C does to the foreground group of a
     terminal."""
     ready_to_restore(cli)
-    process = subprocess.Popen(
-        [str(cli.root / "agoranomos"), "restore", BACKUP, "--yes"],
-        cwd=cli.root,
-        env=cli.environment(
-            {"FAKE_PS_FILE": ps_file(tmp_path, HEALTHY_PS), "FAKE_HANG": hanging, **QUICK}
-        ),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=True,
-    )
+    # A process that was started in the background has SIGINT ignored, and a shell cannot trap a
+    # signal that was ignored when it started: the script gets the default, as in a terminal.
+    previous = signal.signal(signal.SIGINT, signal.SIG_DFL)
+    try:
+        process = subprocess.Popen(
+            [str(cli.root / "agoranomos"), "restore", BACKUP, "--yes"],
+            cwd=cli.root,
+            env=cli.environment(
+                {"FAKE_PS_FILE": ps_file(tmp_path, HEALTHY_PS), "FAKE_HANG": hanging, **QUICK}
+            ),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+    finally:
+        signal.signal(signal.SIGINT, previous)
     try:
         deadline = time.monotonic() + 30
         while not any(f" {hanging} " in f" {call} " for call in cli.docker_calls()):
