@@ -181,10 +181,10 @@ It prints the name of the backup, such as `20261011T030012Z`, which `./agoranomo
 To go back, return the checkout to the commit that you came from, which pins the earlier version of Metabase, and restore the database of Metabase from the backup. Airflow migrates its database one way too, so see first whether the update also changed the Airflow image, while the checkout is still at the new release:
 
 ```bash
-git diff <the commit that you came from> HEAD -- airflow/Dockerfile compose.yaml
+git diff <the commit that you came from> HEAD -- airflow/Dockerfile | grep '^[-+]FROM'
 ```
 
-When only the Metabase line differs, restore the database of Metabase alone. When the Airflow image changed too, restore `metabase,airflow`, or `airflow-init` fails on the schema of the newer Airflow; you lose the runs of Airflow since the backup. Return the checkout, then run:
+It prints the old and the new `FROM` line of the Airflow image when Airflow changed, and nothing otherwise. When it prints nothing, restore the database of Metabase alone. When it prints the lines, restore `metabase,airflow`, or `airflow-init` fails on the schema of the newer Airflow; you lose the runs of Airflow since the backup. Return the checkout, then run:
 
 ```bash
 ./agoranomos restore 20261011T030012Z --only metabase

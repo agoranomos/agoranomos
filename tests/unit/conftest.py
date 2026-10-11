@@ -37,6 +37,11 @@ case "$1" in
       "${FAKE_NCPU:-8}" "${FAKE_MEMTOTAL:-10737418240}" "${FAKE_DOCKER_ROOT:-/nonexistent}" \
       "${FAKE_IMAGE_STORE:-}"
     ;;
+  inspect)
+    # docker inspect of the container of the backup service: FAKE_INSPECT holds what its format
+    # prints, the user and the mount of /backups.
+    printf '%s\n' "${FAKE_INSPECT:-}"
+    ;;
   compose)
     shift
     # What Compose would read from its environment before it reads .env. docker compose version

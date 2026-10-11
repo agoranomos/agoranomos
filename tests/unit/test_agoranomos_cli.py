@@ -3639,7 +3639,10 @@ def restore_interrupted_in(cli, tmp_path, hanging, sent):
 
 
 @pytest.mark.parametrize(
-    ("sent", "code"), [(signal.SIGTERM, 143), (signal.SIGINT, 130)], ids=["TERM", "INT"]
+    ("sent", "code"),
+    # HUP is what a dropped SSH session sends.
+    [(signal.SIGTERM, 143), (signal.SIGINT, 130), (signal.SIGHUP, 129)],
+    ids=["TERM", "INT", "HUP"],
 )
 def test_an_interrupted_pg_restore_removes_the_dump_and_says_where_it_stopped(
     cli, tmp_path, sent, code
@@ -3711,20 +3714,72 @@ VERIFY_IN_THE_SERVICE = (
 )
 
 
+def the_running_service(cli, tmp_path, folder=None, user=None):
+    """The fake docker for a running backup service whose container has this backups folder and
+    this user (those that .env names, unless given): its ID and what docker inspect prints."""
+    folder = folder or str(cli.root / "backups")
+    user = user or f"{cli.read_env()['AGORANOMOS_UID']}:{cli.read_env()['AGORANOMOS_GID']}"
+    return {
+        "FAKE_PS_FILE": ps_file(tmp_path, BACKUP_RUNNING),
+        "FAKE_BACKUP": "0123abcdef\n",
+        "FAKE_INSPECT": f"{user}|{folder}",
+    }
+
+
 def test_restore_checks_the_backup_in_the_running_backup_service(cli, tmp_path):
     # A container more would add its limit to the sum of the budget of ADR-0022. Both paths run as
     # the user of the service.
     ready_to_restore(cli)
     set_env(cli, COMPOSE_PROFILES="core,demo,ops")
-    result = cli.run(
-        "restore", BACKUP, "--yes", FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING), **QUICK
-    )
+    result = cli.run("restore", BACKUP, "--yes", **the_running_service(cli, tmp_path), **QUICK)
     assert result.returncode == 0, result.stderr
     calls = cli.docker_calls()
     assert VERIFY_IN_THE_SERVICE in calls
     assert not any(" backup verify " in call for call in calls)
+    assert "checking in a container of its own" not in result.stdout
     order = calls_in_order(cli, VERIFY_IN_THE_SERVICE, "compose stop ")
     assert order == sorted(order)
+
+
+@pytest.mark.parametrize("changed", ["folder", "user", "group"])
+def test_restore_does_not_check_in_a_service_made_with_another_folder_or_user(
+    cli, tmp_path, changed
+):
+    # After a change of AGORANOMOS_BACKUP_DIR or AGORANOMOS_UID without up, the service still has
+    # the old folder or user: a check in it would read another folder than restore copies from.
+    ready_to_restore(cli)
+    set_env(cli, COMPOSE_PROFILES="core,demo,ops")
+    env = cli.read_env()
+    service = the_running_service(
+        cli,
+        tmp_path,
+        folder=str(cli.root / "old backups") if changed == "folder" else None,
+        user=f"{int(env['AGORANOMOS_UID']) + (changed == 'user')}:"
+        f"{int(env['AGORANOMOS_GID']) + (changed == 'group')}",
+    )
+    result = cli.run("restore", BACKUP, "--yes", **service, **QUICK)
+    assert result.returncode == 0, result.stderr
+    calls = cli.docker_calls()
+    assert VERIFY_IN_THE_SERVICE not in calls
+    assert (
+        f"compose run --rm --no-deps -T backup verify {BACKUP} warehouse airflow metabase" in calls
+    )
+    assert (
+        "The backup service has another backups folder or user than .env names now "
+        "(./agoranomos up makes it again): checking in a container of its own."
+    ) in result.stdout
+
+
+def test_restore_checks_in_a_container_of_its_own_when_docker_cannot_inspect_the_service(
+    cli, tmp_path
+):
+    ready_to_restore(cli)
+    set_env(cli, COMPOSE_PROFILES="core,demo,ops")
+    service = the_running_service(cli, tmp_path)
+    service["FAKE_INSPECT"] = ""
+    result = cli.run("restore", BACKUP, "--yes", **service, **QUICK)
+    assert result.returncode == 0, result.stderr
+    assert VERIFY_IN_THE_SERVICE not in cli.docker_calls()
 
 
 def test_restore_checks_the_backup_in_a_container_of_its_own_when_the_service_is_not_running(
@@ -3747,11 +3802,7 @@ def test_a_backup_that_fails_its_check_in_the_service_changes_nothing(cli, tmp_p
     ready_to_restore(cli)
     set_env(cli, COMPOSE_PROFILES="core,demo,ops")
     result = cli.run(
-        "restore",
-        BACKUP,
-        "--yes",
-        FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING),
-        FAKE_EXEC_FAIL="verify",
+        "restore", BACKUP, "--yes", **the_running_service(cli, tmp_path), FAKE_EXEC_FAIL="verify"
     )
     assert result.returncode == 1
     assert "did not pass its check" in result.stderr

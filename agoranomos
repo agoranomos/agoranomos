@@ -409,6 +409,17 @@ backups_folder_unwritable() {
   printf '%s' "the backup service (AGORANOMOS_UID=$(env_get AGORANOMOS_UID)) cannot write $owned_folder, which belongs to UID $folder_owner: set AGORANOMOS_UID and AGORANOMOS_GID in .env to the user and the group that own the folder, or give the folder to UID $(env_get AGORANOMOS_UID) with chown"
 }
 
+# True when the running backup service has the backups folder and the user that .env names now. A
+# service made before a change of AGORANOMOS_BACKUP_DIR or AGORANOMOS_UID keeps the old ones until
+# up makes it again, and a check in it would read another folder than the one that restore copies
+# from. The mount of /backups and the user come from docker inspect of its container.
+backup_service_current() {
+  service_container=$(compose ps --quiet backup 2> /dev/null) || return 1
+  [ -n "$service_container" ] || return 1
+  service_has=$(docker inspect --format '{{.Config.User}}|{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Source}}{{end}}{{end}}' "$service_container" 2> /dev/null) || return 1
+  [ "$service_has" = "$(env_get AGORANOMOS_UID):$(env_get AGORANOMOS_GID)|$(backups_path)" ]
+}
+
 # True when .env runs server mode: COMPOSE_PROFILES lists server (ADR-0011, ADR-0019).
 server_mode() {
   case ",$(setting COMPOSE_PROFILES core,demo)," in
@@ -1288,7 +1299,7 @@ restore_report() {
 # that it left in a container and says where it stopped.
 restore_exit() {
   restore_code=$?
-  trap - EXIT INT TERM
+  trap - EXIT INT TERM HUP
   restore_remove_dump
   if [ "$restore_code" -ne 0 ]; then
     restore_report
@@ -1296,7 +1307,8 @@ restore_exit() {
   exit "$restore_code"
 }
 
-# The trap of INT and TERM: end the restore, which runs the trap of EXIT.
+# The trap of INT, TERM and HUP (a dropped SSH session): end the restore, which runs the trap of
+# EXIT.
 restore_signaled() {
   restore_interrupted=1
   error_line "restore was interrupted"
@@ -1383,8 +1395,19 @@ cmd_restore() {
   fi
   say "Checking the backup $restore_name..."
   # In the running backup service when there is one, as backup does: a container more would add
-  # its limit to the sum that the memory budget holds. Either way it runs as AGORANOMOS_UID.
+  # its limit to the sum that the memory budget holds. Either way it runs as AGORANOMOS_UID. A
+  # service that was made before a change of the folder or the user in .env checks another folder
+  # than the one that restore copies from: then a container of its own with the current mount
+  # checks, for the length of the check (a rare case, so the budget of ADR-0022 holds).
+  check_in_service=0
   if ops_mode && running_service backup; then
+    if backup_service_current; then
+      check_in_service=1
+    else
+      say "The backup service has another backups folder or user than .env names now (./agoranomos up makes it again): checking in a container of its own."
+    fi
+  fi
+  if [ "$check_in_service" -eq 1 ]; then
     # shellcheck disable=SC2086 # one argument for each database
     compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh verify "$restore_name" $databases ||
       die "the backup $restore_name did not pass its check (the lines above say why), and nothing was changed"
@@ -1440,6 +1463,7 @@ Check out the release that took it and restore there, or pass --force if you kno
   trap restore_exit EXIT
   trap 'restore_signaled 130' INT
   trap 'restore_signaled 143' TERM
+  trap 'restore_signaled 129' HUP
   say "Stopping the services that use the databases..."
   # docker compose stop with no service stops every one, the databases among them.
   if [ -n "$stop" ]; then
@@ -1475,7 +1499,7 @@ Check out the release that took it and restore there, or pass --force if you kno
   say "Restored $databases from $restore_name. The backup also holds extensions.tar.gz, which restore leaves as it is. Starting the stack..."
   start_stack
   restore_phase=started
-  trap - EXIT INT TERM
+  trap - EXIT INT TERM HUP
   [ "$demo_failed" -eq 0 ] || die "the databases are restored and the stack is up, but the demo is not ready"
   say "$(paint ok 'The stack is up.' 1) ./agoranomos status shows every service."
 }
