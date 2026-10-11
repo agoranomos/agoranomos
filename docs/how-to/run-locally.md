@@ -4,7 +4,7 @@ This guide starts Agoranomos on your own machine in local mode: the warehouse, A
 
 !!! note "Pre-release"
 
-    Local mode runs from the `main` branch. The first release, v0.1.0, adds server mode and backups. The repository is private until v0.3, so cloning it needs an invitation.
+    Local mode runs from the `main` branch, and so do server mode and backups ([Deploy on a server](deploy-on-a-server.md)); v0.1.0 is to be the first release. The repository is private until v0.3, so cloning it needs an invitation.
 
 ## Before you begin
 

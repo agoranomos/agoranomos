@@ -158,6 +158,8 @@ Each container gets the Linux privileges that its job needs and no more. Every s
 
 The stack has two modes, local and server. Both are first-class, and CI tests both. Local mode runs today, with its ports published on `127.0.0.1` only ([Run Agoranomos locally](../how-to/run-locally.md)). Server mode runs today too: Caddy, the `server` profile, puts Metabase on HTTPS on ports 80 and 443 only, and Airflow stays reachable through an SSH tunnel ([ADR-0019](../adr/0019-open-only-metabase-in-server-mode.md)). Its daily backups, the `ops` profile, run too ([ADR-0020](../adr/0020-back-up-the-databases-every-day.md)).
 
+[Deploy on a server](../how-to/deploy-on-a-server.md) and [Back up and restore](../how-to/back-up-and-restore.md) walk through server mode and the backups.
+
 The stack needs 8 GB of RAM available to Docker (6 GB as a minimum, and 12 GB recommended for the CeleryExecutor variant), 4 CPUs and 20 GB of disk, on x86-64-v2 or ARM64 hardware such as Apple Silicon. The memory limits of the services come from measurements on the demo ([System requirements](../reference/system-requirements.md)).
 
 Decision records: [ADR-0010: Support amd64 and arm64 within a memory budget](../adr/0010-multi-arch-and-memory-budget.md) covers the architectures, [ADR-0022: Budget the memory by variant and mode](../adr/0022-budget-the-memory-by-variant-and-mode.md) the memory budget, and [ADR-0011: Support local and server modes](../adr/0011-local-and-server-modes.md) the two modes.

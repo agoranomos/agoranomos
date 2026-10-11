@@ -45,6 +45,8 @@ Server mode puts Metabase on the internet behind Caddy, with HTTPS, and opens th
 
 Caddy keeps its certificates in the Docker volume `caddy-data`, which backups leave out: a lost volume means a new certificate. It sends Let's Encrypt no contact email, as Let's Encrypt has sent no expiration emails since June 2025, and Caddy renews the certificate by itself.
 
+[Deploy on a server](../how-to/deploy-on-a-server.md) walks through it on a new server.
+
 ## Backups
 
 `./agoranomos backup` takes a backup of the three databases at any time, and with the `ops` profile, which `./agoranomos init --server` turns on, the `backup` service takes one every day ([ADR-0020](../adr/0020-back-up-the-databases-every-day.md)).
@@ -66,6 +68,8 @@ The retention removes scheduled backups only, after each good backup. A backup t
 A backup is written as `.partial-<name>` and renamed when it is complete, so a folder with the name of a backup is a complete one. A stop of the `backup` service during a backup, such as `./agoranomos down`, ends it: the next backup removes the partial folder, and `latest.json`, in the backups folder, keeps the result of the last backup. To turn the daily backups off, take `ops` out of `COMPOSE_PROFILES`; the backups stay ([Server mode](#server-mode) says what `up` and `down` do with the `backup` container that is left).
 
 The `backup` service runs as `AGORANOMOS_UID` and `AGORANOMOS_GID` of the host, so that the backups belong to you. Rootless Docker and `userns-remap`, which map the users of containers to other users of the host, are not supported: the backups would belong to another user.
+
+[Back up and restore](../how-to/back-up-and-restore.md) shows how to schedule, copy and restore them.
 
 ## Memory limits
 
