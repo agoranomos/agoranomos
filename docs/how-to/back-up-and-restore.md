@@ -140,7 +140,7 @@ If `restore` stops because the images of the backup differ from those of the che
 
 ## Restore on a new server
 
-1. Set up the new server as [Deploy on a server](deploy-on-a-server.md) says: [Prepare the server](deploy-on-a-server.md#prepare-the-server) and [Open ports 22, 80 and 443 only](deploy-on-a-server.md#open-ports-22-80-and-443-only). Then, as `agoranomos`, run the first two commands of its [Start the stack](deploy-on-a-server.md#start-the-stack), and check out the commit that took the backup ([Restore](#restore) says how to find it). Do not run its third command, `./agoranomos init --server`, nor `up`: the `.env` comes from the password manager in step 2, and `init` runs in step 3. Point the A record of the domain at the new server.
+1. Set up the new server as [Deploy on a server](deploy-on-a-server.md) says: [Prepare the server](deploy-on-a-server.md#prepare-the-server) and [Open ports 22, 80 and 443 only](deploy-on-a-server.md#open-ports-22-80-and-443-only). Then, as `agoranomos`, run the first two commands of its [Start the stack](deploy-on-a-server.md#start-the-stack), and check out the commit that took the backup ([Restore](#restore) says how to find it). Do not run its third command, `./agoranomos init --server`, nor `up`: the `.env` comes from the password manager in step 2, and `init` runs in step 3. Point the A record of the domain, and its AAAA record if it has one, at the new server.
 
     ```bash
     git clone https://github.com/agoranomos/agoranomos.git

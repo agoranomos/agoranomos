@@ -177,7 +177,7 @@ CI measures the stack in the same way in every run of the stack tests, on the Gi
 | warehouse-db | 256 MiB | 54 MiB | 123 MiB | 0 | 0 |
 | **Running services, total** | **6656 MiB** | **3772 MiB** | | | |
 
-On 11 October 2026 the stack also ran in server mode on a Hetzner Cloud CAX21, the reference server of the project (arm64, 4 vCPUs, 8 GB; Ubuntu 26.04, Docker Engine 29.9.0, Docker Compose 5.6.0, 7,720 MiB of memory as Docker reports it, no swap), set up as [Deploy on a server](../how-to/deploy-on-a-server.md) says, with a certificate of Let's Encrypt and the default limits of that day. It ran the stack tests, all of which passed, and then stood idle for 10 minutes. Every peak stays below its limit, and no process was killed and no container restarted.
+On 11 October 2026 the stack also ran in server mode on a Hetzner Cloud CAX21, the reference server of the project (arm64, 4 vCPUs, 8 GB; Ubuntu 26.04, Docker Engine 29.9.0, Docker Compose 5.6.0, 7,720 MiB of memory as Docker reports it, no swap), set up as [Deploy on a server](../how-to/deploy-on-a-server.md) says, with a certificate of Let's Encrypt and the default limits of that day. It ran the stack tests, with the memory report around them: the pytest summary of that run was lost, and a repeat run passed (519 passed and 9 skipped, the skips being the CeleryExecutor variant and the opt-in restore tests). It then stood idle for 10 minutes. Every peak stays below its limit, and no process was killed and no container restarted.
 
 ### Hetzner CAX21 arm64, server mode, the stack tests (aarch64)
 
