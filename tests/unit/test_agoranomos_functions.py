@@ -624,3 +624,56 @@ def test_a_database_belongs_to_a_service_and_depends_on_the_images_that_read_it(
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == f"{service}|{images}"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("value", "path"),
+    [
+        ("./backups", "{root}/backups"),
+        ("backups", "{root}/backups"),
+        ("../backups", "{root}/../backups"),
+        ("/srv/backups", "/srv/backups"),
+        # Compose reads a leading ~ as the home folder of the user.
+        ("~/backups", "/home/someone/backups"),
+        ("~", "/home/someone"),
+        ("~/my backups", "/home/someone/my backups"),
+        # A tilde that is not the first character is a character of the name.
+        ("./~/backups", "{root}/~/backups"),
+    ],
+    ids=repr,
+)
+def test_folder_path_reads_a_folder_as_compose_does(shell, tmp_path, value, path):
+    script, _, _ = SCRIPT.rpartition('\nmain "$@"')
+    result = subprocess.run(
+        [shell, "-c", f'{script}\nfolder_path "$1"\n', "sh", value],
+        cwd=tmp_path,
+        env={"PATH": os.environ["PATH"], "HOME": "/home/someone/"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == path.format(root=tmp_path.resolve())
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("value", "is_path"),
+    [
+        ("./backups", True),
+        ("../backups", True),
+        ("/srv/backups", True),
+        ("~/backups", True),
+        (".", True),
+        ("..", True),
+        ("~", True),
+        ("backups", False),
+        ("data/backups", False),
+        ("", False),
+    ],
+    ids=repr,
+)
+def test_is_folder_path_tells_a_path_from_the_name_of_a_volume(shell, tmp_path, value, is_path):
+    assert answers(shell, tmp_path, "is_folder_path", value) is is_path

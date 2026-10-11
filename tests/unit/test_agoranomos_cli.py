@@ -2057,12 +2057,36 @@ def test_up_waits_for_a_backup_service_that_is_still_starting(cli, tmp_path):
     assert NO_RECENT_BACKUP not in result.stderr
 
 
-@pytest.mark.parametrize("line", ["backup|exited||1", "backup|dead||1", "backup|exited||137"])
-def test_up_stops_when_the_backup_service_has_exited(cli, tmp_path, line):
+@pytest.mark.parametrize(
+    ("line", "state"),
+    [
+        ("backup|restarting||1", "restarting with exit code 1"),
+        ("backup|exited||1", "exited with exit code 1"),
+        ("backup|dead||1", "dead with exit code 1"),
+        ("backup|exited||137", "exited with exit code 137"),
+    ],
+)
+def test_up_goes_on_with_a_warning_when_the_backup_service_is_down(cli, tmp_path, line, state):
+    # A setting that preflight passes and the container refuses puts the service into a restart
+    # loop: the stack works without it, so up says so once and goes on, as for an unhealthy one.
     result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps_with(line)), **QUICK)
+    assert result.returncode == 0, result.stderr
+    warnings = [line for line in result.stderr.splitlines() if "the backup service is" in line]
+    assert len(warnings) == 1
+    assert state in warnings[0]
+    assert "./agoranomos logs backup shows why" in warnings[0]
+    assert "All services but the backup are healthy." in result.stdout
+    assert "The stack is up." in result.stdout
+    assert "the stack did not start" not in result.stderr
+
+
+def test_up_still_stops_for_another_service_that_has_exited_with_the_backup_down(cli, tmp_path):
+    ps = ps_with("backup|restarting||1").replace(
+        "platform-db|running|healthy|0", "platform-db|exited||1"
+    )
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, ps), **QUICK)
     assert result.returncode == 1
-    assert "backup failed: see ./agoranomos logs backup" in result.stderr
-    assert "the stack did not start" in result.stderr
+    assert "platform-db failed: see ./agoranomos logs platform-db" in result.stderr
 
 
 def test_up_starts_the_stack_and_waits_until_healthy(cli, tmp_path):
@@ -3727,3 +3751,119 @@ def test_a_backup_that_fails_its_check_in_the_service_changes_nothing(cli, tmp_p
     assert "did not pass its check" in result.stderr
     assert "nothing was changed" in result.stderr
     assert not any(call.startswith(("compose stop", "compose up")) for call in cli.docker_calls())
+
+
+# A folder setting that Compose reads as a path: ~ is the home of the user, as for a bind mount.
+def test_a_backups_folder_with_a_tilde_is_the_one_that_compose_mounts(cli):
+    cli.run("init")
+    set_env(cli, AGORANOMOS_BACKUP_DIR="~/my backups")
+    result = cli.run("init")
+    assert result.returncode == 0, result.stderr
+    # The home folder of the tests is the checkout (the cli fixture sets HOME).
+    assert (cli.root / "my backups").is_dir()
+    assert not (cli.root / "~").exists()
+    assert str(cli.root / "my backups") in cli.run("status").stdout
+
+
+@pytest.mark.parametrize("setting", ["AGORANOMOS_BACKUP_DIR", "AGORANOMOS_EXTENSIONS_DIR"])
+@pytest.mark.parametrize("value", ["backups", "my folder", "data/backups"])
+def test_preflight_stops_on_a_folder_that_compose_would_read_as_a_volume(cli, setting, value):
+    cli.run("init")
+    set_env(cli, **{setting: value})
+    result = cli.run("preflight")
+    assert result.returncode == 1
+    assert (
+        f"{setting} in .env must be an absolute path or start with ./, ../ or ~/, because "
+        "Compose reads anything else as the name of a volume"
+    ) in result.stderr
+
+
+@pytest.mark.parametrize("setting", ["AGORANOMOS_BACKUP_DIR", "AGORANOMOS_EXTENSIONS_DIR"])
+@pytest.mark.parametrize("value", ["./data", "../data", "~/data", "/srv/data", ".", "..", "~"])
+def test_preflight_accepts_a_folder_that_compose_reads_as_a_path(cli, setting, value):
+    cli.run("init")
+    set_env(cli, **{setting: value})
+    result = cli.run("preflight")
+    assert result.returncode == 0, result.stderr
+
+
+def test_preflight_stops_on_keep_daily_of_zeros(cli):
+    ops_env(cli, BACKUP_KEEP_DAILY="00")
+    result = cli.run("preflight")
+    assert result.returncode == 1
+    assert "BACKUP_KEEP_DAILY in .env must be at least 1" in result.stderr
+    set_env(cli, BACKUP_KEEP_DAILY="10")
+    assert cli.run("preflight").returncode == 0
+
+
+def test_status_says_how_much_room_the_disk_of_the_backups_folder_has(cli):
+    cli.run("init")
+    result = cli.run("status")
+    assert "Free space on the disk of the backups folder: 100 GB." in result.stdout
+    result = cli.run("status", FAKE_DISK_AVAILABLE_KB="512000")
+    assert "Free space on the disk of the backups folder: 500 MB." in result.stdout
+
+
+def test_status_asks_df_about_the_first_folder_that_exists(cli):
+    cli.run("init")
+    set_env(cli, AGORANOMOS_BACKUP_DIR="./not/there/yet")
+    cli.stub(
+        "df",
+        'echo "df $*" >> "$FAKE_LOG.df"; echo "Filesystem 1 2 3 4 5"; echo "x 1 2 20971520 4 /"',
+    )
+    result = cli.run("status")
+    assert "Free space on the disk of the backups folder: 20 GB." in result.stdout
+    asked = cli.log.with_name(f"{cli.log.name}.df").read_text(encoding="utf-8")
+    assert asked.splitlines() == [f"df -Pk {cli.root}"]
+
+
+def test_status_says_nothing_of_room_when_df_cannot_tell(cli):
+    cli.run("init")
+    cli.stub("df", "exit 1")
+    result = cli.run("status")
+    assert result.returncode == 0
+    assert "Free space" not in result.stdout
+
+
+def test_backup_on_linux_stops_when_the_folder_it_makes_is_not_the_users_to_write(cli, tmp_path):
+    # A folder that does not exist yet is made for the user who runs this, and then it is compared
+    # with the user of the service.
+    cli.run("init")
+    (cli.root / "backups").rmdir()
+    other = os.getuid() + 1
+    set_env(cli, AGORANOMOS_UID=str(other))
+    stub_uname(cli, "Linux")
+    result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert result.returncode == 1
+    assert f"the backup service (AGORANOMOS_UID={other}) cannot write" in result.stderr
+    assert not any(call.startswith(("compose run", "compose exec")) for call in cli.docker_calls())
+
+
+def test_the_owner_of_the_backups_folder_is_the_owner_of_what_a_link_points_to(cli, tmp_path):
+    # ls -ldn on a link gives the owner of the link, and the service writes into the target: the
+    # slash after the path makes ls follow the link. The stand-in answers like ls.
+    cli.run("init")
+    stub_uname(cli, "Linux")
+    cli.stub(
+        "ls",
+        'case "$2" in\n'
+        '  */) echo "drwx------ 2 4242 20 64 Oct 11 04:44 $2" ;;\n'
+        '  *) echo "lrwxr-xr-x 1 1 20 64 Oct 11 04:44 $2" ;;\n'
+        "esac",
+    )
+    set_env(cli, AGORANOMOS_UID="4242")
+    result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert result.returncode == 0, result.stderr
+    set_env(cli, AGORANOMOS_UID="1")
+    result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert result.returncode == 1
+    assert "which belongs to UID 4242" in result.stderr
+
+
+def test_the_user_of_the_service_and_the_owner_of_the_folder_are_compared_as_numbers(cli, tmp_path):
+    cli.run("init")
+    stub_uname(cli, "Linux")
+    set_env(cli, AGORANOMOS_UID=f"000{os.getuid()}")
+    result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert result.returncode == 0, result.stderr
+    assert "cannot write" not in result.stderr

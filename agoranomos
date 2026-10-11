@@ -291,13 +291,32 @@ generate_secret() {
   esac
 }
 
+# The absolute path of a folder that a setting names, as Compose reads it for a bind mount: an
+# absolute path stays, a leading ~ is the home folder of the user, and a relative path starts at the
+# checkout.
+folder_path() {
+  # shellcheck disable=SC2088 # a literal ~ in a value of .env, which no shell has expanded
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    '~') printf '%s' "${HOME%/}" ;;
+    '~/'*) printf '%s/%s' "${HOME%/}" "${1#\~/}" ;;
+    *) printf '%s/%s' "$ROOT" "${1#./}" ;;
+  esac
+}
+
+# True when $1 is a value that Compose reads as a path for a bind mount: absolute, or starting with
+# ., .. or ~. Anything else, such as backups, it reads as the name of a volume.
+is_folder_path() {
+  # shellcheck disable=SC2088 # a literal ~ in a value of .env, which no shell has expanded
+  case "$1" in
+    /* | . | .. | ./* | ../* | '~' | '~/'*) return 0 ;;
+  esac
+  return 1
+}
+
 # The absolute path of the extensions folder (ADR-0013).
 extensions_path() {
-  extensions_dir=$(setting AGORANOMOS_EXTENSIONS_DIR ./extensions)
-  case "$extensions_dir" in
-    /*) printf '%s' "$extensions_dir" ;;
-    *) printf '%s/%s' "$ROOT" "${extensions_dir#./}" ;;
-  esac
+  folder_path "$(setting AGORANOMOS_EXTENSIONS_DIR ./extensions)"
 }
 
 # The images of the checkout, one reference to a line, sorted: the image: lines of the Compose
@@ -313,11 +332,7 @@ image_refs() {
 
 # The absolute path of the backups folder (ADR-0020).
 backups_path() {
-  backups_dir=$(setting AGORANOMOS_BACKUP_DIR ./backups)
-  case "$backups_dir" in
-    /*) printf '%s' "$backups_dir" ;;
-    *) printf '%s/%s' "$ROOT" "${backups_dir#./}" ;;
-  esac
+  folder_path "$(setting AGORANOMOS_BACKUP_DIR ./backups)"
 }
 
 # Print a field of a JSON file that postgres/backup.sh wrote, which has one field to a line.
@@ -377,10 +392,15 @@ make_backups_folder() {
 backup_folder_foreign() {
   owned_folder=$(backups_path)
   [ -d "$owned_folder" ] || return 1
-  # ls -ldn gives the numeric owner of one path on Linux and macOS alike; stat has other options on each.
+  # ls -ldn gives the numeric owner of one path on Linux and macOS alike; stat has other options on
+  # each. The slash after the path makes ls look at the folder that a link points to, which is the
+  # folder that the service writes into, and not at the link.
   # shellcheck disable=SC2012
-  folder_owner=$(ls -ldn "$owned_folder" | awk '{ print $3 }')
-  [ "$folder_owner" != "$(env_get AGORANOMOS_UID)" ]
+  folder_owner=$(ls -ldn "$owned_folder/" | awk '{ print $3 }')
+  # The IDs are numbers, so that 0501 is 501.
+  owner_number=$(printf '%s' "$folder_owner" | sed 's/^0*\([0-9]\)/\1/')
+  uid_number=$(env_get AGORANOMOS_UID | sed 's/^0*\([0-9]\)/\1/')
+  [ "$owner_number" != "$uid_number" ]
 }
 
 # On Linux a bind mount keeps the owner of the host, so the backup service cannot write into a
@@ -660,6 +680,13 @@ EOF
       problem "$site_host cannot get a certificate from Let's Encrypt: run ./agoranomos init --server with the domain name of the server, or set AGORANOMOS_TLS=internal in .env for a test"
     fi
   fi
+  # Compose reads a value that is not a path, such as backups, as the name of a volume, and stops
+  # with an error that names no setting.
+  for folder_setting in AGORANOMOS_BACKUP_DIR AGORANOMOS_EXTENSIONS_DIR; do
+    if ! is_folder_path "$(setting "$folder_setting" ./folder)"; then
+      problem "$folder_setting in .env must be an absolute path or start with ./, ../ or ~/, because Compose reads anything else as the name of a volume: write ./$(setting "$folder_setting" folder)"
+    fi
+  done
   # The backup service of the ops profile runs as AGORANOMOS_UID and reads its schedule from .env.
   if ops_mode; then
     message=$(backup_user_problem)
@@ -681,7 +708,8 @@ EOF
         '' | *[!0-9]*) problem "$keep_setting in .env must be a whole number" ;;
       esac
     done
-    if [ "$(setting BACKUP_KEEP_DAILY 7)" = 0 ]; then
+    # Zeros only, such as 0 or 00: the service reads a number, and stops on it.
+    if [ -z "$(setting BACKUP_KEEP_DAILY 7 | tr -d 0)" ]; then
       problem "BACKUP_KEEP_DAILY in .env must be at least 1: the newest backup always stays"
     fi
     # The image of the databases has the time zones of the IANA database, as Linux and macOS
@@ -843,9 +871,9 @@ EOF
 # the active profiles count: docker compose ps lists every container of the project, also one that a
 # start with another profile left behind, such as a failed demo-init after COMPOSE_PROFILES=core. A
 # failed demo-init alone does not stop the wait: the rest of the stack works without the demo, so
-# the wait goes on until the rest is ready, and then sets demo_failed=1 for cmd_up. An unhealthy
-# backup service does not stop it either: it is unhealthy when there is no good backup in the last 26
-# hours, and the stack works without a fresh backup, so the wait warns and goes on.
+# the wait goes on until the rest is ready, and then sets demo_failed=1 for cmd_up. A backup
+# service that is unhealthy (no good backup in the last 26 hours), restarting or exited does not
+# stop it either: the stack works without a fresh backup, so the wait warns and goes on.
 # AGORANOMOS_WAIT_TIMEOUT and AGORANOMOS_WAIT_INTERVAL, in seconds, are hooks for the tests: how long
 # to wait at most (default 900) and how long to sleep between two looks (default 5).
 # The line that names a service that failed while up waited, and the command that shows its logs.
@@ -870,7 +898,7 @@ wait_healthy() {
   while :; do
     states=$(compose ps --all --format '{{.Service}}|{{.State}}|{{.Health}}|{{.ExitCode}}') ||
       die "docker compose ps failed; the error above names the cause, and Docker may have stopped"
-    pending="" failed="" killed="" seen="" stale_backup=0
+    pending="" failed="" killed="" seen="" stale_backup=0 backup_down=""
     while IFS='|' read -r service state health exit_code; do
       [ -n "$service" ] || continue
       case "$active" in *" $service "*) ;; *) continue ;; esac
@@ -890,8 +918,7 @@ wait_healthy() {
           case "$state:$health:$exit_code" in
             running:healthy:* | running::*) ;;
             running:unhealthy:*) stale_backup=1 ;;
-            exited:*:137) failed="$failed $service" killed="$killed $service" ;;
-            exited:* | dead:*) failed="$failed $service" ;;
+            restarting:* | exited:* | dead:*) backup_down="$state${exit_code:+ with exit code $exit_code}" ;;
             *) pending="${pending:+$pending,} $service ($state${health:+, $health})" ;;
           esac
           ;;
@@ -922,12 +949,14 @@ EOF
     if [ -z "$pending" ]; then
       [ "$stale_backup" -eq 0 ] ||
         warn "backup: $NO_RECENT_BACKUP: ./agoranomos status shows when the last one was, and ./agoranomos logs backup why"
+      [ -z "$backup_down" ] ||
+        warn "backup: the backup service is $backup_down, so there are no new backups: ./agoranomos logs backup shows why. The stack works without it"
       if [ -n "$failed" ]; then
         warn "$(failed_service demo-init)"
         demo_failed=1
         return 0
       fi
-      if [ "$stale_backup" -eq 0 ]; then
+      if [ "$stale_backup" -eq 0 ] && [ -z "$backup_down" ]; then
         say "$(paint ok 'All services are healthy.' 1)"
       else
         say "$(paint ok 'All services but the backup are healthy.' 1)"
@@ -1087,10 +1116,12 @@ cmd_backup() {
   if ! running_service warehouse-db || ! running_service platform-db; then
     die "the databases are not running: start the stack with ./agoranomos up"
   fi
+  # The folder first: one that does not exist yet would be made for the user who runs this, and
+  # then compared with the user of the service.
+  make_backups_folder
   if [ "$(uname -s)" = Linux ] && backup_folder_foreign; then
     die "$(backups_folder_unwritable)"
   fi
-  make_backups_folder
   if ops_mode && running_service backup; then
     compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh now ||
       die "the backup failed: the lines above say at which step. The backups folder is $(backups_path)"
@@ -1129,6 +1160,21 @@ backup_status() {
   else
     say "Backups: none yet in $backups_folder. ./agoranomos backup takes one."
   fi
+  # The room for the next one: the file system of the folder, which by default is the one that
+  # holds the data of Docker too. The folder may not exist yet: its first parent that does.
+  free_room=$backups_folder
+  while [ ! -d "$free_room" ] && [ "$free_room" != / ]; do free_room=$(dirname "$free_room"); done
+  free_kb=$(df -Pk "$free_room" 2> /dev/null | awk 'NR == 2 { print $4 }')
+  case "$free_kb" in
+    '' | *[!0-9]*) ;;
+    *)
+      if [ "$free_kb" -ge 1048576 ]; then
+        say "Free space on the disk of the backups folder: $((free_kb / 1048576)) GB."
+      else
+        say "Free space on the disk of the backups folder: $((free_kb / 1024)) MB."
+      fi
+      ;;
+  esac
   # The backups by hand, which the retention never removes (ADR-0020): their size and age. They are
   # listed without latest.json too, as they take disk space whether it is there or not.
   listed=0
