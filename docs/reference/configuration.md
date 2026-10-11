@@ -74,7 +74,7 @@ Every service has a memory limit, also for swap, so that the stack stays within 
 | Setting | Default | Service |
 |---|---|---|
 | `WAREHOUSE_DB_MEMORY` | `256m` | `warehouse-db`, the warehouse |
-| `PLATFORM_DB_MEMORY` | `384m` | `platform-db`, the databases of Airflow and Metabase |
+| `PLATFORM_DB_MEMORY` | `512m` | `platform-db`, the databases of Airflow and Metabase |
 | `AIRFLOW_APISERVER_MEMORY` | `512m` | `airflow-apiserver` |
 | `AIRFLOW_DAG_PROCESSOR_MEMORY` | `768m` | `airflow-dag-processor`, which runs `dbt ls` each time that it parses the transform DAG (below) |
 | `AIRFLOW_TRIGGERER_MEMORY` | `640m` | `airflow-triggerer` |
