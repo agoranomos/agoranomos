@@ -8,7 +8,7 @@ Agoranomos runs on any machine with Docker that has the resources below ([ADR-00
 | CPUs available to Docker | 2 | 4 |
 | Free disk for Docker | 10 GB | 20 GB |
 | CPU architecture | arm64, or x86-64 with x86-64-v2 | |
-| Docker Engine | 25.0; 28.0 in server mode | |
+| Docker Engine | 27.0.1; 28.0 in server mode | |
 | Docker Compose | 2.24 | 5.4 or newer |
 
 Docker runs as root, the default of Docker Engine: rootless Docker and `userns-remap`, which map the users of containers to other users of the host, are not supported with the backups, which would belong to another user ([Configuration](configuration.md#backups)).

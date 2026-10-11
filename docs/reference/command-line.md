@@ -20,7 +20,7 @@ Checks that this machine can run the stack. Each problem is reported with what t
 
 | Check | Stops when | Warns when |
 |---|---|---|
-| Docker Engine | it is missing, not running, or older than 25.0 | — |
+| Docker Engine | it is missing, not running, or older than 27.0.1 | — |
 | Docker Engine, in server mode | it is older than 28.0.0 | — |
 | Docker Compose | the plugin is missing or older than 2.24 | it is 2.37 or 2.38, or older than 5.4 with the containerd image store |
 | CPU architecture | it is neither arm64 nor x86-64 with x86-64-v2 | — |
