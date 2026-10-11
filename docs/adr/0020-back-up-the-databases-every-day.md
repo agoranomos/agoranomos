@@ -73,6 +73,6 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** in place for v0.1.0: the `backup` service of the `ops` profile, `postgres/backup.sh`, the role `backup`, `./agoranomos backup`, `restore` and the status of the backups, and the round trip in the job `server` of the Stack workflow, with a restore of Metabase into the running stack and a restore on empty volumes. Not done yet: the guide Back up and restore, with copies elsewhere, and the check on a real server.
+* **Implementation status, as of October 2026:** in place for v0.1.0: the `backup` service of the `ops` profile, `postgres/backup.sh`, the role `backup`, `./agoranomos backup`, `restore` and the status of the backups, and the round trip in the job `server` of the Stack workflow, with a restore of Metabase into the running stack and a restore on empty volumes, and the guide [Back up and restore](../how-to/back-up-and-restore.md), with copies elsewhere. Not done yet: the check on a real server.
 * Other self-hosted projects keep the keys apart from their backups and restore onto the same version: [GitLab](https://docs.gitlab.com/administration/backup_restore/backup_gitlab/), [Sentry](https://develop.sentry.dev/self-hosted/backup/).
 * PostgreSQL 18: [pg_dump](https://www.postgresql.org/docs/18/app-pgdump.html), [pg_restore](https://www.postgresql.org/docs/18/app-pgrestore.html), [pg_dumpall](https://www.postgresql.org/docs/18/app-pg-dumpall.html), [predefined roles](https://www.postgresql.org/docs/18/predefined-roles.html).
