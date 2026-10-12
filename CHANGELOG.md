@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/agoranomos/agoranomos/compare/v0.1.1...v0.1.2) (2026-10-12)
+
+
+### Bug Fixes
+
+* **backups:** take a manual backup into the folder of .env after it changed ([#63](https://github.com/agoranomos/agoranomos/issues/63)) ([782c5d6](https://github.com/agoranomos/agoranomos/commit/782c5d6037a5823b32eded69a962185b5aab9d9e))
+
 ## [0.1.1](https://github.com/agoranomos/agoranomos/compare/v0.1.0...v0.1.1) (2026-10-12)
 
 
