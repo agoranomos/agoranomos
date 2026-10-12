@@ -47,7 +47,7 @@ Solid arrows show how data moves. Dotted arrows show what Airflow runs.
 | Layer | Component | What it does | Version line, as of 2026-10 | ADR |
 |---|---|---|---|---|
 | Runtime | Python | Language of the pipelines and tooling; the version supported by every component | 3.13 | [0012](../adr/0012-python-and-tooling.md) |
-| Ingestion | dlt | Incremental loading, schema evolution, merge | 1.30 | [0004](../adr/0004-ingest-with-dlt.md) |
+| Ingestion | dlt | Incremental loading, schema evolution, merge | 1.31 | [0004](../adr/0004-ingest-with-dlt.md) |
 | Orchestration | Apache Airflow | Scheduling and orchestration; by default the LocalExecutor runs tasks in the scheduler, and the CeleryExecutor variant runs them on separate workers | 3.3 | [0002](../adr/0002-orchestrate-with-airflow-3.md), [0015](../adr/0015-run-localexecutor-by-default.md) |
 | | Valkey | Message broker of the CeleryExecutor variant | 9 | [0002](../adr/0002-orchestrate-with-airflow-3.md) |
 | Storage | PostgreSQL | The warehouse and the platform databases | 18 | [0003](../adr/0003-two-postgres-instances.md) |
