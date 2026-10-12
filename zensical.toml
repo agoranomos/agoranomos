@@ -55,6 +55,8 @@ nav = [
     { "ADR-0021: Leave the outgoing traffic of Metabase open, and close what relays it without a sign-in" = "adr/0021-leave-the-outgoing-traffic-of-metabase-open.md" },
     { "ADR-0022: Budget the memory by variant and mode" = "adr/0022-budget-the-memory-by-variant-and-mode.md" },
     { "ADR-0023: Give the network of the stack IPv6, so that Metabase sees the address of each client" = "adr/0023-give-the-network-of-the-stack-ipv6.md" },
+    { "ADR-0024: One deployment is one business, and clients group its ad accounts" = "adr/0024-one-deployment-is-one-business.md" },
+    { "ADR-0025: Model advertising statistics once, at the grain of a campaign and a day" = "adr/0025-model-advertising-statistics-once.md" },
   ] },
 ]
 
