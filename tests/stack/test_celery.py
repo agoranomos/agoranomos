@@ -97,32 +97,61 @@ def test_the_worker_writes_the_results_into_their_own_database(env):
         assert int(own.stdout.strip()) > 0, "no result of a task in celery_results"
 
 
-def test_db_init_deletes_the_results_older_than_90_days(env):
+# A trigger that the role of the results puts on its own table, as the code of a task on the worker
+# could: it records the role that runs each deletion. And what puts the database back.
+WATCH_THE_DELETIONS = (
+    "CREATE TABLE agoranomos_test_deleted_by (name text); "
+    "CREATE FUNCTION agoranomos_test_record_deleter() RETURNS trigger LANGUAGE plpgsql AS "
+    "$$ BEGIN INSERT INTO agoranomos_test_deleted_by VALUES (current_user); RETURN OLD; END $$; "
+    "CREATE TRIGGER agoranomos_test_record_deleter BEFORE DELETE ON celery_taskmeta "
+    "FOR EACH ROW EXECUTE FUNCTION agoranomos_test_record_deleter()"
+)
+PUT_BACK = (
+    "DROP TRIGGER IF EXISTS agoranomos_test_record_deleter ON celery_taskmeta; "
+    "DROP FUNCTION IF EXISTS agoranomos_test_record_deleter(); "
+    "DROP TABLE IF EXISTS agoranomos_test_deleted_by; "
+    "DELETE FROM celery_taskmeta WHERE task_id LIKE 'agoranomos-test-%'"
+)
+
+
+def test_db_init_deletes_the_old_results_as_their_role_and_never_as_the_superuser(env):
     # Nothing in Airflow cleans the database of the results, so db-init, which runs on every start,
     # deletes those older than 90 days. Two results of no task, as the worker writes them, one 91
-    # and one 89 days old: db-init run again deletes the first only.
+    # and one 89 days old: db-init run again deletes the first only. Whoever holds the password of
+    # celery_results decides what a deletion in its database runs, so db-init deletes as that role:
+    # the trigger, which runs with the powers of the role that deletes, sees celery_results.
     def results(sql):
         return psql(
-            "platform-db", "postgres", env["PLATFORM_POSTGRES_PASSWORD"], "celery_results", sql
+            "platform-db",
+            "celery_results",
+            env["CELERY_RESULTS_DB_PASSWORD"],
+            "celery_results",
+            sql,
         )
 
-    remove = "DELETE FROM celery_taskmeta WHERE task_id LIKE 'agoranomos-test-%'"
-    results(remove)
-    inserted = results(
+    results(PUT_BACK)
+    watched = results(WATCH_THE_DELETIONS)
+    prepared = results(
         "INSERT INTO celery_taskmeta (id, task_id, status, date_done) VALUES "
         "(nextval('task_id_sequence'), 'agoranomos-test-91-days', 'SUCCESS', "
         "now() - interval '91 days'), "
         "(nextval('task_id_sequence'), 'agoranomos-test-89-days', 'SUCCESS', "
         "now() - interval '89 days')"
     )
-    assert inserted.returncode == 0, inserted.stderr
     try:
+        assert watched.returncode == 0, watched.stderr
+        assert prepared.returncode == 0, prepared.stderr
         rerun = compose("run", "--rm", "--no-deps", "db-init", check=False)
         assert rerun.returncode == 0, job_failed("db-init", rerun)
+        cleaned = "deleting them failed" not in rerun.stderr
+        assert cleaned, "db-init says that it could not delete the old results"
         left = results(
             "SELECT task_id FROM celery_taskmeta WHERE task_id LIKE 'agoranomos-test-%' ORDER BY 1"
         )
         assert left.returncode == 0, left.stderr
         assert left.stdout.split() == ["agoranomos-test-89-days"]
+        deleted_by = results("SELECT name FROM agoranomos_test_deleted_by")
+        assert deleted_by.returncode == 0, deleted_by.stderr
+        assert deleted_by.stdout.split() == ["celery_results"]
     finally:
-        results(remove)
+        results(PUT_BACK)

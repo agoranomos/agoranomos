@@ -66,7 +66,12 @@ def runs(text: str, statement: str) -> bool:
 LEXEMES = re.compile(rf"'(?:[^']|'')*'|--[^\n]*|{BLOCK_COMMENT.pattern}", re.DOTALL)
 
 
-@pytest.mark.parametrize("name", sorted(ROLE_PASSWORDS))
+# The SQL files that db-init runs: those of the superuser, and the cleanup of the results of Celery,
+# which it runs as their role.
+SQL_FILES = sorted([*ROLE_PASSWORDS, "celery_results.sql"])
+
+
+@pytest.mark.parametrize("name", SQL_FILES)
 def test_the_sql_files_hold_nothing_that_normalized_misreads(name):
     text = read(name)
     lexemes = LEXEMES.findall(text)
@@ -87,13 +92,68 @@ def test_the_sql_files_hold_nothing_that_normalized_misreads(name):
 def test_db_init_gives_psql_no_variable_but_on_error_stop():
     # The arguments of a process can be read by the other users of a Linux host, through /proc. A
     # password given with --set, --variable or -v would be in them, so none is: psql reads the
-    # passwords of the roles from its environment (\getenv), and the one of the superuser from
-    # PGPASSWORD, which is in its environment too.
+    # passwords of the roles from its environment (\getenv), and the one of the role that it signs
+    # in as from PGPASSWORD, which is in its environment too. Of the passwords that the SQL files
+    # give the roles, the script names only that of celery_results, the role that it signs in as
+    # for the cleanup of the results of Celery (the next test).
     script = read("db-init.sh")
     assert re.findall(r"(?:--set|--variable|-v)[ =]+(\w+)", script) == ["ON_ERROR_STOP"]
-    for variables in ROLE_PASSWORDS.values():
-        for environment_variable in variables.values():
-            assert environment_variable not in script
+    named = sorted(
+        environment_variable
+        for variables in ROLE_PASSWORDS.values()
+        for environment_variable in variables.values()
+        if environment_variable in script
+    )
+    assert named == ["CELERY_RESULTS_DB_PASSWORD"]
+    assert "PGPASSWORD=$password psql " in script
+    assert '--host "$host" --username "$user" --dbname "$database" --file "$file"' in script
+
+
+def run_sql_calls() -> list[tuple[str, ...]]:
+    """The calls of run_sql in db-init.sh, as (host, database, user, setting of the password,
+    file)."""
+    script = read("db-init.sh").replace("\\\n", " ")
+    return re.findall(r'\brun_sql (\S+) (\S+) (\S+) "\$(\w+)"\s+([^\s;]+)', script)
+
+
+def test_db_init_runs_the_cleanup_of_the_results_of_celery_as_their_role_only():
+    # celery_results owns its database, its schema public and the tables of the results, and the
+    # code of a task on the Celery worker can sign in as it: in that database, such code decides
+    # what a statement runs, such as a trigger, or an operator of a type of its own. A statement of
+    # the superuser there would run that code with the powers of the superuser, so the superuser
+    # runs the setup only, and the cleanup signs in as celery_results.
+    folder = "/opt/agoranomos/postgres"
+    assert run_sql_calls() == [
+        (
+            "platform-db",
+            "postgres",
+            "postgres",
+            "PLATFORM_POSTGRES_PASSWORD",
+            f"{folder}/platform.sql",
+        ),
+        (
+            "warehouse-db",
+            "warehouse",
+            "postgres",
+            "WAREHOUSE_POSTGRES_PASSWORD",
+            f"{folder}/warehouse.sql",
+        ),
+        (
+            "platform-db",
+            "celery_results",
+            "celery_results",
+            "CELERY_RESULTS_DB_PASSWORD",
+            f"{folder}/celery_results.sql",
+        ),
+    ]
+
+
+@pytest.mark.parametrize("name", sorted(ROLE_PASSWORDS))
+def test_the_files_of_the_superuser_stay_in_the_database_that_db_init_names(name):
+    # A \connect (or \c) would take the statements after it into another database, such as that of
+    # the results of Celery, as the superuser.
+    meta = re.findall(r"^\s*\\(\w+)", read(name), re.MULTILINE)
+    assert [command for command in meta if command in {"c", "connect"}] == []
 
 
 @pytest.mark.parametrize("name", sorted(ROLE_PASSWORDS))
@@ -248,10 +308,10 @@ def test_the_results_of_celery_have_a_database_and_a_role_of_their_own():
     assert re.findall(r"\bGRANT\b[^;]*\bcelery_results\b[^;]*;", text, re.IGNORECASE) == []
 
 
-# The end of platform.sql: the results of Celery older than 90 days go, in their own database,
-# whose tables the worker creates when it first starts.
+# The whole of celery_results.sql: a timeout, and the results older than 90 days go, from tables
+# that the worker creates when it first starts.
 CELERY_RESULTS_CLEANUP = (
-    "\\connect celery_results "
+    "SET statement_timeout = '1min'; "
     "SELECT 'DELETE FROM celery_taskmeta WHERE date_done < now() - interval ''90 days''' "
     "WHERE to_regclass('public.celery_taskmeta') IS NOT NULL \\gexec "
     "SELECT 'DELETE FROM celery_tasksetmeta WHERE date_done < now() - interval ''90 days''' "
@@ -259,9 +319,7 @@ CELERY_RESULTS_CLEANUP = (
 )
 
 
-def test_the_old_results_of_celery_go_on_every_start_at_the_end_of_platform_sql():
-    # Nothing in Airflow removes them from a database of their own. \connect leaves the database
-    # postgres for the rest of the file, so the cleanup comes last, and nothing follows it.
-    text = normalized("platform.sql")
-    assert text.count("\\connect") == 1
-    assert text.endswith(CELERY_RESULTS_CLEANUP)
+def test_the_cleanup_of_the_results_of_celery_deletes_the_old_ones_and_does_nothing_else():
+    # Nothing in Airflow removes them from a database of their own. The code of a task can make a
+    # statement there wait, so each has a timeout.
+    assert normalized("celery_results.sql") == CELERY_RESULTS_CLEANUP

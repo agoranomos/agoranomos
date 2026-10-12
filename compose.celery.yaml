@@ -32,6 +32,10 @@ x-airflow-celery-queue-environment: &airflow-celery-queue-environment
   # The results of the tasks (the state of each), which the worker writes and the scheduler reads: a
   # database of PostgreSQL, as the Celery provider recommends, of their own, with a role of their own
   # (postgres/platform.sql), so that the worker holds no password of the metadata database of Airflow.
+  # That narrows what the worker holds, and does not keep the code of a task away from the scheduler:
+  # Celery 5.6.3 keeps each result in this database as a pickle, which the scheduler loads, so a task
+  # that writes a crafted result with this password runs code in the scheduler, which holds the
+  # metadata database and the signing key (ADR-0015).
   AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql+psycopg2://celery_results:${CELERY_RESULTS_DB_PASSWORD:?run ./agoranomos init}@platform-db:5432/celery_results
   AIRFLOW__CELERY__WORKER_CONCURRENCY: ${AIRFLOW_WORKER_CONCURRENCY:-4}
 

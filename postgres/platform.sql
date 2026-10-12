@@ -44,7 +44,9 @@ REVOKE ALL ON DATABASE metabase FROM PUBLIC;
 -- their own, so that the worker holds no password of the metadata database of Airflow. db-init
 -- sets them up in both variants; only the Celery variant uses them. The limit of connections
 -- keeps the code of a task, which can read the password, from taking those of the instance from
--- Airflow and Metabase.
+-- Airflow and Metabase. Such code decides what runs in the database of the role, so no statement
+-- of this file, which the superuser runs, enters it: db-init deletes the old results as the role
+-- itself (celery_results.sql).
 SELECT 'CREATE ROLE celery_results'
 WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'celery_results') \gexec
 SELECT format(
@@ -79,13 +81,3 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 REVOKE SELECT ON public.pg_stat_statements, public.pg_stat_statements_info FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.pg_stat_statements(boolean), public.pg_stat_statements_info()
 FROM PUBLIC;
-
--- Nothing in Airflow removes the old results of Celery from a database of their own (airflow db
--- clean knows their tables only in the metadata database), so those older than 90 days go on every
--- start. The tables are there once a Celery worker has started: the worker creates them. \connect
--- leaves the database postgres for the rest of the file, so these lines stay last.
-\connect celery_results
-SELECT 'DELETE FROM celery_taskmeta WHERE date_done < now() - interval ''90 days'''
-WHERE to_regclass('public.celery_taskmeta') IS NOT NULL \gexec
-SELECT 'DELETE FROM celery_tasksetmeta WHERE date_done < now() - interval ''90 days'''
-WHERE to_regclass('public.celery_tasksetmeta') IS NOT NULL \gexec
