@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 
 import pytest
@@ -14,6 +15,7 @@ from stack_helpers import (
     psql,
     rendered,
     secrets,
+    wait_for,
 )
 
 SELFCHECK = "agoranomos_selfcheck"
@@ -201,11 +203,16 @@ def test_serve_logs_and_the_health_check_go_before_the_scheduler_at_the_memory_l
     assert scores == expected, f"yama: {found['yama']}"
 
 
+def fixture_target(env):
+    """Where the DAG of the fixture goes: the dags folder of the extensions folder of .env."""
+    extensions = REPO_ROOT / (env.get("AGORANOMOS_EXTENSIONS_DIR") or "./extensions") / "dags"
+    return extensions / FIXTURE.name
+
+
 @pytest.fixture(scope="module")
 def extension_run(env, airflow_url, token):
     """The DAG of the extensions folder and a run of it."""
-    extensions = REPO_ROOT / (env.get("AGORANOMOS_EXTENSIONS_DIR") or "./extensions") / "dags"
-    target = extensions / FIXTURE.name
+    target = fixture_target(env)
     # CI copies the fixture before the start. A local run adds it here, or updates an older copy.
     if not target.exists() or target.read_bytes() != FIXTURE.read_bytes():
         shutil.copy(FIXTURE, target)
@@ -332,6 +339,44 @@ def test_the_check_of_a_job_passes_for_the_job_of_its_own_container_only(service
     assert check(own) == 0
     assert check(other) == 1
     assert check(own, "-e", "HOSTNAME=another-container") == 1
+
+
+def parse_state(airflow_url, token, dag_id):
+    """When Airflow last parsed the file of a DAG, and the token that names the file."""
+    status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}")
+    assert status == 200, body
+    return body["last_parsed_time"], body["file_token"]
+
+
+def test_the_dag_processor_parses_a_changed_dag_file_at_once(
+    env, airflow_url, token, extension_run
+):
+    # compose.yaml makes an unchanged DAG file wait five minutes for its next parse ([dag_processor]
+    # min_file_process_interval). A file whose modification time is newer than its last parse does
+    # not wait (Airflow 3.3.2): the file of the fixture, touched, is parsed again within a minute.
+    before, _ = parse_state(airflow_url, token, EXTENSION_CHECK)
+    os.utime(fixture_target(env))
+    wait_for(
+        lambda: parse_state(airflow_url, token, EXTENSION_CHECK)[0] != before,
+        60,
+        interval=2,
+        message=f"the DAG processor did not parse the touched file of {EXTENSION_CHECK} at once",
+    )
+
+
+def test_a_parse_request_parses_an_unchanged_dag_file_at_once(airflow_url, token):
+    # What Reparse Dag in the Airflow UI asks for, the way to see a change that the file of a DAG
+    # does not show, such as one to the dbt project, before the five minutes are over.
+    wait_for_dag(airflow_url, token, SELFCHECK)
+    before, file_token = parse_state(airflow_url, token, SELFCHECK)
+    status, body = api(airflow_url, token, "PUT", f"/api/v2/parseDagFile/{file_token}")
+    assert status == 201, body
+    wait_for(
+        lambda: parse_state(airflow_url, token, SELFCHECK)[0] != before,
+        60,
+        interval=2,
+        message=f"the DAG processor did not parse the file of {SELFCHECK} in a minute",
+    )
 
 
 def test_the_dag_processor_keeps_no_cache_of_cosmos_in_airflow_variables(airflow_url, token):

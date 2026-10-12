@@ -155,3 +155,13 @@ def test_compose_runs_the_check_for_the_dag_processor_and_the_triggerer():
         line = f'test: ["CMD", "python", "-c", *airflow-job-check, "{job_type}"]'
         assert text.count(line) == 1, job_type
     assert "jobs check --job-type" not in text
+
+
+def test_compose_parses_an_unchanged_dag_file_every_five_minutes():
+    # In the environment that every Airflow service shares (x-airflow).
+    lines = COMPOSE.read_text(encoding="utf-8").splitlines()
+    start = lines.index("  environment: &airflow-environment")
+    end = next(i for i in range(start + 1, len(lines)) if not lines[i].startswith("    "))
+    environment = lines[start + 1 : end]
+    assert '    AIRFLOW__DAG_PROCESSOR__MIN_FILE_PROCESS_INTERVAL: "300"' in environment
+    assert '    AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "60"' in environment
