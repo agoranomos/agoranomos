@@ -25,7 +25,7 @@ A backup holds everything that the databases hold, also the hashes of the passwo
 ./agoranomos backup
 ```
 
-It works in local mode and in server mode, once the databases run, and prints the name of the backup and its size. Take one before every upgrade, and before you update the checkout with `git pull`: a backup records the images of the checkout as they are when it runs, and `restore` compares them later. Note the commit that you run, which `git rev-parse HEAD` prints: a restore needs the checkout at it. While a scheduled backup runs, it waits for it, up to 10 minutes.
+It works in local mode and in server mode, once the databases run, and prints the name of the backup and its size. The backup goes into the folder that `.env` names now, also when you changed `AGORANOMOS_BACKUP_DIR` and did not run `./agoranomos up` since: the `backup` service still has the old folder then, so the command says so and takes the backup in a container of its own. Take one before every upgrade, and before you update the checkout with `git pull`: a backup records the images of the checkout as they are when it runs, and `restore` compares them later. Note the commit that you run, which `git rev-parse HEAD` prints: a restore needs the checkout at it. While a scheduled backup runs, it waits for it, up to 10 minutes.
 
 A backup that you take this way stays until you delete it: the retention removes scheduled backups only, so the backup before an upgrade is still there when you need to go back. `./agoranomos status` lists these backups with their size and age. To delete one:
 

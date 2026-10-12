@@ -1771,14 +1771,80 @@ BACKUP_RUNNING = HEALTHY_PS + "backup|running|healthy|0\n"
 NO_RECENT_BACKUP = "no good backup in the last 26 hours"
 
 
+def the_running_service(cli, tmp_path, folder=None, user=None):
+    """The fake docker for a running backup service whose container has this backups folder and
+    this user (those that .env names, unless given): its ID and what docker inspect prints."""
+    folder = folder or str(cli.root / "backups")
+    user = user or f"{cli.read_env()['AGORANOMOS_UID']}:{cli.read_env()['AGORANOMOS_GID']}"
+    return {
+        "FAKE_PS_FILE": ps_file(tmp_path, BACKUP_RUNNING),
+        "FAKE_BACKUP": "0123abcdef\n",
+        "FAKE_INSPECT": f"{user}|{folder}",
+    }
+
+
+BACKUP_IN_THE_SERVICE = "compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh now"
+BACKUP_IN_A_CONTAINER = "compose run --rm --no-deps -T backup now"
+SERVICE_NOT_CURRENT = (
+    "The backup service has another backups folder or user than .env names now "
+    "(./agoranomos up makes it again): taking the backup in a container of its own."
+)
+
+
 def test_backup_runs_in_the_backup_service_when_it_runs(cli, tmp_path):
     ops_env(cli)
-    result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING))
+    result = cli.run("backup", **the_running_service(cli, tmp_path))
     assert result.returncode == 0, result.stderr
-    assert "compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh now" in (
-        cli.docker_calls()
-    )
+    assert BACKUP_IN_THE_SERVICE in cli.docker_calls()
     assert not any(call.startswith("compose run") for call in cli.docker_calls())
+    assert "taking the backup in a container of its own" not in result.stdout
+
+
+@pytest.mark.parametrize("changed", ["folder", "user", "group"])
+def test_backup_does_not_use_a_service_made_with_another_folder_or_user(cli, tmp_path, changed):
+    # After a change of AGORANOMOS_BACKUP_DIR or AGORANOMOS_UID without up, the service still
+    # writes into the old folder as the old user, while the backup is wanted in the folder that
+    # .env names now: a container of its own with the current mount takes it.
+    ops_env(cli)
+    env = cli.read_env()
+    service = the_running_service(
+        cli,
+        tmp_path,
+        folder=str(cli.root / "old backups") if changed == "folder" else None,
+        user=f"{int(env['AGORANOMOS_UID']) + (changed == 'user')}:"
+        f"{int(env['AGORANOMOS_GID']) + (changed == 'group')}",
+    )
+    result = cli.run("backup", **service)
+    assert result.returncode == 0, result.stderr
+    assert BACKUP_IN_A_CONTAINER in cli.docker_calls()
+    assert not any(call.startswith("compose exec") for call in cli.docker_calls())
+    assert result.stdout.splitlines().count(SERVICE_NOT_CURRENT) == 1
+
+
+def test_backup_goes_into_the_folder_that_env_names_after_it_changed_without_up(cli, tmp_path):
+    # The service was made with the default folder; the person then pointed .env at another one.
+    # The backup is taken in a container of its own, which mounts the folder of .env, and the
+    # folder is made for the person before Docker could make it as root.
+    ops_env(cli)
+    service = the_running_service(cli, tmp_path)
+    set_env(cli, AGORANOMOS_BACKUP_DIR="./other-backups")
+    result = cli.run("backup", **service)
+    assert result.returncode == 0, result.stderr
+    assert BACKUP_IN_A_CONTAINER in cli.docker_calls()
+    assert not any(call.startswith("compose exec") for call in cli.docker_calls())
+    assert SERVICE_NOT_CURRENT in result.stdout.splitlines()
+    assert stat.S_IMODE((cli.root / "other-backups").stat().st_mode) == 0o700
+
+
+def test_backup_runs_a_container_of_its_own_when_docker_cannot_inspect_the_service(cli, tmp_path):
+    ops_env(cli)
+    service = the_running_service(cli, tmp_path)
+    service["FAKE_INSPECT"] = ""
+    result = cli.run("backup", **service)
+    assert result.returncode == 0, result.stderr
+    assert BACKUP_IN_A_CONTAINER in cli.docker_calls()
+    assert BACKUP_IN_THE_SERVICE not in cli.docker_calls()
+    assert SERVICE_NOT_CURRENT in result.stdout.splitlines()
 
 
 def test_backup_runs_a_container_of_its_own_without_the_service(cli, tmp_path):
@@ -1786,10 +1852,13 @@ def test_backup_runs_a_container_of_its_own_without_the_service(cli, tmp_path):
     cli.run("init")
     result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
     assert result.returncode == 0, result.stderr
-    assert "compose run --rm --no-deps -T backup now" in cli.docker_calls()
+    assert BACKUP_IN_A_CONTAINER in cli.docker_calls()
     ops_env(cli)
-    assert cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS)).returncode == 0
-    assert cli.docker_calls().count("compose run --rm --no-deps -T backup now") == 2
+    again = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert again.returncode == 0, again.stderr
+    assert cli.docker_calls().count(BACKUP_IN_A_CONTAINER) == 2
+    # No service, so no word about one.
+    assert "another backups folder" not in result.stdout + again.stdout
 
 
 def test_backup_leaves_a_backup_container_of_an_ops_profile_that_is_off_alone(cli, tmp_path):
@@ -1798,8 +1867,9 @@ def test_backup_leaves_a_backup_container_of_an_ops_profile_that_is_off_alone(cl
     cli.run("init")
     result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING))
     assert result.returncode == 0, result.stderr
-    assert "compose run --rm --no-deps -T backup now" in cli.docker_calls()
+    assert BACKUP_IN_A_CONTAINER in cli.docker_calls()
     assert not any(call.startswith("compose exec") for call in cli.docker_calls())
+    assert "another backups folder" not in result.stdout
 
 
 def test_backup_needs_the_databases(cli, tmp_path):
@@ -1833,7 +1903,7 @@ def test_a_failed_backup_fails_the_command(cli, tmp_path, ops):
     else:
         cli.run("init")
     fail = {"FAKE_EXEC_FAIL": "now"} if ops else {"FAKE_RUN_FAIL": "now"}
-    result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING), **fail)
+    result = cli.run("backup", **the_running_service(cli, tmp_path), **fail)
     assert result.returncode == 1
     assert "the backup failed" in result.stderr
     # The script of the container says /backups; the person needs the folder of the host.
@@ -1855,8 +1925,8 @@ def test_backup_leaves_standard_input_alone(cli, tmp_path, ops):
     result = cli.run(
         "backup",
         stdin=f"{REST_OF_THE_SCRIPT}\n",
-        FAKE_PS_FILE=ps_file(tmp_path, BACKUP_RUNNING),
         FAKE_READ_STDIN="1",
+        **the_running_service(cli, tmp_path),
     )
     assert result.returncode == 0, result.stderr
     [(call, received)] = cli.stdin_reads()
@@ -4170,18 +4240,6 @@ VERIFY_IN_THE_SERVICE = (
     "compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh verify "
     f"{BACKUP} warehouse airflow metabase"
 )
-
-
-def the_running_service(cli, tmp_path, folder=None, user=None):
-    """The fake docker for a running backup service whose container has this backups folder and
-    this user (those that .env names, unless given): its ID and what docker inspect prints."""
-    folder = folder or str(cli.root / "backups")
-    user = user or f"{cli.read_env()['AGORANOMOS_UID']}:{cli.read_env()['AGORANOMOS_GID']}"
-    return {
-        "FAKE_PS_FILE": ps_file(tmp_path, BACKUP_RUNNING),
-        "FAKE_BACKUP": "0123abcdef\n",
-        "FAKE_INSPECT": f"{user}|{folder}",
-    }
 
 
 def test_restore_checks_the_backup_in_the_running_backup_service(cli, tmp_path):
