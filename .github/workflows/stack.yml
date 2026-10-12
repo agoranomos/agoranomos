@@ -9,11 +9,13 @@ name: Stack
 # .env selects.
 # A pull request that changes the stack runs one job on amd64: the job server when it changes a file
 # of server mode, which the job changes finds, and the job local (the local variant) otherwise; the
-# job server runs the same stack tests and those of the proxy and the backups. Pushes to main and
-# the weekly schedule run the four combinations of local mode (two architectures and two variants,
-# ADR-0010) and server mode on amd64; a manual run adds server mode on arm64. In a private
-# repository the minutes of Actions are counted, so a pull request does not run both jobs, and
-# arm64 runners do not run for every pull request.
+# job server runs the same stack tests and those of the proxy and the backups. A push to main runs
+# both jobs on amd64: the job local with the local variant, and the job server. The weekly schedule
+# runs the four combinations of local mode (two architectures and two variants, ADR-0010) and server
+# mode on amd64, and a manual run does the same and adds server mode on arm64. In a private
+# repository the minutes of Actions are counted, so a pull request does not run both jobs, and the
+# arm64 runners and the celery variant run every week and on a manual run, not for every pull
+# request or push.
 # The secrets of the stack are generated anew in every run, so the logs uploaded on failure hold
 # nothing that lives on.
 on:
@@ -52,8 +54,10 @@ on:
 
 permissions: {}
 
+# The event is part of the group: a push to main never replaces a weekly or manual run that waits,
+# which would skip the arm64 runners and the celery variant for that week.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -96,8 +100,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ fromJSON(github.event_name == 'pull_request' && '["amd64"]' || '["amd64", "arm64"]') }}
-        variant: ${{ fromJSON(github.event_name == 'pull_request' && '["local"]' || '["local", "celery"]') }}
+        # The weekly schedule and a manual run test both architectures and both variants; a pull
+        # request and a push to main test amd64 and the local variant.
+        arch: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["amd64", "arm64"]' || '["amd64"]') }}
+        variant: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["local", "celery"]' || '["local"]') }}
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     # The first start builds the Airflow image and makes the demo ready.
     timeout-minutes: 45
