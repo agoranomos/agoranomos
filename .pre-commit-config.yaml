@@ -100,6 +100,6 @@ repos:
         entry: python scripts/check_docs_site.py
         language: python
         language_version: "3.13"
-        additional_dependencies: ["zensical==0.0.68"] # the version of pyproject.toml: the hook builds the site
+        additional_dependencies: ["zensical==0.0.69"] # the version of pyproject.toml: the hook builds the site
         files: ^(zensical\.toml|docs/.+|overrides/.+|scripts/check_docs_site\.py)$
         pass_filenames: false
