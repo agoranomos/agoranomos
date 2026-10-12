@@ -32,6 +32,11 @@
       "groupName": "prek"
     },
     {
+      "description": "Update zensical in pyproject.toml and the version that the check-docs-site hook installs in one pull request (a unit test checks that the two are the same).",
+      "matchDepNames": ["zensical"],
+      "groupName": "zensical"
+    },
+    {
       "description": "Python stays on the version chosen in ADR-0012: changing it is a decision, not a routine update.",
       "matchManagers": ["pyenv", "pep621"],
       "matchPackageNames": ["python"],
