@@ -3,12 +3,16 @@
 #   uv run prek run --all-files    # check the whole repository
 # CI runs the command above plus a scan of the whole git history for secrets (needs a full clone):
 #   uv run prek run gitleaks-history --all-files --hook-stage manual
+# docs/assets/javascripts/mermaid.min.js is Mermaid as its npm package ships it (3.5 MB, minified). It stays byte for
+# byte as released, so the hooks that size, fix or reformat a file skip it. The secret scans do not skip it, and typos
+# skips it in _typos.toml.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
       - id: check-added-large-files
         args: [--enforce-all] # check every file on full runs and in CI, not only the staged ones
+        exclude: ^docs/assets/javascripts/mermaid\.min\.js$
       - id: check-case-conflict
       - id: check-merge-conflict
         args: [--assume-in-merge] # run outside a merge too, so full runs and CI look for conflict markers
@@ -17,9 +21,12 @@ repos:
       - id: check-yaml
       - id: detect-private-key
       - id: end-of-file-fixer
+        exclude: ^docs/assets/javascripts/mermaid\.min\.js$
       - id: mixed-line-ending
         args: [--fix=lf]
+        exclude: ^docs/assets/javascripts/mermaid\.min\.js$
       - id: trailing-whitespace
+        exclude: ^docs/assets/javascripts/mermaid\.min\.js$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.10

@@ -6,3 +6,5 @@
 *.ico binary
 *.webp binary
 *.woff2 binary
+# Mermaid as released (minified): git shows no diff of it, and GitHub counts it as vendored code.
+docs/assets/javascripts/mermaid.min.js -diff linguist-vendored

@@ -2,11 +2,19 @@
 site_name = "Agoranomos"
 site_description = "Open-source marketing BI out of the box, with AI access via MCP."
 site_author = "Andrei Gromov"
+# The header shows a link to the repository. For a repository on GitHub the theme also asks api.github.com for its
+# stars, forks and latest release, in two requests from the reader's browser. Zensical 0.0.68 has no setting to turn
+# that off while the link stays (its cookie consent form only makes the request opt-in, behind a banner that covers
+# the page), so this is the one request the site makes to another host.
 repo_url = "https://github.com/agoranomos/agoranomos"
 repo_name = "agoranomos/agoranomos"
 copyright = "Copyright &copy; 2026 Andrei Gromov and Agoranomos contributors. Apache-2.0."
 # The brand style of the site: colors, the self-hosted fonts and the logo (see [project.theme]).
 extra_css = ["stylesheets/brand.css"]
+# Mermaid 11.17.2 (MIT, as of October 2026), served by the site: dist/mermaid.min.js of the npm package, unmodified,
+# with its license text next to it. The script sets the global mermaid, and the theme then draws the diagrams with it
+# instead of loading Mermaid from unpkg.com (the Diagrams page of the Zensical documentation shows this way).
+extra_javascript = ["assets/javascripts/mermaid.min.js"]
 nav = [
   { "Home" = "index.md" },
   { "Tutorials" = ["tutorials/index.md"] },

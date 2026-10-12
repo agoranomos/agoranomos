@@ -13,6 +13,7 @@ Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 - `README.md`, `README.ru.md`: the project overview in English and in Russian. The English text is the reference.
 - `docs/`: the documentation source, in Markdown, laid out after [Diátaxis](https://diataxis.fr/): `tutorials/`, `how-to/`, `reference/`, `explanation/` (the architecture overview is here) and `adr/` (the decision records and their index).
 - `docs/stylesheets/`, `docs/assets/brand/`, `docs/assets/fonts/`: the brand theme of the documentation site: `brand.css` (its colors and type), the logo files, and the Fira Sans and Fira Code fonts with their SIL OFL 1.1 texts.
+- `docs/assets/javascripts/`: Mermaid 11.17.2 (as of October 2026), which draws the diagram of the architecture page: `mermaid.min.js`, the file of the `mermaid` npm package as released and unmodified, and its MIT license text `LICENSE-mermaid.txt` next to it, like the licenses of the fonts. `zensical.toml` lists it in `extra_javascript`, so the theme does not load Mermaid from unpkg.com, and the hooks that fix or size files skip it. [CONTRIBUTING.md](CONTRIBUTING.md) says how to update it.
 - `docs/assets/readme/`: the pictures of `README.md` and `README.ru.md`: the banner, the pipeline and the mark in a light and a dark variant for the two themes of GitHub, the badges in English and Russian, and a screenshot of the demo dashboard. They are built with the project's brand tooling, which is not in this repository.
 - `zensical.toml`: the configuration of the documentation site, including its navigation.
 - `agoranomos`, `.env.example`: the command that sets up, checks and runs the stack, and the template of its settings ([ADR-0014](docs/adr/0014-start-the-stack-with-one-script.md)).
@@ -80,6 +81,7 @@ CI runs the static checks, the full-history secret scan, the strict documentatio
 
 - Do not bypass the hooks: no `git commit --no-verify`, and no skipping or disabling a hook or a CI check to get a change through. Fix the cause instead.
 - Do not weaken CI. Workflows start with `permissions: {}`, each job asks for only what it needs, every action is pinned by its full commit SHA with the version in a comment, and every job has a timeout. Do not widen permissions, unpin an action or remove a timeout.
+- Do not make the documentation site call another host. A reader's browser asks only the site itself, so fonts, scripts, style sheets and images are files in `docs/`, never loaded from a CDN. The one exception is the header, which asks api.github.com for the stars, forks and latest release of the repository: as of Zensical 0.0.68 it has no setting to turn that off.
 - Do not describe unbuilt features as existing, and do not invent versions, flags or APIs.
 - Do not put personal or machine-specific content (local paths, notes, credentials) into tracked files.
 - Do not force-push `main`, and do not merge your own pull request.
