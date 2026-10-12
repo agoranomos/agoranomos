@@ -84,6 +84,29 @@ x-airflow: &airflow
     db-init:
       condition: service_completed_successfully
 
+# The health check of the DAG processor and of the triggerer, which have no health server in Airflow
+# 3.3.2: it passes while the job of the type that it gets as its argument runs in this container and
+# has sent a heartbeat in the last 30 seconds, as airflow jobs check would say. Each job sends one
+# every 5 seconds, and Airflow records the host name of the container with it. The check reads the
+# job table of the metadata database with psycopg2 and does not import Airflow, which airflow jobs
+# check does, at a cost of more than a second of CPU and about 150 MiB each time.
+x-airflow-job-check: &airflow-job-check |
+  import os
+  import sys
+  from contextlib import closing
+
+  import psycopg2
+
+  url = os.environ["AIRFLOW__DATABASE__SQL_ALCHEMY_CONN"].replace("+psycopg2", "", 1)
+  with closing(psycopg2.connect(url, connect_timeout=5)) as connection, connection.cursor() as cursor:
+      cursor.execute(
+          "SELECT 1 FROM job WHERE job_type = %s AND hostname = %s AND state = 'running'"
+          " AND latest_heartbeat > now() - interval '30 seconds'",
+          (sys.argv[1], os.environ["HOSTNAME"]),
+      )
+      alive = cursor.fetchone() is not None
+  raise SystemExit(0 if alive else 1)
+
 services:
   # Each database runs as postgres from its first process, with no capability of Linux: the entrypoint
   # of the image then skips what needs root (a chown of the data directory and a switch of user),
@@ -314,10 +337,12 @@ services:
     mem_limit: ${AIRFLOW_DAG_PROCESSOR_MEMORY:-768m}
     memswap_limit: ${AIRFLOW_DAG_PROCESSOR_MEMORY:-768m}
     command: ["dag-processor"]
-    healthcheck:
-      test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob --hostname \"$${HOSTNAME}\""]
+    # The check of its job (x-airflow-job-check). Five failures in a row, 30 seconds apart, make the
+    # service unhealthy, about three minutes after its last heartbeat.
+    healthcheck: &airflow-job-healthcheck
+      test: ["CMD", "python", "-c", *airflow-job-check, "DagProcessorJob"]
       interval: 30s
-      timeout: 30s
+      timeout: 10s
       retries: 5
       start_period: 60s
     depends_on:
@@ -330,12 +355,10 @@ services:
     mem_limit: ${AIRFLOW_TRIGGERER_MEMORY:-640m}
     memswap_limit: ${AIRFLOW_TRIGGERER_MEMORY:-640m}
     command: ["triggerer"]
+    # As for the DAG processor, with the job of the triggerer.
     healthcheck:
-      test: ["CMD-SHELL", "airflow jobs check --job-type TriggererJob --hostname \"$${HOSTNAME}\""]
-      interval: 30s
-      timeout: 30s
-      retries: 5
-      start_period: 60s
+      <<: *airflow-job-healthcheck
+      test: ["CMD", "python", "-c", *airflow-job-check, "TriggererJob"]
     depends_on:
       <<: *airflow-depends-on
       airflow-init:

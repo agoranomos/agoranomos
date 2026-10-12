@@ -12,6 +12,7 @@ from stack_helpers import (
     job_failed,
     leaked,
     psql,
+    rendered,
     secrets,
 )
 
@@ -26,6 +27,9 @@ DAG_FOLDERS = ("/opt/agoranomos/dags", "/opt/agoranomos/extensions/dags")
 DBT_PROJECT = "/opt/agoranomos/dbt"
 # The services that run tasks: with the LocalExecutor the scheduler, with Celery also the worker.
 TASK_RUNNERS = [s for s in ("airflow-scheduler", "airflow-worker") if s in LONG_RUNNING]
+# The services whose health check reads their job from the metadata database (compose.yaml), with
+# the type of the job.
+JOB_CHECKS = {"airflow-dag-processor": "DagProcessorJob", "airflow-triggerer": "TriggererJob"}
 
 
 @pytest.fixture(scope="module")
@@ -310,6 +314,24 @@ def test_the_dag_processor_reports_no_import_error(airflow_url, token):
     status, body = api(airflow_url, token, "GET", "/api/v2/importErrors?bundle_name=agoranomos")
     assert status == 200, body
     assert body["total_entries"] == 0, [error["filename"] for error in body["import_errors"]]
+
+
+@pytest.mark.parametrize("service", sorted(JOB_CHECKS))
+def test_the_check_of_a_job_passes_for_the_job_of_its_own_container_only(service):
+    # The health check of compose.yaml, run in the container as Docker runs it: it passes for the
+    # job of the service, and fails for the other type of job and for another host name, since no
+    # such job runs here.
+    command = rendered(active_variant())[service]["healthcheck"]["test"][1:-1]
+
+    def check(job_type, *options):
+        result = compose("exec", "-T", *options, service, *command, job_type, check=False)
+        return result.returncode
+
+    own = JOB_CHECKS[service]
+    [other] = [job_type for name, job_type in JOB_CHECKS.items() if name != service]
+    assert check(own) == 0
+    assert check(other) == 1
+    assert check(own, "-e", "HOSTNAME=another-container") == 1
 
 
 def test_the_dag_processor_keeps_no_cache_of_cosmos_in_airflow_variables(airflow_url, token):

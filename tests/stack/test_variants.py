@@ -926,3 +926,39 @@ def test_the_api_server_check_fails_when_nothing_answers():
     server.shutdown()
     server.server_close()
     assert api_server_check(port) == 1
+
+
+# The services whose health check reads their job from the metadata database, with its type.
+JOB_CHECKS = {"airflow-dag-processor": "DagProcessorJob", "airflow-triggerer": "TriggererJob"}
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_the_dag_processor_and_the_triggerer_check_their_jobs_without_airflow(variant):
+    # Airflow 3.3.2 has a health server for the scheduler only, and airflow jobs check imports
+    # Airflow at every check: so both run the same short Python of compose.yaml, which reads the job
+    # table (tests/unit/test_airflow_job_check.py), each with the type of its own job. Five
+    # failures 30 seconds apart make a service unhealthy. The check holds no secret: it reads the
+    # connection from the environment.
+    services = rendered(variant)
+    codes = set()
+    for name, job_type in JOB_CHECKS.items():
+        health = services[name]["healthcheck"]
+        test = health["test"]
+        assert test[:3] == ["CMD", "python", "-c"], name
+        assert test[4:] == [job_type], name
+        assert "import psycopg2" in test[3], name
+        codes.add(test[3])
+        timing = {
+            key: health.get(key) for key in ("interval", "timeout", "retries", "start_period")
+        }
+        assert timing == {
+            "interval": "30s",
+            "timeout": "10s",
+            "retries": 5,
+            "start_period": "1m0s",
+        }, name
+    assert len(codes) == 1, "the two checks run different code"
+    # The scheduler keeps the HTTP check of its own health server ([scheduler] enable_health_check).
+    scheduler = services["airflow-scheduler"]
+    assert scheduler["healthcheck"]["test"][-1] == "http://localhost:8974/health"
+    assert scheduler["environment"]["AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK"] == "true"
