@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/agoranomos/agoranomos/compare/v0.1.2...v0.1.3) (2026-10-12)
+
+
+### Documentation
+
+* serve the site without third-party hosts ([#66](https://github.com/agoranomos/agoranomos/issues/66)) ([7577a81](https://github.com/agoranomos/agoranomos/commit/7577a819b701bab0c6039410c4f43841a306ac83))
+
 ## [0.1.2](https://github.com/agoranomos/agoranomos/compare/v0.1.1...v0.1.2) (2026-10-12)
 
 
