@@ -71,5 +71,5 @@ Agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0021](0021-leave-the-outgoing-traffic-of-metabase-open.md) | Leave the outgoing traffic of Metabase open, and close what relays it without a sign-in | accepted | 2026-10-09 |
 | [0022](0022-budget-the-memory-by-variant-and-mode.md) | Budget the memory by variant and mode | accepted | 2026-10-09 |
 | [0023](0023-give-the-network-of-the-stack-ipv6.md) | Give the network of the stack IPv6, so that Metabase sees the address of each client | accepted | 2026-10-11 |
-| [0024](0024-one-deployment-is-one-business.md) | One deployment is one business, and clients group its ad accounts | proposed | 2026-10-12 |
-| [0025](0025-model-advertising-statistics-once.md) | Model advertising statistics once, at the grain of a campaign and a day | proposed | 2026-10-12 |
+| [0024](0024-one-deployment-is-one-business.md) | One deployment is one business, and clients group its ad accounts | accepted | 2026-10-12 |
+| [0025](0025-model-advertising-statistics-once.md) | Model advertising statistics once, at the grain of a campaign and a day | accepted | 2026-10-12 |
