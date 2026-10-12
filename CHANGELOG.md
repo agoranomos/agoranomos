@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/agoranomos/agoranomos/compare/v0.1.0...v0.1.1) (2026-10-12)
+
+
+### Documentation
+
+* say that Phase 1 is released as v0.1.0 ([#61](https://github.com/agoranomos/agoranomos/issues/61)) ([4bd84d9](https://github.com/agoranomos/agoranomos/commit/4bd84d9b9b59a68b2d337e5fc7f1e613cca72c7f))
+
 ## 0.1.0 (2026-10-11)
 
 
