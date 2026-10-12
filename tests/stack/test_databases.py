@@ -10,8 +10,13 @@ from stack_helpers import (
 )
 
 # The roles of the platform instance, each the owner of its database, and the setting of .env that
-# holds the password of each.
-PLATFORM_ROLES = {"airflow": "AIRFLOW_DB_PASSWORD", "metabase": "METABASE_DB_PASSWORD"}
+# holds the password of each. db-init sets up celery_results, the role of the results of Celery,
+# in both variants.
+PLATFORM_ROLES = {
+    "airflow": "AIRFLOW_DB_PASSWORD",
+    "celery_results": "CELERY_RESULTS_DB_PASSWORD",
+    "metabase": "METABASE_DB_PASSWORD",
+}
 
 
 def test_pg_stat_statements_is_loaded(env):
@@ -33,19 +38,40 @@ def test_application_databases_have_their_own_owners(env):
         env["PLATFORM_POSTGRES_PASSWORD"],
         "postgres",
         "SELECT datname || ':' || pg_get_userbyid(datdba) FROM pg_database "
-        "WHERE datname IN ('airflow', 'metabase') ORDER BY 1",
+        "WHERE datname IN ('airflow', 'celery_results', 'metabase') ORDER BY 1",
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == ["airflow:airflow", "metabase:metabase"]
+    assert result.stdout.split() == [f"{role}:{role}" for role in sorted(PLATFORM_ROLES)]
 
 
-def test_application_roles_cannot_open_each_others_database(env):
-    result = psql("platform-db", "metabase", env["METABASE_DB_PASSWORD"], "airflow", "SELECT 1")
+@pytest.mark.parametrize(
+    ("role", "database"),
+    [
+        (role, other)
+        for role in sorted(PLATFORM_ROLES)
+        for other in sorted(PLATFORM_ROLES)
+        if other != role
+    ],
+)
+def test_application_roles_cannot_open_each_others_database(env, role, database):
+    result = psql("platform-db", role, env[PLATFORM_ROLES[role]], database, "SELECT 1")
     assert result.returncode != 0
-    assert "permission denied for database" in result.stderr
-    result = psql("platform-db", "airflow", env["AIRFLOW_DB_PASSWORD"], "metabase", "SELECT 1")
-    assert result.returncode != 0
-    assert "permission denied for database" in result.stderr
+    assert f'permission denied for database "{database}"' in result.stderr
+
+
+def test_the_role_of_the_results_of_celery_has_a_limit_of_connections(env):
+    # The code of a task on the Celery worker can read its password: the limit keeps it from
+    # taking the connections of the instance from Airflow and Metabase. db-init sets it on every
+    # start.
+    result = psql(
+        "platform-db",
+        "postgres",
+        env["PLATFORM_POSTGRES_PASSWORD"],
+        "postgres",
+        "SELECT rolconnlimit FROM pg_roles WHERE rolname = 'celery_results'",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "20"
 
 
 def test_metabase_reader_reads_marts_and_cannot_write(env):
@@ -111,7 +137,12 @@ def test_role_passwords_stay_out_of_pg_stat_statements(env):
             "platform-db",
             "PLATFORM_POSTGRES_PASSWORD",
             "postgres",
-            ("AIRFLOW_DB_PASSWORD", "METABASE_DB_PASSWORD", "BACKUP_DB_PASSWORD"),
+            (
+                "AIRFLOW_DB_PASSWORD",
+                "METABASE_DB_PASSWORD",
+                "BACKUP_DB_PASSWORD",
+                "CELERY_RESULTS_DB_PASSWORD",
+            ),
         ),
         (
             "warehouse-db",
@@ -402,7 +433,7 @@ def test_the_roles_of_the_platform_sign_in_and_have_no_other_power(env):
         "SELECT rolname, rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls, "
         "rolcanlogin, (SELECT string_agg(pg_get_userbyid(roleid), ',' ORDER BY roleid) "
         "FROM pg_auth_members WHERE member = pg_roles.oid) "
-        "FROM pg_roles WHERE rolname IN ('airflow', 'metabase')",
+        "FROM pg_roles WHERE rolname IN ('airflow', 'celery_results', 'metabase')",
     )
     assert result.returncode == 0, result.stderr
     found = {}

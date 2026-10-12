@@ -18,6 +18,7 @@ ROLE_PASSWORDS = {
         "airflow_password": "AIRFLOW_DB_PASSWORD",
         "metabase_password": "METABASE_DB_PASSWORD",
         "backup_password": "BACKUP_DB_PASSWORD",
+        "celery_results_password": "CELERY_RESULTS_DB_PASSWORD",
     },
     "warehouse.sql": {
         "loader_password": "WAREHOUSE_LOADER_PASSWORD",
@@ -172,7 +173,7 @@ ROLE_ATTRIBUTES = {
 }
 # The roles that each SQL file sets up.
 FILE_ROLES = {
-    "platform.sql": ["airflow", "backup", "metabase"],
+    "platform.sql": ["airflow", "backup", "celery_results", "metabase"],
     "warehouse.sql": ["backup", "loader", "metabase_reader", "transformer"],
 }
 
@@ -233,3 +234,34 @@ def test_the_backup_role_reads_every_table_and_writes_nothing(name, databases):
         f"GRANT CONNECT ON DATABASE {databases} TO backup;",
     ]
     assert runs(text, "ALTER ROLE backup SET default_transaction_read_only = on;")
+
+
+def test_the_results_of_celery_have_a_database_and_a_role_of_their_own():
+    # The Celery worker writes the results of the tasks as celery_results (ADR-0015), so that it
+    # holds no password of the metadata database of Airflow. The role owns its database and gets
+    # nothing more: no grant on another database, and no other role. The code of a task can read
+    # the password, so the role has a limit of connections, below those of the instance.
+    text = normalized("platform.sql")
+    assert runs(text, "SELECT 'CREATE DATABASE celery_results OWNER celery_results'")
+    assert runs(text, "REVOKE ALL ON DATABASE celery_results FROM PUBLIC;")
+    assert runs(text, "ALTER ROLE celery_results CONNECTION LIMIT 20;")
+    assert re.findall(r"\bGRANT\b[^;]*\bcelery_results\b[^;]*;", text, re.IGNORECASE) == []
+
+
+# The end of platform.sql: the results of Celery older than 90 days go, in their own database,
+# whose tables the worker creates when it first starts.
+CELERY_RESULTS_CLEANUP = (
+    "\\connect celery_results "
+    "SELECT 'DELETE FROM celery_taskmeta WHERE date_done < now() - interval ''90 days''' "
+    "WHERE to_regclass('public.celery_taskmeta') IS NOT NULL \\gexec "
+    "SELECT 'DELETE FROM celery_tasksetmeta WHERE date_done < now() - interval ''90 days''' "
+    "WHERE to_regclass('public.celery_tasksetmeta') IS NOT NULL \\gexec"
+)
+
+
+def test_the_old_results_of_celery_go_on_every_start_at_the_end_of_platform_sql():
+    # Nothing in Airflow removes them from a database of their own. \connect leaves the database
+    # postgres for the rest of the file, so the cleanup comes last, and nothing follows it.
+    text = normalized("platform.sql")
+    assert text.count("\\connect") == 1
+    assert text.endswith(CELERY_RESULTS_CLEANUP)

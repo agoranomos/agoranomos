@@ -29,7 +29,10 @@ x-airflow-celery-environment: &airflow-celery-environment
 # airflow-init have no use for it either.
 x-airflow-celery-queue-environment: &airflow-celery-queue-environment
   AIRFLOW__CELERY__BROKER_URL: redis://:${VALKEY_PASSWORD:?run ./agoranomos init}@broker:6379/0
-  AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:?run ./agoranomos init}@platform-db:5432/airflow
+  # The results of the tasks (the state of each), which the worker writes and the scheduler reads: a
+  # database of PostgreSQL, as the Celery provider recommends, of their own, with a role of their own
+  # (postgres/platform.sql), so that the worker holds no password of the metadata database of Airflow.
+  AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql+psycopg2://celery_results:${CELERY_RESULTS_DB_PASSWORD:?run ./agoranomos init}@platform-db:5432/celery_results
   AIRFLOW__CELERY__WORKER_CONCURRENCY: ${AIRFLOW_WORKER_CONCURRENCY:-4}
 
 services:
@@ -98,7 +101,8 @@ services:
   # Runs the tasks. It starts from the scheduler of compose.yaml (extends), which gives it the image, the
   # user, the volumes, the networks, the logging and the dependencies. extends reads that service from
   # compose.yaml alone, without the changes above, so the Celery settings and the dependencies on the
-  # broker and on the API server are stated again here.
+  # broker and on the API server are stated again here. It holds neither the metadata database nor the
+  # signing key of Airflow (below).
   airflow-worker:
     extends:
       file: compose.yaml
@@ -108,6 +112,17 @@ services:
       <<: [*airflow-celery-environment, *airflow-celery-queue-environment]
       # Lets the Celery worker finish its tasks when it stops (a warm shutdown).
       DUMB_INIT_SETSID: "0"
+      # A worker runs the tasks, which reach Airflow through its execution API with the token that
+      # the scheduler gives each of them: the security model of Airflow 3.3.2 gives a worker neither
+      # the connection string of the metadata database nor the key that signs the tokens ("Workers
+      # should not have access to the signing key"). The worker extends the scheduler of
+      # compose.yaml, which has both, so !reset takes them away here, from the scheduler that it
+      # starts from; in a later Compose file it would not, since the environment is merged by then.
+      # Without the connection string, Airflow in the worker sees its default database, an SQLite
+      # file in the container, which stays empty. The log server of the worker checks the requests
+      # of the API server with AIRFLOW__API__SECRET_KEY, which it keeps.
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: !reset null
+      AIRFLOW__API_AUTH__JWT_SECRET: !reset null
     healthcheck:
       test: ["CMD-SHELL", "celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d \"celery@$${HOSTNAME}\""]
       interval: 30s

@@ -201,6 +201,9 @@ services:
       WAREHOUSE_LOADER_PASSWORD: ${WAREHOUSE_LOADER_PASSWORD:?run ./agoranomos init}
       WAREHOUSE_TRANSFORMER_PASSWORD: ${WAREHOUSE_TRANSFORMER_PASSWORD:?run ./agoranomos init}
       BACKUP_DB_PASSWORD: ${BACKUP_DB_PASSWORD:?run ./agoranomos init}
+      # The role of the results of Celery, which only the CeleryExecutor variant uses
+      # (compose.celery.yaml): db-init sets it up in both variants.
+      CELERY_RESULTS_DB_PASSWORD: ${CELERY_RESULTS_DB_PASSWORD:?run ./agoranomos init}
     volumes:
       - ./postgres:/opt/agoranomos/postgres:ro
     # psql writes nothing. The image declares a volume for the data of PostgreSQL, which db-init
