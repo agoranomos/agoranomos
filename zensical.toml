@@ -2,6 +2,10 @@
 site_name = "Agoranomos"
 site_description = "Open-source marketing BI out of the box, with AI access via MCP."
 site_author = "Andrei Gromov"
+# The header shows a link to the repository. For a repository on GitHub the theme also asks api.github.com for its
+# stars, forks and latest release, in two requests from the reader's browser. Zensical 0.0.68 has no setting to turn
+# that off while the link stays (its cookie consent form only makes the request opt-in, behind a banner that covers
+# the page), so this is the one request the site makes to another host.
 repo_url = "https://github.com/agoranomos/agoranomos"
 repo_name = "agoranomos/agoranomos"
 copyright = "Copyright &copy; 2026 Andrei Gromov and Agoranomos contributors. Apache-2.0."
@@ -62,6 +66,11 @@ logo = "assets/brand/agoranomos-lockup-on-dark.svg"
 favicon = "assets/brand/favicon.svg"
 # No Google Fonts: Fira Sans and Fira Code are served from docs/assets/fonts by brand.css.
 font = false
+# Mermaid 11.17.2 (MIT, as of October 2026) is served by the site: docs/assets/javascripts/mermaid.min.js is
+# dist/mermaid.min.js of the npm package, unmodified, with its license text next to it. overrides/main.html adds it
+# to a page that has a diagram. The script sets the global mermaid, and the theme then draws the diagrams with it
+# instead of loading Mermaid from unpkg.com (the Diagrams page of the Zensical documentation shows this way).
+custom_dir = "overrides"
 features = [
   "content.code.copy",
   "navigation.footer",

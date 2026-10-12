@@ -1,3 +1,7 @@
 [default.extend-words]
 agoranomos = "agoranomos"
 agoranomoi = "agoranomoi"
+
+[files]
+# Mermaid as released, minified: its short names are not words (see .pre-commit-config.yaml).
+extend-exclude = ["docs/assets/javascripts/mermaid.min.js"]

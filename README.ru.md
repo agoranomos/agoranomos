@@ -135,7 +135,7 @@ cd agoranomos
 
 ## Лицензия
 
-Agoranomos распространяется по лицензии [Apache License 2.0](LICENSE). Стороннее ПО, которое запускает стек, сохраняет собственные лицензии. Шрифты Fira Sans и Fira Code сайта документации в `docs/assets/fonts/` распространяются по лицензии SIL Open Font License 1.1, тексты лицензий (на английском) лежат рядом: [Fira Sans](docs/assets/fonts/OFL-FiraSans.txt) и [Fira Code](docs/assets/fonts/OFL-FiraCode.txt). Кодекс поведения адаптирован из Contributor Covenant 3.0 и распространяется по лицензии [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+Agoranomos распространяется по лицензии [Apache License 2.0](LICENSE). Стороннее ПО, которое запускает стек, сохраняет собственные лицензии. Шрифты Fira Sans и Fira Code сайта документации в `docs/assets/fonts/` распространяются по лицензии SIL Open Font License 1.1, тексты лицензий (на английском) лежат рядом: [Fira Sans](docs/assets/fonts/OFL-FiraSans.txt) и [Fira Code](docs/assets/fonts/OFL-FiraCode.txt). Mermaid, который рисует диаграммы сайта документации, лежит в `docs/assets/javascripts/` и распространяется по лицензии MIT, текст лицензии (на английском) лежит рядом: [Mermaid](docs/assets/javascripts/LICENSE-mermaid.txt). Кодекс поведения адаптирован из Contributor Covenant 3.0 и распространяется по лицензии [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
 ## Об имени
 

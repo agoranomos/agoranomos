@@ -135,7 +135,7 @@ The site will be published when the repository goes public. Until then, read it 
 
 ## License
 
-Agoranomos is licensed under the [Apache License 2.0](LICENSE). The third-party software that the stack runs keeps its own licenses. The Fira Sans and Fira Code fonts of the documentation site, in `docs/assets/fonts/`, are under the SIL Open Font License 1.1, and the license texts are next to them: [Fira Sans](docs/assets/fonts/OFL-FiraSans.txt) and [Fira Code](docs/assets/fonts/OFL-FiraCode.txt). The Code of Conduct is adapted from the Contributor Covenant 3.0 and is licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+Agoranomos is licensed under the [Apache License 2.0](LICENSE). The third-party software that the stack runs keeps its own licenses. The Fira Sans and Fira Code fonts of the documentation site, in `docs/assets/fonts/`, are under the SIL Open Font License 1.1, and the license texts are next to them: [Fira Sans](docs/assets/fonts/OFL-FiraSans.txt) and [Fira Code](docs/assets/fonts/OFL-FiraCode.txt). Mermaid, which draws the diagrams of the documentation site, is served from `docs/assets/javascripts/` under the MIT License, and its license text is next to it: [Mermaid](docs/assets/javascripts/LICENSE-mermaid.txt). The Code of Conduct is adapted from the Contributor Covenant 3.0 and is licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
 ## About the name
 
