@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/agoranomos/agoranomos/compare/v0.1.3...v0.1.4) (2026-10-12)
+
+
+### Performance Improvements
+
+* **airflow:** check the DAG processor and the triggerer cheaply, and parse the DAG files every five minutes ([#68](https://github.com/agoranomos/agoranomos/issues/68)) ([3c66d2b](https://github.com/agoranomos/agoranomos/commit/3c66d2b896c71ad72b322853e9c38a83a5bc56f5))
+
 ## [0.1.3](https://github.com/agoranomos/agoranomos/compare/v0.1.2...v0.1.3) (2026-10-12)
 
 
