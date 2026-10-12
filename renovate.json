@@ -1,6 +1,18 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:best-practices", ":semanticCommits", ":gitSignOff", "customManagers:githubActionsVersions"],
+  "customManagers": [
+    {
+      "description": "The version of the release-please schema, in the $schema of release-please-config.json and in the --schemafile argument of the check-jsonschema hook in .pre-commit-config.yaml. Both carry the same URL, so Renovate updates them in one pull request. The URL names a tag of googleapis/release-please, such as v17.6.0, and the releases of that repository are tagged the same way.",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)release-please-config\\.json$/", "/(^|/)\\.pre-commit-config\\.yaml$/"],
+      "matchStrings": ["https://raw\\.githubusercontent\\.com/googleapis/release-please/v(?<currentValue>\\d+\\.\\d+\\.\\d+)/schemas/config\\.json"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "googleapis/release-please",
+      "extractVersionTemplate": "^v(?<version>.+)$",
+      "versioningTemplate": "semver"
+    }
+  ],
   "pre-commit": {
     "enabled": true
   },

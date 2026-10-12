@@ -66,6 +66,12 @@ repos:
       - id: check-github-issue-forms
       - id: check-github-issue-config
       - id: check-renovate
+      # The schema is the one that release-please-config.json names in its "$schema". Renovate moves
+      # the version in both places in one pull request (customManagers in renovate.json).
+      - id: check-jsonschema
+        name: Validate the release-please configuration
+        files: ^release-please-config\.json$
+        args: [--schemafile, "https://raw.githubusercontent.com/googleapis/release-please/v17.6.0/schemas/config.json"]
 
   - repo: local
     hooks:
