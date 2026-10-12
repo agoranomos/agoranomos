@@ -33,7 +33,7 @@ Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 - `tests/stack/`: the stack tests, run with `uv run pytest tests/stack` against a running stack.
 - `.github/`: the workflows (`workflows/`: CI, the stack tests, the pull request checks, the daily Renovate run and the release workflow), the issue forms, the pull request template and `CODEOWNERS`.
 - `renovate.json`: the [Renovate](https://docs.renovatebot.com/) configuration for keeping the pinned versions current ([ADR-0012](docs/adr/0012-python-and-tooling.md)).
-- `release-please-config.json`, `.release-please-manifest.json`, `version.txt`: the releases, which release-please makes from the Conventional Commits history (`.github/workflows/release.yml`). It writes `CHANGELOG.md` too, which does not exist before the first release. Nobody edits these files by hand.
+- `release-please-config.json`, `.release-please-manifest.json`, `version.txt`: the releases, which release-please makes from the Conventional Commits history (`.github/workflows/release.yml`). It writes `CHANGELOG.md` too. Nobody edits these files by hand.
 - `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`: the community files. `LICENSE` and `NOTICE`: Apache-2.0.
 
 ## Commands

@@ -2,9 +2,9 @@
 
 This guide starts Agoranomos on your own machine in local mode: the warehouse, Airflow and Metabase, with the demo, reachable from this machine only ([ADR-0011](../adr/0011-local-and-server-modes.md)). It is for engineers who want to try the stack or work on it.
 
-!!! note "Pre-release"
+!!! note "Pre-alpha"
 
-    Local mode runs from the `main` branch, and so do server mode and backups ([Deploy on a server](deploy-on-a-server.md)); v0.1.0 is to be the first release. The repository is private until v0.3, so cloning it needs an invitation.
+    Local mode runs from the `main` branch, and so do server mode and backups ([Deploy on a server](deploy-on-a-server.md)); v0.1.0, released on 11 October 2026, is the first release. The repository is private until v0.3, so cloning it needs an invitation.
 
 ## Before you begin
 
