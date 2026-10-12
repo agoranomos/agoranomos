@@ -11,10 +11,6 @@ repo_name = "agoranomos/agoranomos"
 copyright = "Copyright &copy; 2026 Andrei Gromov and Agoranomos contributors. Apache-2.0."
 # The brand style of the site: colors, the self-hosted fonts and the logo (see [project.theme]).
 extra_css = ["stylesheets/brand.css"]
-# Mermaid 11.17.2 (MIT, as of October 2026), served by the site: dist/mermaid.min.js of the npm package, unmodified,
-# with its license text next to it. The script sets the global mermaid, and the theme then draws the diagrams with it
-# instead of loading Mermaid from unpkg.com (the Diagrams page of the Zensical documentation shows this way).
-extra_javascript = ["assets/javascripts/mermaid.min.js"]
 nav = [
   { "Home" = "index.md" },
   { "Tutorials" = ["tutorials/index.md"] },
@@ -70,6 +66,11 @@ logo = "assets/brand/agoranomos-lockup-on-dark.svg"
 favicon = "assets/brand/favicon.svg"
 # No Google Fonts: Fira Sans and Fira Code are served from docs/assets/fonts by brand.css.
 font = false
+# Mermaid 11.17.2 (MIT, as of October 2026) is served by the site: docs/assets/javascripts/mermaid.min.js is
+# dist/mermaid.min.js of the npm package, unmodified, with its license text next to it. overrides/main.html adds it
+# to a page that has a diagram. The script sets the global mermaid, and the theme then draws the diagrams with it
+# instead of loading Mermaid from unpkg.com (the Diagrams page of the Zensical documentation shows this way).
+custom_dir = "overrides"
 features = [
   "content.code.copy",
   "navigation.footer",

@@ -1,0 +1,15 @@
+{#-
+  Load Mermaid only on a page that has a diagram.
+
+  The theme draws a diagram with the global mermaid when there is one, and otherwise loads Mermaid from
+  unpkg.com, so a page with a diagram gets the copy of the site first (see custom_dir in zensical.toml).
+  This main.html overrides the one of the theme and adds to the scripts block of base.html with super(),
+  the pattern of the Zensical documentation (Customization, "Extending the theme").
+-#}
+{% extends "base.html" %}
+{% block scripts %}
+  {% if '<pre class="mermaid">' in page.content %}
+    <script src="{{ 'assets/javascripts/mermaid.min.js' | url }}"></script>
+  {% endif %}
+  {{ super() }}
+{% endblock %}
