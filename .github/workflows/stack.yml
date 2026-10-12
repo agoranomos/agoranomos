@@ -119,7 +119,7 @@ jobs:
           cache-binary: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.23"
+          version: "0.12.24"
       - run: uv sync --locked
       - name: Compose refuses to start before ./agoranomos init
         run: |
@@ -209,7 +209,7 @@ jobs:
           cache-binary: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.23"
+          version: "0.12.24"
       - run: uv sync --locked
       # The runner has no public name: the site is agoranomos.localhost, on 127.0.0.1, with a
       # certificate of the own authority of Caddy, which the tests read from the proxy.
