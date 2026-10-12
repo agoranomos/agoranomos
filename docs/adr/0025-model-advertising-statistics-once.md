@@ -1,0 +1,84 @@
+---
+status: proposed
+date: 2026-10-12
+decision-makers: Andrei Gromov
+---
+
+# Model advertising statistics once, at the grain of a campaign and a day
+
+## Context and Problem Statement
+
+Agoranomos loads the statistics of several ad platforms and of web analytics ([ADR-0004](0004-ingest-with-dlt.md)) and is to answer the same questions across them: what the business spent, on which platform and campaign, and with which results, in one currency. The APIs differ. The Google Ads API v25 reports cost in micros of the currency of the account, as INT64 numbers that its JSON writes as strings; the Meta Marketing API v26.0 and the TikTok API for Business v1.3 write money as strings in major units. Each reports days in the time zone of the account. Each counts conversions its own way: Google in a column for the actions that count as conversions and by action in a report of its own, Meta as a list of actions, TikTok as the optimization event of the ad group. Each changes past days for a while: Meta's insights "do not change after 28 days", the conversion windows of Google reach 90 days, and GA4 changes the attribution of key events for up to 12 days. And each report gives the current name of a campaign for every day. v0.1 has one mart, `ad_spend_daily`, of one fictional account in USD, and its dashboard sums `spend` over the whole table, which is wrong as soon as two currencies meet. [ADR-0016](0016-keep-the-metadata-of-the-marts-as-code.md) left a currency of the deployment's own open.
+
+How does Agoranomos model advertising statistics, so that the demo now and the connectors of real platforms later fill one model?
+
+## Decision Drivers
+
+* One model for every platform, which the demo and the connectors of Phase 4 fill in the same way.
+* The rules of each platform are visible to an analyst and covered by tests of dbt.
+* Sums are right across currencies, time zones and the days that platforms change.
+* A failed check of the data keeps the marts as they were, as since v0.1.
+* Few dependencies in a closed image, and PostgreSQL only ([ADR-0003](0003-two-postgres-instances.md)).
+* The names that people use in v0.1 and in Metabase stay.
+
+## Considered Options
+
+* Raw as the API gives it, staging by platform through one macro for each API shape, intermediate unions, and marts rebuilt in full at the grain of a campaign and a day, with money in the currency of the account and in a reporting currency
+* Connectors that write one unified shape directly
+* The dbt packages of Fivetran: `dbt_ad_reporting` and the packages of the platforms
+* Incremental marts
+* The grains of ad groups and ads now
+
+## Decision Outcome
+
+Chosen option: "Raw as the API gives it, staging by platform through one macro for each API shape, intermediate unions, and marts rebuilt in full at the grain of a campaign and a day, with money in the currency of the account and in a reporting currency", because the demo then tests on every run the staging that real data is to go through, every rule of a platform is SQL with tests, and the marts always agree with what was loaded last.
+
+In practice this means:
+
+* **Layers.** Raw is the response of the API as dlt normalizes it, in one schema `raw_<source>` for each source: nested objects become columns joined by `__`, and lists become child tables. Staging has one view `stg_<source>__<entity>` for each entity of a source, which renames, casts and converts (micros to units, strings to numbers, a `-` of TikTok to nothing) through one macro for each API shape, which the demo and the connector of that platform both call. Intermediate models, `int_<entity>__<verb>`, union the sources and resolve clients, conversion actions and exchange rates; until Phase 3 they are views in the schema `staging`. Marts are tables that dbt rebuilds in full on every run.
+* **Grain.** The facts are by campaign and day: `ad_stats_campaign_daily`, whose key is `report_date`, `platform`, `account_id` and `campaign_id`, and `ad_conversions_campaign_daily`, by conversion action as well. Ad groups and ads come with the first real connector (v0.4), each from its own report of the platform, never as a sum of a lower level. `web_sessions_daily` holds the sessions of web analytics by day, property, source, medium and campaign, and links them to ad campaigns by the campaign ID in `utm_id`.
+* **Dimensions.** `ad_platforms`, `ad_accounts`, `clients` ([ADR-0024](0024-one-deployment-is-one-business.md)), `ad_campaigns`, `ad_campaign_names` and `fx_rates_daily`. The facts also carry the names of their platform, client, account and campaign, so that a question needs no join.
+* **Days and time zones.** `report_date` is the day in the time zone of the ad account, which `ad_accounts.time_zone` names, as the platforms report it: a daily total cannot be moved into another zone. A load takes the days up to yesterday in the time zone of each account.
+* **Money.** Every amount is `numeric(18,6)`, and no row is rounded. A fact has its money in the currency of its account (`spend` and `conversion_value`, beside `currency`) and in one reporting currency (`spend_reporting` and `conversion_value_reporting`, beside `reporting_currency`), at the rate of its `report_date`, carried forward from the last published rate on a day without one. The reporting currency is the setting `AGORANOMOS_REPORTING_CURRENCY`, USD by default; until a source of exchange rates comes with the connectors (Phase 4), the rates of the demo cover USD and EUR. Ratios such as CTR, CPC and ROAS are not stored, because a sum of ratios is wrong.
+* **No foreign keys between marts.** dbt-postgres 1.11.0 drops a table that it replaces with `drop table if exists … cascade`, and PostgreSQL 18 then removes the foreign keys of other tables that point at it, with no error. Tests check the relationships instead.
+* **Names.** The style of v0.1, such as `report_date`, `spend`, `conversion_value` and `clicks`, and the families `ad_stats_<grain>_daily` and `ad_conversions_<grain>_daily`. The reference of the model maps them to the names of Fivetran's `dbt_ad_reporting`, whose design the model follows and whose code it does not take.
+* **Clicks** are clicks to the site: `metrics.clicks` of Google, "Clicks (destination)" of TikTok, and `inline_link_clicks` of Meta, whose `clicks` counts every click.
+* **The names of campaigns.** A fact carries the current name of its campaign, so that a group by name does not split a renamed campaign. `ad_campaign_names` keeps the names that each campaign had, with the time from which and until which it had each, from the campaigns that dlt loads with its `scd2` strategy; dbt snapshots are not used, as they depend on when dbt runs.
+* **Conversions.** `ad_conversions_campaign_daily` has a row for each conversion action, with a category from a short list: `purchase`, `lead`, `sign_up`, `add_to_cart`, `app_install` and `other`. The `conversions` and `conversion_value` of `ad_stats_campaign_daily` are the sums of the primary actions. Which actions are primary is data: the seed `seed_conversion_actions` of the base package, which a deployment overrides in `extensions/model/conversion_actions.toml`, checked as `clients.toml` is ([ADR-0024](0024-one-deployment-is-one-business.md)).
+* **Conversions by platform.** A conversion is what each platform counts as one, and the model keeps that definition: for Google Ads, `metrics.conversions`, the conversion actions that count in it, dated by the day of the click (`metrics.conversions_by_conversion_date` is not used); for Meta, the actions in the attribution setting of the account, `7d_click_1d_view` in the demo; for TikTok, the optimization event of the ad group, in the attribution window of the ad group; for GA4, key events. Microsoft Advertising (`ConversionsQualified`) and LinkedIn (post-click, 30 days) get theirs with their connectors.
+* **Past days.** Each daily load replaces a window of recent days of each account, deleted and inserted in one transaction, whose length is a setting for each platform: 90 days for the shape of Google, 28 for Meta and TikTok, and 14 for GA4. The first load brings the history. The connectors take the same windows by default: 90 days for Google, because its conversions are dated by the click; 28 for Meta and TikTok; 14 for GA4. Microsoft and LinkedIn get theirs with their connectors.
+* **Quality.** The critical tests are in staging and intermediate, where a failure stops the rebuild of the marts: the keys are unique and not null, money is not negative, every currency is of ISO 4217 and every time zone of the tz database of IANA, every day and currency of the facts has a rate, every account and campaign of the facts is known, and the primary actions add up to the conversions of the fact. Warnings stop nothing: more clicks than impressions, a missing day of an active account, and an account without a client.
+* **The demo** has fictional platforms with codes of their own: `demo_search`, `demo_social`, `demo_video` and `demo_web`, which follow the shapes of the Google Ads API v25, the Meta Marketing API v26.0, the TikTok API for Business v1.3 and the GA4 Data API v1beta, and `demo_fx`, a source of exchange rates. `ad_platforms.mimics` says which; the codes of the real platforms stay for their connectors.
+* **v0.1.** `ad_stats_campaign_daily` replaces `ad_spend_daily` in v0.2.0. The first start of v0.2.0 removes the objects of v0.1 from the warehouse: `raw_demo`, `raw_demo_staging`, `marts.ad_spend_daily` and the view `staging.stg_demo__ad_stats_daily`.
+
+The other options were not chosen for these reasons:
+
+* **Connectors that write one unified shape** would put the rules of a platform into Python, where no test of dbt sees them, and a mistake in them would need a reload from the API, whose history is limited.
+* **The packages of Fivetran** read the tables of Fivetran's own connectors, which dlt does not make, convert no currency and keep no time zone. Their names and grains are a good map, which the reference follows.
+* **Incremental marts** would keep old rows with old names and old clients, and need the window of each platform in two places, while the demo builds in seconds. A mart becomes incremental when its build becomes a noticeable part of a run.
+* **Ad groups and ads now** would triple the raw data of the demo and its time at the first start, and Performance Max campaigns of Google have no ad groups.
+
+### Consequences
+
+* Good, because one model serves every platform, and the demo tests the staging of each shape on every run before a connector exists.
+* Good, because a sum across platforms is in one currency, and each amount keeps the currency of its account beside it.
+* Good, because a rule of a platform, such as what counts as a click or a conversion, is SQL or data that a person can read and change.
+* Bad, because the project has many more models than in v0.1, more than thirty views and tables, and Airflow runs a task of dbt for each.
+* Bad, because v0.2.0 breaks the questions that people built on `ad_spend_daily`, which the release notes say.
+* Bad, because the exchange rates of the demo are made up, and until a source of rates comes in Phase 4, a deployment reports in USD or EUR only.
+* Bad, because the daily totals of accounts in different time zones cover different hours, which a sum across accounts hides; the descriptions say so.
+
+## More Information
+
+* **Implementation status, as of October 2026:** planned for v0.2.0; none of it is in place.
+* The facts behind this record, read on 12 October 2026:
+    * The Google Ads API v25 (v25.2, 23 September 2026): `metrics.cost_micros` and `metrics.clicks` are INT64, which the REST interface writes as strings, and `customer.currency_code` is the currency of the account; `metrics.conversions` counts the conversion actions whose `include_in_conversions_metric` is true, and `metrics.conversions_by_conversion_date` counts them on the day of the conversion ([Metrics](https://developers.google.com/google-ads/api/fields/v25/metrics)); `segments.conversion_action` cannot be selected with `metrics.cost_micros` ([Segments](https://developers.google.com/google-ads/api/fields/v25/segments)); "All date ranges and time periods are evaluated relative to the serving account's time zone" ([Date ranges](https://developers.google.com/google-ads/api/docs/query/date-ranges)); the window after a click is 1 to 90 days for most conversion actions ([Conversion management](https://developers.google.com/google-ads/api/docs/conversions/getting-started)); Performance Max campaigns have asset groups instead of ad groups ([Performance Max reporting](https://developers.google.com/google-ads/api/performance-max/reporting)).
+    * Google Ads Help: "Google Ads has always reported conversions by the date your ad was clicked" ([Understand conversions by time with new columns](https://support.google.com/google-ads/answer/9549009)).
+    * The Meta Marketing API v26.0 (29 July 2026): "We report ad insights data in the ad account's timezone", and "Insights refresh every 15 minutes and do not change after 28 days of being reported" ([Limits and Best Practices](https://developers.facebook.com/documentation/ads-commerce/marketing-api/insights/best-practices)); `spend` is a numeric string, `clicks` counts every click on an ad and `inline_link_clicks` the clicks on links to a destination, and `use_account_attribution_setting` reports with the attribution setting of the ad account, while each ad set also has an attribution setting of its own ([Ad Account, Insights](https://developers.facebook.com/documentation/ads-commerce/marketing-api/reference/ad-account/insights)).
+    * The TikTok API for Business v1.3: the amounts of money are "based on the currency set by the advertiser's account", and the dates are based on the time zone of the ad account ([Run a synchronous report](https://business-api.tiktok.com/portal/docs?id=1740302848100353)); every metric is a string, `-` where it has no value, `clicks` is "Clicks (destination)", and `conversion` counts the optimization event of the ad ([Supported metrics](https://business-api.tiktok.com/portal/docs?id=1751443967255553)); the attribution windows are set on the ad group, up to 28 days after a click ([Attribution window and event count](https://business-api.tiktok.com/portal/docs?id=1777694366654465)).
+    * Google Analytics: "Attribution credit for key events can change for up to 12 days" ([Data freshness](https://support.google.com/analytics/answer/11198161)).
+    * Microsoft Advertising: `ConversionsQualified` takes the place of the deprecated column `Conversions` ([CampaignPerformanceReportColumn](https://learn.microsoft.com/en-us/advertising/reporting-service/campaignperformancereportcolumn)). LinkedIn: the window after a click, `postClickAttributionWindowSize`, is 30 days by default ([Conversion Tracking](https://learn.microsoft.com/en-us/linkedin/marketing/integrations/ads-reporting/conversion-tracking)).
+    * dbt-postgres 1.11.0: `postgres__drop_table` in `src/dbt/include/postgres/macros/relations/table/drop.sql` runs `drop table if exists … cascade`; PostgreSQL 18: `CASCADE` removes the foreign-key constraint of another table that references the dropped one ([DROP TABLE](https://www.postgresql.org/docs/18/sql-droptable.html)); dlt 1.31.0: the `delete-insert` and `scd2` strategies of merge loading ([Merge loading](https://dlthub.com/docs/general-usage/merge-loading)).
+* Fivetran's `dbt_ad_reporting` v2.8.0 is under Apache-2.0. The connectors of Airbyte are under the Elastic License 2.0, and nothing of them is taken.
+* This record decides the currency of a deployment's own that [ADR-0016](0016-keep-the-metadata-of-the-marts-as-code.md) left open.
+* Related decisions: [ADR-0004](0004-ingest-with-dlt.md) (dlt and the contract of a source), [ADR-0005](0005-transform-with-dbt-core.md) (dbt and its layers), [ADR-0016](0016-keep-the-metadata-of-the-marts-as-code.md) (the metadata of the marts) and [ADR-0024](0024-one-deployment-is-one-business.md) (one business, and its clients).

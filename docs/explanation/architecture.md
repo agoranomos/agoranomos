@@ -68,7 +68,14 @@ dlt takes care of incremental loading, schema evolution, merging and name normal
 * **Explicit retries.** How failed requests are retried is set explicitly, not left to library defaults.
 * **Loud failures.** If an account fails, the run fails or raises an alert that lists the affected accounts and the original API error.
 
-The planned sources are ad platform APIs (for example Google, Meta, TikTok, Yandex and VK), GA4, CRM systems and files. A demo source needs no keys: it generates eight weeks of statistics of one fictional ad account with three campaigns, up to yesterday, and the DAG `agoranomos_demo_load` loads them into `raw_demo` as the `loader` role. On the first start, `demo-init` runs it. Demo data for more platforms is planned.
+The connectors of real platforms are to add four rules to this contract (planned with the connectors):
+
+* **An app of the deployment.** Each deployment registers its own app or project with each platform and keeps its secrets in `.env`: the access level, the quotas and the OAuth client of a platform belong to the app, so one app cannot serve every deployment.
+* **Tokens that expire.** A source refreshes its access token, and says loudly before a token expires and needs a new sign-in: a long-lived user access token of Meta lasts about 60 days (as of October 2026).
+* **Asynchronous reports.** Where a platform builds a report on request, as Microsoft Advertising does, a source submits it, polls until it is ready and downloads it, with the same explicit retries and loud failures as any other request.
+* **Daily quotas.** The daily load of every account of a deployment fits the daily quota of the lowest access level of each platform that reads real accounts, such as the 2,880 operations a day of the Explorer access of the Google Ads API (as of October 2026).
+
+The planned sources are ad platform APIs (for example Google, Meta, TikTok, Microsoft Advertising and LinkedIn), GA4, CRM systems and files. A demo source needs no keys: it generates eight weeks of statistics of one fictional ad account with three campaigns, up to yesterday, and the DAG `agoranomos_demo_load` loads them into `raw_demo` as the `loader` role. On the first start, `demo-init` runs it. Demo data for more platforms is planned.
 
 Decision record: [ADR-0004: Ingest data with dlt](../adr/0004-ingest-with-dlt.md).
 
@@ -88,7 +95,7 @@ Inside the warehouse, data moves through layers, each in its own schema:
 | `raw_<source>` | Data as loaded, one schema per source |
 | `raw_<source>_staging` | The rows of a load on their way into `raw_<source>`: dlt merges through it. `loader` owns it, and no other role reads it |
 | `staging` | Standardized source data |
-| `intermediate` (planned) | Shared transformation steps |
+| `intermediate` (planned) | Shared transformation steps. Until Phase 3 the intermediate models are views in `staging` ([ADR-0025](../adr/0025-model-advertising-statistics-once.md)), and the schema does not exist |
 | `marts` | Final models for dashboards and AI access |
 | `ops` (planned) | Operational data: run metadata and data quality results |
 
@@ -98,12 +105,13 @@ Today the dbt project in `dbt/` builds the demo data: the staging model `stg_dem
 
 Every model, column and source table of the project has a description. Every mart also has a display name for Metabase, and each of its columns a display name and a semantic type ([Describe the marts](../reference/describe-the-marts.md)). dbt writes the descriptions into the comments of the tables, views and columns that it builds, so SQL clients read them in the warehouse, and so will the planned AI access. Each mart has an enforced contract: its columns, their types and its primary key are fixed in its YAML, and a build that would change them fails.
 
-dbt Core with dbt-postgres does the transformations, with tests from the first day and an elementary report for observability. The marts layer is a single advertising-statistics model that spans all platforms:
+dbt Core with dbt-postgres does the transformations, with tests from the first day and an elementary report for observability. The marts layer is to be one model of advertising statistics that spans all platforms ([ADR-0025](../adr/0025-model-advertising-statistics-once.md)), planned for v0.2.0:
 
-* Additive metrics are stored at daily grain: date, account, campaign, ad group and ad.
-* Non-additive metrics, such as reach and frequency, are separate period facts with calendar keys.
-* Currencies (FX rates) and time zones are explicit.
-* History is tracked as type 2 slowly changing dimensions (SCD2), using dbt snapshots with explicit `check_cols`, only for attributes where it matters.
+* Additive metrics are stored by campaign and day, with the conversions by action in a table of their own; ad groups and ads come with the first real connector.
+* Non-additive metrics, such as reach and frequency, are to be separate period facts with calendar keys.
+* Money is kept in the currency of the ad account and in one reporting currency, at the rate of the day, and each day is the day of the time zone of the ad account.
+* The facts carry the current names of campaigns, and a dimension keeps the names that each campaign had, as dlt records them with its `scd2` strategy.
+* One deployment holds the data of one business, and clients group its ad accounts ([ADR-0024](../adr/0024-one-deployment-is-one-business.md)).
 
 Decision records: [ADR-0003: Run two PostgreSQL instances](../adr/0003-two-postgres-instances.md) and [ADR-0005: Transform data with dbt Core](../adr/0005-transform-with-dbt-core.md).
 
