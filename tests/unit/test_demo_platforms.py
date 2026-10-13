@@ -41,8 +41,34 @@ GOLDEN = {
 }
 
 
+# Moments at which the time zones of the demo disagree on the day: at 23:30 UTC Berlin has begun
+# the next day, and at 05:00 UTC Los Angeles and Etc/GMT+8 are still on the day before.
+EDGES = [datetime(2026, 10, 12, 23, 30, tzinfo=UTC), datetime(2026, 10, 12, 5, 0, tzinfo=UTC)]
+# The account and the day of a row of the main table of each platform, as its API writes them.
+ACCOUNT_AND_DAY = {
+    "demo_search": lambda r: (r["customer"]["id"], r["segments"]["date"]),
+    "demo_social": lambda r: (r["account_id"], r["date_start"]),
+    "demo_video": lambda r: (r["advertiser_id"], r["dimensions"]["stat_time_day"][:10]),
+    "demo_web": lambda r: (
+        r["property"].split("/")[1],
+        f"{r['date'][:4]}-{r['date'][4:6]}-{r['date'][6:]}",
+    ),
+}
+
+
 def last_month(account):
     return common.last_final_day(NOW, account.time_zone) - timedelta(days=29)
+
+
+def last_days(code, now):
+    """The last day of the facts of each account of a platform, from the records of its main
+    table as of now."""
+    platform = platforms.PLATFORMS[code]
+    found = {}
+    for record in platform.module.records(now)[platform.main_table]:
+        account, day = ACCOUNT_AND_DAY[code](record)
+        found[account] = max(found.get(account, day), day)
+    return {account: date.fromisoformat(day) for account, day in found.items()}
 
 
 def all_records(module, now=NOW, first=None, skip=frozenset()):
@@ -282,6 +308,32 @@ def test_the_rates_come_on_weekdays_but_holidays_and_start_before_any_history():
     first = min(common.history_first_day(NOW, a.time_zone) for a in world.ACCOUNTS)
     assert min(days) <= first
     assert all(len(r["rate"].split(".")[1]) == 4 for r in rows)
+
+
+@pytest.mark.parametrize("now", EDGES, ids=["late", "early"])
+@pytest.mark.parametrize("code", sorted(ACCOUNT_AND_DAY))
+def test_each_account_loads_up_to_its_own_yesterday(code, now):
+    # At an edge of the day of UTC, a load that took the yesterday of UTC, or of another account,
+    # would bring a day that an account has not finished, or leave out one that it has.
+    assert len({common.last_final_day(now, a.time_zone) for a in world.ACCOUNTS}) > 1, now
+    platform = platforms.PLATFORMS[code]
+    expected = {
+        a.account_id: common.last_final_day(now, a.time_zone) for a in platform.module.accounts()
+    }
+    assert last_days(code, now) == expected
+    assert {account: last for account, (_, last) in platform.module.windows(now).items()} == (
+        expected
+    )
+
+
+@pytest.mark.parametrize("now", EDGES, ids=["late", "early"])
+def test_the_rates_cover_every_day_of_every_account_at_the_edges(now):
+    # The newest day of the facts, Berlin's at 23:30 UTC, has its rate, and so has the oldest.
+    [(first, last)] = fx.windows(now).values()
+    assert last == max(common.last_final_day(now, a.time_zone) for a in world.ACCOUNTS)
+    assert first <= min(common.history_first_day(now, a.time_zone) for a in world.ACCOUNTS)
+    days = [date.fromisoformat(r["rate_date"]) for r in fx.records(now)["rates_daily"]]
+    assert days == [day for day in common.days(first, last) if fx.published(day)]
 
 
 def test_the_list_of_platforms_names_where_each_loads():
