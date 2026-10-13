@@ -15,7 +15,7 @@ Each backup is a folder of the backups folder, `./backups` unless `AGORANOMOS_BA
 
 The file `latest.json`, next to the folders, says how the last run went.
 
-A backup does not hold `.env`. Its keys decrypt the connections that Airflow and Metabase save, so keep a copy of `.env` in a password manager, as [Start the stack](deploy-on-a-server.md#start-the-stack) shows, and save a new copy whenever `.env` changes, after every update too: a backup without the keys restores the data, but not the saved connections, and a copy from before a change of a password or of the admin would not match the databases. It does not hold the certificates of server mode either; Caddy gets them again. Nor does it hold `celery_results`, the database of the results of the tasks of the CeleryExecutor variant: the scheduler reads each result when its task ends, and a restore leaves the database as it is. The three dumps are taken one after the other, so they are not of the same instant; the pipelines are safe to run again and catch up.
+A backup does not hold `.env`. Its keys decrypt the connections that Airflow and Metabase save, so keep a copy of `.env` in a password manager, as [Start the stack](deploy-on-a-server.md#start-the-stack) shows, and save a new copy whenever `.env` changes, after every update too: a backup without the keys restores the data, but not the saved connections, and a copy from before a change of a password or of the admin would not match the databases. It does not hold the certificates of server mode either; Caddy gets them again. Nor does it hold `celery_results`, the database of the results of the tasks of the CeleryExecutor variant: the scheduler reads each result when its task ends, and a restore leaves the database as it is. Nor does it hold the registry with which the setup jobs find the content of the package in Metabase, on the volume `metabase-content` ([Restore on a new server](#restore-on-a-new-server) says what that means). The three dumps are taken one after the other, so they are not of the same instant; the pipelines are safe to run again and catch up.
 
 A backup holds everything that the databases hold, also the hashes of the passwords of the users of Metabase. The folder and its files are readable only by the user who runs `./agoranomos`: keep copies as safe as `.env`.
 
@@ -156,6 +156,8 @@ If `restore` stops because the images of the backup differ from those of the che
 7. Run `./agoranomos restore 20261011T030012Z`. It starts the databases on empty volumes, restores them, and starts the stack.
 
 Sign in to Metabase with the password of the old deployment, which is in the `.env` that you copied.
+
+The setup jobs find the content of the package in Metabase by a registry on a volume of their own, `metabase-content`, which a backup does not hold ([Configuration](../reference/configuration.md#the-content-of-the-package)). After a restore onto a new machine, the first start with the demo creates the collection **Agoranomos** and its content again, and the restored collection **Agoranomos** stays as it was, view-only, next to it. The last line of `./agoranomos logs demo-init` names the ID of the dashboard of the new one, which the address of the dashboard in Metabase shows too. Move the restored one to the trash in Metabase, from the menu of the collection, after you copied anything that you added to it.
 
 ## Limits
 

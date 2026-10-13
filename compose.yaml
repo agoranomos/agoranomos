@@ -543,7 +543,8 @@ services:
 
   # Sets Metabase up on the first start and keeps the warehouse connection current on every start. Metabase
   # makes the connection to the warehouse, so this job needs the default network only, to reach Metabase.
-  # Then it applies the metadata of the marts: the export and this deployment's overrides, both read-only.
+  # Then it applies the metadata of the marts: the export and this deployment's overrides, both read-only;
+  # and it gives every group but Administrators at most View on the content of the package (ADR-0018).
   metabase-init:
     image: python:3.13.16-slim-trixie@sha256:3dd7cc108ec1493442514f5c2a871af6af0ec31d768ff6e378a93340c3b3db5f
     profiles: [core]
@@ -565,24 +566,34 @@ services:
       WAREHOUSE_PASSWORD: ${METABASE_READER_PASSWORD:?run ./agoranomos init}
       METADATA_EXPORT: /opt/agoranomos/metadata/metadata.json
       METADATA_OVERRIDES: /opt/agoranomos/extensions/metadata/overrides.toml
+      CONTENT_REGISTRY: /var/tmp/agoranomos-content.json
     volumes:
       - ./metabase:/opt/agoranomos/metabase:ro
       - metadata-export:/opt/agoranomos/metadata:ro
       - ${AGORANOMOS_EXTENSIONS_DIR:-./extensions}/metadata:/opt/agoranomos/extensions/metadata:ro
+      # The registry of the content of the package (ADR-0018): the entity IDs that Metabase gave
+      # the collections, questions and dashboards that the setup jobs created, by the key of each in
+      # the code. Only this job and demo-init mount it. A new named volume takes the owner and mode
+      # of the folder that it is first mounted on: /var/tmp, the folder for temporary files that
+      # last, is open to every user of the Python image (mode 1777 in Debian), so the user 65534 of
+      # the jobs can write the volume.
+      - metabase-content:/var/tmp
     depends_on:
       metabase:
         condition: service_healthy
       metadata-export:
         condition: service_completed_successfully
-    # The job writes nothing: PYTHONDONTWRITEBYTECODE keeps Python from writing its bytecode.
+    # It writes nothing but the registry of the content, on its volume: PYTHONDONTWRITEBYTECODE
+    # keeps Python from writing its bytecode.
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     logging: *logging
 
   # Makes the demo ready on every start (the demo profile, which .env turns on by default): it runs the
-  # demo pipeline once, then syncs the warehouse in Metabase and creates the demo collection, its
-  # questions and its dashboard. It holds the passwords of both admins, which no Airflow task gets.
+  # demo pipeline once, then syncs the warehouse in Metabase and puts the demo collection, its questions
+  # and its dashboard in the collection Agoranomos as the code says (ADR-0018). It holds the passwords of
+  # both admins, which no Airflow task gets.
   # COMPOSE_PROFILES=core in .env turns the demo off.
   demo-init:
     image: python:3.13.16-slim-trixie@sha256:3dd7cc108ec1493442514f5c2a871af6af0ec31d768ff6e378a93340c3b3db5f
@@ -606,10 +617,13 @@ services:
       WAREHOUSE_USER: metabase_reader
       METADATA_EXPORT: /opt/agoranomos/metadata/metadata.json
       METADATA_OVERRIDES: /opt/agoranomos/extensions/metadata/overrides.toml
+      CONTENT_REGISTRY: /var/tmp/agoranomos-content.json
     volumes:
       - ./metabase:/opt/agoranomos/metabase:ro
       - metadata-export:/opt/agoranomos/metadata:ro
       - ${AGORANOMOS_EXTENSIONS_DIR:-./extensions}/metadata:/opt/agoranomos/extensions/metadata:ro
+      # The registry of the content of the package, as metabase-init mounts it (ADR-0018).
+      - metabase-content:/var/tmp
     depends_on:
       airflow-apiserver:
         condition: service_healthy
@@ -619,7 +633,7 @@ services:
         condition: service_healthy
       metabase-init:
         condition: service_completed_successfully
-    # As metabase-init, it writes nothing.
+    # As metabase-init, it writes nothing but the registry of the content, on its volume.
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -768,5 +782,8 @@ volumes:
   metadata-export:
   # The manifest of the dbt project for Cosmos: only metadata-export writes it (ADR-0027).
   dbt-manifest:
+  # The registry of the content of the package in Metabase: only metabase-init and demo-init
+  # write it (ADR-0018).
+  metabase-content:
   # The certificates of the proxy of server mode.
   caddy-data:

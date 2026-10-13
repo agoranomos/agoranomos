@@ -18,6 +18,7 @@ from typing import Any
 
 import metadata
 import pytest
+from metabase_content import item, registry, run_job
 from services import DEMO
 from stack_helpers import REPO_ROOT, compose, http_json, leaked, read_env, secrets
 
@@ -35,6 +36,8 @@ display_name = "Purchases (stack test)"
 note = "A note of the stack test."
 """
 QUESTIONS = {"Spend, last 7 days", "Spend by campaign, last 7 days", "Spend by day"}
+# The keys of the questions of the demo in the registry of the content.
+QUESTION_KEYS = ("spend-last-7-days", "spend-by-campaign-last-7-days", "spend-by-day")
 # The first color of the palette of the project for a light background.
 SERIES_COLOR = "#A86400"
 KINDS = (metadata.FIRST, metadata.UPDATE, metadata.REVERT)
@@ -252,47 +255,31 @@ def test_an_override_shows_after_the_next_start_and_its_removal_brings_the_base_
     assert (field["display_name"], field["description"]) == (base.display_name, base.description)
 
 
+def demo_questions(metabase_url: str, session: dict[str, str]) -> dict[str, dict[str, Any]]:
+    """The questions of the demo by name, found through the registry of the content."""
+    entries = registry()
+    found = (item(metabase_url, session, f"demo/{key}", entries) for key in QUESTION_KEYS)
+    return {question["name"]: question for question in found}
+
+
 @needs_the_demo
 def test_the_demo_questions_have_the_titles_of_their_columns_and_axes(metabase_url, session):
-    status, collections = http_json("GET", f"{metabase_url}/api/collection", headers=session)
-    assert status == 200, f"GET /api/collection answered HTTP {status}"
-    [collection] = [
-        c for c in collections if c.get("name") == "Agoranomos demo" and c.get("location") == "/"
-    ]
-    path = f"/api/collection/{collection['id']}/items?models=card"
-    status, items = http_json("GET", f"{metabase_url}{path}", headers=session)
-    assert status == 200, f"GET {path} answered HTTP {status}"
     titled = {}
-    for item in items["data"]:
-        if item["name"] not in QUESTIONS:
-            continue
-        status, card = http_json("GET", f"{metabase_url}/api/card/{item['id']}", headers=session)
-        assert status == 200, f"GET /api/card/{item['id']} answered HTTP {status}"
+    for name, card in demo_questions(metabase_url, session).items():
         settings = card["visualization_settings"]
         titles = [entry.get("column_title") for entry in settings["column_settings"].values()]
         axes = [settings.get(key) for key in ("graph.x_axis.title_text", "graph.y_axis.title_text")]
-        titled[item["name"]] = all(titles) and (card["display"] == "scalar" or all(axes))
+        titled[name] = all(titles) and (card["display"] == "scalar" or all(axes))
     assert titled == dict.fromkeys(QUESTIONS, True), titled
 
 
 @needs_the_demo
 def test_the_demo_charts_are_drawn_in_the_color_of_the_project(metabase_url, session):
     # Metabase keys the color of the one series of a chart by the name of its metric column.
-    status, collections = http_json("GET", f"{metabase_url}/api/collection", headers=session)
-    assert status == 200, f"GET /api/collection answered HTTP {status}"
-    [collection] = [
-        c for c in collections if c.get("name") == "Agoranomos demo" and c.get("location") == "/"
-    ]
-    path = f"/api/collection/{collection['id']}/items?models=card"
-    status, items = http_json("GET", f"{metabase_url}{path}", headers=session)
-    assert status == 200, f"GET {path} answered HTTP {status}"
-    colors = {}
-    for item in items["data"]:
-        if item["name"] not in QUESTIONS:
-            continue
-        status, card = http_json("GET", f"{metabase_url}/api/card/{item['id']}", headers=session)
-        assert status == 200, f"GET /api/card/{item['id']} answered HTTP {status}"
-        colors[item["name"]] = card["visualization_settings"].get("series_settings")
+    colors = {
+        name: card["visualization_settings"].get("series_settings")
+        for name, card in demo_questions(metabase_url, session).items()
+    }
     assert colors == {
         "Spend by campaign, last 7 days": {"spend": {"color": SERIES_COLOR}},
         "Spend by day": {"spend": {"color": SERIES_COLOR}},
@@ -324,43 +311,39 @@ def test_metabase_lists_the_columns_of_the_warehouse_through_its_connection(
 
 
 @needs_the_demo
-def test_demo_init_gives_a_question_the_title_that_it_lacks(env, metabase_url, session, marts):
-    # A question made before the titles and the color: the next start adds the title and the color
-    # of the code, and leaves the rest. The body of the PUT has the settings only, as the one of
-    # demo-init has. The settings of the card go back as they were, a title that a person set
-    # included, also when it fails.
+def test_demo_init_puts_back_the_title_of_a_column(env, metabase_url, session, marts):
+    # An admin removes the title of a column, the title of an axis and the color of a chart: the
+    # next start puts the settings of display back as the code says, and logs it. The settings go
+    # back as they were also when the test fails.
     [spend] = [c for c in marts.effective[MART].columns if c.name == "spend"]
-    status, collections = http_json("GET", f"{metabase_url}/api/collection", headers=session)
-    assert status == 200, f"GET /api/collection answered HTTP {status}"
-    [collection] = [
-        c for c in collections if c.get("name") == "Agoranomos demo" and c.get("location") == "/"
-    ]
-    path = f"/api/collection/{collection['id']}/items?models=card"
-    status, items = http_json("GET", f"{metabase_url}{path}", headers=session)
-    assert status == 200, f"GET {path} answered HTTP {status}"
-    [card_id] = [item["id"] for item in items["data"] if item["name"] == "Spend by day"]
-    card_path = f"{metabase_url}/api/card/{card_id}"
-    status, card = http_json("GET", card_path, headers=session)
-    assert status == 200, f"GET /api/card/{card_id} answered HTTP {status}"
+    card = item(metabase_url, session, "demo/spend-by-day")
+    card_path = f"{metabase_url}/api/card/{card['id']}"
     before = card["visualization_settings"]
     omitted = ("graph.y_axis.title_text", "series_settings")
     lacking = {key: value for key, value in before.items() if key not in omitted}
+    lacking["column_settings"] = {
+        key: {k: v for k, v in entry.items() if k != "column_title"}
+        for key, entry in before["column_settings"].items()
+    }
     try:
         status, _ = http_json(
             "PUT", card_path, {"visualization_settings": lacking}, headers=session
         )
-        assert status == 200, f"PUT /api/card/{card_id} answered HTTP {status}"
-        result = compose("run", "--rm", "--no-deps", "-T", "demo-init", check=False)
-        found = leaked(secrets(env), [result.stdout, result.stderr])
+        assert status == 200, f"PUT /api/card/{card['id']} answered HTTP {status}"
+        code, changes, found, _ = run_job("demo-init", secrets(env))
         assert not found, f"the output of demo-init holds the values of {found}"
-        assert result.returncode == 0, f"demo-init exited with {result.returncode}"
-        status, card = http_json("GET", card_path, headers=session)
-        assert status == 200, f"GET /api/card/{card_id} answered HTTP {status}"
-        settings = card["visualization_settings"]
+        assert code == 0, f"demo-init exited with {code}"
+        settings = item(metabase_url, session, "demo/spend-by-day")["visualization_settings"]
         assert settings.get("graph.y_axis.title_text") == spend.display_name
+        assert settings["column_settings"]['["name","spend"]'] == {
+            "column_title": spend.display_name
+        }
         assert settings.get("series_settings") == {"spend": {"color": SERIES_COLOR}}
         assert settings["graph.dimensions"] == ["report_date"]
+        assert changes == [
+            "demo-init: revert of an edit: question demo/spend-by-day visualization_settings"
+        ], changes
     finally:
         # No assert here: it would hide the failure of the test when the way back fails too.
         back, _ = http_json("PUT", card_path, {"visualization_settings": before}, headers=session)
-    assert back == 200, f"PUT /api/card/{card_id} answered HTTP {back} on the way back"
+    assert back == 200, f"PUT /api/card/{card['id']} answered HTTP {back} on the way back"

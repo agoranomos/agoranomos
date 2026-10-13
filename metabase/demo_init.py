@@ -5,16 +5,19 @@ It runs the demo pipeline once: agoranomos_demo_load, and then agoranomos_demo_t
 asset of the raw table starts. It also runs agoranomos_demo_history once, which loads the history
 of the fictional platforms of the demo generator into raw_demo_<platform>. Then it makes the demo
 visible in Metabase: it syncs the schema of the warehouse, applies the metadata of the marts
-(metadata.py), as metabase-init does, and creates the demo collection, its questions and its
-dashboard. The questions get the titles of their columns and axes from the display names of the
-metadata, and their charts get the color of the project.
+(metadata.py), as metabase-init does, and puts the demo, its questions and its dashboard, in the
+collection Agoranomos / Demo as the code says (content.py, ADR-0018): an edit is reverted and
+logged, an item in the trash comes back, and every group but Administrators gets at most View on
+them. The questions get the titles of their columns and axes from the display names of the
+metadata, and their charts get the color of the project. The demo collection of v0.1, the one
+whose dashboard the account of demo-init made, moves into Agoranomos as Demo once, after every item
+in it that the demo does not ship has gone to the root.
 
 Each step looks at the current state first. A start that finds a successful run of the transform
 does not run the pipeline again and leaves the pause state of both of its DAGs as it is, and one
 that finds a successful run of the history does the same with the history. The content of
-Metabase is found by name: what is there stays as it is, edits included, and what is missing is
-created again, so a deleted or renamed question, dashboard or collection comes back. A question
-that exists gets only the titles and the series color that it lacks.
+Metabase is found by the entity IDs that Metabase gave it, in the registry of the content, never by
+name, but for the one move of the collection of an earlier release.
 
 The whole job has one deadline, DEADLINE seconds from its start, which every wait shares, and a
 step that runs out of time names itself; ./agoranomos up waits longer than that for the stack.
@@ -37,6 +40,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlencode
 
+import content
 import metadata
 from metabase_init import (
     SHAPE_ERRORS,
@@ -55,8 +59,25 @@ from metabase_init import (
 LOAD_DAG = "agoranomos_demo_load"
 TRANSFORM_DAG = "agoranomos_demo_transform"
 HISTORY_DAG = "agoranomos_demo_history"
-COLLECTION = "Agoranomos demo"
+# The demo as a package of the content (content.py): its key in the registry, and its name, the
+# name of its collection in Agoranomos.
+DEMO_KEY = "demo"
+DEMO_NAME = "Demo"
+DEMO_DESCRIPTION = (
+    "The demo of Agoranomos: a fictional business, as the demo data of this release shows it."
+)
 DASHBOARD = "Ad spend (demo)"
+DASHBOARD_DESCRIPTION = "Ad spend of the demo account, from marts.ad_spend_daily."
+# The names of the demo of v0.1, which the jobs look for once, to move it into Agoranomos: its
+# collection at the root, its dashboard, and its questions, with the key of each in the package.
+# Written out, so that they stay as v0.1 named them when the questions of the code change.
+COLLECTION_V01 = "Agoranomos demo"
+DASHBOARD_V01 = "Ad spend (demo)"
+V01_KEYS = {
+    "Spend, last 7 days": "spend-last-7-days",
+    "Spend by campaign, last 7 days": "spend-by-campaign-last-7-days",
+    "Spend by day": "spend-by-day",
+}
 MART_SCHEMA = "marts"
 MART_TABLE = "ad_spend_daily"
 # The one deadline of the job, in seconds from its start, shared by the waits for the DAGs, the
@@ -92,15 +113,22 @@ AXIS_TITLES = ("graph.x_axis.title_text", "graph.y_axis.title_text")
 # color of a series in series_settings, under the series key, which for a chart with one metric and
 # no breakout is the name of the metric column. A color with no color_name is drawn as it is.
 SERIES_COLOR = "#A86400"
-# What demo-init writes into each entry of the settings that Metabase keeps for each column and for
-# each series of a card: the title of a column, the color of a series.
-ENTRY_SETTINGS = (("column_settings", "column_title"), ("series_settings", "color"))
+
+# The types that Metabase 0.64.1 gives the columns of the mart that the questions answer with, read
+# from the warehouse (checked on the stand in October 2026): the contract of the mart fixes them.
+COLUMN_TYPES = {
+    "report_date": ("type/Date", "date"),
+    "campaign_name": ("type/Text", "text"),
+    "spend": ("type/Decimal", "numeric"),
+}
 
 # The questions of the demo dashboard, in the order of the dashboard, with their place on its grid
-# of 24 columns. columns are the columns of the answer, which are columns of the mart, so that the
-# titles come from their display names.
+# of 24 columns. key is the key of a question in the package, which the registry of the content
+# keeps; columns are the columns of the answer, in their order, which are columns of the mart, so
+# that the titles come from their display names.
 QUESTIONS: tuple[dict[str, Any], ...] = (
     {
+        "key": "spend-last-7-days",
         "name": "Spend, last 7 days",
         "description": "The spend of the last seven days that have data.",
         "display": "scalar",
@@ -110,6 +138,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "layout": {"row": 0, "col": 0, "size_x": 6, "size_y": 4},
     },
     {
+        "key": "spend-by-campaign-last-7-days",
         "name": "Spend by campaign, last 7 days",
         "description": "The spend of each campaign in the last seven days that have data.",
         "display": "row",
@@ -126,6 +155,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "layout": {"row": 0, "col": 6, "size_x": 18, "size_y": 4},
     },
     {
+        "key": "spend-by-day",
         "name": "Spend by day",
         "description": "The spend of every day that has data.",
         "display": "line",
@@ -155,6 +185,7 @@ ENV_NAMES = {
     "warehouse_user": "WAREHOUSE_USER",
     "metadata_export": "METADATA_EXPORT",
     "metadata_overrides": "METADATA_OVERRIDES",
+    "content_registry": "CONTENT_REGISTRY",
 }
 
 
@@ -171,6 +202,7 @@ class Config:
     warehouse_user: str
     metadata_export: str
     metadata_overrides: str
+    content_registry: str
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
@@ -392,30 +424,6 @@ def ensure_synced(
     return True
 
 
-def ensure_collection(metabase: Metabase) -> int:
-    """The demo collection, at the top level of Metabase, created when there is none."""
-    for collection in items_of(metabase.call("GET", "/api/collection")):
-        if (
-            collection.get("name") == COLLECTION
-            and collection.get("location") == "/"
-            and not collection.get("personal_owner_id")
-            and not collection.get("archived")
-        ):
-            return collection["id"]
-    created = metabase.call(
-        "POST",
-        "/api/collection",
-        {"name": COLLECTION, "description": "The demo of Agoranomos: one fictional ad account."},
-    )
-    return created["id"]
-
-
-def collection_items(metabase: Metabase, collection_id: int, model: str) -> dict[str, int]:
-    """The ids of the items of a model in a collection, by name."""
-    response = metabase.call("GET", f"/api/collection/{collection_id}/items?models={model}")
-    return {item["name"]: item["id"] for item in items_of(response) if item.get("model") == model}
-
-
 def demo_mart(marts: metadata.Metadata) -> metadata.Table:
     """The table of the mart of the demo in the effective metadata: the dbt project declares it."""
     table = marts.effective.get((MART_SCHEMA, MART_TABLE))
@@ -460,81 +468,214 @@ def visualization_settings(question: Mapping[str, Any], titles: Mapping[str, str
     return settings
 
 
-def with_missing_settings(current: Mapping[str, Any], wanted: Mapping[str, Any]) -> dict | None:
-    """The settings of a card that exists, with the titles and the series color of wanted that it
-    lacks, or None when it lacks none: a title or a color that is there, also one that a person
-    changed, stays as it is."""
-    settings = copy.deepcopy(dict(current))
-    added = False
-    for key in AXIS_TITLES:
-        if key in wanted and key not in settings:
-            settings[key] = wanted[key]
-            added = True
-    for group, field in ENTRY_SETTINGS:
-        for key, wanted_entry in (wanted.get(group) or {}).items():
-            current_entry = settings.setdefault(group, {}).setdefault(key, {})
-            if field not in current_entry:
-                current_entry[field] = wanted_entry[field]
-                added = True
-    return settings if added else None
+def demo_package(titles: Mapping[str, str]) -> content.Package:
+    """The demo as a package of the content: its questions, with the titles of their columns and
+    the series color, and its dashboard."""
+    return content.Package(
+        key=DEMO_KEY,
+        name=DEMO_NAME,
+        description=DEMO_DESCRIPTION,
+        questions=tuple(
+            content.Question(
+                key=q["key"],
+                name=q["name"],
+                description=q["description"],
+                display=q["display"],
+                query=q["query"],
+                columns=tuple(content.Column(c, *COLUMN_TYPES[c]) for c in q["columns"]),
+                visualization_settings=visualization_settings(q, titles),
+            )
+            for q in QUESTIONS
+        ),
+        dashboards=(
+            content.Dashboard(
+                "dashboard",
+                DASHBOARD,
+                DASHBOARD_DESCRIPTION,
+                tuple(content.Placement(q["key"], **q["layout"]) for q in QUESTIONS),
+            ),
+        ),
+    )
 
 
-def ensure_questions(
-    metabase: Metabase, collection_id: int, database_id: int, titles: Mapping[str, str]
-) -> dict[str, int]:
-    """Create the questions that the collection lacks, with their titles and series color, and give
-    the questions that it has the titles and the color that they lack; return the id of every
-    question by name."""
-    cards = collection_items(metabase, collection_id, "card")
-    for question in QUESTIONS:
-        settings = visualization_settings(question, titles)
-        if question["name"] in cards:
-            card_id = cards[question["name"]]
-            card = metabase.call("GET", f"/api/card/{card_id}")
-            added = with_missing_settings(card.get("visualization_settings") or {}, settings)
-            if added is not None:
-                metabase.call("PUT", f"/api/card/{card_id}", {"visualization_settings": added})
-            continue
-        card = metabase.call(
-            "POST",
-            "/api/card",
-            {
-                "name": question["name"],
-                "description": question["description"],
-                "display": question["display"],
-                "visualization_settings": settings,
-                "collection_id": collection_id,
-                "dataset_query": {
-                    "database": database_id,
-                    "type": "native",
-                    "native": {"query": question["query"]},
-                },
-            },
+# How each model of the items of a collection leaves the collection of v0.1 for the root, and its
+# word in the log. A dashboard takes its own questions along, and a timeline its events (Metabase
+# 0.64.1); a question of the dashboard of v0.1 leaves that dashboard too. An item of any other kind
+# that a collection of Metabase 0.64.1 can hold, a document or a pulse, keeps the collection of v0.1
+# where it is (valid-collection-models, collections/children.clj, read in October 2026).
+TAKE_OUT = {
+    "card": ("question", "card", {"collection_id": None}),
+    "dataset": ("model", "card", {"collection_id": None}),
+    "metric": ("metric", "card", {"collection_id": None}),
+    "dashboard": ("dashboard", "dashboard", {"collection_id": None}),
+    "collection": ("collection", "collection", {"parent_id": None}),
+    "timeline": ("timeline", "timeline", {"collection_id": None}),
+}
+
+
+def take_out(
+    metabase: Metabase, item: Mapping[str, Any], board_id: int, where: str, log: content.Log
+) -> None:
+    """Move an item that the demo does not ship to the root, where it stays in the trash if it was
+    there, with one line by its model and its ID, never its name. A question of another dashboard
+    moves with its dashboard; a question of the dashboard of the demo leaves it."""
+    word, model, body = TAKE_OUT[item["model"]]
+    if item.get("dashboard_id") and item["dashboard_id"] != board_id:
+        return
+    if item.get("dashboard_id"):
+        body = {**body, "dashboard_id": None}
+    if model == "collection" and item.get("archived"):
+        body = {**body, "archived": True}  # a PUT of a collection without it restores it
+    metabase.call("PUT", f"/api/{model}/{item['id']}", body)
+    trash = ", in the trash," if item.get("archived") else ""
+    log(
+        f"moved out: {word} {item['id']} of {where}{trash} to the root, as the demo does not "
+        "ship it"
+    )
+
+
+def made_by(metabase: Metabase, model: str, item_id: int, account_id: int) -> bool:
+    """Whether the account made the question or the dashboard of an ID."""
+    return metabase.call("GET", f"/api/{model}/{item_id}").get("creator_id") == account_id
+
+
+def demo_of_v01(
+    metabase: Metabase, items: list[dict[str, Any]], account_id: int
+) -> dict[str, dict[str, Any]]:
+    """The items of a collection of the old name that are the demo of v0.1, by their keys in the
+    package: of each name of v0.1, the oldest question, and the oldest dashboard, that the account
+    of demo-init made. A question of the demo is one of the collection, not of a dashboard."""
+    found: dict[str, dict[str, Any]] = {}
+    names = {**V01_KEYS, DASHBOARD_V01: "dashboard"}
+    for item in sorted(items, key=lambda item: item["id"]):
+        model = "dashboard" if names.get(item.get("name")) == "dashboard" else "card"
+        key = names.get(item.get("name"))
+        if (
+            key is not None
+            and key not in found
+            and item.get("model") == model
+            and not item.get("archived")
+            and not item.get("dashboard_id")
+            and made_by(metabase, model, item["id"], account_id)
+        ):
+            found[key] = item
+    return found
+
+
+def collection_line(old: Mapping[str, Any]) -> str:
+    return f"collection {old['id']} named {COLLECTION_V01!r} at the root"
+
+
+def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: content.Log) -> bool:
+    """Move the demo collection of v0.1 into Agoranomos as Demo, once, and record it with its
+    dashboard and questions, so that the next steps put them back as the code says (ADR-0018).
+
+    Nothing is done when Metabase has the demo of the registry, also in the trash: a registry whose
+    demo Metabase does not have, as after a restore of the Metabase of an earlier release, lets the
+    collection of that release move again. The name of a collection proves nothing, as on a
+    Metabase of v0.1 every account may curate the root: the demo of v0.1 is the collection named
+    Agoranomos demo at the root, the one with the lowest ID of those, that holds the dashboard Ad
+    spend (demo) that the account of demo-init made, the account that made the demo of v0.1. Of
+    its questions, only those of the names of v0.1 that this account made are the demo's. When no
+    collection is the demo, or one holds an item that the job cannot take out, nothing moves: one
+    line says so, and the package makes its demo anew.
+
+    Before the move, every other item of the collection, whoever made it, goes to the root, also
+    from the trash, where it stays, with one line for each by its model and its ID, so that only
+    the content of the package enters Agoranomos. Then the collection is locked where it is, at the
+    root, so that no account but an admin can add an item to it, and listed once more: an item
+    that reached it before the lock stops the job, and the collection stays at the root,
+    view-only, for the next start, which takes that item out. Only then does the registry learn
+    the demo, and the collection moves into Agoranomos as Demo: a job that stops before the
+    registry leaves the collection to be checked again, and one that stops after it leaves the
+    move to the next start, which puts the collection in its place. True if it moved one."""
+    entry = registry.get(DEMO_KEY)
+    if entry and content.find(metabase, "collection", entry["entity_id"]) is not None:
+        return False
+    candidates = sorted(
+        (
+            c
+            for c in items_of(metabase.call("GET", "/api/collection"))
+            if c.get("name") == COLLECTION_V01
+            and c.get("location") == "/"
+            and not c.get("personal_owner_id")
+            and not c.get("archived")
+        ),
+        key=lambda c: c["id"],
+    )
+    if not candidates:
+        return False
+    account_id = metabase.call("GET", "/api/user/current")["id"]
+    for old in candidates:
+        items = content.everything_in(metabase, old["id"])
+        adopted = demo_of_v01(metabase, items, account_id)
+        if "dashboard" in adopted:
+            break
+    else:
+        ids = ", ".join(str(c["id"]) for c in candidates)
+        one = len(candidates) == 1
+        log(
+            f"not moved: {'collection' if one else 'collections'} {ids} named {COLLECTION_V01!r} "
+            f"at the root {'holds' if one else 'hold'} no dashboard {DASHBOARD_V01!r} that the "
+            "account of demo-init made, "
+            + (
+                "so it is not the demo of v0.1, and it stays where it is"
+                if one
+                else "so none is the demo of v0.1, and they stay where they are"
+            )
         )
-        cards[question["name"]] = card["id"]
-    return cards
-
-
-def ensure_dashboard(metabase: Metabase, collection_id: int, cards: Mapping[str, int]) -> int:
-    """Create the dashboard if the collection lacks it, and place the questions on an empty one."""
-    dashboard_id = collection_items(metabase, collection_id, "dashboard").get(DASHBOARD)
-    if dashboard_id is None:
-        dashboard_id = metabase.call(
-            "POST",
-            "/api/dashboard",
-            {
-                "name": DASHBOARD,
-                "description": "Ad spend of the demo account, from marts.ad_spend_daily.",
-                "collection_id": collection_id,
-            },
-        )["id"]
-    if not metabase.call("GET", f"/api/dashboard/{dashboard_id}").get("dashcards"):
-        dashcards = [
-            {"id": -(index + 1), "card_id": cards[question["name"]], **question["layout"]}
-            for index, question in enumerate(QUESTIONS)
-        ]
-        metabase.call("PUT", f"/api/dashboard/{dashboard_id}", {"dashcards": dashcards})
-    return dashboard_id
+        return False
+    kept = {item["id"] for item in adopted.values() if item["model"] == "card"}
+    board_id = adopted["dashboard"]["id"]
+    others = [
+        item
+        for item in items
+        if not (item.get("model") == "dashboard" and item["id"] == board_id)
+        and not (item.get("model") == "card" and item["id"] in kept)
+    ]
+    unknown = next((item for item in others if item.get("model") not in TAKE_OUT), None)
+    if unknown is not None:
+        log(
+            f"not moved: {collection_line(old)} holds a {unknown.get('model')} {unknown['id']} "
+            "that demo-init cannot take out first, and it stays where it is"
+        )
+        return False
+    for item in others:
+        take_out(metabase, item, board_id, "the collection of v0.1", log)
+    # Every account could curate the collection until now, and may have put an item into it since
+    # the listing. Once it is locked, no account but an admin can add one, so what the next listing
+    # finds is all there is.
+    content.lock(metabase, {str(old["id"]): COLLECTION_V01}, log)
+    named = {item["entity_id"] for item in adopted.values()}
+    held = content.everything_in(metabase, old["id"])
+    stray = next((i for i in held if i.get("entity_id") not in named), None)
+    if stray is not None:
+        word = TAKE_OUT.get(stray.get("model"), (stray.get("model"),))[0]
+        raise content.ContentError(
+            f"the collection of v0.1 got a {word} {stray['id']} before demo-init could lock it, "
+            "which the demo does not ship: it stays at the root, view-only, and the next start "
+            "takes that out and moves it"
+        )
+    for key, item in adopted.items():
+        model = "dashboard" if key == "dashboard" else "card"
+        registry.set(f"{DEMO_KEY}/{key}", model, item["entity_id"])
+    registry.set(DEMO_KEY, "collection", old["entity_id"])
+    root = content.ensure_collection(
+        metabase,
+        registry,
+        content.ROOT_KEY,
+        content.ROOT_NAME,
+        content.ROOT_DESCRIPTION,
+        None,
+        log,
+    )
+    moved = {"name": DEMO_NAME, "parent_id": root["id"]}
+    metabase.call("PUT", f"/api/collection/{old['id']}", moved)
+    log(
+        f"moved: collection {COLLECTION_V01!r} of an earlier release into {content.ROOT_NAME} as "
+        f"{DEMO_NAME}"
+    )
+    return True
 
 
 def when(ran: bool) -> str:
@@ -547,10 +688,13 @@ def main(env: Mapping[str, str] | None = None) -> int:
     try:
         deadline = Deadline(DEADLINE)
         config = Config.from_env(os.environ if env is None else env)
-        # The metadata is read and checked first: a mistake in the overrides of the deployment
-        # stops the job before it writes anything, in Airflow or in Metabase.
+        # The metadata and the registry of the content are read and checked first: a mistake in
+        # the overrides of the deployment, or a registry that is none, stops the job before it
+        # writes anything, in Airflow or in Metabase.
         marts = metadata.load(config.metadata_export, config.metadata_overrides)
         mart = demo_mart(marts)
+        log = logged("demo-init")
+        registry = content.Registry(config.content_registry, log)
         airflow = Airflow(config.airflow_url)
         sign_in_to_airflow(airflow, config.airflow_password)
         wait_for_dags(airflow, deadline)
@@ -573,12 +717,13 @@ def main(env: Mapping[str, str] | None = None) -> int:
             database["id"],
             marts,
             lambda check, what: wait_until(check, deadline, what, SYNC_HINT),
-            log=logged("demo-init"),
+            log=log,
         )
-        collection_id = ensure_collection(metabase)
-        cards = ensure_questions(metabase, collection_id, database["id"], column_titles(marts))
-        dashboard_id = ensure_dashboard(metabase, collection_id, cards)
-    except (SetupError, metadata.MetadataError) as error:
+        adopt_earlier_demo(metabase, registry, log)
+        package = demo_package(column_titles(marts))
+        ids = content.ensure_package(metabase, registry, package, database["id"], log)
+        dashboard_id = ids["dashboard"]
+    except (SetupError, metadata.MetadataError, content.ContentError) as error:
         print(f"demo-init: {error}", file=sys.stderr)
         return 1
     except SHAPE_ERRORS as error:
@@ -587,7 +732,7 @@ def main(env: Mapping[str, str] | None = None) -> int:
     print(
         f"demo-init: the demo pipeline {when(ran_pipeline)}, the history of the demo "
         f"{when(ran_history)}, and the dashboard "
-        f"{DASHBOARD!r} ({dashboard_id}) is in the collection {COLLECTION!r}"
+        f"{DASHBOARD!r} ({dashboard_id}) is in the collection {content.ROOT_NAME} / {DEMO_NAME}"
     )
     return 0
 

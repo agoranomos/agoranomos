@@ -5,7 +5,8 @@ Metabase answers reaches the tests of every job.
 It answers as Metabase 0.63.19 and 0.64.1 do where the jobs depend on it, and it answers a failure
 by echoing the request with its credentials: the worst case for secrets. serve() runs a stand-in on
 a free local port, leaked() finds a secret in what a job printed, and metadata_env() writes the
-export of the metadata and the overrides that the jobs read.
+export of the metadata and the overrides that the jobs read. ContentState answers for the content
+of Metabase, its collections, questions and dashboards, and the permissions of its collections.
 """
 
 from __future__ import annotations
@@ -152,6 +153,383 @@ def metadata_env(
     return {"METADATA_EXPORT": str(export_path), "METADATA_OVERRIDES": str(overrides_path)}
 
 
+# The alphabet of the entity IDs of Metabase (NanoID).
+NANO = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+# The model of a question in the items of a collection, by its type (collections/children.clj).
+ITEM_MODEL = {"question": "card", "model": "dataset", "metric": "metric"}
+# The keys that each write of the content takes: the bodies of these endpoints are closed maps in
+# Metabase 0.64.1, which refuses any other key with 400 (collections_rest/api.clj,
+# queries_rest/api/card.clj, dashboards_rest/api.clj, at the tag v0.64.1).
+ACCEPTED = {
+    ("POST", "collection"): "name description parent_id namespace authority_level",
+    ("PUT", "collection"): "name description archived parent_id authority_level",
+    ("POST", "card"): (
+        "name type dataset_query entity_id parameters parameter_mappings description display "
+        "visualization_settings collection_id collection_position result_metadata cache_ttl "
+        "dashboard_id dashboard_tab_id size"
+    ),
+    ("PUT", "card"): (
+        "name parameters parameter_mappings dataset_query type display description "
+        "visualization_settings archived enable_embedding embedding_type embedding_params "
+        "collection_id collection_position result_metadata cache_ttl collection_preview "
+        "dashboard_id dashboard_tab_id"
+    ),
+    ("POST", "dashboard"): (
+        "name parameters description cache_ttl collection_id collection_position"
+    ),
+    ("PUT", "dashboard"): (
+        "name description caveats points_of_interest show_in_getting_started enable_embedding "
+        "embedding_type embedding_params parameters position width archived auto_apply_filters "
+        "collection_id collection_position cache_ttl dashcards tabs"
+    ),
+    ("PUT", "graph"): "namespace revision groups",
+}
+
+
+class ContentState:
+    """The collections, questions and dashboards of a Metabase, its groups, and the graph of the
+    permissions of its collections, as Metabase 0.64.1 answers for them: every item gets an entity
+    ID of 21 characters that Metabase makes itself, also when the request carries one; a GET takes
+    an entity ID in place of an ID and gives an item in the trash with archived true, and a
+    question or a dashboard that a person put in the trash in the collection of the trash; a new
+    collection takes the permissions of its parent, and All Users may curate the root; the graph
+    that a GET gives leaves out No access; a PUT of the graph with a revision that is not the
+    newest is refused with 409; a PUT of a collection without archived takes it out of the trash;
+    a PUT of a dashboard with dashcards replaces them all, and a dashcard with a negative id is a
+    new one, but a dashboard in the trash, or a question in the trash on a new dashcard, makes it
+    404; a write with a key that its endpoint does not take is refused with 400. A question or a
+    dashboard keeps the account that made it (creator_id: user_id unless a test says otherwise);
+    the items of a collection are of every model unless models says, and leave out the questions
+    of a dashboard unless show_dashboard_questions is true; with archived=true they are the
+    sub-collections in the trash and what went there with them, while a question or a dashboard
+    that a person put in the trash is listed only in GET /api/card?f=archived and GET
+    /api/dashboard?f=archived, with its own collection; a dashboard that moves takes its questions
+    along; a PUT of a question with the query and result_metadata null has Metabase compute the
+    metadata again (here: none yet); a timeline is an item of its collection, in the trash with
+    archived=true, and GET /api/timeline/collection/:id lists those of a collection; a document is
+    an item too, but one in the trash is listed only in the trash, where its collection shows as
+    the trash, while GET /api/document/:id gives its own; others holds items of models that the
+    jobs never write, such as a pulse."""
+
+    def __init__(self) -> None:
+        self.collections: dict[int, dict[str, Any]] = {}
+        self.cards: dict[int, dict[str, Any]] = {}
+        self.dashboards: dict[int, dict[str, Any]] = {}
+        self.groups = [
+            {"id": 1, "name": "All Users", "magic_group_type": "all-internal-users"},
+            {"id": 2, "name": "Administrators", "magic_group_type": "admin"},
+        ]
+        self.graph: dict[str, dict[str, str]] = {"1": {"root": "write"}, "2": {"root": "write"}}
+        self.revision = 1
+        self.conflicts = 0  # how many PUTs of the graph to refuse with 409 before one passes
+        self.serial = 100
+        self.graph_puts: list[dict[str, Any]] = []
+        self.trash_id = 99  # the collection of the trash, as a GET of an item shows it
+        self.items_as_list = False  # the items of a collection as a bare list, not as data
+        self.user_id = 1  # the account that signs the requests in: the admin of the jobs
+        self.others: list[dict[str, Any]] = []  # items of other models: id, model, name, collection
+        self.timelines: dict[int, dict[str, Any]] = {}
+        self.documents: dict[int, dict[str, Any]] = {}
+
+    def new_ids(self) -> tuple[int, str]:
+        self.serial += 1
+        entity_id = "".join(NANO[(self.serial * 7 + i * 13) % 64] for i in range(21))
+        return self.serial, entity_id
+
+    @staticmethod
+    def by(table: dict[int, dict[str, Any]], ident: str) -> dict[str, Any] | None:
+        if ident.isdigit():
+            return table.get(int(ident))
+        return next((item for item in table.values() if item["entity_id"] == ident), None)
+
+    def location_of(self, parent_id: int | None) -> str:
+        if parent_id is None:
+            return "/"
+        return f"{self.collections[parent_id]['location']}{parent_id}/"
+
+    def add_collection(self, name, description=None, parent_id=None) -> dict[str, Any]:
+        ident, entity_id = self.new_ids()
+        collection = {
+            "id": ident,
+            "entity_id": entity_id,
+            "name": name,
+            "description": description,
+            "location": self.location_of(parent_id),
+            "archived": False,
+            "personal_owner_id": None,
+        }
+        self.collections[ident] = collection
+        for perms in self.graph.values():
+            perms[str(ident)] = perms.get(str(parent_id) if parent_id else "root", "none")
+        return collection
+
+    def add_card(self, body: dict[str, Any]) -> dict[str, Any]:
+        ident, entity_id = self.new_ids()
+        card = {
+            "id": ident,
+            "entity_id": entity_id,
+            "archived": False,
+            "description": None,
+            "type": "question",
+            "dashboard_id": None,
+            "creator_id": self.user_id,
+            **{k: copy.deepcopy(v) for k, v in body.items() if k != "entity_id"},
+        }
+        self.cards[ident] = card
+        return card
+
+    def add_dashboard(self, body: dict[str, Any]) -> dict[str, Any]:
+        ident, entity_id = self.new_ids()
+        dashboard = {
+            "id": ident,
+            "entity_id": entity_id,
+            "archived": False,
+            "dashcards": [],
+            "parameters": [],
+            "tabs": [],
+            "description": None,
+            "creator_id": self.user_id,
+            **copy.deepcopy(body),
+        }
+        self.dashboards[ident] = dashboard
+        return dashboard
+
+    def shown(self, item: dict[str, Any]) -> dict[str, Any]:
+        """A question or a dashboard as a GET gives it: one that a person put in the trash shows
+        in the collection of the trash (present-in-trash-if-archived-directly)."""
+        shown = copy.deepcopy(item)
+        if shown.get("archived_directly"):
+            shown["collection_id"] = self.trash_id
+        return shown
+
+    def items(
+        self, collection_id: int, models: list[str], dashboard_questions: bool, archived: bool
+    ) -> Any:
+        def item(i: dict[str, Any], model: str) -> dict[str, Any]:
+            listed = {"id": i["id"], "entity_id": i.get("entity_id"), "name": i["name"]}
+            more = {"dashboard_id": i.get("dashboard_id"), "archived": bool(i.get("archived"))}
+            return {**listed, "model": model, **more}
+
+        def listed(i: dict[str, Any]) -> bool:
+            # A question or a dashboard that a person put in the trash is listed in the trash only.
+            return bool(i.get("archived")) == archived and not i.get("archived_directly")
+
+        found = [
+            item(c, ITEM_MODEL.get(c.get("type"), "card"))
+            for c in self.cards.values()
+            if c.get("collection_id") == collection_id
+            and listed(c)
+            and (dashboard_questions or not c.get("dashboard_id"))
+        ]
+        found += [
+            item(d, "dashboard")
+            for d in self.dashboards.values()
+            if d.get("collection_id") == collection_id and listed(d)
+        ]
+        inside = self.location_of(collection_id)
+        found += [
+            item(c, "collection")
+            for c in self.collections.values()
+            if c["location"] == inside and c["archived"] == archived
+        ]
+        found += [
+            item(i, "timeline")
+            for i in self.timelines.values()
+            if i["collection_id"] == collection_id and i["archived"] == archived
+        ]
+        found += [
+            item(d, "document")
+            for d in self.documents.values()
+            if d["collection_id"] == collection_id and listed(d)
+        ]
+        found += [
+            item(o, o["model"])
+            for o in self.others
+            if o["collection_id"] == collection_id and bool(o.get("archived")) == archived
+        ]
+        if models:
+            found = [i for i in found if i["model"] in models]
+        return found if self.items_as_list else {"data": found, "total": len(found)}
+
+    def sparse_graph(self) -> dict[str, dict[str, str]]:
+        """The graph as GET /api/collection/graph gives it: without No access, and without a group
+        that has no access to anything."""
+        groups = {
+            group: {cid: perm for cid, perm in perms.items() if perm != "none"}
+            for group, perms in self.graph.items()
+        }
+        return {group: perms for group, perms in groups.items() if perms}
+
+    def refused(self, method: str, kind: str, body: Any) -> tuple[int, Any] | None:
+        accepted = ACCEPTED.get((method, kind))
+        extra = sorted(set(body or {}) - set(accepted.split())) if accepted else []
+        if extra:
+            return 400, {"errors": {key: "disallowed key" for key in extra}}
+        return None
+
+    def add_timeline(self, collection_id: int | None, **more: Any) -> dict[str, Any]:
+        ident, entity_id = self.new_ids()
+        timeline = {"id": ident, "entity_id": entity_id, "name": "A timeline", "archived": False}
+        timeline |= {"collection_id": collection_id, "events": [{"name": "An event"}], **more}
+        self.timelines[ident] = timeline
+        return timeline
+
+    def add_document(self, collection_id: int | None, **more: Any) -> dict[str, Any]:
+        ident, _ = self.new_ids()
+        document = {"id": ident, "name": "A document", "collection_id": collection_id}
+        document |= {"archived": False, "archived_directly": False, **more}
+        self.documents[ident] = document
+        return document
+
+    def trash_items(self, models: list[str]) -> dict[str, Any]:
+        """The items of the trash: what a person put there, each shown in the trash."""
+        found = [
+            {"id": d["id"], "name": d["name"], "model": "document", "collection_id": self.trash_id}
+            for d in self.documents.values()
+            if d.get("archived_directly")
+        ]
+        found = [i for i in found if not models or i["model"] in models]
+        return {"data": found, "total": len(found)}
+
+    def handle(
+        self, method: str, path: str, query: dict[str, list[str]], body: Any
+    ) -> tuple[int, Any] | None:
+        parts = path.strip("/").split("/")  # ["api", "collection", "12", "items"]
+        kind = parts[1] if len(parts) > 1 else ""
+        if path == "/api/collection/trash" and method == "GET":
+            return 200, {"id": self.trash_id, "name": "Trash", "type": "trash", "location": "/"}
+        if path == f"/api/collection/{self.trash_id}/items" and method == "GET":
+            return 200, self.trash_items(query.get("models", []))
+        if kind == "timeline" and len(parts) == 4 and parts[2] == "collection" and method == "GET":
+            archived = query.get("archived") == ["true"]
+            return 200, [
+                copy.deepcopy(i)
+                for i in self.timelines.values()
+                if str(i["collection_id"]) == parts[3] and i["archived"] == archived
+            ]
+        if kind == "timeline" and len(parts) == 3 and method == "PUT":
+            timeline = self.timelines.get(int(parts[2]))
+            if timeline is None:
+                return 404, "Not found."
+            timeline.update({k: v for k, v in body.items() if k in ("collection_id", "archived")})
+            return 200, copy.deepcopy(timeline)
+        if kind == "document" and len(parts) == 3 and method == "GET":
+            document = self.documents.get(int(parts[2]))
+            return (200, copy.deepcopy(document)) if document else (404, "Not found.")
+        if path == "/api/permissions/group" and method == "GET":
+            return 200, copy.deepcopy(self.groups)
+        if path == "/api/collection/graph":
+            if method == "GET":
+                return 200, {"revision": self.revision, "groups": self.sparse_graph()}
+            refused = self.refused(method, "graph", body)
+            if refused:
+                return refused
+            if body.get("revision") != self.revision or self.conflicts:
+                self.conflicts = max(0, self.conflicts - 1)
+                self.revision += 1  # someone else changed the graph meanwhile
+                return 409, {"message": "Looks like someone else edited the permissions"}
+            self.graph_puts.append(copy.deepcopy(body))
+            for group, perms in body["groups"].items():
+                self.graph.setdefault(group, {}).update(perms)
+            self.revision += 1
+            return 200, {"revision": self.revision, "groups": self.sparse_graph()}
+        if method in ("POST", "PUT"):
+            refused = self.refused(method, kind, body)
+            if refused:
+                return refused
+        if kind == "collection":
+            if method == "GET" and len(parts) == 2:
+                return 200, [c for c in self.collections.values() if not c["archived"]]
+            if method == "POST" and len(parts) == 2:
+                return 200, self.add_collection(
+                    body["name"], body.get("description"), body.get("parent_id")
+                )
+            item = self.by(self.collections, parts[2])
+            if item is None:
+                return 404, "Not found."
+            if len(parts) == 4 and parts[3] == "items":
+                dashboard_questions = query.get("show_dashboard_questions") == ["true"]
+                archived = query.get("archived") == ["true"]
+                models = query.get("models", [])
+                return 200, self.items(item["id"], models, dashboard_questions, archived)
+            if method == "GET":
+                return 200, copy.deepcopy(item)
+            if method == "PUT":
+                for key in ("name", "description"):
+                    if key in body:
+                        item[key] = body[key]
+                # The endpoint reads a missing archived as false (collections_rest/api.clj).
+                item["archived"] = bool(body.get("archived", False))
+                if "parent_id" in body:
+                    item["location"] = self.location_of(body["parent_id"])
+                return 200, copy.deepcopy(item)
+            if method == "DELETE":
+                if not item["archived"]:
+                    return 400, "Collection must be trashed before deletion."
+                del self.collections[item["id"]]
+                return 200, 1  # the number of collections that it deleted
+        if kind in ("card", "dashboard"):
+            table = self.cards if kind == "card" else self.dashboards
+            if method == "GET" and len(parts) == 2 and query.get("f") == ["archived"]:
+                # The lists of what is in the trash keep the collection of each item.
+                return 200, [copy.deepcopy(i) for i in table.values() if i["archived"]]
+            if method == "POST" and len(parts) == 2:
+                return 200, (self.add_card(body) if kind == "card" else self.add_dashboard(body))
+            item = self.by(table, parts[2])
+            if item is None:
+                return 404, "Not found."
+            if method == "GET":
+                return 200, self.shown(item)
+            if method == "PUT" and "dashcards" in body:
+                # Metabase changes no card of a dashboard in the trash, also in the request that
+                # takes it out, and puts no question of the trash on a dashboard: 404, and nothing
+                # changes (update-dashboard! and create-dashcards!, dashboards_rest/api.clj).
+                new = {d["card_id"] for d in body["dashcards"] if d["id"] < 0 and d.get("card_id")}
+                if item["archived"] or any(self.cards.get(c, {}).get("archived") for c in new):
+                    return 404, {
+                        "message": "The object has been archived.",
+                        "error_code": "archived",
+                    }
+            if method == "PUT":
+                placed_before = (item.get("dashboard_id"), item.get("collection_id"))
+                for key, value in body.items():
+                    if key == "dashcards":
+                        item["dashcards"] = [
+                            {**d, "id": d["id"] if d["id"] > 0 else self.new_ids()[0]}
+                            for d in copy.deepcopy(value)
+                        ]
+                    elif key == "archived":
+                        item["archived"] = item["archived_directly"] = bool(value)
+                    elif key == "result_metadata" and value is None and "dataset_query" in body:
+                        item[key] = None  # Metabase computes it again from the query
+                    else:
+                        item[key] = copy.deepcopy(value)
+                moved = (body.get("dashboard_id", placed_before[0]), body.get("collection_id"))
+                if kind == "card" and (
+                    moved[0] != placed_before[0]
+                    or ("collection_id" in body and moved[1] != placed_before[1])
+                ):
+                    # The collection of a question follows from what the request says: the one that
+                    # it names, else that of the dashboard that it names, else the root, also for
+                    # dashboard_id null alone (card_write_checks.clj, actual-collection-id).
+                    if "collection_id" in body:
+                        item["collection_id"] = body["collection_id"]
+                    elif body.get("dashboard_id"):
+                        item["collection_id"] = self.dashboards[body["dashboard_id"]][
+                            "collection_id"
+                        ]
+                    else:
+                        item["collection_id"] = None
+                if kind == "dashboard" and "collection_id" in body:
+                    # The questions of a dashboard move with it (dashboards_rest/api.clj,
+                    # cascade-card-state-from-dashboard-update!).
+                    for card in self.cards.values():
+                        if card.get("dashboard_id") == item["id"]:
+                            card["collection_id"] = body["collection_id"]
+                return 200, self.shown(item)
+        return None
+
+
 class FakeMetabase:
     """What the setup jobs can see of Metabase 0.63.19 and 0.64.1.
 
@@ -166,7 +544,9 @@ class FakeMetabase:
     table (mart_hidden), or a field (its visibility_type): the metadata of the database then
     leaves it out unless the request passes include_hidden=true, and a sync does not show it
     again. PUT /api/table/:id and PUT /api/field/:id set what their body says, and a field's
-    settings are replaced whole, as Metabase does. bodies keeps what each write sent.
+    settings are replaced whole, as Metabase does. bodies keeps what each write sent. The content,
+    its collections, questions and dashboards, and the permissions of the collections, are those of
+    content_state (ContentState).
     """
 
     def __init__(self, clock: Any = None) -> None:
@@ -180,7 +560,6 @@ class FakeMetabase:
         self.admin: dict[str, str] | None = None
         self.databases: list[dict[str, Any]] = []
         self.databases_as_list = False
-        self.items_as_list = False
         # A failing path that ends with a slash stands for every path under it.
         self.failures: dict[tuple[str, str], int] = {}
         # Calls that get no HTTP answer: "close" (the connection ends), "truncate" (it ends in
@@ -200,21 +579,31 @@ class FakeMetabase:
         self.sync_seconds = 10.0
         self.fields_seconds = 0.0
         self.synced_at: float | None = None
-        self.collections: list[dict[str, Any]] = [
-            {"id": "root", "name": "Our analytics", "can_write": True},
-            {
-                "id": 3,
-                "name": "Agoranomos Admin's Personal Collection",
-                "location": "/",
-                "personal_owner_id": 1,
-                "archived": False,
-            },
-        ]
-        self.cards: dict[int, dict[str, Any]] = {}
-        self.dashboards: dict[int, dict[str, Any]] = {}
+        self.content_state = ContentState()
         self.next_id = 100
         # The settings that the jobs write, with their default values in Metabase 0.64.1.
         self.settings: dict[str, Any] = {"enable-public-sharing": True}
+
+    # The content as the tests of the jobs read it: the tables of content_state, by ID.
+    @property
+    def collections(self) -> dict[int, dict[str, Any]]:
+        return self.content_state.collections
+
+    @property
+    def cards(self) -> dict[int, dict[str, Any]]:
+        return self.content_state.cards
+
+    @property
+    def dashboards(self) -> dict[int, dict[str, Any]]:
+        return self.content_state.dashboards
+
+    @property
+    def items_as_list(self) -> bool:
+        return self.content_state.items_as_list
+
+    @items_as_list.setter
+    def items_as_list(self, value: bool) -> None:
+        self.content_state.items_as_list = value
 
     def new_id(self) -> int:
         self.next_id += 1
@@ -292,15 +681,6 @@ class FakeMetabase:
             table["fields"] = [f for f in table["fields"] if f["visibility_type"] == "normal"]
         return [table]
 
-    def items(self, collection_id: int, model: str) -> Any:
-        source = self.cards if model == "card" else self.dashboards
-        items = [
-            {"id": item_id, "name": item["name"], "model": model}
-            for item_id, item in source.items()
-            if item["collection_id"] == collection_id and not item.get("archived")
-        ]
-        return items if self.items_as_list else {"data": items, "total": len(items)}
-
     def failure(self, method: str, path: str, body: Any, session: str | None) -> Any:
         for (failing_method, failing_path), status in self.failures.items():
             prefix = failing_path.endswith("/") and path.startswith(failing_path)
@@ -371,6 +751,10 @@ class FakeMetabase:
             return self.dataset(body)
         if segments[:3] in (["", "api", "table"], ["", "api", "field"]) and method == "PUT":
             return self.metadata_write(segments[2], int(segments[3]), body)
+        if (method, path) == ("GET", "/api/user/current"):
+            admin = self.admin or {}
+            account = {"id": self.content_state.user_id, "email": admin.get("email")}
+            return 200, {**account, "is_superuser": True}
         if segments[:3] == ["", "api", "setting"] and len(segments) == 4 and method == "PUT":
             # PUT /api/setting/<key> with {"value": ...} answers 204 with no body.
             self.settings[segments[3]] = body["value"]
@@ -427,50 +811,8 @@ class FakeMetabase:
     def content(
         self, method: str, path: str, query: dict[str, list[str]], body: Any
     ) -> tuple[int, Any]:
-        if (method, path) == ("GET", "/api/collection"):
-            return 200, [c for c in self.collections if not c.get("archived")]
-        if (method, path) == ("POST", "/api/collection"):
-            collection = {
-                "id": self.new_id(),
-                "location": "/",
-                "personal_owner_id": None,
-                "archived": False,
-                **body,
-            }
-            self.collections.append(collection)
-            return 200, collection
-        if method == "GET" and path.startswith("/api/collection/") and path.endswith("/items"):
-            [model] = query["models"]
-            return 200, self.items(int(path.split("/")[3]), model)
-        if (method, path) == ("POST", "/api/card"):
-            card_id = self.new_id()
-            self.cards[card_id] = copy.deepcopy(body)
-            return 200, {"id": card_id, **body}
-        if path.startswith("/api/card/"):
-            card_id = int(path.split("/")[3])
-            if card_id in self.cards:
-                card = self.cards[card_id]
-                if method == "PUT":
-                    card.update(copy.deepcopy(body))
-                return 200, {"id": card_id, **copy.deepcopy(card)}
-        if (method, path) == ("POST", "/api/dashboard"):
-            dashboard_id = self.new_id()
-            self.dashboards[dashboard_id] = {**copy.deepcopy(body), "dashcards": []}
-            return 200, {"id": dashboard_id, **body}
-        if path.startswith("/api/dashboard/"):
-            dashboard_id = int(path.split("/")[3])
-            if dashboard_id in self.dashboards:
-                dashboard = self.dashboards[dashboard_id]
-                if method == "GET":
-                    return 200, {"id": dashboard_id, **dashboard}
-                if method == "PUT":
-                    # Metabase gives each new dashcard (a negative id) an id of its own.
-                    dashboard["dashcards"] = [
-                        {**dashcard, "id": self.new_id()} if dashcard["id"] < 0 else dashcard
-                        for dashcard in body["dashcards"]
-                    ]
-                    return 200, {"id": dashboard_id, **dashboard}
-        return 404, "Not found"
+        answer = self.content_state.handle(method, path, query, body)
+        return answer if answer is not None else (404, "Not found")
 
 
 def serve(state: Any, header: str) -> ThreadingHTTPServer:
@@ -504,7 +846,7 @@ def serve(state: Any, header: str) -> ThreadingHTTPServer:
             elif fault == "garbage":
                 self.wfile.write(b"this is not an HTTP answer\r\n\r\n")
 
-        do_GET = do_POST = do_PUT = do_PATCH = serve
+        do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = serve
 
         def log_message(self, *args: object) -> None:
             pass

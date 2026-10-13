@@ -30,6 +30,8 @@ ENV = {
     # The files of the metadata: env_for points these at files that the fixture writes.
     "METADATA_EXPORT": "/nonexistent/metadata.json",
     "METADATA_OVERRIDES": "/nonexistent/overrides.toml",
+    # The registry of the content of the package: none, as before the first start of demo-init.
+    "CONTENT_REGISTRY": "/nonexistent/content.json",
 }
 
 # What metabase-init must never print: the values that these tests pass in, and the tokens that the
@@ -795,9 +797,9 @@ def test_the_script_runs_as_compose_runs_it():
     assert "Traceback" not in result.stderr
 
 
-def test_the_module_imports_only_the_standard_library_and_metadata():
-    # metabase-init runs in a plain python image: it has the standard library, and metadata.py
-    # from the same folder, which imports nothing of this module.
+def test_the_module_imports_only_the_standard_library_metadata_and_content():
+    # metabase-init runs in a plain python image: it has the standard library, and metadata.py and
+    # content.py from the same folder, which import nothing of this module.
     tree = ast.parse(Path(mi.__file__).read_text(encoding="utf-8"))
     imported: set[str] = set()
     for node in ast.walk(tree):
@@ -805,9 +807,107 @@ def test_the_module_imports_only_the_standard_library_and_metadata():
             imported |= {alias.name.split(".")[0] for alias in node.names}
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             imported.add(node.module.split(".")[0])
-    allowed = set(sys.stdlib_module_names) | {"metadata"}
-    assert "metadata" in imported
+    allowed = set(sys.stdlib_module_names) | {"content", "metadata"}
+    assert {"content", "metadata"} <= imported
     assert imported <= allowed, sorted(imported - allowed)
+
+
+def a_registry(tmp_path: Path, **items: dict[str, Any]) -> Path:
+    """A registry of the content, as an earlier start of demo-init wrote it."""
+    path = tmp_path / "content.json"
+    path.write_text(json.dumps({"format": 1, "items": items}), encoding="utf-8")
+    return path
+
+
+def test_metabase_init_locks_the_content_of_the_registry_on_every_start(tmp_path, metabase, capsys):
+    # A registry of an earlier start, with the collection Agoranomos and its Demo, which All Users
+    # may curate, and a group of the deployment that may curate the demo as well.
+    content = metabase.content_state
+    root = content.add_collection("Agoranomos")
+    demo = content.add_collection("Demo", parent_id=root["id"])
+    content.groups.append({"id": 7, "name": "Analysts", "magic_group_type": None})
+    content.graph["7"] = {str(demo["id"]): "write"}
+    registry = a_registry(
+        tmp_path,
+        agoranomos={"model": "collection", "entity_id": root["entity_id"]},
+        demo={"model": "collection", "entity_id": demo["entity_id"]},
+    )
+    for start in (1, 2):
+        assert mi.main(env_for(metabase, CONTENT_REGISTRY=str(registry))) == 0
+        for collection in (root, demo):
+            assert content.graph["1"][str(collection["id"])] == "read", start
+            assert content.graph["2"][str(collection["id"])] == "write", start
+        assert content.graph["7"][str(demo["id"])] == "read", start
+        lines = capsys.readouterr().out.splitlines()
+        lowered = [line for line in lines if line.startswith("metabase-init: lowered: ")]
+        if start == 1:
+            assert lowered == [
+                'metabase-init: lowered: group "All Users" on collection "Agoranomos": curate -> '
+                "view",
+                'metabase-init: lowered: group "All Users" on collection "Demo": curate -> view',
+                'metabase-init: lowered: group "Analysts" on collection "Demo": curate -> view',
+            ]
+        else:
+            assert lowered == [], "a start that finds View changes nothing and says nothing"
+            assert len(content.graph_puts) == 1
+    assert lines[-1].startswith("metabase-init: the admin account exists")
+
+
+def test_metabase_init_locks_every_collection_inside_agoranomos(tmp_path, metabase, capsys):
+    # A collection that an admin made inside Agoranomos, which the registry does not know, opened
+    # to All Users: the next start lowers it as well (ADR-0018: Agoranomos and its sub-collections).
+    content = metabase.content_state
+    root = content.add_collection("Agoranomos")
+    content.graph["1"][str(root["id"])] = "read"
+    inner = content.add_collection("Inner", parent_id=root["id"])
+    content.graph["1"][str(inner["id"])] = "write"
+    registry = a_registry(
+        tmp_path, agoranomos={"model": "collection", "entity_id": root["entity_id"]}
+    )
+    assert mi.main(env_for(metabase, CONTENT_REGISTRY=str(registry))) == 0
+    assert content.graph["1"][str(inner["id"])] == "read"
+    assert (
+        'metabase-init: lowered: group "All Users" on collection "Inner": curate -> view'
+        in capsys.readouterr().out.splitlines()
+    )
+
+
+def test_metabase_init_without_a_registry_changes_no_permission(metabase):
+    # The first start of a stack, before demo-init has made any content: no registry.
+    root = metabase.content_state.add_collection("Agoranomos")
+    assert mi.main(env_for(metabase)) == 0
+    assert metabase.content_state.graph["1"][str(root["id"])] == "write"
+    assert ("GET", "/api/collection/graph") not in metabase.calls
+
+
+def test_a_registry_that_is_no_registry_stops_metabase_init_before_it_writes(
+    tmp_path, metabase, capsys
+):
+    path = tmp_path / "content.json"
+    path.write_text(json.dumps({"format": 2, "items": {}}), encoding="utf-8")
+    assert mi.main(env_for(metabase, CONTENT_REGISTRY=str(path))) == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err.splitlines() == [
+        f"metabase-init: {path} is not a registry of the content of format 1: move it away and "
+        "run ./agoranomos up, which creates the content again next to the old one"
+    ]
+    assert metabase.calls == []
+
+
+def test_a_refused_change_of_the_permissions_is_one_line_with_no_secret(tmp_path, metabase, capsys):
+    root = metabase.content_state.add_collection("Agoranomos")
+    registry = a_registry(
+        tmp_path, agoranomos={"model": "collection", "entity_id": root["entity_id"]}
+    )
+    metabase.failures[("PUT", "/api/collection/graph")] = 403
+    assert mi.main(env_for(metabase, CONTENT_REGISTRY=str(registry))) == 1
+    output = capsys.readouterr()
+    assert output.err.splitlines() == [
+        "metabase-init: PUT /api/collection/graph failed with HTTP 403. See ./agoranomos logs "
+        "metabase."
+    ]
+    assert leaked(output.out + output.err) == []
 
 
 def test_every_start_applies_the_metadata_of_the_marts(metabase, capsys):

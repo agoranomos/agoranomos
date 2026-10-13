@@ -5,13 +5,15 @@ prints what it compares: these tests print names, flags and status codes, never 
 change no setting of Metabase. They read, they run one SELECT through it, they run metabase-init
 again, which the stack does on every start anyway, they sign in once more and read the login
 history, and they try three changes of the LLM providers that Metabase must refuse, and that would
-change nothing if it took them.
+change nothing if it took them. With the demo, they also let All Users curate the collection
+Agoranomos, which the run of metabase-init that follows puts back to View.
 """
 
 import time
 
 import pytest
 from ai_switches import readings, switches_on
+from metabase_content import get, group_ids, item, put, run_job
 from services import DEMO
 from stack_helpers import compose, http_json, leaked, psql, secrets
 
@@ -297,6 +299,25 @@ def test_metabase_init_can_run_again(metabase_url, session):
     assert updated_the_connection, "metabase-init did not update the warehouse connection"
     names = [d["name"] for d in databases(metabase_url, session)]
     assert names.count(WAREHOUSE_NAME) == 1, names
+
+
+@pytest.mark.skipif(not DEMO, reason="no content of the package: the demo is off")
+def test_metabase_init_gives_all_users_view_again_on_agoranomos(env, metabase_url, session):
+    # All Users raised to Curate on the collection Agoranomos, as an admin could: the next run of
+    # metabase-init, which every start runs, lowers it to View and says so.
+    root_id = str(item(metabase_url, session, "agoranomos")["id"])
+    _, all_users = group_ids(metabase_url, session)
+    graph = get(metabase_url, session, "/api/collection/graph")
+    body = {"revision": graph["revision"], "groups": {all_users: {root_id: "write"}}}
+    put(metabase_url, session, "/api/collection/graph", body)
+    code, changes, found, _ = run_job("metabase-init", secrets(env))
+    assert not found, f"the output of metabase-init holds the values of {found}"
+    assert code == 0, f"metabase-init exited with {code}"
+    graph = get(metabase_url, session, "/api/collection/graph")
+    assert graph["groups"][all_users][root_id] == "read"
+    assert changes == [
+        'metabase-init: lowered: group "All Users" on collection "Agoranomos": curate -> view'
+    ], changes
 
 
 def stored_details(env, in_clear):

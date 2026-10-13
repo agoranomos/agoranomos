@@ -39,7 +39,7 @@ Keep a copy of `.env` in a password manager. It holds the keys without which the
 
 ## Look around
 
-- In Metabase, open the collection **Agoranomos demo** and its dashboard **Ad spend (demo)**: [See the demo](see-the-demo.md) explains what they show.
+- In Metabase, open the collection **Agoranomos / Demo** and its dashboard **Ad spend (demo)**: [See the demo](see-the-demo.md) explains what they show.
 - In Airflow, open the DAGs `agoranomos_demo_load` and `agoranomos_demo_transform`, which loaded and built the demo data. To check the executor, unpause the DAG `agoranomos_selfcheck` and trigger it: its one task runs where the executor runs tasks.
 
 ## Add your own DAG
