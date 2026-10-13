@@ -19,6 +19,7 @@ had."""
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import tempfile
@@ -114,6 +115,16 @@ RELOAD_HINTS = {
         "loaded_at": TIMESTAMP,
     },
 }
+
+
+def own(hints: dict) -> dict:
+    """A copy of the hints of a table for one resource, with a dict of its own for each column.
+    dlt writes the name of each column into the dict of its hint, in place (dlt 1.31.0,
+    ensure_table_schema_columns), so a dict that two columns share, as TEXT and DATE are above,
+    would carry the name of the last that dlt saw, and the other column would lose its type."""
+    copied = copy.deepcopy(hints)
+    copied["columns"] = {name: dict(schema) for name, schema in hints["columns"].items()}
+    return copied
 
 
 def scope(code: str, table: str, windows: dict[str, tuple[date, date]]) -> str:
@@ -213,7 +224,7 @@ def build(
     for table, rows in platform.module.records(now, first, skip).items():
         if entities_only and table != "campaigns":
             continue
-        hints = dict(TABLE_HINTS[(code, table)])
+        hints = own(TABLE_HINTS[(code, table)])
         if hints["write_disposition"] == SCD2 and boundary is not None:
             hints["write_disposition"] = {**SCD2, "boundary_timestamp": boundary.isoformat()}
         if table in facts:
@@ -267,7 +278,7 @@ def load(
                 counted(counts, pipeline)
         resources = build(code, now, first=first, skip=skip, boundary=now)
         # In the same run as the facts, so that a load that fails records no window.
-        resources.append(dlt.resource(reloads(code, now, first), name=RELOADS, **RELOAD_HINTS))
+        resources.append(dlt.resource(reloads(code, now, first), name=RELOADS, **own(RELOAD_HINTS)))
         pipeline.run(resources)
         counted(counts, pipeline)
     for table, rows in sorted(counts.items()):

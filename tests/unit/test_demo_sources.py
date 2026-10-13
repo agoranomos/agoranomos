@@ -66,13 +66,21 @@ class Resource:
         self.data, self.name, self.hints = data, name, hints
 
 
+def resource(data, name, **hints):
+    """As dlt.resource of dlt 1.31.0, which writes the name of each column into the dict of its
+    hint, in place (ensure_table_schema_columns in dlt/extract/utils.py)."""
+    for column, hint in (hints.get("columns") or {}).items():
+        hint["name"] = column
+    return Resource(data, name, **hints)
+
+
 @pytest.fixture
 def sources(monkeypatch):
     """The module with a stand-in for dlt, the pipelines that it makes, and how many loads each
     dataset holds (None: no table _dlt_loads yet)."""
     pipelines, loads = [], {"value": None}
     dlt = types.ModuleType("dlt")
-    dlt.resource = lambda data, name, **hints: Resource(data, name, **hints)
+    dlt.resource = resource
     dlt.mark = types.SimpleNamespace(materialize_table_schema=lambda: MARKER)
     dlt.pipeline = lambda **options: (
         pipelines.append(StandInPipeline(options, loads["value"])) or pipelines[-1]
@@ -122,6 +130,25 @@ def test_every_table_of_every_platform_has_its_hints(sources):
     assert not hasattr(module, "FACT_SCOPES"), "the fact tables are described once, in platforms.py"
     columns = module.TABLE_HINTS[("demo_search", "campaign_stats")]["columns"]
     assert columns["segments__date"] == {"data_type": "date"}
+
+
+def test_each_column_keeps_its_own_hint_across_the_tables_of_a_load(sources):
+    # dlt writes the name of each column into the dict of its hint, so a dict that two columns
+    # share carries the name of the last one that dlt saw, and the other loses its type: the day of
+    # the rates did so beside the days of _agoranomos_reloads, and was loaded as text.
+    module, pipelines, _ = sources
+    from agoranomos_pipelines.demo import platforms
+
+    for code in platforms.LOAD_ORDER:
+        module.load_history(code, NOW)
+    for pipeline in pipelines:
+        for _, hints in pipeline.runs:
+            for table, hint in hints.items():
+                for column, schema in (hint.get("columns") or {}).items():
+                    assert schema["name"] == column, (table, column, schema["name"])
+    # dlt never writes into the hints of the module, which every load starts from.
+    for hint in [*module.TABLE_HINTS.values(), module.RELOAD_HINTS]:
+        assert all("name" not in schema for schema in hint["columns"].values())
 
 
 def test_every_run_of_a_fact_table_replaces_the_window_of_each_account(sources):

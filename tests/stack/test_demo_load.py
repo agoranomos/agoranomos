@@ -306,34 +306,36 @@ def test_the_names_of_campaigns_have_their_versions(env, history_run):
     assert names == {"Prospecting - Spring Range", "Prospecting - Autumn Range"}
 
 
+# The columns of raw that staging reads, with the types that the hints of the resources give and
+# that dlt 1.31.0 writes: the day of each fact table, the money of Google as a string of micros, and
+# the windows of the actions of Meta in its child tables, as dlt names them. dlt writes its type
+# text as varchar, which PostgreSQL reports as character varying. The unit tests load with a
+# stand-in of dlt, so only a load with dlt itself shows that each hint reaches its column.
+RAW_COLUMNS = (
+    "raw_demo_fx.rates_daily.rate_date:date",
+    "raw_demo_search.campaign_conversions.segments__date:date",
+    "raw_demo_search.campaign_stats.metrics__cost_micros:character varying",
+    "raw_demo_search.campaign_stats.segments__date:date",
+    "raw_demo_social.insights_campaign.date_start:date",
+    "raw_demo_social.insights_campaign__action_values._7d_click:character varying",
+    "raw_demo_social.insights_campaign__actions._1d_click:character varying",
+    "raw_demo_social.insights_campaign__actions._1d_view:character varying",
+    "raw_demo_social.insights_campaign__actions._7d_click:character varying",
+    "raw_demo_social.insights_campaign__actions._dlt_root_id:character varying",
+    "raw_demo_video.report_campaign_daily.dimensions__stat_time_day:character varying",
+    "raw_demo_web.report_sessions_daily.date:character varying",
+)
+
+
 def test_the_raw_tables_have_the_columns_that_staging_reads(env, history_run):
-    # The windows of the actions of Meta in its child tables, as dlt 1.31.0 names them, and the
-    # types that the hints of the resources give. dlt writes its type text as varchar, which
-    # PostgreSQL reports as character varying.
+    names = ", ".join(f"'{column.split(':')[0]}'" for column in RAW_COLUMNS)
     text = warehouse_output(
         env,
-        "SELECT table_name || '.' || column_name || ':' || data_type "
+        "SELECT table_schema || '.' || table_name || '.' || column_name || ':' || data_type "  # noqa: S608 (constants of this file)
         "FROM information_schema.columns "
-        "WHERE table_schema IN ('raw_demo_search', 'raw_demo_social') AND column_name IN "
-        "('segments__date', 'metrics__cost_micros', '_1d_click', '_7d_click', '_1d_view', "
-        "'date_start', '_dlt_root_id') ORDER BY 1",
+        f"WHERE table_schema || '.' || table_name || '.' || column_name IN ({names})",
     )
-    found = set(text.splitlines())
-    # dlt may type the flattened day as a date or as text; staging casts it either way.
-    assert found & {
-        "campaign_stats.segments__date:date",
-        "campaign_stats.segments__date:character varying",
-    }
-    for column in (
-        "campaign_stats.metrics__cost_micros:character varying",
-        "insights_campaign.date_start:date",
-        "insights_campaign__actions._1d_click:character varying",
-        "insights_campaign__actions._7d_click:character varying",
-        "insights_campaign__actions._1d_view:character varying",
-        "insights_campaign__actions._dlt_root_id:character varying",
-        "insights_campaign__action_values._7d_click:character varying",
-    ):
-        assert column in found, column
+    assert sorted(text.splitlines()) == sorted(RAW_COLUMNS)
 
 
 def test_a_row_that_the_platform_no_longer_sends_is_gone_after_the_next_load(
