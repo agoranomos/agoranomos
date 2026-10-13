@@ -55,7 +55,8 @@ def _platform(module: ModuleType, main_table: str, window_days: int, *facts: Fac
 
 
 ISO, COMPACT = "%Y-%m-%d", "%Y%m%d"
-# dlt may type the flattened day of Google as a date or as text: the cast reads both.
+# dlt types the flattened day of Google as a date, as its hint says (dlt 1.31.0); the cast of the
+# day for reads stays, so that it reads a day stored as text as well.
 SEARCH_DAY = ('"segments__date"', ISO, '"segments__date"::date')
 # TikTok writes the day as "YYYY-MM-DD 00:00:00".
 VIDEO_DAY = 'left("dimensions__stat_time_day"::text, 10)'

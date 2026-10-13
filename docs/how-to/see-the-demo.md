@@ -1,6 +1,6 @@
 # See the demo
 
-Agoranomos comes with a demo: eight weeks of statistics of one fictional ad account with three campaigns. On the first start the demo data goes all the way through the stack, so you can see what each part does before you connect a real ad platform.
+Agoranomos comes with a demo: eight weeks of statistics of one fictional ad account with three campaigns, and the history of 18 months of a fictional business on four fictional platforms. On the first start the demo data goes all the way through the stack, so you can see what each part does before you connect a real ad platform.
 
 ## What happens on the first start
 
