@@ -34,10 +34,10 @@ FACT_TABLES = {
 # shows here. They come from a first run of the generator, checked by a person.
 GOLDEN = {
     "demo_fx": "5abc425fd6176c725d9a5de32d69121604b951fb96972781cd64cfa59e2643fb",
-    "demo_search": "a91765f33f4dbdb2a97e997a1e2f5eb3cd639e84c927a8c6b38aa970b94d1be1",
+    "demo_search": "9682d2d2e32bc8b3df4171a57724cdb96bfa3374c16944bb5b1d99460998f09d",
     "demo_social": "6920405dfd561491dcad5e580c0ca6f8fc6f51009f3f1d5c10ab814183cee2d2",
-    "demo_video": "38387e18756627fe081f53cb998e24f26fc1654fc7c321e5cf1187e293d8a19b",
-    "demo_web": "f0de0da43fbf82c790f62eabf6422bde13a958115624661fb1698518de8e4b58",
+    "demo_video": "70cd30471a6dec38aee14f46c61bedab1726b56cee639a375a06a819ef348658",
+    "demo_web": "335d391844f7585e98d451db4c2b997fe878fe05a6d416e10fc9079879102eb4",
 }
 
 
@@ -334,6 +334,18 @@ def test_the_rates_cover_every_day_of_every_account_at_the_edges(now):
     assert first <= min(common.history_first_day(now, a.time_zone) for a in world.ACCOUNTS)
     days = [date.fromisoformat(r["rate_date"]) for r in fx.records(now)["rates_daily"]]
     assert days == [day for day in common.days(first, last) if fx.published(day)]
+
+
+# Names of products of the ad platforms that the demo mimics, which no name of the fictional
+# platforms may take: the demo writes the shapes of the APIs, not their brands. The values of the
+# enumerations of the APIs, such as the channel type PERFORMANCE_MAX, are their shapes and stay.
+PRODUCT_NAMES = ("performance max", "pmax", "demand gen", "spark ads", "topview", "advantage+")
+
+
+@pytest.mark.parametrize("module", MODULES, ids=lambda m: m.PLATFORM)
+def test_no_name_of_the_demo_is_a_product_of_an_ad_platform(module):
+    text = json.dumps(all_records(module), ensure_ascii=False).lower()
+    assert [name for name in PRODUCT_NAMES if name in text] == []
 
 
 def test_the_list_of_platforms_names_where_each_loads():
