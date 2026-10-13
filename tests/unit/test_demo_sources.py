@@ -225,6 +225,17 @@ def test_a_repeated_history_does_not_replay_the_names(sources):
     assert len(pipelines[0].runs) == 1
 
 
+def test_a_history_whose_earlier_try_completed_no_load_replays_the_names(sources):
+    # A first history that failed after dlt had made its tables and before a load completed: the
+    # table _dlt_loads is there, with no complete load in it, so the retry replays the names.
+    module, pipelines, loads = sources
+    from agoranomos_pipelines.demo import search
+
+    loads["value"] = 0
+    module.load_history("demo_search", NOW)
+    assert len(pipelines[0].runs) == len(search.name_versions(NOW)) + 1
+
+
 def test_the_history_leaves_out_the_gap_day(sources):
     module, pipelines, _ = sources
     from agoranomos_pipelines.demo import platforms
