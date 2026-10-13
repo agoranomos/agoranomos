@@ -24,14 +24,15 @@ QUESTIONS = {"Spend, last 7 days", "Spend by campaign, last 7 days", "Spend by d
 WAREHOUSE_NAME = "Agoranomos warehouse"
 LOAD = "agoranomos_demo_load"
 TRANSFORM = "agoranomos_demo_transform"
-DAGS = (LOAD, TRANSFORM)
+HISTORY = "agoranomos_demo_history"
+DAGS = (LOAD, TRANSFORM, HISTORY)
 
 
 @pytest.fixture(scope="module", autouse=True)
 def idle_demo_dags(airflow_url, token):
     """The tests of the demo load run before these, and each of their loads starts a run of the
-    transform. These tests wait until such runs have ended, so that none starts or rebuilds the
-    mart while they count runs or read the mart."""
+    transform, and they run the history too. These tests wait until such runs have ended, so that
+    none starts or rebuilds the mart while they count runs or read the mart."""
     wait_for(
         lambda: not any(is_busy(airflow_url, token, dag_id) for dag_id in DAGS),
         600,
@@ -123,13 +124,14 @@ def test_metabase_knows_the_mart(metabase_url, session):
 
 def test_the_first_start_ran_the_demo_pipeline(airflow_url, token):
     # What the first start did, whatever a person did since, such as a pause, which demo-init
-    # keeps: the load ran, and its asset started a run of the transform that succeeded. Counted by
-    # total_entries, as Airflow keeps every run.
+    # keeps: the load ran, and its asset started a run of the transform that succeeded, and the
+    # history succeeded. Counted by total_entries, as Airflow keeps every run.
     assert run_count(airflow_url, token, LOAD) > 0, f"{LOAD} has no run"
     succeeded = run_count(
         airflow_url, token, TRANSFORM, states=("success",), run_types=("asset_triggered",)
     )
     assert succeeded > 0, f"{TRANSFORM} has no successful run that the asset of the load started"
+    assert run_count(airflow_url, token, HISTORY, states=("success",)) > 0, f"{HISTORY} never ran"
 
 
 def test_demo_init_runs_again_without_a_change(env, airflow_url, token, metabase_url, session):

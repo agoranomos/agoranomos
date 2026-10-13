@@ -2,13 +2,16 @@
 profile.
 
 It runs the demo pipeline once: agoranomos_demo_load, and then agoranomos_demo_transform, which the
-asset of the raw table starts. Then it makes the demo visible in Metabase: it syncs the schema of
-the warehouse, applies the metadata of the marts (metadata.py), as metabase-init does, and creates
-the demo collection, its questions and its dashboard. The questions get the titles of their columns
-and axes from the display names of the metadata, and their charts get the color of the project.
+asset of the raw table starts. It also runs agoranomos_demo_history once, which loads the history
+of the fictional platforms of the demo generator into raw_demo_<platform>. Then it makes the demo
+visible in Metabase: it syncs the schema of the warehouse, applies the metadata of the marts
+(metadata.py), as metabase-init does, and creates the demo collection, its questions and its
+dashboard. The questions get the titles of their columns and axes from the display names of the
+metadata, and their charts get the color of the project.
 
 Each step looks at the current state first. A start that finds a successful run of the transform
-does not run the pipeline again and leaves the pause state of both DAGs as it is. The content of
+does not run the pipeline again and leaves the pause state of both of its DAGs as it is, and one
+that finds a successful run of the history does the same with the history. The content of
 Metabase is found by name: what is there stays as it is, edits included, and what is missing is
 created again, so a deleted or renamed question, dashboard or collection comes back. A question
 that exists gets only the titles and the series color that it lacks.
@@ -51,6 +54,7 @@ from metabase_init import (
 
 LOAD_DAG = "agoranomos_demo_load"
 TRANSFORM_DAG = "agoranomos_demo_transform"
+HISTORY_DAG = "agoranomos_demo_history"
 COLLECTION = "Agoranomos demo"
 DASHBOARD = "Ad spend (demo)"
 MART_SCHEMA = "marts"
@@ -256,8 +260,8 @@ def transform_is_busy(airflow: Airflow) -> bool:
 
 
 def wait_for_dags(airflow: Airflow, deadline: Deadline) -> None:
-    """Wait until the DAG processor has loaded both demo DAGs; until then Airflow answers 404."""
-    for dag_id in (LOAD_DAG, TRANSFORM_DAG):
+    """Wait until the DAG processor has loaded the demo DAGs; until then Airflow answers 404."""
+    for dag_id in (LOAD_DAG, TRANSFORM_DAG, HISTORY_DAG):
         wait_until(
             lambda dag_id=dag_id: airflow.call("GET", f"/api/v2/dags/{dag_id}", missing_ok=True),
             deadline,
@@ -332,6 +336,22 @@ def run_demo_pipeline(airflow: Airflow, deadline: Deadline) -> bool:
     if load["state"] != "success":
         raise SetupError(f"the DAG {LOAD_DAG} failed: see it in Airflow")
     wait_for_transform(airflow, load["start_date"], deadline)
+    return True
+
+
+def run_demo_history(airflow: Airflow, deadline: Deadline) -> bool:
+    """Run the history of the fictional platforms once, unless a run of it has succeeded before;
+    True if it ran. A start that finds such a run changes nothing in Airflow. Otherwise it unpauses
+    the DAG and triggers it, or waits for a run that is queued or running, until it ends."""
+    if count_runs(airflow, HISTORY_DAG, "success"):
+        return False
+    airflow.call("PATCH", f"/api/v2/dags/{HISTORY_DAG}", {"is_paused": False})
+    run = newest_run(airflow, HISTORY_DAG, "queued", "running")
+    if run is None:
+        run = airflow.call("POST", f"/api/v2/dags/{HISTORY_DAG}/dagRuns", {"logical_date": None})
+    run = wait_for_run(airflow, HISTORY_DAG, run["dag_run_id"], deadline)
+    if run["state"] != "success":
+        raise SetupError(f"the DAG {HISTORY_DAG} failed: see it in Airflow")
     return True
 
 
@@ -530,7 +550,9 @@ def main(env: Mapping[str, str] | None = None) -> int:
         airflow = Airflow(config.airflow_url)
         sign_in_to_airflow(airflow, config.airflow_password)
         wait_for_dags(airflow, deadline)
-        ran = run_demo_pipeline(airflow, deadline)
+        ran_pipeline = run_demo_pipeline(airflow, deadline)
+        ran_history = run_demo_history(airflow, deadline)
+        ran = ran_pipeline or ran_history
         server, hint = "Metabase", Metabase.logs_hint
         metabase = Metabase(config.metabase_url)
         sign_in(metabase, config.admin_email, config.admin_password)
@@ -540,7 +562,9 @@ def main(env: Mapping[str, str] | None = None) -> int:
             raise SetupError(
                 "Metabase has no connection to the warehouse: see ./agoranomos logs metabase-init"
             )
-        ensure_synced(metabase, database["id"], mart, deadline, ran)
+        # The history builds no mart: what a missing mart points at depends on whether the
+        # pipeline ran now.
+        ensure_synced(metabase, database["id"], mart, deadline, ran_pipeline)
         metadata.apply(
             metabase,
             database["id"],
