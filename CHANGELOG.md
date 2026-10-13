@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.5](https://github.com/agoranomos/agoranomos/compare/v0.1.4...v0.1.5) (2026-10-13)
+
+
+### Bug Fixes
+
+* **airflow:** keep the metadata database and the signing key away from the Celery worker, and give its results a database of their own ([#78](https://github.com/agoranomos/agoranomos/issues/78)) ([fb27018](https://github.com/agoranomos/agoranomos/commit/fb27018e5e22b1b777e52bb3295e77381b84babf))
+
+
+### Documentation
+
+* accept ADR-0024 and ADR-0025 ([#75](https://github.com/agoranomos/agoranomos/issues/75)) ([a4f4d2d](https://github.com/agoranomos/agoranomos/commit/a4f4d2d93a801ce343a72ce5f7c795729e28a911))
+* decide that one deployment is one business, and model advertising statistics once ([#73](https://github.com/agoranomos/agoranomos/issues/73)) ([9c932bc](https://github.com/agoranomos/agoranomos/commit/9c932bcb1fb6da85f4664ea5991e8ca719c502b0))
+
 ## [0.1.4](https://github.com/agoranomos/agoranomos/compare/v0.1.3...v0.1.4) (2026-10-12)
 
 
