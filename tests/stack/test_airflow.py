@@ -32,6 +32,9 @@ TASK_RUNNERS = [s for s in ("airflow-scheduler", "airflow-worker") if s in LONG_
 # The services whose health check reads their job from the metadata database (compose.yaml), with
 # the type of the job.
 JOB_CHECKS = {"airflow-dag-processor": "DagProcessorJob", "airflow-triggerer": "TriggererJob"}
+# The pool of the tasks of dbt, and its size, which airflow-init sets on every start (ADR-0027).
+DBT_POOL = "/api/v2/pools/dbt"
+DBT_POOL_SLOTS = 2
 
 
 @pytest.fixture(scope="module")
@@ -64,12 +67,38 @@ def test_the_admin_signs_in_with_the_generated_password_only(airflow_url, token)
     assert status == 401, body
 
 
-def test_airflow_init_can_run_again():
+@pytest.fixture(scope="module")
+def airflow_init_again(airflow_url, token):
+    """The pool of dbt as the start left it, and airflow-init run once more after an edit of the
+    size of that pool, as one in the Airflow UI makes it."""
+    status, pool = api(airflow_url, token, "GET", DBT_POOL)
+    assert status == 200, pool
+    # Airflow 3.3.2 answers 422 to a body without the name and include_deferred, as the UI sends.
+    edit = {"pool": pool["name"], "slots": 5, "include_deferred": pool["include_deferred"]}
+    status, body = api(airflow_url, token, "PATCH", f"{DBT_POOL}?update_mask=slots", edit)
+    assert status == 200, body
+    assert body["slots"] == 5, body
+    return pool, compose("run", "--rm", "--no-deps", "-T", "airflow-init", check=False)
+
+
+def test_airflow_init_can_run_again(airflow_init_again):
     # An admin that exists is not an error, and the second run does not make another one.
-    result = compose("run", "--rm", "--no-deps", "-T", "airflow-init", check=False)
+    _, result = airflow_init_again
     assert result.returncode == 0, job_failed("airflow-init", result)
     said_so = "admin already exists in the db" in result.stdout + result.stderr
     assert said_so, "airflow-init did not find the admin that exists"
+
+
+def test_the_pool_of_dbt_has_its_slots_and_comes_back_at_the_next_start(
+    airflow_url, token, airflow_init_again
+):
+    # The tasks of dbt run in it, at most two at a time, whatever AIRFLOW_PARALLELISM allows: the
+    # memory of the container of the tasks has room for two processes of dbt (ADR-0027).
+    pool, _ = airflow_init_again
+    assert pool["slots"] == DBT_POOL_SLOTS, pool
+    status, pool = api(airflow_url, token, "GET", DBT_POOL)
+    assert status == 200, pool
+    assert pool["slots"] == DBT_POOL_SLOTS, "airflow-init did not put the size of the pool back"
 
 
 def users_create_in_the_audit_log(env):
@@ -366,7 +395,7 @@ def test_the_dag_processor_parses_a_changed_dag_file_at_once(
 
 def test_a_parse_request_parses_an_unchanged_dag_file_at_once(airflow_url, token):
     # What Reparse Dag in the Airflow UI asks for, the way to see a change that the file of a DAG
-    # does not show, such as one to the dbt project, before the five minutes are over.
+    # does not show, such as one to a file that the DAG reads, before the five minutes are over.
     wait_for_dag(airflow_url, token, SELFCHECK)
     before, file_token = parse_state(airflow_url, token, SELFCHECK)
     status, body = api(airflow_url, token, "PUT", f"/api/v2/parseDagFile/{file_token}")
@@ -397,7 +426,8 @@ def test_dag_folders_are_read_only(service, path):
     assert "Read-only file system" in result.stderr, result.stderr
 
 
-# The DAG processor runs dbt ls when it parses the transform DAG, and the task runners run dbt.
+# The DAG processor renders the transform DAG from the manifest of dbt, and the task runners run
+# dbt on the project.
 @pytest.mark.parametrize("service", ["airflow-dag-processor", *TASK_RUNNERS])
 def test_the_dbt_project_is_read_only(service):
     # Cosmos runs dbt in a temporary folder that links to the project, where dbt writes its target

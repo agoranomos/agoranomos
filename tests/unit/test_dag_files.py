@@ -19,10 +19,9 @@ def imports(path: Path) -> list[tuple[str, list[str]]]:
 
 
 def test_the_load_dag_does_not_import_cosmos():
-    # Cosmos runs dbt ls each time that a file that builds a DAG of it is parsed: by the DAG
-    # processor, and by each task of that file when it starts. The load DAG has a file of its own
-    # without Cosmos, so its task does not wait for dbt ls, and a dbt project on which dbt ls fails
-    # cannot break its import.
+    # Cosmos reads the manifest of the dbt project each time that a file that builds a DAG of it is
+    # parsed: by the DAG processor, and by each task of that file when it starts. The load DAG has a
+    # file of its own without Cosmos, so that a missing or broken manifest cannot break its import.
     modules = [module for module, _ in imports(DAGS / "agoranomos_demo.py")]
     assert modules, "agoranomos_demo.py imports nothing"
     assert [module for module in modules if module.split(".")[0] == "cosmos"] == []
@@ -41,6 +40,34 @@ def test_no_dag_file_imports_another():
 def test_both_demo_dags_take_the_asset_of_the_raw_table_from_the_shared_package():
     for name in ("agoranomos_demo.py", "agoranomos_demo_transform.py"):
         assert ("agoranomos_pipelines.assets", ["RAW_DEMO"]) in imports(DAGS / name), name
+
+
+def keyword_values(path: Path, name: str) -> list[ast.AST]:
+    """The values of the keyword arguments of that name in a file, at any depth."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return [n.value for n in ast.walk(tree) if isinstance(n, ast.keyword) and n.arg == name]
+
+
+def test_the_transform_renders_from_the_manifest_in_the_pool_of_dbt():
+    # ADR-0027: Cosmos renders the tasks from the manifest that metadata-export writes, and the
+    # tasks of dbt run in the pool dbt, set on the task group so that other tasks stay out of it.
+    path = DAGS / "agoranomos_demo_transform.py"
+    text = path.read_text(encoding="utf-8")
+    assert "LoadMode.DBT_MANIFEST" in text
+    assert "LoadMode.DBT_LS" not in text
+    assert 'DBT_MANIFEST = Path("/opt/agoranomos/manifest/manifest.json")' in text
+    [manifest] = keyword_values(path, "manifest_path")
+    assert isinstance(manifest, ast.Name)
+    assert manifest.id == "DBT_MANIFEST"
+    defaults = [v for v in keyword_values(path, "default_args") if isinstance(v, ast.Dict)]
+    pools = [
+        ast.unparse(value)
+        for d in defaults
+        for key, value in zip(d.keys, d.values, strict=True)
+        if isinstance(key, ast.Constant) and key.value == "pool"
+    ]
+    assert pools == ["DBT_POOL"], "the pool is set once, on the task group of dbt"
+    assert 'DBT_POOL = "dbt"' in text
 
 
 def test_the_demo_dags_start_paused():

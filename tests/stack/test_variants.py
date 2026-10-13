@@ -1049,8 +1049,9 @@ def test_the_dag_processor_and_the_triggerer_check_their_jobs_without_airflow(va
 
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_every_airflow_service_parses_an_unchanged_dag_file_every_five_minutes(variant):
-    # Each parse of the transform DAG runs dbt ls, so an unchanged file waits five minutes, not the
-    # 30 seconds of Airflow; a new file shows up at the next look into the folders, every minute.
+    # Each parse of the transform DAG reads the manifest of dbt and renders all its tasks, so an
+    # unchanged file waits five minutes, not the 30 seconds of Airflow; a new file shows up at the
+    # next look into the folders, every minute.
     # Both are settings, not secrets, so a failed assertion may print them.
     for name, service in airflow_services(variant).items():
         environment = service["environment"]

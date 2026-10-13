@@ -15,11 +15,12 @@ ENV RUNTIME__DLTHUB_TELEMETRY=false \
 # compose.yaml sets the same.
 ENV PROVIDERS__ENABLE_AIRFLOW_SECRETS=false
 
-# The two caches from which Cosmos renders the tasks of dbt stay out of Airflow Variables, which the
-# Op role may edit. Cosmos would keep the output of dbt ls there and render the tasks of dbt and
-# their arguments from it, so such a Variable could change what a dbt task runs. Instead, dbt ls
-# runs each time that the DAG processor parses a DAG of Cosmos, and again when each task of that
-# DAG starts, since a task parses the file of its DAG first; compose.yaml sets the same.
+# The two caches of Cosmos stay out of Airflow Variables, which the Op role may edit. A DAG of Cosmos
+# that reads its project with dbt ls would keep the output there and render the tasks of dbt and
+# their arguments from it, so such a Variable could change what a dbt task runs. The transform DAG
+# needs neither: Cosmos renders it from the manifest of the dbt project, which metadata-export
+# writes into a volume that the Airflow services mount read-only (ADR-0027). compose.yaml sets the
+# same.
 ENV AIRFLOW__COSMOS__ENABLE_CACHE_DBT_LS=False \
     AIRFLOW__COSMOS__ENABLE_CACHE_DBT_YAML_SELECTORS=False
 

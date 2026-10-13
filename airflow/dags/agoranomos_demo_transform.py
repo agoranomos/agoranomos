@@ -8,6 +8,10 @@ safe: dbt rebuilds the models. The DAG starts paused, and a load starts it only 
 unpaused. With the demo profile, the one-shot demo-init job unpauses both demo DAGs on the first
 start and triggers the load; without it, unpause this DAG in the Airflow UI before you trigger the
 load, or trigger it there yourself.
+
+Cosmos renders its tasks from the manifest that metadata-export writes on every start (ADR-0027),
+so a change of the dbt project reaches the DAG at the next ./agoranomos up; its tasks of dbt run at
+most two at a time, in the pool dbt.
 """
 
 from __future__ import annotations
@@ -32,6 +36,12 @@ from cosmos import (
 DBT_PROJECT = Path("/opt/agoranomos/dbt")
 # dbt has a virtual environment of its own in the image (airflow/Dockerfile).
 DBT_EXECUTABLE = "/opt/airflow/dbt_venv/bin/dbt"
+# The manifest of the dbt project, which metadata-export writes on every start into a volume that
+# the Airflow services mount read-only (ADR-0027): Cosmos renders the tasks from it, without dbt ls.
+DBT_MANIFEST = Path("/opt/agoranomos/manifest/manifest.json")
+# The pool of the tasks of dbt, which airflow-init sets on every start: at most two processes of dbt
+# share the memory of the container that runs the tasks (ADR-0027).
+DBT_POOL = "dbt"
 START = datetime(2026, 1, 1, tzinfo=UTC)
 
 
@@ -53,13 +63,14 @@ START = datetime(2026, 1, 1, tzinfo=UTC)
     doc_md=__doc__,
 )
 def agoranomos_demo_transform():
-    # Cosmos runs dbt ls each time that this file is parsed, by the DAG processor and by each task
-    # of this DAG when it starts, since its cache is off (airflow/Dockerfile). So the DAG has a file
-    # of its own: the task of the load DAG does not wait for dbt ls, and a dbt project on which dbt
-    # ls fails cannot break the import of the load DAG.
+    # Cosmos renders the tasks from the manifest of the project, without dbt ls; the DAG still has a
+    # file of its own, so that a missing or broken manifest, which fails the import of this file,
+    # cannot break the import of the other DAGs.
     DbtTaskGroup(
         group_id="dbt",
-        project_config=ProjectConfig(dbt_project_path=DBT_PROJECT, install_dbt_deps=False),
+        project_config=ProjectConfig(
+            dbt_project_path=DBT_PROJECT, manifest_path=DBT_MANIFEST, install_dbt_deps=False
+        ),
         profile_config=ProfileConfig(
             profile_name="agoranomos",
             target_name="prod",
@@ -71,12 +82,12 @@ def agoranomos_demo_transform():
             dbt_executable_path=DBT_EXECUTABLE,
         ),
         render_config=RenderConfig(
-            load_method=LoadMode.DBT_LS,
-            invocation_mode=InvocationMode.SUBPROCESS,
-            dbt_executable_path=DBT_EXECUTABLE,
+            load_method=LoadMode.DBT_MANIFEST,
             # The tests of a model run right after it; a failed one stops the models that read it.
             test_behavior=TestBehavior.AFTER_EACH,
         ),
+        # Only the tasks of dbt go into its pool.
+        default_args={"pool": DBT_POOL},
     )
 
 
