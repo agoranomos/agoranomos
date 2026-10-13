@@ -17,6 +17,7 @@ from agoranomos_pipelines.demo_data import rows
 from airflow_api import is_busy, run_count
 from metabase_content import (
     REGISTRY,
+    another_account,
     delete,
     get,
     group_ids,
@@ -197,6 +198,39 @@ def test_an_edit_of_the_content_is_reverted_by_the_next_start_and_logged(
     ], changes
 
 
+def test_a_click_behavior_and_an_extra_setting_are_reverted_by_the_next_start(
+    env, metabase_url, session
+):
+    # An admin gives a card of the dashboard a click behavior, which could send whoever clicks it
+    # to any address, and a question a setting that the code does not set.
+    entries = registry()
+    board = item(metabase_url, session, "demo/dashboard", entries)
+    question = item(metabase_url, session, "demo/spend-by-day", entries)
+    link = {"type": "link", "linkType": "url", "linkTemplate": "https://example.com/{{spend}}"}
+    dashcards = [
+        {
+            **{key: d[key] for key in ("id", "card_id", "row", "col", "size_x", "size_y")},
+            "visualization_settings": {"click_behavior": link} if n == 0 else {},
+        }
+        for n, d in enumerate(board["dashcards"])
+    ]
+    put(metabase_url, session, f"/api/dashboard/{board['id']}", {"dashcards": dashcards})
+    settings = {**question["visualization_settings"], "graph.show_values": True}
+    put(metabase_url, session, f"/api/card/{question['id']}", {"visualization_settings": settings})
+    code, changes, found, _ = run_job("demo-init", secrets(env))
+    assert not found, f"the output of demo-init holds the values of {found}"
+    assert code == 0, f"demo-init exited with {code}"
+    board = item(metabase_url, session, "demo/dashboard", entries)
+    assert [d["visualization_settings"] for d in board["dashcards"]] == [{}] * len(QUESTIONS)
+    settings = item(metabase_url, session, "demo/spend-by-day", entries)["visualization_settings"]
+    assert "graph.show_values" not in settings
+    assert changes == [
+        "demo-init: revert of an edit: question demo/spend-by-day visualization_settings",
+        "demo-init: revert of an edit: dashboard demo/dashboard cards: 3 cards (1 not as the "
+        "code says) and no filter -> 3 cards and no filter",
+    ], changes
+
+
 def test_a_collection_with_the_same_name_is_not_taken_for_the_package(env, metabase_url, session):
     decoy = post(metabase_url, session, "/api/collection", {"name": "Agoranomos"})
     try:
@@ -213,48 +247,74 @@ def test_a_collection_with_the_same_name_is_not_taken_for_the_package(env, metab
 
 def test_the_collection_of_v0_1_moves_into_agoranomos(env, metabase_url, session):
     # A Metabase of v0.1, made on this stand: the content of the package goes to the trash, is
-    # deleted from it, and leaves the registry, and a collection of the old name at the root, with
-    # the questions and the dashboard of v0.1 in it, takes its place.
+    # deleted from it, and leaves the registry. A second account, which may curate the root as on
+    # v0.1, makes a decoy of the old name first, with a dashboard of the old name; the admin then
+    # makes the collection of v0.1 with its questions and its dashboard; and the second account
+    # adds a question of a name of v0.1 to it.
     root = item(metabase_url, session, "agoranomos")
     put(metabase_url, session, f"/api/collection/{root['id']}", {"archived": True})
     delete(metabase_url, session, f"/api/collection/{root['id']}")
     removed = in_metabase_init("rm", "-f", REGISTRY)
     assert removed.returncode == 0, f"the registry was not removed: exit code {removed.returncode}"
-    old = post(metabase_url, session, "/api/collection", {"name": "Agoranomos demo"})
     database_id = warehouse_database_id(metabase_url, session)
     native = {"database": database_id, "type": "native", "native": {"query": "SELECT 1"}}
-    cards = {
-        name: post(
+
+    def question(headers, collection_id, name):
+        body = {
+            "name": name,
+            "collection_id": collection_id,
+            "display": "table",
+            "visualization_settings": {},
+            "dataset_query": native,
+        }
+        return post(metabase_url, headers, "/api/card", body)
+
+    with another_account(metabase_url, session) as theirs:
+        decoy = post(metabase_url, theirs, "/api/collection", {"name": "Agoranomos demo"})
+        decoy_board = post(
             metabase_url,
-            session,
-            "/api/card",
-            {
-                "name": name,
-                "collection_id": old["id"],
-                "display": "table",
-                "visualization_settings": {},
-                "dataset_query": native,
-            },
+            theirs,
+            "/api/dashboard",
+            {"name": DASHBOARD, "collection_id": decoy["id"]},
         )
-        for name in QUESTIONS.values()
-    }
-    board = post(
-        metabase_url, session, "/api/dashboard", {"name": DASHBOARD, "collection_id": old["id"]}
-    )
-    code, changes, found, _ = run_job("demo-init", secrets(env))
-    assert not found, f"the output of demo-init holds the values of {found}"
-    assert code == 0, f"demo-init exited with {code}"
-    assert (
-        "demo-init: moved: collection 'Agoranomos demo' of an earlier release into Agoranomos as "
-        "Demo"
-    ) in changes, changes
-    entries = registry()
-    demo = item(metabase_url, session, "demo", entries)
-    root = item(metabase_url, session, "agoranomos", entries)
-    assert (demo["id"], demo["name"], demo["location"]) == (old["id"], "Demo", f"/{root['id']}/")
-    assert item(metabase_url, session, "demo/dashboard", entries)["id"] == board["id"]
-    adopted = {key: item(metabase_url, session, f"demo/{key}", entries) for key in QUESTIONS}
-    assert {q["id"] for q in adopted.values()} == {c["id"] for c in cards.values()}
-    assert adopted["spend-by-day"]["dataset_query"]["native"]["query"] != "SELECT 1"
-    # The questions of v0.1 were adopted and put right, not replaced: none is in the trash.
-    assert [q["archived"] for q in adopted.values()] == [False] * len(QUESTIONS)
+        old = post(metabase_url, session, "/api/collection", {"name": "Agoranomos demo"})
+        cards = {name: question(session, old["id"], name) for name in QUESTIONS.values()}
+        board = post(
+            metabase_url, session, "/api/dashboard", {"name": DASHBOARD, "collection_id": old["id"]}
+        )
+        added = question(theirs, old["id"], "Spend by day")
+    try:
+        code, changes, found, _ = run_job("demo-init", secrets(env))
+        assert not found, f"the output of demo-init holds the values of {found}"
+        assert code == 0, f"demo-init exited with {code}"
+        assert (
+            "demo-init: moved: collection 'Agoranomos demo' of an earlier release into Agoranomos "
+            "as Demo"
+        ) in changes, changes
+        assert (
+            f"demo-init: moved out: question {added['id']} of the collection of v0.1 to the root, "
+            "as the demo does not ship it"
+        ) in changes, changes
+        entries = registry()
+        demo = item(metabase_url, session, "demo", entries)
+        root = item(metabase_url, session, "agoranomos", entries)
+        assert (demo["id"], demo["name"], demo["location"]) == (
+            old["id"],
+            "Demo",
+            f"/{root['id']}/",
+        )
+        assert item(metabase_url, session, "demo/dashboard", entries)["id"] == board["id"]
+        adopted = {key: item(metabase_url, session, f"demo/{key}", entries) for key in QUESTIONS}
+        assert {q["id"] for q in adopted.values()} == {c["id"] for c in cards.values()}
+        assert adopted["spend-by-day"]["dataset_query"]["native"]["query"] != "SELECT 1"
+        # The questions of v0.1 were adopted and put right, not replaced: none is in the trash.
+        assert [q["archived"] for q in adopted.values()] == [False] * len(QUESTIONS)
+        # The question of the second account is at the root, and the decoy is as it was.
+        assert get(metabase_url, session, f"/api/card/{added['id']}")["collection_id"] is None
+        kept = get(metabase_url, session, f"/api/collection/{decoy['id']}")
+        assert (kept["name"], kept["location"], kept["archived"]) == ("Agoranomos demo", "/", False)
+        kept_board = get(metabase_url, session, f"/api/dashboard/{decoy_board['id']}")
+        assert kept_board["collection_id"] == decoy["id"]
+    finally:
+        put(metabase_url, session, f"/api/collection/{decoy['id']}", {"archived": True})
+        put(metabase_url, session, f"/api/card/{added['id']}", {"archived": True})

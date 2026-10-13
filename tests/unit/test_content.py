@@ -111,6 +111,96 @@ def test_an_edit_is_reverted_and_each_change_is_one_line(metabase, registry):
     assert any(line.startswith("revert of an edit: dashboard demo/dashboard cards") for line in log)
 
 
+def test_an_extra_key_in_the_settings_of_a_question_is_reverted(metabase, registry):
+    # The settings of display are compared whole: a key that the code does not set goes too.
+    state, client = metabase
+    ids = ct.ensure_package(client, registry, PACKAGE, 2, lambda line: None)
+    card = state.content_state.cards[ids["spend"]]
+    card["visualization_settings"]["graph.show_values"] = True
+    log, say = lines()
+    ct.ensure_package(client, registry, PACKAGE, 2, say)
+    assert card["visualization_settings"] == dict(QUESTION.visualization_settings)
+    assert log == ["revert of an edit: question demo/spend visualization_settings"]
+
+
+def test_a_question_of_another_type_or_with_more_in_its_query_is_put_back(metabase, registry):
+    # A question turned into a model, and a template tag added to its SQL: the type and the whole
+    # query are the code's.
+    state, client = metabase
+    ids = ct.ensure_package(client, registry, PACKAGE, 2, lambda line: None)
+    card = state.content_state.cards[ids["spend"]]
+    card["type"] = "model"
+    card["dataset_query"]["native"]["template-tags"] = {"x": {"name": "x", "type": "text"}}
+    log, say = lines()
+    ct.ensure_package(client, registry, PACKAGE, 2, say)
+    assert card["type"] == "question"
+    assert card["dataset_query"] == {
+        "database": 2,
+        "type": "native",
+        "native": {"query": QUESTION.query},
+    }
+    assert log == [
+        'revert of an edit: question demo/spend type: "model" -> "question"',
+        "revert of an edit: question demo/spend query",
+    ]
+
+
+def test_a_click_behavior_added_to_a_card_of_the_dashboard_is_reverted(metabase, registry):
+    # A click behavior can send whoever clicks the card to any address: the settings of each card
+    # of the dashboard are the code's, as are its mappings, its series and its tabs.
+    state, client = metabase
+    ids = ct.ensure_package(client, registry, PACKAGE, 2, lambda line: None)
+    board = state.content_state.dashboards[ids["dashboard"]]
+    [dashcard] = board["dashcards"]
+    link = {"type": "link", "linkType": "url", "linkTemplate": "https://example.com/?q={{spend}}"}
+    dashcard["visualization_settings"] = {"click_behavior": link}
+    log, say = lines()
+    ct.ensure_package(client, registry, PACKAGE, 2, say)
+    [dashcard] = board["dashcards"]
+    assert dashcard["card_id"] == ids["spend"]
+    assert dashcard["visualization_settings"] == {}
+    assert log == [
+        "revert of an edit: dashboard demo/dashboard cards: 1 card (1 not as the code says) and "
+        "no filter -> 1 card and no filter"
+    ]
+
+
+# What a person can change on a card of a dashboard besides its settings, one at a time: the
+# mappings of a filter, a series of another question, an inline filter, an action, and a tab.
+CARD_EDITS = {
+    "mappings": {"parameter_mappings": [{"parameter_id": "f1", "target": ["text"]}]},
+    "series": {"series": "other"},
+    "inline filter": {"inline_parameters": ["f1"]},
+    "action": {"action_id": 3},
+    "tab": {"dashboard_tab_id": 55},
+}
+
+
+@pytest.mark.parametrize("edit", CARD_EDITS)
+def test_each_part_of_a_card_of_the_dashboard_is_put_back(metabase, registry, edit):
+    state, client = metabase
+    ids = ct.ensure_package(client, registry, PACKAGE, 2, lambda line: None)
+    board = state.content_state.dashboards[ids["dashboard"]]
+    [dashcard] = board["dashcards"]
+    other = state.content_state.add_card({"name": "Other", "collection_id": None})
+    change = {k: [{"id": other["id"]}] if v == "other" else v for k, v in CARD_EDITS[edit].items()}
+    dashcard.update(change)
+    if edit == "tab":
+        board["tabs"] = [{"id": 55, "name": "Mine"}]
+    log, say = lines()
+    ct.ensure_package(client, registry, PACKAGE, 2, say)
+    [dashcard] = board["dashcards"]
+    assert dashcard["card_id"] == ids["spend"]
+    for key in change:
+        assert not dashcard.get(key), key
+    assert board["tabs"] == []
+    tabs = ", no filter and 1 tab" if edit == "tab" else " and no filter"
+    assert log == [
+        f"revert of an edit: dashboard demo/dashboard cards: 1 card (1 not as the code says){tabs} "
+        "-> 1 card and no filter"
+    ]
+
+
 def test_an_item_that_a_person_put_in_the_trash_comes_back_to_its_place_in_one_line(
     metabase, registry
 ):

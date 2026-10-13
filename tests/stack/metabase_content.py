@@ -5,11 +5,14 @@ hold secrets: an assertion here prints the method, the path and the status of a 
 answer.
 """
 
+import contextlib
 import json
+import secrets
 import subprocess
+from collections.abc import Iterator
 from typing import Any
 
-from stack_helpers import compose, http_json, leaked
+from stack_helpers import Secret, SecretHeaders, compose, http_json, leaked
 
 # The registry of the content, on the volume metabase-content, where compose.yaml mounts it in
 # metabase-init and demo-init.
@@ -95,3 +98,22 @@ def run_job(service: str, values: dict[str, str]) -> tuple[int, list[str], list[
     changes = [line for line in lines if line.startswith(prefixes)]
     last = lines[-1] if lines and result.returncode == 0 else ""
     return result.returncode, changes, leaked(values, [result.stdout, result.stderr]), last
+
+
+@contextlib.contextmanager
+def another_account(metabase_url: str, session: dict[str, str]) -> Iterator[dict[str, str]]:
+    """A second account of Metabase, in no group but All Users, as a person whom an admin invited:
+    the headers that sign its requests in. Its password is made here and never shown, and the
+    account is deactivated at the end."""
+    email = f"stack-test-{secrets.token_hex(4)}@example.com"
+    password = Secret(secrets.token_urlsafe(24) + "aA1!")
+    body = {"first_name": "Stack", "last_name": "Test", "email": email, "password": password}
+    user = post(metabase_url, session, "/api/user", body)
+    try:
+        status, answer = http_json(
+            "POST", f"{metabase_url}/api/session", {"username": email, "password": password}
+        )
+        assert status == 200, f"the second account could not sign in: HTTP {status}"
+        yield SecretHeaders({"X-Metabase-Session": Secret(answer["id"])})
+    finally:
+        delete(metabase_url, session, f"/api/user/{user['id']}")

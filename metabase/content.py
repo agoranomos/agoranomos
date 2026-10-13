@@ -9,8 +9,10 @@ item, or another one with the same name, cannot take the place of one of the pac
 0.64.1 lets no caller of its API choose an entity ID, so the registry is their only record.
 
 Each start compares each item with the code: the name and the description of a collection, a
-question or a dashboard, where it is, the query and the settings of display of a question, and the
-cards, their layout and the filters of a dashboard. What differs is put back, what is in the trash
+question or a dashboard, where it is, the type, the whole query and the whole settings of display of
+a question, and each card of a dashboard whole (its question, its place, its settings of display,
+such as a click behavior, its filter mappings and its series), with the filters and the tabs of the
+dashboard. What differs is put back, what is in the trash
 comes back, what Metabase no longer has is created again, an item that the code no longer ships
 goes to the trash, and one line of the log says each change and what it replaced. Metabase keeps
 the replaced version in the history of revisions of the item. Every group but Administrators gets
@@ -25,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import string
+from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,6 +44,8 @@ ROOT_DESCRIPTION = (
     "To change a question or a dashboard, copy it into a collection of your own."
 )
 ADMIN_GROUP_TYPE = "admin"
+# The type of every question that the package ships: not a model, not a metric.
+QUESTION_TYPE = "question"
 WHAT = {"collection": "collection", "card": "question", "dashboard": "dashboard"}
 # An entity ID of Metabase: a NanoID of 21 characters of this alphabet (NanoIdString of Metabase
 # 0.64.1). The registry holds nothing else, as its entries become paths of requests of the admin.
@@ -283,6 +288,10 @@ def ensure_question(
     database_id: int,
     log: Log,
 ) -> int:
+    """The question of a key, as the code says. Its query, in the legacy form that find() asks for,
+    and its settings of display are compared whole: Metabase 0.64.1 gives both back as the jobs
+    wrote them, and adds no key of its own (checked on the stand, October 2026), so anything that
+    differs, a template tag or a key that someone added included, is put back."""
     key = f"{package.key}/{question.key}"
     query = {"database": database_id, "type": "native", "native": {"query": question.query}}
     settings = dict(question.visualization_settings)
@@ -293,6 +302,7 @@ def ensure_question(
             "/api/card",
             {
                 "name": question.name,
+                "type": QUESTION_TYPE,
                 "description": question.description,
                 "display": question.display,
                 "collection_id": collection_id,
@@ -305,27 +315,43 @@ def ensure_question(
         return created["id"]
     wanted = {
         "name": question.name,
+        "type": QUESTION_TYPE,
         "description": question.description,
         "display": question.display,
         "collection_id": collection_id,
     }
     body = placed("card", key, found, wanted, log)
-    current = found.get("dataset_query") or {}
-    native = current.get("native") or {}
-    if (current.get("type"), current.get("database"), native.get("query")) != (
-        "native",
-        database_id,
-        question.query,
-    ):
+    if found.get("dataset_query") != query:
         body["dataset_query"] = query
         log(f"revert of an edit: question {key} query")
-    current_settings = found.get("visualization_settings") or {}
-    if any(current_settings.get(name) != value for name, value in settings.items()):
+    if (found.get("visualization_settings") or {}) != settings:
         body["visualization_settings"] = settings
         log(f"revert of an edit: question {key} visualization_settings")
     if body:
         metabase.call("PUT", f"/api/card/{found['id']}", body)
     return found["id"]
+
+
+def dashcard_shape(dashcard: Mapping[str, Any]) -> str:
+    """A card of a dashboard as the jobs compare it, whole: its question, its action, its tab, its
+    place, its filter mappings, its settings of display, such as a click behavior, which can send
+    whoever clicks it to any address, its own filters and its series. GET /api/dashboard/:id of
+    Metabase 0.64.1 gives each of these; a list or a map that a card lacks counts as empty."""
+    return json.dumps(
+        {
+            "card_id": dashcard.get("card_id"),
+            "action_id": dashcard.get("action_id"),
+            "dashboard_tab_id": dashcard.get("dashboard_tab_id"),
+            "place": [dashcard.get(k) for k in ("row", "col", "size_x", "size_y")],
+            "parameter_mappings": dashcard.get("parameter_mappings") or [],
+            "visualization_settings": dashcard.get("visualization_settings") or {},
+            "inline_parameters": dashcard.get("inline_parameters") or [],
+            "series": [
+                s.get("id") if isinstance(s, Mapping) else s for s in dashcard.get("series") or []
+            ],
+        },
+        sort_keys=True,
+    )
 
 
 def ensure_dashboard(
@@ -365,31 +391,38 @@ def ensure_dashboard(
             # takes it out of the trash: so it comes out first.
             metabase.call("PUT", f"/api/dashboard/{found['id']}", body)
             body = {}
-    wanted_cards = sorted(
-        (cards[p.question], p.row, p.col, p.size_x, p.size_y) for p in dashboard.cards
-    )
-    have = sorted(
-        (d.get("card_id") or 0, d["row"], d["col"], d["size_x"], d["size_y"])
-        for d in found.get("dashcards") or []
-    )
+    wanted_cards = [
+        {
+            "card_id": cards[p.question],
+            "row": p.row,
+            "col": p.col,
+            "size_x": p.size_x,
+            "size_y": p.size_y,
+            "parameter_mappings": [],
+            "visualization_settings": {},
+            "series": [],
+        }
+        for p in dashboard.cards
+    ]
+    wanted = Counter(dashcard_shape(d) for d in wanted_cards)
+    have = Counter(dashcard_shape(d) for d in found.get("dashcards") or [])
     filters = found.get("parameters") or []
-    if have != wanted_cards or filters:
-        body["dashcards"] = [
-            {
-                "id": -(index + 1),
-                "card_id": card_id,
-                "row": row,
-                "col": col,
-                "size_x": size_x,
-                "size_y": size_y,
-            }
-            for index, (card_id, row, col, size_x, size_y) in enumerate(wanted_cards)
-        ]
+    tabs = found.get("tabs") or []
+    if have != wanted or filters or tabs:
+        body["dashcards"] = [{"id": -(n + 1), **d} for n, d in enumerate(wanted_cards)]
         body["parameters"] = []
+        body["tabs"] = []
         if not created:
-            had = counted(len(filters), "filter") if filters else "no filter"
+            cards_had = counted(have.total(), "card")
+            astray = (have - wanted).total()
+            if astray and have.total():
+                cards_had += f" ({astray} not as the code says)"
+            had = [cards_had, counted(len(filters), "filter") if filters else "no filter"]
+            if tabs:
+                had.append(counted(len(tabs), "tab"))
+            listed = f"{', '.join(had[:-1])} and {had[-1]}"
             log(
-                f"revert of an edit: dashboard {key} cards: {counted(len(have), 'card')} and {had} "
+                f"revert of an edit: dashboard {key} cards: {listed} "
                 f"-> {counted(len(wanted_cards), 'card')} and no filter"
             )
     if body:

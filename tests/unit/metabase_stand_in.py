@@ -155,6 +155,8 @@ def metadata_env(
 
 # The alphabet of the entity IDs of Metabase (NanoID).
 NANO = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+# The model of a question in the items of a collection, by its type (collections/children.clj).
+ITEM_MODEL = {"question": "card", "model": "dataset", "metric": "metric"}
 # The keys that each write of the content takes: the bodies of these endpoints are closed maps in
 # Metabase 0.64.1, which refuses any other key with 400 (collections_rest/api.clj,
 # queries_rest/api/card.clj, dashboards_rest/api.clj, at the tag v0.64.1).
@@ -195,7 +197,12 @@ class ContentState:
     newest is refused with 409; a PUT of a collection without archived takes it out of the trash;
     a PUT of a dashboard with dashcards replaces them all, and a dashcard with a negative id is a
     new one, but a dashboard in the trash, or a question in the trash on a new dashcard, makes it
-    404; a write with a key that its endpoint does not take is refused with 400."""
+    404; a write with a key that its endpoint does not take is refused with 400. A question or a
+    dashboard keeps the account that made it (creator_id: user_id unless a test says otherwise);
+    the items of a collection are of every model unless models says, and leave out the questions
+    of a dashboard unless show_dashboard_questions is true; a dashboard that moves takes its
+    questions along; others holds items of the models that the jobs do not write, such as a
+    timeline."""
 
     def __init__(self) -> None:
         self.collections: dict[int, dict[str, Any]] = {}
@@ -212,6 +219,8 @@ class ContentState:
         self.graph_puts: list[dict[str, Any]] = []
         self.trash_id = 99  # the collection of the trash, as a GET of an item shows it
         self.items_as_list = False  # the items of a collection as a bare list, not as data
+        self.user_id = 1  # the account that signs the requests in: the admin of the jobs
+        self.others: list[dict[str, Any]] = []  # items of other models: id, model, name, collection
 
     def new_ids(self) -> tuple[int, str]:
         self.serial += 1
@@ -252,6 +261,9 @@ class ContentState:
             "entity_id": entity_id,
             "archived": False,
             "description": None,
+            "type": "question",
+            "dashboard_id": None,
+            "creator_id": self.user_id,
             **{k: copy.deepcopy(v) for k, v in body.items() if k != "entity_id"},
         }
         self.cards[ident] = card
@@ -265,7 +277,9 @@ class ContentState:
             "archived": False,
             "dashcards": [],
             "parameters": [],
+            "tabs": [],
             "description": None,
+            "creator_id": self.user_id,
             **copy.deepcopy(body),
         }
         self.dashboards[ident] = dashboard
@@ -279,13 +293,32 @@ class ContentState:
             shown["collection_id"] = self.trash_id
         return shown
 
-    def items(self, collection_id: int, model: str) -> Any:
-        table = self.cards if model == "card" else self.dashboards
+    def items(self, collection_id: int, models: list[str], dashboard_questions: bool) -> Any:
+        def item(i: dict[str, Any], model: str) -> dict[str, Any]:
+            listed = {"id": i["id"], "entity_id": i.get("entity_id"), "name": i["name"]}
+            return {**listed, "model": model, "dashboard_id": i.get("dashboard_id")}
+
         found = [
-            {"id": i["id"], "entity_id": i["entity_id"], "name": i["name"], "model": model}
-            for i in table.values()
-            if i.get("collection_id") == collection_id and not i["archived"]
+            item(c, ITEM_MODEL.get(c.get("type"), "card"))
+            for c in self.cards.values()
+            if c.get("collection_id") == collection_id
+            and not c["archived"]
+            and (dashboard_questions or not c.get("dashboard_id"))
         ]
+        found += [
+            item(d, "dashboard")
+            for d in self.dashboards.values()
+            if d.get("collection_id") == collection_id and not d["archived"]
+        ]
+        inside = self.location_of(collection_id)
+        found += [
+            item(c, "collection")
+            for c in self.collections.values()
+            if c["location"] == inside and not c["archived"]
+        ]
+        found += [item(o, o["model"]) for o in self.others if o["collection_id"] == collection_id]
+        if models:
+            found = [i for i in found if i["model"] in models]
         return found if self.items_as_list else {"data": found, "total": len(found)}
 
     def sparse_graph(self) -> dict[str, dict[str, str]]:
@@ -341,7 +374,8 @@ class ContentState:
             if item is None:
                 return 404, "Not found."
             if len(parts) == 4 and parts[3] == "items":
-                return 200, self.items(item["id"], query.get("models", ["card"])[0])
+                dashboard_questions = query.get("show_dashboard_questions") == ["true"]
+                return 200, self.items(item["id"], query.get("models", []), dashboard_questions)
             if method == "GET":
                 return 200, copy.deepcopy(item)
             if method == "PUT":
@@ -388,6 +422,12 @@ class ContentState:
                         item["archived"] = item["archived_directly"] = bool(value)
                     else:
                         item[key] = copy.deepcopy(value)
+                if kind == "dashboard" and "collection_id" in body:
+                    # The questions of a dashboard move with it (dashboards_rest/api.clj,
+                    # cascade-card-state-from-dashboard-update!).
+                    for card in self.cards.values():
+                        if card.get("dashboard_id") == item["id"]:
+                            card["collection_id"] = body["collection_id"]
                 return 200, self.shown(item)
         return None
 
@@ -613,6 +653,10 @@ class FakeMetabase:
             return self.dataset(body)
         if segments[:3] in (["", "api", "table"], ["", "api", "field"]) and method == "PUT":
             return self.metadata_write(segments[2], int(segments[3]), body)
+        if (method, path) == ("GET", "/api/user/current"):
+            admin = self.admin or {}
+            account = {"id": self.content_state.user_id, "email": admin.get("email")}
+            return 200, {**account, "is_superuser": True}
         if segments[:3] == ["", "api", "setting"] and len(segments) == 4 and method == "PUT":
             # PUT /api/setting/<key> with {"value": ...} answers 204 with no body.
             self.settings[segments[3]] = body["value"]

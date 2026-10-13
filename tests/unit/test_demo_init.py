@@ -1103,8 +1103,8 @@ def test_a_dashboard_whose_cards_were_changed_gets_those_of_the_code_back(
     assert dashboard["parameters"] == []
     assert len(metabase.cards) == len(di.QUESTIONS)
     assert (
-        "demo-init: revert of an edit: dashboard demo/dashboard cards: 1 card and 1 filter -> "
-        "3 cards and no filter"
+        "demo-init: revert of an edit: dashboard demo/dashboard cards: 1 card (1 not as the code "
+        "says) and 1 filter -> 3 cards and no filter"
     ) in capsys.readouterr().out.splitlines()
 
 
@@ -1190,8 +1190,8 @@ def test_an_edit_of_the_content_is_reverted_by_the_next_start_and_logged(airflow
 
 def test_the_collection_of_v0_1_moves_into_agoranomos(airflow, metabase, capsys):
     # A Metabase of v0.1: the collection at the root with its questions and its dashboard, which
-    # All Users may curate; a question that a person added to it; and a copy of a question of the
-    # demo that a person made in a collection of their own.
+    # All Users may curate, all made by the account of demo-init; a question that a person added to
+    # it; and a copy of a question of the demo that a person made in a collection of their own.
     content = metabase.content_state
     old, cards, board = an_earlier_demo(metabase)
     native = {"database": 2, "type": "native", "native": {"query": "SELECT 1"}}
@@ -1202,16 +1202,23 @@ def test_the_collection_of_v0_1_moves_into_agoranomos(airflow, metabase, capsys)
     copied = content.add_card(
         {"name": "Spend by day", "collection_id": own["id"], "dataset_query": native}
     )
-    theirs = copy.deepcopy((added, copied))
+    before = copy.deepcopy(copied)
     assert di.main(env_for(airflow, metabase)) == 0
     root, demo, now_cards, [now_board] = demo_items(metabase)
     assert (demo["id"], demo["name"], demo["location"]) == (old["id"], "Demo", f"/{root['id']}/")
     assert now_board["id"] == board["id"], "the dashboard of v0.1 keeps its ID, and its links work"
-    assert {now_cards[name]["id"] for name in cards} == {c["id"] for c in cards.values()}
-    assert (added, copied) == theirs, "the questions of people stay as they are"
+    assert {c["id"] for c in now_cards.values()} == {c["id"] for c in cards.values()}
+    # The question that the demo does not ship went to the root before the move; the copy in a
+    # collection of a person stays as it is.
+    assert added["collection_id"] is None
+    assert copied == before
     assert len(metabase.cards) == len(di.QUESTIONS) + 2
     assert content.graph["1"][str(demo["id"])] == "read"
     out = capsys.readouterr().out.splitlines()
+    assert (
+        f"demo-init: moved out: question {added['id']} of the collection of v0.1 to the root, as "
+        "the demo does not ship it"
+    ) in out
     assert (
         f"demo-init: moved: collection {di.COLLECTION_V01!r} of an earlier release into "
         "Agoranomos as Demo"
@@ -1229,40 +1236,185 @@ def test_the_collection_of_v0_1_moves_into_agoranomos(airflow, metabase, capsys)
     assert registry_of(metabase)["demo/dashboard"]["entity_id"] == board["entity_id"]
 
 
+def test_a_decoy_of_the_old_name_that_another_account_made_is_not_moved(airflow, metabase, capsys):
+    # On a Metabase of v0.1 any account may curate the root: one made a collection of the old name,
+    # with a dashboard and a question of the names of v0.1 in it. Its dashboard is not one that the
+    # account of demo-init made, so it is no demo of v0.1: it stays as it is, and the demo is new.
+    content = metabase.content_state
+    decoy = content.add_collection(di.COLLECTION_V01)
+    board = content.add_dashboard(
+        {"name": di.DASHBOARD_V01, "collection_id": decoy["id"], "creator_id": 7}
+    )
+    card = content.add_card({"name": "Spend by day", "collection_id": decoy["id"], "creator_id": 7})
+    before = copy.deepcopy((decoy, board, card))
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert (decoy, board, card) == before
+    _, demo, cards, [now_board] = demo_items(metabase)
+    assert (demo["id"], now_board["id"]) != (decoy["id"], board["id"])
+    assert card["id"] not in {c["id"] for c in cards.values()}
+    out = capsys.readouterr().out.splitlines()
+    assert (
+        f"demo-init: not moved: collection {decoy['id']} named {di.COLLECTION_V01!r} at the root "
+        f"holds no dashboard {di.DASHBOARD_V01!r} that the account of demo-init made, so it is not "
+        "the demo of v0.1, and it stays where it is"
+    ) in out
+    assert not [line for line in out if line.startswith("demo-init: moved")]
+
+
+def test_of_several_collections_of_v0_1_the_one_with_the_lowest_id_moves(airflow, metabase):
+    # A decoy that another account made first, then the demo of v0.1, then a second one that the
+    # account of demo-init made: the lowest of the two that qualify is the demo.
+    content = metabase.content_state
+    decoy = content.add_collection(di.COLLECTION_V01)
+    content.add_dashboard({"name": di.DASHBOARD_V01, "collection_id": decoy["id"], "creator_id": 7})
+    old, _, board = an_earlier_demo(metabase)
+    later, _, _ = an_earlier_demo(metabase)
+    # Metabase lists the collections in an order of its own: here the newest first.
+    listed = list(content.collections.items())
+    content.collections.clear()
+    content.collections.update(reversed(listed))
+    assert di.main(env_for(airflow, metabase)) == 0
+    _, demo, _, [now_board] = demo_items(metabase)
+    assert (demo["id"], now_board["id"]) == (old["id"], board["id"])
+    for other in (decoy, later):
+        assert (other["name"], other["location"]) == (di.COLLECTION_V01, "/")
+
+
+def test_what_the_demo_does_not_ship_leaves_the_collection_of_v0_1_for_the_root(
+    airflow, metabase, capsys
+):
+    # Before the move, every item of the collection of v0.1 that the demo does not adopt goes to the
+    # root: what another account made, a question of a name of v0.1 included, a model, a dashboard,
+    # a sub-collection, and a question saved into the dashboard of v0.1. A question of a dashboard
+    # that goes moves with it. Only the content of the package enters Agoranomos.
+    content = metabase.content_state
+    old, cards, board = an_earlier_demo(metabase)
+    theirs_board = content.add_dashboard(
+        {"name": "Their board", "collection_id": old["id"], "creator_id": 7}
+    )
+    theirs = {
+        "card": content.add_card(
+            {"name": "Spend by day", "collection_id": old["id"], "creator_id": 7}
+        ),
+        "dataset": content.add_card(
+            {"name": "A model", "collection_id": old["id"], "type": "model"}
+        ),
+        "dashboard": theirs_board,
+        "dashboard of the old name": content.add_dashboard(
+            {"name": di.DASHBOARD_V01, "collection_id": old["id"], "creator_id": 7}
+        ),
+        "on the dashboard of v0.1": content.add_card(
+            {"name": "Extra", "collection_id": old["id"], "dashboard_id": board["id"]}
+        ),
+    }
+    notes = content.add_collection("Notes", parent_id=old["id"])
+    inside = content.add_card(
+        {"name": "Inside", "collection_id": old["id"], "dashboard_id": theirs_board["id"]}
+    )
+    assert di.main(env_for(airflow, metabase)) == 0
+    _, demo, now_cards, [now_board] = demo_items(metabase)
+    assert now_board["id"] == board["id"]
+    assert {c["id"] for c in now_cards.values()} == {c["id"] for c in cards.values()}
+    for item in theirs.values():
+        assert item["collection_id"] is None, item["name"]
+    assert theirs["on the dashboard of v0.1"]["dashboard_id"] is None
+    assert (inside["collection_id"], inside["dashboard_id"]) == (None, theirs_board["id"])
+    assert notes["location"] == "/"
+    inside_demo = [c for c in metabase.cards.values() if c["collection_id"] == demo["id"]]
+    assert sorted(c["id"] for c in inside_demo) == sorted(c["id"] for c in cards.values())
+    out = capsys.readouterr().out.splitlines()
+    # One line for each, by its model and its ID; the question of their dashboard moved with it.
+    taken_out = [
+        ("question", theirs["card"]),
+        ("model", theirs["dataset"]),
+        ("dashboard", theirs_board),
+        ("dashboard", theirs["dashboard of the old name"]),
+        ("question", theirs["on the dashboard of v0.1"]),
+        ("collection", notes),
+    ]
+    assert sorted(line for line in out if line.startswith("demo-init: moved out: ")) == sorted(
+        f"demo-init: moved out: {model} {item['id']} of the collection of v0.1 to the root, as "
+        "the demo does not ship it"
+        for model, item in taken_out
+    )
+    # No name that another account chose reaches the log.
+    for name in ("Their board", "A model", "Extra", "Notes", "Inside"):
+        assert not [line for line in out if name in line], name
+
+
+def test_a_collection_of_v0_1_with_an_item_that_demo_init_cannot_take_out_does_not_move(
+    airflow, metabase, capsys
+):
+    # A timeline in the collection of v0.1: demo-init does not move what it cannot take out first,
+    # so the collection stays where it is, as it was, and the demo is new.
+    content = metabase.content_state
+    old, cards, _ = an_earlier_demo(metabase)
+    content.others.append(
+        {"id": 900, "model": "timeline", "name": "Launches", "collection_id": old["id"]}
+    )
+    before = copy.deepcopy((old, cards))
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert (old, cards) == before
+    _, demo, _, _ = demo_items(metabase)
+    assert demo["id"] != old["id"]
+    assert (
+        f"demo-init: not moved: collection {old['id']} named {di.COLLECTION_V01!r} at the root "
+        "holds a timeline 900 that demo-init cannot take out first, and it stays where it is"
+    ) in capsys.readouterr().out.splitlines()
+
+
 def test_of_two_questions_of_one_name_in_the_collection_of_v0_1_the_older_is_the_demos(
     airflow, metabase, monkeypatch
 ):
     # A question of v0.1 and a newer one of the same name next to it, listed newest first: the
-    # older one, which the dashboard of v0.1 shows, is the question of the demo.
+    # older one, which the dashboard of v0.1 shows, is the question of the demo, and the newer one
+    # goes to the root.
     content = metabase.content_state
     old, cards, board = an_earlier_demo(metabase)
     newer = content.add_card({"name": "Spend by day", "collection_id": old["id"]})
     listed = content.items
-    monkeypatch.setattr(
-        content,
-        "items",
-        lambda collection_id, model: {"data": listed(collection_id, model)["data"][::-1]},
-    )
+
+    def newest_first(collection_id, models, dashboard_questions):
+        return {"data": listed(collection_id, models, dashboard_questions)["data"][::-1]}
+
+    monkeypatch.setattr(content, "items", newest_first)
     assert di.main(env_for(airflow, metabase)) == 0
     assert registered(metabase, "demo/spend-by-day") is cards["Spend by day"]
-    assert newer["name"] == "Spend by day"
+    assert (newer["name"], newer["collection_id"]) == ("Spend by day", None)
     assert newer["id"] not in {d["card_id"] for d in board["dashcards"]}
 
 
-def test_a_question_of_v0_1_that_a_person_renamed_stays_and_the_code_makes_its_own(
+def test_a_question_of_v0_1_that_a_person_renamed_goes_to_the_root_and_the_code_makes_its_own(
     airflow, metabase, capsys
 ):
     _, cards, _ = an_earlier_demo(metabase)
     renamed = cards["Spend by day"]
     renamed["name"] = "Daily spend"
     assert di.main(env_for(airflow, metabase)) == 0
-    _, demo, now_cards, [board] = demo_items(metabase)
-    assert (renamed["name"], renamed["collection_id"]) == ("Daily spend", demo["id"])
+    _, _, now_cards, [board] = demo_items(metabase)
+    assert (renamed["name"], renamed["collection_id"]) == ("Daily spend", None)
     assert now_cards["Spend by day"]["id"] != renamed["id"]
     assert renamed["id"] not in {d["card_id"] for d in board["dashcards"]}
     assert 'demo-init: created: question demo/spend-by-day "Spend by day"' in (
         capsys.readouterr().out.splitlines()
     )
+
+
+def test_a_click_behavior_added_to_a_card_of_the_demo_dashboard_is_reverted(airflow, metabase):
+    assert di.main(env_for(airflow, metabase)) == 0
+    _, _, _, [board] = demo_items(metabase)
+    link = {"type": "link", "linkType": "url", "linkTemplate": "https://example.com/{{spend}}"}
+    board["dashcards"][0]["visualization_settings"] = {"click_behavior": link}
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert [d["visualization_settings"] for d in board["dashcards"]] == [{}] * len(di.QUESTIONS)
+
+
+def test_an_extra_key_in_the_settings_of_a_question_of_the_demo_is_reverted(airflow, metabase):
+    assert di.main(env_for(airflow, metabase)) == 0
+    settings_of(metabase, "Spend by day")["graph.show_values"] = True
+    assert di.main(env_for(airflow, metabase)) == 0
+    wanted = di.visualization_settings(question_of("spend-by-day"), TITLES)
+    assert settings_of(metabase, "Spend by day") == wanted
 
 
 def test_a_second_root_collection_of_the_old_name_is_left_alone_once_the_demo_is_found(

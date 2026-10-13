@@ -9,8 +9,9 @@ visible in Metabase: it syncs the schema of the warehouse, applies the metadata 
 collection Agoranomos / Demo as the code says (content.py, ADR-0018): an edit is reverted and
 logged, an item in the trash comes back, and every group but Administrators gets at most View on
 them. The questions get the titles of their columns and axes from the display names of the
-metadata, and their charts get the color of the project. A demo collection of an earlier release
-moves into Agoranomos as Demo once.
+metadata, and their charts get the color of the project. The demo collection of v0.1, the one
+whose dashboard the account of demo-init made, moves into Agoranomos as Demo once, after every item
+in it that the demo does not ship has gone to the root.
 
 Each step looks at the current state first. A start that finds a successful run of the transform
 does not run the pipeline again and leaves the pause state of both of its DAGs as it is, and one
@@ -488,19 +489,71 @@ def demo_package(titles: Mapping[str, str]) -> content.Package:
     )
 
 
+# How each model of the items of a collection leaves the collection of v0.1 for the root, and its
+# word in the log. A dashboard takes its own questions along (Metabase 0.64.1); a question of the
+# dashboard of v0.1 leaves that dashboard too. An item of any other model, such as a timeline or a
+# document, keeps the collection of v0.1 where it is.
+TAKE_OUT = {
+    "card": ("question", "card", {"collection_id": None}),
+    "dataset": ("model", "card", {"collection_id": None}),
+    "metric": ("metric", "card", {"collection_id": None}),
+    "dashboard": ("dashboard", "dashboard", {"collection_id": None}),
+    "collection": ("collection", "collection", {"parent_id": None}),
+}
+
+
+def made_by(metabase: Metabase, model: str, item_id: int, account_id: int) -> bool:
+    """Whether the account made the question or the dashboard of an ID."""
+    return metabase.call("GET", f"/api/{model}/{item_id}").get("creator_id") == account_id
+
+
+def demo_of_v01(
+    metabase: Metabase, items: list[dict[str, Any]], account_id: int
+) -> dict[str, dict[str, Any]]:
+    """The items of a collection of the old name that are the demo of v0.1, by their keys in the
+    package: of each name of v0.1, the oldest question, and the oldest dashboard, that the account
+    of demo-init made. A question of the demo is one of the collection, not of a dashboard."""
+    found: dict[str, dict[str, Any]] = {}
+    names = {**V01_KEYS, DASHBOARD_V01: "dashboard"}
+    for item in sorted(items, key=lambda item: item["id"]):
+        model = "dashboard" if names.get(item.get("name")) == "dashboard" else "card"
+        key = names.get(item.get("name"))
+        if (
+            key is not None
+            and key not in found
+            and item.get("model") == model
+            and not item.get("dashboard_id")
+            and made_by(metabase, model, item["id"], account_id)
+        ):
+            found[key] = item
+    return found
+
+
+def collection_line(old: Mapping[str, Any]) -> str:
+    return f"collection {old['id']} named {COLLECTION_V01!r} at the root"
+
+
 def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: content.Log) -> bool:
-    """Move the demo collection of an earlier release into Agoranomos as Demo, once, and record it
-    with its dashboard and questions, so that the next steps put them back as the code says: the
-    collection of that name at the root, which is the one lookup by name (ADR-0018). Nothing is
-    done when Metabase has the demo of the registry, also in the trash: a registry whose demo
-    Metabase does not have, as after a restore of the Metabase of an earlier release, lets the
-    collection of that release move again. A question or a dashboard of that collection whose name
-    is not one of v0.1, as one that a person renamed or added, stays in it as it is; of two of one
-    name, the older is the one of the demo. True if it moved one."""
+    """Move the demo collection of v0.1 into Agoranomos as Demo, once, and record it with its
+    dashboard and questions, so that the next steps put them back as the code says (ADR-0018).
+
+    Nothing is done when Metabase has the demo of the registry, also in the trash: a registry whose
+    demo Metabase does not have, as after a restore of the Metabase of an earlier release, lets the
+    collection of that release move again. The name of a collection proves nothing, as on a
+    Metabase of v0.1 every account may curate the root: the demo of v0.1 is the collection named
+    Agoranomos demo at the root, the one with the lowest ID of those, that holds the dashboard Ad
+    spend (demo) that the account of demo-init made, the account that made the demo of v0.1. Of
+    its questions, only those of the names of v0.1 that this account made are the demo's. When no
+    collection is the demo, or one holds an item that the job cannot take out, nothing moves: one
+    line says so, and the package makes its demo anew.
+
+    Before the move, every other item of the collection, whoever made it, goes to the root, with
+    one line for each by its model and its ID, so that only the content of the package enters
+    Agoranomos. True if it moved one."""
     entry = registry.get(DEMO_KEY)
     if entry and content.find(metabase, "collection", entry["entity_id"]) is not None:
         return False
-    old = next(
+    candidates = sorted(
         (
             c
             for c in items_of(metabase.call("GET", "/api/collection"))
@@ -509,10 +562,59 @@ def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: cont
             and not c.get("personal_owner_id")
             and not c.get("archived")
         ),
-        None,
+        key=lambda c: c["id"],
     )
-    if old is None:
+    if not candidates:
         return False
+    account_id = metabase.call("GET", "/api/user/current")["id"]
+    for old in candidates:
+        listed = metabase.call(
+            "GET", f"/api/collection/{old['id']}/items?show_dashboard_questions=true"
+        )
+        items = items_of(listed)
+        adopted = demo_of_v01(metabase, items, account_id)
+        if "dashboard" in adopted:
+            break
+    else:
+        ids = ", ".join(str(c["id"]) for c in candidates)
+        one = len(candidates) == 1
+        log(
+            f"not moved: {'collection' if one else 'collections'} {ids} named {COLLECTION_V01!r} "
+            f"at the root {'holds' if one else 'hold'} no dashboard {DASHBOARD_V01!r} that the "
+            "account of demo-init made, "
+            + (
+                "so it is not the demo of v0.1, and it stays where it is"
+                if one
+                else "so none is the demo of v0.1, and they stay where they are"
+            )
+        )
+        return False
+    kept = {item["id"] for item in adopted.values() if item["model"] == "card"}
+    board_id = adopted["dashboard"]["id"]
+    others = [
+        item
+        for item in items
+        if not (item.get("model") == "dashboard" and item["id"] == board_id)
+        and not (item.get("model") == "card" and item["id"] in kept)
+    ]
+    unknown = next((item for item in others if item.get("model") not in TAKE_OUT), None)
+    if unknown is not None:
+        log(
+            f"not moved: {collection_line(old)} holds a {unknown.get('model')} {unknown['id']} "
+            "that demo-init cannot take out first, and it stays where it is"
+        )
+        return False
+    for item in others:
+        word, model, body = TAKE_OUT[item["model"]]
+        if item.get("dashboard_id") and item["dashboard_id"] != board_id:
+            continue  # a question of a dashboard that goes to the root moves with it
+        if item.get("dashboard_id"):
+            body = {**body, "dashboard_id": None}
+        metabase.call("PUT", f"/api/{model}/{item['id']}", body)
+        log(
+            f"moved out: {word} {item['id']} of the collection of v0.1 to the root, as the demo "
+            "does not ship it"
+        )
     root = content.ensure_collection(
         metabase,
         registry,
@@ -529,14 +631,9 @@ def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: cont
         f"moved: collection {COLLECTION_V01!r} of an earlier release into {content.ROOT_NAME} as "
         f"{DEMO_NAME}"
     )
-    for model, keys in (("card", V01_KEYS), ("dashboard", {DASHBOARD_V01: "dashboard"})):
-        response = metabase.call("GET", f"/api/collection/{old['id']}/items?models={model}")
-        found: dict[str, dict[str, Any]] = {}
-        for item in sorted(items_of(response), key=lambda item: item["id"]):
-            if item.get("model") == model and item.get("name") in keys:
-                found.setdefault(keys[item["name"]], item)
-        for key, item in found.items():
-            registry.set(f"{DEMO_KEY}/{key}", model, item["entity_id"])
+    for key, item in adopted.items():
+        model = "dashboard" if key == "dashboard" else "card"
+        registry.set(f"{DEMO_KEY}/{key}", model, item["entity_id"])
     return True
 
 
