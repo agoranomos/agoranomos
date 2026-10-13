@@ -205,8 +205,11 @@ class ContentState:
     that a person put in the trash is listed only in GET /api/card?f=archived and GET
     /api/dashboard?f=archived, with its own collection; a dashboard that moves takes its questions
     along; a PUT of a question with the query and result_metadata null has Metabase compute the
-    metadata again (here: none yet); others holds items of the models that the jobs do not write,
-    such as a timeline."""
+    metadata again (here: none yet); a timeline is an item of its collection, in the trash with
+    archived=true, and GET /api/timeline/collection/:id lists those of a collection; a document is
+    an item too, but one in the trash is listed only in the trash, where its collection shows as
+    the trash, while GET /api/document/:id gives its own; others holds items of models that the
+    jobs never write, such as a pulse."""
 
     def __init__(self) -> None:
         self.collections: dict[int, dict[str, Any]] = {}
@@ -225,6 +228,8 @@ class ContentState:
         self.items_as_list = False  # the items of a collection as a bare list, not as data
         self.user_id = 1  # the account that signs the requests in: the admin of the jobs
         self.others: list[dict[str, Any]] = []  # items of other models: id, model, name, collection
+        self.timelines: dict[int, dict[str, Any]] = {}
+        self.documents: dict[int, dict[str, Any]] = {}
 
     def new_ids(self) -> tuple[int, str]:
         self.serial += 1
@@ -327,7 +332,21 @@ class ContentState:
             for c in self.collections.values()
             if c["location"] == inside and c["archived"] == archived
         ]
-        found += [item(o, o["model"]) for o in self.others if o["collection_id"] == collection_id]
+        found += [
+            item(i, "timeline")
+            for i in self.timelines.values()
+            if i["collection_id"] == collection_id and i["archived"] == archived
+        ]
+        found += [
+            item(d, "document")
+            for d in self.documents.values()
+            if d["collection_id"] == collection_id and listed(d)
+        ]
+        found += [
+            item(o, o["model"])
+            for o in self.others
+            if o["collection_id"] == collection_id and bool(o.get("archived")) == archived
+        ]
         if models:
             found = [i for i in found if i["model"] in models]
         return found if self.items_as_list else {"data": found, "total": len(found)}
@@ -348,11 +367,55 @@ class ContentState:
             return 400, {"errors": {key: "disallowed key" for key in extra}}
         return None
 
+    def add_timeline(self, collection_id: int | None, **more: Any) -> dict[str, Any]:
+        ident, entity_id = self.new_ids()
+        timeline = {"id": ident, "entity_id": entity_id, "name": "A timeline", "archived": False}
+        timeline |= {"collection_id": collection_id, "events": [{"name": "An event"}], **more}
+        self.timelines[ident] = timeline
+        return timeline
+
+    def add_document(self, collection_id: int | None, **more: Any) -> dict[str, Any]:
+        ident, _ = self.new_ids()
+        document = {"id": ident, "name": "A document", "collection_id": collection_id}
+        document |= {"archived": False, "archived_directly": False, **more}
+        self.documents[ident] = document
+        return document
+
+    def trash_items(self, models: list[str]) -> dict[str, Any]:
+        """The items of the trash: what a person put there, each shown in the trash."""
+        found = [
+            {"id": d["id"], "name": d["name"], "model": "document", "collection_id": self.trash_id}
+            for d in self.documents.values()
+            if d.get("archived_directly")
+        ]
+        found = [i for i in found if not models or i["model"] in models]
+        return {"data": found, "total": len(found)}
+
     def handle(
         self, method: str, path: str, query: dict[str, list[str]], body: Any
     ) -> tuple[int, Any] | None:
         parts = path.strip("/").split("/")  # ["api", "collection", "12", "items"]
         kind = parts[1] if len(parts) > 1 else ""
+        if path == "/api/collection/trash" and method == "GET":
+            return 200, {"id": self.trash_id, "name": "Trash", "type": "trash", "location": "/"}
+        if path == f"/api/collection/{self.trash_id}/items" and method == "GET":
+            return 200, self.trash_items(query.get("models", []))
+        if kind == "timeline" and len(parts) == 4 and parts[2] == "collection" and method == "GET":
+            archived = query.get("archived") == ["true"]
+            return 200, [
+                copy.deepcopy(i)
+                for i in self.timelines.values()
+                if str(i["collection_id"]) == parts[3] and i["archived"] == archived
+            ]
+        if kind == "timeline" and len(parts) == 3 and method == "PUT":
+            timeline = self.timelines.get(int(parts[2]))
+            if timeline is None:
+                return 404, "Not found."
+            timeline.update({k: v for k, v in body.items() if k in ("collection_id", "archived")})
+            return 200, copy.deepcopy(timeline)
+        if kind == "document" and len(parts) == 3 and method == "GET":
+            document = self.documents.get(int(parts[2]))
+            return (200, copy.deepcopy(document)) if document else (404, "Not found.")
         if path == "/api/permissions/group" and method == "GET":
             return 200, copy.deepcopy(self.groups)
         if path == "/api/collection/graph":

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import string
 from collections import Counter
 from collections.abc import Callable, Mapping
@@ -47,15 +48,6 @@ ROOT_DESCRIPTION = (
 ADMIN_GROUP_TYPE = "admin"
 # The type of every question that the package ships: not a model, not a metric.
 QUESTION_TYPE = "question"
-# The keys of a column of the metadata that Metabase 0.64.1 computes for the answer of a native
-# question, which has no description and the name of the column as its display name, and refers to
-# the column by its name and type: read on the stand in October 2026, and computed from the query by
-# maybe-async-result-metadata (queries/models/card/metadata.clj), which keeps instead the metadata
-# that a request sends with an unchanged query, or with none. Anything else in it was written by
-# someone: a description, a display name, a semantic type.
-COMPUTED_COLUMN_KEYS = frozenset(
-    {"name", "database_type", "base_type", "display_name", "field_ref"}
-)
 WHAT = {"collection": "collection", "card": "question", "dashboard": "dashboard"}
 # An entity ID of Metabase: a NanoID of 21 characters of this alphabet (NanoIdString of Metabase
 # 0.64.1). The registry holds nothing else, as its entries become paths of requests of the admin.
@@ -86,12 +78,23 @@ class ContentError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class Column:
+    """A column of the answer of a question: its name, and the types that Metabase gives it from
+    the warehouse, which the mart that the question reads fixes."""
+
+    name: str
+    base_type: str
+    database_type: str
+
+
+@dataclass(frozen=True)
 class Question:
     key: str
     name: str
     description: str
     display: str
     query: str
+    columns: tuple[Column, ...]
     visualization_settings: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -302,7 +305,8 @@ def ensure_question(
     query, in the legacy form that find() asks for, and its settings of display are compared whole:
     Metabase 0.64.1 gives both back as the jobs wrote them, and adds no key of its own (checked on
     the stand, October 2026), so anything that differs, a template tag or a key that someone added
-    included, is put back. Metadata of its columns that Metabase did not compute is dropped, and
+    included, is put back. The metadata of its columns is kept only when it is what Metabase makes
+    for the columns that the question declares (as_metabase_makes_it), else it is dropped, and
     Metabase computes it again from the query that goes with the null."""
     key = f"{package.key}/{question.key}"
     query = {"database": database_id, "type": "native", "native": {"query": question.query}}
@@ -345,7 +349,7 @@ def ensure_question(
         if have[part] != value:
             body[part] = value
             log(f"revert of an edit: question {key} {part}")
-    if have["result_metadata"] != COMPUTED:
+    if not as_metabase_makes_it(have["result_metadata"], question.columns):
         body |= {"result_metadata": None, "dataset_query": query}
         log(f"revert of an edit: question {key} result_metadata")
     if body:
@@ -353,22 +357,152 @@ def ensure_question(
     return found["id"]
 
 
-# What question_shape() gives for metadata that Metabase computed itself, or has not yet.
-COMPUTED = "computed by Metabase"
+def computed_metadata(columns: tuple[Column, ...]) -> list[dict[str, Any]]:
+    """The metadata that Metabase 0.64.1 computes for the answer of a native question with these
+    columns, in their order: no description, the name of a column as its display name, and a
+    reference to it by its name and type (read on the stand in October 2026). It computes it from
+    the query (maybe-async-result-metadata, queries/models/card/metadata.clj), and keeps instead the
+    metadata that a request sends with the query unchanged, or with none: so anything else, the
+    name of a column included, is text that someone wrote, which people and AI clients read."""
+    return [
+        {
+            "name": column.name,
+            "database_type": column.database_type,
+            "base_type": column.base_type,
+            "display_name": column.name,
+            "field_ref": ["field", column.name, {"base-type": column.base_type}],
+        }
+        for column in columns
+    ]
 
 
-def computed_by_metabase(metadata: Any) -> bool:
-    """Whether the metadata of the columns of a native question is what Metabase computes."""
-    if not metadata:
-        return True  # none yet: Metabase computes it after a save that takes longer
-    return isinstance(metadata, list) and all(
-        isinstance(column, Mapping)
-        and set(column) <= COMPUTED_COLUMN_KEYS
-        and column.get("display_name") == column.get("name")
-        and column.get("field_ref")
-        == ["field", column.get("name"), {"base-type": column.get("base_type")}]
-        for column in metadata
+# The keys that Metabase 0.64.1 adds to the metadata of each column of a native question when it
+# records the metadata of a run of the question, as a view of a dashboard makes one, with the value
+# that it gives each from the column (seen on the stand in October 2026, after POST
+# /api/card/:id/query), besides fingerprint, the statistics of the data of the column.
+RECORDED_KEYS: dict[str, Callable[[Column], Any]] = {
+    "effective_type": lambda column: column.base_type,
+    "semantic_type": lambda column: None,
+    "lib/deduplicated-name": lambda column: column.name,
+    "lib/original-name": lambda column: column.name,
+    "lib/source-column-alias": lambda column: column.name,
+    "lib/desired-column-alias": lambda column: column.name,
+    "lib/source": lambda column: "source/native",
+    "source": lambda column: "native",
+}
+# The statistics that a fingerprint may hold, each with the kind of its value, as the schema of a
+# fingerprint of Metabase 0.64.1 names them, in closed maps: src/metabase/lib/schema/metadata/
+# fingerprint.cljc at the tag v0.64.1, read on 2026-10-13. A count is an integer, a share a number
+# from 0 to 1, a moment a date or a time, and shares a list of shares, as for the days of a week or
+# the hours of a day; every value but a count may be null, and no share in a list.
+COUNT, NUMBER, SHARE, MOMENT, SHARES = "count", "number", "share", "moment", "shares"
+TEMPORAL_STATISTICS = {
+    "earliest": MOMENT,
+    "latest": MOMENT,
+    "skewness": NUMBER,
+    "weekday-distribution": SHARES,
+    "hour-distribution": SHARES,
+    "mode-fraction": SHARE,
+    "top-3-fraction": SHARE,
+}
+FINGERPRINT_TYPES: dict[str, dict[str, str]] = {
+    "type/Number": {
+        **dict.fromkeys(("min", "max", "avg", "q1", "q3", "sd"), NUMBER),
+        **dict.fromkeys(("skewness", "excess-kurtosis"), NUMBER),
+        **dict.fromkeys(("mode-fraction", "top-3-fraction", "zero-fraction"), SHARE),
+    },
+    "type/Text": {
+        **dict.fromkeys(("percent-json", "percent-url", "percent-email"), SHARE),
+        **dict.fromkeys(("percent-state", "percent-blank"), SHARE),
+        **dict.fromkeys(("average-length", "min-length", "max-length"), NUMBER),
+        **dict.fromkeys(("mode-fraction", "top-3-fraction"), SHARE),
+    },
+    # Temporal fingerprints are keyed by type/DateTime for historical reasons, and the schema takes
+    # type/Date and type/Time as well.
+    "type/DateTime": TEMPORAL_STATISTICS,
+    "type/Date": TEMPORAL_STATISTICS,
+    "type/Time": TEMPORAL_STATISTICS,
+}
+GLOBAL_STATISTICS = {"distinct-count": COUNT, "nil%": SHARE}
+# The longest list of shares that a fingerprint holds: the 24 hours of a day.
+LONGEST_SHARES = 24
+MOMENT_TEXT = re.compile(
+    r"(\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?)?"
+    r"|\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?)(Z|[+-]\d{2}:?\d{2})?"
+)
+
+
+def a_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def a_statistic(kind: str, value: Any) -> bool:
+    """Whether a value is one that the schema of a fingerprint allows for a statistic of a kind."""
+    if kind == COUNT:
+        return isinstance(value, int) and not isinstance(value, bool)
+    if value is None:
+        return True
+    if kind == NUMBER:
+        return a_number(value)
+    if kind == SHARE:
+        return a_number(value) and 0 <= value <= 1
+    if kind == MOMENT:
+        return isinstance(value, str) and MOMENT_TEXT.fullmatch(value) is not None
+    return (
+        isinstance(value, list)
+        and len(value) <= LONGEST_SHARES
+        and all(a_number(share) and 0 <= share <= 1 for share in value)
     )
+
+
+def statistics_of(value: Any, allowed: Mapping[str, str]) -> bool:
+    return isinstance(value, Mapping) and all(
+        key in allowed and a_statistic(allowed[key], item) for key, item in value.items()
+    )
+
+
+def statistics_only(fingerprint: Any) -> bool:
+    """Whether a fingerprint holds only the statistics that Metabase 0.64.1 makes: the global ones,
+    those of one type, and no experiment, each a value of its kind. The schema fixes its depth."""
+    if not isinstance(fingerprint, Mapping) or not set(fingerprint) <= {
+        "global",
+        "type",
+        "experimental",
+    }:
+        return False
+    if "global" in fingerprint and not statistics_of(fingerprint["global"], GLOBAL_STATISTICS):
+        return False
+    if fingerprint.get("experimental", {}) != {}:
+        return False
+    if "type" not in fingerprint:
+        return True
+    typed = fingerprint["type"]
+    if not isinstance(typed, Mapping) or len(typed) != 1:
+        return False
+    [(kind, statistics)] = typed.items()
+    return kind in FINGERPRINT_TYPES and statistics_of(statistics, FINGERPRINT_TYPES[kind])
+
+
+def as_metabase_makes_it(metadata: Any, columns: tuple[Column, ...]) -> bool:
+    """Whether the metadata of the columns of a question is what Metabase makes for the columns
+    that the question declares, in their order: none yet; what it computes from the query; or what
+    it records after a run, with the keys that it adds, each with its own value, and statistics.
+    Anything else, the name of a column included, is text that someone wrote."""
+    if metadata is None:
+        return True
+    computed = computed_metadata(columns)
+    if not isinstance(metadata, list) or len(metadata) != len(computed):
+        return False
+    for found, wanted, column in zip(metadata, computed, columns, strict=True):
+        if not isinstance(found, Mapping) or any(found.get(k) != v for k, v in wanted.items()):
+            return False
+        for key in set(found) - set(wanted):
+            if key == "fingerprint":
+                if not statistics_only(found[key]):
+                    return False
+            elif key not in RECORDED_KEYS or found[key] != RECORDED_KEYS[key](column):
+                return False
+    return True
 
 
 def question_shape(card: Mapping[str, Any]) -> dict[str, Any]:
@@ -376,13 +510,13 @@ def question_shape(card: Mapping[str, Any]) -> dict[str, Any]:
     display, place and trash (placed()): its query, its settings of display, its filters, the
     dashboard that it belongs to, and the metadata of its columns, which people and AI clients read
     as the display names and descriptions of its columns. Nothing else of a question is compared."""
-    metadata = card.get("result_metadata")
     return {
         "dataset_query": card.get("dataset_query"),
         "visualization_settings": card.get("visualization_settings") or {},
         "parameters": card.get("parameters") or [],
         "dashboard_id": card.get("dashboard_id"),
-        "result_metadata": COMPUTED if computed_by_metabase(metadata) else metadata,
+        # None until Metabase has computed it, after a save that takes longer.
+        "result_metadata": card.get("result_metadata") or None,
     }
 
 

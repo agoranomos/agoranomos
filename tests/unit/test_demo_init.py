@@ -305,7 +305,15 @@ def env_for(airflow: FakeAirflow, metabase: FakeMetabase, **overrides: str) -> d
 METADATA_LINES = tuple(f"demo-init: {kind}: " for kind in (md.FIRST, md.UPDATE, md.REVERT))
 CONTENT_LINES = tuple(
     f"demo-init: {kind}: "
-    for kind in ("created", "created again", "restored from the trash", "retired", "lowered")
+    for kind in (
+        "created",
+        "created again",
+        "restored from the trash",
+        "retired",
+        "lowered",
+        "moved",
+        "moved out",
+    )
 )
 
 
@@ -1384,12 +1392,13 @@ def test_a_question_of_v0_1_in_the_trash_is_not_adopted(airflow, metabase):
     assert (trashed["collection_id"], trashed["archived"]) == (None, True)
 
 
-def test_what_reaches_the_collection_during_the_move_leaves_demo_after_it(
+def test_what_reaches_the_collection_during_the_move_fails_the_job_and_moves_it_back(
     airflow, metabase, capsys
 ):
     # Another account adds a question to the collection of v0.1 while demo-init moves it, and puts
-    # one in the trash there: after the move, demo-init lets no group but Administrators curate
-    # Demo, lists it once more, the trash included, and takes out what the registry does not name.
+    # one in the trash there. The listing after the move finds what the registry does not name:
+    # demo-init puts the collection back at the root as it was, forgets it, and fails in one line.
+    # The next start moves it again, after it has taken those out.
     content = metabase.content_state
     old, cards, _ = an_earlier_demo(metabase)
     handle = content.handle
@@ -1397,51 +1406,97 @@ def test_what_reaches_the_collection_during_the_move_leaves_demo_after_it(
 
     def racing(method, path, query, body):
         answer = handle(method, path, query, body)
-        if (method, path) == ("PUT", f"/api/collection/{old['id']}") and "parent_id" in body:
+        moving = (method, path) == ("PUT", f"/api/collection/{old['id']}") and "parent_id" in body
+        if moving and body["parent_id"] is not None and not late:
             late["added"] = content.add_card({"name": "Late", "collection_id": old["id"]})
             late["trashed"] = content.add_card({"name": "Gone", "collection_id": old["id"]})
             late["trashed"].update(archived=True, archived_directly=True)
         return answer
 
     content.handle = racing
+    assert di.main(env_for(airflow, metabase)) == 1
+    line = one_line(capsys, after_apply=True)
+    assert line == (
+        f"demo-init: the collection of v0.1 got a question {late['added']['id']} during its move, "
+        "which the demo does not ship: it is back at the root as it was, and the next start moves "
+        "it again"
+    )
+    assert (old["name"], old["location"]) == (di.COLLECTION_V01, "/")
+    # It was locked before the listing, so that what the listing found is all there is, and it
+    # stays view-only at the root.
+    assert content.graph["1"][str(old["id"])] == "read"
+    assert "demo" not in registry_of(metabase)
+    assert not [k for k in registry_of(metabase) if k.startswith("demo/")]
     assert di.main(env_for(airflow, metabase)) == 0
     _, demo, now_cards, _ = demo_items(metabase)
     assert demo["id"] == old["id"]
     assert {c["id"] for c in now_cards.values()} == {c["id"] for c in cards.values()}
     assert late["added"]["collection_id"] is None
     assert (late["trashed"]["collection_id"], late["trashed"]["archived"]) == (None, True)
-    out = capsys.readouterr().out.splitlines()
-    assert (
-        f"demo-init: moved out: question {late['added']['id']} of Demo to the root, as the demo "
-        "does not ship it"
-    ) in out
-    assert (
-        f"demo-init: moved out: question {late['trashed']['id']} of Demo, in the trash, to the "
-        "root, as the demo does not ship it"
-    ) in out
-    lowered = out.index("demo-init: lowered: group 'All Users' on collection Demo: curate -> view")
-    assert lowered < next(i for i, line in enumerate(out) if " of Demo" in line)
 
 
-def test_a_collection_of_v0_1_with_an_item_that_demo_init_cannot_take_out_does_not_move(
+def test_the_timelines_of_the_collection_of_v0_1_go_to_the_root_with_their_events(
     airflow, metabase, capsys
 ):
-    # A timeline in the collection of v0.1: demo-init does not move what it cannot take out first,
-    # so the collection stays where it is, as it was, and the demo is new.
+    # The events of a timeline show on the charts of its collection: a timeline goes to the root
+    # with its events, also one in the trash, which stays there.
+    content = metabase.content_state
+    old, _, _ = an_earlier_demo(metabase)
+    live = content.add_timeline(old["id"])
+    trashed = content.add_timeline(old["id"], archived=True)
+    assert di.main(env_for(airflow, metabase)) == 0
+    _, demo, _, _ = demo_items(metabase)
+    assert demo["id"] == old["id"]
+    assert (live["collection_id"], live["events"]) == (None, [{"name": "An event"}])
+    assert (trashed["collection_id"], trashed["archived"]) == (None, True)
+    out = capsys.readouterr().out.splitlines()
+    assert (
+        f"demo-init: moved out: timeline {live['id']} of the collection of v0.1 to the root, as "
+        "the demo does not ship it"
+    ) in out
+    assert (
+        f"demo-init: moved out: timeline {trashed['id']} of the collection of v0.1, in the trash, "
+        "to the root, as the demo does not ship it"
+    ) in out
+
+
+# What demo-init cannot take out of the collection of v0.1, as each comes to it: a document, one
+# in the trash, which Metabase lists in the trash only, and a pulse.
+def a_pulse(content: ContentState, collection_id: int) -> dict[str, Any]:
+    pulse = {"id": 900, "model": "pulse", "name": "Weekly", "collection_id": collection_id}
+    content.others.append(pulse)
+    return pulse
+
+
+KEPT_BY = {
+    "document": lambda content, old: content.add_document(old["id"]),
+    "document in the trash": lambda content, old: content.add_document(
+        old["id"], archived=True, archived_directly=True
+    ),
+    "pulse": lambda content, old: a_pulse(content, old["id"]),
+}
+
+
+@pytest.mark.parametrize("kind", KEPT_BY)
+def test_an_item_that_demo_init_cannot_take_out_keeps_the_collection_of_v0_1_where_it_is(
+    airflow, metabase, capsys, kind
+):
     content = metabase.content_state
     old, cards, _ = an_earlier_demo(metabase)
-    content.others.append(
-        {"id": 900, "model": "timeline", "name": "Launches", "collection_id": old["id"]}
-    )
+    item = KEPT_BY[kind](content, old)
     before = copy.deepcopy((old, cards))
     assert di.main(env_for(airflow, metabase)) == 0
     assert (old, cards) == before
     _, demo, _, _ = demo_items(metabase)
     assert demo["id"] != old["id"]
+    model = kind.split()[0]
+    out = capsys.readouterr().out.splitlines()
     assert (
         f"demo-init: not moved: collection {old['id']} named {di.COLLECTION_V01!r} at the root "
-        "holds a timeline 900 that demo-init cannot take out first, and it stays where it is"
-    ) in capsys.readouterr().out.splitlines()
+        f"holds a {model} {item['id']} that demo-init cannot take out first, and it stays where "
+        "it is"
+    ) in out
+    assert not [line for line in out if "A document" in line or "Weekly" in line]
 
 
 def test_of_two_questions_of_one_name_in_the_collection_of_v0_1_the_older_is_the_demos(
@@ -1479,6 +1534,56 @@ def test_a_question_of_v0_1_that_a_person_renamed_goes_to_the_root_and_the_code_
     assert 'demo-init: created: question demo/spend-by-day "Spend by day"' in (
         capsys.readouterr().out.splitlines()
     )
+
+
+def metadata_on_the_stand(name: str, after_a_run: bool) -> dict[str, Any]:
+    """The metadata of a column of the mart as Metabase 0.64.1 made it on the stand: computed from
+    the query, or recorded after a run of the question, with the keys and statistics of a run."""
+    base_type, database_type = {
+        "report_date": ("type/Date", "date"),
+        "campaign_name": ("type/Text", "text"),
+        "spend": ("type/Decimal", "numeric"),
+    }[name]
+    column = {
+        "name": name,
+        "database_type": database_type,
+        "base_type": base_type,
+        "display_name": name,
+        "field_ref": ["field", name, {"base-type": base_type}],
+    }
+    if after_a_run:
+        aliases = (
+            "deduplicated-name",
+            "original-name",
+            "source-column-alias",
+            "desired-column-alias",
+        )
+        column |= {f"lib/{alias}": name for alias in aliases}
+        column |= {"effective_type": base_type, "semantic_type": None, "source": "native"}
+        column |= {"lib/source": "source/native"}
+        column["fingerprint"] = {
+            "global": {"distinct-count": 56, "nil%": 0.0},
+            "type": {"type/DateTime": {"earliest": "2026-08-18", "latest": "2026-10-12"}}
+            if base_type == "type/Date"
+            else {"type/Number": {"min": 6664.71, "q1": 6664.71, "skewness": None}},
+        }
+    return column
+
+
+@pytest.mark.parametrize("after_a_run", [False, True], ids=["computed", "recorded after a run"])
+def test_the_metadata_that_metabase_makes_for_the_demo_is_left_as_it_is(
+    airflow, metabase, after_a_run
+):
+    # A start that finds the metadata of the columns of the questions as Metabase made it changes
+    # nothing, also after a view of the dashboard has run them.
+    assert di.main(env_for(airflow, metabase)) == 0
+    for question in di.QUESTIONS:
+        card_of(metabase, question["name"])["result_metadata"] = [
+            metadata_on_the_stand(name, after_a_run) for name in question["columns"]
+        ]
+    writes = len(metabase.bodies)
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert [b for b in metabase.bodies[writes:] if b[1] != "/api/session"] == []
 
 
 def test_a_click_behavior_added_to_a_card_of_the_demo_dashboard_is_reverted(airflow, metabase):

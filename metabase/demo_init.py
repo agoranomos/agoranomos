@@ -114,10 +114,18 @@ AXIS_TITLES = ("graph.x_axis.title_text", "graph.y_axis.title_text")
 # no breakout is the name of the metric column. A color with no color_name is drawn as it is.
 SERIES_COLOR = "#A86400"
 
+# The types that Metabase 0.64.1 gives the columns of the mart that the questions answer with, read
+# from the warehouse (checked on the stand in October 2026): the contract of the mart fixes them.
+COLUMN_TYPES = {
+    "report_date": ("type/Date", "date"),
+    "campaign_name": ("type/Text", "text"),
+    "spend": ("type/Decimal", "numeric"),
+}
+
 # The questions of the demo dashboard, in the order of the dashboard, with their place on its grid
 # of 24 columns. key is the key of a question in the package, which the registry of the content
-# keeps; columns are the columns of the answer, which are columns of the mart, so that the titles
-# come from their display names.
+# keeps; columns are the columns of the answer, in their order, which are columns of the mart, so
+# that the titles come from their display names.
 QUESTIONS: tuple[dict[str, Any], ...] = (
     {
         "key": "spend-last-7-days",
@@ -469,12 +477,13 @@ def demo_package(titles: Mapping[str, str]) -> content.Package:
         description=DEMO_DESCRIPTION,
         questions=tuple(
             content.Question(
-                q["key"],
-                q["name"],
-                q["description"],
-                q["display"],
-                q["query"],
-                visualization_settings(q, titles),
+                key=q["key"],
+                name=q["name"],
+                description=q["description"],
+                display=q["display"],
+                query=q["query"],
+                columns=tuple(content.Column(c, *COLUMN_TYPES[c]) for c in q["columns"]),
+                visualization_settings=visualization_settings(q, titles),
             )
             for q in QUESTIONS
         ),
@@ -490,15 +499,17 @@ def demo_package(titles: Mapping[str, str]) -> content.Package:
 
 
 # How each model of the items of a collection leaves the collection of v0.1 for the root, and its
-# word in the log. A dashboard takes its own questions along (Metabase 0.64.1); a question of the
-# dashboard of v0.1 leaves that dashboard too. An item of any other model, such as a timeline or a
-# document, keeps the collection of v0.1 where it is.
+# word in the log. A dashboard takes its own questions along, and a timeline its events (Metabase
+# 0.64.1); a question of the dashboard of v0.1 leaves that dashboard too. An item of any other kind
+# that a collection of Metabase 0.64.1 can hold, a document or a pulse, keeps the collection of v0.1
+# where it is (valid-collection-models, collections/children.clj, read in October 2026).
 TAKE_OUT = {
     "card": ("question", "card", {"collection_id": None}),
     "dataset": ("model", "card", {"collection_id": None}),
     "metric": ("metric", "card", {"collection_id": None}),
     "dashboard": ("dashboard", "dashboard", {"collection_id": None}),
     "collection": ("collection", "collection", {"parent_id": None}),
+    "timeline": ("timeline", "timeline", {"collection_id": None}),
 }
 
 
@@ -507,12 +518,15 @@ ITEM_MODEL = {"question": "card", "model": "dataset", "metric": "metric"}
 
 
 def everything_in(metabase: Metabase, collection_id: int) -> list[dict[str, Any]]:
-    """Every item of a collection, those in the trash included, each once: the items out of the
-    trash, with the questions of its dashboards; with archived=true, its sub-collections in the
-    trash and what went there with them; and the questions and the dashboards that a person put
-    in the trash from it. Metabase 0.64.1 lists those in the trash only, as items of the trash, but
-    its lists of the questions and the dashboards in the trash keep their own collection (read in
-    collections/children.clj and on the stand, October 2026)."""
+    """Every item of a collection, those in the trash included, each once: the items of every
+    model out of the trash, its timelines among them, and the questions of its dashboards; with
+    archived=true, its sub-collections, timelines and pulses in the trash and what went there with
+    them; and the questions, dashboards and documents that a person put in the trash from it. The
+    events of a timeline belong to it and go where it goes. Metabase 0.64.1 lists what a person put
+    in the trash only as items of the trash, but its lists of the questions and the dashboards in
+    the trash, and a document read by its ID, keep their own collection (read in
+    collections/children.clj, timeline/api/timeline.clj and documents/api/document.clj, and on the
+    stand, October 2026)."""
     found: dict[tuple[str, int], dict[str, Any]] = {}
     for archived in ("", "&archived=true"):
         path = f"/api/collection/{collection_id}/items?show_dashboard_questions=true{archived}"
@@ -523,6 +537,12 @@ def everything_in(metabase: Metabase, collection_id: int) -> list[dict[str, Any]
             if item.get("collection_id") == collection_id:
                 model = kind if kind == "dashboard" else ITEM_MODEL.get(item.get("type"), "card")
                 found[(model, item["id"])] = {**item, "model": model, "archived": True}
+    trash = metabase.call("GET", "/api/collection/trash")
+    in_trash = metabase.call("GET", f"/api/collection/{trash['id']}/items?models=document")
+    for listed in items_of(in_trash):
+        document = metabase.call("GET", f"/api/document/{listed['id']}")
+        if document.get("collection_id") == collection_id:
+            found[("document", listed["id"])] = {**document, "model": "document", "archived": True}
     return sorted(found.values(), key=lambda item: (str(item.get("model")), item["id"]))
 
 
@@ -596,8 +616,9 @@ def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: cont
     Before the move, every other item of the collection, whoever made it, goes to the root, also
     from the trash, where it stays, with one line for each by its model and its ID, so that only
     the content of the package enters Agoranomos. After the move, no group but Administrators may
-    curate Demo any more, and what reached the collection in between and the registry does not
-    name goes to the root as well. True if it moved one."""
+    curate Demo any more, and Demo must hold nothing that the registry does not name: an item that
+    reached it during the move puts it back at the root as it was, and stops the job, so that the
+    next start moves it again, after it has taken that item out. True if it moved one."""
     entry = registry.get(DEMO_KEY)
     if entry and content.find(metabase, "collection", entry["entity_id"]) is not None:
         return False
@@ -671,16 +692,23 @@ def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: cont
         model = "dashboard" if key == "dashboard" else "card"
         registry.set(f"{DEMO_KEY}/{key}", model, item["entity_id"])
     # Every account could curate the collection until now: it may have got an item during the
-    # move, which no account but an admin can add once it is locked.
+    # move. Once it is locked, no account but an admin can add one, so what this listing finds
+    # is all there is.
     content.lock_down(metabase, registry, log)
     named = {registry.get(key)["entity_id"] for key in registry.keys_of(DEMO_KEY)}
-    for item in everything_in(metabase, old["id"]):
-        if item.get("entity_id") in named:
-            continue
-        if item.get("model") in TAKE_OUT:
-            take_out(metabase, item, board_id, DEMO_NAME, log)
-        else:
-            log(f"left: {item.get('model')} {item['id']} in Demo, which demo-init cannot take out")
+    stray = next(
+        (i for i in everything_in(metabase, old["id"]) if i.get("entity_id") not in named), None
+    )
+    if stray is not None:
+        back = {"name": COLLECTION_V01, "parent_id": None}
+        metabase.call("PUT", f"/api/collection/{old['id']}", back)
+        for key in (DEMO_KEY, *registry.keys_of(DEMO_KEY)):
+            registry.drop(key)
+        word = TAKE_OUT.get(stray.get("model"), (stray.get("model"),))[0]
+        raise content.ContentError(
+            f"the collection of v0.1 got a {word} {stray['id']} during its move, which the demo "
+            "does not ship: it is back at the root as it was, and the next start moves it again"
+        )
     return True
 
 
