@@ -376,7 +376,10 @@ def test_a_second_start_changes_nothing(airflow, metabase, capsys):
     assert len([c for c in metabase.collections if c.get("name") == di.COLLECTION]) == 1
     assert len(metabase.cards) == len(di.QUESTIONS)
     assert len(metabase.dashboards) == 1
-    assert capsys.readouterr().out.startswith("demo-init: the demo pipeline ran before")
+    assert capsys.readouterr().out.startswith(
+        "demo-init: the demo pipeline ran before, the history of the demo ran before, and the "
+        "dashboard "
+    )
 
 
 def test_a_pause_made_after_the_first_start_stays(airflow, metabase):
@@ -534,7 +537,9 @@ def test_a_first_start_runs_the_history_once(airflow, metabase, capsys):
     assert not airflow.paused[di.HISTORY_DAG]
     out = capsys.readouterr()
     assert out.err == ""
-    assert out.out.splitlines()[-1].startswith("demo-init: the demo pipeline ran now")
+    assert out.out.splitlines()[-1].startswith(
+        "demo-init: the demo pipeline ran now, the history of the demo ran now, and the dashboard "
+    )
 
 
 def test_a_history_that_succeeded_before_is_not_run_again(airflow, metabase):
@@ -549,14 +554,19 @@ def test_a_stack_whose_pipeline_ran_before_runs_the_history_on_its_next_start(
     airflow, metabase, capsys
 ):
     # A stack of v0.1, whose transform succeeded: its first start with the history runs the
-    # history and nothing else in Airflow, and the line says that the demo ran now.
+    # history and nothing else in Airflow, and the line says which of the two ran now.
     airflow.add_run(di.TRANSFORM_DAG, "success", run_type="asset_triggered", at=-3500)
     assert di.main(env_for(airflow, metabase)) == 0
     assert [run["state"] for run in airflow.runs_of(di.HISTORY_DAG)] == ["success"]
     assert airflow.runs_of(di.LOAD_DAG) == []
     assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True, di.HISTORY_DAG: False}
     assert (
-        capsys.readouterr().out.splitlines()[-1].startswith("demo-init: the demo pipeline ran now")
+        capsys.readouterr()
+        .out.splitlines()[-1]
+        .startswith(
+            "demo-init: the demo pipeline ran before, the history of the demo ran now, and the "
+            "dashboard "
+        )
     )
 
 

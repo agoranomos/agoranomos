@@ -537,6 +537,10 @@ def ensure_dashboard(metabase: Metabase, collection_id: int, cards: Mapping[str,
     return dashboard_id
 
 
+def when(ran: bool) -> str:
+    return "ran now" if ran else "ran before"
+
+
 def main(env: Mapping[str, str] | None = None) -> int:
     # The server whose answers the job reads, for the line of an answer of an unexpected shape.
     server, hint = "Airflow", Airflow.logs_hint
@@ -552,7 +556,6 @@ def main(env: Mapping[str, str] | None = None) -> int:
         wait_for_dags(airflow, deadline)
         ran_pipeline = run_demo_pipeline(airflow, deadline)
         ran_history = run_demo_history(airflow, deadline)
-        ran = ran_pipeline or ran_history
         server, hint = "Metabase", Metabase.logs_hint
         metabase = Metabase(config.metabase_url)
         sign_in(metabase, config.admin_email, config.admin_password)
@@ -582,7 +585,8 @@ def main(env: Mapping[str, str] | None = None) -> int:
         print(f"demo-init: {unexpected_shape(server, error, hint)}", file=sys.stderr)
         return 1
     print(
-        f"demo-init: the demo pipeline {'ran now' if ran else 'ran before'}, and the dashboard "
+        f"demo-init: the demo pipeline {when(ran_pipeline)}, the history of the demo "
+        f"{when(ran_history)}, and the dashboard "
         f"{DASHBOARD!r} ({dashboard_id}) is in the collection {COLLECTION!r}"
     )
     return 0
