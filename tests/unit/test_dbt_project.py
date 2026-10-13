@@ -1,9 +1,12 @@
 """Static checks of the dbt project in dbt/, for what Cosmos and the stack rely on, without dbt."""
 
+import csv
 import re
 from pathlib import Path
 
 DBT = Path(__file__).resolve().parents[2] / "dbt"
+SEEDS = DBT / "seeds"
+REPORTING = "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
 
 
 def test_the_profile_has_no_jinja_filter_and_literal_numbers():
@@ -122,3 +125,101 @@ def test_the_mart_has_a_contract_and_its_key():
         text,
         flags=re.MULTILINE,
     )
+
+
+def seed_rows(name: str) -> list[dict[str, str]]:
+    with (SEEDS / f"{name}.csv").open(encoding="utf-8", newline="") as file:
+        return list(csv.DictReader(file))
+
+
+def described_seed_columns(text: str) -> dict[str, set[str]]:
+    """The seeds of _seeds.yml that have a description, each with its columns that have one."""
+    found = {}
+    for block in re.split(r"^(?=  - name: )", text, flags=re.MULTILINE):
+        seed = re.match(r"  - name: (\w+)\n    description:", block)
+        if seed:
+            pattern = r"^      - name: (\w+)\n        description:"
+            found[seed.group(1)] = set(re.findall(pattern, block, flags=re.MULTILINE))
+    return found
+
+
+def test_every_seed_has_a_description_and_its_columns_have_one():
+    seeds = {path.stem for path in SEEDS.glob("*.csv")}
+    assert seeds == {
+        "seed_ad_platforms",
+        "seed_conversion_actions",
+        "seed_iso_4217_currencies",
+        "seed_iana_time_zones",
+    }
+    described = described_seed_columns((SEEDS / "_seeds.yml").read_text(encoding="utf-8"))
+    assert seeds <= described.keys(), sorted(seeds - described.keys())
+    for seed in seeds:
+        with (SEEDS / f"{seed}.csv").open(encoding="utf-8", newline="") as file:
+            header = set(next(csv.reader(file)))
+        assert header == described[seed], (seed, sorted(header ^ described[seed]))
+
+
+def test_the_seeds_go_to_staging_and_comment_their_tables():
+    project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
+    pattern = (
+        r"^seeds:\n  agoranomos:\n(?:    #.*\n)*    \+schema: staging\n"
+        r"    \+persist_docs:\n      relation: true\n      columns: true$"
+    )
+    assert re.search(pattern, project, flags=re.MULTILINE)
+    assert 'seed-paths: ["seeds"]' in project
+
+
+def test_the_intermediate_models_are_views_in_staging():
+    # ADR-0025: until an AI role needs to tell them apart, intermediate models are views in staging.
+    project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
+    pattern = r"^    intermediate:\n      \+schema: staging\n      \+materialized: view$"
+    assert re.search(pattern, project, flags=re.MULTILINE)
+
+
+def test_the_reporting_currency_is_written_one_way_everywhere():
+    # dbt renders env_var() in meta and in the arguments of tests, but not a project var whose
+    # value holds Jinja (dbt 1.12.5): every YAML file writes the one expression.
+    for path in [*(DBT / "models").rglob("*.yml"), DBT / "dbt_project.yml"]:
+        text = path.read_text(encoding="utf-8")
+        assert "var('reporting_currency" not in text, path.name
+        for found in re.findall(r"\{\{[^}]*AGORANOMOS_REPORTING_CURRENCY[^}]*\}\}", text):
+            assert found == REPORTING, (path.name, found)
+    macro = (DBT / "macros" / "reporting_currency.sql").read_text(encoding="utf-8")
+    assert "env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD')" in macro
+
+
+def test_the_conversion_actions_of_the_seed_have_a_known_category_and_one_row_each():
+    rows = seed_rows("seed_conversion_actions")
+    keys = [(r["platform"], r["conversion_action_id"]) for r in rows]
+    assert len(keys) == len(set(keys))
+    categories = {"purchase", "lead", "sign_up", "add_to_cart", "app_install", "other"}
+    assert {r["conversion_category"] for r in rows} <= categories
+    assert {r["is_primary"] for r in rows} <= {"true", "false"}
+    # Meta counts the same purchases twice, by the pixel and as omni_purchase: one of them counts.
+    meta = {
+        r["conversion_action_id"]: r["is_primary"] for r in rows if r["platform"] == "demo_social"
+    }
+    assert meta["offsite_conversion.fb_pixel_purchase"] == "true"
+    assert meta["omni_purchase"] == "false"
+
+
+def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
+    rows = {r["platform"]: r for r in seed_rows("seed_ad_platforms")}
+    from agoranomos_pipelines.demo import platforms
+
+    assert set(rows) == set(platforms.PLATFORMS)
+    for code, platform in platforms.PLATFORMS.items():
+        assert rows[code]["mimics"] == platform.mimics
+        assert rows[code]["is_demo"] == "true"
+
+
+def test_the_seeds_of_currencies_and_time_zones_hold_what_the_demo_uses():
+    currencies = {r["currency_code"] for r in seed_rows("seed_iso_4217_currencies")}
+    zones = {r["time_zone"] for r in seed_rows("seed_iana_time_zones")}
+    from agoranomos_pipelines.demo import world
+
+    assert {a.currency for a in world.ACCOUNTS} <= currencies
+    assert len(currencies) > 150
+    assert {a.time_zone for a in world.ACCOUNTS} <= zones
+    assert "Etc/GMT+8" in zones
+    assert len(zones) > 400

@@ -1,0 +1,74 @@
+seeds:
+  - name: seed_ad_platforms
+    description: >-
+      The platforms that the data of the model comes from, one row each: their codes, the names
+      that the marts show, and what kind of data each gives. The demo platforms are fictional, and
+      mimics names the API whose shape each follows; the codes of real platforms come with their
+      connectors.
+    config:
+      column_types: {is_demo: boolean}
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null, unique]
+      - name: platform_name
+        description: '{{ doc("platform_name") }}'
+      - name: kind
+        description: '{{ doc("kind") }}'
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["ads", "web_analytics", "exchange_rates"]
+      - name: mimics
+        description: '{{ doc("mimics") }}'
+      - name: is_demo
+        description: '{{ doc("is_demo") }}'
+  - name: seed_conversion_actions
+    description: >-
+      The conversion actions that the base package knows, one row for each platform and action:
+      their names, their categories, and whether each is primary, that is, counts in the
+      conversions of a campaign. A deployment overrides a row in
+      extensions/model/conversion_actions.toml; an action that neither names is not primary.
+    config:
+      # Text, as the IDs of some platforms are numbers and those of others are not.
+      column_types: {conversion_action_id: text, is_primary: boolean}
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: conversion_action_id
+        description: '{{ doc("conversion_action_id") }}'
+      - name: conversion_action_name
+        description: '{{ doc("conversion_action_name") }}'
+      - name: conversion_category
+        description: '{{ doc("conversion_category") }}'
+      - name: is_primary
+        description: '{{ doc("is_primary") }}'
+  - name: seed_iso_4217_currencies
+    description: >-
+      The currencies of List One of ISO 4217, as SIX publishes it (published 2026-09-17), one row
+      each, against which the model checks the currency of every account.
+    config:
+      # Text, so that a numeric code keeps its leading zeros, such as 008.
+      column_types: {minor_unit: integer, numeric_code: text}
+    columns:
+      - name: currency_code
+        description: The three-letter code of the currency, such as USD.
+        data_tests: [not_null, unique]
+      - name: currency_name
+        description: The name of the currency in List One, such as US Dollar.
+      - name: minor_unit
+        description: How many decimal places the currency has, such as 2 for USD; none where List One gives N.A.
+      - name: numeric_code
+        description: The three-digit numeric code of the currency, as text.
+  - name: seed_iana_time_zones
+    description: >-
+      The names of the time zones of the tz database of IANA, release 2026e, one row each, against
+      which the model checks the time zone of every account and property.
+    config:
+      column_types: {is_link: boolean}
+    columns:
+      - name: time_zone
+        description: The name of the time zone, such as Europe/Berlin or Etc/GMT+8.
+        data_tests: [not_null, unique]
+      - name: is_link
+        description: Whether the name is another name of a zone, a link of the database, such as US/Eastern.
