@@ -20,8 +20,9 @@ def imports(path: Path) -> list[tuple[str, list[str]]]:
 
 def test_the_load_dag_does_not_import_cosmos():
     # Cosmos reads the manifest of the dbt project each time that a file that builds a DAG of it is
-    # parsed: by the DAG processor, and by each task of that file when it starts. Each load DAG has a
-    # file of its own without Cosmos, so that a missing or broken manifest cannot break its import.
+    # parsed: by the DAG processor, and by each task of that file when it starts. Each load DAG
+    # has a file of its own without Cosmos, so that a missing or broken manifest cannot break its
+    # import.
     for name in ("agoranomos_demo.py", "agoranomos_demo_history.py"):
         modules = [module for module, _ in imports(DAGS / name)]
         assert modules, f"{name} imports nothing"
