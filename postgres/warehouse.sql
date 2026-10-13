@@ -76,6 +76,44 @@ ALTER SCHEMA raw_demo_staging OWNER TO loader;
 GRANT USAGE ON SCHEMA raw_demo TO transformer;
 GRANT SELECT ON ALL TABLES IN SCHEMA raw_demo TO transformer;
 ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_demo GRANT SELECT ON TABLES TO transformer;
+-- The fictional platforms of the demo (ADR-0025): dlt loads each into raw_demo_<platform>, and
+-- merges and keeps the versions of its campaigns through raw_demo_<platform>_staging. loader owns
+-- both; transformer may read the first.
+CREATE SCHEMA IF NOT EXISTS raw_demo_search AUTHORIZATION loader;
+CREATE SCHEMA IF NOT EXISTS raw_demo_search_staging AUTHORIZATION loader;
+ALTER SCHEMA raw_demo_search OWNER TO loader;
+ALTER SCHEMA raw_demo_search_staging OWNER TO loader;
+GRANT USAGE ON SCHEMA raw_demo_search TO transformer;
+GRANT SELECT ON ALL TABLES IN SCHEMA raw_demo_search TO transformer;
+ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_demo_search GRANT SELECT ON TABLES TO transformer;
+CREATE SCHEMA IF NOT EXISTS raw_demo_social AUTHORIZATION loader;
+CREATE SCHEMA IF NOT EXISTS raw_demo_social_staging AUTHORIZATION loader;
+ALTER SCHEMA raw_demo_social OWNER TO loader;
+ALTER SCHEMA raw_demo_social_staging OWNER TO loader;
+GRANT USAGE ON SCHEMA raw_demo_social TO transformer;
+GRANT SELECT ON ALL TABLES IN SCHEMA raw_demo_social TO transformer;
+ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_demo_social GRANT SELECT ON TABLES TO transformer;
+CREATE SCHEMA IF NOT EXISTS raw_demo_video AUTHORIZATION loader;
+CREATE SCHEMA IF NOT EXISTS raw_demo_video_staging AUTHORIZATION loader;
+ALTER SCHEMA raw_demo_video OWNER TO loader;
+ALTER SCHEMA raw_demo_video_staging OWNER TO loader;
+GRANT USAGE ON SCHEMA raw_demo_video TO transformer;
+GRANT SELECT ON ALL TABLES IN SCHEMA raw_demo_video TO transformer;
+ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_demo_video GRANT SELECT ON TABLES TO transformer;
+CREATE SCHEMA IF NOT EXISTS raw_demo_web AUTHORIZATION loader;
+CREATE SCHEMA IF NOT EXISTS raw_demo_web_staging AUTHORIZATION loader;
+ALTER SCHEMA raw_demo_web OWNER TO loader;
+ALTER SCHEMA raw_demo_web_staging OWNER TO loader;
+GRANT USAGE ON SCHEMA raw_demo_web TO transformer;
+GRANT SELECT ON ALL TABLES IN SCHEMA raw_demo_web TO transformer;
+ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_demo_web GRANT SELECT ON TABLES TO transformer;
+CREATE SCHEMA IF NOT EXISTS raw_demo_fx AUTHORIZATION loader;
+CREATE SCHEMA IF NOT EXISTS raw_demo_fx_staging AUTHORIZATION loader;
+ALTER SCHEMA raw_demo_fx OWNER TO loader;
+ALTER SCHEMA raw_demo_fx_staging OWNER TO loader;
+GRANT USAGE ON SCHEMA raw_demo_fx TO transformer;
+GRANT SELECT ON ALL TABLES IN SCHEMA raw_demo_fx TO transformer;
+ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_demo_fx GRANT SELECT ON TABLES TO transformer;
 -- loader waits at most a minute for a lock, so a blocked load fails, and is tried again (ADR-0004).
 ALTER ROLE loader SET lock_timeout = '1min';
 

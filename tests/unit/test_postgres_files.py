@@ -323,3 +323,26 @@ def test_the_cleanup_of_the_results_of_celery_deletes_the_old_ones_and_does_noth
     # Nothing in Airflow removes them from a database of their own. The code of a task can make a
     # statement there wait, so each has a timeout.
     assert normalized("celery_results.sql") == CELERY_RESULTS_CLEANUP
+
+
+DEMO_PLATFORMS = ("search", "social", "video", "web", "fx")
+
+
+@pytest.mark.parametrize("platform", DEMO_PLATFORMS)
+def test_each_demo_platform_has_its_schema_and_its_staging_schema(platform):
+    # dlt loads raw_demo_<platform> as loader and merges through raw_demo_<platform>_staging;
+    # transformer reads the first, and no role but loader the second (ADR-0004).
+    text = normalized("warehouse.sql")
+    raw, staging = f"raw_demo_{platform}", f"raw_demo_{platform}_staging"
+    for statement in (
+        f"CREATE SCHEMA IF NOT EXISTS {raw} AUTHORIZATION loader;",
+        f"CREATE SCHEMA IF NOT EXISTS {staging} AUTHORIZATION loader;",
+        f"ALTER SCHEMA {raw} OWNER TO loader;",
+        f"ALTER SCHEMA {staging} OWNER TO loader;",
+        f"GRANT USAGE ON SCHEMA {raw} TO transformer;",
+        f"GRANT SELECT ON ALL TABLES IN SCHEMA {raw} TO transformer;",
+        f"ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA {raw} "
+        "GRANT SELECT ON TABLES TO transformer;",
+    ):
+        assert runs(text, statement), statement
+    assert not runs(text, f"GRANT USAGE ON SCHEMA {staging}")
