@@ -9,6 +9,7 @@ from stack_helpers import (
     process_uids,
     psql,
     psql_over_network,
+    rendered,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -60,6 +61,35 @@ def test_the_broker_server_does_not_run_as_root():
 def test_the_worker_does_not_run_as_root():
     result = compose("exec", "-T", "airflow-worker", "id", "-u")
     assert result.stdout.strip() == "50000"
+
+
+def worker_check(*options, python=("python", "-c")):
+    """Run the health check of compose.celery.yaml in the worker, as Docker runs it: options go to
+    docker compose exec, and python is the command that runs the code of the check."""
+    code = rendered("celery")["airflow-worker"]["healthcheck"]["test"][3]
+    return compose("exec", "-T", *options, "airflow-worker", *python, code, check=False)
+
+
+def test_the_check_of_the_worker_passes_for_its_own_node_only():
+    # The worker of the container answers the ping for its own node name. For another host name
+    # no node answers within the 5 seconds of the check, and it fails.
+    assert worker_check().returncode == 0
+    assert worker_check("-e", "HOSTNAME=another-container").returncode == 1
+
+
+def test_the_check_of_the_worker_starts_no_airflow():
+    # -X importtime lists each module that a Python process imports, on standard error: the check
+    # imports Celery and the transport of the broker, and nothing of Airflow, which the old check
+    # started at every run.
+    result = worker_check(python=("python", "-X", "importtime", "-c"))
+    assert result.returncode == 0
+    imported = {
+        line.rsplit("|", 1)[1].strip()
+        for line in result.stderr.splitlines()
+        if line.startswith("import time:") and "|" in line
+    }
+    assert {"celery", "kombu.transport.redis"} <= imported
+    assert not sorted(name for name in imported if name.split(".")[0] == "airflow")
 
 
 def test_the_worker_holds_neither_the_metadata_database_nor_the_signing_key():

@@ -411,8 +411,24 @@ def test_the_worker_is_set_up_like_the_other_airflow_services():
     )
     assert worker["environment"]["DUMB_INIT_SETSID"] == "0"
     assert worker["command"] == ["celery", "worker"]
-    assert "inspect ping" in " ".join(worker["healthcheck"]["test"])
     assert "ports" not in worker
+
+
+def test_the_worker_checks_that_it_answers_a_ping_without_airflow():
+    # celery --app airflow.providers.celery.executors.celery_executor.app inspect ping started
+    # Airflow at every check, at a cost of about 150 MiB and more than a second of CPU inside the
+    # memory limit of the worker. The check of compose.celery.yaml pings the worker of the
+    # container through the broker with Celery alone (tests/unit/test_celery_worker_check.py),
+    # and reads the URL of the broker, with its password, from the environment. Five failures in
+    # a row, 30 seconds apart, make the worker unhealthy, as for the DAG processor.
+    health = rendered("celery")["airflow-worker"]["healthcheck"]
+    test = health["test"]
+    assert test[:3] == ["CMD", "python", "-c"]
+    assert len(test) == 4
+    assert "from celery import Celery" in test[3]
+    assert "airflow" not in test[3].lower().replace("airflow__celery__broker_url", "")
+    timing = {key: health.get(key) for key in ("interval", "timeout", "retries", "start_period")}
+    assert timing == {"interval": "30s", "timeout": "10s", "retries": 5, "start_period": "1m0s"}
 
 
 def test_the_broker_is_set_up_as_the_decision_says():
