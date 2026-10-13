@@ -480,11 +480,17 @@ JOB_MOUNTS = {
     ("metadata-export", "/opt/agoranomos/metadata"),
     (os.path.join(extensions_folder(), "metadata"), "/opt/agoranomos/extensions/metadata"),
 }
+# The one mount of these jobs that they write: the registry of the content of the package in
+# Metabase (ADR-0018), which test_only_the_setup_jobs_hold_the_registry_of_the_content checks.
+REGISTRY_FOLDER = "/var/tmp"  # noqa: S108 (a named volume of the jobs, not a folder of the host)
+REGISTRY_MOUNT = ("metabase-content", REGISTRY_FOLDER)
+REGISTRY = f"{REGISTRY_FOLDER}/agoranomos-content.json"
 
 
 def job_mounts(service: dict[str, Any]) -> set[tuple[str, str]]:
-    """The mounts of a service as (source, target), after a check that each is read-only."""
-    mounts = service["volumes"]
+    """The mounts of a service as (source, target), but the registry of the content, after a check
+    that each is read-only."""
+    mounts = [m for m in service["volumes"] if (m["source"], m["target"]) != REGISTRY_MOUNT]
     writable = [mount["target"] for mount in mounts if not mount.get("read_only")]
     assert not writable, f"these mounts are writable: {writable}"
     return {(mount["source"], mount["target"]) for mount in mounts}
@@ -551,6 +557,27 @@ def test_the_dag_processor_and_the_tasks_start_after_the_manifest(variant):
     for name in runners:
         condition = services[name]["depends_on"]["metadata-export"]["condition"]
         assert condition == "service_completed_successfully", name
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_only_the_setup_jobs_hold_the_registry_of_the_content(variant):
+    # The registry says which items of Metabase are the package's (ADR-0018): no Airflow
+    # service, which runs the code of the DAGs of the extensions folder, mounts it.
+    services = rendered(variant)
+    holders = {
+        (name, mount["target"], bool(mount.get("read_only")))
+        for name, service in services.items()
+        for mount in service.get("volumes") or []
+        if mount.get("source") == "metabase-content"
+    }
+    expected = {("metabase-init", REGISTRY_FOLDER, False)}
+    if "demo-init" in services:
+        expected.add(("demo-init", REGISTRY_FOLDER, False))
+    assert holders == expected
+    for name in {holder[0] for holder in holders}:
+        # The environment holds secrets: only the path, which is none, reaches the assertion.
+        path = services[name]["environment"].get("CONTENT_REGISTRY")
+        assert path == REGISTRY, name
 
 
 # Metabase 0.63 and 0.64 have these on by default, and compose.yaml switches them off with
