@@ -115,6 +115,24 @@ def test_metadata_export_wrote_the_export_as_nobody(marts):
     assert MART in marts.effective
 
 
+def test_metadata_export_wrote_the_manifest_that_airflow_reads():
+    # As nobody, and every Airflow service reads it: the DAG processor here.
+    result = compose(
+        "exec",
+        "-T",
+        "airflow-dag-processor",
+        "python",
+        "-c",
+        "import json, os; p = '/opt/agoranomos/manifest/manifest.json'; "
+        "m = json.load(open(p)); print(os.stat(p).st_uid, len(m['nodes']))",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr[-500:]
+    owner, nodes = map(int, result.stdout.split())
+    assert owner == 65534
+    assert nodes > 0
+
+
 @needs_the_demo
 def test_metabase_shows_the_effective_metadata_of_the_marts(metabase_url, session, marts):
     shown = metadata.tables_of(warehouse_metadata(metabase_url, session))

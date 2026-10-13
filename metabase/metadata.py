@@ -2,9 +2,11 @@
 Metabase shows (ADR-0016).
 
 The one-shot metadata-export service runs this file as `metadata.py export`, in the Airflow image,
-where dbt is. dbt ls reads the project, which is mounted read-only, and the descriptions, the meta
-and the columns of every model and source go as JSON into the metadata-export volume, which no other
-service can write. The job holds no secret and has no network.
+where dbt is. dbt ls reads the project, which is mounted read-only, and the job writes the
+descriptions, the meta and the columns of every model and source as JSON into the metadata-export
+volume, which no other service can write, and copies the manifest that dbt writes for dbt ls into
+the volume dbt-manifest, which the Airflow services read (ADR-0027). The job holds no secret and has
+no network.
 
 metabase-init, on every start, and demo-init, after its sync, load() the effective metadata (the
 export, plus the overrides in extensions/metadata/overrides.toml) and apply() it to the tables and
@@ -44,6 +46,9 @@ DBT = "/opt/airflow/dbt_venv/bin/dbt"
 PROJECT = "/opt/agoranomos/dbt"
 WORK = "/tmp/dbt"  # noqa: S108 (a tmpfs of the metadata-export container)
 EXPORT = "/opt/agoranomos/metadata/metadata.json"
+# The manifest of the dbt project, which dbt ls writes into its target folder, for Cosmos: the job
+# copies it into the volume dbt-manifest, which the Airflow services mount read-only (ADR-0027).
+MANIFEST = "/opt/agoranomos/manifest/manifest.json"
 # What dbt ls prints of each model and source, and how long it may take.
 EXPORT_KEYS = ("resource_type", "schema", "name", "source_name", "description", "columns", "meta")
 DBT_TIMEOUT = 300
@@ -284,8 +289,41 @@ def write_export(document: Mapping[str, Any], output: str | Path) -> None:
         ) from None
 
 
-def export(dbt: str, project: str, work: str, output: str) -> str:
-    """Export the metadata of the dbt project, and return the line that says what was exported."""
+def copy_manifest(work: str, output: str | Path) -> None:
+    """Copy the manifest that dbt ls wrote into its target folder to the volume that Airflow reads,
+    in one step, so that a parse of Airflow never sees half of one. A manifest that is not a JSON
+    object with nodes is refused, and the one that was there stays."""
+    source = Path(work) / "target" / "manifest.json"
+    try:
+        data = source.read_bytes()
+    except FileNotFoundError:
+        raise MetadataError(
+            f"dbt ls wrote no manifest into {source.parent}: Airflow reads the project from it "
+            "(ADR-0027)"
+        ) from None
+    except OSError as error:
+        raise MetadataError(f"cannot read {source}: {type(error).__name__}") from None
+    try:
+        document = json.loads(data)
+    except ValueError:
+        raise MetadataError("the manifest that dbt ls wrote is not JSON") from None
+    if not isinstance(document, dict) or not isinstance(document.get("nodes"), dict):
+        raise MetadataError("the manifest that dbt ls wrote has no nodes")
+    target = Path(output)
+    temporary = target.with_name(f".{target.name}.tmp")
+    try:
+        temporary.write_bytes(data)
+        os.replace(temporary, target)
+    except OSError as error:
+        raise MetadataError(
+            f"cannot write {target}: {type(error).__name__}. The folder must belong to the user "
+            "65534 that runs the job (airflow/Dockerfile)"
+        ) from None
+
+
+def export(dbt: str, project: str, work: str, output: str, manifest: str | None = None) -> str:
+    """Export the metadata of the dbt project, and copy the manifest that dbt ls wrote to manifest,
+    if given; return the line that says what was exported."""
     try:
         result = subprocess.run(  # noqa: S603 (a fixed command, with the paths of the job)
             export_command(dbt, project, work),
@@ -308,7 +346,11 @@ def export(dbt: str, project: str, work: str, output: str) -> str:
         raise MetadataError(f"dbt ls printed an unexpected line ({type(error).__name__})") from None
     write_export(document, output)
     models, sources = len(document["models"]), len(document["sources"])
-    return f"exported {counted(models, 'model')} and {counted(sources, 'source table')} to {output}"
+    line = f"exported {counted(models, 'model')} and {counted(sources, 'source table')} to {output}"
+    if manifest is not None:
+        copy_manifest(work, manifest)
+        line += f", and the manifest of the dbt project to {manifest}"
+    return line
 
 
 def counted(number: int, thing: str) -> str:
@@ -839,7 +881,7 @@ def main(argv: list[str]) -> int:
         print("metadata-export: usage: metadata.py export", file=sys.stderr)
         return 2
     try:
-        line = export(DBT, PROJECT, WORK, EXPORT)
+        line = export(DBT, PROJECT, WORK, EXPORT, MANIFEST)
     except MetadataError as error:
         print(f"metadata-export: {error}", file=sys.stderr)
         return 1

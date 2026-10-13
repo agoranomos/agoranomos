@@ -76,6 +76,9 @@ x-airflow: &airflow
   volumes:
     - ./airflow/dags:/opt/agoranomos/dags:ro
     - ./dbt:/opt/agoranomos/dbt:ro
+    # The manifest of the dbt project, from which Cosmos renders the tasks of dbt (ADR-0027):
+    # metadata-export writes it on every start, and no Airflow service can change it.
+    - dbt-manifest:/opt/agoranomos/manifest:ro
     - ${AGORANOMOS_EXTENSIONS_DIR:-./extensions}/dags:/opt/agoranomos/extensions/dags:ro
     - airflow-logs:/opt/airflow/logs
   networks: [default, data]
@@ -338,6 +341,9 @@ services:
       <<: *airflow-depends-on
       airflow-init:
         condition: service_completed_successfully
+      # The manifest of the dbt project, which the transform DAG needs to be parsed (ADR-0027).
+      metadata-export:
+        condition: service_completed_successfully
 
   airflow-dag-processor:
     <<: *airflow
@@ -356,6 +362,9 @@ services:
     depends_on:
       <<: *airflow-depends-on
       airflow-init:
+        condition: service_completed_successfully
+      # The manifest of the dbt project, which the transform DAG needs to be parsed (ADR-0027).
+      metadata-export:
         condition: service_completed_successfully
 
   airflow-triggerer:
@@ -482,8 +491,11 @@ services:
   # is mounted read-only, and metadata.py writes the descriptions, the meta and the columns of the models
   # and sources as JSON into the metadata-export volume, for metabase-init and demo-init. It is the one
   # service that can write that volume, and no Airflow service mounts it, so the code of a DAG cannot
-  # change what the jobs with the admin password apply. It holds no secret and has no network. It runs
-  # the Airflow image for its dbt, as nobody, with neither the entrypoint of Airflow nor its settings.
+  # change what the jobs with the admin password apply. It also copies the manifest of the dbt project,
+  # which dbt writes for dbt ls, into the volume dbt-manifest, from which Cosmos renders the tasks of dbt
+  # (ADR-0027): the Airflow services mount it read-only, and this job is the one service that can write
+  # either volume. It holds no secret and has no network. It runs the Airflow image for its dbt, as
+  # nobody, with neither the entrypoint of Airflow nor its settings.
   metadata-export:
     image: agoranomos-airflow:local
     pull_policy: never
@@ -504,8 +516,11 @@ services:
       # The folder of the image that this volume is mounted on belongs to nobody, so the new volume
       # does too (airflow/Dockerfile).
       - metadata-export:/opt/agoranomos/metadata
+      # The folder of the image that this volume is mounted on belongs to nobody as well, so the new
+      # volume does too (airflow/Dockerfile).
+      - dbt-manifest:/opt/agoranomos/manifest
     # dbt writes its target and logs folders under /tmp, and they go with the container; the job
-    # writes nothing else but the export.
+    # writes nothing else but the export and the manifest.
     read_only: true
     tmpfs:
       - /tmp
@@ -739,5 +754,7 @@ volumes:
   airflow-logs:
   # The export of metadata-export: only that job writes it.
   metadata-export:
+  # The manifest of the dbt project for Cosmos: only metadata-export writes it (ADR-0027).
+  dbt-manifest:
   # The certificates of the proxy of server mode.
   caddy-data:
