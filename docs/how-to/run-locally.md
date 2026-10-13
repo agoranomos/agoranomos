@@ -44,7 +44,7 @@ Keep a copy of `.env` in a password manager. It holds the keys without which the
 
 ## Add your own DAG
 
-Put a DAG file into `extensions/dags/`. Airflow shows it within about a minute, in the `extensions` bundle, paused until you unpause it. The folder is yours: releases of Agoranomos never change it ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)). A task of your DAG runs with the keys of Airflow and the passwords of its metadata database and of the warehouse roles in its environment, and with the CeleryExecutor also with the password of the broker, so review what you put there as you would any code that touches your data.
+Put a DAG file into `extensions/dags/`. Airflow shows it within about a minute, in the `extensions` bundle, paused until you unpause it. The folder is yours: releases of Agoranomos never change it ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)). A task of your DAG runs with keys of Airflow and the passwords of the warehouse roles in its environment, with the LocalExecutor also with the password of the metadata database of Airflow, and with the CeleryExecutor with the passwords of the broker and of the database of the results of Celery instead, so review what you put there as you would any code that touches your data.
 
 ## Stop and start again
 

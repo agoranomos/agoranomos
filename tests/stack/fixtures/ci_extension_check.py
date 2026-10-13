@@ -22,7 +22,9 @@ from airflow.sdk import dag, task
 log = logging.getLogger(__name__)
 
 # The settings that can hold the connection string of the metadata database: Airflow's own, and the
-# result backend of Celery, which the Celery variant points at the same database.
+# result backend of Celery, which falls back to it when it is not set. The Celery variant gives the
+# worker neither the first nor a backend in the metadata database: its results have a database of
+# their own.
 DATABASE_SETTINGS = ("SQL_ALCHEMY_CONN", "RESULT_BACKEND")
 # Words in the names of settings that hold secrets.
 SECRET_WORDS = ("SECRET", "KEY", "PASSWORD", "CONN", "BROKER", "BACKEND", "TOKEN")

@@ -13,6 +13,7 @@ import sys
 import threading
 from collections.abc import Iterator
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 from services import BASE_AIRFLOW, airflow_names, airflow_services
@@ -42,6 +43,11 @@ WAREHOUSE_PASSWORDS = ("WAREHOUSE_LOADER_PASSWORD", "WAREHOUSE_TRANSFORMER_PASSW
 WAREHOUSE_CREDENTIALS = ("WAREHOUSE_LOADER_PASSWORD", "DBT_ENV_SECRET_WAREHOUSE_PASSWORD")
 # The service whose processes run the tasks.
 TASK_RUNNER = {"local": "airflow-scheduler", "celery": "airflow-worker"}
+# What the Celery worker does not get of the settings that it would take from the scheduler: the
+# connection string of the metadata database and the key that signs the tokens of Airflow. The
+# security model of Airflow 3.3.2 keeps both from workers: a task reaches Airflow through the
+# execution API, with the token that the scheduler gives it.
+KEPT_FROM_THE_WORKER = ("AIRFLOW__API_AUTH__JWT_SECRET", "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN")
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
@@ -78,10 +84,13 @@ def test_no_service_waits_for_a_service_that_the_variant_lacks(variant):
 
 
 def test_the_local_variant_has_no_celery_settings():
+    # db-init sets up the role of the results of Celery in both variants, so it alone has its
+    # password.
     for name, service in rendered("local").items():
         environment = service.get("environment", {})
         celery = sorted(key for key in environment if "CELERY" in key or key == "VALKEY_PASSWORD")
-        assert not celery, f"{name} has Celery settings in the local variant: {celery}"
+        allowed = ["CELERY_RESULTS_DB_PASSWORD"] if name == "db-init" else []
+        assert celery == allowed, f"{name} has Celery settings in the local variant: {celery}"
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
@@ -107,16 +116,57 @@ def test_every_airflow_service_shares_the_keys_and_the_database(variant):
     )
     services = airflow_services(variant)
     for key in shared:
+        # The Celery worker has neither of KEPT_FROM_THE_WORKER, which the next test checks.
+        holders = {
+            name: service
+            for name, service in services.items()
+            if not (name == "airflow-worker" and key in KEPT_FROM_THE_WORKER)
+        }
         # Some of these are secrets, and a failed assertion prints what it compares, and the locals
         # of the test under --showlocals: so the values of the services are NamesOnly, and the test
         # compares names and counts, never the values.
         values = NamesOnly(
-            {name: service["environment"].get(key) for name, service in services.items()}
+            {name: service["environment"].get(key) for name, service in holders.items()}
         )
         missing = sorted(name for name, value in values.items() if not value)
         assert not missing, f"{key} is missing in {missing}"
         different = len(set(values.values()))
         assert different == 1, f"{key} differs between the Airflow services"
+
+
+def test_the_celery_worker_holds_neither_the_metadata_database_nor_the_signing_key():
+    # It keeps what it needs: the Fernet key, which decrypts the connections and variables that the
+    # execution API gives a task, the secret key with which its log server checks the requests of
+    # the API server, and the address of the execution API. Flags and names only: values are
+    # secrets.
+    worker = airflow_services("celery")["airflow-worker"]["environment"]
+    held = sorted(set(KEPT_FROM_THE_WORKER) & set(worker))
+    assert held == [], f"the worker holds {held}"
+    for key in (
+        "AIRFLOW__CORE__FERNET_KEY",
+        "AIRFLOW__API__SECRET_KEY",
+        "AIRFLOW__CORE__EXECUTION_API_SERVER_URL",
+    ):
+        assert bool(worker.get(key)), f"the worker lacks {key}"
+
+
+def test_the_results_of_celery_go_to_a_database_and_a_role_of_their_own():
+    # The worker writes the result of each task, and the scheduler reads it, so both name the same
+    # backend: the database celery_results of platform-db, as the role celery_results, which
+    # postgres/platform.sql sets up. The URL holds a password: the test compares its parts that are
+    # names, and the URLs of the two services as a flag.
+    services = airflow_services("celery")
+    backends = {
+        name: services[name]["environment"]["AIRFLOW__CELERY__RESULT_BACKEND"]
+        for name in ("airflow-scheduler", "airflow-worker")
+    }
+    for name, backend in backends.items():
+        url = urlsplit(backend.removeprefix("db+"))
+        found = (url.scheme, url.username, url.hostname, url.port, url.path)
+        expected = ("postgresql+psycopg2", "celery_results", "platform-db", 5432, "/celery_results")
+        assert found == expected, name
+    same = len(set(backends.values())) == 1
+    assert same, "the scheduler and the worker name different result backends"
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
@@ -234,11 +284,14 @@ def expected_holders(variant: str) -> dict[str, set[str]]:
       the databases and the schemas, holds those and the passwords that it gives the roles.
     - The role backup has a password of its own, which db-init gives it and the backup service
       uses.
-    - The Airflow services share the keys of Airflow and its metadata database. The service that
-      runs the tasks gets the passwords of the warehouse roles of dlt and dbt, and the DAG
-      processor, which parses the DAGs of the extensions folder, gets none.
+    - The Airflow services share the keys of Airflow and its metadata database, but for the
+      Celery worker, which holds neither the password of the metadata database nor the key that
+      signs the tokens. The service that runs the tasks gets the passwords of the warehouse roles
+      of dlt and dbt, and the DAG processor, which parses the DAGs of the extensions folder, gets
+      none.
     - With Celery, the broker, the scheduler that sends it the tasks and the worker that runs them
-      hold the password of the broker.
+      hold the password of the broker, and the scheduler and the worker that of the role of the
+      results of Celery, which db-init sets up in both variants.
     - The admin passwords stay in the one-shot jobs that create the admins or sign in as them, so
       the code of an Airflow task, an extension DAG included, never holds one.
     - Metabase holds its own database password and its two keys. It learns the password of the
@@ -246,20 +299,22 @@ def expected_holders(variant: str) -> dict[str, set[str]]:
     """
     airflow = airflow_names(variant)
     runner = TASK_RUNNER[variant]
+    # The Airflow services that hold the password of the metadata database and the signing key.
+    control = airflow - {"airflow-worker"}
+    celery_queue = {"airflow-scheduler", "airflow-worker"} if variant == "celery" else set()
     return {
         "WAREHOUSE_POSTGRES_PASSWORD": {"warehouse-db", "db-init"},
         "PLATFORM_POSTGRES_PASSWORD": {"platform-db", "db-init"},
-        "AIRFLOW_DB_PASSWORD": {"db-init", *airflow},
+        "AIRFLOW_DB_PASSWORD": {"db-init", *control},
         "METABASE_DB_PASSWORD": {"db-init", "metabase"},
         "METABASE_READER_PASSWORD": {"db-init", "metabase-init"},
         "WAREHOUSE_LOADER_PASSWORD": {"db-init", runner},
         "WAREHOUSE_TRANSFORMER_PASSWORD": {"db-init", runner},
         "BACKUP_DB_PASSWORD": {"db-init", "backup"},
-        "VALKEY_PASSWORD": (
-            {"broker", "airflow-scheduler", "airflow-worker"} if variant == "celery" else set()
-        ),
+        "VALKEY_PASSWORD": {"broker", *celery_queue} if variant == "celery" else set(),
+        "CELERY_RESULTS_DB_PASSWORD": {"db-init", *celery_queue},
         "AIRFLOW_FERNET_KEY": airflow,
-        "AIRFLOW_JWT_SECRET": airflow,
+        "AIRFLOW_JWT_SECRET": control,
         "AIRFLOW_API_SECRET_KEY": airflow,
         "AIRFLOW_ADMIN_PASSWORD": {"airflow-init", "demo-init"},
         "METABASE_ENCRYPTION_KEY": {"metabase"},
@@ -342,10 +397,12 @@ def test_the_worker_is_set_up_like_the_other_airflow_services():
         assert worker[key] == scheduler[key], key
     assert worker["volumes"] == scheduler["volumes"]
     assert set(worker["environment"]) - set(scheduler["environment"]) == {"DUMB_INIT_SETSID"}
+    lacks = set(scheduler["environment"]) - set(worker["environment"])
+    assert sorted(lacks) == sorted(KEPT_FROM_THE_WORKER)
     differing = [
         k
         for k in scheduler["environment"]
-        if worker["environment"][k] != scheduler["environment"][k]
+        if k in worker["environment"] and worker["environment"][k] != scheduler["environment"][k]
     ]
     assert sorted(differing) == sorted(WAREHOUSE_CREDENTIALS), (
         f"the worker and the scheduler differ in {differing}"
