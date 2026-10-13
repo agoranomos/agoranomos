@@ -217,15 +217,18 @@ def build(
     boundary: datetime | None = None,
 ) -> list:
     """The resources of a platform as of now: every table, or the campaigns alone, whose versions
-    start at boundary. A fact table replaces the windows of its accounts, empty or not."""
+    start at boundary, by default now. A fact table replaces the windows of its accounts, empty or
+    not. Like the scope, the boundary is set on every run: a run of scd2 without one would reuse
+    the boundary that dlt stored in the schema at the last load."""
     platform = PLATFORMS[code]
+    boundary = now if boundary is None else boundary
     facts = {fact.table for fact in platform.facts}
     resources = []
     for table, rows in platform.module.records(now, first, skip).items():
         if entities_only and table != "campaigns":
             continue
         hints = own(TABLE_HINTS[(code, table)])
-        if hints["write_disposition"] == SCD2 and boundary is not None:
+        if hints["write_disposition"] == SCD2:
             hints["write_disposition"] = {**SCD2, "boundary_timestamp": boundary.isoformat()}
         if table in facts:
             covered = scope(code, table, platform.module.windows(now, first))

@@ -236,6 +236,18 @@ def test_a_history_whose_earlier_try_completed_no_load_replays_the_names(sources
     assert len(pipelines[0].runs) == len(search.name_versions(NOW)) + 1
 
 
+@pytest.mark.parametrize("code", ["demo_search", "demo_social", "demo_video"])
+def test_a_build_without_a_boundary_dates_the_versions_at_its_own_moment(sources, code):
+    # A run of scd2 without a boundary of its own would reuse the one that dlt stored in the
+    # schema at the last load, as a run without a scope would reuse the stored scope.
+    module, _, _ = sources
+    [campaigns] = [r for r in module.build(code, NOW) if r.name == "campaigns"]
+    assert campaigns.hints["write_disposition"] == {
+        **module.SCD2,
+        "boundary_timestamp": NOW.isoformat(),
+    }
+
+
 def test_the_history_leaves_out_the_gap_day(sources):
     module, pipelines, _ = sources
     from agoranomos_pipelines.demo import platforms
