@@ -1,0 +1,28 @@
+sources:
+  - name: raw_demo_search
+    description: >-
+      The data of demo_search, a fictional platform of search ads in the shape of the Google Ads
+      API v25, which the DAG agoranomos_demo_history loads with dlt: its responses as dlt
+      normalizes them, nested objects joined by __.
+    schema: raw_demo_search
+    # The demo has no daily load in this release: no freshness.
+    config:
+      freshness: null
+    tables:
+      - name: customer_clients
+        description: >-
+          The accounts under the manager account of demo_search, as customer_client lists them,
+          the manager among them; each load replaces them.
+      - name: campaigns
+        description: >-
+          The campaigns of demo_search, one row for each version, from _dlt_valid_from until
+          _dlt_valid_to, as dlt keeps them with its scd2 strategy.
+      - name: campaign_stats
+        description: >-
+          The statistics of the campaigns of demo_search, one row for each campaign and day with
+          any metric, in the currency and the time zone of the account. Each load replaces the
+          days of each account that it covers.
+      - name: campaign_conversions
+        description: >-
+          The conversions of the campaigns of demo_search by conversion action, one row for each
+          campaign, day and action with any conversion.

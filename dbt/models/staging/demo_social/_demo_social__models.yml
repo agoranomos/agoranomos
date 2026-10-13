@@ -1,0 +1,144 @@
+models:
+  - name: stg_demo_social__campaign_stats
+    description: >-
+      The statistics of the campaigns of demo_social, one row for each campaign and day, from its
+      insights at the level of campaigns, with the column names of the model; clicks are its link
+      clicks. report_date, platform, account_id and campaign_id are its key. Its tests guard the
+      marts: when one of them fails, dbt does not rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [report_date, platform, account_id, campaign_id]
+    columns:
+      - name: report_date
+        description: '{{ doc("report_date") }}'
+        data_tests: [not_null]
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+        data_tests: [not_null]
+      - name: loaded_campaign_name
+        description: '{{ doc("loaded_campaign_name") }}'
+      - name: impressions
+        description: '{{ doc("impressions") }}'
+        data_tests: [not_null, non_negative]
+      - name: clicks
+        description: '{{ doc("clicks") }}'
+        data_tests: [not_null, non_negative]
+      - name: spend
+        description: '{{ doc("spend") }}'
+        data_tests: [not_null, non_negative]
+  - name: stg_demo_social__campaign_conversions
+    description: >-
+      The conversions of the campaigns of demo_social by action type, one row for each campaign, day
+      and action type that its insights list among the actions or the action values, with the count
+      and the value of the attribution setting of its row. report_date, platform, account_id,
+      campaign_id and conversion_action_id are its key. Its tests guard the marts: when one of them
+      fails, dbt does not rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [report_date, platform, account_id, campaign_id, conversion_action_id]
+    columns:
+      - name: report_date
+        description: '{{ doc("report_date") }}'
+        data_tests: [not_null]
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+        data_tests: [not_null]
+      - name: conversion_action_id
+        description: '{{ doc("conversion_action_id") }}'
+        data_tests: [not_null]
+      - name: conversion_action_name
+        description: '{{ doc("conversion_action_name") }}'
+      - name: platform_category
+        description: '{{ doc("platform_category") }}'
+      - name: attribution_setting
+        description: '{{ doc("attribution_setting") }}'
+      - name: conversions
+        description: '{{ doc("conversions") }}'
+        data_tests: [not_null, non_negative]
+      - name: conversion_value
+        description: '{{ doc("conversion_value") }}'
+        data_tests: [not_null, non_negative]
+  - name: stg_demo_social__accounts
+    description: >-
+      The ad accounts of demo_social, one row each. platform and account_id are its key. Its tests
+      guard the marts: when one of them fails, dbt does not rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id]
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: account_name
+        description: '{{ doc("account_name") }}'
+      - name: currency
+        description: '{{ doc("currency") }}'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('seed_iso_4217_currencies')
+                field: currency_code
+      - name: time_zone
+        description: '{{ doc("time_zone") }}'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('seed_iana_time_zones')
+                field: time_zone
+      - name: manager_account_id
+        description: '{{ doc("manager_account_id") }}'
+      - name: account_status
+        description: '{{ doc("account_status") }}'
+  - name: stg_demo_social__campaigns
+    description: >-
+      The versions of the campaigns of demo_social, one row for each version that the loads saw,
+      from valid_from until valid_to: a change of any of its fields, such as the name or the status,
+      starts a new version, and a campaign that a load no longer lists has no current one. platform,
+      account_id, campaign_id and valid_from are its key. Its tests guard the marts: when one of
+      them fails, dbt does not rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id, campaign_id, valid_from]
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+        data_tests: [not_null]
+      - name: observed_name
+        description: '{{ doc("observed_name") }}'
+        data_tests: [not_null]
+      - name: campaign_status
+        description: '{{ doc("campaign_status") }}'
+      - name: campaign_type
+        description: '{{ doc("campaign_type") }}'
+      - name: valid_from
+        description: '{{ doc("valid_from") }}'
+        data_tests: [not_null]
+      - name: valid_to
+        description: '{{ doc("valid_to") }}'

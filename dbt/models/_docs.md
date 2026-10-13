@@ -138,7 +138,7 @@ The status of the ad account at the last load, as the ad platform writes it, suc
 {% enddocs %}
 
 {% docs campaign_status %}
-The status of the campaign at the last load, as the ad platform writes it, such as ENABLED, PAUSED or REMOVED for Google, ACTIVE or DELETED for Meta, or ENABLE for TikTok.
+The status of the campaign at the last load, or in a version of the campaign its status in that version, as the ad platform writes it, such as ENABLED, PAUSED or REMOVED for Google, ACTIVE or DELETED for Meta, or ENABLE for TikTok.
 {% enddocs %}
 
 {% docs campaign_type %}
@@ -146,11 +146,11 @@ The type of the campaign as the ad platform gives it: the advertising channel ty
 {% enddocs %}
 
 {% docs valid_from %}
-The moment from which the campaign had the name of the row, as the loads saw it: the moment of the load that first saw it, or, for the names that the first load of the demo replays, 00:00 UTC of the day on which the name changed, or of the first day of the history for the first of them.
+The moment from which the row held, as the loads saw it: for a version of a campaign, its values, as a change of any of its fields, such as its name or its status, starts a new version; for a name of a campaign, as in ad_campaign_names, the name. It is the moment of the load that first saw it, or, for the versions that the first load of the demo replays, 00:00 UTC of the day on which a name changed, or of the first day of the history for the first of them.
 {% enddocs %}
 
 {% docs valid_to %}
-The moment until which the campaign had the name of the row; none for its current name.
+The moment until which the row held: that of the load that saw the campaign change, or no longer saw it; none while the row holds, as for the current version or name of a campaign.
 {% enddocs %}
 
 {% docs is_current %}

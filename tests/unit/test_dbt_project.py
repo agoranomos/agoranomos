@@ -223,3 +223,192 @@ def test_the_seeds_of_currencies_and_time_zones_hold_what_the_demo_uses():
     assert {a.time_zone for a in world.ACCOUNTS} <= zones
     assert "Etc/GMT+8" in zones
     assert len(zones) > 400
+
+
+STAGING = DBT / "models" / "staging"
+# The staging models of the platforms of the demo (ADR-0025), by platform: each is one call of the
+# macro of the shape of its API, over these raw tables of the platform, in this order.
+SHAPED = {
+    "demo_search": {
+        "campaign_stats": ("google_ads_campaign_stats", ["campaign_stats"]),
+        "campaign_conversions": ("google_ads_campaign_conversions", ["campaign_conversions"]),
+        "accounts": ("google_ads_accounts", ["customer_clients"]),
+        "campaigns": ("google_ads_campaigns", ["campaigns"]),
+    },
+    "demo_social": {
+        "campaign_stats": ("meta_campaign_stats", ["insights_campaign"]),
+        "campaign_conversions": (
+            "meta_campaign_conversions",
+            ["insights_campaign", "insights_campaign__actions", "insights_campaign__action_values"],
+        ),
+        "accounts": ("meta_accounts", ["ad_accounts"]),
+        "campaigns": ("meta_campaigns", ["campaigns"]),
+    },
+    "demo_video": {
+        "campaign_stats": ("tiktok_campaign_stats", ["report_campaign_daily"]),
+        "campaign_conversions": ("tiktok_campaign_conversions", ["report_campaign_daily"]),
+        "accounts": ("tiktok_accounts", ["advertisers"]),
+        "campaigns": ("tiktok_campaigns", ["campaigns"]),
+    },
+    "demo_web": {
+        "properties": ("ga4_properties", ["properties"]),
+        "sessions_daily": ("ga4_sessions_daily", ["report_sessions_daily"]),
+    },
+    "demo_fx": {"rates_daily": ("euro_rates", ["rates_daily"])},
+}
+STATS_KEY = ["report_date", "platform", "account_id", "campaign_id"]
+ACCOUNT_KEY = ["platform", "account_id"]
+# The critical tests of each kind of staging model: its key, which unique_combination checks, the
+# columns that not_null checks, and those that non_negative checks.
+CRITICAL = {
+    "campaign_stats": (
+        STATS_KEY,
+        [*STATS_KEY, "impressions", "clicks", "spend"],
+        ["impressions", "clicks", "spend"],
+    ),
+    "campaign_conversions": (
+        [*STATS_KEY, "conversion_action_id"],
+        [*STATS_KEY, "conversion_action_id", "conversions", "conversion_value"],
+        ["conversions", "conversion_value"],
+    ),
+    "accounts": (ACCOUNT_KEY, [*ACCOUNT_KEY, "currency", "time_zone"], []),
+    "campaigns": (
+        [*ACCOUNT_KEY, "campaign_id", "valid_from"],
+        [*ACCOUNT_KEY, "campaign_id", "valid_from", "observed_name"],
+        [],
+    ),
+    "properties": (
+        ["platform", "property_id"],
+        ["platform", "property_id", "currency", "time_zone"],
+        [],
+    ),
+    "sessions_daily": (
+        [
+            "report_date",
+            "property_id",
+            "session_source",
+            "session_medium",
+            "session_campaign_name",
+            "session_campaign_id",
+        ],
+        ["report_date", "property_id", "sessions"],
+        ["sessions", "engaged_sessions", "key_events", "total_revenue"],
+    ),
+    "rates_daily": (
+        ["rate_date", "base_currency", "quote_currency"],
+        ["rate_date", "base_currency", "quote_currency", "rate", "rate_source"],
+        ["rate"],
+    ),
+}
+# The key test of a model, with its columns in flow style.
+UNIQUE = r"^      - unique_combination:\n          arguments:\n            columns: \[(.*)\]$"
+# The columns of an account or a property that must be in a seed: the seed and its column.
+IN_SEEDS = {
+    "currency": ("seed_iso_4217_currencies", "currency_code"),
+    "time_zone": ("seed_iana_time_zones", "time_zone"),
+}
+
+
+def blocks(text: str, indent: int) -> dict[str, str]:
+    """The items of a list of YAML with a name, by their name: those whose dash is at indent."""
+    found = {}
+    for block in re.split(rf"^(?= {{{indent}}}- name: )", text, flags=re.MULTILINE):
+        item = re.match(rf" {{{indent}}}- name: (\w+)\n", block)
+        if item:
+            found[item.group(1)] = block
+    return found
+
+
+def column_tests(block: str) -> set[str]:
+    """The names of the tests of a column: a list on the line of data_tests, or a list below it."""
+    tests = set(re.findall(r"^          - (\w+)", block, flags=re.MULTILINE))
+    flow = re.search(r"^        data_tests: \[(.*)\]$", block, flags=re.MULTILINE)
+    if flow:
+        tests |= {name.strip() for name in flow.group(1).split(",")}
+    return tests
+
+
+def test_each_staging_model_of_a_platform_is_one_call_of_the_shape_of_its_api():
+    # With the code of the platform of its folder and the raw tables of its own dataset: a model
+    # that passed the code of another platform would still pass its key tests.
+    from agoranomos_pipelines.demo import platforms
+
+    assert set(SHAPED) == set(platforms.PLATFORMS)
+    found = {path.relative_to(STAGING).as_posix() for path in STAGING.glob("demo_*/*.sql")}
+    wanted = {f"{code}/stg_{code}__{model}.sql" for code in SHAPED for model in SHAPED[code]}
+    assert found == wanted, sorted(found ^ wanted)
+    for code, models in SHAPED.items():
+        dataset = platforms.PLATFORMS[code].dataset
+        for model, (macro, tables) in models.items():
+            path = STAGING / code / f"stg_{code}__{model}.sql"
+            comment, *body = path.read_text(encoding="utf-8").splitlines()
+            relations = ", ".join(f"source('{dataset}', '{table}')" for table in tables)
+            assert comment.startswith(f"-- {path.name}: "), path.name
+            assert body == [f"{{{{ {macro}({relations}, '{code}') }}}}"], path.name
+
+
+def test_the_sources_of_a_platform_are_the_tables_that_its_load_writes():
+    # dlt writes a table for each table of the shape of the platform, and a child table for each
+    # list in it, such as insights_campaign__actions of Meta.
+    from agoranomos_pipelines.demo import platforms, shapes
+
+    for code, platform in platforms.PLATFORMS.items():
+        written = set()
+        for (owner, table), shape in shapes.SHAPES.items():
+            if owner == code:
+                lists = [field for field, kind in shape.items() if isinstance(kind, list)]
+                written |= {table, *(f"{table}__{field}" for field in lists)}
+        text = (STAGING / code / f"_{code}__sources.yml").read_text(encoding="utf-8")
+        [source] = re.findall(r"^  - name: (\w+)\n    description:", text, flags=re.MULTILINE)
+        assert source == platform.dataset
+        assert re.search(rf"^    schema: {platform.dataset}$", text, flags=re.MULTILINE), code
+        pattern = r"^      - name: (\w+)\n        description:"
+        declared = set(re.findall(pattern, text, flags=re.MULTILINE))
+        assert declared == written, (code, sorted(declared ^ written))
+
+
+def test_the_staging_models_of_the_platforms_have_their_critical_tests():
+    # Each test is an error, so a row that breaks one stops the models that read the model
+    # (TestBehavior.AFTER_EACH of Cosmos): no test of staging is a warning.
+    for code, models in SHAPED.items():
+        text = (STAGING / code / f"_{code}__models.yml").read_text(encoding="utf-8")
+        assert "severity" not in text, code
+        described = blocks(text, 2)
+        assert set(described) == {f"stg_{code}__{model}" for model in models}, code
+        for model in models:
+            key, not_null, non_negative = CRITICAL[model]
+            block = described[f"stg_{code}__{model}"]
+            unique = re.findall(UNIQUE, block, flags=re.MULTILINE)
+            assert [part.split(", ") for part in unique] == [key], (code, model)
+            columns = blocks(block, 6)
+            tested = {name: column_tests(column) for name, column in columns.items()}
+            assert {c for c, tests in tested.items() if "not_null" in tests} == set(not_null), (
+                code,
+                model,
+            )
+            assert {c for c, tests in tested.items() if "non_negative" in tests} == set(
+                non_negative
+            ), (code, model)
+            seeded = {c for c, tests in tested.items() if "relationships" in tests}
+            assert seeded == (set(IN_SEEDS) if model in {"accounts", "properties"} else set())
+            for column in seeded:
+                seed, field = IN_SEEDS[column]
+                target = rf"^ +to: ref\('{seed}'\)\n +field: {field}$"
+                assert re.search(target, columns[column], flags=re.MULTILINE), (code, column)
+
+
+def test_every_column_of_the_staging_of_the_platforms_takes_the_doc_block_of_its_name():
+    # The staging models share their columns with the intermediate models and the marts, where
+    # columns of one name say the same.
+    docs = (DBT / "models" / "_docs.md").read_text(encoding="utf-8")
+    written = set(re.findall(r"^\{% docs (\w+) %\}$", docs, flags=re.MULTILINE))
+    for code in SHAPED:
+        text = (STAGING / code / f"_{code}__models.yml").read_text(encoding="utf-8")
+        for model, block in blocks(text, 2).items():
+            columns = blocks(block, 6)
+            assert columns, model
+            for name, column in columns.items():
+                description = re.search(r"^        description: (.*)$", column, flags=re.MULTILINE)
+                assert description, (model, name)
+                assert description.group(1) == f"'{{{{ doc(\"{name}\") }}}}'", (model, name)
+                assert name in written, (model, name)
