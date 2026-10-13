@@ -69,7 +69,9 @@ def stamp(seconds: float) -> str:
 
 
 class FakeAirflow:
-    """What demo-init can see of Airflow 3.3.2: two DAGs, their runs, and the asset between them.
+    """What demo-init can see of Airflow 3.3.2: the three DAGs of the demo, their runs, and the
+    asset between the load and the transform. The history is a DAG like any other here: its runs
+    update no asset that schedules a DAG.
 
     A scheduler runs on the fake clock, one loop a second, in the order of the loop of Airflow:
     first a run for an event that waits, then the queued runs start, then the running ones end.
@@ -91,9 +93,13 @@ class FakeAirflow:
         self.clock = clock
         self.url = ""
         self.loaded_at = 0.0  # when the DAG processor has loaded the DAGs
-        self.paused = {di.LOAD_DAG: True, di.TRANSFORM_DAG: True}
-        self.durations = {di.LOAD_DAG: 10.0, di.TRANSFORM_DAG: 30.0}
-        self.results = {di.LOAD_DAG: "success", di.TRANSFORM_DAG: "success"}
+        self.paused = {di.LOAD_DAG: True, di.TRANSFORM_DAG: True, di.HISTORY_DAG: True}
+        self.durations = {di.LOAD_DAG: 10.0, di.TRANSFORM_DAG: 30.0, di.HISTORY_DAG: 60.0}
+        self.results = {
+            di.LOAD_DAG: "success",
+            di.TRANSFORM_DAG: "success",
+            di.HISTORY_DAG: "success",
+        }
         self.runs: list[dict[str, Any]] = []
         self.queued_event: float | None = None
         self.triggers: list[tuple[float, str, str]] = []  # (time, DAG, result)
@@ -324,7 +330,7 @@ def test_the_scan_finds_a_secret_in_the_json_of_an_echo():
 
 def test_a_first_start_runs_the_pipeline_and_creates_the_demo(airflow, metabase, capsys):
     assert di.main(env_for(airflow, metabase)) == 0
-    assert airflow.paused == {di.LOAD_DAG: False, di.TRANSFORM_DAG: False}
+    assert airflow.paused == {di.LOAD_DAG: False, di.TRANSFORM_DAG: False, di.HISTORY_DAG: False}
     assert airflow.calls.count(("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns")) == 1
     # The load starts the transform through the asset of the raw table: demo-init does not.
     assert ("POST", f"/api/v2/dags/{di.TRANSFORM_DAG}/dagRuns") not in airflow.calls
@@ -370,25 +376,29 @@ def test_a_second_start_changes_nothing(airflow, metabase, capsys):
     assert len([c for c in metabase.collections if c.get("name") == di.COLLECTION]) == 1
     assert len(metabase.cards) == len(di.QUESTIONS)
     assert len(metabase.dashboards) == 1
-    assert capsys.readouterr().out.startswith("demo-init: the demo pipeline ran before")
+    assert capsys.readouterr().out.startswith(
+        "demo-init: the demo pipeline ran before, the history of the demo ran before, and the "
+        "dashboard "
+    )
 
 
 def test_a_pause_made_after_the_first_start_stays(airflow, metabase):
     assert di.main(env_for(airflow, metabase)) == 0
-    airflow.paused = {di.LOAD_DAG: True, di.TRANSFORM_DAG: True}  # paused in the Airflow UI
+    airflow.paused = dict.fromkeys(airflow.paused, True)  # paused in the Airflow UI
     assert di.main(env_for(airflow, metabase)) == 0
-    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True}
+    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True, di.HISTORY_DAG: True}
 
 
 def test_a_success_long_ago_counts_whatever_ran_since(airflow, metabase):
     # Airflow keeps every run, also after ./agoranomos down. Here the one success is the oldest of
-    # 121 runs of the transform, so a page of the newest runs would not show it: the count of the
-    # successful runs does.
-    airflow.add_run(di.TRANSFORM_DAG, "success", at=-10_000)
-    for n in range(120):
-        airflow.add_run(di.TRANSFORM_DAG, "failed", at=-9_000 + n)
+    # 121 runs of the transform, and of the history, so a page of the newest runs would not show
+    # it: the count of the successful runs does.
+    for dag_id in (di.TRANSFORM_DAG, di.HISTORY_DAG):
+        airflow.add_run(dag_id, "success", at=-10_000)
+        for n in range(120):
+            airflow.add_run(dag_id, "failed", at=-9_000 + n)
     assert di.main(env_for(airflow, metabase)) == 0
-    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True}
+    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True, di.HISTORY_DAG: True}
     assert [call for call in airflow.calls if call[0] in ("POST", "PATCH")] == [
         ("POST", "/auth/token")
     ]
@@ -419,7 +429,7 @@ def test_the_load_starts_only_once_the_transform_is_idle(airflow, metabase):
     # An earlier start stopped half-way: a run of the transform is running, and an event waits for
     # the next one. With max_active_runs=1, the event of a load that ended now would be dropped and
     # would start no run, so demo-init waits until the transform is idle before it loads.
-    airflow.paused = {di.LOAD_DAG: False, di.TRANSFORM_DAG: False}
+    airflow.paused.update({di.LOAD_DAG: False, di.TRANSFORM_DAG: False})
     airflow.add_run(di.TRANSFORM_DAG, "running", at=-10, result="failed")
     airflow.queued_event = -5.0
     assert di.main(env_for(airflow, metabase)) == 0
@@ -437,7 +447,7 @@ def test_an_event_that_waits_makes_the_transform_busy(airflow, metabase):
     # An event of the raw asset waits, and the scheduler has not made its run yet: no run is
     # queued or running. The transform is busy all the same, and the load waits until the run of
     # that event has ended, since its own event would find the waiting one and be dropped.
-    airflow.paused = {di.LOAD_DAG: False, di.TRANSFORM_DAG: False}
+    airflow.paused.update({di.LOAD_DAG: False, di.TRANSFORM_DAG: False})
     airflow.queued_event = 0.0
     client = di.Airflow(airflow.url)
     di.sign_in_to_airflow(client, ENV["AIRFLOW_ADMIN_PASSWORD"])
@@ -520,6 +530,77 @@ def test_a_failed_transform_names_the_transform_dag_and_dbt(airflow, metabase, c
     assert metabase.calls == []
 
 
+def test_a_first_start_runs_the_history_once(airflow, metabase, capsys):
+    assert di.main(env_for(airflow, metabase)) == 0
+    history = airflow.runs_of(di.HISTORY_DAG)
+    assert [run["state"] for run in history] == ["success"]
+    assert not airflow.paused[di.HISTORY_DAG]
+    out = capsys.readouterr()
+    assert out.err == ""
+    assert out.out.splitlines()[-1].startswith(
+        "demo-init: the demo pipeline ran now, the history of the demo ran now, and the dashboard "
+    )
+
+
+def test_a_history_that_succeeded_before_is_not_run_again(airflow, metabase):
+    airflow.add_run(di.HISTORY_DAG, "success", at=-3600)
+    airflow.add_run(di.TRANSFORM_DAG, "success", run_type="asset_triggered", at=-3500)
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert [run["state"] for run in airflow.runs_of(di.HISTORY_DAG)] == ["success"]
+    assert airflow.paused[di.HISTORY_DAG]  # a start that finds a success leaves the pause as it is
+
+
+def test_a_stack_whose_pipeline_ran_before_runs_the_history_on_its_next_start(
+    airflow, metabase, capsys
+):
+    # A stack of v0.1, whose transform succeeded: its first start with the history runs the
+    # history and nothing else in Airflow, and the line says which of the two ran now.
+    airflow.add_run(di.TRANSFORM_DAG, "success", run_type="asset_triggered", at=-3500)
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert [run["state"] for run in airflow.runs_of(di.HISTORY_DAG)] == ["success"]
+    assert airflow.runs_of(di.LOAD_DAG) == []
+    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True, di.HISTORY_DAG: False}
+    assert (
+        capsys.readouterr()
+        .out.splitlines()[-1]
+        .startswith(
+            "demo-init: the demo pipeline ran before, the history of the demo ran now, and the "
+            "dashboard "
+        )
+    )
+
+
+def test_a_failed_history_stops_with_the_dag_named(airflow, metabase, capsys):
+    airflow.results[di.HISTORY_DAG] = "failed"
+    assert di.main(env_for(airflow, metabase)) == 1
+    assert one_line(capsys) == f"demo-init: the DAG {di.HISTORY_DAG} failed: see it in Airflow"
+
+
+def test_a_history_that_is_running_is_awaited_and_not_started_again(airflow, metabase):
+    airflow.paused[di.HISTORY_DAG] = False
+    airflow.add_run(di.HISTORY_DAG, "running")
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert len(airflow.runs_of(di.HISTORY_DAG)) == 1
+    assert ("POST", f"/api/v2/dags/{di.HISTORY_DAG}/dagRuns") not in airflow.calls
+
+
+def test_a_history_that_runs_now_leaves_a_missing_mart_to_the_pipeline_that_ran_before(
+    airflow, metabase, capsys
+):
+    # A stack of v0.1, whose transform succeeded, gets the history on its first start with it.
+    # When its warehouse has lost the mart since, the line points at the load, as after any reset
+    # of the warehouse volume: the transform did not run now.
+    airflow.add_run(di.TRANSFORM_DAG, "success", run_type="asset_triggered", at=-3500)
+    metabase.mart_in_warehouse = False
+    assert di.main(env_for(airflow, metabase)) == 1
+    line = one_line(capsys)
+    assert line.startswith(
+        "demo-init: Metabase finds no marts.ad_spend_daily in the warehouse: the demo pipeline "
+        "ran before"
+    )
+    assert [run["state"] for run in airflow.runs_of(di.HISTORY_DAG)] == ["success"]
+
+
 # A step that runs out of time: how to make it hang, and what its line says.
 HANGING_STEPS = [
     pytest.param(
@@ -547,6 +628,19 @@ HANGING_STEPS = [
         f"the DAG {di.TRANSFORM_DAG} did not succeed after the demo load",
         "see it in Airflow",
         id="transform",
+    ),
+    pytest.param(
+        # The file of the history does not load, as with an import error: Airflow answers 404.
+        lambda airflow, metabase: airflow.paused.pop(di.HISTORY_DAG),
+        f"Airflow did not load the DAG {di.HISTORY_DAG}",
+        "./agoranomos logs airflow-dag-processor",
+        id="history-dag",
+    ),
+    pytest.param(
+        lambda airflow, metabase: airflow.durations.update({di.HISTORY_DAG: math.inf}),
+        f"the DAG {di.HISTORY_DAG} did not finish",
+        "see it in Airflow",
+        id="history",
     ),
     pytest.param(
         lambda airflow, metabase: setattr(metabase, "sync_seconds", math.inf),
@@ -1104,8 +1198,10 @@ def test_a_later_step_that_fails_leaves_the_lines_of_the_metadata_in_the_log(
 def test_the_lines_of_the_metadata_reach_the_log_of_a_process_before_its_error(airflow, metabase):
     # As a container runs it, with its standard output a pipe that Python buffers: each line is
     # flushed as it is printed, so the log has the lines of the metadata before the line of the
-    # error. The pipeline ran before and Metabase knows the mart, so the process waits for nothing.
+    # error. The pipeline and the history ran before and Metabase knows the mart, so the process
+    # waits for nothing.
     airflow.add_run(di.TRANSFORM_DAG, "success", at=-10)
+    airflow.add_run(di.HISTORY_DAG, "success", at=-10)
     metabase.mart_known = True
     metabase.failures[("POST", "/api/collection")] = 500
     result = subprocess.run(

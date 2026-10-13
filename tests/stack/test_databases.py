@@ -162,7 +162,9 @@ def test_role_passwords_stay_out_of_pg_stat_statements(env):
 
 
 # What each role may do in each schema of the layers, as (USAGE, CREATE): loader writes the raw
-# schemas, transformer reads raw_demo and builds staging and marts, metabase_reader reads marts.
+# schemas and the staging schemas of its merges, transformer reads the raw schemas and builds
+# staging and marts, metabase_reader reads marts. The fictional platforms of the demo each have a
+# raw schema and a staging schema of their own.
 SCHEMA_PRIVILEGES = {
     ("loader", "raw_demo"): (True, True),
     ("loader", "raw_demo_staging"): (True, True),
@@ -176,20 +178,66 @@ SCHEMA_PRIVILEGES = {
     ("metabase_reader", "raw_demo_staging"): (False, False),
     ("metabase_reader", "staging"): (False, False),
     ("metabase_reader", "marts"): (True, False),
+    ("loader", "raw_demo_search"): (True, True),
+    ("loader", "raw_demo_search_staging"): (True, True),
+    ("transformer", "raw_demo_search"): (True, False),
+    ("transformer", "raw_demo_search_staging"): (False, False),
+    ("metabase_reader", "raw_demo_search"): (False, False),
+    ("metabase_reader", "raw_demo_search_staging"): (False, False),
+    ("loader", "raw_demo_social"): (True, True),
+    ("loader", "raw_demo_social_staging"): (True, True),
+    ("transformer", "raw_demo_social"): (True, False),
+    ("transformer", "raw_demo_social_staging"): (False, False),
+    ("metabase_reader", "raw_demo_social"): (False, False),
+    ("metabase_reader", "raw_demo_social_staging"): (False, False),
+    ("loader", "raw_demo_video"): (True, True),
+    ("loader", "raw_demo_video_staging"): (True, True),
+    ("transformer", "raw_demo_video"): (True, False),
+    ("transformer", "raw_demo_video_staging"): (False, False),
+    ("metabase_reader", "raw_demo_video"): (False, False),
+    ("metabase_reader", "raw_demo_video_staging"): (False, False),
+    ("loader", "raw_demo_web"): (True, True),
+    ("loader", "raw_demo_web_staging"): (True, True),
+    ("transformer", "raw_demo_web"): (True, False),
+    ("transformer", "raw_demo_web_staging"): (False, False),
+    ("metabase_reader", "raw_demo_web"): (False, False),
+    ("metabase_reader", "raw_demo_web_staging"): (False, False),
+    ("loader", "raw_demo_fx"): (True, True),
+    ("loader", "raw_demo_fx_staging"): (True, True),
+    ("transformer", "raw_demo_fx"): (True, False),
+    ("transformer", "raw_demo_fx_staging"): (False, False),
+    ("metabase_reader", "raw_demo_fx"): (False, False),
+    ("metabase_reader", "raw_demo_fx_staging"): (False, False),
 }
+# The schemas of the layers, each once, in the order of SCHEMA_PRIVILEGES, and as the literals of
+# the queries below.
+LAYER_SCHEMAS = tuple(dict.fromkeys(schema for _, schema in SCHEMA_PRIVILEGES))
+LAYER_SCHEMA_LITERALS = ", ".join(f"'{schema}'" for schema in LAYER_SCHEMAS)
 
 
 def test_each_schema_of_the_layers_has_its_owner(env):
+    # The rows are sorted here, by code point, as the list below is: the collation of the database
+    # may sort a _ or a : elsewhere.
     result = warehouse(
         env,
-        "SELECT nspname || ':' || pg_get_userbyid(nspowner) FROM pg_namespace "
-        "WHERE nspname IN ('raw_demo', 'raw_demo_staging', 'staging', 'marts') ORDER BY 1",
+        "SELECT nspname || ':' || pg_get_userbyid(nspowner) "  # noqa: S608 (constants of this file)
+        f"FROM pg_namespace WHERE nspname IN ({LAYER_SCHEMA_LITERALS})",
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == [
+    assert sorted(result.stdout.split()) == [
         "marts:transformer",
         "raw_demo:loader",
+        "raw_demo_fx:loader",
+        "raw_demo_fx_staging:loader",
+        "raw_demo_search:loader",
+        "raw_demo_search_staging:loader",
+        "raw_demo_social:loader",
+        "raw_demo_social_staging:loader",
         "raw_demo_staging:loader",
+        "raw_demo_video:loader",
+        "raw_demo_video_staging:loader",
+        "raw_demo_web:loader",
+        "raw_demo_web_staging:loader",
         "staging:transformer",
     ]
 
@@ -197,9 +245,10 @@ def test_each_schema_of_the_layers_has_its_owner(env):
 def test_each_role_has_exactly_its_privileges_on_the_schemas_of_the_layers(env):
     result = warehouse(
         env,
-        "SELECT r, s, has_schema_privilege(r, s, 'USAGE'), has_schema_privilege(r, s, 'CREATE') "
+        "SELECT r, s, has_schema_privilege(r, s, 'USAGE'), "  # noqa: S608 (constants of this file)
+        "has_schema_privilege(r, s, 'CREATE') "
         "FROM unnest(ARRAY['loader', 'transformer', 'metabase_reader']) AS r, "
-        "unnest(ARRAY['raw_demo', 'raw_demo_staging', 'staging', 'marts']) AS s",
+        f"unnest(ARRAY[{LAYER_SCHEMA_LITERALS}]) AS s",
     )
     assert result.returncode == 0, result.stderr
     found = {}
@@ -217,11 +266,17 @@ def test_the_default_privileges_are_those_of_the_roles_that_create_the_tables(en
         env,
         "SELECT format('%s:%s:%s:%s', pg_get_userbyid(defaclrole), nspname, defaclobjtype, "
         "defaclacl) FROM pg_default_acl "
-        "LEFT JOIN pg_namespace ON pg_namespace.oid = defaclnamespace ORDER BY 1",
+        "LEFT JOIN pg_namespace ON pg_namespace.oid = defaclnamespace",
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == [
+    # Sorted here, as the owners of the schemas are.
+    assert sorted(result.stdout.split()) == [
         "loader:raw_demo:r:{transformer=r/loader}",
+        "loader:raw_demo_fx:r:{transformer=r/loader}",
+        "loader:raw_demo_search:r:{transformer=r/loader}",
+        "loader:raw_demo_social:r:{transformer=r/loader}",
+        "loader:raw_demo_video:r:{transformer=r/loader}",
+        "loader:raw_demo_web:r:{transformer=r/loader}",
         "transformer:marts:r:{metabase_reader=r/transformer}",
     ]
 

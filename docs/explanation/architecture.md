@@ -64,7 +64,7 @@ Solid arrows show how data moves. Dotted arrows show what Airflow runs.
 dlt takes care of incremental loading, schema evolution, merging and name normalization. Every source is a dlt source that follows one shared contract:
 
 * **Date window.** Each load covers a date window in the time zone of the ad account: final data up to yesterday, plus a sliding reload window because attribution keeps maturing after the fact.
-* **Safe repeats.** Rows are merged on natural keys, so a load can be repeated without creating duplicates.
+* **Safe repeats.** A load can be repeated without creating duplicates: the demo source of v0.1 merges its rows on natural keys, and the sources of the fictional platforms replace the days of each account in the window of the load, the days that come back empty included.
 * **Explicit retries.** How failed requests are retried is set explicitly, not left to library defaults.
 * **Loud failures.** If an account fails, the run fails or raises an alert that lists the affected accounts and the original API error.
 
@@ -75,7 +75,7 @@ The connectors of real platforms are to add four rules to this contract (planned
 * **Asynchronous reports.** Where a platform builds a report on request, as Microsoft Advertising does, a source submits it, polls until it is ready and downloads it, with the same explicit retries and loud failures as any other request.
 * **Daily quotas.** The daily load of every account of a deployment fits the daily quota of the lowest access level of each platform that reads real accounts, such as the 2,880 operations a day of the Explorer access of the Google Ads API (as of October 2026).
 
-The planned sources are ad platform APIs (for example Google, Meta, TikTok, Microsoft Advertising and LinkedIn), GA4, CRM systems and files. A demo source needs no keys: it generates eight weeks of statistics of one fictional ad account with three campaigns, up to yesterday, and the DAG `agoranomos_demo_load` loads them into `raw_demo` as the `loader` role. On the first start, `demo-init` runs it. Demo data for more platforms is planned.
+The planned sources are ad platform APIs (for example Google, Meta, TikTok, Microsoft Advertising and LinkedIn), GA4, CRM systems and files. A demo source needs no keys: it generates eight weeks of statistics of one fictional ad account with three campaigns, up to yesterday, and the DAG `agoranomos_demo_load` loads them into `raw_demo` as the `loader` role. On the first start, `demo-init` runs it. The demo generator also makes 18 months of a fictional business on four fictional platforms, in the shapes of the APIs of Google Ads, Meta, TikTok and GA4, and a source of exchange rates, which the DAG `agoranomos_demo_history` loads into `raw_demo_<platform>`; the unified model that reads them is planned for v0.2.0 ([ADR-0025](../adr/0025-model-advertising-statistics-once.md)).
 
 Decision record: [ADR-0004: Ingest data with dlt](../adr/0004-ingest-with-dlt.md).
 

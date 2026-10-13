@@ -1,6 +1,8 @@
 [default.extend-words]
 agoranomos = "agoranomos"
 agoranomoi = "agoranomoi"
+# German for "search", in the name of an ad account of the demo.
+suche = "suche"
 
 [files]
 # Mermaid as released, minified: its short names are not words (see .pre-commit-config.yaml).
