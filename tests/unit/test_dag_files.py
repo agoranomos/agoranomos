@@ -77,6 +77,24 @@ def test_the_transform_renders_from_the_manifest_in_the_pool_of_dbt():
     assert 'DBT_POOL = "dbt"' in text
 
 
+def test_a_test_of_two_nodes_runs_in_the_task_of_the_one_that_depends_on_the_other():
+    # Cosmos 1.15.1 runs the tests of each node in a task after it (AFTER_EACH) and selects them as
+    # ExecutionConfig says. Buildable: a test of two nodes, such as a relationships test of a model
+    # against a seed, runs only in the task of the node that depends on the other, after both, and
+    # its failure stops the models below. Eager, the default: the task of either node runs it, on a
+    # first run also before the other exists. test_dbt_project.py checks the dependencies.
+    path = DAGS / "agoranomos_demo_transform.py"
+    calls = {
+        node.func.id: {k.arg: ast.unparse(k.value) for k in node.keywords}
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert calls["ExecutionConfig"]["test_indirect_selection"] == "TestIndirectSelection.BUILDABLE"
+    assert calls["RenderConfig"]["test_behavior"] == "TestBehavior.AFTER_EACH"
+    assert len(keyword_values(path, "test_indirect_selection")) == 1
+    assert any(m == "cosmos" and "TestIndirectSelection" in names for m, names in imports(path))
+
+
 def test_the_history_takes_its_assets_and_platforms_from_the_shared_package():
     found = imports(DAGS / "agoranomos_demo_history.py")
     assert ("agoranomos_pipelines.assets", ["RAW_DEMO_PLATFORMS"]) in found

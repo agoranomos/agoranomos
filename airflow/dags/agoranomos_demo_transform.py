@@ -31,6 +31,7 @@ from cosmos import (
     ProjectConfig,
     RenderConfig,
     TestBehavior,
+    TestIndirectSelection,
 )
 
 DBT_PROJECT = Path("/opt/agoranomos/dbt")
@@ -80,6 +81,12 @@ def agoranomos_demo_transform():
             execution_mode=ExecutionMode.LOCAL,
             invocation_mode=InvocationMode.SUBPROCESS,
             dbt_executable_path=DBT_EXECUTABLE,
+            # A test of two nodes, such as a relationships test of a model against a seed, runs
+            # only in the test task of the node that depends on the other, so after both, and its
+            # failure stops the models below that node. By default (eager), the test task of either
+            # node would run it, on a first run also before the other exists. The dbt project names
+            # such a dependency where no ref makes it, and tests/unit/test_dbt_project.py checks it.
+            test_indirect_selection=TestIndirectSelection.BUILDABLE,
         ),
         render_config=RenderConfig(
             load_method=LoadMode.DBT_MANIFEST,
