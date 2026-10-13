@@ -200,9 +200,13 @@ class ContentState:
     404; a write with a key that its endpoint does not take is refused with 400. A question or a
     dashboard keeps the account that made it (creator_id: user_id unless a test says otherwise);
     the items of a collection are of every model unless models says, and leave out the questions
-    of a dashboard unless show_dashboard_questions is true; a dashboard that moves takes its
-    questions along; others holds items of the models that the jobs do not write, such as a
-    timeline."""
+    of a dashboard unless show_dashboard_questions is true; with archived=true they are the
+    sub-collections in the trash and what went there with them, while a question or a dashboard
+    that a person put in the trash is listed only in GET /api/card?f=archived and GET
+    /api/dashboard?f=archived, with its own collection; a dashboard that moves takes its questions
+    along; a PUT of a question with the query and result_metadata null has Metabase compute the
+    metadata again (here: none yet); others holds items of the models that the jobs do not write,
+    such as a timeline."""
 
     def __init__(self) -> None:
         self.collections: dict[int, dict[str, Any]] = {}
@@ -293,28 +297,35 @@ class ContentState:
             shown["collection_id"] = self.trash_id
         return shown
 
-    def items(self, collection_id: int, models: list[str], dashboard_questions: bool) -> Any:
+    def items(
+        self, collection_id: int, models: list[str], dashboard_questions: bool, archived: bool
+    ) -> Any:
         def item(i: dict[str, Any], model: str) -> dict[str, Any]:
             listed = {"id": i["id"], "entity_id": i.get("entity_id"), "name": i["name"]}
-            return {**listed, "model": model, "dashboard_id": i.get("dashboard_id")}
+            more = {"dashboard_id": i.get("dashboard_id"), "archived": bool(i.get("archived"))}
+            return {**listed, "model": model, **more}
+
+        def listed(i: dict[str, Any]) -> bool:
+            # A question or a dashboard that a person put in the trash is listed in the trash only.
+            return bool(i.get("archived")) == archived and not i.get("archived_directly")
 
         found = [
             item(c, ITEM_MODEL.get(c.get("type"), "card"))
             for c in self.cards.values()
             if c.get("collection_id") == collection_id
-            and not c["archived"]
+            and listed(c)
             and (dashboard_questions or not c.get("dashboard_id"))
         ]
         found += [
             item(d, "dashboard")
             for d in self.dashboards.values()
-            if d.get("collection_id") == collection_id and not d["archived"]
+            if d.get("collection_id") == collection_id and listed(d)
         ]
         inside = self.location_of(collection_id)
         found += [
             item(c, "collection")
             for c in self.collections.values()
-            if c["location"] == inside and not c["archived"]
+            if c["location"] == inside and c["archived"] == archived
         ]
         found += [item(o, o["model"]) for o in self.others if o["collection_id"] == collection_id]
         if models:
@@ -375,7 +386,9 @@ class ContentState:
                 return 404, "Not found."
             if len(parts) == 4 and parts[3] == "items":
                 dashboard_questions = query.get("show_dashboard_questions") == ["true"]
-                return 200, self.items(item["id"], query.get("models", []), dashboard_questions)
+                archived = query.get("archived") == ["true"]
+                models = query.get("models", [])
+                return 200, self.items(item["id"], models, dashboard_questions, archived)
             if method == "GET":
                 return 200, copy.deepcopy(item)
             if method == "PUT":
@@ -394,6 +407,9 @@ class ContentState:
                 return 200, 1  # the number of collections that it deleted
         if kind in ("card", "dashboard"):
             table = self.cards if kind == "card" else self.dashboards
+            if method == "GET" and len(parts) == 2 and query.get("f") == ["archived"]:
+                # The lists of what is in the trash keep the collection of each item.
+                return 200, [copy.deepcopy(i) for i in table.values() if i["archived"]]
             if method == "POST" and len(parts) == 2:
                 return 200, (self.add_card(body) if kind == "card" else self.add_dashboard(body))
             item = self.by(table, parts[2])
@@ -412,6 +428,7 @@ class ContentState:
                         "error_code": "archived",
                     }
             if method == "PUT":
+                placed_before = (item.get("dashboard_id"), item.get("collection_id"))
                 for key, value in body.items():
                     if key == "dashcards":
                         item["dashcards"] = [
@@ -420,8 +437,26 @@ class ContentState:
                         ]
                     elif key == "archived":
                         item["archived"] = item["archived_directly"] = bool(value)
+                    elif key == "result_metadata" and value is None and "dataset_query" in body:
+                        item[key] = None  # Metabase computes it again from the query
                     else:
                         item[key] = copy.deepcopy(value)
+                moved = (body.get("dashboard_id", placed_before[0]), body.get("collection_id"))
+                if kind == "card" and (
+                    moved[0] != placed_before[0]
+                    or ("collection_id" in body and moved[1] != placed_before[1])
+                ):
+                    # The collection of a question follows from what the request says: the one that
+                    # it names, else that of the dashboard that it names, else the root, also for
+                    # dashboard_id null alone (card_write_checks.clj, actual-collection-id).
+                    if "collection_id" in body:
+                        item["collection_id"] = body["collection_id"]
+                    elif body.get("dashboard_id"):
+                        item["collection_id"] = self.dashboards[body["dashboard_id"]][
+                            "collection_id"
+                        ]
+                    else:
+                        item["collection_id"] = None
                 if kind == "dashboard" and "collection_id" in body:
                     # The questions of a dashboard move with it (dashboards_rest/api.clj,
                     # cascade-card-state-from-dashboard-update!).

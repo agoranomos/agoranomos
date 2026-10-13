@@ -502,6 +502,51 @@ TAKE_OUT = {
 }
 
 
+# The model of a question in the items of a collection, by its type (collections/children.clj).
+ITEM_MODEL = {"question": "card", "model": "dataset", "metric": "metric"}
+
+
+def everything_in(metabase: Metabase, collection_id: int) -> list[dict[str, Any]]:
+    """Every item of a collection, those in the trash included, each once: the items out of the
+    trash, with the questions of its dashboards; with archived=true, its sub-collections in the
+    trash and what went there with them; and the questions and the dashboards that a person put
+    in the trash from it. Metabase 0.64.1 lists those in the trash only, as items of the trash, but
+    its lists of the questions and the dashboards in the trash keep their own collection (read in
+    collections/children.clj and on the stand, October 2026)."""
+    found: dict[tuple[str, int], dict[str, Any]] = {}
+    for archived in ("", "&archived=true"):
+        path = f"/api/collection/{collection_id}/items?show_dashboard_questions=true{archived}"
+        for item in items_of(metabase.call("GET", path)):
+            found[(item.get("model"), item["id"])] = item
+    for kind in ("card", "dashboard"):
+        for item in items_of(metabase.call("GET", f"/api/{kind}?f=archived")):
+            if item.get("collection_id") == collection_id:
+                model = kind if kind == "dashboard" else ITEM_MODEL.get(item.get("type"), "card")
+                found[(model, item["id"])] = {**item, "model": model, "archived": True}
+    return sorted(found.values(), key=lambda item: (str(item.get("model")), item["id"]))
+
+
+def take_out(
+    metabase: Metabase, item: Mapping[str, Any], board_id: int, where: str, log: content.Log
+) -> None:
+    """Move an item that the demo does not ship to the root, where it stays in the trash if it was
+    there, with one line by its model and its ID, never its name. A question of another dashboard
+    moves with its dashboard; a question of the dashboard of the demo leaves it."""
+    word, model, body = TAKE_OUT[item["model"]]
+    if item.get("dashboard_id") and item["dashboard_id"] != board_id:
+        return
+    if item.get("dashboard_id"):
+        body = {**body, "dashboard_id": None}
+    if model == "collection" and item.get("archived"):
+        body = {**body, "archived": True}  # a PUT of a collection without it restores it
+    metabase.call("PUT", f"/api/{model}/{item['id']}", body)
+    trash = ", in the trash," if item.get("archived") else ""
+    log(
+        f"moved out: {word} {item['id']} of {where}{trash} to the root, as the demo does not "
+        "ship it"
+    )
+
+
 def made_by(metabase: Metabase, model: str, item_id: int, account_id: int) -> bool:
     """Whether the account made the question or the dashboard of an ID."""
     return metabase.call("GET", f"/api/{model}/{item_id}").get("creator_id") == account_id
@@ -522,6 +567,7 @@ def demo_of_v01(
             key is not None
             and key not in found
             and item.get("model") == model
+            and not item.get("archived")
             and not item.get("dashboard_id")
             and made_by(metabase, model, item["id"], account_id)
         ):
@@ -547,9 +593,11 @@ def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: cont
     collection is the demo, or one holds an item that the job cannot take out, nothing moves: one
     line says so, and the package makes its demo anew.
 
-    Before the move, every other item of the collection, whoever made it, goes to the root, with
-    one line for each by its model and its ID, so that only the content of the package enters
-    Agoranomos. True if it moved one."""
+    Before the move, every other item of the collection, whoever made it, goes to the root, also
+    from the trash, where it stays, with one line for each by its model and its ID, so that only
+    the content of the package enters Agoranomos. After the move, no group but Administrators may
+    curate Demo any more, and what reached the collection in between and the registry does not
+    name goes to the root as well. True if it moved one."""
     entry = registry.get(DEMO_KEY)
     if entry and content.find(metabase, "collection", entry["entity_id"]) is not None:
         return False
@@ -568,10 +616,7 @@ def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: cont
         return False
     account_id = metabase.call("GET", "/api/user/current")["id"]
     for old in candidates:
-        listed = metabase.call(
-            "GET", f"/api/collection/{old['id']}/items?show_dashboard_questions=true"
-        )
-        items = items_of(listed)
+        items = everything_in(metabase, old["id"])
         adopted = demo_of_v01(metabase, items, account_id)
         if "dashboard" in adopted:
             break
@@ -605,16 +650,7 @@ def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: cont
         )
         return False
     for item in others:
-        word, model, body = TAKE_OUT[item["model"]]
-        if item.get("dashboard_id") and item["dashboard_id"] != board_id:
-            continue  # a question of a dashboard that goes to the root moves with it
-        if item.get("dashboard_id"):
-            body = {**body, "dashboard_id": None}
-        metabase.call("PUT", f"/api/{model}/{item['id']}", body)
-        log(
-            f"moved out: {word} {item['id']} of the collection of v0.1 to the root, as the demo "
-            "does not ship it"
-        )
+        take_out(metabase, item, board_id, "the collection of v0.1", log)
     root = content.ensure_collection(
         metabase,
         registry,
@@ -634,6 +670,17 @@ def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: cont
     for key, item in adopted.items():
         model = "dashboard" if key == "dashboard" else "card"
         registry.set(f"{DEMO_KEY}/{key}", model, item["entity_id"])
+    # Every account could curate the collection until now: it may have got an item during the
+    # move, which no account but an admin can add once it is locked.
+    content.lock_down(metabase, registry, log)
+    named = {registry.get(key)["entity_id"] for key in registry.keys_of(DEMO_KEY)}
+    for item in everything_in(metabase, old["id"]):
+        if item.get("entity_id") in named:
+            continue
+        if item.get("model") in TAKE_OUT:
+            take_out(metabase, item, board_id, DEMO_NAME, log)
+        else:
+            log(f"left: {item.get('model')} {item['id']} in Demo, which demo-init cannot take out")
     return True
 
 

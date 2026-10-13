@@ -1342,6 +1342,87 @@ def test_what_the_demo_does_not_ship_leaves_the_collection_of_v0_1_for_the_root(
         assert not [line for line in out if name in line], name
 
 
+def test_what_is_in_the_trash_of_the_collection_of_v0_1_goes_to_the_root_too(
+    airflow, metabase, capsys
+):
+    # A question and a dashboard that a person put in the trash from the collection of v0.1, and a
+    # sub-collection in the trash with a question in it: restored later, they would land in Demo.
+    # Each goes to the root and stays in the trash; the question goes with its sub-collection.
+    content = metabase.content_state
+    old, _, _ = an_earlier_demo(metabase)
+    trashed = content.add_card({"name": "Mine", "collection_id": old["id"], "creator_id": 7})
+    board = content.add_dashboard({"name": "Theirs", "collection_id": old["id"], "creator_id": 7})
+    for item in (trashed, board):
+        item.update(archived=True, archived_directly=True)
+    notes = content.add_collection("Notes", parent_id=old["id"])
+    inside = content.add_card({"name": "Inside", "collection_id": notes["id"]})
+    notes["archived"] = True
+    inside["archived"] = True  # went to the trash with its collection
+    assert di.main(env_for(airflow, metabase)) == 0
+    _, demo, _, _ = demo_items(metabase)
+    assert demo["id"] == old["id"]
+    assert (trashed["collection_id"], trashed["archived"]) == (None, True)
+    assert (board["collection_id"], board["archived"]) == (None, True)
+    assert (notes["location"], notes["archived"]) == ("/", True)
+    assert inside["collection_id"] == notes["id"]
+    out = capsys.readouterr().out.splitlines()
+    for model, item in (("question", trashed), ("dashboard", board), ("collection", notes)):
+        assert (
+            f"demo-init: moved out: {model} {item['id']} of the collection of v0.1, in the trash, "
+            "to the root, as the demo does not ship it"
+        ) in out
+
+
+def test_a_question_of_v0_1_in_the_trash_is_not_adopted(airflow, metabase):
+    # A question of v0.1 that a person put in the trash goes to the root with the rest, and stays in
+    # the trash there; the code makes its own question.
+    _, cards, _ = an_earlier_demo(metabase)
+    trashed = cards["Spend by day"]
+    trashed.update(archived=True, archived_directly=True)
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert registered(metabase, "demo/spend-by-day")["id"] != trashed["id"]
+    assert (trashed["collection_id"], trashed["archived"]) == (None, True)
+
+
+def test_what_reaches_the_collection_during_the_move_leaves_demo_after_it(
+    airflow, metabase, capsys
+):
+    # Another account adds a question to the collection of v0.1 while demo-init moves it, and puts
+    # one in the trash there: after the move, demo-init lets no group but Administrators curate
+    # Demo, lists it once more, the trash included, and takes out what the registry does not name.
+    content = metabase.content_state
+    old, cards, _ = an_earlier_demo(metabase)
+    handle = content.handle
+    late = {}
+
+    def racing(method, path, query, body):
+        answer = handle(method, path, query, body)
+        if (method, path) == ("PUT", f"/api/collection/{old['id']}") and "parent_id" in body:
+            late["added"] = content.add_card({"name": "Late", "collection_id": old["id"]})
+            late["trashed"] = content.add_card({"name": "Gone", "collection_id": old["id"]})
+            late["trashed"].update(archived=True, archived_directly=True)
+        return answer
+
+    content.handle = racing
+    assert di.main(env_for(airflow, metabase)) == 0
+    _, demo, now_cards, _ = demo_items(metabase)
+    assert demo["id"] == old["id"]
+    assert {c["id"] for c in now_cards.values()} == {c["id"] for c in cards.values()}
+    assert late["added"]["collection_id"] is None
+    assert (late["trashed"]["collection_id"], late["trashed"]["archived"]) == (None, True)
+    out = capsys.readouterr().out.splitlines()
+    assert (
+        f"demo-init: moved out: question {late['added']['id']} of Demo to the root, as the demo "
+        "does not ship it"
+    ) in out
+    assert (
+        f"demo-init: moved out: question {late['trashed']['id']} of Demo, in the trash, to the "
+        "root, as the demo does not ship it"
+    ) in out
+    lowered = out.index("demo-init: lowered: group 'All Users' on collection Demo: curate -> view")
+    assert lowered < next(i for i, line in enumerate(out) if " of Demo" in line)
+
+
 def test_a_collection_of_v0_1_with_an_item_that_demo_init_cannot_take_out_does_not_move(
     airflow, metabase, capsys
 ):
@@ -1374,8 +1455,8 @@ def test_of_two_questions_of_one_name_in_the_collection_of_v0_1_the_older_is_the
     newer = content.add_card({"name": "Spend by day", "collection_id": old["id"]})
     listed = content.items
 
-    def newest_first(collection_id, models, dashboard_questions):
-        return {"data": listed(collection_id, models, dashboard_questions)["data"][::-1]}
+    def newest_first(*arguments):
+        return {"data": listed(*arguments)["data"][::-1]}
 
     monkeypatch.setattr(content, "items", newest_first)
     assert di.main(env_for(airflow, metabase)) == 0

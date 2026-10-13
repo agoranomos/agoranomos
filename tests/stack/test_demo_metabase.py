@@ -231,6 +231,32 @@ def test_a_click_behavior_and_an_extra_setting_are_reverted_by_the_next_start(
     ], changes
 
 
+def test_a_description_written_into_the_columns_of_a_question_is_reverted(
+    env, metabase_url, session
+):
+    # The metadata of the columns of a question is what people and AI clients read as their display
+    # names and descriptions; Metabase 0.64.1 keeps what a request sends there with the query
+    # unchanged. The next start drops it, and Metabase computes it again from the query.
+    question = item(metabase_url, session, "demo/spend-by-day")
+    computed = question["result_metadata"]
+    assert computed, "Metabase computed no metadata for the question"
+    written = [{**column, "description": "Written by a stack test"} for column in computed]
+    put(metabase_url, session, f"/api/card/{question['id']}", {"result_metadata": written})
+    code, changes, found, _ = run_job("demo-init", secrets(env))
+    assert not found, f"the output of demo-init holds the values of {found}"
+    assert code == 0, f"demo-init exited with {code}"
+    assert changes == [
+        "demo-init: revert of an edit: question demo/spend-by-day result_metadata"
+    ], changes
+    metadata = wait_for(
+        lambda: item(metabase_url, session, "demo/spend-by-day")["result_metadata"],
+        60,
+        interval=2,
+        message="Metabase did not compute the metadata of the question again",
+    )
+    assert metadata == computed
+
+
 def test_a_collection_with_the_same_name_is_not_taken_for_the_package(env, metabase_url, session):
     decoy = post(metabase_url, session, "/api/collection", {"name": "Agoranomos"})
     try:
@@ -283,6 +309,8 @@ def test_the_collection_of_v0_1_moves_into_agoranomos(env, metabase_url, session
             metabase_url, session, "/api/dashboard", {"name": DASHBOARD, "collection_id": old["id"]}
         )
         added = question(theirs, old["id"], "Spend by day")
+        trashed = question(theirs, old["id"], "Mine")
+        put(metabase_url, theirs, f"/api/card/{trashed['id']}", {"archived": True})
     try:
         code, changes, found, _ = run_job("demo-init", secrets(env))
         assert not found, f"the output of demo-init holds the values of {found}"
@@ -311,6 +339,10 @@ def test_the_collection_of_v0_1_moves_into_agoranomos(env, metabase_url, session
         assert [q["archived"] for q in adopted.values()] == [False] * len(QUESTIONS)
         # The question of the second account is at the root, and the decoy is as it was.
         assert get(metabase_url, session, f"/api/card/{added['id']}")["collection_id"] is None
+        # The one in the trash went to the root too, and stays in the trash: restored, it is not
+        # in Demo. The list of the trash keeps the collection of each question.
+        in_trash = {c["id"]: c for c in get(metabase_url, session, "/api/card?f=archived")}
+        assert in_trash[trashed["id"]]["collection_id"] is None
         kept = get(metabase_url, session, f"/api/collection/{decoy['id']}")
         assert (kept["name"], kept["location"], kept["archived"]) == ("Agoranomos demo", "/", False)
         kept_board = get(metabase_url, session, f"/api/dashboard/{decoy_board['id']}")
@@ -318,3 +350,4 @@ def test_the_collection_of_v0_1_moves_into_agoranomos(env, metabase_url, session
     finally:
         put(metabase_url, session, f"/api/collection/{decoy['id']}", {"archived": True})
         put(metabase_url, session, f"/api/card/{added['id']}", {"archived": True})
+        put(metabase_url, session, f"/api/card/{trashed['id']}", {"archived": True})

@@ -9,13 +9,14 @@ item, or another one with the same name, cannot take the place of one of the pac
 0.64.1 lets no caller of its API choose an entity ID, so the registry is their only record.
 
 Each start compares each item with the code: the name and the description of a collection, a
-question or a dashboard, where it is, the type, the whole query and the whole settings of display of
-a question, and each card of a dashboard whole (its question, its place, its settings of display,
-such as a click behavior, its filter mappings and its series), with the filters and the tabs of the
-dashboard. What differs is put back, what is in the trash
-comes back, what Metabase no longer has is created again, an item that the code no longer ships
-goes to the trash, and one line of the log says each change and what it replaced. Metabase keeps
-the replaced version in the history of revisions of the item. Every group but Administrators gets
+question or a dashboard, and where it is; of a question its type, its whole query, its whole
+settings of display, its filters, the dashboard that it belongs to (none) and the metadata of its
+columns; and each card of a dashboard whole (its question, its place, its settings of display, such
+as a click behavior, its filter mappings and its series), with the filters and the tabs of the
+dashboard. What differs is put back, what is in the trash comes back, what Metabase no longer has
+is created again, an item that the code no longer ships goes to the trash, and one line of the log
+says each change and what it replaced. Metabase keeps the replaced version in the history of
+revisions of the item. Every group but Administrators gets
 at most View on the collection Agoranomos and on every sub-collection of the registry.
 
 It uses the standard library only, and the client that the jobs pass in; a failed request raises
@@ -46,6 +47,15 @@ ROOT_DESCRIPTION = (
 ADMIN_GROUP_TYPE = "admin"
 # The type of every question that the package ships: not a model, not a metric.
 QUESTION_TYPE = "question"
+# The keys of a column of the metadata that Metabase 0.64.1 computes for the answer of a native
+# question, which has no description and the name of the column as its display name, and refers to
+# the column by its name and type: read on the stand in October 2026, and computed from the query by
+# maybe-async-result-metadata (queries/models/card/metadata.clj), which keeps instead the metadata
+# that a request sends with an unchanged query, or with none. Anything else in it was written by
+# someone: a description, a display name, a semantic type.
+COMPUTED_COLUMN_KEYS = frozenset(
+    {"name", "database_type", "base_type", "display_name", "field_ref"}
+)
 WHAT = {"collection": "collection", "card": "question", "dashboard": "dashboard"}
 # An entity ID of Metabase: a NanoID of 21 characters of this alphabet (NanoIdString of Metabase
 # 0.64.1). The registry holds nothing else, as its entries become paths of requests of the admin.
@@ -288,10 +298,12 @@ def ensure_question(
     database_id: int,
     log: Log,
 ) -> int:
-    """The question of a key, as the code says. Its query, in the legacy form that find() asks for,
-    and its settings of display are compared whole: Metabase 0.64.1 gives both back as the jobs
-    wrote them, and adds no key of its own (checked on the stand, October 2026), so anything that
-    differs, a template tag or a key that someone added included, is put back."""
+    """The question of a key, as the code says, compared by the parts in question_shape(). Its
+    query, in the legacy form that find() asks for, and its settings of display are compared whole:
+    Metabase 0.64.1 gives both back as the jobs wrote them, and adds no key of its own (checked on
+    the stand, October 2026), so anything that differs, a template tag or a key that someone added
+    included, is put back. Metadata of its columns that Metabase did not compute is dropped, and
+    Metabase computes it again from the query that goes with the null."""
     key = f"{package.key}/{question.key}"
     query = {"database": database_id, "type": "native", "native": {"query": question.query}}
     settings = dict(question.visualization_settings)
@@ -303,6 +315,7 @@ def ensure_question(
             {
                 "name": question.name,
                 "type": QUESTION_TYPE,
+                "parameters": [],
                 "description": question.description,
                 "display": question.display,
                 "collection_id": collection_id,
@@ -321,15 +334,56 @@ def ensure_question(
         "collection_id": collection_id,
     }
     body = placed("card", key, found, wanted, log)
-    if found.get("dataset_query") != query:
+    have = question_shape(found)
+    if have["dashboard_id"] is not None:
+        body |= {"dashboard_id": None, "collection_id": collection_id}
+        log(f"revert of an edit: question {key} dashboard_id")
+    if have["dataset_query"] != query:
         body["dataset_query"] = query
         log(f"revert of an edit: question {key} query")
-    if (found.get("visualization_settings") or {}) != settings:
-        body["visualization_settings"] = settings
-        log(f"revert of an edit: question {key} visualization_settings")
+    for part, value in (("visualization_settings", settings), ("parameters", [])):
+        if have[part] != value:
+            body[part] = value
+            log(f"revert of an edit: question {key} {part}")
+    if have["result_metadata"] != COMPUTED:
+        body |= {"result_metadata": None, "dataset_query": query}
+        log(f"revert of an edit: question {key} result_metadata")
     if body:
         metabase.call("PUT", f"/api/card/{found['id']}", body)
     return found["id"]
+
+
+# What question_shape() gives for metadata that Metabase computed itself, or has not yet.
+COMPUTED = "computed by Metabase"
+
+
+def computed_by_metabase(metadata: Any) -> bool:
+    """Whether the metadata of the columns of a native question is what Metabase computes."""
+    if not metadata:
+        return True  # none yet: Metabase computes it after a save that takes longer
+    return isinstance(metadata, list) and all(
+        isinstance(column, Mapping)
+        and set(column) <= COMPUTED_COLUMN_KEYS
+        and column.get("display_name") == column.get("name")
+        and column.get("field_ref")
+        == ["field", column.get("name"), {"base-type": column.get("base_type")}]
+        for column in metadata
+    )
+
+
+def question_shape(card: Mapping[str, Any]) -> dict[str, Any]:
+    """The parts of a question that the jobs compare, besides its name, description, type,
+    display, place and trash (placed()): its query, its settings of display, its filters, the
+    dashboard that it belongs to, and the metadata of its columns, which people and AI clients read
+    as the display names and descriptions of its columns. Nothing else of a question is compared."""
+    metadata = card.get("result_metadata")
+    return {
+        "dataset_query": card.get("dataset_query"),
+        "visualization_settings": card.get("visualization_settings") or {},
+        "parameters": card.get("parameters") or [],
+        "dashboard_id": card.get("dashboard_id"),
+        "result_metadata": COMPUTED if computed_by_metabase(metadata) else metadata,
+    }
 
 
 def dashcard_shape(dashcard: Mapping[str, Any]) -> str:
