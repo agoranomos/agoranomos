@@ -496,7 +496,7 @@ def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> in
         # the overrides of the deployment, or a registry that is none, stops the job before it
         # writes anything.
         marts = metadata.load(config.metadata_export, config.metadata_overrides)
-        registry = content.Registry(config.content_registry)
+        registry = content.Registry(config.content_registry, logged("metabase-init"))
         metabase = Metabase(config.url)
         wait_until_healthy(metabase)
         admin_created = ensure_admin(metabase, config)

@@ -842,15 +842,34 @@ def test_metabase_init_locks_the_content_of_the_registry_on_every_start(tmp_path
         lowered = [line for line in lines if line.startswith("metabase-init: lowered: ")]
         if start == 1:
             assert lowered == [
-                "metabase-init: lowered: group 'All Users' on collection Agoranomos: curate -> "
+                'metabase-init: lowered: group "All Users" on collection "Agoranomos": curate -> '
                 "view",
-                "metabase-init: lowered: group 'All Users' on collection Demo: curate -> view",
-                "metabase-init: lowered: group 'Analysts' on collection Demo: curate -> view",
+                'metabase-init: lowered: group "All Users" on collection "Demo": curate -> view',
+                'metabase-init: lowered: group "Analysts" on collection "Demo": curate -> view',
             ]
         else:
             assert lowered == [], "a start that finds View changes nothing and says nothing"
             assert len(content.graph_puts) == 1
     assert lines[-1].startswith("metabase-init: the admin account exists")
+
+
+def test_metabase_init_locks_every_collection_inside_agoranomos(tmp_path, metabase, capsys):
+    # A collection that an admin made inside Agoranomos, which the registry does not know, opened
+    # to All Users: the next start lowers it as well (ADR-0018: Agoranomos and its sub-collections).
+    content = metabase.content_state
+    root = content.add_collection("Agoranomos")
+    content.graph["1"][str(root["id"])] = "read"
+    inner = content.add_collection("Inner", parent_id=root["id"])
+    content.graph["1"][str(inner["id"])] = "write"
+    registry = a_registry(
+        tmp_path, agoranomos={"model": "collection", "entity_id": root["entity_id"]}
+    )
+    assert mi.main(env_for(metabase, CONTENT_REGISTRY=str(registry))) == 0
+    assert content.graph["1"][str(inner["id"])] == "read"
+    assert (
+        'metabase-init: lowered: group "All Users" on collection "Inner": curate -> view'
+        in capsys.readouterr().out.splitlines()
+    )
 
 
 def test_metabase_init_without_a_registry_changes_no_permission(metabase):

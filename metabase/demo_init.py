@@ -513,39 +513,6 @@ TAKE_OUT = {
 }
 
 
-# The model of a question in the items of a collection, by its type (collections/children.clj).
-ITEM_MODEL = {"question": "card", "model": "dataset", "metric": "metric"}
-
-
-def everything_in(metabase: Metabase, collection_id: int) -> list[dict[str, Any]]:
-    """Every item of a collection, those in the trash included, each once: the items of every
-    model out of the trash, its timelines among them, and the questions of its dashboards; with
-    archived=true, its sub-collections, timelines and pulses in the trash and what went there with
-    them; and the questions, dashboards and documents that a person put in the trash from it. The
-    events of a timeline belong to it and go where it goes. Metabase 0.64.1 lists what a person put
-    in the trash only as items of the trash, but its lists of the questions and the dashboards in
-    the trash, and a document read by its ID, keep their own collection (read in
-    collections/children.clj, timeline/api/timeline.clj and documents/api/document.clj, and on the
-    stand, October 2026)."""
-    found: dict[tuple[str, int], dict[str, Any]] = {}
-    for archived in ("", "&archived=true"):
-        path = f"/api/collection/{collection_id}/items?show_dashboard_questions=true{archived}"
-        for item in items_of(metabase.call("GET", path)):
-            found[(item.get("model"), item["id"])] = item
-    for kind in ("card", "dashboard"):
-        for item in items_of(metabase.call("GET", f"/api/{kind}?f=archived")):
-            if item.get("collection_id") == collection_id:
-                model = kind if kind == "dashboard" else ITEM_MODEL.get(item.get("type"), "card")
-                found[(model, item["id"])] = {**item, "model": model, "archived": True}
-    trash = metabase.call("GET", "/api/collection/trash")
-    in_trash = metabase.call("GET", f"/api/collection/{trash['id']}/items?models=document")
-    for listed in items_of(in_trash):
-        document = metabase.call("GET", f"/api/document/{listed['id']}")
-        if document.get("collection_id") == collection_id:
-            found[("document", listed["id"])] = {**document, "model": "document", "archived": True}
-    return sorted(found.values(), key=lambda item: (str(item.get("model")), item["id"]))
-
-
 def take_out(
     metabase: Metabase, item: Mapping[str, Any], board_id: int, where: str, log: content.Log
 ) -> None:
@@ -615,10 +582,13 @@ def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: cont
 
     Before the move, every other item of the collection, whoever made it, goes to the root, also
     from the trash, where it stays, with one line for each by its model and its ID, so that only
-    the content of the package enters Agoranomos. After the move, no group but Administrators may
-    curate Demo any more, and Demo must hold nothing that the registry does not name: an item that
-    reached it during the move puts it back at the root as it was, and stops the job, so that the
-    next start moves it again, after it has taken that item out. True if it moved one."""
+    the content of the package enters Agoranomos. Then the collection is locked where it is, at the
+    root, so that no account but an admin can add an item to it, and listed once more: an item
+    that reached it before the lock stops the job, and the collection stays at the root,
+    view-only, for the next start, which takes that item out. Only then does the registry learn
+    the demo, and the collection moves into Agoranomos as Demo: a job that stops before the
+    registry leaves the collection to be checked again, and one that stops after it leaves the
+    move to the next start, which puts the collection in its place. True if it moved one."""
     entry = registry.get(DEMO_KEY)
     if entry and content.find(metabase, "collection", entry["entity_id"]) is not None:
         return False
@@ -637,7 +607,7 @@ def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: cont
         return False
     account_id = metabase.call("GET", "/api/user/current")["id"]
     for old in candidates:
-        items = everything_in(metabase, old["id"])
+        items = content.everything_in(metabase, old["id"])
         adopted = demo_of_v01(metabase, items, account_id)
         if "dashboard" in adopted:
             break
@@ -672,6 +642,24 @@ def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: cont
         return False
     for item in others:
         take_out(metabase, item, board_id, "the collection of v0.1", log)
+    # Every account could curate the collection until now, and may have put an item into it since
+    # the listing. Once it is locked, no account but an admin can add one, so what the next listing
+    # finds is all there is.
+    content.lock(metabase, {str(old["id"]): COLLECTION_V01}, log)
+    named = {item["entity_id"] for item in adopted.values()}
+    held = content.everything_in(metabase, old["id"])
+    stray = next((i for i in held if i.get("entity_id") not in named), None)
+    if stray is not None:
+        word = TAKE_OUT.get(stray.get("model"), (stray.get("model"),))[0]
+        raise content.ContentError(
+            f"the collection of v0.1 got a {word} {stray['id']} before demo-init could lock it, "
+            "which the demo does not ship: it stays at the root, view-only, and the next start "
+            "takes that out and moves it"
+        )
+    for key, item in adopted.items():
+        model = "dashboard" if key == "dashboard" else "card"
+        registry.set(f"{DEMO_KEY}/{key}", model, item["entity_id"])
+    registry.set(DEMO_KEY, "collection", old["entity_id"])
     root = content.ensure_collection(
         metabase,
         registry,
@@ -683,32 +671,10 @@ def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: cont
     )
     moved = {"name": DEMO_NAME, "parent_id": root["id"]}
     metabase.call("PUT", f"/api/collection/{old['id']}", moved)
-    registry.set(DEMO_KEY, "collection", old["entity_id"])
     log(
         f"moved: collection {COLLECTION_V01!r} of an earlier release into {content.ROOT_NAME} as "
         f"{DEMO_NAME}"
     )
-    for key, item in adopted.items():
-        model = "dashboard" if key == "dashboard" else "card"
-        registry.set(f"{DEMO_KEY}/{key}", model, item["entity_id"])
-    # Every account could curate the collection until now: it may have got an item during the
-    # move. Once it is locked, no account but an admin can add one, so what this listing finds
-    # is all there is.
-    content.lock_down(metabase, registry, log)
-    named = {registry.get(key)["entity_id"] for key in registry.keys_of(DEMO_KEY)}
-    stray = next(
-        (i for i in everything_in(metabase, old["id"]) if i.get("entity_id") not in named), None
-    )
-    if stray is not None:
-        back = {"name": COLLECTION_V01, "parent_id": None}
-        metabase.call("PUT", f"/api/collection/{old['id']}", back)
-        for key in (DEMO_KEY, *registry.keys_of(DEMO_KEY)):
-            registry.drop(key)
-        word = TAKE_OUT.get(stray.get("model"), (stray.get("model"),))[0]
-        raise content.ContentError(
-            f"the collection of v0.1 got a {word} {stray['id']} during its move, which the demo "
-            "does not ship: it is back at the root as it was, and the next start moves it again"
-        )
     return True
 
 
@@ -727,8 +693,8 @@ def main(env: Mapping[str, str] | None = None) -> int:
         # writes anything, in Airflow or in Metabase.
         marts = metadata.load(config.metadata_export, config.metadata_overrides)
         mart = demo_mart(marts)
-        registry = content.Registry(config.content_registry)
         log = logged("demo-init")
+        registry = content.Registry(config.content_registry, log)
         airflow = Airflow(config.airflow_url)
         sign_in_to_airflow(airflow, config.airflow_password)
         wait_for_dags(airflow, deadline)

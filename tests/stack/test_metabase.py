@@ -316,7 +316,7 @@ def test_metabase_init_gives_all_users_view_again_on_agoranomos(env, metabase_ur
     graph = get(metabase_url, session, "/api/collection/graph")
     assert graph["groups"][all_users][root_id] == "read"
     assert changes == [
-        "metabase-init: lowered: group 'All Users' on collection Agoranomos: curate -> view"
+        'metabase-init: lowered: group "All Users" on collection "Agoranomos": curate -> view'
     ], changes
 
 

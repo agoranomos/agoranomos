@@ -14,6 +14,7 @@ import json
 import math
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -349,6 +350,12 @@ def registry_of(metabase: FakeMetabase) -> dict[str, dict[str, str]]:
     """The entries of the registry of the content that the jobs keep, by key."""
     path = Path(metabase.files["CONTENT_REGISTRY"])
     return json.loads(path.read_text(encoding="utf-8"))["items"]
+
+
+def registry_keys(metabase: FakeMetabase) -> list[str]:
+    """The keys of the registry of the content, none while the jobs have written no registry."""
+    path = Path(metabase.files["CONTENT_REGISTRY"])
+    return list(registry_of(metabase)) if path.exists() else []
 
 
 def registered(metabase: FakeMetabase, key: str) -> dict[str, Any]:
@@ -1193,7 +1200,7 @@ def test_an_edit_of_the_content_is_reverted_by_the_next_start_and_logged(airflow
         '"Spend by day"'
     ) in out
     assert "demo-init: restored from the trash: dashboard demo/dashboard" in out
-    assert "demo-init: lowered: group 'All Users' on collection Demo: curate -> view" in out
+    assert 'demo-init: lowered: group "All Users" on collection "Demo": curate -> view' in out
 
 
 def test_the_collection_of_v0_1_moves_into_agoranomos(airflow, metabase, capsys):
@@ -1231,7 +1238,9 @@ def test_the_collection_of_v0_1_moves_into_agoranomos(airflow, metabase, capsys)
         f"demo-init: moved: collection {di.COLLECTION_V01!r} of an earlier release into "
         "Agoranomos as Demo"
     ) in out
-    assert "demo-init: lowered: group 'All Users' on collection Demo: curate -> view" in out
+    assert (
+        'demo-init: lowered: group "All Users" on collection "Agoranomos demo": curate -> view'
+    ) in out
     # The move is one line: no revert of the name or the place of the collection after it. The
     # questions and the dashboard of v0.1 are as the code of this release says: no line either.
     assert not [
@@ -1392,47 +1401,176 @@ def test_a_question_of_v0_1_in_the_trash_is_not_adopted(airflow, metabase):
     assert (trashed["collection_id"], trashed["archived"]) == (None, True)
 
 
-def test_what_reaches_the_collection_during_the_move_fails_the_job_and_moves_it_back(
-    airflow, metabase, capsys
-):
-    # Another account adds a question to the collection of v0.1 while demo-init moves it, and puts
-    # one in the trash there. The listing after the move finds what the registry does not name:
-    # demo-init puts the collection back at the root as it was, forgets it, and fails in one line.
-    # The next start moves it again, after it has taken those out.
-    content = metabase.content_state
-    old, cards, _ = an_earlier_demo(metabase)
+def lock_of(content: ContentState, collection_id: int, plant) -> dict:
+    """Run plant() once, just before Metabase applies the first PUT of the graph that names a
+    collection: what an account that may still curate it could add before the lock lands."""
     handle = content.handle
-    late = {}
+    done: dict = {}
 
     def racing(method, path, query, body):
-        answer = handle(method, path, query, body)
-        moving = (method, path) == ("PUT", f"/api/collection/{old['id']}") and "parent_id" in body
-        if moving and body["parent_id"] is not None and not late:
-            late["added"] = content.add_card({"name": "Late", "collection_id": old["id"]})
-            late["trashed"] = content.add_card({"name": "Gone", "collection_id": old["id"]})
-            late["trashed"].update(archived=True, archived_directly=True)
-        return answer
+        locking = (method, path) == ("PUT", "/api/collection/graph") and any(
+            str(collection_id) in perms for perms in (body or {}).get("groups", {}).values()
+        )
+        if locking and not done:
+            done.update(plant())
+        return handle(method, path, query, body)
 
     content.handle = racing
+    return done
+
+
+# What an account of All Users can add to the collection of v0.1 before demo-init locks it, of
+# each kind: a question, one that it puts in the trash at once, a sub-collection, a timeline and a
+# dashboard.
+def strays(content: ContentState, old: dict) -> dict[str, Callable[[], dict]]:
+    def trashed() -> dict:
+        card = content.add_card({"name": "Gone", "collection_id": old["id"]})
+        card.update(archived=True, archived_directly=True)
+        return card
+
+    return {
+        "question": lambda: content.add_card({"name": "Late", "collection_id": old["id"]}),
+        "question in the trash": trashed,
+        "collection": lambda: content.add_collection("Late notes", parent_id=old["id"]),
+        "timeline": lambda: content.add_timeline(old["id"]),
+        "dashboard": lambda: content.add_dashboard({"name": "Late", "collection_id": old["id"]}),
+    }
+
+
+@pytest.mark.parametrize(
+    "kind", ["question", "question in the trash", "collection", "timeline", "dashboard"]
+)
+def test_what_reaches_the_collection_before_its_lock_stops_the_job_and_keeps_it_at_the_root(
+    airflow, metabase, capsys, kind
+):
+    # Another account adds an item to the collection of v0.1 after demo-init listed it and before
+    # its lock lands. The listing after the lock finds it: the job stops in one line, and the
+    # collection stays at the root, view-only, unknown to the registry. The next start takes the
+    # item out and moves the collection.
+    content = metabase.content_state
+    old, cards, _ = an_earlier_demo(metabase)
+    late = lock_of(content, old["id"], lambda: {"item": strays(content, old)[kind]()})
     assert di.main(env_for(airflow, metabase)) == 1
     line = one_line(capsys, after_apply=True)
+    word = kind.split()[0]
     assert line == (
-        f"demo-init: the collection of v0.1 got a question {late['added']['id']} during its move, "
-        "which the demo does not ship: it is back at the root as it was, and the next start moves "
-        "it again"
+        f"demo-init: the collection of v0.1 got a {word} {late['item']['id']} before demo-init "
+        "could lock it, which the demo does not ship: it stays at the root, view-only, and the "
+        "next start takes that out and moves it"
     )
     assert (old["name"], old["location"]) == (di.COLLECTION_V01, "/")
-    # It was locked before the listing, so that what the listing found is all there is, and it
-    # stays view-only at the root.
     assert content.graph["1"][str(old["id"])] == "read"
-    assert "demo" not in registry_of(metabase)
-    assert not [k for k in registry_of(metabase) if k.startswith("demo/")]
+    assert not [k for k in registry_keys(metabase) if k == "demo" or k.startswith("demo/")]
+    del content.handle
     assert di.main(env_for(airflow, metabase)) == 0
     _, demo, now_cards, _ = demo_items(metabase)
     assert demo["id"] == old["id"]
     assert {c["id"] for c in now_cards.values()} == {c["id"] for c in cards.values()}
-    assert late["added"]["collection_id"] is None
-    assert (late["trashed"]["collection_id"], late["trashed"]["archived"]) == (None, True)
+    item = late["item"]
+    assert item.get("collection_id", "no collection") is None or item.get("location") == "/"
+
+
+def test_a_failure_after_the_lock_leaves_the_collection_of_v0_1_to_be_checked_again(
+    airflow, metabase, capsys
+):
+    # An item reaches the collection before its lock, and the listing after the lock fails, as
+    # with a failure of Metabase or a job that stops: the registry does not know the demo yet, so
+    # the next start lists the collection again, finds the item and takes it out.
+    content = metabase.content_state
+    old, _, _ = an_earlier_demo(metabase)
+    late = lock_of(content, old["id"], lambda: {"item": strays(content, old)["question"]()})
+    handle = content.handle
+    calls = {"after the lock": 0}
+
+    def failing(method, path, query, body):
+        if late and (method, path) == ("GET", "/api/card") and not calls["after the lock"]:
+            calls["after the lock"] += 1
+            return 500, {"message": "a failure of Metabase"}
+        return handle(method, path, query, body)
+
+    content.handle = failing
+    assert di.main(env_for(airflow, metabase)) == 1
+    assert "GET /api/card?f=archived failed with HTTP 500" in one_line(capsys, after_apply=True)
+    assert (old["name"], old["location"]) == (di.COLLECTION_V01, "/")
+    assert not [k for k in registry_keys(metabase) if k == "demo" or k.startswith("demo/")]
+    del content.handle
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert late["item"]["collection_id"] is None
+    _, demo, _, _ = demo_items(metabase)
+    assert demo["id"] == old["id"]
+    assert (
+        f"demo-init: moved out: question {late['item']['id']} of the collection of v0.1 to the "
+        "root, as the demo does not ship it"
+    ) in capsys.readouterr().out.splitlines()
+
+
+def test_what_reaches_a_new_demo_before_its_lock_stops_the_job_and_goes_to_the_trash(
+    airflow, metabase, capsys
+):
+    # A first start, as when the demo is turned on after people exist: an account of All Users
+    # saves a question into the new Demo right after Metabase made it, before its lock. The job
+    # stops in one line, the new Demo goes to the trash with the question, and the next start
+    # makes it again.
+    content = metabase.content_state
+    handle = content.handle
+    planted: dict = {}
+
+    def watching(method, path, query, body):
+        answer = handle(method, path, query, body)
+        if (method, path) == ("POST", "/api/collection") and body.get("name") == "Demo":
+            planted.setdefault(
+                "card", content.add_card({"name": "Mine", "collection_id": answer[1]["id"]})
+            )
+        return answer
+
+    content.handle = watching
+    assert di.main(env_for(airflow, metabase)) == 1
+    assert one_line(capsys, after_apply=True) == (
+        f"demo-init: the new collection demo got a question {planted['card']['id']} before its "
+        "lock, which the package does not ship: both are in the trash now, and the next start "
+        "makes the collection again"
+    )
+    [first] = [c for c in content.collections.values() if c["name"] == "Demo"]
+    assert first["archived"]
+    del content.handle
+    assert di.main(env_for(airflow, metabase)) == 0
+    _, demo, cards, _ = demo_items(metabase)
+    assert demo["id"] != first["id"]
+    assert planted["card"]["id"] not in {c["id"] for c in cards.values()}
+
+
+def test_a_collection_planted_in_a_new_agoranomos_during_the_move_stops_the_job(
+    airflow, metabase, capsys
+):
+    # The upgrade from v0.1: an account of All Users makes a collection inside Agoranomos right
+    # after Metabase made it, before its lock. The job stops in one line; the demo of v0.1, which
+    # the registry knows by then, goes into the Agoranomos of the next start.
+    content = metabase.content_state
+    old, _, _ = an_earlier_demo(metabase)
+    handle = content.handle
+    planted: dict = {}
+
+    def watching(method, path, query, body):
+        answer = handle(method, path, query, body)
+        if (method, path) == ("POST", "/api/collection") and body.get("name") == "Agoranomos":
+            planted.setdefault(
+                "notes", content.add_collection("Official notes", parent_id=answer[1]["id"])
+            )
+        return answer
+
+    content.handle = watching
+    assert di.main(env_for(airflow, metabase)) == 1
+    assert one_line(capsys, after_apply=True) == (
+        f"demo-init: the new collection agoranomos got a collection {planted['notes']['id']} "
+        "before its lock, which the package does not ship: both are in the trash now, and the "
+        "next start makes the collection again"
+    )
+    del content.handle
+    assert di.main(env_for(airflow, metabase)) == 0
+    root, demo, _, _ = demo_items(metabase)
+    assert demo["id"] == old["id"]
+    assert not planted["notes"]["location"].startswith(f"/{root['id']}/")
+    assert "registry" not in planted
 
 
 def test_the_timelines_of_the_collection_of_v0_1_go_to_the_root_with_their_events(

@@ -194,7 +194,7 @@ def test_an_edit_of_the_content_is_reverted_by_the_next_start_and_logged(
         'demo-init: revert of an edit: question demo/spend-by-day name: "Edited by a test" -> '
         '"Spend by day"',
         "demo-init: restored from the trash: dashboard demo/dashboard",
-        "demo-init: lowered: group 'All Users' on collection Demo: curate -> view",
+        'demo-init: lowered: group "All Users" on collection "Demo": curate -> view',
     ], changes
 
 
@@ -255,6 +255,59 @@ def test_a_description_written_into_the_columns_of_a_question_is_reverted(
         message="Metabase did not compute the metadata of the question again",
     )
     assert metadata == computed
+
+
+def test_another_account_cannot_put_anything_into_the_package(metabase_url, session):
+    # Agoranomos and Demo are view-only for every group but Administrators: a second account, in
+    # All Users only, can make neither a collection in Agoranomos nor a question in Demo.
+    entries = registry()
+    root = item(metabase_url, session, "agoranomos", entries)
+    demo = item(metabase_url, session, "demo", entries)
+    database_id = warehouse_database_id(metabase_url, session)
+    native = {"database": database_id, "type": "native", "native": {"query": "SELECT 1"}}
+    question = {"name": "Mine", "display": "table", "visualization_settings": {}}
+    with another_account(metabase_url, session) as theirs:
+        tries = {
+            "a collection in Agoranomos": (
+                "/api/collection",
+                {"name": "Official notes", "parent_id": root["id"]},
+            ),
+            "a question in Demo": (
+                "/api/card",
+                {**question, "collection_id": demo["id"], "dataset_query": native},
+            ),
+        }
+        answers = {
+            what: http_json("POST", f"{metabase_url}{path}", body, headers=theirs)[0]
+            for what, (path, body) in tries.items()
+        }
+    assert answers == dict.fromkeys(tries, 403), answers
+
+
+def test_a_collection_that_an_admin_opens_inside_agoranomos_is_locked_by_the_next_start(
+    env, metabase_url, session
+):
+    # An admin makes a collection inside Agoranomos and lets All Users curate it: the next run of
+    # metabase-init, which every start runs, lowers it to View and says so.
+    root = item(metabase_url, session, "agoranomos")
+    inner = post(
+        metabase_url, session, "/api/collection", {"name": "Inner", "parent_id": root["id"]}
+    )
+    try:
+        _, all_users = group_ids(metabase_url, session)
+        graph = get(metabase_url, session, "/api/collection/graph")
+        body = {"revision": graph["revision"], "groups": {all_users: {str(inner["id"]): "write"}}}
+        put(metabase_url, session, "/api/collection/graph", body)
+        code, changes, found, _ = run_job("metabase-init", secrets(env))
+        assert not found, f"the output of metabase-init holds the values of {found}"
+        assert code == 0, f"metabase-init exited with {code}"
+        graph = get(metabase_url, session, "/api/collection/graph")
+        assert graph["groups"][all_users][str(inner["id"])] == "read"
+        assert changes == [
+            'metabase-init: lowered: group "All Users" on collection "Inner": curate -> view'
+        ], changes
+    finally:
+        put(metabase_url, session, f"/api/collection/{inner['id']}", {"archived": True})
 
 
 def test_a_collection_with_the_same_name_is_not_taken_for_the_package(env, metabase_url, session):

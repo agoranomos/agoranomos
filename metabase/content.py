@@ -43,12 +43,16 @@ ROOT_KEY = "agoranomos"
 ROOT_NAME = "Agoranomos"
 ROOT_DESCRIPTION = (
     "The content that Agoranomos ships: view-only, and put back as the code says on every start. "
-    "To change a question or a dashboard, copy it into a collection of your own."
+    "A copy of a question or a dashboard in another collection can be changed."
 )
 ADMIN_GROUP_TYPE = "admin"
 # The type of every question that the package ships: not a model, not a metric.
 QUESTION_TYPE = "question"
 WHAT = {"collection": "collection", "card": "question", "dashboard": "dashboard"}
+# The word of the log for each model of the items of a collection, and the model of a question by
+# its type in those items (collections/children.clj of Metabase 0.64.1).
+ITEM_WORDS = {"card": "question", "dataset": "model", **{m: m for m in ("metric", "dashboard")}}
+ITEM_MODEL = {"question": "card", "model": "dataset", "metric": "metric"}
 # An entity ID of Metabase: a NanoID of 21 characters of this alphabet (NanoIdString of Metabase
 # 0.64.1). The registry holds nothing else, as its entries become paths of requests of the admin.
 ENTITY_ID_LENGTH = 21
@@ -137,7 +141,7 @@ class Registry:
     <package>/<item>. A JSON file that only the setup jobs can write, saved in one step after each
     change, so that an item that a job has just created is never created twice."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, log: Log | None = None) -> None:
         self.path = Path(path)
         self.items: dict[str, dict[str, str]] = {}
         try:
@@ -159,13 +163,18 @@ class Registry:
                 f"{self.path} is not a registry of the content of format {FORMAT}: move it away "
                 "and run ./agoranomos up, which creates the content again next to the old one"
             )
-        self.items = {
-            key: {"model": entry["model"], "entity_id": entry["entity_id"]}
-            for key, entry in document["items"].items()
-            if isinstance(entry, dict)
-            and entry.get("model") in MODELS
-            and is_entity_id(entry.get("entity_id"))
-        }
+        for key, entry in document["items"].items():
+            if (
+                isinstance(entry, dict)
+                and entry.get("model") in MODELS
+                and is_entity_id(entry.get("entity_id"))
+            ):
+                self.items[key] = {"model": entry["model"], "entity_id": entry["entity_id"]}
+            elif log is not None:
+                # By its key, never its value: the entity ID of the entry is what is wrong with it.
+                log(
+                    f"left out: entry {shown(key)} of the registry, which names no item of Metabase"
+                )
 
     def get(self, key: str) -> dict[str, str] | None:
         return self.items.get(key)
@@ -276,6 +285,19 @@ def ensure_collection(
             body["parent_id"] = parent_id
         created = metabase.call("POST", "/api/collection", body)
         log(created_line(registry, "collection", key, name))
+        # It takes the permissions of its parent: Curate for All Users at the root of a new
+        # Metabase. So it is locked before anything else, and what reached it before the lock means
+        # that someone was faster: the collection goes to the trash with it, and the job stops.
+        lock(metabase, {str(created["id"]): name}, log)
+        held = everything_in(metabase, created["id"])
+        if held:
+            metabase.call("PUT", f"/api/collection/{created['id']}", {"archived": True})
+            word = ITEM_WORDS.get(held[0].get("model"), str(held[0].get("model")))
+            raise ContentError(
+                f"the new collection {key} got a {word} {held[0]['id']} before its lock, which the "
+                "package does not ship: both are in the trash now, and the next start makes the "
+                "collection again"
+            )
         registry.set(key, "collection", created["entity_id"])
         return created
     body = restore("collection", key, found, log)
@@ -290,6 +312,47 @@ def ensure_collection(
     if body:
         found = metabase.call("PUT", f"/api/collection/{found['id']}", body)
     return found
+
+
+def items_in(response: Any) -> list[Any]:
+    """The items of a list that Metabase gives bare or as the data of an object."""
+    return response.get("data", []) if isinstance(response, dict) else response
+
+
+def everything_in(metabase: Client, collection_id: int) -> list[dict[str, Any]]:
+    """Every item of a collection, those in the trash included, each once: the items of every
+    model out of the trash, its timelines among them, the questions of its dashboards and the
+    documents of explorations; with archived=true, its sub-collections, timelines and pulses in
+    the trash and what went there with them; and the questions, dashboards and documents that a
+    person put in the trash from it. The events of a timeline belong to it and go where it goes.
+    Metabase 0.64.1 lists what a person put in the trash only as items of the trash, but its lists
+    of the questions and the dashboards in the trash, and a document read by its ID, keep their
+    own collection (read in collections/children.clj, collections_rest/api.clj,
+    timeline/api/timeline.clj and documents/api/document.clj at the tag v0.64.1, and on the stand,
+    October 2026). Each list comes whole: every archived question and dashboard of the instance
+    is read, with its query and metadata."""
+    found: dict[tuple[str, int], dict[str, Any]] = {}
+    shows = "show_dashboard_questions=true&show_exploration_documents=true"
+    for archived in ("", "&archived=true"):
+        path = f"/api/collection/{collection_id}/items?{shows}{archived}"
+        for item in items_in(metabase.call("GET", path)):
+            found[(item.get("model"), item["id"])] = item
+    # GET /api/dashboard is deprecated in Metabase 0.64.1 ("may be removed in the future",
+    # dashboards_rest/api.clj at the tag v0.64.1, read on 2026-10-13), and it is the one way to the
+    # collection of a dashboard in the trash: GET /api/dashboard/:id and the items of the trash
+    # show the trash instead. Should a later release drop it, the call fails and the job with it.
+    for kind in ("card", "dashboard"):
+        for item in items_in(metabase.call("GET", f"/api/{kind}?f=archived")):
+            if item.get("collection_id") == collection_id:
+                model = kind if kind == "dashboard" else ITEM_MODEL.get(item.get("type"), "card")
+                found[(model, item["id"])] = {**item, "model": model, "archived": True}
+    trash = metabase.call("GET", "/api/collection/trash")
+    in_trash = metabase.call("GET", f"/api/collection/{trash['id']}/items?models=document")
+    for listed in items_in(in_trash):
+        document = metabase.call("GET", f"/api/document/{listed['id']}")
+        if document.get("collection_id") == collection_id:
+            found[("document", listed["id"])] = {**document, "model": "document", "archived": True}
+    return sorted(found.values(), key=lambda item: (str(item.get("model")), item["id"]))
 
 
 def ensure_question(
@@ -568,9 +631,14 @@ def ensure_dashboard(
         registry.set(key, "dashboard", found["entity_id"])
         body: dict[str, Any] = {}
     else:
+        # caveats and points_of_interest are texts of a dashboard that its readers, AI clients
+        # among them, get; the package leaves them empty, and a null in a PUT changes nothing
+        # (DashUpdates, dashboards_rest/api.clj at the tag v0.64.1).
         wanted = {
             "name": dashboard.name,
             "description": dashboard.description,
+            "caveats": "",
+            "points_of_interest": "",
             "collection_id": collection_id,
         }
         body = placed("dashboard", key, found, wanted, log)
@@ -655,20 +723,38 @@ def ensure_package(
 
 
 def lock_down(metabase: Client, registry: Registry, log: Log) -> None:
-    """Give every group but Administrators at most View on each collection of the registry: Curate
-    becomes View, and No access stays. The graph is read again once when someone changed it in
-    between (409)."""
+    """Give every group but Administrators at most View on Agoranomos and on every collection in
+    it, at any depth, and on each collection of the registry: Curate becomes View, and No access
+    stays (ADR-0018). Personal collections and those in the trash are left out."""
     collections = {}
     for key in registry.collection_keys():
         found = located(registry, metabase, "collection", key)
         if found is not None and not found.get("archived"):
             collections[str(found["id"])] = found["name"]
+    root = located(registry, metabase, "collection", ROOT_KEY)
+    if root is not None and not root.get("archived"):
+        inside = f"{root.get('location') or '/'}{root['id']}/"
+        for collection in items_in(metabase.call("GET", "/api/collection")):
+            if (
+                isinstance(collection.get("id"), int)
+                and (collection.get("location") or "").startswith(inside)
+                and not collection.get("personal_owner_id")
+                and not collection.get("archived")
+            ):
+                collections[str(collection["id"])] = collection["name"]
+    lock(metabase, collections, log)
+
+
+def lock(metabase: Client, collections: Mapping[str, str], log: Log) -> None:
+    """Give every group but Administrators at most View on these collections, by ID, with one
+    line for each permission that it lowers. The graph is read again once when someone changed it
+    in between (409); a second 409 stops the job, as the content is not locked then."""
     if not collections:
         return
     groups = metabase.call("GET", "/api/permissions/group")
     admins = {str(g["id"]) for g in groups if g.get("magic_group_type") == ADMIN_GROUP_TYPE}
     names = {str(g["id"]): g.get("name") for g in groups}
-    for attempt in (1, 2):
+    for _attempt in (1, 2):
         # Metabase 0.64.1 gives the graph sparse: a group or a collection with No access is not in
         # it, and the PUT changes only what it names.
         graph = metabase.call("GET", "/api/collection/graph")
@@ -683,7 +769,7 @@ def lock_down(metabase: Client, registry: Registry, log: Log) -> None:
         status, _ = metabase.send(
             "PUT", "/api/collection/graph", {"revision": graph["revision"], "groups": lowered}
         )
-        if status == 409 and attempt == 1:
+        if status == 409:
             continue
         if status >= 400:
             raise ContentError(
@@ -692,6 +778,12 @@ def lock_down(metabase: Client, registry: Registry, log: Log) -> None:
             )
         for group, perms in sorted(lowered.items()):
             for cid in perms:
-                name = names.get(group, f"#{group}")
-                log(f"lowered: group '{name}' on collection {collections[cid]}: curate -> view")
+                name = shown(names.get(group, f"#{group}"))
+                log(
+                    f"lowered: group {name} on collection {shown(collections[cid])}: curate -> view"
+                )
         return
+    raise ContentError(
+        "PUT /api/collection/graph was refused twice with HTTP 409, as the permissions changed in "
+        "between: the content of the package is not locked yet; run ./agoranomos up again"
+    )
