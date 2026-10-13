@@ -83,7 +83,7 @@ cd agoranomos
 
 | Service | Address | What to open |
 |---|---|---|
-| Metabase | <http://127.0.0.1:3000> | The collection **Agoranomos demo** and its dashboard **Ad spend (demo)** |
+| Metabase | <http://127.0.0.1:3000> | The collection **Agoranomos / Demo** and its dashboard **Ad spend (demo)** |
 | Airflow | <http://127.0.0.1:8080> | The DAGs `agoranomos_demo_load`, `agoranomos_demo_history` and `agoranomos_demo_transform` |
 
 `./agoranomos credentials` shows the addresses, the user names and the settings of `.env` that hold the passwords, and never prints a password; `./agoranomos down` stops the stack while the data stays. [Run Agoranomos locally](docs/how-to/run-locally.md) covers Windows, updates, memory and troubleshooting.

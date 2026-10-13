@@ -543,7 +543,8 @@ services:
 
   # Sets Metabase up on the first start and keeps the warehouse connection current on every start. Metabase
   # makes the connection to the warehouse, so this job needs the default network only, to reach Metabase.
-  # Then it applies the metadata of the marts: the export and this deployment's overrides, both read-only.
+  # Then it applies the metadata of the marts: the export and this deployment's overrides, both read-only;
+  # and it gives every group but Administrators at most View on the content of the package (ADR-0018).
   metabase-init:
     image: python:3.13.16-slim-trixie@sha256:3dd7cc108ec1493442514f5c2a871af6af0ec31d768ff6e378a93340c3b3db5f
     profiles: [core]
@@ -590,8 +591,9 @@ services:
     logging: *logging
 
   # Makes the demo ready on every start (the demo profile, which .env turns on by default): it runs the
-  # demo pipeline once, then syncs the warehouse in Metabase and creates the demo collection, its
-  # questions and its dashboard. It holds the passwords of both admins, which no Airflow task gets.
+  # demo pipeline once, then syncs the warehouse in Metabase and puts the demo collection, its questions
+  # and its dashboard in the collection Agoranomos as the code says (ADR-0018). It holds the passwords of
+  # both admins, which no Airflow task gets.
   # COMPOSE_PROFILES=core in .env turns the demo off.
   demo-init:
     image: python:3.13.16-slim-trixie@sha256:3dd7cc108ec1493442514f5c2a871af6af0ec31d768ff6e378a93340c3b3db5f

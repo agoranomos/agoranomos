@@ -38,7 +38,7 @@ A description is not an instruction: write facts about the data, and never copy 
 
 ## The questions of the demo
 
-The questions of the demo take the titles of their columns and axes from the display names when `demo-init` creates them, and keep them after that, also when you change a name later. A question that lacks a title gets it on the next start. To get the new titles, delete the question in Metabase, and the next start creates it again.
+The questions of the demo take the titles of their columns and axes from the display names, with the entries of this file, on every start: `demo-init` puts the settings of display of each question back as the code says ([See the demo](see-the-demo.md#what-later-starts-do)). So a display name that you change here reaches their titles at the next start, which logs it as a `revert of an edit` of the `visualization_settings` of each question that it changed.
 
 ## Keep the file in git
 

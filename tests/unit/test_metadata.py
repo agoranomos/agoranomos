@@ -505,6 +505,8 @@ def test_an_override_in_another_language_is_kept_and_logged_as_written(tmp_path,
         "WAREHOUSE_DB": "warehouse",
         "WAREHOUSE_USER": "metabase_reader",
         "WAREHOUSE_PASSWORD": "reader-password",
+        # No registry of the content yet, as before the first start of demo-init.
+        "CONTENT_REGISTRY": str(tmp_path / "content.json"),
         **metadata_env(tmp_path, overrides=overrides),
     }
     result = subprocess.run(

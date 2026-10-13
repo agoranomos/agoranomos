@@ -7,8 +7,11 @@ connection details. Settings that must not change in the Metabase UI, such as th
 being off, are environment variables in compose.yaml instead. On a new Metabase it also turns the
 public links off, once. Then it applies the metadata of the marts (metadata.py): the names,
 descriptions and types that dbt and the overrides of the deployment give the tables and fields of
-the marts, with one line for each change. Run with the argument diff, as ./agoranomos metadata diff
-does, it prints that plan and applies nothing.
+the marts, with one line for each change. Last, it gives every group but Administrators at most
+View on the collections of the content of the package that the registry of the content records,
+the collection Agoranomos and its packages such as Demo (content.py, ADR-0018), on every start, with
+one line for each permission that it lowers. Run with the argument diff, as ./agoranomos metadata
+diff does, it prints the plan of the metadata and applies nothing.
 
 Every secret comes from the environment and goes only into the body of a request. The messages of
 this script name a step and an HTTP status, or the class of an error (and, for an answer of an
@@ -31,6 +34,7 @@ from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+import content
 import metadata
 
 WAREHOUSE_NAME = "Agoranomos warehouse"
@@ -59,6 +63,7 @@ ENV_NAMES = {
     "warehouse_password": "WAREHOUSE_PASSWORD",
     "metadata_export": "METADATA_EXPORT",
     "metadata_overrides": "METADATA_OVERRIDES",
+    "content_registry": "CONTENT_REGISTRY",
 }
 
 # The hints that end a message. A step that fails gets the one for its status, or LOGS_HINT.
@@ -141,6 +146,7 @@ class Config:
     warehouse_password: str
     metadata_export: str
     metadata_overrides: str
+    content_registry: str
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
@@ -486,9 +492,11 @@ def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> in
         return 2
     try:
         config = Config.from_env(environment)
-        # The metadata is read and checked first: a mistake in the overrides of the deployment
-        # stops the job before it writes anything.
+        # The metadata and the registry of the content are read and checked first: a mistake in
+        # the overrides of the deployment, or a registry that is none, stops the job before it
+        # writes anything.
         marts = metadata.load(config.metadata_export, config.metadata_overrides)
+        registry = content.Registry(config.content_registry)
         metabase = Metabase(config.url)
         wait_until_healthy(metabase)
         admin_created = ensure_admin(metabase, config)
@@ -496,8 +504,10 @@ def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> in
             turn_off_public_sharing(metabase)
         database_id, database_created = ensure_warehouse(metabase, config)
         wait = metadata.waiter(METADATA_SYNC_TIMEOUT, "see ./agoranomos logs metabase")
-        metadata.apply(metabase, database_id, marts, wait, log=logged("metabase-init"))
-    except (SetupError, metadata.MetadataError) as error:
+        log = logged("metabase-init")
+        metadata.apply(metabase, database_id, marts, wait, log=log)
+        content.lock_down(metabase, registry, log)
+    except (SetupError, metadata.MetadataError, content.ContentError) as error:
         print(f"metabase-init: {error}", file=sys.stderr)
         return 1
     except SHAPE_ERRORS as error:
