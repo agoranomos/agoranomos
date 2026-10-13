@@ -7,6 +7,7 @@ dataset holds a load. The stack tests load with dlt itself."""
 
 import importlib
 import os
+import re
 import sys
 import types
 from datetime import UTC, date, datetime, timedelta
@@ -149,6 +150,25 @@ def test_each_column_keeps_its_own_hint_across_the_tables_of_a_load(sources):
     # dlt never writes into the hints of the module, which every load starts from.
     for hint in [*module.TABLE_HINTS.values(), module.RELOAD_HINTS]:
         assert all("name" not in schema for schema in hint["columns"].values())
+
+
+@pytest.mark.parametrize(
+    "account_id", ["41700'00011", "{0}", "4170000011 OR true", "", "Kaufhaus\u00e4", "41700\n11"]
+)
+def test_a_scope_takes_only_ids_of_letters_digits_hyphens_and_underscores(sources, account_id):
+    # The IDs go into the SQL of the scope, and dlt formats it with str.format: an ID from outside
+    # the code of the demo, as part B may pass, must not change either. The error names no ID.
+    module, _, _ = sources
+    day = date(2026, 10, 11)
+    line = (
+        "the scope of demo_search.campaign_stats takes account IDs of ASCII letters, digits, _ "
+        "and - only"
+    )
+    with pytest.raises(ValueError, match=f"^{re.escape(line)}$"):
+        module.scope("demo_search", "campaign_stats", {account_id: (day, day)})
+    assert module.scope("demo_search", "campaign_stats", {"Ab_9-0": (day, day)}).startswith(
+        "(\"customer__id\" = 'Ab_9-0'"
+    )
 
 
 def test_every_run_of_a_fact_table_replaces_the_window_of_each_account(sources):

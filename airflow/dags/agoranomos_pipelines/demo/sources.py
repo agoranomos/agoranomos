@@ -22,6 +22,7 @@ from __future__ import annotations
 import copy
 import logging
 import os
+import re
 import tempfile
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
@@ -127,13 +128,22 @@ def own(hints: dict) -> dict:
     return copied
 
 
+# The account IDs that a scope writes into its SQL, which dlt then formats with str.format: ASCII
+# letters, digits, _ and -, so that an ID from outside the code of the demo cannot change either.
+ACCOUNT_ID = re.compile(r"[A-Za-z0-9_-]+")
+
+
 def scope(code: str, table: str, windows: dict[str, tuple[date, date]]) -> str:
     """The rows of a fact table that a load replaces, as the SQL condition of dlt's destination
     scope: those of each account in its window, by the column of the account and the day of the
-    fact table (platforms.FactTable). The values come from the code of the demo. The natural keys,
-    which the critical tests of staging check, are in the reference of the model: these tables
-    have none in dlt."""
+    fact table (platforms.FactTable). The days are dates, and an account ID that is not of
+    ACCOUNT_ID fails, with a line that names no ID. The natural keys, which the critical tests of
+    staging check, are in the reference of the model: these tables have none in dlt."""
     [fact] = [f for f in PLATFORMS[code].facts if f.table == table]
+    if not all(ACCOUNT_ID.fullmatch(account_id) for account_id in windows):
+        raise ValueError(
+            f"the scope of {code}.{table} takes account IDs of ASCII letters, digits, _ and - only"
+        )
     parts = []
     for account_id, (first, last) in sorted(windows.items()):
         between = (
