@@ -307,6 +307,8 @@ IN_SEEDS = {
     "currency": ("seed_iso_4217_currencies", "currency_code"),
     "time_zone": ("seed_iana_time_zones", "time_zone"),
 }
+# The kinds of staging models whose tests read the seeds.
+SEEDED = {"accounts", "properties"}
 
 
 def blocks(text: str, indent: int) -> dict[str, str]:
@@ -330,7 +332,8 @@ def column_tests(block: str) -> set[str]:
 
 def test_each_staging_model_of_a_platform_is_one_call_of_the_shape_of_its_api():
     # With the code of the platform of its folder and the raw tables of its own dataset: a model
-    # that passed the code of another platform would still pass its key tests.
+    # that passed the code of another platform would still pass its key tests. An account or a
+    # property model also names the seeds that its tests read, so that they come first (below).
     from agoranomos_pipelines.demo import platforms
 
     assert set(SHAPED) == set(platforms.PLATFORMS)
@@ -343,8 +346,10 @@ def test_each_staging_model_of_a_platform_is_one_call_of_the_shape_of_its_api():
             path = STAGING / code / f"stg_{code}__{model}.sql"
             comment, *body = path.read_text(encoding="utf-8").splitlines()
             relations = ", ".join(f"source('{dataset}', '{table}')" for table in tables)
+            seeds = [seed for seed, _ in IN_SEEDS.values()] if model in SEEDED else []
+            depends = [f"-- depends_on: {{{{ ref('{seed}') }}}}" for seed in seeds]
             assert comment.startswith(f"-- {path.name}: "), path.name
-            assert body == [f"{{{{ {macro}({relations}, '{code}') }}}}"], path.name
+            assert body == [*depends, f"{{{{ {macro}({relations}, '{code}') }}}}"], path.name
 
 
 def test_the_sources_of_a_platform_are_the_tables_that_its_load_writes():
@@ -390,7 +395,7 @@ def test_the_staging_models_of_the_platforms_have_their_critical_tests():
                 non_negative
             ), (code, model)
             seeded = {c for c, tests in tested.items() if "relationships" in tests}
-            assert seeded == (set(IN_SEEDS) if model in {"accounts", "properties"} else set())
+            assert seeded == (set(IN_SEEDS) if model in SEEDED else set())
             for column in seeded:
                 seed, field = IN_SEEDS[column]
                 target = rf"^ +to: ref\('{seed}'\)\n +field: {field}$"
@@ -412,3 +417,70 @@ def test_every_column_of_the_staging_of_the_platforms_takes_the_doc_block_of_its
                 assert description, (model, name)
                 assert description.group(1) == f"'{{{{ doc(\"{name}\") }}}}'", (model, name)
                 assert name in written, (model, name)
+
+
+# A ref or a source in SQL or YAML, outside the comments of Jinja, which dbt does not render; dbt
+# also reads one in a comment of SQL, such as -- depends_on: {{ ref('x') }}.
+REF = re.compile(r"\bref\(\s*'(\w+)'\s*\)")
+SOURCE = re.compile(r"\bsource\(\s*'(\w+)'\s*,\s*'(\w+)'\s*\)")
+JINJA_COMMENT = re.compile(r"\{#.*?#\}", flags=re.DOTALL)
+
+
+def referenced(text: str) -> list[str]:
+    """The nodes that a text refs, by name, and the sources that it reads, as source:<name>.<table>,
+    in their order."""
+    text = JINJA_COMMENT.sub("", text)
+    found = [(m.start(), m.group(1)) for m in REF.finditer(text)]
+    found += [(m.start(), f"source:{m.group(1)}.{m.group(2)}") for m in SOURCE.finditer(text)]
+    return [name for _, name in sorted(found)]
+
+
+def ancestors(node: str, parents: dict[str, set[str]]) -> set[str]:
+    """Every node that a node depends on, at any depth."""
+    found: set[str] = set()
+    todo = [node]
+    while todo:
+        for parent in parents.get(todo.pop(), set()) - found:
+            found.add(parent)
+            todo.append(parent)
+    return found
+
+
+def read_together() -> list[tuple[str, set[str]]]:
+    """Each test that reads more than one node, with the nodes that it reads: a singular test of
+    dbt/tests, by its file, or a generic test of a YAML file, by the node that it is on and the ref
+    or source in its arguments."""
+    found = []
+    for path in sorted((DBT / "tests").glob("*.sql")):
+        nodes = set(referenced(path.read_text(encoding="utf-8")))
+        if len(nodes) > 1:
+            found.append((path.name, nodes))
+    for path in sorted([*(DBT / "models").rglob("*.yml"), *SEEDS.glob("*.yml")]):
+        text = path.read_text(encoding="utf-8")
+        if not text.startswith(("models:", "seeds:")):
+            assert not referenced(text), f"{path.name}: a test outside models or seeds"
+            continue
+        for node, block in blocks(text, 2).items():
+            found += [(f"{path.name}: {node}", {node, other}) for other in referenced(block)]
+    return found
+
+
+def test_a_test_of_several_nodes_is_on_one_that_depends_on_the_others():
+    # The transform selects the tests of each task as buildable: a test that reads more than one
+    # node runs in the test task of the node that depends on all the others, after them, and its
+    # failure stops the models below that node. A test of nodes none of which depends on the others
+    # runs in no task, so one of them names the others: a ref, or a -- depends_on: line.
+    sql = [*(DBT / "macros").rglob("*.sql"), *(DBT / "tests" / "generic").glob("*.sql")]
+    hidden = [path.name for path in sql if referenced(path.read_text(encoding="utf-8"))]
+    assert not hidden, f"a ref in a macro or a generic test is not seen here: {hidden}"
+    parents = {
+        path.stem: set(referenced(path.read_text(encoding="utf-8")))
+        for path in (DBT / "models").rglob("*.sql")
+    }
+    checked = read_together()
+    assert len(checked) >= 8, "the tests of the accounts and properties against the seeds"
+    for where, nodes in checked:
+        assert any(nodes - {node} <= ancestors(node, parents) for node in nodes), (
+            where,
+            sorted(nodes),
+        )
