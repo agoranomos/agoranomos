@@ -179,6 +179,8 @@ def test_airflow_services_mount_the_dag_folders_and_the_dbt_project_read_only(va
             assert mounts[folder]["read_only"] is True, (name, folder)
         dbt = mounts["/opt/agoranomos/dbt"]
         assert (dbt["source"], dbt["read_only"]) == (str(REPO_ROOT / "dbt"), True), name
+        manifest = mounts["/opt/agoranomos/manifest"]
+        assert (manifest["source"], manifest["read_only"]) == ("dbt-manifest", True), name
         assert mounts["/opt/airflow/logs"]["source"] == "airflow-logs", name
 
 
@@ -510,6 +512,7 @@ def test_metadata_export_holds_no_secret_and_has_no_network(variant):
         (str(REPO_ROOT / "dbt"), "/opt/agoranomos/dbt", True),
         (str(REPO_ROOT / "metabase"), "/opt/agoranomos/metabase", True),
         ("metadata-export", "/opt/agoranomos/metadata", False),
+        ("dbt-manifest", "/opt/agoranomos/manifest", False),
     }
 
 
@@ -525,6 +528,29 @@ def test_only_metadata_export_can_write_the_export(variant):
                 (readers if mount.get("read_only") else writers).add(name)
     assert writers == {"metadata-export"}
     assert readers == {"metabase-init", "demo-init"}
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_only_metadata_export_can_write_the_manifest_and_every_airflow_service_reads_it(variant):
+    # What a task of dbt runs comes from the checkout only: the manifest that Cosmos renders the
+    # tasks from is written by the job without network and secrets (ADR-0027).
+    readers, writers = set(), set()
+    for name, service in rendered(variant).items():
+        for mount in service.get("volumes") or []:
+            if mount.get("source") == "dbt-manifest":
+                (readers if mount.get("read_only") else writers).add(name)
+    assert writers == {"metadata-export"}
+    assert readers == airflow_names(variant)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_the_dag_processor_and_the_tasks_start_after_the_manifest(variant):
+    services = rendered(variant)
+    runners = ["airflow-dag-processor", "airflow-scheduler"]
+    runners += ["airflow-worker"] if variant == "celery" else []
+    for name in runners:
+        condition = services[name]["depends_on"]["metadata-export"]["condition"]
+        assert condition == "service_completed_successfully", name
 
 
 # Metabase 0.63 and 0.64 have these on by default, and compose.yaml switches them off with
@@ -1023,8 +1049,9 @@ def test_the_dag_processor_and_the_triggerer_check_their_jobs_without_airflow(va
 
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_every_airflow_service_parses_an_unchanged_dag_file_every_five_minutes(variant):
-    # Each parse of the transform DAG runs dbt ls, so an unchanged file waits five minutes, not the
-    # 30 seconds of Airflow; a new file shows up at the next look into the folders, every minute.
+    # Each parse of the transform DAG reads the manifest of dbt and renders all its tasks, so an
+    # unchanged file waits five minutes, not the 30 seconds of Airflow; a new file shows up at the
+    # next look into the folders, every minute.
     # Both are settings, not secrets, so a failed assertion may print them.
     for name, service in airflow_services(variant).items():
         environment = service["environment"]

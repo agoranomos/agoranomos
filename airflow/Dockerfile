@@ -15,11 +15,12 @@ ENV RUNTIME__DLTHUB_TELEMETRY=false \
 # compose.yaml sets the same.
 ENV PROVIDERS__ENABLE_AIRFLOW_SECRETS=false
 
-# The two caches from which Cosmos renders the tasks of dbt stay out of Airflow Variables, which the
-# Op role may edit. Cosmos would keep the output of dbt ls there and render the tasks of dbt and
-# their arguments from it, so such a Variable could change what a dbt task runs. Instead, dbt ls
-# runs each time that the DAG processor parses a DAG of Cosmos, and again when each task of that
-# DAG starts, since a task parses the file of its DAG first; compose.yaml sets the same.
+# The two caches of Cosmos stay out of Airflow Variables, which the Op role may edit. A DAG of Cosmos
+# that reads its project with dbt ls would keep the output there and render the tasks of dbt and
+# their arguments from it, so such a Variable could change what a dbt task runs. The transform DAG
+# needs neither: Cosmos renders it from the manifest of the dbt project, which metadata-export
+# writes into a volume that the Airflow services mount read-only (ADR-0027). compose.yaml sets the
+# same.
 ENV AIRFLOW__COSMOS__ENABLE_CACHE_DBT_LS=False \
     AIRFLOW__COSMOS__ENABLE_CACHE_DBT_YAML_SELECTORS=False
 
@@ -41,13 +42,14 @@ RUN python -m venv /opt/airflow/dbt_venv \
         -r /tmp/agoranomos/dbt-requirements.txt \
     && /opt/airflow/dbt_venv/bin/pip check
 
-# The folder that the metadata-export service writes the export into, as nobody (65534): a new named
-# volume takes the owner of the folder that it is first mounted on, and without this folder Docker
-# would give the volume to root, and the job could not write it (compose.yaml). The folder of the
-# plugins is made here too, as root, for the COPY below. These come last, so that the layers above
-# stay in the cache of Docker. The image then runs as the user of the base.
+# The folders that the metadata-export service writes the export and the manifest into, as nobody
+# (65534): a new named volume takes the owner of the folder that it is first mounted on, and without
+# these folders Docker would give the volumes to root, and the job could not write them
+# (compose.yaml). The folder of the plugins is made here too, as root, for the COPY below. These
+# come last, so that the layers above stay in the cache of Docker. The image then runs as the user
+# of the base.
 USER root
-RUN install -d -o 65534 -g 65534 -m 0755 /opt/agoranomos/metadata
+RUN install -d -o 65534 -g 65534 -m 0755 /opt/agoranomos/metadata /opt/agoranomos/manifest
 RUN install -d -m 0755 /opt/agoranomos/plugins
 USER ${AIRFLOW_UID}
 

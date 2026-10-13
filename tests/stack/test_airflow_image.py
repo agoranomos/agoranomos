@@ -303,8 +303,10 @@ def test_cosmos_itself_keeps_no_cache_in_airflow_variables(service):
 
 
 def test_the_image_has_the_folder_of_the_export_of_nobody_and_the_user_of_airflow():
-    # metadata-export runs this image as nobody and writes a named volume that is mounted on this
-    # folder (compose.yaml); the Airflow services run it as the user of the official image.
+    # metadata-export runs this image as nobody and writes the named volumes that are mounted on
+    # these folders, the export and the manifest of the dbt project (compose.yaml); the Airflow
+    # services run it as the user of the official image.
+    folders = ["/opt/agoranomos/metadata", "/opt/agoranomos/manifest"]
     result = docker(
         "run",
         "--rm",
@@ -314,11 +316,12 @@ def test_the_image_has_the_folder_of_the_export_of_nobody_and_the_user_of_airflo
         "stat",
         IMAGE,
         "-c",
-        "%u:%g %a",
-        "/opt/agoranomos/metadata",
+        "%u:%g %a %n",
+        *folders,
         check=False,
     )
-    assert (result.returncode, result.stdout.strip()) == (0, "65534:65534 755"), result.stderr
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [f"65534:65534 755 {folder}" for folder in folders]
     user = docker("image", "inspect", IMAGE, "--format", "{{.Config.User}}").stdout.strip()
     assert user == "50000"
 

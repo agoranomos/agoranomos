@@ -223,14 +223,95 @@ def test_a_folder_that_the_job_cannot_write_names_the_owner_it_needs(tmp_path):
 
 
 def test_the_export_service_prints_one_line(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(md, "DBT", fake_dbt(tmp_path, [MODEL_LINE]))
-    monkeypatch.setattr(md, "EXPORT", str(tmp_path / "metadata.json"))
+    # The service exports the metadata and copies the manifest into the volume of MANIFEST.
+    export, manifest = tmp_path / "metadata.json", tmp_path / "manifest.json"
+    monkeypatch.setattr(md, "DBT", fake_dbt_with_manifest(tmp_path, [MODEL_LINE], MANIFEST_TEXT))
+    monkeypatch.setattr(md, "WORK", str(tmp_path / "work"))
+    monkeypatch.setattr(md, "EXPORT", str(export))
+    monkeypatch.setattr(md, "MANIFEST", str(manifest))
     assert md.main(["export"]) == 0
     assert capsys.readouterr().out.splitlines() == [
-        f"metadata-export: exported 1 model and 0 source tables to {tmp_path / 'metadata.json'}"
+        f"metadata-export: exported 1 model and 0 source tables to {export}, and the manifest of "
+        f"the dbt project to {manifest}"
     ]
+    assert manifest.read_text(encoding="utf-8") == MANIFEST_TEXT
     assert md.main([]) == 2
     assert md.main(["diff"]) == 2
+
+
+FAKE_DBT_WITH_MANIFEST = """#!{python}
+import json, pathlib, sys
+arguments = sys.argv[1:]
+pathlib.Path({arguments_file!r}).write_text(json.dumps(arguments))
+target = pathlib.Path(arguments[arguments.index("--target-path") + 1])
+target.mkdir(parents=True, exist_ok=True)
+manifest = {manifest!r}
+if manifest is not None:
+    (target / "manifest.json").write_text(manifest)
+sys.stdout.write({printed!r})
+"""
+
+
+def fake_dbt_with_manifest(folder: Path, lines: list[dict[str, Any]], manifest: str | None) -> str:
+    """A stand-in for dbt ls that, as dbt 1.12.5 does, writes manifest.json into its target folder;
+    with manifest None it writes none."""
+    script = folder / "dbt"
+    printed = "".join(json.dumps(line) + "\n" for line in lines)
+    script.write_text(
+        FAKE_DBT_WITH_MANIFEST.format(
+            python=sys.executable,
+            arguments_file=str(folder / "arguments.json"),
+            manifest=manifest,
+            printed=printed,
+        ),
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return str(script)
+
+
+MANIFEST_TEXT = json.dumps(
+    {"metadata": {"dbt_version": "1.12.5"}, "nodes": {"model.agoranomos.x": {}}}
+)
+
+
+def test_the_export_copies_the_manifest_that_dbt_ls_wrote(tmp_path):
+    work, output, manifest = (
+        tmp_path / "work",
+        tmp_path / "metadata.json",
+        tmp_path / "manifest.json",
+    )
+    dbt = fake_dbt_with_manifest(tmp_path, [MODEL_LINE], MANIFEST_TEXT)
+    line = md.export(dbt, "/p", str(work), str(output), str(manifest))
+    assert manifest.read_text(encoding="utf-8") == MANIFEST_TEXT
+    assert line.endswith(f"and the manifest of the dbt project to {manifest}")
+    assert not list(tmp_path.glob(".manifest.json.tmp")), "the copy left its temporary file"
+
+
+def test_a_dbt_that_wrote_no_manifest_is_one_line(tmp_path):
+    dbt = fake_dbt_with_manifest(tmp_path, [MODEL_LINE], None)
+    with pytest.raises(md.MetadataError, match=r"^dbt ls wrote no manifest into .*target"):
+        md.export(
+            dbt,
+            "/p",
+            str(tmp_path / "work"),
+            str(tmp_path / "metadata.json"),
+            str(tmp_path / "m.json"),
+        )
+
+
+@pytest.mark.parametrize("text", ["not json", json.dumps(["a list"]), json.dumps({"metadata": {}})])
+def test_a_manifest_that_is_not_one_is_refused_and_the_old_one_stays(tmp_path, text):
+    old = tmp_path / "manifest.json"
+    old.write_text(MANIFEST_TEXT, encoding="utf-8")
+    dbt = fake_dbt_with_manifest(tmp_path, [MODEL_LINE], text)
+    with pytest.raises(md.MetadataError, match="manifest"):
+        md.export(dbt, "/p", str(tmp_path / "work"), str(tmp_path / "metadata.json"), str(old))
+    assert old.read_text(encoding="utf-8") == MANIFEST_TEXT
+
+
+def test_the_export_service_names_the_manifest_of_the_volume():
+    assert md.MANIFEST == "/opt/agoranomos/manifest/manifest.json"
 
 
 # --- The effective metadata -------------------------------------------------------------------

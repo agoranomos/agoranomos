@@ -48,9 +48,10 @@ x-airflow: &airflow
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
     # New DAG files appear within a minute (the default is 300 seconds).
     AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "60"
-    # A DAG file that has not changed is parsed again every five minutes (the default is 30 seconds),
-    # since each parse of the transform DAG runs dbt ls. A changed file is parsed at once; a change
-    # that the file does not show, such as one to the dbt project, within five minutes.
+    # A DAG file that has not changed is parsed again every five minutes (the default is 30 seconds):
+    # a parse of the transform DAG reads the manifest of dbt and renders all its tasks, and a change
+    # of the dbt project comes with a new manifest at the next start anyway. A changed file is parsed
+    # at once.
     AIRFLOW__DAG_PROCESSOR__MIN_FILE_PROCESS_INTERVAL: "300"
     # Two DAG bundles (ADR-0013): the DAGs of the base package and the deployment's own extensions.
     AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST: >-
@@ -66,9 +67,9 @@ x-airflow: &airflow
     # dlt takes no settings from Airflow Variables, which the Op role may create: one could send the
     # connection of a load, with its password, to another host. The image sets the same.
     PROVIDERS__ENABLE_AIRFLOW_SECRETS: "false"
-    # The two caches from which Cosmos renders the tasks of dbt stay out of Airflow Variables, which
-    # the Op role may edit: with the cache of dbt ls there, one could change what a dbt task runs.
-    # The image sets the same.
+    # The two caches of Cosmos stay out of Airflow Variables, which the Op role may edit: with the
+    # cache of dbt ls there, one could change what a dbt task runs. The transform DAG renders its
+    # tasks from the manifest of dbt and uses neither (ADR-0027). The image sets the same.
     AIRFLOW__COSMOS__ENABLE_CACHE_DBT_LS: "False"
     AIRFLOW__COSMOS__ENABLE_CACHE_DBT_YAML_SELECTORS: "False"
   # The base DAGs and the dbt project come from the checkout, read-only. Cosmos runs dbt in a
@@ -76,6 +77,9 @@ x-airflow: &airflow
   volumes:
     - ./airflow/dags:/opt/agoranomos/dags:ro
     - ./dbt:/opt/agoranomos/dbt:ro
+    # The manifest of the dbt project, from which Cosmos renders the tasks of dbt (ADR-0027):
+    # metadata-export writes it on every start, and no Airflow service can change it.
+    - dbt-manifest:/opt/agoranomos/manifest:ro
     - ${AGORANOMOS_EXTENSIONS_DIR:-./extensions}/dags:/opt/agoranomos/extensions/dags:ro
     - airflow-logs:/opt/airflow/logs
   networks: [default, data]
@@ -223,13 +227,13 @@ services:
     security_opt: ["no-new-privileges:true"]
     logging: *logging
 
-  # Migrates the metadata database and creates the admin user, on every start. The entrypoint of the image
-  # migrates the database (_AIRFLOW_DB_MIGRATE) and then runs the command. The command creates the admin
-  # with the Airflow CLI, called inside this Python process: the entrypoint's own way,
-  # _AIRFLOW_WWW_USER_CREATE, runs airflow users create --password <the password>, which puts the password
-  # on the command line of a process. Here the arguments exist only in sys.argv, and the command line of the
-  # process holds this code. An admin that exists already is not an error: the command says so and succeeds,
-  # so a password changed in Airflow stays.
+  # Migrates the metadata database, creates the admin user and sets the pool of the tasks of dbt, on every
+  # start. The entrypoint of the image migrates the database (_AIRFLOW_DB_MIGRATE) and then runs the
+  # command. The command creates the admin with the Airflow CLI, called inside this Python process: the
+  # entrypoint's own way, _AIRFLOW_WWW_USER_CREATE, runs airflow users create --password <the password>,
+  # which puts the password on the command line of a process. Here the arguments exist only in sys.argv,
+  # and the command line of the process holds this code. An admin that exists already is not an error: the
+  # command says so and succeeds, so a password changed in Airflow stays.
   airflow-init:
     <<: *airflow
     # The one service that builds the image (see x-airflow).
@@ -269,6 +273,17 @@ services:
             os.environ["AGORANOMOS_ADMIN_EMAIL"],
             "--password",
             os.environ["AIRFLOW_ADMIN_PASSWORD"],
+        ]
+        main()
+        # The pool of the tasks of dbt (ADR-0027), set on every start, so that an edit of its size
+        # in the Airflow UI is reverted.
+        sys.argv = [
+            "airflow",
+            "pools",
+            "set",
+            "dbt",
+            "2",
+            "The tasks of dbt of Cosmos, at most two at a time (ADR-0027)",
         ]
         main()
     environment:
@@ -338,10 +353,13 @@ services:
       <<: *airflow-depends-on
       airflow-init:
         condition: service_completed_successfully
+      # The manifest of the dbt project, which the transform DAG needs to be parsed (ADR-0027).
+      metadata-export:
+        condition: service_completed_successfully
 
   airflow-dag-processor:
     <<: *airflow
-    # It runs dbt ls each time that it parses the transform DAG (docs/reference/configuration.md).
+    # It renders the transform DAG from the manifest of dbt each time that it parses it (ADR-0027).
     mem_limit: ${AIRFLOW_DAG_PROCESSOR_MEMORY:-768m}
     memswap_limit: ${AIRFLOW_DAG_PROCESSOR_MEMORY:-768m}
     command: ["dag-processor"]
@@ -356,6 +374,9 @@ services:
     depends_on:
       <<: *airflow-depends-on
       airflow-init:
+        condition: service_completed_successfully
+      # The manifest of the dbt project, which the transform DAG needs to be parsed (ADR-0027).
+      metadata-export:
         condition: service_completed_successfully
 
   airflow-triggerer:
@@ -482,8 +503,11 @@ services:
   # is mounted read-only, and metadata.py writes the descriptions, the meta and the columns of the models
   # and sources as JSON into the metadata-export volume, for metabase-init and demo-init. It is the one
   # service that can write that volume, and no Airflow service mounts it, so the code of a DAG cannot
-  # change what the jobs with the admin password apply. It holds no secret and has no network. It runs
-  # the Airflow image for its dbt, as nobody, with neither the entrypoint of Airflow nor its settings.
+  # change what the jobs with the admin password apply. It also copies the manifest of the dbt project,
+  # which dbt writes for dbt ls, into the volume dbt-manifest, from which Cosmos renders the tasks of dbt
+  # (ADR-0027): the Airflow services mount it read-only, and this job is the one service that can write
+  # either volume. It holds no secret and has no network. It runs the Airflow image for its dbt, as
+  # nobody, with neither the entrypoint of Airflow nor its settings.
   metadata-export:
     image: agoranomos-airflow:local
     pull_policy: never
@@ -504,8 +528,11 @@ services:
       # The folder of the image that this volume is mounted on belongs to nobody, so the new volume
       # does too (airflow/Dockerfile).
       - metadata-export:/opt/agoranomos/metadata
+      # The folder of the image that this volume is mounted on belongs to nobody as well, so the new
+      # volume does too (airflow/Dockerfile).
+      - dbt-manifest:/opt/agoranomos/manifest
     # dbt writes its target and logs folders under /tmp, and they go with the container; the job
-    # writes nothing else but the export.
+    # writes nothing else but the export and the manifest.
     read_only: true
     tmpfs:
       - /tmp
@@ -739,5 +766,7 @@ volumes:
   airflow-logs:
   # The export of metadata-export: only that job writes it.
   metadata-export:
+  # The manifest of the dbt project for Cosmos: only metadata-export writes it (ADR-0027).
+  dbt-manifest:
   # The certificates of the proxy of server mode.
   caddy-data:

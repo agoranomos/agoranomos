@@ -5,6 +5,7 @@ The assertions print counts, sums, states and names, never a secret.
 """
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 from airflow_api import (
@@ -20,7 +21,16 @@ from airflow_api import (
     wait_for_run,
 )
 from services import DEMO
-from stack_helpers import leaked, secrets, totals, wait_for, warehouse_output
+from stack_helpers import (
+    compose,
+    containers,
+    docker,
+    leaked,
+    secrets,
+    totals,
+    wait_for,
+    warehouse_output,
+)
 
 pytestmark = pytest.mark.skipif(
     not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
@@ -48,6 +58,30 @@ BROKEN_ROW = (
 REMOVE_BROKEN_ROW = "DELETE FROM raw_demo.ad_stats_daily WHERE _dlt_id = 'stack-test-broken-row'"
 # The test of the staging model that the broken row fails.
 BROKEN_TEST = "non_negative_stg_demo__ad_stats_daily_spend"
+# The pool of the tasks of dbt, which airflow-init sets (ADR-0027).
+DBT_POOL = "dbt"
+# The lines in which Cosmos says how it parsed the dbt project (cosmos/dbt/graph.py, Cosmos 1.15.1),
+# from the logs that the DAG processor writes for the file of the transform DAG, as JSON lines, into
+# dag_processor/<day>/<bundle>/ of the volume airflow-logs (Airflow 3.3.2); latest links to the
+# newest day. The DAG processor has no secret, and only these events are printed.
+PARSES = """
+import json
+import pathlib
+
+events = []
+for day in pathlib.Path("/opt/airflow/logs/dag_processor").iterdir():
+    path = day / "agoranomos" / "agoranomos_demo_transform.py.log"
+    if day.is_symlink() or not path.is_file():
+        continue
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if str(entry.get("event", "")).startswith("Trying to parse the dbt project"):
+            events.append([entry["timestamp"], entry["event"]])
+print(json.dumps(sorted(events)))
+"""
 
 
 def said(entries, text):
@@ -121,6 +155,35 @@ def test_cosmos_runs_each_model_and_then_its_tests(airflow_url, token, transform
     }
     states = {i["task_id"]: i["state"] for i in task_instances(airflow_url, token, transform_run)}
     assert states == dict.fromkeys(DBT_TASKS, "success")
+
+
+def test_the_tasks_of_dbt_run_in_their_pool(airflow_url, token, transform_run):
+    # At most two at a time, whatever AIRFLOW_PARALLELISM allows (ADR-0027).
+    pools = {i["task_id"]: i["pool"] for i in task_instances(airflow_url, token, transform_run)}
+    assert pools, "the run has no task"
+    assert set(pools.values()) == {DBT_POOL}, pools
+
+
+def started_at(service):
+    """When the container of a service last started, in UTC."""
+    started = docker("inspect", "--format", "{{.State.StartedAt}}", containers()[service]["ID"])
+    # Docker gives nanoseconds and a Z: fromisoformat reads them, and drops what is finer.
+    return datetime.fromisoformat(started.stdout.strip()).astimezone(UTC)
+
+
+def test_cosmos_renders_the_transform_from_the_manifest(transform_run):
+    # Every parse of the transform DAG since the DAG processor started read the manifest, and none
+    # ran dbt ls: an upgraded stack keeps the lines of its parses with dbt ls in the same logs.
+    result = compose("exec", "-T", "airflow-dag-processor", "python", "-c", PARSES, check=False)
+    assert result.returncode == 0, f"the script exited with {result.returncode}"
+    since = started_at("airflow-dag-processor")
+    events = [
+        event
+        for timestamp, event in json.loads(result.stdout)
+        if datetime.fromisoformat(timestamp).astimezone(UTC) >= since
+    ]
+    assert events, "Cosmos logged no parse of the transform DAG since the DAG processor started"
+    assert all("using a dbt manifest" in event for event in events), events
 
 
 def test_the_mart_holds_what_raw_demo_holds(env, transform_run):
