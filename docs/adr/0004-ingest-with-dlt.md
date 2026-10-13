@@ -58,6 +58,6 @@ The other options were not chosen for these reasons:
 ## More Information
 
 * **Implementation status, as of October 2026:** the demo source is in place: the DAG `agoranomos_demo_load` loads one fictional ad account into `raw_demo` as the `loader` role, merging on the natural key, with explicit retries. The demo generator of the fictional platforms is in place too: the DAG `agoranomos_demo_history` loads five sources, one into each `raw_demo_<platform>`, with the facts of each account replaced in the window of each load and the campaigns kept as versions (`scd2`). The sources of real ad platforms are planned for Phase 4.
-* Version as of October 2026: dlt 1.30, which works with Airflow 3.
+* Version as of October 2026: dlt 1.31.0, which works with Airflow 3.
 * Related decisions: Airflow runs the loads ([ADR-0002](0002-orchestrate-with-airflow-3.md)), dbt transforms what dlt loads ([ADR-0005](0005-transform-with-dbt-core.md)), and the schemas live in the warehouse instance ([ADR-0003](0003-two-postgres-instances.md)).
 * The [dlt documentation](https://dlthub.com/docs/intro) covers sources, incremental loading and schema evolution.
