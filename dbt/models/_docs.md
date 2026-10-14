@@ -66,7 +66,7 @@ A name that the campaign had, from valid_from until valid_to, as the loads saw i
 {% enddocs %}
 
 {% docs currency %}
-A currency, as a three-letter code of ISO 4217, such as USD. In a row of statistics or sessions, the currency of its ad account or property, in whose units its amounts of money are: amounts in rows with different codes are in different units, and the columns that end in _reporting add them up in one. In fx_rates_daily, the currency that a rate converts from.
+A currency, as a three-letter code of ISO 4217, such as USD. In a row of statistics or sessions, the currency of its ad account or property, in whose units its amounts of money are: amounts in rows with different codes are in different units, and the columns that end in _reporting add them up in one. In the rates into the reporting currency, as in fx_rates_daily, the currency that a rate converts from.
 {% enddocs %}
 
 {% docs reporting_currency %}

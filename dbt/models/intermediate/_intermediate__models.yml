@@ -1,0 +1,376 @@
+models:
+  - name: int_ad_platforms__unioned
+    description: >-
+      The platforms of the model, one row each, from the seed of platforms of the base package: the
+      one list of platforms that the marts join, so that a platform from another source is one more
+      branch here. platform is its key. Its tests guard the marts: when one of them fails, dbt does
+      not rebuild the models that read this one.
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null, unique]
+      - name: platform_name
+        description: '{{ doc("platform_name") }}'
+      - name: kind
+        description: '{{ doc("kind") }}'
+      - name: mimics
+        description: '{{ doc("mimics") }}'
+      - name: is_demo
+        description: '{{ doc("is_demo") }}'
+  - name: int_clients__resolved
+    description: >-
+      The clients of the business, one row each: those that the settings of the deployment and the
+      file of the demo name, the deployment's where both name one ID, and the default client
+      Unassigned, which holds the accounts that no setting names. client_id is its key. It reads
+      stg_settings__clients. Its tests guard the marts: when one of them fails, dbt does not
+      rebuild the models that read this one.
+    columns:
+      - name: client_id
+        description: '{{ doc("client_id") }}'
+        data_tests: [not_null, unique]
+      - name: client_name
+        description: '{{ doc("client_name") }}'
+        data_tests: [not_null]
+      - name: origin
+        description: '{{ doc("origin") }}'
+      - name: is_default
+        description: '{{ doc("is_default") }}'
+  - name: int_ad_accounts__unioned
+    description: >-
+      The ad accounts of every ad platform, one row each, with the client that each belongs to: the
+      one that the settings of the deployment name for it, else the one of the file of the demo,
+      else Unassigned. platform and account_id are its key. It reads the staging models of the
+      accounts of each platform, stg_settings__account_clients and int_clients__resolved. Its
+      tests guard the marts: when one of them fails, dbt does not rebuild the models that read
+      this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id]
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('int_ad_platforms__unioned')
+                field: platform
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+      - name: account_name
+        description: '{{ doc("account_name") }}'
+      - name: currency
+        description: '{{ doc("currency") }}'
+        data_tests: [not_null]
+      - name: time_zone
+        description: '{{ doc("time_zone") }}'
+        data_tests: [not_null]
+      - name: manager_account_id
+        description: '{{ doc("manager_account_id") }}'
+      - name: account_status
+        description: '{{ doc("account_status") }}'
+      - name: client_id
+        description: '{{ doc("client_id") }}'
+        data_tests: [not_null]
+      - name: client_name
+        description: '{{ doc("client_name") }}'
+  - name: int_ad_campaigns__unioned
+    description: >-
+      The campaigns of every ad platform, one row each, as the newest of their versions has them,
+      whether the campaign is current or no longer listed, with how many names it had. platform,
+      account_id and campaign_id are its key. It reads the staging models of the campaigns of each
+      platform. Its tests guard the marts: when one of them fails, dbt does not rebuild the models
+      that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id, campaign_id]
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+      - name: campaign_name
+        description: '{{ doc("campaign_name") }}'
+        data_tests: [not_null]
+      - name: campaign_status
+        description: '{{ doc("campaign_status") }}'
+      - name: campaign_type
+        description: '{{ doc("campaign_type") }}'
+      - name: name_count
+        description: '{{ doc("name_count") }}'
+  - name: int_ad_campaign_names__collapsed
+    description: >-
+      The names that the campaigns of every ad platform had, one row for each campaign and each
+      period in which it kept one name, from valid_from until valid_to: consecutive versions with
+      the same name, which differ in another field such as the status, are one period. platform,
+      account_id, campaign_id and valid_from are its key. It reads the staging models of the
+      campaigns of each platform. Its tests guard the marts: when one of them fails, dbt does not
+      rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id, campaign_id, valid_from]
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+      - name: observed_name
+        description: '{{ doc("observed_name") }}'
+      - name: valid_from
+        description: '{{ doc("valid_from") }}'
+      - name: valid_to
+        description: '{{ doc("valid_to") }}'
+  - name: int_conversion_actions__resolved
+    description: >-
+      The conversion actions of the data and of the seed of conversion actions, one row for each
+      platform and action: the name of the seed, else that of the platform; the category of the
+      settings of the deployment, else of the seed, else the one that the category of the platform
+      maps to, else other; and whether it is primary, as the settings of the deployment, else the
+      seed, say, else not. platform and conversion_action_id are its key. It reads the staging
+      models of the conversions of each platform, seed_conversion_actions and
+      stg_settings__conversion_actions. Its tests guard the marts: when one of them fails, dbt does
+      not rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, conversion_action_id]
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: conversion_action_id
+        description: '{{ doc("conversion_action_id") }}'
+      - name: conversion_action_name
+        description: '{{ doc("conversion_action_name") }}'
+      - name: conversion_category
+        description: '{{ doc("conversion_category") }}'
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["purchase", "lead", "sign_up", "add_to_cart", "app_install", "other"]
+      - name: is_primary
+        description: '{{ doc("is_primary") }}'
+        data_tests: [not_null]
+  - name: int_ad_conversions__unioned
+    description: >-
+      The conversions of every ad platform by conversion action, one row for each campaign, day and
+      action with any conversion, with the category of the action, whether it is primary, and the
+      client and the currency of the account. report_date, platform, account_id, campaign_id and
+      conversion_action_id are its key. It reads the staging models of the conversions of each
+      platform, int_conversion_actions__resolved and int_ad_accounts__unioned. Its tests guard the
+      marts: when one of them fails, dbt does not rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [report_date, platform, account_id, campaign_id, conversion_action_id]
+      - relationships_composite:
+          arguments:
+            columns: [platform, account_id, campaign_id]
+            to: ref('int_ad_campaigns__unioned')
+            to_columns: [platform, account_id, campaign_id]
+      - relationships_composite:
+          arguments:
+            columns: [report_date, currency]
+            to: ref('int_fx_rates__filled')
+            to_columns: [rate_date, currency]
+    columns:
+      - name: report_date
+        description: '{{ doc("report_date") }}'
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: client_id
+        description: '{{ doc("client_id") }}'
+      - name: client_name
+        description: '{{ doc("client_name") }}'
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+      - name: account_name
+        description: '{{ doc("account_name") }}'
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+      - name: conversion_action_id
+        description: '{{ doc("conversion_action_id") }}'
+      - name: conversion_action_name
+        description: '{{ doc("conversion_action_name") }}'
+      - name: conversion_category
+        description: '{{ doc("conversion_category") }}'
+      - name: is_primary
+        description: '{{ doc("is_primary") }}'
+        data_tests: [not_null]
+      - name: attribution_setting
+        description: '{{ doc("attribution_setting") }}'
+      - name: currency
+        description: '{{ doc("currency") }}'
+        data_tests: [not_null]
+      - name: conversions
+        description: '{{ doc("conversions") }}'
+      - name: conversion_value
+        description: '{{ doc("conversion_value") }}'
+  - name: int_ad_stats__unioned
+    description: >-
+      The statistics of every ad platform, one row for each campaign and day, with the current name
+      of the campaign, the client and the currency of the account, and the conversions of the
+      primary conversion actions; a day on which a campaign has primary conversions and no other
+      metric keeps them, with zeros for the rest. report_date, platform, account_id and campaign_id
+      are its key. It reads the staging models of the statistics of each platform,
+      int_ad_conversions__unioned, int_ad_accounts__unioned and int_ad_campaigns__unioned. Its
+      tests guard the marts: when one of them fails, dbt does not rebuild the models that read
+      this one; the test of a missing day is a warning.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [report_date, platform, account_id, campaign_id]
+      - relationships_composite:
+          arguments:
+            columns: [platform, account_id]
+            to: ref('int_ad_accounts__unioned')
+            to_columns: [platform, account_id]
+      - relationships_composite:
+          arguments:
+            columns: [platform, account_id, campaign_id]
+            to: ref('int_ad_campaigns__unioned')
+            to_columns: [platform, account_id, campaign_id]
+      - relationships_composite:
+          arguments:
+            columns: [report_date, currency]
+            to: ref('int_fx_rates__filled')
+            to_columns: [rate_date, currency]
+      # A name of its own, which the log of the task of the tests prints with its warning.
+      - gap:
+          name: int_ad_stats__unioned_has_no_missing_day
+          arguments:
+            account_columns: [platform, account_id]
+            date_column: report_date
+          config:
+            severity: warn
+    columns:
+      - name: report_date
+        description: '{{ doc("report_date") }}'
+        data_tests: [not_null]
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: client_id
+        description: '{{ doc("client_id") }}'
+        data_tests: [not_null]
+      - name: client_name
+        description: '{{ doc("client_name") }}'
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: account_name
+        description: '{{ doc("account_name") }}'
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+        data_tests: [not_null]
+      - name: campaign_name
+        description: '{{ doc("campaign_name") }}'
+        data_tests: [not_null]
+      - name: currency
+        description: '{{ doc("currency") }}'
+        data_tests: [not_null]
+      - name: impressions
+        description: '{{ doc("impressions") }}'
+      - name: clicks
+        description: '{{ doc("clicks") }}'
+      - name: spend
+        description: '{{ doc("spend") }}'
+        data_tests: [not_null]
+      - name: conversions
+        description: '{{ doc("conversions") }}'
+      - name: conversion_value
+        description: '{{ doc("conversion_value") }}'
+  - name: int_fx_rates__filled
+    description: >-
+      The rates into the reporting currency, one row for each day and each currency of the data,
+      through the reference rates of the euro, each the last one published on or before the day.
+      The days run from the first published rate or the first day of the data, whichever comes
+      first, to the last day of either; the data is that of every platform in
+      int_ad_stats__unioned, int_ad_conversions__unioned and int_web_sessions__unioned. The
+      reporting currency has the rate 1 on every day, whether or not a source publishes rates;
+      another currency has a row from the first day on which the source published a rate for it.
+      rate_date and currency are its key. It also reads stg_demo_fx__rates_daily. Its tests guard
+      the marts: when one of them fails, dbt does not rebuild the models that read this one; a
+      currency of the data without a rate fails the tests of the models whose rows it converts.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [rate_date, currency]
+    columns:
+      - name: rate_date
+        description: '{{ doc("rate_date") }}'
+      - name: currency
+        description: '{{ doc("currency") }}'
+      - name: reporting_currency
+        description: '{{ doc("reporting_currency") }}'
+      - name: rate
+        description: '{{ doc("rate") }}'
+        data_tests: [not_null]
+      - name: rate_source
+        description: '{{ doc("rate_source") }}'
+        data_tests: [not_null]
+      - name: is_carried_forward
+        description: '{{ doc("is_carried_forward") }}'
+  - name: int_web_sessions__unioned
+    description: >-
+      The sessions of web analytics, one row for each property, day in the time zone of the
+      property, source, medium and campaign of the sessions, with the client of the property and
+      the ad campaign whose ID the links carried, when exactly one campaign of the data has it.
+      report_date, property_id, session_source, session_medium, session_campaign_name and
+      session_campaign_id are its key. It reads the staging models of the sessions and the
+      properties of web analytics, stg_settings__account_clients, int_clients__resolved and
+      int_ad_campaigns__unioned. Its tests guard the marts: when one of them fails, dbt does not
+      rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [report_date, property_id, session_source, session_medium, session_campaign_name, session_campaign_id]
+      - relationships_composite:
+          arguments:
+            columns: [report_date, currency]
+            to: ref('int_fx_rates__filled')
+            to_columns: [rate_date, currency]
+    columns:
+      - name: report_date
+        description: '{{ doc("report_date") }}'
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: client_id
+        description: '{{ doc("client_id") }}'
+        data_tests: [not_null]
+      - name: client_name
+        description: '{{ doc("client_name") }}'
+      - name: property_id
+        description: '{{ doc("property_id") }}'
+      - name: property_name
+        description: '{{ doc("property_name") }}'
+      - name: session_source
+        description: '{{ doc("session_source") }}'
+      - name: session_medium
+        description: '{{ doc("session_medium") }}'
+      - name: session_campaign_id
+        description: '{{ doc("session_campaign_id") }}'
+      - name: session_campaign_name
+        description: '{{ doc("session_campaign_name") }}'
+      - name: session_default_channel_group
+        description: '{{ doc("session_default_channel_group") }}'
+      - name: ad_platform
+        description: '{{ doc("ad_platform") }}'
+      - name: ad_account_id
+        description: '{{ doc("ad_account_id") }}'
+      - name: currency
+        description: '{{ doc("currency") }}'
+        data_tests: [not_null]
+      - name: sessions
+        description: '{{ doc("sessions") }}'
+      - name: engaged_sessions
+        description: '{{ doc("engaged_sessions") }}'
+      - name: key_events
+        description: '{{ doc("key_events") }}'
+      - name: total_revenue
+        description: '{{ doc("total_revenue") }}'

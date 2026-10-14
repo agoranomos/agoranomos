@@ -484,3 +484,144 @@ def test_a_test_of_several_nodes_is_on_one_that_depends_on_the_others():
             where,
             sorted(nodes),
         )
+
+
+INTERMEDIATE = DBT / "models" / "intermediate"
+# The relationships of columns of an intermediate model to the columns of another model, which
+# relationships_composite checks: the columns, the other model, and its columns.
+TO_ACCOUNTS = (["platform", "account_id"], "int_ad_accounts__unioned", ["platform", "account_id"])
+TO_CAMPAIGNS = (
+    ["platform", "account_id", "campaign_id"],
+    "int_ad_campaigns__unioned",
+    ["platform", "account_id", "campaign_id"],
+)
+TO_RATES = (["report_date", "currency"], "int_fx_rates__filled", ["rate_date", "currency"])
+SESSIONS_KEY = CRITICAL["sessions_daily"][0]
+# The critical tests of each intermediate model, every one an error: its key, which
+# unique_combination checks, or unique for a key of one column; the columns that not_null checks;
+# the relationships of a column to a column of another model; and those of columns to columns.
+INTERMEDIATE_TESTS = {
+    "int_ad_platforms__unioned": (["platform"], ["platform"], {}, []),
+    "int_clients__resolved": (["client_id"], ["client_id", "client_name"], {}, []),
+    "int_ad_accounts__unioned": (
+        ACCOUNT_KEY,
+        ["client_id", "currency", "time_zone"],
+        {"platform": ("int_ad_platforms__unioned", "platform")},
+        [],
+    ),
+    "int_ad_campaigns__unioned": ([*ACCOUNT_KEY, "campaign_id"], ["campaign_name"], {}, []),
+    "int_ad_campaign_names__collapsed": ([*ACCOUNT_KEY, "campaign_id", "valid_from"], [], {}, []),
+    "int_conversion_actions__resolved": (
+        ["platform", "conversion_action_id"],
+        ["is_primary"],
+        {},
+        [],
+    ),
+    "int_ad_conversions__unioned": (
+        [*STATS_KEY, "conversion_action_id"],
+        ["currency", "is_primary"],
+        {},
+        [TO_CAMPAIGNS, TO_RATES],
+    ),
+    "int_ad_stats__unioned": (
+        STATS_KEY,
+        [*STATS_KEY, "currency", "client_id", "campaign_name", "spend"],
+        {},
+        [TO_ACCOUNTS, TO_CAMPAIGNS, TO_RATES],
+    ),
+    "int_fx_rates__filled": (["rate_date", "currency"], ["rate", "rate_source"], {}, []),
+    "int_web_sessions__unioned": (SESSIONS_KEY, ["client_id", "currency"], {}, [TO_RATES]),
+}
+COMPOSITE = (
+    r"^      - relationships_composite:\n          arguments:\n            columns: \[(.*)\]\n"
+    r"            to: ref\('(\w+)'\)\n            to_columns: \[(.*)\]$"
+)
+RELATIONSHIPS = r"^ +to: ref\('(\w+)'\)\n +field: (\w+)$"
+# The one warning of the intermediate models, a missing day, under the name that the log prints.
+GAP = (
+    "      - gap:\n          name: int_ad_stats__unioned_has_no_missing_day\n"
+    "          arguments:\n            account_columns: [platform, account_id]\n"
+    "            date_column: report_date\n          config:\n            severity: warn\n"
+)
+
+
+def split(columns: str) -> list[str]:
+    return [column.strip() for column in columns.split(",")]
+
+
+def test_the_intermediate_models_have_their_critical_tests():
+    # A test that is missing or a warning would pass every run of dbt, and the marts would add up
+    # rows that it should have stopped (TestBehavior.AFTER_EACH of Cosmos).
+    text = (INTERMEDIATE / "_intermediate__models.yml").read_text(encoding="utf-8")
+    found = {path.stem for path in INTERMEDIATE.glob("*.sql")}
+    assert found == set(INTERMEDIATE_TESTS), sorted(found ^ set(INTERMEDIATE_TESTS))
+    described = blocks(text, 2)
+    assert set(described) == set(INTERMEDIATE_TESTS)
+    assert text.count("severity") == 1, "only the test of a missing day is a warning"
+    assert text.count(GAP) == 1, "the warning of a missing day, by its name"
+    assert GAP in described["int_ad_stats__unioned"]
+    for model, (key, not_null, related, composite) in INTERMEDIATE_TESTS.items():
+        block = described[model]
+        columns = blocks(block, 6)
+        tested = {name: column_tests(column) for name, column in columns.items()}
+        unique = [split(part) for part in re.findall(UNIQUE, block, flags=re.MULTILINE)]
+        if len(key) == 1:
+            assert unique == [], model
+            assert {c for c, tests in tested.items() if "unique" in tests} == set(key), model
+        else:
+            assert unique == [key], model
+            assert not any("unique" in tests for tests in tested.values()), model
+        assert {c for c, tests in tested.items() if "not_null" in tests} == set(not_null), model
+        assert {
+            column: re.search(RELATIONSHIPS, columns[column], flags=re.MULTILINE).groups()
+            for column, tests in tested.items()
+            if "relationships" in tests
+        } == related, model
+        pairs = re.findall(COMPOSITE, block, flags=re.MULTILINE)
+        assert [(split(a), to, split(b)) for a, to, b in pairs] == composite, model
+    categories = re.search(
+        r"^ +values: \[(.*)\]$", described["int_conversion_actions__resolved"], re.M
+    )
+    assert categories, "the categories of conversion_category"
+    assert [value.strip('"') for value in split(categories.group(1))] == [
+        "purchase",
+        "lead",
+        "sign_up",
+        "add_to_cart",
+        "app_install",
+        "other",
+    ]
+
+
+def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
+    # Clicks above impressions and an account of no client can be right, so they warn; primary
+    # actions that do not add up to the conversions of a campaign cannot.
+    wanted = {
+        "assert_clicks_within_impressions": ({"int_ad_stats__unioned"}, True),
+        "assert_every_account_has_a_client": ({"int_ad_accounts__unioned"}, True),
+        "assert_primary_actions_add_up_to_the_conversions": (
+            {"int_ad_conversions__unioned", "int_ad_stats__unioned"},
+            False,
+        ),
+    }
+    for name, (reads, warns) in wanted.items():
+        text = (DBT / "tests" / f"{name}.sql").read_text(encoding="utf-8")
+        assert set(referenced(text)) == reads, name
+        assert ("{{ config(severity='warn') }}" in text) is warns, name
+        assert text.count("severity") == int(warns), name
+
+
+def test_every_column_of_the_intermediate_models_takes_the_doc_block_of_its_name():
+    # The intermediate models share their columns with staging and the marts, where columns of
+    # one name say the same.
+    docs = (DBT / "models" / "_docs.md").read_text(encoding="utf-8")
+    written = set(re.findall(r"^\{% docs (\w+) %\}$", docs, flags=re.MULTILINE))
+    text = (INTERMEDIATE / "_intermediate__models.yml").read_text(encoding="utf-8")
+    for model, block in blocks(text, 2).items():
+        columns = blocks(block, 6)
+        assert columns, model
+        for name, column in columns.items():
+            description = re.search(r"^        description: (.*)$", column, flags=re.MULTILINE)
+            assert description, (model, name)
+            assert description.group(1) == f"'{{{{ doc(\"{name}\") }}}}'", (model, name)
+            assert name in written, (model, name)
