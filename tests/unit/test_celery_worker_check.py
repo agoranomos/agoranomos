@@ -90,8 +90,8 @@ def run_check(tmp_path: Path, scenario: str):
 
 def test_the_check_imports_no_airflow():
     # celery --app airflow.providers.celery.executors.celery_executor.app inspect ping imports
-    # Airflow, which costs more than a second of CPU and about 150 MiB at every check, inside the
-    # memory limit of the worker: this check needs Celery and the standard library only.
+    # Airflow, which costs more than a second of CPU and 120 MiB of the memory limit of the worker
+    # at every check: this check needs Celery and the standard library only.
     imported = set()
     for node in ast.walk(ast.parse(worker_check())):
         if isinstance(node, ast.Import):

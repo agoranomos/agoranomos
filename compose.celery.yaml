@@ -44,8 +44,9 @@ x-airflow-celery-queue-environment: &airflow-celery-queue-environment
 # the connection from which the worker takes its tasks, once it takes them, so the check fails when
 # the worker has lost the broker or no longer reads from it. The check needs Celery alone, with the
 # URL of the broker from the environment, so no password is on its command line, and it does not
-# start Airflow, which celery inspect ping with the app of Airflow does, at a cost of about 150 MiB
-# and more than a second of CPU each time, inside the memory limit of the worker.
+# start Airflow, which celery inspect ping with the app of Airflow does, at a cost of more than a
+# second of CPU and 120 MiB of the memory limit of the worker each time
+# (docs/reference/system-requirements.md).
 x-airflow-worker-check: &airflow-worker-check |
   import os
 

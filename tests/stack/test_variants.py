@@ -416,8 +416,8 @@ def test_the_worker_is_set_up_like_the_other_airflow_services():
 
 def test_the_worker_checks_that_it_answers_a_ping_without_airflow():
     # celery --app airflow.providers.celery.executors.celery_executor.app inspect ping started
-    # Airflow at every check, at a cost of about 150 MiB and more than a second of CPU inside the
-    # memory limit of the worker. The check of compose.celery.yaml pings the worker of the
+    # Airflow at every check, at a cost of more than a second of CPU and 120 MiB of the memory
+    # limit of the worker. The check of compose.celery.yaml pings the worker of the
     # container through the broker with Celery alone (tests/unit/test_celery_worker_check.py),
     # and reads the URL of the broker, with its password, from the environment. Five failures in
     # a row, 30 seconds apart, make the worker unhealthy, as for the DAG processor.
