@@ -78,7 +78,7 @@ repos:
       - id: check-jsonschema
         name: Validate the release-please configuration
         files: ^release-please-config\.json$
-        args: [--schemafile, "https://raw.githubusercontent.com/googleapis/release-please/v17.6.0/schemas/config.json"]
+        args: [--schemafile, "https://raw.githubusercontent.com/googleapis/release-please/v17.11.2/schemas/config.json"]
 
   - repo: local
     hooks:
