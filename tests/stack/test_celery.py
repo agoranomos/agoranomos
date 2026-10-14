@@ -1,5 +1,7 @@
 """What only the Celery variant has: the broker and the worker (skipped in the local variant)."""
 
+import json
+
 import pytest
 from services import DEMO
 from stack_helpers import (
@@ -77,17 +79,26 @@ def test_the_check_of_the_worker_passes_for_its_own_node_only():
     assert worker_check("-e", "HOSTNAME=another-container").returncode == 1
 
 
+# Runs the code of the check, its argument, and then prints the names of the modules that the
+# process has imported, as JSON, and exits as the check did. -X importtime would not do: it leaves
+# out a module that importlib.import_module loads, as kombu loads the transport of the broker.
+AFTER_THE_CHECK = """
+import json
+import sys
+
+try:
+    exec(sys.argv[1], {"__name__": "__main__"})
+finally:
+    print(json.dumps(sorted(sys.modules)))
+"""
+
+
 def test_the_check_of_the_worker_starts_no_airflow():
-    # -X importtime lists each module that a Python process imports, on standard error: the check
-    # imports Celery and the transport of the broker, and nothing of Airflow, which the old check
-    # started at every run.
-    result = worker_check(python=("python", "-X", "importtime", "-c"))
+    # The check imports Celery and the transport of the broker, and nothing of Airflow, which the
+    # old check started at every run.
+    result = worker_check(python=("python", "-c", AFTER_THE_CHECK))
     assert result.returncode == 0
-    imported = {
-        line.rsplit("|", 1)[1].strip()
-        for line in result.stderr.splitlines()
-        if line.startswith("import time:") and "|" in line
-    }
+    imported = set(json.loads(result.stdout))
     assert {"celery", "kombu.transport.redis"} <= imported
     assert not sorted(name for name in imported if name.split(".")[0] == "airflow")
 
