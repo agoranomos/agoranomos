@@ -185,6 +185,26 @@ def test_airflow_services_mount_the_dag_folders_and_the_dbt_project_read_only(va
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
+def test_airflow_services_mount_the_settings_of_the_model_read_only(variant):
+    # The first task of the transform reads extensions/model/*.toml (ADR-0024); no Airflow service
+    # can change them, and no other service but the backups, which copy the whole extensions
+    # folder, mounts them.
+    folder = os.path.join(extensions_folder(), "model")
+    target = "/opt/agoranomos/extensions/model"
+    for name, service in airflow_services(variant).items():
+        mounts = {v["target"]: v for v in service["volumes"]}
+        found = (mounts[target]["source"], mounts[target].get("read_only"))
+        assert found == (folder, True), name
+    holders = {
+        name
+        for name, service in rendered(variant).items()
+        for mount in service.get("volumes") or []
+        if mount.get("source") in (folder, extensions_folder())
+    }
+    assert holders == airflow_names(variant) | {"backup"}
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
 def test_only_the_api_server_publishes_a_port_of_airflow(variant):
     for name, service in airflow_services(variant).items():
         published = [port["published"] for port in service.get("ports", [])]

@@ -457,6 +457,8 @@ def test_init_creates_the_extensions_folder(cli):
     assert (cli.root / "extensions" / "dags").is_dir()
     # The folder of the overrides of the metadata: Docker would make a missing one as root.
     assert (cli.root / "extensions" / "metadata").is_dir()
+    # The folder of the settings of the model, which the Airflow services mount: the same.
+    assert (cli.root / "extensions" / "model").is_dir()
 
 
 def test_init_with_server_turns_server_mode_on(cli):

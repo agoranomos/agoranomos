@@ -6,7 +6,7 @@ The day that the row covers, in the time zone of its account: of the ad account 
 {% enddocs %}
 
 {% docs platform %}
-The code of the platform that the row comes from, one of ad_platforms, such as demo_search. The platforms of the demo are fictional and have codes of their own; the codes of real platforms come with their connectors.
+The code of the platform that the row comes from, or, in the settings of the model, of the account or the conversion action that they name, such as demo_search; ad_platforms lists the platforms of the model. The platforms of the demo are fictional and have codes of their own; the codes of real platforms come with their connectors.
 {% enddocs %}
 
 {% docs platform_name %}
@@ -26,11 +26,11 @@ Whether the platform is a fictional one of the demo.
 {% enddocs %}
 
 {% docs client_id %}
-The ID of the client that the account of the row belongs to: a brand, shop or legal entity of the business, as the settings of the deployment name it in extensions/model/clients.toml. unassigned for an account that no setting names.
+The ID of a client of the business, a brand, shop or legal entity, as the settings of the model name it: those of the deployment in extensions/model/clients.toml, or the file of the demo. In a row of an account or of its data, the client that the account belongs to; unassigned for an account that no setting names.
 {% enddocs %}
 
 {% docs client_name %}
-The name of the client that the account of the row belongs to; Unassigned for an account that no setting names.
+The name of the client of the row, as the settings of the model give it: in a row of an account or of its data, of the client that the account belongs to; Unassigned for an account that no setting names.
 {% enddocs %}
 
 {% docs is_default %}
@@ -42,7 +42,7 @@ Where the row of the settings comes from: extensions, the settings of this deplo
 {% enddocs %}
 
 {% docs account_id %}
-The ID of the ad account that the row belongs to, as the ad platform gives it, as text. platform and account_id together identify an ad account.
+The ID of the ad account that the row belongs to, as the ad platform gives it, as text; in the settings of the clients, also the ID of a property of web analytics. platform and account_id together identify an account.
 {% enddocs %}
 
 {% docs account_name %}
@@ -110,7 +110,7 @@ The name of the conversion action: the one that the platform gives, which the in
 {% enddocs %}
 
 {% docs conversion_category %}
-What kind of conversion the action is: purchase, lead, sign_up, add_to_cart, app_install or other, from the settings of the deployment, the seed of the base package, or the category that the platform gives, in that order.
+What kind of conversion the action is: purchase, lead, sign_up, add_to_cart, app_install or other. The model takes it from the settings of the deployment, the seed of the base package, or the category that the platform gives, in that order; in the settings it is none where they name none.
 {% enddocs %}
 
 {% docs platform_category %}

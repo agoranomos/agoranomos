@@ -164,7 +164,8 @@ def test_role_passwords_stay_out_of_pg_stat_statements(env):
 # What each role may do in each schema of the layers, as (USAGE, CREATE): loader writes the raw
 # schemas and the staging schemas of its merges, transformer reads the raw schemas and builds
 # staging and marts, metabase_reader reads marts. The fictional platforms of the demo each have a
-# raw schema and a staging schema of their own.
+# raw schema and a staging schema of their own; the settings of the model have a raw schema only,
+# as dlt replaces its tables in place.
 SCHEMA_PRIVILEGES = {
     ("loader", "raw_demo"): (True, True),
     ("loader", "raw_demo_staging"): (True, True),
@@ -208,6 +209,9 @@ SCHEMA_PRIVILEGES = {
     ("transformer", "raw_demo_fx_staging"): (False, False),
     ("metabase_reader", "raw_demo_fx"): (False, False),
     ("metabase_reader", "raw_demo_fx_staging"): (False, False),
+    ("loader", "raw_settings"): (True, True),
+    ("transformer", "raw_settings"): (True, False),
+    ("metabase_reader", "raw_settings"): (False, False),
 }
 # The schemas of the layers, each once, in the order of SCHEMA_PRIVILEGES, and as the literals of
 # the queries below.
@@ -238,6 +242,7 @@ def test_each_schema_of_the_layers_has_its_owner(env):
         "raw_demo_video_staging:loader",
         "raw_demo_web:loader",
         "raw_demo_web_staging:loader",
+        "raw_settings:loader",
         "staging:transformer",
     ]
 
@@ -277,6 +282,7 @@ def test_the_default_privileges_are_those_of_the_roles_that_create_the_tables(en
         "loader:raw_demo_social:r:{transformer=r/loader}",
         "loader:raw_demo_video:r:{transformer=r/loader}",
         "loader:raw_demo_web:r:{transformer=r/loader}",
+        "loader:raw_settings:r:{transformer=r/loader}",
         "transformer:marts:r:{metabase_reader=r/transformer}",
     ]
 

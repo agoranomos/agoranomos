@@ -27,6 +27,9 @@ FIXTURE = REPO_ROOT / "tests" / "stack" / "fixtures" / f"{EXTENSION_CHECK}.py"
 EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
 DAG_FOLDERS = ("/opt/agoranomos/dags", "/opt/agoranomos/extensions/dags")
 DBT_PROJECT = "/opt/agoranomos/dbt"
+# The settings of the model of the deployment, extensions/model, which the first task of the
+# transform reads (ADR-0024).
+MODEL_SETTINGS = "/opt/agoranomos/extensions/model"
 # The services that run tasks: with the LocalExecutor the scheduler, with Celery also the worker.
 TASK_RUNNERS = [s for s in ("airflow-scheduler", "airflow-worker") if s in LONG_RUNNING]
 # The services whose health check reads their job from the metadata database (compose.yaml), with
@@ -422,6 +425,14 @@ def test_the_dag_processor_keeps_no_cache_of_cosmos_in_airflow_variables(airflow
 @pytest.mark.parametrize("service", TASK_RUNNERS)
 def test_dag_folders_are_read_only(service, path):
     result = compose("exec", "-T", service, "touch", f"{path}/should-fail", check=False)
+    assert result.returncode != 0
+    assert "Read-only file system" in result.stderr, result.stderr
+
+
+@pytest.mark.parametrize("service", TASK_RUNNERS)
+def test_the_settings_of_the_model_are_read_only(service):
+    # The tasks read the settings files of the deployment and cannot change them.
+    result = compose("exec", "-T", service, "touch", f"{MODEL_SETTINGS}/should-fail", check=False)
     assert result.returncode != 0
     assert "Read-only file system" in result.stderr, result.stderr
 

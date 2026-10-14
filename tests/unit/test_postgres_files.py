@@ -346,3 +346,23 @@ def test_each_demo_platform_has_its_schema_and_its_staging_schema(platform):
     ):
         assert runs(text, statement), statement
     assert not runs(text, f"GRANT USAGE ON SCHEMA {staging}")
+
+
+def test_the_settings_of_the_model_have_a_schema_of_loader_that_only_transformer_reads():
+    # The first task of the transform loads the settings of the deployment (ADR-0024) with dlt into
+    # raw_settings as loader, replacing each table in place, so dlt needs no staging schema there;
+    # transformer reads them for staging, and metabase_reader does not.
+    text = normalized("warehouse.sql")
+    for statement in (
+        "CREATE SCHEMA IF NOT EXISTS raw_settings AUTHORIZATION loader;",
+        "ALTER SCHEMA raw_settings OWNER TO loader;",
+        "GRANT USAGE ON SCHEMA raw_settings TO transformer;",
+        "GRANT SELECT ON ALL TABLES IN SCHEMA raw_settings TO transformer;",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_settings "
+        "GRANT SELECT ON TABLES TO transformer;",
+    ):
+        assert runs(text, statement), statement
+    assert not runs(text, "CREATE SCHEMA IF NOT EXISTS raw_settings_staging")
+    granted = re.findall(r"\bGRANT [^;]*\braw_settings\b[^;]*;", text, re.IGNORECASE)
+    assert granted, "warehouse.sql grants nothing on raw_settings"
+    assert all(grant.endswith("TO transformer;") for grant in granted), granted

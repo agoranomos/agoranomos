@@ -95,6 +95,41 @@ def test_a_test_of_two_nodes_runs_in_the_task_of_the_one_that_depends_on_the_oth
     assert any(m == "cosmos" and "TestIndirectSelection" in names for m, names in imports(path))
 
 
+def test_the_transform_loads_the_settings_of_the_model_before_dbt():
+    # The first task loads extensions/model/*.toml (ADR-0024), outside the pool of dbt, and every
+    # task of dbt comes after it, so a mistake in a file stops the run before dbt. dlt is imported
+    # inside the task, not at the top: the DAG processor parses the file often.
+    path = DAGS / "agoranomos_demo_transform.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    [function] = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "load_settings"
+    ]
+    [decorator] = function.decorator_list
+    assert ast.unparse(decorator) == "task(task_id='load_settings')"
+    assert ("airflow.sdk", ["dag", "task"]) in imports(path)
+    assert ("airflow.sdk.log", ["mask_secret"]) in imports(path)
+    inner = [node for node in ast.walk(function) if isinstance(node, ast.ImportFrom)]
+    assert [(node.module, [a.name for a in node.names]) for node in inner] == [
+        ("agoranomos_pipelines.settings", ["source"])
+    ]
+    calls = [ast.unparse(node) for node in ast.walk(function) if isinstance(node, ast.Call)]
+    assert "mask_secret(source.credentials()['password'])" in calls
+    assert "source.load()" in calls
+    top = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
+    assert not [n for n in top if "settings" in ast.dump(n) or "dlt" in ast.dump(n)]
+    # The task comes first: load_settings() >> DbtTaskGroup(...).
+    [chain] = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.RShift)
+    ]
+    assert ast.unparse(chain.left) == "load_settings()"
+    assert isinstance(chain.right, ast.Call)
+    assert ast.unparse(chain.right.func) == "DbtTaskGroup"
+
+
 def test_the_history_takes_its_assets_and_platforms_from_the_shared_package():
     found = imports(DAGS / "agoranomos_demo_history.py")
     assert ("agoranomos_pipelines.assets", ["RAW_DEMO_PLATFORMS"]) in found

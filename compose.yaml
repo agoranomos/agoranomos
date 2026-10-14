@@ -81,6 +81,9 @@ x-airflow: &airflow
     # metadata-export writes it on every start, and no Airflow service can change it.
     - dbt-manifest:/opt/agoranomos/manifest:ro
     - ${AGORANOMOS_EXTENSIONS_DIR:-./extensions}/dags:/opt/agoranomos/extensions/dags:ro
+    # The settings of the model of the deployment (ADR-0024): the first task of the transform reads
+    # them, and no Airflow service can change them.
+    - ${AGORANOMOS_EXTENSIONS_DIR:-./extensions}/model:/opt/agoranomos/extensions/model:ro
     - airflow-logs:/opt/airflow/logs
   networks: [default, data]
   cap_drop: [ALL]

@@ -529,7 +529,7 @@ cmd_init() {
   if [ "$(env_get AGORANOMOS_UID)" = auto ]; then env_set AGORANOMOS_UID "$(id -u)"; fi
   if [ "$(env_get AGORANOMOS_GID)" = auto ]; then env_set AGORANOMOS_GID "$(id -g)"; fi
   make_backups_folder
-  mkdir -p "$(extensions_path)/dags" "$(extensions_path)/metadata"
+  mkdir -p "$(extensions_path)/dags" "$(extensions_path)/metadata" "$(extensions_path)/model"
   if [ "$server_asked" -eq 1 ]; then
     # A line is written only when its value changes, so that running init --server again changes
     # nothing, also in a .env that a person edited: a line with quotes or a comment stays as it is.

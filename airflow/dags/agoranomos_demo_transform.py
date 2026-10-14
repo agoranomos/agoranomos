@@ -1,13 +1,17 @@
-"""The demo transform of Agoranomos: dbt builds marts from the demo data in raw_demo.
+"""The demo transform of Agoranomos: the settings of the model, and then dbt builds marts from the
+demo data in raw_demo.
 
-agoranomos_demo_transform runs the dbt project through Cosmos, as the transformer role. It builds
-the staging model stg_demo__ad_stats_daily and then the mart marts.ad_spend_daily, each followed by
-its tests, and a failed test of the staging model keeps the mart as it was. Each successful run of
-agoranomos_demo_load updates the asset of the raw table, and that starts this DAG. A repeat is
-safe: dbt rebuilds the models. The DAG starts paused, and a load starts it only while it is
-unpaused. With the demo profile, the one-shot demo-init job unpauses both demo DAGs on the first
-start and triggers the load; without it, unpause this DAG in the Airflow UI before you trigger the
-load, or trigger it there yourself.
+agoranomos_demo_transform first loads the settings of the model of the deployment, the files of
+extensions/model, and the clients of the demo into raw_settings, as the loader role (ADR-0024): a
+mistake in a file fails that task with one line that names the file and the entry, nothing is
+written, and no task of dbt runs. Then it runs the dbt project through Cosmos, as the transformer
+role. It builds the staging model stg_demo__ad_stats_daily and then the mart marts.ad_spend_daily,
+each followed by its tests, and a failed test of the staging model keeps the mart as it was. Each
+successful run of agoranomos_demo_load updates the asset of the raw table, and that starts this
+DAG. A repeat is safe: the settings are loaded again, and dbt rebuilds the models. The DAG starts
+paused, and a load starts it only while it is unpaused. With the demo profile, the one-shot
+demo-init job unpauses both demo DAGs on the first start and triggers the load; without it, unpause
+this DAG in the Airflow UI before you trigger the load, or trigger it there yourself.
 
 Cosmos renders its tasks from the manifest that metadata-export writes on every start (ADR-0027),
 so a change of the dbt project reaches the DAG at the next ./agoranomos up; its tasks of dbt run at
@@ -20,7 +24,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from agoranomos_pipelines.assets import RAW_DEMO
-from airflow.sdk import dag
+from airflow.sdk import dag, task
+from airflow.sdk.log import mask_secret
 from cosmos import (
     DbtTaskGroup,
     ExecutionConfig,
@@ -53,7 +58,8 @@ START = datetime(2026, 1, 1, tzinfo=UTC)
     catchup=False,
     max_active_runs=1,
     default_args={
-        # A failed dbt test does not pass on a retry: it found data to fix.
+        # A failed dbt test does not pass on a retry: it found data to fix. Nor does a mistake in
+        # a settings file.
         "retries": 0,
         # A dbt task takes seconds. The timeout ends one that hangs: Cosmos interrupts its dbt
         # process, and dbt then ends its queries in PostgreSQL. A statement that waits on a lock
@@ -64,10 +70,21 @@ START = datetime(2026, 1, 1, tzinfo=UTC)
     doc_md=__doc__,
 )
 def agoranomos_demo_transform():
+    @task(task_id="load_settings")
+    def load_settings() -> None:
+        # dlt is imported here and not at the top: the DAG processor parses this file often.
+        from agoranomos_pipelines.settings import source
+
+        # Should anything write the password of the loader into the log, Airflow shows ***.
+        mask_secret(source.credentials()["password"])
+        # The settings of the deployment, extensions/model/*.toml, and the clients of the demo;
+        # a mistake in a file fails this task, and the tasks of dbt after it do not run.
+        source.load()
+
     # Cosmos renders the tasks from the manifest of the project, without dbt ls; the DAG still has a
     # file of its own, so that a missing or broken manifest, which fails the import of this file,
-    # cannot break the import of the other DAGs.
-    DbtTaskGroup(
+    # cannot break the import of the other DAGs. Every task of dbt comes after the settings.
+    load_settings() >> DbtTaskGroup(
         group_id="dbt",
         project_config=ProjectConfig(
             dbt_project_path=DBT_PROJECT, manifest_path=DBT_MANIFEST, install_dbt_deps=False

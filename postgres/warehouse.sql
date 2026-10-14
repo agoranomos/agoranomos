@@ -114,6 +114,14 @@ ALTER SCHEMA raw_demo_fx_staging OWNER TO loader;
 GRANT USAGE ON SCHEMA raw_demo_fx TO transformer;
 GRANT SELECT ON ALL TABLES IN SCHEMA raw_demo_fx TO transformer;
 ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_demo_fx GRANT SELECT ON TABLES TO transformer;
+-- The settings of the model of the deployment (ADR-0024): the first task of the transform loads
+-- them with dlt into raw_settings, replacing each table in place, so the schema needs no staging
+-- schema. loader owns it; transformer may read it, and metabase_reader may not.
+CREATE SCHEMA IF NOT EXISTS raw_settings AUTHORIZATION loader;
+ALTER SCHEMA raw_settings OWNER TO loader;
+GRANT USAGE ON SCHEMA raw_settings TO transformer;
+GRANT SELECT ON ALL TABLES IN SCHEMA raw_settings TO transformer;
+ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_settings GRANT SELECT ON TABLES TO transformer;
 -- loader waits at most a minute for a lock, so a blocked load fails, and is tried again (ADR-0004).
 ALTER ROLE loader SET lock_timeout = '1min';
 
