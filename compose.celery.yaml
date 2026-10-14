@@ -39,6 +39,24 @@ x-airflow-celery-queue-environment: &airflow-celery-queue-environment
   AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql+psycopg2://celery_results:${CELERY_RESULTS_DB_PASSWORD:?run ./agoranomos init}@platform-db:5432/celery_results
   AIRFLOW__CELERY__WORKER_CONCURRENCY: ${AIRFLOW_WORKER_CONCURRENCY:-4}
 
+# The health check of the worker: it passes when the Celery worker of this container answers a ping
+# through the broker within 5 seconds, as celery inspect ping would say. Celery 5.6.3 answers it on
+# the connection from which the worker takes its tasks, once it takes them, so the check fails when
+# the worker has lost the broker or no longer reads from it. The check needs Celery alone, with the
+# URL of the broker from the environment, so no password is on its command line, and it does not
+# start Airflow, which celery inspect ping with the app of Airflow does, at a cost of more than a
+# second of CPU and 120 MiB of the memory limit of the worker each time
+# (docs/reference/system-requirements.md).
+x-airflow-worker-check: &airflow-worker-check |
+  import os
+
+  from celery import Celery
+
+  node = "celery@" + os.environ["HOSTNAME"]
+  app = Celery(broker=os.environ["AIRFLOW__CELERY__BROKER_URL"])
+  replies = app.control.ping(destination=[node], timeout=5.0)
+  raise SystemExit(0 if {node: {"ok": "pong"}} in replies else 1)
+
 services:
   broker:
     image: valkey/valkey:9.1.2-trixie@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd
@@ -127,10 +145,12 @@ services:
       # of the API server with AIRFLOW__API__SECRET_KEY, which it keeps.
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: !reset null
       AIRFLOW__API_AUTH__JWT_SECRET: !reset null
+    # The check of x-airflow-worker-check. Five failures in a row, 30 seconds apart, make the worker
+    # unhealthy, as they make the DAG processor of compose.yaml.
     healthcheck:
-      test: ["CMD-SHELL", "celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d \"celery@$${HOSTNAME}\""]
+      test: ["CMD", "python", "-c", *airflow-worker-check]
       interval: 30s
-      timeout: 30s
+      timeout: 10s
       retries: 5
       start_period: 60s
     depends_on:
