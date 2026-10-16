@@ -727,6 +727,11 @@ EOF
       problem "$folder_setting in .env must be an absolute path or start with ./, ../ or ~/, because Compose reads anything else as the name of a volume: write ./$(setting "$folder_setting" folder)"
     fi
   done
+  # The reporting currency (ADR-0025): the rates of this release cover USD and EUR.
+  case "$(setting AGORANOMOS_REPORTING_CURRENCY USD)" in
+    USD | EUR) ;;
+    *) problem "AGORANOMOS_REPORTING_CURRENCY in .env must be USD or EUR: the exchange rates of this release cover these two" ;;
+  esac
   # The backup service of the ops profile runs as AGORANOMOS_UID and reads its schedule from .env.
   if ops_mode; then
     message=$(backup_user_problem)

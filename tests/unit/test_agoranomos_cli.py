@@ -452,6 +452,22 @@ def test_an_env_of_the_last_release_gets_the_memory_limits_with_their_defaults(c
     assert {key: cli.read_env()[key] for key in limits} == limits
 
 
+def test_init_adds_the_reporting_currency_to_an_env_of_v0_1(cli):
+    cli.run("init")
+    text = cli.env_path.read_text(encoding="utf-8")
+    cli.env_path.write_text(
+        "\n".join(
+            line
+            for line in text.splitlines()
+            if not line.startswith("AGORANOMOS_REPORTING_CURRENCY=")
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    cli.run("init")
+    assert cli.read_env()["AGORANOMOS_REPORTING_CURRENCY"] == "USD"
+
+
 def test_init_creates_the_extensions_folder(cli):
     cli.run("init")
     assert (cli.root / "extensions" / "dags").is_dir()
@@ -4488,6 +4504,21 @@ def test_preflight_accepts_a_folder_that_compose_reads_as_a_path(cli, setting, v
     set_env(cli, **{setting: value})
     result = cli.run("preflight")
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("value", "outcome"),
+    [("USD", "pass"), ("EUR", "pass"), ("GBP", "stop"), ("usd", "stop"), ("", "pass")],
+)
+def test_preflight_stops_on_a_reporting_currency_without_rates(cli, value, outcome):
+    # ADR-0025: until a source of rates comes with the connectors, the rates of the demo cover USD
+    # and EUR. Empty is the default, USD.
+    cli.run("init")
+    set_env(cli, AGORANOMOS_REPORTING_CURRENCY=value)
+    result = cli.run("preflight")
+    check_limit(result, outcome, "AGORANOMOS_REPORTING_CURRENCY")
+    if outcome == "stop":
+        assert "USD or EUR" in result.stderr
 
 
 def test_preflight_stops_on_keep_daily_of_zeros(cli):

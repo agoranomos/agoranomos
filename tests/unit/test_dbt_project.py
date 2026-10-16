@@ -117,14 +117,37 @@ def test_a_description_over_several_lines_ends_without_a_line_break():
         assert set(found) <= {">-"}, f"{path.name}: write descriptions as >-, not {found}"
 
 
-def test_the_mart_has_a_contract_and_its_key():
+# The key of each mart (ADR-0025), which its contract makes a primary key of PostgreSQL.
+MART_KEYS = {
+    "ad_stats_campaign_daily": "[report_date, platform, account_id, campaign_id]",
+    "ad_conversions_campaign_daily": (
+        "[report_date, platform, account_id, campaign_id, conversion_action_id]"
+    ),
+    "web_sessions_daily": (
+        "[report_date, property_id, session_source, session_medium, session_campaign_name, "
+        "session_campaign_id]"
+    ),
+    "ad_platforms": "[platform]",
+    "ad_accounts": "[platform, account_id]",
+    "clients": "[client_id]",
+    "ad_campaigns": "[platform, account_id, campaign_id]",
+    "ad_campaign_names": "[platform, account_id, campaign_id, valid_from]",
+    "fx_rates_daily": "[rate_date, currency, reporting_currency]",
+}
+
+
+def test_every_mart_has_a_contract_and_its_key():
     text = (DBT / "models" / "marts" / "_marts__models.yml").read_text(encoding="utf-8")
-    assert re.search(r"^      contract:\n        enforced: true$", text, flags=re.MULTILINE)
-    assert re.search(
-        r"^      - type: primary_key\n        columns: \[report_date, account_id, campaign_id\]$",
-        text,
-        flags=re.MULTILINE,
-    )
+    blocks = re.split(r"^  - name: ", text, flags=re.MULTILINE)[1:]
+    found = {block.split("\n", 1)[0]: block for block in blocks}
+    assert set(MART_KEYS) <= set(found)
+    for name, key in MART_KEYS.items():
+        contract = r"^      contract:\n        enforced: true$"
+        assert re.search(contract, found[name], flags=re.MULTILINE), name
+        assert f"      - type: primary_key\n        columns: {key}\n" in found[name], name
+        # The constraint is checked only when dbt builds the table; the test checks the data.
+        unique = f"      - unique_combination:\n          arguments:\n            columns: {key}\n"
+        assert unique in found[name], name
 
 
 def seed_rows(name: str) -> list[dict[str, str]]:

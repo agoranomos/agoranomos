@@ -205,6 +205,20 @@ def test_airflow_services_mount_the_settings_of_the_model_read_only(variant):
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
+def test_dbt_gets_the_reporting_currency_wherever_it_runs_and_no_other_service_does(env, variant):
+    # ADR-0025: dbt reads the reporting currency with env_var() in the tasks and in the DAG
+    # processor of every Airflow service, and in metadata-export, which writes it into the currency
+    # of the fields of Metabase. It is no secret, so a failed assertion may print it.
+    wanted = env.get("AGORANOMOS_REPORTING_CURRENCY") or "USD"
+    holders = {
+        name: service["environment"]["AGORANOMOS_REPORTING_CURRENCY"]
+        for name, service in rendered(variant).items()
+        if "AGORANOMOS_REPORTING_CURRENCY" in (service.get("environment") or {})
+    }
+    assert holders == dict.fromkeys(airflow_names(variant) | {"metadata-export"}, wanted)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
 def test_only_the_api_server_publishes_a_port_of_airflow(variant):
     for name, service in airflow_services(variant).items():
         published = [port["published"] for port in service.get("ports", [])]

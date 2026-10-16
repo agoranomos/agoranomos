@@ -106,3 +106,685 @@ models:
             metabase:
               display_name: Conversions
               semantic_type: null
+  - name: ad_stats_campaign_daily
+    description: >-
+      Advertising statistics by day and campaign on every platform. One row is one campaign of
+      one ad account on one day, in the time zone of the account: report_date, platform,
+      account_id and campaign_id together are its key. Money is in the currency of the account
+      (currency) and in the reporting currency (reporting_currency); add up money across accounts
+      with the columns that end in _reporting. Conversions are those of the primary conversion
+      actions; ad_conversions_campaign_daily has them by action. Today it holds the fictional
+      platforms of the demo; the sources of real ad platforms are planned.
+    config:
+      # The table that dbt builds has exactly these columns, with these types, or the build fails.
+      contract:
+        enforced: true
+      meta:
+        metabase:
+          display_name: Ad Statistics by Campaign and Day
+    # The key, as a constraint that PostgreSQL enforces. It has no name on purpose: dbt builds the
+    # table under a temporary name and renames it, and the index of the key keeps the name it got,
+    # so a named key would collide with itself on the next run.
+    constraints:
+      - type: primary_key
+        columns: [report_date, platform, account_id, campaign_id]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [report_date, platform, account_id, campaign_id]
+    columns:
+      - name: report_date
+        data_type: date
+        description: '{{ doc("report_date") }}'
+        data_tests: [not_null]
+        config: {meta: {metabase: {display_name: Report Date, semantic_type: null}}}
+      - name: platform
+        data_type: text
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+      - name: platform_name
+        data_type: text
+        description: '{{ doc("platform_name") }}'
+        config: {meta: {metabase: {display_name: Platform, semantic_type: type/Category}}}
+      - name: client_id
+        data_type: text
+        description: '{{ doc("client_id") }}'
+        data_tests: [not_null]
+        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/Category}}}
+      - name: client_name
+        data_type: text
+        description: '{{ doc("client_name") }}'
+        config: {meta: {metabase: {display_name: Client, semantic_type: type/Category}}}
+      - name: account_id
+        data_type: text
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+        config: {meta: {metabase: {display_name: Account ID, semantic_type: type/Category}}}
+      - name: account_name
+        data_type: text
+        description: '{{ doc("account_name") }}'
+        config: {meta: {metabase: {display_name: Account Name, semantic_type: type/Category}}}
+      - name: campaign_id
+        data_type: text
+        description: '{{ doc("campaign_id") }}'
+        data_tests: [not_null]
+        config: {meta: {metabase: {display_name: Campaign ID, semantic_type: type/Category}}}
+      - name: campaign_name
+        data_type: text
+        description: '{{ doc("campaign_name") }}'
+        config: {meta: {metabase: {display_name: Campaign Name, semantic_type: type/Category}}}
+      - name: currency
+        data_type: text
+        description: '{{ doc("currency") }}'
+        data_tests: [not_null]
+        config: {meta: {metabase: {display_name: Currency, semantic_type: type/Category}}}
+      - name: impressions
+        data_type: bigint
+        description: '{{ doc("impressions") }}'
+        config: {meta: {metabase: {display_name: Impressions, semantic_type: type/Quantity}}}
+      - name: clicks
+        data_type: bigint
+        description: '{{ doc("clicks") }}'
+        config: {meta: {metabase: {display_name: Clicks, semantic_type: type/Quantity}}}
+      - name: spend
+        data_type: numeric(18,6)
+        description: '{{ doc("spend") }}'
+        # Two currencies in the table: a plain number (docs/reference/describe-the-marts.md).
+        data_tests: [not_null]
+        config: {meta: {metabase: {display_name: Spend, semantic_type: null}}}
+      - name: conversions
+        data_type: numeric(18,6)
+        description: '{{ doc("conversions") }}'
+        config: {meta: {metabase: {display_name: Conversions, semantic_type: null}}}
+      - name: conversion_value
+        data_type: numeric(18,6)
+        description: '{{ doc("conversion_value") }}'
+        config: {meta: {metabase: {display_name: Conversion Value, semantic_type: null}}}
+      - name: reporting_currency
+        data_type: text
+        description: '{{ doc("reporting_currency") }}'
+        # One currency in the whole table, and never NULL: the condition for the columns that end
+        # in _reporting to be money in Metabase. The test has a name of its own, as the name that
+        # dbt makes would carry the expression.
+        data_tests:
+          - not_null
+          - accepted_values:
+              name: ad_stats_campaign_daily_has_one_reporting_currency
+              arguments:
+                values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
+        config: {meta: {metabase: {display_name: Reporting Currency, semantic_type: type/Category}}}
+      - name: spend_reporting
+        data_type: numeric(18,6)
+        description: '{{ doc("spend_reporting") }}'
+        data_tests: [not_null]
+        config:
+          meta:
+            metabase:
+              display_name: Spend in Reporting Currency
+              semantic_type: type/Currency
+              currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
+      - name: conversion_value_reporting
+        data_type: numeric(18,6)
+        description: '{{ doc("conversion_value_reporting") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Conversion Value in Reporting Currency
+              semantic_type: type/Currency
+              currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
+  - name: ad_conversions_campaign_daily
+    description: >-
+      Conversions by day, campaign and conversion action on every platform. One row is one
+      conversion action of one campaign of one ad account on one day, in the time zone of the
+      account, with any conversion: report_date, platform, account_id, campaign_id and
+      conversion_action_id together are its key. Each action has a category (conversion_category)
+      and says whether it counts in the conversions of the campaign (is_primary): the rows of the
+      primary actions add up to the conversions of ad_stats_campaign_daily. Money is in the currency
+      of the account (currency) and in the reporting currency (reporting_currency); add up money
+      across accounts with the columns that end in _reporting. Today it holds the fictional
+      platforms of the demo; the sources of real ad platforms are planned.
+    config:
+      contract:
+        enforced: true
+      meta:
+        metabase:
+          display_name: Conversions by Campaign, Day and Action
+    constraints:
+      - type: primary_key
+        columns: [report_date, platform, account_id, campaign_id, conversion_action_id]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [report_date, platform, account_id, campaign_id, conversion_action_id]
+    columns:
+      - name: report_date
+        data_type: date
+        description: '{{ doc("report_date") }}'
+        data_tests: [not_null]
+        config: {meta: {metabase: {display_name: Report Date, semantic_type: null}}}
+      - name: platform
+        data_type: text
+        description: '{{ doc("platform") }}'
+        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+      - name: platform_name
+        data_type: text
+        description: '{{ doc("platform_name") }}'
+        config: {meta: {metabase: {display_name: Platform, semantic_type: type/Category}}}
+      - name: client_id
+        data_type: text
+        description: '{{ doc("client_id") }}'
+        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/Category}}}
+      - name: client_name
+        data_type: text
+        description: '{{ doc("client_name") }}'
+        config: {meta: {metabase: {display_name: Client, semantic_type: type/Category}}}
+      - name: account_id
+        data_type: text
+        description: '{{ doc("account_id") }}'
+        config: {meta: {metabase: {display_name: Account ID, semantic_type: type/Category}}}
+      - name: account_name
+        data_type: text
+        description: '{{ doc("account_name") }}'
+        config: {meta: {metabase: {display_name: Account Name, semantic_type: type/Category}}}
+      - name: campaign_id
+        data_type: text
+        description: '{{ doc("campaign_id") }}'
+        config: {meta: {metabase: {display_name: Campaign ID, semantic_type: type/Category}}}
+      - name: campaign_name
+        data_type: text
+        description: '{{ doc("campaign_name") }}'
+        config: {meta: {metabase: {display_name: Campaign Name, semantic_type: type/Category}}}
+      - name: conversion_action_id
+        data_type: text
+        description: '{{ doc("conversion_action_id") }}'
+        config: {meta: {metabase: {display_name: Conversion Action ID, semantic_type: type/Category}}}
+      - name: conversion_action_name
+        data_type: text
+        description: '{{ doc("conversion_action_name") }}'
+        config: {meta: {metabase: {display_name: Conversion Action, semantic_type: type/Category}}}
+      - name: conversion_category
+        data_type: text
+        description: '{{ doc("conversion_category") }}'
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["purchase", "lead", "sign_up", "add_to_cart", "app_install", "other"]
+        config: {meta: {metabase: {display_name: Conversion Category, semantic_type: type/Category}}}
+      - name: is_primary
+        data_type: boolean
+        description: '{{ doc("is_primary") }}'
+        config: {meta: {metabase: {display_name: Is Primary, semantic_type: type/Category}}}
+      - name: attribution_setting
+        data_type: text
+        description: '{{ doc("attribution_setting") }}'
+        config: {meta: {metabase: {display_name: Attribution Setting, semantic_type: type/Category}}}
+      - name: currency
+        data_type: text
+        description: '{{ doc("currency") }}'
+        data_tests: [not_null]
+        config: {meta: {metabase: {display_name: Currency, semantic_type: type/Category}}}
+      - name: conversions
+        data_type: numeric(18,6)
+        description: '{{ doc("conversions") }}'
+        config: {meta: {metabase: {display_name: Conversions, semantic_type: null}}}
+      - name: conversion_value
+        data_type: numeric(18,6)
+        description: '{{ doc("conversion_value") }}'
+        config: {meta: {metabase: {display_name: Conversion Value, semantic_type: null}}}
+      - name: reporting_currency
+        data_type: text
+        description: '{{ doc("reporting_currency") }}'
+        data_tests:
+          - not_null
+          - accepted_values:
+              name: ad_conversions_campaign_daily_has_one_reporting_currency
+              arguments:
+                values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
+        config: {meta: {metabase: {display_name: Reporting Currency, semantic_type: type/Category}}}
+      - name: conversion_value_reporting
+        data_type: numeric(18,6)
+        description: '{{ doc("conversion_value_reporting") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Conversion Value in Reporting Currency
+              semantic_type: type/Currency
+              currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
+  - name: web_sessions_daily
+    description: >-
+      Sessions of web analytics by day, property, source, medium and campaign. One row is the
+      sessions of one property on one day, in the time zone of the property, with one source,
+      medium and campaign: report_date, property_id, session_source, session_medium,
+      session_campaign_name and session_campaign_id together are its key. ad_platform and
+      ad_account_id name the ad campaign whose ID the links carried, when exactly one campaign of
+      the data has it. Revenue is in the currency of the property (currency) and in the reporting
+      currency (reporting_currency). Today it holds the fictional web analytics of the demo; the
+      sources of real web analytics are planned.
+    config:
+      contract:
+        enforced: true
+      meta:
+        metabase:
+          display_name: Web Sessions by Day
+    constraints:
+      - type: primary_key
+        columns: [report_date, property_id, session_source, session_medium, session_campaign_name, session_campaign_id]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [report_date, property_id, session_source, session_medium, session_campaign_name, session_campaign_id]
+    columns:
+      - name: report_date
+        data_type: date
+        description: '{{ doc("report_date") }}'
+        config: {meta: {metabase: {display_name: Report Date, semantic_type: null}}}
+      - name: platform
+        data_type: text
+        description: '{{ doc("platform") }}'
+        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+      - name: platform_name
+        data_type: text
+        description: '{{ doc("platform_name") }}'
+        config: {meta: {metabase: {display_name: Platform, semantic_type: type/Category}}}
+      - name: client_id
+        data_type: text
+        description: '{{ doc("client_id") }}'
+        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/Category}}}
+      - name: client_name
+        data_type: text
+        description: '{{ doc("client_name") }}'
+        config: {meta: {metabase: {display_name: Client, semantic_type: type/Category}}}
+      - name: property_id
+        data_type: text
+        description: '{{ doc("property_id") }}'
+        config: {meta: {metabase: {display_name: Property ID, semantic_type: type/Category}}}
+      - name: property_name
+        data_type: text
+        description: '{{ doc("property_name") }}'
+        config: {meta: {metabase: {display_name: Property, semantic_type: type/Category}}}
+      - name: session_source
+        data_type: text
+        description: '{{ doc("session_source") }}'
+        config: {meta: {metabase: {display_name: Session Source, semantic_type: type/Source}}}
+      - name: session_medium
+        data_type: text
+        description: '{{ doc("session_medium") }}'
+        config: {meta: {metabase: {display_name: Session Medium, semantic_type: type/Category}}}
+      - name: session_campaign_id
+        data_type: text
+        description: '{{ doc("session_campaign_id") }}'
+        config: {meta: {metabase: {display_name: Session Campaign ID, semantic_type: type/Category}}}
+      - name: session_campaign_name
+        data_type: text
+        description: '{{ doc("session_campaign_name") }}'
+        config: {meta: {metabase: {display_name: Session Campaign Name, semantic_type: type/Category}}}
+      - name: session_default_channel_group
+        data_type: text
+        description: '{{ doc("session_default_channel_group") }}'
+        config: {meta: {metabase: {display_name: Channel Group, semantic_type: type/Category}}}
+      - name: ad_platform
+        data_type: text
+        description: '{{ doc("ad_platform") }}'
+        config: {meta: {metabase: {display_name: Ad Platform Code, semantic_type: type/Category}}}
+      - name: ad_account_id
+        data_type: text
+        description: '{{ doc("ad_account_id") }}'
+        config: {meta: {metabase: {display_name: Ad Account ID, semantic_type: type/Category}}}
+      - name: currency
+        data_type: text
+        description: '{{ doc("currency") }}'
+        config: {meta: {metabase: {display_name: Currency, semantic_type: type/Category}}}
+      - name: sessions
+        data_type: bigint
+        description: '{{ doc("sessions") }}'
+        config: {meta: {metabase: {display_name: Sessions, semantic_type: type/Quantity}}}
+      - name: engaged_sessions
+        data_type: bigint
+        description: '{{ doc("engaged_sessions") }}'
+        config: {meta: {metabase: {display_name: Engaged Sessions, semantic_type: type/Quantity}}}
+      - name: key_events
+        data_type: numeric(18,6)
+        description: '{{ doc("key_events") }}'
+        config: {meta: {metabase: {display_name: Key Events, semantic_type: null}}}
+      - name: total_revenue
+        data_type: numeric(18,6)
+        description: '{{ doc("total_revenue") }}'
+        config: {meta: {metabase: {display_name: Total Revenue, semantic_type: null}}}
+      - name: reporting_currency
+        data_type: text
+        description: '{{ doc("reporting_currency") }}'
+        data_tests:
+          - not_null
+          - accepted_values:
+              name: web_sessions_daily_has_one_reporting_currency
+              arguments:
+                values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
+        config: {meta: {metabase: {display_name: Reporting Currency, semantic_type: type/Category}}}
+      - name: total_revenue_reporting
+        data_type: numeric(18,6)
+        description: '{{ doc("total_revenue_reporting") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Total Revenue in Reporting Currency
+              semantic_type: type/Currency
+              currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
+  - name: ad_platforms
+    description: >-
+      The platforms of the model, one row each: the ad platforms, the web analytics and the
+      sources of exchange rates whose data the marts hold, with the kind of data that each gives.
+      platform is its key; the marts that name a platform take its name from here. Today it lists
+      the fictional platforms of the demo; the platforms of the connectors are planned.
+    config:
+      contract:
+        enforced: true
+      meta:
+        metabase:
+          display_name: Ad Platforms
+    constraints:
+      - type: primary_key
+        columns: [platform]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform]
+    columns:
+      - name: platform
+        data_type: text
+        description: '{{ doc("platform") }}'
+        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+      - name: platform_name
+        data_type: text
+        description: '{{ doc("platform_name") }}'
+        config: {meta: {metabase: {display_name: Platform, semantic_type: type/Name}}}
+      - name: kind
+        data_type: text
+        description: '{{ doc("kind") }}'
+        config: {meta: {metabase: {display_name: Kind, semantic_type: type/Category}}}
+      - name: mimics
+        data_type: text
+        description: '{{ doc("mimics") }}'
+        config: {meta: {metabase: {display_name: Mimics, semantic_type: type/Category}}}
+      - name: is_demo
+        data_type: boolean
+        description: '{{ doc("is_demo") }}'
+        config: {meta: {metabase: {display_name: Is Demo, semantic_type: type/Category}}}
+  - name: ad_accounts
+    description: >-
+      The ad accounts of every ad platform, one row each, with their client, currency and time
+      zone, and the first and last days that their statistics in ad_stats_campaign_daily cover.
+      platform and account_id together are its key. The client of an account is the one that the
+      settings of the deployment name for it, else the one of the demo, else Unassigned. Today it
+      holds the accounts of the demo; the sources of real ad platforms are planned.
+    config:
+      contract:
+        enforced: true
+      meta:
+        metabase:
+          display_name: Ad Accounts
+    constraints:
+      - type: primary_key
+        columns: [platform, account_id]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id]
+    columns:
+      - name: platform
+        data_type: text
+        description: '{{ doc("platform") }}'
+        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+      - name: platform_name
+        data_type: text
+        description: '{{ doc("platform_name") }}'
+        config: {meta: {metabase: {display_name: Platform, semantic_type: type/Category}}}
+      - name: account_id
+        data_type: text
+        description: '{{ doc("account_id") }}'
+        config: {meta: {metabase: {display_name: Account ID, semantic_type: type/Category}}}
+      - name: account_name
+        data_type: text
+        description: '{{ doc("account_name") }}'
+        config: {meta: {metabase: {display_name: Account Name, semantic_type: type/Name}}}
+      - name: client_id
+        data_type: text
+        description: '{{ doc("client_id") }}'
+        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/Category}}}
+      - name: client_name
+        data_type: text
+        description: '{{ doc("client_name") }}'
+        config: {meta: {metabase: {display_name: Client, semantic_type: type/Category}}}
+      - name: currency
+        data_type: text
+        description: '{{ doc("currency") }}'
+        config: {meta: {metabase: {display_name: Currency, semantic_type: type/Category}}}
+      - name: time_zone
+        data_type: text
+        description: '{{ doc("time_zone") }}'
+        config: {meta: {metabase: {display_name: Time Zone, semantic_type: type/Category}}}
+      - name: manager_account_id
+        data_type: text
+        description: '{{ doc("manager_account_id") }}'
+        config: {meta: {metabase: {display_name: Manager Account ID, semantic_type: type/Category}}}
+      - name: account_status
+        data_type: text
+        description: '{{ doc("account_status") }}'
+        config: {meta: {metabase: {display_name: Account Status, semantic_type: type/Category}}}
+      - name: first_report_date
+        data_type: date
+        description: '{{ doc("first_report_date") }}'
+        config: {meta: {metabase: {display_name: First Report Date, semantic_type: null}}}
+      - name: last_report_date
+        data_type: date
+        description: '{{ doc("last_report_date") }}'
+        config: {meta: {metabase: {display_name: Last Report Date, semantic_type: null}}}
+  - name: clients
+    description: >-
+      The clients of the business, such as brands, shops or legal entities, one row each: those
+      that the settings of the deployment name, those of the demo while an account or a property
+      of the demo is in the data, and the default client Unassigned, which holds the accounts
+      that no setting names. client_id is its key, and the other marts name a client by it.
+    config:
+      contract:
+        enforced: true
+      meta:
+        metabase:
+          display_name: Clients
+    constraints:
+      - type: primary_key
+        columns: [client_id]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [client_id]
+    columns:
+      - name: client_id
+        data_type: text
+        description: '{{ doc("client_id") }}'
+        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/Category}}}
+      - name: client_name
+        data_type: text
+        description: '{{ doc("client_name") }}'
+        config: {meta: {metabase: {display_name: Client, semantic_type: type/Name}}}
+      - name: is_default
+        data_type: boolean
+        description: '{{ doc("is_default") }}'
+        config: {meta: {metabase: {display_name: Is Default, semantic_type: type/Category}}}
+  - name: ad_campaigns
+    description: >-
+      The campaigns of every ad platform, one row each, as their newest version has them,
+      whether the platform still lists them or not: the current name, status and type, the first
+      and last days that their statistics in ad_stats_campaign_daily cover, and how many names
+      each had, which ad_campaign_names lists. platform, account_id and campaign_id together are
+      its key. Today it holds the campaigns of the demo; the sources of real ad platforms are
+      planned.
+    config:
+      contract:
+        enforced: true
+      meta:
+        metabase:
+          display_name: Ad Campaigns
+    constraints:
+      - type: primary_key
+        columns: [platform, account_id, campaign_id]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id, campaign_id]
+    columns:
+      - name: platform
+        data_type: text
+        description: '{{ doc("platform") }}'
+        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+      - name: platform_name
+        data_type: text
+        description: '{{ doc("platform_name") }}'
+        config: {meta: {metabase: {display_name: Platform, semantic_type: type/Category}}}
+      - name: client_id
+        data_type: text
+        description: '{{ doc("client_id") }}'
+        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/Category}}}
+      - name: client_name
+        data_type: text
+        description: '{{ doc("client_name") }}'
+        config: {meta: {metabase: {display_name: Client, semantic_type: type/Category}}}
+      - name: account_id
+        data_type: text
+        description: '{{ doc("account_id") }}'
+        config: {meta: {metabase: {display_name: Account ID, semantic_type: type/Category}}}
+      - name: account_name
+        data_type: text
+        description: '{{ doc("account_name") }}'
+        config: {meta: {metabase: {display_name: Account Name, semantic_type: type/Category}}}
+      - name: campaign_id
+        data_type: text
+        description: '{{ doc("campaign_id") }}'
+        config: {meta: {metabase: {display_name: Campaign ID, semantic_type: type/Category}}}
+      - name: campaign_name
+        data_type: text
+        description: '{{ doc("campaign_name") }}'
+        config: {meta: {metabase: {display_name: Campaign Name, semantic_type: type/Name}}}
+      - name: campaign_status
+        data_type: text
+        description: '{{ doc("campaign_status") }}'
+        config: {meta: {metabase: {display_name: Campaign Status, semantic_type: type/Category}}}
+      - name: campaign_type
+        data_type: text
+        description: '{{ doc("campaign_type") }}'
+        config: {meta: {metabase: {display_name: Campaign Type, semantic_type: type/Category}}}
+      - name: first_report_date
+        data_type: date
+        description: '{{ doc("first_report_date") }}'
+        config: {meta: {metabase: {display_name: First Report Date, semantic_type: null}}}
+      - name: last_report_date
+        data_type: date
+        description: '{{ doc("last_report_date") }}'
+        config: {meta: {metabase: {display_name: Last Report Date, semantic_type: null}}}
+      - name: name_count
+        data_type: bigint
+        description: '{{ doc("name_count") }}'
+        config: {meta: {metabase: {display_name: Name Count, semantic_type: type/Quantity}}}
+  - name: ad_campaign_names
+    description: >-
+      The names that the campaigns of every ad platform had, as the loads saw them: one row for
+      each campaign and each period in which it kept one name, from valid_from until valid_to,
+      and is_current on the name that it has now. Versions of a campaign that differ in another
+      field only, such as the status, are one period. platform, account_id, campaign_id and
+      valid_from together are its key. Today it holds the campaigns of the demo; the sources of
+      real ad platforms are planned.
+    config:
+      contract:
+        enforced: true
+      meta:
+        metabase:
+          display_name: Ad Campaign Names
+    constraints:
+      - type: primary_key
+        columns: [platform, account_id, campaign_id, valid_from]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id, campaign_id, valid_from]
+    columns:
+      - name: platform
+        data_type: text
+        description: '{{ doc("platform") }}'
+        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+      - name: account_id
+        data_type: text
+        description: '{{ doc("account_id") }}'
+        config: {meta: {metabase: {display_name: Account ID, semantic_type: type/Category}}}
+      - name: campaign_id
+        data_type: text
+        description: '{{ doc("campaign_id") }}'
+        config: {meta: {metabase: {display_name: Campaign ID, semantic_type: type/Category}}}
+      - name: observed_name
+        data_type: text
+        description: '{{ doc("observed_name") }}'
+        config: {meta: {metabase: {display_name: Observed Name, semantic_type: type/Name}}}
+      - name: valid_from
+        data_type: timestamp with time zone
+        description: '{{ doc("valid_from") }}'
+        config: {meta: {metabase: {display_name: Valid From, semantic_type: null}}}
+      - name: valid_to
+        data_type: timestamp with time zone
+        description: '{{ doc("valid_to") }}'
+        config: {meta: {metabase: {display_name: Valid Until, semantic_type: null}}}
+      - name: is_current
+        data_type: boolean
+        description: '{{ doc("is_current") }}'
+        config: {meta: {metabase: {display_name: Is Current, semantic_type: type/Category}}}
+  - name: fx_rates_daily
+    description: >-
+      The exchange rates into the reporting currency, one row for each day and each currency of
+      the data: the rates at which the columns that end in _reporting convert the money of each
+      day, through the reference rates of the euro, each the last one published on or before the
+      day. rate_date, currency and reporting_currency together are its key. The reporting
+      currency has the rate 1 on every day; another currency has rows from the first day on which
+      the source published a rate for it. Today the rates come from the fictional source of the
+      demo, which covers USD and EUR; a source of real rates is planned.
+    config:
+      contract:
+        enforced: true
+      meta:
+        metabase:
+          display_name: Exchange Rates by Day
+    constraints:
+      - type: primary_key
+        columns: [rate_date, currency, reporting_currency]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [rate_date, currency, reporting_currency]
+    columns:
+      - name: rate_date
+        data_type: date
+        description: '{{ doc("rate_date") }}'
+        config: {meta: {metabase: {display_name: Rate Date, semantic_type: null}}}
+      - name: currency
+        data_type: text
+        description: '{{ doc("currency") }}'
+        config: {meta: {metabase: {display_name: Currency, semantic_type: type/Category}}}
+      - name: reporting_currency
+        data_type: text
+        description: '{{ doc("reporting_currency") }}'
+        data_tests:
+          - not_null
+          - accepted_values:
+              name: fx_rates_daily_has_one_reporting_currency
+              arguments:
+                values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
+        config: {meta: {metabase: {display_name: Reporting Currency, semantic_type: type/Category}}}
+      - name: rate
+        data_type: numeric(18,8)
+        description: '{{ doc("rate") }}'
+        config: {meta: {metabase: {display_name: Rate, semantic_type: null}}}
+      - name: rate_source
+        data_type: text
+        description: '{{ doc("rate_source") }}'
+        config: {meta: {metabase: {display_name: Rate Source, semantic_type: type/Category}}}
+      - name: is_carried_forward
+        data_type: boolean
+        description: '{{ doc("is_carried_forward") }}'
+        config: {meta: {metabase: {display_name: Is Carried Forward, semantic_type: type/Category}}}

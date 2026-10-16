@@ -36,6 +36,10 @@ x-airflow: &airflow
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     # How many tasks run at the same time; Airflow's own default is 32.
     AIRFLOW__CORE__PARALLELISM: ${AIRFLOW_PARALLELISM:-4}
+    # The reporting currency of the marts (ADR-0025), which dbt reads with env_var() in the tasks
+    # and in the DAG processor; metadata-export gets it too, for the currency of the fields of
+    # Metabase.
+    AGORANOMOS_REPORTING_CURRENCY: ${AGORANOMOS_REPORTING_CURRENCY:-USD}
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?run ./agoranomos init}
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
@@ -525,6 +529,9 @@ services:
       # No usage telemetry from dbt; the image sets the same.
       DBT_ENGINE_SEND_ANONYMOUS_USAGE_STATS: "False"
       DO_NOT_TRACK: "1"
+      # The reporting currency of the marts (ADR-0025), which dbt renders into the currency of the
+      # fields of Metabase.
+      AGORANOMOS_REPORTING_CURRENCY: ${AGORANOMOS_REPORTING_CURRENCY:-USD}
     volumes:
       - ./dbt:/opt/agoranomos/dbt:ro
       - ./metabase:/opt/agoranomos/metabase:ro
