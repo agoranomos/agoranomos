@@ -103,6 +103,13 @@ def test_metabase_reader_has_a_statement_timeout_and_a_limit_of_connections(env)
 
 
 @pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))
+def test_the_warehouse_compiles_no_query_with_jit(env, role):
+    # db-init sets it on the database on every start: with JIT, the tests of the intermediate models
+    # took warehouse-db past its memory limit (docs/reference/system-requirements.md).
+    assert warehouse_output(env, "SHOW jit", role) == "off"
+
+
+@pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))
 def test_each_role_of_the_warehouse_signs_in_with_its_password_and_with_no_other(env, role):
     # Loopback inside a database container is trust, so psql() cannot tell a wrong password from a
     # right one. From another container the connection crosses the network, where the server asks.

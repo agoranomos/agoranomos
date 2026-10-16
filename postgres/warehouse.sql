@@ -30,6 +30,11 @@ FROM PUBLIC;
 -- none): each role gets CONNECT on warehouse below, and no more.
 REVOKE ALL ON DATABASE warehouse FROM PUBLIC;
 REVOKE ALL ON DATABASE postgres, template1 FROM PUBLIC;
+-- No session of the warehouse compiles a query with JIT. The models of dbt are views over views,
+-- and the code that JIT compiled for one of their tests took more memory than the test itself:
+-- four of them at a time took warehouse-db past its memory limit
+-- (docs/reference/system-requirements.md). The line runs on every start, for new sessions.
+ALTER DATABASE warehouse SET jit = off;
 
 -- ALTER ROLE keeps every attribute that it does not name, so the statements below name LOGIN and
 -- each attribute that would give a role more power: one given by hand, such as CREATEDB, is gone
