@@ -35,7 +35,9 @@ days as (
 ),
 
 currencies as (
-    select currency from facts where currency is not null
+    -- distinct: without it, PostgreSQL counts a currency for each day and currency of the facts,
+    -- and plans for billions of rows of this view, which has about a thousand.
+    select distinct currency from facts where currency is not null
     union
     select {{ reporting_currency() }}
 ),
