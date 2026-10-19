@@ -112,6 +112,12 @@ def read_toml(path: Path, name: str) -> dict[str, Any] | None:
         place = PLACE.search(str(error))
         where = f" ({place.group(1)})" if place else ""
         raise SettingsError(f"{name}: the file is not valid TOML{where}") from None
+    except ValueError:
+        # tomllib leaves the error of an integer of more than the digits that Python converts,
+        # 4,300 by default, as it is: a ValueError that is no TOMLDecodeError.
+        raise SettingsError(
+            f"{name}: the file is not valid TOML: it has an integer with too many digits"
+        ) from None
     except RecursionError:
         # tomllib reads a value in a value by recursion: a deep nesting ends Python's.
         raise SettingsError(

@@ -153,6 +153,7 @@ def test_a_file_may_start_with_the_mark_of_utf_8(tmp_path):
         (f'[clients.acme]\nname = "{"A" * 101}"\n', r"has 101 characters, and it may have 100"),
         ("[clients.acme\n", r"clients.toml: the file is not valid TOML \(at line 1, column 14\)$"),
         ("x = " + "[" * 5000 + "]" * 5000 + "\n", r"clients.toml: .* nested too deeply"),
+        ("x = " + "1" * 5000 + "\n", r"clients.toml: .* an integer with too many digits$"),
     ],
 )
 def test_a_mistake_in_clients_toml_is_one_line_that_says_where(tmp_path, text, message):
