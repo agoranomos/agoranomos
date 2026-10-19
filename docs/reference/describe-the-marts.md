@@ -1,8 +1,8 @@
 # Describe the marts
 
-Every model and column of the dbt project, and every table of its sources, has a description. Every mart also has a display name for Metabase, and each of its columns a display name and a semantic type. People read the descriptions in SQL clients and in Metabase, and the planned AI access through MCP ([ADR-0007](../adr/0007-ai-access-via-mcp-read-only.md)) is to take its context from them, so they follow the rules on this page. Tests check them ([How the rules are checked](#how-the-rules-are-checked)).
+Every model, seed and column of the dbt project, and every table of its sources, has a description. Every mart also has a display name for Metabase, and each of its columns a display name and a semantic type. People read the descriptions in SQL clients and in Metabase, and the planned AI access through MCP ([ADR-0007](../adr/0007-ai-access-via-mcp-read-only.md)) is to take its context from them, so they follow the rules on this page. Tests check them ([How the rules are checked](#how-the-rules-are-checked)).
 
-Metabase gets them on every start: the one-shot job `metadata-export` exports them from dbt, and `metabase-init` applies them, with the overrides of a deployment, as `demo-init` does for the mart of the demo once the demo pipeline has built it ([A deployment's own words](#a-deployments-own-words)).
+Metabase gets them on every start: the one-shot job `metadata-export` exports them from dbt, and `metabase-init` applies them, with the overrides of a deployment, as `demo-init` does for the marts of the demo once the demo pipeline has built them ([A deployment's own words](#a-deployments-own-words)).
 
 ## What a description says
 
@@ -20,21 +20,20 @@ A description stands on its own, because it reaches its reader one column at a t
 
 ## Write it in dbt
 
-- Every model, column and table of a source has `description:`.
+- Every model, seed, column and table of a source has `description:`, and so does every column of a seed.
 - A column that more than one model has takes its description from the doc block of its own name in `dbt/models/_docs.md`, as `description: '{{ doc("spend") }}'`. Columns of one name then say the same in every model.
 - A description over several lines is a folded block with `>-`: `>` would leave a line break at its end, which the comment in the warehouse keeps, and a literal block, `|` or `|-`, would keep every line break.
 
 ```yaml
 columns:
   - name: spend
-    data_type: numeric(12,2)
+    data_type: numeric(18,6)
     description: '{{ doc("spend") }}'
     config:
       meta:
         metabase:
           display_name: Spend
-          semantic_type: type/Currency
-          currency: USD
+          semantic_type: null
 ```
 
 ## Names and types for Metabase
@@ -59,12 +58,33 @@ The jobs that apply the metadata never send a display name of `null`, which the 
 | An identifier from a source that is not the key of the table on its own | `type/Category` | `account_id`, `campaign_id` |
 | The name of something, or a code from a short list | `type/Category` | `campaign_name`, `currency` |
 | A count of whole things | `type/Quantity` | `impressions`, `clicks` |
-| Money, when the whole table has one currency and tests assert it | `type/Currency`, with `currency` | `spend` |
-| Any other number, such as a count that can be fractional | `null` | `conversions` |
+| Money, when the whole table has one currency and tests assert it | `type/Currency`, with `currency` | `spend_reporting` |
+| Money in the currencies of the accounts, and any other number, such as a count that can be fractional | `null` | `spend`, `conversions` |
 
 `type/Quantity` is for whole numbers: Metabase defines it under its integer types (as of Metabase 0.63.19 and 0.64.1). `null` declares that the column has no type of its own: the jobs that apply the metadata then clear a type that Metabase guessed, or that someone set in its UI. A column without the key would keep the type that Metabase shows, and the tests require the key on every column of a mart.
 
-**Money and its currency.** `type/Currency` and the types under it, such as `type/Cost`, go together with `currency`, and only in a mart whose column `currency` has an `accepted_values` test with that one code and a `not_null` test: `accepted_values` lets NULL through. The demo is in USD only. In a mart that mixes currencies, the columns of money stay plain numbers, and their descriptions name the column of the currency.
+**Money and its currency.** A column is money in Metabase, `type/Currency` or a type under it, such as `type/Cost`, with a `currency`, only where one currency holds for the whole table: a `not_null` and an `accepted_values` test with that one code on the column of its currency, which is `reporting_currency` for a column whose name ends in `_reporting` and `currency` for any other (`accepted_values` alone lets NULL through). A mart in the reporting currency writes the code as `{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}`, in the `currency` of the column and in the values of the test, which gets a `name:` of its own: dbt renders `env_var()` there, and the name that dbt would make would carry the expression. The accounts of the demo have two currencies, so `spend` stays a plain number, and its description names the column of its currency, while `spend_reporting` is money:
+
+```yaml
+  - name: reporting_currency
+    data_type: text
+    description: '{{ doc("reporting_currency") }}'
+    data_tests:
+      - not_null
+      - accepted_values:
+          name: ad_stats_campaign_daily_has_one_reporting_currency
+          arguments:
+            values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
+  - name: spend_reporting
+    data_type: numeric(18,6)
+    description: '{{ doc("spend_reporting") }}'
+    config:
+      meta:
+        metabase:
+          display_name: Spend in Reporting Currency
+          semantic_type: type/Currency
+          currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
+```
 
 **Reserved keys.** `synonyms` (a list of other names) and `ai_context` (a text for AI clients only) are reserved under `config: meta:` of a model or a column, for the step that adds a glossary and metrics. They are not used yet: the tests do not require them, and nothing reads them.
 
@@ -75,7 +95,7 @@ A mart has an enforced dbt contract, `contract: enforced: true` in its `config`,
 ```yaml
     constraints:
       - type: primary_key
-        columns: [report_date, account_id, campaign_id]
+        columns: [report_date, platform, account_id, campaign_id]
 ```
 
 The constraint has no `name`. dbt builds a table under a temporary name and then renames it, and an index keeps the name that it got: a named key would collide with itself on the next build (`relation "…" already exists`), and PostgreSQL gives an unnamed key a free name each time.
@@ -92,8 +112,8 @@ A deployment can override the display name and the description of a table or a f
 
 ## How the rules are checked
 
-- `tests/unit/test_dbt_project.py` reads the files: `persist_docs` is on, every description over several lines is `>-`, the mart has its contract and its key, and no primary key has a name, in whatever order its keys are written.
-- `tests/stack/test_dbt_metadata.py` asks dbt itself, with `dbt ls` in the Airflow image, which resolves the doc blocks and the configs as dbt does: every model, column and source table has a description, every mart has a display name and each of its columns a display name and a semantic type, columns of one name have one description, money has its tests of one currency and no NULL, the names follow the style, and every mart has its contract. It also checks the warehouse after a build: each table and view that dbt builds in `staging` and `marts` has exactly the columns that dbt declares, it and each of them carry the description as their comment, and the key of the mart is a primary key in PostgreSQL.
+- `tests/unit/test_dbt_project.py` reads the files: `persist_docs` is on, every description over several lines is `>-`, every seed and each of its columns has a description, every mart has its contract, its key and a test of its key, no primary key has a name, in whatever order its keys are written, and the columns of the staging and intermediate models take the doc blocks of their names.
+- `tests/stack/test_dbt_metadata.py` asks dbt itself, with `dbt ls` in the Airflow image, which resolves the doc blocks and the configs as dbt does: every model, seed, column and source table has a description, every mart has a display name and each of its columns a display name and a semantic type, columns of one name have one description, money has its tests of one currency and no NULL, the names follow the style, and every mart has its contract. It also checks the warehouse after a build: each table and view that dbt builds in `staging` and `marts` has exactly the columns that dbt declares, it and each of them carry the description as their comment, and the key of the mart is a primary key in PostgreSQL.
 - `tests/stack/test_metabase_metadata.py` checks Metabase after a start: every table and field of the marts shows the display name, the description and the semantic type of the code, also a semantic type of none, and the currency of money; an edit in the Metabase UI is reverted at the next start, and a field that someone hid stays hidden.
 
 CI runs the first on every pull request, and the other two on every pull request that changes the stack, such as `dbt/` or `metabase/`.

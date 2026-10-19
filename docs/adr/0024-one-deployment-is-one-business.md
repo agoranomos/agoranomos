@@ -61,6 +61,6 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** planned for v0.2.0; none of it is in place.
+* **Implementation status, as of October 2026:** in place for v0.2.0: `marts.clients`, the client of each account in `marts.ad_accounts` and in the facts, `extensions/model/clients.toml` with its checks, its load into `raw_settings` by the first task of the transform, the clients of the demo from a file of the base package, and the default client `unassigned` with the test that warns about it. The hosted version is planned for later.
 * Metabase: "Row and column security is only available on Pro and Enterprise plans" ([Row and column security](https://www.metabase.com/docs/latest/permissions/row-and-column-security), the documentation of Metabase 0.64, read on 12 October 2026).
 * Related decisions: [ADR-0004](0004-ingest-with-dlt.md) (sources load with dlt as `loader`), [ADR-0013](0013-keep-extensions-apart-from-the-base-package.md) (extensions apart from the base package), [ADR-0016](0016-keep-the-metadata-of-the-marts-as-code.md) (a data file of the deployment, the overrides of the metadata), [ADR-0025](0025-model-advertising-statistics-once.md) (the model).
