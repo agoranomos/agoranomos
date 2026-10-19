@@ -28,6 +28,7 @@ nav = [
     { "Configuration" = "reference/configuration.md" },
     { "System requirements" = "reference/system-requirements.md" },
     { "Describe the marts" = "reference/describe-the-marts.md" },
+    { "Data model" = "reference/data-model.md" },
   ] },
   { "Explanation" = ["explanation/index.md", "explanation/architecture.md"] },
   { "Decisions" = [

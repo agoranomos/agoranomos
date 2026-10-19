@@ -8,10 +8,10 @@ The names and descriptions of the tables and fields of the marts in Metabase com
 2. Add an entry for each table or field. A table is `[marts.<table>]`, and a field of it is `[marts.<table>.columns.<column>]`:
 
     ```toml
-    [marts.ad_spend_daily]
-    display_name = "Ad Spend, Daily"
+    [marts.ad_stats_campaign_daily]
+    display_name = "Campaigns by Day"
 
-    [marts.ad_spend_daily.columns.conversions]
+    [marts.ad_stats_campaign_daily.columns.conversions]
     display_name = "Purchases"
     note = "In this business, a conversion is a paid order in the online shop."
     ```
@@ -19,7 +19,7 @@ The names and descriptions of the tables and fields of the marts in Metabase com
     `display_name` and `description` replace what the release says. `note` keeps the description of the release and adds yours after an empty line, so that an improved description in a later release still reaches you: prefer it to `description`.
 
 3. See what will change: `./agoranomos metadata diff` prints each change, and changes nothing.
-4. Apply it: `./agoranomos up`. `./agoranomos logs metabase-init` shows one line for each change; on the first start with the demo, `./agoranomos logs demo-init` shows them, as it applies the metadata once the demo pipeline has built the mart.
+4. Apply it: `./agoranomos up`. `./agoranomos logs metabase-init` shows one line for each change; on the first start with the demo, `./agoranomos logs demo-init` shows them, as it applies the metadata once the demo pipeline has built the marts.
 
 The tables and columns go by their names in the warehouse, the ones that a SQL query uses, which Admin > Table Metadata in Metabase shows next to the display names. [Describe the marts](../reference/describe-the-marts.md) has the rules that the names and descriptions of the release follow.
 
