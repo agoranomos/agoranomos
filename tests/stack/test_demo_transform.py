@@ -466,7 +466,22 @@ def test_the_logs_hold_no_secret(env, airflow_url, token, transform_run):
     assert_no_secret_in_the_logs(env, airflow_url, token, transform_run)
 
 
-def test_a_failed_critical_test_keeps_the_marts(env, airflow_url, token, transform_run):
+@pytest.fixture(scope="module")
+def put_back(env, airflow_url, token, transform_run):
+    """The tests below break the data or the settings, and each takes its change out again in the
+    end. One run of the transform after the last of them puts the marts back as the demo makes
+    them, and checks it: a run takes minutes on a runner of CI, so the tests share it."""
+    before = totals(env, MART)
+    yield
+    run = transform(airflow_url, token)
+    assert run["state"] == "success", run["state"]
+    assert totals(env, MART) == before
+    clients = warehouse_output(env, "SELECT client_id || ' ' || client_name FROM marts.clients")
+    assert "acme" not in clients.split()
+    assert "tarnwick Tarnwick Outfitters" in clients.splitlines()
+
+
+def test_a_failed_critical_test_keeps_the_marts(env, airflow_url, token, transform_run, put_back):
     # Negative clicks break non_negative of stg_demo_search__campaign_stats: the models that read
     # it do not run, and the marts keep the rows of the last good run.
     before = totals(env, MART)
@@ -489,9 +504,6 @@ def test_a_failed_critical_test_keeps_the_marts(env, airflow_url, token, transfo
         assert_no_secret_in_the_logs(env, airflow_url, token, run)
     finally:
         warehouse_output(env, REMOVE_BROKEN_ROW)
-    run = transform(airflow_url, token)
-    assert run["state"] == "success", run["state"]
-    assert totals(env, MART) == before
 
 
 # The settings of a deployment: a client of its own, which takes an account of a client of the
@@ -510,7 +522,9 @@ client = "acme"
 """
 
 
-def test_a_deployment_names_its_own_client_for_an_account(env, airflow_url, token, transform_run):
+def test_a_deployment_names_its_own_client_for_an_account(
+    env, airflow_url, token, transform_run, put_back
+):
     path = settings_file(env, "clients.toml")
     path.write_text(OWN_CLIENTS, encoding="utf-8")
     account = "platform = 'demo_search' AND account_id = '4170000011'"
@@ -527,15 +541,10 @@ def test_a_deployment_names_its_own_client_for_an_account(env, airflow_url, toke
         assert warehouse_output(env, renamed) == "Tarnwick of the deployment"
     finally:
         path.unlink(missing_ok=True)
-    run = transform(airflow_url, token)
-    assert run["state"] == "success", run["state"]
-    clients = warehouse_output(env, "SELECT client_id || ' ' || client_name FROM marts.clients")
-    assert "acme" not in clients.split()
-    assert "tarnwick Tarnwick Outfitters" in clients.splitlines()
 
 
 def test_a_broken_settings_file_stops_the_transform_and_keeps_the_marts(
-    env, airflow_url, token, transform_run
+    env, airflow_url, token, transform_run, put_back
 ):
     before = totals(env, MART)
     path = settings_file(env, "clients.toml")
@@ -554,5 +563,3 @@ def test_a_broken_settings_file_stops_the_transform_and_keeps_the_marts(
         assert totals(env, MART) == before
     finally:
         path.unlink(missing_ok=True)
-    run = transform(airflow_url, token)
-    assert run["state"] == "success", run["state"]

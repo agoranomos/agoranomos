@@ -1,8 +1,8 @@
 """The history of the fictional platforms, agoranomos_demo_history: each raw_demo_<platform> holds
 what the demo generator makes for the days of each account that a load replaces, a repeated history
 and a row that a platform no longer sends leave no stale row, and each load records the window of
-each account that it replaced. Each run of the history also starts a run of the transform while the
-transform is unpaused; the tests of the transform and of the demo in Metabase wait for it to end.
+each account that it replaced. The transform is paused while these tests run the history, which
+would start a run of it each time, and runs once after the last of them.
 
 The generator is deterministic, so the tests compute what the warehouse must hold for the days that
 it holds. The assertions print counts, dates and sums, never a secret.
@@ -15,15 +15,28 @@ from itertools import pairwise
 
 import pytest
 from agoranomos_pipelines.demo import common, platforms
-from airflow_api import asset_events, run_dag, task_instances, task_log, wait_for_dag
+from airflow_api import (
+    asset_events,
+    is_busy,
+    is_paused,
+    pause,
+    run_dag,
+    task_instances,
+    task_log,
+    trigger,
+    unpause,
+    wait_for_dag,
+    wait_for_run,
+)
 from services import DEMO
-from stack_helpers import leaked, secrets, warehouse_output
+from stack_helpers import leaked, secrets, wait_for, warehouse_output
 
 pytestmark = pytest.mark.skipif(
     not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
 )
 
 HISTORY = "agoranomos_demo_history"
+TRANSFORM = "agoranomos_demo_transform"
 # What each main table holds, as SQL over its columns and as the same from a record of the
 # generator: the account, the day, and the count and the sums that the comparison takes.
 MAIN = {
@@ -85,6 +98,31 @@ MAIN = {
         lambda r: (r["base"], r["rate_date"], (Decimal(r["rate"]), 0, 0)),
     ),
 }
+
+
+@pytest.fixture(scope="module", autouse=True)
+def transform_paused(airflow_url, token):
+    """The tests below run the history three times. While the transform is unpaused, each history
+    starts or queues a run of it, which takes minutes on a runner of CI and which none of them
+    needs; Airflow queues no event for a paused DAG. So the transform is paused while they run, and
+    runs once after the last history, as the first start leaves the demo: demo-init, and the tests
+    of the demo in Metabase after these, find a good transform after the newest history."""
+    wait_for_dag(airflow_url, token, TRANSFORM)
+    was_paused = is_paused(airflow_url, token, TRANSFORM)
+    wait_for(
+        lambda: not is_busy(airflow_url, token, TRANSFORM, assets=len(platforms.PLATFORMS)),
+        900,
+        interval=5,
+        message="the runs of the transform that earlier tests started did not end",
+    )
+    pause(airflow_url, token, TRANSFORM)
+    yield
+    if was_paused:
+        return
+    unpause(airflow_url, token, TRANSFORM)
+    run = trigger(airflow_url, token, TRANSFORM)
+    run = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=900)
+    assert run["state"] == "success", run["state"]
 
 
 @pytest.fixture(scope="module")

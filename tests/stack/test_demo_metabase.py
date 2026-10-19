@@ -57,9 +57,9 @@ KEYS = ("agoranomos", "demo", "demo/dashboard", *(f"demo/{key}" for key in QUEST
 
 @pytest.fixture(scope="module", autouse=True)
 def idle_demo_dags(airflow_url, token):
-    """The tests of the history run before these, and each of their histories starts a run of the
-    transform. These tests wait until such runs have ended, so that none starts or rebuilds the
-    mart while they count runs or read the mart."""
+    """The tests of the history run before these, and a run of the transform follows them. These
+    tests wait until such runs have ended, so that none starts or rebuilds the mart while they
+    count runs or read the mart."""
     wait_for(
         lambda: (
             not (

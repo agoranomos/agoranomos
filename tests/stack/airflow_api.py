@@ -32,6 +32,17 @@ def unpause(airflow_url, token, dag_id):
     assert status == 200, body
 
 
+def pause(airflow_url, token, dag_id):
+    status, body = api(airflow_url, token, "PATCH", f"/api/v2/dags/{dag_id}", {"is_paused": True})
+    assert status == 200, body
+
+
+def is_paused(airflow_url, token, dag_id):
+    status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}")
+    assert status == 200, body
+    return body["is_paused"]
+
+
 def trigger(airflow_url, token, dag_id):
     """Start a manual run of a DAG and return it, without waiting for it."""
     status, run = api(
