@@ -6,13 +6,14 @@ extensions/model, and the clients of the demo into raw_settings, as the loader r
 mistake in a file fails that task with one line that names the file and the entry, nothing is
 written, and no task of dbt runs. Then it runs the dbt project through Cosmos, as the transformer
 role: the seeds, the staging models of each platform, the steps that the platforms share, and the
-marts, each followed by its tests (ADR-0025). A failed critical test stops the models that read it,
-and the marts keep their data. The DAG runs when each of the five platforms of the demo has loaded
-since its last run: each load updates the asset of its main table. A repeat is safe: the settings
-are loaded again, and dbt rebuilds the models. The DAG starts paused. With the demo profile, the
-one-shot demo-init job unpauses it and runs agoranomos_demo_history on the first start; without it,
-unpause this DAG in the Airflow UI before you trigger the history. The DAG keeps the word demo in
-its id until the first connector of a real platform.
+marts, each built with its tests in one task, dbt build (ADR-0025, ADR-0028). A failed critical
+test stops the models that read it, and the marts keep their data. The DAG runs when each of the
+five platforms of the demo has loaded since its last run: each load updates the asset of its main
+table. A repeat is safe: the settings are loaded again, and dbt rebuilds the models. The DAG starts
+paused. With the demo profile, the one-shot demo-init job unpauses it and runs
+agoranomos_demo_history on the first start; without it, unpause this DAG in the Airflow UI before
+you trigger the history. The DAG keeps the word demo in its id until the first connector of a real
+platform.
 
 Cosmos renders its tasks from the manifest that metadata-export writes on every start (ADR-0027),
 so a change of the dbt project reaches the DAG at the next ./agoranomos up; its tasks of dbt run at
@@ -100,16 +101,19 @@ def agoranomos_demo_transform():
             invocation_mode=InvocationMode.SUBPROCESS,
             dbt_executable_path=DBT_EXECUTABLE,
             # A test of two nodes, such as a relationships test of a model against a seed, runs
-            # only in the test task of the node that depends on the other, so after both, and its
-            # failure stops the models below that node. By default (eager), the test task of either
+            # only in the task of the node that depends on the other, so after both, and its
+            # failure stops the models below that node. By default (eager), the task of either
             # node would run it, on a first run also before the other exists. The dbt project names
             # such a dependency where no ref makes it, and tests/unit/test_dbt_project.py checks it.
             test_indirect_selection=TestIndirectSelection.BUILDABLE,
         ),
         render_config=RenderConfig(
             load_method=LoadMode.DBT_MANIFEST,
-            # The tests of a model run right after it; a failed one stops the models that read it.
-            test_behavior=TestBehavior.AFTER_EACH,
+            # Each model and each seed is one task, dbt build, which builds it and then runs its
+            # tests: a failed one fails the task and stops the models that read it. One process of
+            # dbt for each node, instead of one for the node and one for its tests, halves the
+            # processes of a run (ADR-0028).
+            test_behavior=TestBehavior.BUILD,
         ),
         # Only the tasks of dbt go into its pool.
         default_args={"pool": DBT_POOL},

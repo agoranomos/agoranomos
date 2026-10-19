@@ -57,7 +57,8 @@ MARTS = (
     "ad_campaign_names",
     "fx_rates_daily",
 )
-MART_RUN = "dbt.ad_stats_campaign_daily.run"
+# The task of the mart: each model and each seed is one task, dbt build (ADR-0028).
+MART_BUILD = "dbt.ad_stats_campaign_daily_model_build"
 MART_ASSET = "postgres://warehouse-db:5432/warehouse/marts/ad_stats_campaign_daily"
 ASSETS = len(platforms.PLATFORMS)
 # The pool of the tasks of dbt, which airflow-init sets (ADR-0027); the settings load outside it.
@@ -109,6 +110,8 @@ REMOVE_BROKEN_ROW = (
     "DELETE FROM raw_demo_search.campaign_stats WHERE _dlt_id = 'stack-test-broken-row'"
 )
 BROKEN_TEST = "non_negative_stg_demo_search__campaign_stats_clicks"
+# The task that builds the staging view of that row, and runs the test that it breaks.
+STAGING_BUILD = "dbt.stg_demo_search__campaign_stats_model_build"
 # The lines in which Cosmos says how it parsed the dbt project (cosmos/dbt/graph.py, Cosmos 1.15.1),
 # from the logs that the DAG processor writes for the file of the transform DAG, as JSON lines, into
 # dag_processor/<day>/<bundle>/ of the volume airflow-logs (Airflow 3.3.2); latest links to the
@@ -252,7 +255,7 @@ def test_the_five_assets_of_the_history_start_the_transform(transform_run):
     assert transform_run["state"] == "success", transform_run["state"]
 
 
-def test_the_settings_load_first_and_each_model_is_followed_by_its_tests(
+def test_the_settings_load_first_and_each_node_is_built_with_its_tests_in_one_task(
     airflow_url, token, transform_run
 ):
     downstream = downstream_task_ids(airflow_url, token, TRANSFORM)
@@ -263,12 +266,11 @@ def test_the_settings_load_first_and_each_model_is_followed_by_its_tests(
                 reached.add(following)
                 todo.append(following)
     assert reached == set(downstream) - {SETTINGS}, "a task of dbt does not wait for the settings"
-    built = [task for task in downstream if task.rpartition(".")[2] in ("run", "seed")]
-    assert MART_RUN in built, sorted(built)[:5]
-    for task in built:
-        tests = f"{task.rpartition('.')[0]}.test"
-        if tests in downstream:
-            assert tests in downstream[task], task
+    built = [task for task in downstream if task != SETTINGS]
+    assert MART_BUILD in built, sorted(built)[:5]
+    # One task of dbt build for each model and each seed: no task runs a node or its tests alone.
+    alone = [task for task in built if not task.endswith(("_model_build", "_seed_build"))]
+    assert not alone, sorted(alone)[:5]
     states = {i["task_id"]: i["state"] for i in task_instances(airflow_url, token, transform_run)}
     assert set(states.values()) == {"success"}, sorted(
         t for t, s in states.items() if s != "success"
@@ -421,7 +423,7 @@ def test_the_day_that_the_demo_misses_is_a_warning_and_has_no_row(
     [tests] = [
         i
         for i in task_instances(airflow_url, token, run)
-        if i["task_id"] == "dbt.int_ad_stats__unioned.test"
+        if i["task_id"] == "dbt.int_ad_stats__unioned_model_build"
     ]
     assert tests["state"] == "success", "a warning failed the task"
     assert logged(task_log(airflow_url, token, tests), "int_ad_stats__unioned_has_no_missing_day")
@@ -436,7 +438,7 @@ def test_cosmos_emits_the_asset_of_the_mart(airflow_url, token, transform_run):
     assert events, f"the run {run_id} did not update the asset of the mart"
     # The API ignores a filter that it does not know, so the events must be those of this run.
     sources = {(e["source_dag_id"], e["source_run_id"], e["source_task_id"]) for e in events}
-    assert sources == {(TRANSFORM, run_id, MART_RUN)}
+    assert sources == {(TRANSFORM, run_id, MART_BUILD)}
 
 
 @pytest.mark.parametrize("mart", MARTS)
@@ -458,7 +460,7 @@ def test_metabase_reader_reads_no_layer_below_the_marts(env, transform_run):
 def test_the_logs_hold_no_secret(env, airflow_url, token, transform_run):
     # The line that dbt prints first shows that the scan reads the logs of dbt.
     [mart] = [
-        i for i in task_instances(airflow_url, token, transform_run) if i["task_id"] == MART_RUN
+        i for i in task_instances(airflow_url, token, transform_run) if i["task_id"] == MART_BUILD
     ]
     assert logged(task_log(airflow_url, token, mart), "Running with dbt=")
     assert_no_secret_in_the_logs(env, airflow_url, token, transform_run)
@@ -476,14 +478,12 @@ def test_a_failed_critical_test_keeps_the_marts(env, airflow_url, token, transfo
         instances = task_instances(airflow_url, token, run)
         states = {i["task_id"]: i["state"] for i in instances}
         assert states[SETTINGS] == "success"
-        assert states["dbt.stg_demo_search__campaign_stats.test"] == "failed"
-        assert states[MART_RUN] == "upstream_failed"
+        assert states[STAGING_BUILD] == "failed"
+        assert states[MART_BUILD] == "upstream_failed"
         assert totals(env, MART) == before
         # The log of the failed task names the test that failed, with its one row, as dbt 1.12
         # prints it. No log of the run holds a secret: a failure prints more than a success does.
-        [failed] = [
-            i for i in instances if i["task_id"] == "dbt.stg_demo_search__campaign_stats.test"
-        ]
+        [failed] = [i for i in instances if i["task_id"] == STAGING_BUILD]
         named = logged(task_log(airflow_url, token, failed), f"FAIL 1 {BROKEN_TEST}")
         assert named, f"the log of the failed task does not name the test {BROKEN_TEST}"
         assert_no_secret_in_the_logs(env, airflow_url, token, run)

@@ -405,7 +405,7 @@ def test_the_sources_of_a_platform_are_the_tables_that_its_load_writes():
 
 def test_the_staging_models_of_the_platforms_have_their_critical_tests():
     # Each test is an error, so a row that breaks one stops the models that read the model
-    # (TestBehavior.AFTER_EACH of Cosmos): no test of staging is a warning.
+    # (TestBehavior.BUILD of Cosmos): no test of staging is a warning.
     for code, models in SHAPED.items():
         text = (STAGING / code / f"_{code}__models.yml").read_text(encoding="utf-8")
         assert "severity" not in text, code
@@ -582,7 +582,7 @@ def split(columns: str) -> list[str]:
 
 def test_the_intermediate_models_have_their_critical_tests():
     # A test that is missing or a warning would pass every run of dbt, and the marts would add up
-    # rows that it should have stopped (TestBehavior.AFTER_EACH of Cosmos).
+    # rows that it should have stopped (TestBehavior.BUILD of Cosmos).
     text = (INTERMEDIATE / "_intermediate__models.yml").read_text(encoding="utf-8")
     found = {path.stem for path in INTERMEDIATE.glob("*.sql")}
     assert found == set(INTERMEDIATE_TESTS), sorted(found ^ set(INTERMEDIATE_TESTS))

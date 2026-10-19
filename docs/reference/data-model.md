@@ -78,7 +78,7 @@ Every row of a campaign carries its current name, so that a group by name does n
 
 ## Quality
 
-The tests of dbt run after each model. The critical ones are in `staging`, on the staging views and on the steps that the platforms share: a failure stops the models that read the model, and the marts keep their data. They check that the keys are unique and not null, that counts and money are not negative, that every currency is in ISO 4217 and every time zone in the tz database of IANA, that every day and currency of the facts has a rate, that every account and campaign of the facts is known, and that the primary actions add up to the conversions of each campaign. Warnings do not stop anything: a day missing in the data of an account, more clicks than impressions, and an account without a client.
+The tests of dbt run right after their model, in the same task, `dbt build` ([ADR-0028](../adr/0028-build-each-node-of-dbt-with-its-tests-in-one-task.md)). The critical ones are in `staging`, on the staging views and on the steps that the platforms share: a failure stops the models that read the model, and the marts keep their data. They check that the keys are unique and not null, that counts and money are not negative, that every currency is in ISO 4217 and every time zone in the tz database of IANA, that every day and currency of the facts has a rate, that every account and campaign of the facts is known, and that the primary actions add up to the conversions of each campaign. Warnings do not stop anything: a day missing in the data of an account, more clicks than impressions, and an account without a client.
 
 ## The demo platforms
 

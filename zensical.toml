@@ -59,6 +59,7 @@ nav = [
     { "ADR-0024: One deployment is one business, and clients group its ad accounts" = "adr/0024-one-deployment-is-one-business.md" },
     { "ADR-0025: Model advertising statistics once, at the grain of a campaign and a day" = "adr/0025-model-advertising-statistics-once.md" },
     { "ADR-0027: Load the dbt project into Cosmos from a manifest" = "adr/0027-load-the-dbt-project-into-cosmos-from-a-manifest.md" },
+    { "ADR-0028: Build each node of dbt with its tests in one task" = "adr/0028-build-each-node-of-dbt-with-its-tests-in-one-task.md" },
   ] },
 ]
 

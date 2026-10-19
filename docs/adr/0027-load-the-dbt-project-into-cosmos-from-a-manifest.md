@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Load the dbt project into Cosmos from a manifest
 
+Superseded in part by [ADR-0028](0028-build-each-node-of-dbt-with-its-tests-in-one-task.md): in the bullet "Cosmos", one process of dbt for each model and each set of tests. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 Cosmos renders each model of the dbt project as a task of Airflow ([ADR-0005](0005-transform-with-dbt-core.md)). In v0.1 it reads the project with `dbt ls`, each time that the DAG processor parses the transform DAG and again when each task of that DAG starts, because the caches of Cosmos are kept in Airflow Variables, which the Op role of Airflow may edit, so the stack keeps them off: such a Variable could change what a task of dbt runs. For the two models of v0.1, `dbt ls` takes 1.2 to 2 seconds in the DAG processor and 1.3 to 1.7 seconds at the start of each task. The model of v0.2.0 has more than thirty models and four seeds ([ADR-0025](0025-model-advertising-statistics-once.md)), and a run of the transform has more than seventy tasks, each of which would parse the project again before it runs dbt. The DAG processor already parses an unchanged file only every five minutes, which saves most of its own cost.
@@ -39,7 +41,7 @@ Chosen option: "A manifest that the existing `metadata-export` writes into a sec
 In practice this means:
 
 * **The manifest.** On every start, `metadata-export` runs `dbt ls` for the metadata of the marts, and dbt writes `manifest.json` into its target folder as it does so. The job copies that file, in one step, into the volume `dbt-manifest`, which only it can write and which holds no secret. Every Airflow service mounts the volume read-only at `/opt/agoranomos/manifest`. The volume of the export of the metadata stays closed to Airflow.
-* **Cosmos** renders the tasks from the manifest (`LoadMode.DBT_MANIFEST`) and runs dbt on the project of the checkout, which every Airflow service mounts read-only, as before: one process of dbt for each model and each set of tests (`ExecutionMode.LOCAL`), and the tests of a model right after it.
+* **Cosmos** renders the tasks from the manifest (`LoadMode.DBT_MANIFEST`) and runs dbt on the project of the checkout, which every Airflow service mounts read-only, as before: one process of dbt for each model and each set of tests (`ExecutionMode.LOCAL`), and the tests of a model right after it. *Superseded by [ADR-0028](0028-build-each-node-of-dbt-with-its-tests-in-one-task.md): one process of dbt, `dbt build`, for each model and its tests.*
 * **Order.** The DAG processor and the scheduler, and with the CeleryExecutor the worker, start after `metadata-export` has finished, so their first parse finds the manifest; a dbt project that dbt cannot read stops them, with the error of `metadata-export`.
 * **Changes.** A change of the dbt project reaches Airflow at the next `./agoranomos up`. A missing or broken manifest fails the import of the transform DAG, which Airflow shows as an import error.
 * **The pool.** The tasks of dbt run in the pool `dbt` of two slots, which `airflow-init` sets on every start, so an edit of the pool in the Airflow UI is reverted at the next start. Other tasks are not in it.
