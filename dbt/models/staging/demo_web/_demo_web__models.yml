@@ -55,12 +55,16 @@ models:
         data_tests: [not_null]
       - name: session_source
         description: '{{ doc("session_source") }}'
+        data_tests: [not_null]
       - name: session_medium
         description: '{{ doc("session_medium") }}'
+        data_tests: [not_null]
       - name: session_campaign_name
         description: '{{ doc("session_campaign_name") }}'
+        data_tests: [not_null]
       - name: session_campaign_id
         description: '{{ doc("session_campaign_id") }}'
+        data_tests: [not_null]
       - name: session_default_channel_group
         description: '{{ doc("session_default_channel_group") }}'
       - name: sessions

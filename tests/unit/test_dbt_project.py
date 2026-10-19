@@ -314,7 +314,15 @@ CRITICAL = {
             "session_campaign_name",
             "session_campaign_id",
         ],
-        ["report_date", "property_id", "sessions"],
+        [
+            "report_date",
+            "property_id",
+            "session_source",
+            "session_medium",
+            "session_campaign_name",
+            "session_campaign_id",
+            "sessions",
+        ],
         ["sessions", "engaged_sessions", "key_events", "total_revenue"],
     ),
     "rates_daily": (
