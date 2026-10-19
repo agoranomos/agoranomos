@@ -393,17 +393,22 @@ V01_LEFT = (
     "(to_regclass('staging.stg_demo__ad_stats_daily'))) AS found (relation) "
     "WHERE relation IS NOT NULL)"
 )
+# Removes a relation of the name of the mart of v0.1, a table or a view, which a stopped run of a
+# test below can leave.
+V01_MART_GONE = (
+    "DO $$ BEGIN IF to_regclass('marts.ad_spend_daily') IS NOT NULL THEN EXECUTE "
+    "(SELECT CASE relkind WHEN 'v' THEN 'DROP VIEW' ELSE 'DROP TABLE' END FROM pg_class "
+    "WHERE oid = to_regclass('marts.ad_spend_daily')) || ' marts.ad_spend_daily CASCADE'; "
+    "END IF; END $$"
+)
 
 
 def test_db_init_removes_the_demo_of_v0_1_once(env):
     # A warehouse of v0.1, made on this stand as its roles made it: db-init removes the demo of
     # v0.1 on its next run, and finds nothing to remove on the run after (ADR-0025). What a
     # stopped run of this test left is removed first.
-    warehouse_output(
-        env,
-        "DROP SCHEMA IF EXISTS raw_demo, raw_demo_staging CASCADE; "
-        "DROP TABLE IF EXISTS marts.ad_spend_daily CASCADE",
-    )
+    warehouse_output(env, "DROP SCHEMA IF EXISTS raw_demo, raw_demo_staging CASCADE")
+    warehouse_output(env, V01_MART_GONE)
     for sql, role in V01_DEMO:
         warehouse_output(env, sql, role)
     assert warehouse_output(env, V01_LEFT) == "2 2"
@@ -411,6 +416,21 @@ def test_db_init_removes_the_demo_of_v0_1_once(env):
         result = compose("run", "--rm", "--no-deps", "db-init", check=False)
         assert result.returncode == 0, job_failed("db-init", result)
         assert warehouse_output(env, V01_LEFT) == "0 0"
+
+
+def test_db_init_keeps_a_view_that_a_person_named_as_the_mart_of_v0_1(env):
+    # After the upgrade, a person keeps the questions of v0.1 working with a view of the name of
+    # their mart. DROP TABLE fails on a view, also with IF EXISTS, and would stop db-init on every
+    # start: db-init drops the mart of v0.1 only as the table that v0.1 made, and leaves the view.
+    warehouse_output(env, V01_MART_GONE)
+    warehouse_output(env, "CREATE VIEW marts.ad_spend_daily AS SELECT 1 AS spend", "transformer")
+    try:
+        result = compose("run", "--rm", "--no-deps", "db-init", check=False)
+        assert result.returncode == 0, job_failed("db-init", result)
+        kind = "SELECT relkind FROM pg_class WHERE oid = to_regclass('marts.ad_spend_daily')"
+        assert warehouse_output(env, kind) == "v"
+    finally:
+        warehouse_output(env, V01_MART_GONE)
 
 
 @pytest.mark.parametrize("database", ["postgres", "template1"])

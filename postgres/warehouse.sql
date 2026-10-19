@@ -135,9 +135,16 @@ ALTER ROLE transformer SET lock_timeout = '1min';
 -- raw_demo_staging, the view staging.stg_demo__ad_stats_daily and the mart marts.ad_spend_daily.
 -- The model of v0.2 replaces them (ADR-0025), so a warehouse of v0.1 loses them on its first
 -- start of v0.2, and these statements find nothing on every later start. CASCADE drops what a
--- person built on them, as each rebuild of dbt did in v0.1.
-DROP TABLE IF EXISTS marts.ad_spend_daily CASCADE;
-DROP VIEW IF EXISTS staging.stg_demo__ad_stats_daily CASCADE;
+-- person built on them, as each rebuild of dbt did in v0.1. DROP TABLE and DROP VIEW fail on a
+-- relation of the other kind, IF EXISTS or not, which would stop db-init on every start: so each
+-- runs only on the kind that v0.1 made, and a view of the name of the mart that a person made
+-- since, for the questions of v0.1, stays.
+SELECT 'DROP TABLE marts.ad_spend_daily CASCADE'
+WHERE EXISTS (SELECT FROM pg_tables WHERE schemaname = 'marts' AND tablename = 'ad_spend_daily') \gexec
+SELECT 'DROP VIEW staging.stg_demo__ad_stats_daily CASCADE'
+WHERE EXISTS (
+  SELECT FROM pg_views WHERE schemaname = 'staging' AND viewname = 'stg_demo__ad_stats_daily'
+) \gexec
 DROP SCHEMA IF EXISTS raw_demo_staging CASCADE;
 DROP SCHEMA IF EXISTS raw_demo CASCADE;
 

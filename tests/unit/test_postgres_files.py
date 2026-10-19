@@ -369,9 +369,13 @@ def test_the_settings_of_the_model_have_a_schema_of_loader_that_only_transformer
 
 
 # The statements that remove the demo of v0.1 from a warehouse of that release (ADR-0025).
+# The mart and the view go only when they are of the kind that v0.1 made: DROP TABLE and DROP VIEW
+# fail on a relation of the other kind, also with IF EXISTS.
 V01_REMOVALS = (
-    "DROP TABLE IF EXISTS marts.ad_spend_daily CASCADE;",
-    "DROP VIEW IF EXISTS staging.stg_demo__ad_stats_daily CASCADE;",
+    "SELECT 'DROP TABLE marts.ad_spend_daily CASCADE' WHERE EXISTS (SELECT FROM pg_tables "
+    "WHERE schemaname = 'marts' AND tablename = 'ad_spend_daily') \\gexec",
+    "SELECT 'DROP VIEW staging.stg_demo__ad_stats_daily CASCADE' WHERE EXISTS ( SELECT FROM "
+    "pg_views WHERE schemaname = 'staging' AND viewname = 'stg_demo__ad_stats_daily' ) \\gexec",
     "DROP SCHEMA IF EXISTS raw_demo_staging CASCADE;",
     "DROP SCHEMA IF EXISTS raw_demo CASCADE;",
 )
