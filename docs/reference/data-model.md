@@ -60,7 +60,7 @@ is_primary = false
 conversion_category = "lead"
 ```
 
-`platform`, `conversion_action_id` and `is_primary` are required, and `conversion_category` is optional. An action that neither file names is not primary, and its category is the one that its platform reports, or `other`. Meta counts a purchase both by the pixel and in `omni_purchase`: in the seed the pixel's is primary, and only one of them should be, or a purchase counts twice.
+`platform`, `conversion_action_id` and `is_primary` are required, and `conversion_category` is optional: an entry without it keeps the category of the seed, or the one that its platform reports. An action that neither file names is not primary, and its category is the one that its platform reports, or `other`. Meta counts a purchase both by the pixel and in `omni_purchase`: in the seed the pixel's is primary, and only one of them should be, or a purchase counts twice.
 
 ## Currencies
 
