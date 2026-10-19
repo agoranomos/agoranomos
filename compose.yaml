@@ -131,8 +131,8 @@ services:
     profiles: [core]
     restart: unless-stopped
     user: postgres
-    mem_limit: ${WAREHOUSE_DB_MEMORY:-256m}
-    memswap_limit: ${WAREHOUSE_DB_MEMORY:-256m}
+    mem_limit: ${WAREHOUSE_DB_MEMORY:-384m}
+    memswap_limit: ${WAREHOUSE_DB_MEMORY:-384m}
     environment:
       POSTGRES_PASSWORD: ${WAREHOUSE_POSTGRES_PASSWORD:?run ./agoranomos init}
       POSTGRES_DB: warehouse
@@ -388,8 +388,8 @@ services:
 
   airflow-triggerer:
     <<: *airflow
-    mem_limit: ${AIRFLOW_TRIGGERER_MEMORY:-640m}
-    memswap_limit: ${AIRFLOW_TRIGGERER_MEMORY:-640m}
+    mem_limit: ${AIRFLOW_TRIGGERER_MEMORY:-512m}
+    memswap_limit: ${AIRFLOW_TRIGGERER_MEMORY:-512m}
     command: ["triggerer"]
     # As for the DAG processor, with the job of the triggerer.
     healthcheck:
