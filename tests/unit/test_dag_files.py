@@ -23,30 +23,38 @@ def test_the_load_dag_does_not_import_cosmos():
     # parsed: by the DAG processor, and by each task of that file when it starts. Each load DAG
     # has a file of its own without Cosmos, so that a missing or broken manifest cannot break its
     # import.
-    for name in ("agoranomos_demo.py", "agoranomos_demo_history.py"):
-        modules = [module for module, _ in imports(DAGS / name)]
-        assert modules, f"{name} imports nothing"
-        assert [module for module in modules if module.split(".")[0] == "cosmos"] == [], name
+    modules = [module for module, _ in imports(DAGS / "agoranomos_demo_history.py")]
+    assert modules, "agoranomos_demo_history.py imports nothing"
+    assert [module for module in modules if module.split(".")[0] == "cosmos"] == []
 
 
 def test_no_dag_file_imports_another():
     # A DAG file that imported another would define the DAGs of that file twice.
     stems = {path.stem for path in DAG_FILES}
-    assert {
-        "agoranomos_demo",
-        "agoranomos_demo_history",
-        "agoranomos_demo_transform",
-        "agoranomos_selfcheck",
-    } <= stems
+    assert {"agoranomos_demo_history", "agoranomos_demo_transform", "agoranomos_selfcheck"} <= stems
     for path in DAG_FILES:
         others = stems - {path.stem}
         imported = {module.split(".")[0] for module, _ in imports(path)}
         assert not imported & others, f"{path.name} imports {sorted(imported & others)}"
 
 
-def test_both_demo_dags_take_the_asset_of_the_raw_table_from_the_shared_package():
-    for name in ("agoranomos_demo.py", "agoranomos_demo_transform.py"):
-        assert ("agoranomos_pipelines.assets", ["RAW_DEMO"]) in imports(DAGS / name), name
+def test_the_transform_runs_when_each_platform_of_the_demo_has_loaded():
+    # One condition of all five assets, which another schedule can combine with | or &.
+    text = (DAGS / "agoranomos_demo_transform.py").read_text(encoding="utf-8")
+    assert "schedule=DEMO_LOADED" in text
+    found = imports(DAGS / "agoranomos_demo_transform.py")
+    assert ("agoranomos_pipelines.assets", ["DEMO_LOADED"]) in found
+    assets = (DAGS / "agoranomos_pipelines" / "assets.py").read_text(encoding="utf-8")
+    assert "DEMO_LOADED = AssetAll(*RAW_DEMO_PLATFORMS.values())" in assets
+
+
+def test_the_demo_of_v0_1_is_gone():
+    assert not (DAGS / "agoranomos_demo.py").exists()
+    for name in ("demo_data.py", "demo_source.py"):
+        assert not (DAGS / "agoranomos_pipelines" / name).exists(), name
+    assets = (DAGS / "agoranomos_pipelines" / "assets.py").read_text(encoding="utf-8")
+    assert "RAW_DEMO =" not in assets
+    assert "raw_demo/" not in assets
 
 
 def keyword_values(path: Path, name: str) -> list[ast.AST]:
@@ -143,11 +151,7 @@ def test_the_history_takes_its_assets_and_platforms_from_the_shared_package():
 def test_the_demo_dags_start_paused():
     # Without the demo profile no job unpauses the demo DAGs, and the docs say that they stay
     # paused: Airflow pauses a new DAG (compose.yaml says so too), unless the DAG says otherwise.
-    for name in (
-        "agoranomos_demo.py",
-        "agoranomos_demo_history.py",
-        "agoranomos_demo_transform.py",
-    ):
+    for name in ("agoranomos_demo_history.py", "agoranomos_demo_transform.py"):
         tree = ast.parse((DAGS / name).read_text(encoding="utf-8"))
         overrides = [
             node

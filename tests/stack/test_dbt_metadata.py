@@ -15,6 +15,7 @@ from collections import defaultdict
 from typing import Any
 
 import pytest
+from agoranomos_pipelines.demo import platforms
 from airflow_api import is_busy, trigger, unpause, wait_for_dag, wait_for_run
 from services import DEMO
 from stack_helpers import compose, wait_for, warehouse_output
@@ -69,7 +70,7 @@ SMALL_WORDS = {
     "to",
 }
 ABBREVIATIONS = {"ID", "CTR", "CPC", "CPM", "CPA", "ROAS", "ISO"}
-LOAD = "agoranomos_demo_load"
+LOAD = "agoranomos_demo_history"
 TRANSFORM = "agoranomos_demo_transform"
 # The comments of the tables and views of the warehouse outside the catalogs of PostgreSQL, and of
 # their columns, as one JSON document: [schema, relation, column or null, comment or null]. A
@@ -559,7 +560,12 @@ def fresh_build(airflow_url, token):
     for dag_id in (LOAD, TRANSFORM):
         wait_for_dag(airflow_url, token, dag_id)
     wait_for(
-        lambda: not any(is_busy(airflow_url, token, dag_id) for dag_id in (LOAD, TRANSFORM)),
+        lambda: (
+            not (
+                is_busy(airflow_url, token, LOAD)
+                or is_busy(airflow_url, token, TRANSFORM, assets=len(platforms.PLATFORMS))
+            )
+        ),
         600,
         interval=5,
         message="the runs of the demo DAGs that earlier tests started did not end",

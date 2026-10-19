@@ -6,6 +6,7 @@ The assertions print counts and codes of currencies, never a secret.
 """
 
 import pytest
+from agoranomos_pipelines.demo import platforms
 from airflow_api import is_busy, wait_for_dag
 from services import DEMO
 from stack_helpers import wait_for, warehouse_output
@@ -61,7 +62,7 @@ def built(env, airflow_url, token):
     missing while a run rebuilds the staging view under it."""
     wait_for_dag(airflow_url, token, TRANSFORM)
     wait_for(
-        lambda: not is_busy(airflow_url, token, TRANSFORM),
+        lambda: not is_busy(airflow_url, token, TRANSFORM, assets=len(platforms.PLATFORMS)),
         600,
         interval=5,
         message="the runs of the transform that earlier tests started did not end",

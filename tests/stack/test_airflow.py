@@ -19,8 +19,8 @@ from stack_helpers import (
 )
 
 SELFCHECK = "agoranomos_selfcheck"
-# The other DAGs of the base bundle: the demo load and the demo transform.
-DEMO_LOAD = "agoranomos_demo_load"
+# The other DAGs of the base bundle: the history of the demo and the transform.
+DEMO_HISTORY = "agoranomos_demo_history"
 DEMO_TRANSFORM = "agoranomos_demo_transform"
 EXTENSION_CHECK = "ci_extension_check"
 FIXTURE = REPO_ROOT / "tests" / "stack" / "fixtures" / f"{EXTENSION_CHECK}.py"
@@ -348,7 +348,7 @@ def test_the_dag_processor_reports_no_import_error(airflow_url, token):
     # The errors of the DAGs of the base package: the extensions folder belongs to the deployment.
     # The DAGs of the base bundle are waited for first, so that the DAG processor has parsed it,
     # whatever ran before this test.
-    for dag_id in (SELFCHECK, DEMO_LOAD, DEMO_TRANSFORM):
+    for dag_id in (SELFCHECK, DEMO_HISTORY, DEMO_TRANSFORM):
         wait_for_dag(airflow_url, token, dag_id)
     status, body = api(airflow_url, token, "GET", "/api/v2/importErrors?bundle_name=agoranomos")
     assert status == 200, body

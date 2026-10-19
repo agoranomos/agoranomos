@@ -1,6 +1,6 @@
 """The demo in Metabase, made by demo-init: the collection Agoranomos / Demo, its questions and its
-dashboard, found through the registry of the content, each once, with the numbers that the
-generator made, view-only for every group but Administrators (ADR-0018); demo-init runs again
+dashboard, found through the registry of the content, each once, with the numbers of the mart,
+view-only for every group but Administrators (ADR-0018); demo-init runs again
 without a change, puts an edit back, never takes a collection of the same name for the package,
 and moves the demo collection of v0.1.
 
@@ -9,11 +9,10 @@ test of the move runs last: it rebuilds the content. Answers of Metabase and the
 demo-init could hold secrets: the assertions print names, counts, sums and states only.
 """
 
-from datetime import date
 from decimal import Decimal
 
 import pytest
-from agoranomos_pipelines.demo_data import rows
+from agoranomos_pipelines.demo import platforms
 from airflow_api import is_busy, run_count
 from metabase_content import (
     REGISTRY,
@@ -43,21 +42,31 @@ QUESTIONS = {
     "spend-by-campaign-last-7-days": "Spend by campaign, last 7 days",
     "spend-by-day": "Spend by day",
 }
-LOAD = "agoranomos_demo_load"
+LOAD = "agoranomos_demo_history"
 TRANSFORM = "agoranomos_demo_transform"
-HISTORY = "agoranomos_demo_history"
-DAGS = (LOAD, TRANSFORM, HISTORY)
+DAGS = (LOAD, TRANSFORM)
+# The spend of the last seven days of the mart, in the reporting currency, as the question of the
+# demo adds it up.
+SPEND_LAST_7_DAYS = (
+    "SELECT sum(spend_reporting) FROM marts.ad_stats_campaign_daily WHERE report_date > "
+    "(SELECT max(report_date) FROM marts.ad_stats_campaign_daily) - 7"
+)
 # The keys of the content of the demo in the registry.
 KEYS = ("agoranomos", "demo", "demo/dashboard", *(f"demo/{key}" for key in QUESTIONS))
 
 
 @pytest.fixture(scope="module", autouse=True)
 def idle_demo_dags(airflow_url, token):
-    """The tests of the demo load run before these, and each of their loads starts a run of the
-    transform, and they run the history too. These tests wait until such runs have ended, so that
-    none starts or rebuilds the mart while they count runs or read the mart."""
+    """The tests of the history run before these, and each of their histories starts a run of the
+    transform. These tests wait until such runs have ended, so that none starts or rebuilds the
+    mart while they count runs or read the mart."""
     wait_for(
-        lambda: not any(is_busy(airflow_url, token, dag_id) for dag_id in DAGS),
+        lambda: (
+            not (
+                is_busy(airflow_url, token, LOAD)
+                or is_busy(airflow_url, token, TRANSFORM, assets=len(platforms.PLATFORMS))
+            )
+        ),
         600,
         interval=5,
         message="the runs of the demo DAGs that earlier tests started did not end",
@@ -114,18 +123,17 @@ def test_every_group_but_administrators_has_at_most_view(metabase_url, session):
     assert graph["groups"][all_users][demo_id] == "read"
 
 
-def test_the_spend_of_the_last_seven_days_is_what_the_generator_made(env, metabase_url, session):
+def test_the_spend_of_the_last_seven_days_is_that_of_the_mart(env, metabase_url, session):
     card_id = item(metabase_url, session, "demo/spend-last-7-days")["id"]
     status, result = http_json("POST", f"{metabase_url}/api/card/{card_id}/query", headers=session)
     # Metabase 0.63.19 and 0.64.1 answer 202, with the rows in data.rows.
     state = result.get("status") if isinstance(result, dict) else None
     assert (status, state) in {(200, "completed"), (202, "completed")}, (status, state)
     [[spend]] = result["data"]["rows"]
-    last = date.fromisoformat(
-        warehouse_output(env, "SELECT max(report_date) FROM marts.ad_spend_daily")
-    )
-    expected = sum(row["spend"] for row in rows(last, 7))  # the seven days up to the last
-    assert Decimal(str(spend)).quantize(Decimal("0.01")) == expected
+    expected = Decimal(warehouse_output(env, SPEND_LAST_7_DAYS))
+    assert expected > 0, "the mart has no spend in its last seven days"
+    # Metabase answers with a number in JSON, which may round the last of the six places.
+    assert abs(Decimal(str(spend)) - expected) < Decimal("0.0001"), (spend, expected)
 
 
 def test_metabase_knows_the_mart(metabase_url, session):
@@ -138,19 +146,18 @@ def test_metabase_knows_the_mart(metabase_url, session):
         f"/api/database/{database_id}/metadata?skip_fields=true&include_hidden=true",
     )
     tables = {(table["schema"], table["name"]) for table in metadata["tables"]}
-    assert ("marts", "ad_spend_daily") in tables
+    assert ("marts", "ad_stats_campaign_daily") in tables
 
 
 def test_the_first_start_ran_the_demo_pipeline(airflow_url, token):
     # What the first start did, whatever a person did since, such as a pause, which demo-init
-    # keeps: the load ran, and its asset started a run of the transform that succeeded, and the
-    # history succeeded. Counted by total_entries, as Airflow keeps every run.
-    assert run_count(airflow_url, token, LOAD) > 0, f"{LOAD} has no run"
+    # keeps: the history succeeded, and its assets started a run of the transform that succeeded.
+    # Counted by total_entries, as Airflow keeps every run.
+    assert run_count(airflow_url, token, LOAD, states=("success",)) > 0, f"{LOAD} never ran"
     succeeded = run_count(
         airflow_url, token, TRANSFORM, states=("success",), run_types=("asset_triggered",)
     )
-    assert succeeded > 0, f"{TRANSFORM} has no successful run that the asset of the load started"
-    assert run_count(airflow_url, token, HISTORY, states=("success",)) > 0, f"{HISTORY} never ran"
+    assert succeeded > 0, f"{TRANSFORM} has no successful run that the history started"
 
 
 def test_demo_init_runs_again_without_a_change(env, airflow_url, token, metabase_url, session):
@@ -206,7 +213,8 @@ def test_a_click_behavior_and_an_extra_setting_are_reverted_by_the_next_start(
     entries = registry()
     board = item(metabase_url, session, "demo/dashboard", entries)
     question = item(metabase_url, session, "demo/spend-by-day", entries)
-    link = {"type": "link", "linkType": "url", "linkTemplate": "https://example.com/{{spend}}"}
+    template = "https://example.com/{{spend_reporting}}"
+    link = {"type": "link", "linkType": "url", "linkTemplate": template}
     dashcards = [
         {
             **{key: d[key] for key in ("id", "card_id", "row", "col", "size_x", "size_y")},

@@ -1,17 +1,18 @@
-"""The demo transform of Agoranomos: the settings of the model, and then dbt builds marts from the
-demo data in raw_demo.
+"""The transform of Agoranomos: the settings of the model, and then dbt builds the model of
+advertising statistics.
 
 agoranomos_demo_transform first loads the settings of the model of the deployment, the files of
 extensions/model, and the clients of the demo into raw_settings, as the loader role (ADR-0024): a
 mistake in a file fails that task with one line that names the file and the entry, nothing is
 written, and no task of dbt runs. Then it runs the dbt project through Cosmos, as the transformer
-role. It builds the staging model stg_demo__ad_stats_daily and then the mart marts.ad_spend_daily,
-each followed by its tests, and a failed test of the staging model keeps the mart as it was. Each
-successful run of agoranomos_demo_load updates the asset of the raw table, and that starts this
-DAG. A repeat is safe: the settings are loaded again, and dbt rebuilds the models. The DAG starts
-paused, and a load starts it only while it is unpaused. With the demo profile, the one-shot
-demo-init job unpauses both demo DAGs on the first start and triggers the load; without it, unpause
-this DAG in the Airflow UI before you trigger the load, or trigger it there yourself.
+role: the seeds, the staging models of each platform, the steps that the platforms share, and the
+marts, each followed by its tests (ADR-0025). A failed critical test stops the models that read it,
+and the marts keep their data. The DAG runs when each of the five platforms of the demo has loaded
+since its last run: each load updates the asset of its main table. A repeat is safe: the settings
+are loaded again, and dbt rebuilds the models. The DAG starts paused. With the demo profile, the
+one-shot demo-init job unpauses it and runs agoranomos_demo_history on the first start; without it,
+unpause this DAG in the Airflow UI before you trigger the history. The DAG keeps the word demo in
+its id until the first connector of a real platform.
 
 Cosmos renders its tasks from the manifest that metadata-export writes on every start (ADR-0027),
 so a change of the dbt project reaches the DAG at the next ./agoranomos up; its tasks of dbt run at
@@ -23,7 +24,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from agoranomos_pipelines.assets import RAW_DEMO
+from agoranomos_pipelines.assets import DEMO_LOADED
 from airflow.sdk import dag, task
 from airflow.sdk.log import mask_secret
 from cosmos import (
@@ -53,7 +54,7 @@ START = datetime(2026, 1, 1, tzinfo=UTC)
 
 @dag(
     dag_id="agoranomos_demo_transform",
-    schedule=[RAW_DEMO],
+    schedule=DEMO_LOADED,
     start_date=START,
     catchup=False,
     max_active_runs=1,

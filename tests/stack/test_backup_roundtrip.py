@@ -73,7 +73,7 @@ def test_before_the_backup_leave_a_mark_in_each_database(
     assert result.returncode == 0, result.stderr[-2000:]
     backup = json.loads((BACKUPS / "latest.json").read_text(encoding="utf-8"))["last_ok"]
     mart = (
-        {key: str(value) for key, value in totals(env, "marts.ad_spend_daily").items()}
+        {key: str(value) for key, value in totals(env, "marts.ad_stats_campaign_daily").items()}
         if DEMO
         else {}
     )
@@ -127,7 +127,9 @@ def test_after_the_restore_each_mark_is_back_and_the_admin_signs_in(
     saved = json.loads(MARKS.read_text(encoding="utf-8"))
     assert warehouse_output(env, "SELECT mark FROM public.agoranomos_roundtrip") == saved["mark"]
     if DEMO:
-        mart = {key: str(value) for key, value in totals(env, "marts.ad_spend_daily").items()}
+        mart = {
+            key: str(value) for key, value in totals(env, "marts.ad_stats_campaign_daily").items()
+        }
         assert mart == saved["mart"]
     status, variable = api(airflow_url, token, "GET", f"/api/v2/variables/{VARIABLE}")
     assert status == 200

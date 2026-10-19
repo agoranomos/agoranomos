@@ -17,16 +17,16 @@ from typing import Any
 import metabase_init as mi
 import metadata as md
 import pytest
-from metabase_stand_in import EXPORT, FakeClock, FakeMetabase, metadata_env, serve
+from metabase_stand_in import EXPORT, MART_COLUMNS, FakeClock, FakeMetabase, metadata_env, serve
 
 # What dbt ls printed for the demo project, a model and the source, cut short: the stand-in for dbt
 # prints these lines, or the error of a project that dbt cannot read.
 MODEL_LINE = {
     "resource_type": "model",
     "schema": "marts",
-    "name": "ad_spend_daily",
+    "name": "ad_stats_campaign_daily",
     "description": "Advertising spend and results by day and campaign.",
-    "meta": {"metabase": {"display_name": "Ad Spend by Day"}},
+    "meta": {"metabase": {"display_name": "Ad Statistics by Campaign and Day"}},
     "columns": {
         "report_date": {
             "name": "report_date",
@@ -50,9 +50,9 @@ MODEL_LINE = {
 }
 SOURCE_LINE = {
     "resource_type": "source",
-    "schema": "raw_demo",
-    "name": "ad_stats_daily",
-    "source_name": "raw_demo",
+    "schema": "raw_demo_search",
+    "name": "campaign_stats",
+    "source_name": "raw_demo_search",
     "description": "The demo statistics as dlt loads them.",
     "meta": {},
     "columns": {},
@@ -64,9 +64,9 @@ Parsing Error
     Syntax error near line 4
     ------------------------------
     1  | models:
-    2  |   - name: ad_spend_daily
+    2  |   - name: ad_stats_campaign_daily
 """
-MART = ("marts", "ad_spend_daily")
+MART = ("marts", "ad_stats_campaign_daily")
 SECRETS = {"the admin password": "Secret-password-1", "the session": "session-from-login"}
 
 
@@ -152,7 +152,7 @@ def test_the_export_keeps_the_models_and_sources_with_their_columns_in_order(tmp
     assert model["columns"][1]["meta"]["metabase"]["currency"] == "USD"
     assert "data_type" not in model["columns"][0]  # the export keeps what the jobs read
     [source] = document["sources"]
-    assert (source["source"], source["name"]) == ("raw_demo", "ad_stats_daily")
+    assert (source["source"], source["name"]) == ("raw_demo_search", "campaign_stats")
     assert json.loads((tmp_path / "arguments.json").read_text())[:3] == [
         "--quiet",
         "--no-use-colors",
@@ -322,7 +322,7 @@ def test_the_base_is_the_marts_of_the_export(tmp_path):
     assert list(marts.effective) == [MART]  # staging is not shown in Metabase
     table = marts.effective[MART]
     assert (table.display_name, table.description) == (
-        "Ad Spend by Day",
+        "Ad Statistics by Campaign and Day",
         "Advertising spend and results by day and campaign.",
     )
     by_name = {column.name: column for column in table.columns}
@@ -361,14 +361,14 @@ def test_display_name_and_description_replace_the_base_and_a_note_follows_it(tmp
     marts = loaded(
         tmp_path,
         overrides="""
-[marts.ad_spend_daily]
+[marts.ad_stats_campaign_daily]
 display_name = "Ad Spend, Daily"
 
-[marts.ad_spend_daily.columns.conversions]
+[marts.ad_stats_campaign_daily.columns.conversions]
 display_name = "Purchases"
 note = "In this business, a conversion is a paid order in the online shop."
 
-[marts.ad_spend_daily.columns.clicks]
+[marts.ad_stats_campaign_daily.columns.clicks]
 description = "Clicks on the ads."
 note = '''
 A second line.
@@ -393,7 +393,7 @@ A second line.
     ("overrides", "message"),
     [
         pytest.param(
-            "[staging.stg_demo__ad_stats_daily]\ndisplay_name = 'X'\n",
+            "[staging.stg_demo_search__campaign_stats]\ndisplay_name = 'X'\n",
             r"overrides\.toml: \[staging\]: overrides are for the tables of marts",
             id="schema",
         ),
@@ -403,42 +403,43 @@ A second line.
             id="table",
         ),
         pytest.param(
-            "[marts.ad_spend_daily.columns.purchases]\ndisplay_name = 'X'\n",
-            r"\[marts\.ad_spend_daily\.columns\.purchases\]: dbt has no such column",
+            "[marts.ad_stats_campaign_daily.columns.purchases]\ndisplay_name = 'X'\n",
+            r"\[marts\.ad_stats_campaign_daily\.columns\.purchases\]: dbt has no such column",
             id="column",
         ),
         pytest.param(
-            "[marts.ad_spend_daily]\nlabel = 'X'\n",
-            r"marts\.ad_spend_daily\.label: unknown property; use display_name, description, note",
+            "[marts.ad_stats_campaign_daily]\nlabel = 'X'\n",
+            r"marts\.ad_stats_campaign_daily\.label: unknown property; use display_name, "
+            r"description, note",
             id="property",
         ),
         pytest.param(
-            "[marts.ad_spend_daily.columns.spend]\nsemantic_type = 'type/Price'\n",
+            "[marts.ad_stats_campaign_daily.columns.spend]\nsemantic_type = 'type/Price'\n",
             r"spend\.semantic_type: unknown property",
             id="semantic-type",
         ),
         pytest.param(
-            "[marts.ad_spend_daily.columns.spend]\ndisplay_name = 42\n",
+            "[marts.ad_stats_campaign_daily.columns.spend]\ndisplay_name = 42\n",
             r"spend\.display_name: a text in quotes is expected, not int",
             id="number",
         ),
         pytest.param(
-            "[marts.ad_spend_daily.columns.spend]\ndisplay_name = true\n",
+            "[marts.ad_stats_campaign_daily.columns.spend]\ndisplay_name = true\n",
             r"spend\.display_name: a text in quotes is expected, not bool",
             id="boolean",
         ),
         pytest.param(
-            "[marts.ad_spend_daily.columns.spend]\ndescription = '  '\n",
+            "[marts.ad_stats_campaign_daily.columns.spend]\ndescription = '  '\n",
             r"spend\.description: the text is empty",
             id="blank",
         ),
         pytest.param(
-            f"[marts.ad_spend_daily.columns.spend]\ndisplay_name = '{'x' * 101}'\n",
+            f"[marts.ad_stats_campaign_daily.columns.spend]\ndisplay_name = '{'x' * 101}'\n",
             r"spend\.display_name: the text has 101 characters, and it may have 100 at most",
             id="long",
         ),
         pytest.param(
-            '[marts.ad_spend_daily.columns.spend]\ndisplay_name = "Two\\nlines"\n',
+            '[marts.ad_stats_campaign_daily.columns.spend]\ndisplay_name = "Two\\nlines"\n',
             r"spend\.display_name: a display name is one line",
             id="two-lines",
         ),
@@ -446,17 +447,17 @@ A second line.
             "marts = 1\n", r"overrides\.toml: marts: a table of TOML is expected", id="kind"
         ),
         pytest.param(
-            "[marts]\nad_spend_daily = 'X'\n",
-            r"marts\.ad_spend_daily: a table of TOML is expected",
+            "[marts]\nad_stats_campaign_daily = 'X'\n",
+            r"marts\.ad_stats_campaign_daily: a table of TOML is expected",
             id="table-kind",
         ),
         pytest.param(
-            "[marts.ad_spend_daily]\ncolumns = 'X'\n",
-            r"marts\.ad_spend_daily\.columns: a table of TOML is expected",
+            "[marts.ad_stats_campaign_daily]\ncolumns = 'X'\n",
+            r"marts\.ad_stats_campaign_daily\.columns: a table of TOML is expected",
             id="columns-kind",
         ),
         pytest.param(
-            "[marts.ad_spend_daily\n",
+            "[marts.ad_stats_campaign_daily\n",
             r"overrides\.toml: the file is not valid TOML: .*\(at line 1, column \d+\)",
             id="toml",
         ),
@@ -472,10 +473,10 @@ def test_an_override_of_a_column_that_a_release_renamed_says_what_to_fix(tmp_pat
     # A release that renames or removes a column leaves the deployment's entry for it behind:
     # every start stops at it, so its line names the entry and why, to fix in the file.
     with pytest.raises(md.MetadataError) as raised:
-        loaded(tmp_path, overrides="[marts.ad_spend_daily.columns.cost]\nnote = 'Ours.'\n")
+        loaded(tmp_path, overrides="[marts.ad_stats_campaign_daily.columns.cost]\nnote = 'Ours.'\n")
     assert str(raised.value) == (
-        "overrides.toml: [marts.ad_spend_daily.columns.cost]: dbt has no such column in "
-        "marts.ad_spend_daily"
+        "overrides.toml: [marts.ad_stats_campaign_daily.columns.cost]: dbt has no such column in "
+        "marts.ad_stats_campaign_daily"
     )
 
 
@@ -483,18 +484,20 @@ def test_two_columns_may_not_share_a_display_name(tmp_path):
     with pytest.raises(md.MetadataError) as raised:
         loaded(
             tmp_path,
-            overrides="[marts.ad_spend_daily.columns.conversions]\ndisplay_name = 'CLICKS'\n",
+            overrides=(
+                "[marts.ad_stats_campaign_daily.columns.conversions]\ndisplay_name = 'CLICKS'\n"
+            ),
         )
     assert str(raised.value) == (
-        "marts.ad_spend_daily: the columns clicks and conversions have the same display name "
-        "'CLICKS'"
+        "marts.ad_stats_campaign_daily: the columns clicks and conversions have the same display "
+        "name 'CLICKS'"
     )
 
 
 def test_an_override_in_another_language_is_kept_and_logged_as_written(tmp_path, metabase):
     # End to end: metabase-init runs as its container runs it, with its output a pipe, and the
     # words of the deployment reach Metabase and the log as they are written, not escaped.
-    overrides = "[marts.ad_spend_daily.columns.spend]\ndisplay_name = 'Расход'\n"
+    overrides = "[marts.ad_stats_campaign_daily.columns.spend]\ndisplay_name = 'Расход'\n"
     env = {
         "METABASE_URL": metabase.url,
         "METABASE_SITE_NAME": "Agoranomos",
@@ -520,7 +523,8 @@ def test_an_override_in_another_language_is_kept_and_logged_as_written(tmp_path,
     assert metabase.field("spend")["display_name"] == "Расход"
     printed = result.stdout.decode("utf-8").splitlines()
     assert (
-        'metabase-init: update from code: marts.ad_spend_daily.spend display_name: "Spend" -> '
+        "metabase-init: update from code: marts.ad_stats_campaign_daily.spend display_name: "
+        '"Spend" -> '
         '"Расход"'
     ) in printed
 
@@ -528,7 +532,7 @@ def test_an_override_in_another_language_is_kept_and_logged_as_written(tmp_path,
 def test_a_file_with_a_byte_order_mark_is_read(tmp_path):
     env = metadata_env(tmp_path)
     Path(env["METADATA_OVERRIDES"]).write_bytes(
-        b"\xef\xbb\xbf[marts.ad_spend_daily]\ndisplay_name = 'Ours'\n"
+        b"\xef\xbb\xbf[marts.ad_stats_campaign_daily]\ndisplay_name = 'Ours'\n"
     )
     assert (
         md.load(env["METADATA_EXPORT"], env["METADATA_OVERRIDES"]).effective[MART].display_name
@@ -564,7 +568,9 @@ def test_a_file_nested_too_deeply_is_one_line(tmp_path, nested):
 def test_a_file_that_is_gone_when_it_is_read_is_no_file(tmp_path, monkeypatch):
     # A bind mount of Docker Desktop on macOS can show a file for a moment after it is deleted: its
     # size can be read, and then it cannot be opened. The file is gone, so the base applies.
-    env = metadata_env(tmp_path, overrides="[marts.ad_spend_daily]\ndisplay_name = 'Ours'\n")
+    env = metadata_env(
+        tmp_path, overrides="[marts.ad_stats_campaign_daily]\ndisplay_name = 'Ours'\n"
+    )
 
     def gone(self: Path) -> bytes:
         raise FileNotFoundError(2, "No such file or directory")
@@ -579,7 +585,7 @@ def make_a_folder(path: Path) -> None:
 
 
 def make_an_unreadable_file(path: Path) -> None:
-    path.write_text("[marts.ad_spend_daily]\ndisplay_name = 'Ours'\n", encoding="utf-8")
+    path.write_text("[marts.ad_stats_campaign_daily]\ndisplay_name = 'Ours'\n", encoding="utf-8")
     path.chmod(0)
 
 
@@ -644,8 +650,8 @@ def test_what_the_code_said_before_comes_from_the_previous_export(tmp_path):
         ("account_id", "Account ID"),
         ("ctr", "Ctr"),
         ("CTR", "Ctr"),
-        ("ad_spend_daily", "Ad Spend Daily"),
-        ("stg_demo__ad_stats_daily", "Stg Demo Ad Stats Daily"),
+        ("ad_stats_campaign_daily", "Ad Stats Campaign Daily"),
+        ("stg_demo_search__campaign_stats", "Stg Demo Search Campaign Stats"),
     ],
 )
 def test_humanize_names_a_field_as_metabase_does(name, shown):
@@ -658,7 +664,7 @@ def test_the_first_apply_fills_every_declared_property(tmp_path, metabase):
     lines = md.apply(client(metabase), 2, loaded(tmp_path), md.waiter(120, "see the logs"))
     table = metabase.mart_table()
     assert (table["display_name"], table["description"]) == (
-        "Ad Spend by Day",
+        "Ad Statistics by Campaign and Day",
         "Advertising spend and results by day and campaign.",
     )
     fields = {f["name"]: f for f in table["fields"]}
@@ -667,11 +673,12 @@ def test_the_first_apply_fills_every_declared_property(tmp_path, metabase):
     assert fields["spend"]["settings"] == {"currency": "USD"}
     assert fields["report_date"]["semantic_type"] is None
     assert lines[0] == (
-        'first fill: marts.ad_spend_daily display_name: "Ad Spend Daily" -> "Ad Spend by Day"'
+        'first fill: marts.ad_stats_campaign_daily display_name: "Ad Stats Campaign Daily" -> "Ad '
+        'Statistics by Campaign and Day"'
     )
     assert all(line.startswith(md.FIRST) for line in lines), lines
     # One PUT for the table and one for each field.
-    assert len(puts(metabase)) == 1 + 9
+    assert len(puts(metabase)) == 1 + len(MART_COLUMNS)
 
 
 def test_a_second_apply_changes_nothing(tmp_path, metabase):
@@ -711,7 +718,8 @@ def test_an_edit_in_metabase_is_reverted_and_its_line_shows_the_old_value(tmp_pa
     metabase.field("conversions")["display_name"] = "Leads"  # edited in the Metabase UI
     lines = md.apply(client(metabase), 2, marts, md.waiter(120, "see the logs"))
     assert lines == [
-        'revert of an edit: marts.ad_spend_daily.conversions display_name: "Leads" -> "Conversions"'
+        'revert of an edit: marts.ad_stats_campaign_daily.conversions display_name: "Leads" -> '
+        '"Conversions"'
     ]
     assert metabase.field("conversions")["display_name"] == "Conversions"
 
@@ -725,7 +733,8 @@ def test_a_change_of_the_code_is_an_update_and_no_revert(tmp_path, metabase):
     md.apply(client(metabase), 2, loaded(before, export=previous), md.waiter(120, "x"))
     lines = md.apply(client(metabase), 2, loaded(now, previous=previous), md.waiter(120, "x"))
     assert lines == [
-        'update from code: marts.ad_spend_daily.spend description: "The spend, as the release '
+        'update from code: marts.ad_stats_campaign_daily.spend description: "The spend, as the '
+        "release "
         'before put it." -> "The spend of a row."'
     ]
 
@@ -733,10 +742,10 @@ def test_a_change_of_the_code_is_an_update_and_no_revert(tmp_path, metabase):
 def test_an_override_that_takes_over_from_the_base_is_an_update(tmp_path, metabase):
     md.apply(client(metabase), 2, loaded(tmp_path), md.waiter(120, "x"))
     marts = loaded(
-        tmp_path, overrides="[marts.ad_spend_daily.columns.spend]\ndisplay_name = 'Cost'\n"
+        tmp_path, overrides="[marts.ad_stats_campaign_daily.columns.spend]\ndisplay_name = 'Cost'\n"
     )
     assert md.apply(client(metabase), 2, marts, md.waiter(120, "x")) == [
-        'update from code: marts.ad_spend_daily.spend display_name: "Spend" -> "Cost"'
+        'update from code: marts.ad_stats_campaign_daily.spend display_name: "Spend" -> "Cost"'
     ]
 
 
@@ -746,7 +755,7 @@ def test_a_semantic_type_that_metabase_reset_is_set_again(tmp_path, metabase):
     md.apply(client(metabase), 2, marts, md.waiter(120, "x"))
     metabase.field("spend")["semantic_type"] = None
     assert md.apply(client(metabase), 2, marts, md.waiter(120, "x")) == [
-        'first fill: marts.ad_spend_daily.spend semantic_type: none -> "type/Currency"'
+        'first fill: marts.ad_stats_campaign_daily.spend semantic_type: none -> "type/Currency"'
     ]
 
 
@@ -757,7 +766,7 @@ def test_a_semantic_type_that_the_code_declares_none_is_cleared(tmp_path, metaba
     marts = loaded(tmp_path)
     lines = md.apply(client(metabase), 2, marts, md.waiter(120, "x"))
     assert (
-        "revert of an edit: marts.ad_spend_daily.report_date semantic_type: "
+        "revert of an edit: marts.ad_stats_campaign_daily.report_date semantic_type: "
         '"type/CreationDate" -> none'
     ) in lines
     assert metabase.field("report_date")["semantic_type"] is None
@@ -801,7 +810,7 @@ def test_a_mart_that_the_warehouse_has_and_metabase_does_not_show_is_synced_once
     lines = md.apply(client(metabase), 2, loaded(tmp_path), md.waiter(120, "see the logs"))
     assert metabase.calls.count(("POST", "/api/database/2/sync_schema")) == 1
     assert clock.now >= metabase.sync_seconds  # it waited for the sync
-    assert metabase.mart_table()["display_name"] == "Ad Spend by Day"
+    assert metabase.mart_table()["display_name"] == "Ad Statistics by Campaign and Day"
     assert lines
     assert not any("not in the warehouse" in line for line in lines)
 
@@ -835,12 +844,12 @@ def test_a_column_that_the_warehouse_does_not_have_yet_needs_no_sync(tmp_path):
     marts = loaded(tmp_path)
     columns = [c.name for c in marts.effective[MART].columns if c.name != "conversions"]
     fields = [{"id": 90 + i, "name": name, "parent_id": None} for i, name in enumerate(columns)]
-    table = {"id": 9, "schema": "marts", "name": "ad_spend_daily", "fields": fields}
+    table = {"id": 9, "schema": "marts", "name": "ad_stats_campaign_daily", "fields": fields}
 
     class Warehouse:
         def call(self, method: str, path: str, body: Any = None) -> Any:
             assert (method, path) == ("POST", "/api/dataset")
-            rows = [["marts", "ad_spend_daily", name] for name in columns]
+            rows = [["marts", "ad_stats_campaign_daily", name] for name in columns]
             return {"status": "completed", "data": {"rows": rows}}
 
     assert md.sync_needed(Warehouse(), 2, marts, {"tables": [table]}) == md.Sync(tables={})
@@ -855,10 +864,11 @@ def test_a_column_that_metabase_does_not_show_is_a_note_that_says_when_it_comes(
         for index, column in enumerate(marts.effective[MART].columns)
         if column.name != "conversions"
     ]
-    table = {"id": 9, "schema": "marts", "name": "ad_spend_daily", "fields": fields}
+    table = {"id": 9, "schema": "marts", "name": "ad_stats_campaign_daily", "fields": fields}
     assert md.make_plan(marts, {"tables": [table]}).notes == (
-        "marts.ad_spend_daily.conversions: Metabase does not show this column yet: it comes when "
-        "dbt rebuilds the mart, and the start after that syncs it and applies its metadata",
+        "marts.ad_stats_campaign_daily.conversions: Metabase does not show this column yet: it "
+        "comes when dbt rebuilds the mart, and the start after that syncs it and applies its "
+        "metadata",
     )
 
 
@@ -868,7 +878,7 @@ def test_a_mart_that_the_warehouse_does_not_have_is_a_note_and_no_wait(tmp_path,
     metabase.mart_in_warehouse = False
     lines = md.apply(client(metabase), 2, loaded(tmp_path), md.waiter(120, "see the logs"))
     assert lines == [
-        "marts.ad_spend_daily: not in the warehouse yet; the start after the dbt run that "
+        "marts.ad_stats_campaign_daily: not in the warehouse yet; the start after the dbt run that "
         "builds it applies its metadata"
     ]
     assert ("POST", "/api/database/2/sync_schema") not in metabase.calls
@@ -884,8 +894,8 @@ def test_a_sync_that_does_not_show_the_mart_in_time_names_the_step(tmp_path, met
             client(metabase), 2, loaded(tmp_path), md.waiter(120, "see ./agoranomos logs metabase")
         )
     assert str(raised.value) == (
-        "Metabase did not find marts.ad_spend_daily after a sync within 120 seconds: "
-        "see ./agoranomos logs metabase"
+        "Metabase did not find marts.ad_stats_campaign_daily after a sync within 120 seconds: see "
+        "./agoranomos logs metabase"
     )
     assert 120 <= clock.now < 120 + md.POLL_INTERVAL
 
@@ -904,13 +914,24 @@ def test_the_plan_leaves_other_tables_inactive_ones_and_nested_fields_alone(tmp_
     field = {"name": "spend", "display_name": "Spend", "description": None, "parent_id": None}
     database = {
         "tables": [
-            {"id": 7, "schema": "marts", "name": "ad_spend_daily", "active": False, "fields": []},
-            {"id": 8, "schema": "marts", "name": "ad_spend_daily__dbt_backup", "fields": []},
+            {
+                "id": 7,
+                "schema": "marts",
+                "name": "ad_stats_campaign_daily",
+                "active": False,
+                "fields": [],
+            },
+            {
+                "id": 8,
+                "schema": "marts",
+                "name": "ad_stats_campaign_daily__dbt_backup",
+                "fields": [],
+            },
             {
                 "id": 9,
                 "schema": "marts",
-                "name": "ad_spend_daily",
-                "display_name": "Ad Spend by Day",
+                "name": "ad_stats_campaign_daily",
+                "display_name": "Ad Statistics by Campaign and Day",
                 "description": "Advertising spend and results by day and campaign.",
                 "fields": [
                     {**field, "id": 90, "parent_id": 5},
@@ -925,7 +946,7 @@ def test_the_plan_leaves_other_tables_inactive_ones_and_nested_fields_alone(tmp_
         "description": "The spend of a row.",
         "settings": {"currency": "USD"},
     }
-    assert len(plan.notes) == 8  # the other columns: Metabase does not show them
+    assert len(plan.notes) == len(MART_COLUMNS) - 1  # the others: Metabase does not show them
 
 
 @pytest.mark.parametrize(

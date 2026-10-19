@@ -80,20 +80,22 @@ def stamp(seconds: float) -> str:
 
 
 class FakeAirflow:
-    """What demo-init can see of Airflow 3.3.2: the three DAGs of the demo, their runs, and the
-    asset between the load and the transform. The history is a DAG like any other here: its runs
-    update no asset that schedules a DAG.
+    """What demo-init can see of Airflow 3.3.2: the two DAGs of the demo, the history and the
+    transform, their runs, and the five assets between them.
 
     A scheduler runs on the fake clock, one loop a second, in the order of the loop of Airflow:
     first a run for an event that waits, then the queued runs start, then the running ones end.
     A queued run of an unpaused DAG starts when no other run of its DAG is running
     (max_active_runs=1), and a running one ends after the duration of its DAG, with its result.
-    The task of a load that succeeds updates the asset of the raw table a loop before its run
-    ends: while the transform is unpaused, that queues an event for it, unless one is queued
-    already, in which case it is dropped (ON CONFLICT DO NOTHING). The event becomes a run of the
-    transform, whose run_after is the time of the event, on a later loop, once the transform has
-    no run queued or running. triggers are the runs that a person triggers in the Airflow UI, at a
-    time.
+    The last of the five loads of a history that succeeds updates its asset a loop before the run
+    of the history ends: while the transform is unpaused, that completes the events of the five
+    assets, which the fake keeps as one event, unless one is queued already, in which case it is
+    dropped (ON CONFLICT DO NOTHING). The event becomes a run of the transform, whose run_after is
+    the time of the event, on a later loop, once the transform has no run queued or running.
+    partial_events are the events of some of the five assets, as a history that failed half way
+    leaves them: they start no run, and a run of the transform that the one event starts consumes
+    them too. The list of queued events counts all five while the fake keeps its event, else the
+    partial ones. triggers are the runs that a person triggers in the Airflow UI, at a time.
 
     The list of runs answers as the API does: the oldest first unless order_by says otherwise, 50
     to a page unless limit says otherwise and at most 100, and total_entries counts every run that
@@ -104,15 +106,12 @@ class FakeAirflow:
         self.clock = clock
         self.url = ""
         self.loaded_at = 0.0  # when the DAG processor has loaded the DAGs
-        self.paused = {di.LOAD_DAG: True, di.TRANSFORM_DAG: True, di.HISTORY_DAG: True}
-        self.durations = {di.LOAD_DAG: 10.0, di.TRANSFORM_DAG: 30.0, di.HISTORY_DAG: 60.0}
-        self.results = {
-            di.LOAD_DAG: "success",
-            di.TRANSFORM_DAG: "success",
-            di.HISTORY_DAG: "success",
-        }
+        self.paused = {di.LOAD_DAG: True, di.TRANSFORM_DAG: True}
+        self.durations = {di.LOAD_DAG: 10.0, di.TRANSFORM_DAG: 30.0}
+        self.results = {di.LOAD_DAG: "success", di.TRANSFORM_DAG: "success"}
         self.runs: list[dict[str, Any]] = []
         self.queued_event: float | None = None
+        self.partial_events = 0
         self.triggers: list[tuple[float, str, str]] = []  # (time, DAG, result)
         self.scheduled = 0.0
         self.failures: dict[tuple[str, str], int] = {}
@@ -164,6 +163,7 @@ class FakeAirflow:
         if waiting and not self.active(transform):
             self.add_run(transform, "queued", "asset_triggered", at=self.queued_event)
             self.queued_event = None
+            self.partial_events = 0
         for dag_id, paused in self.paused.items():
             runs = self.runs_of(dag_id)
             if paused or any(run["state"] == "running" for run in runs):
@@ -179,8 +179,9 @@ class FakeAirflow:
             if run["state"] != "running":
                 continue
             result = run["result"] or self.results[run["dag_id"]]
-            # The task of a load updates the asset when it ends, a loop before the scheduler marks
-            # its run as done: as on a running stack, the event is older than the end of the run.
+            # The last load of the history updates its asset when it ends, a loop before the
+            # scheduler marks the run as done: as on a running stack, the event is older than the
+            # end of the run.
             emits = run["dag_id"] == di.LOAD_DAG and result == "success" and not run["emitted"]
             if emits and moment >= run["ends_at"] - 1:
                 run["emitted"] = True
@@ -248,8 +249,14 @@ class FakeAirflow:
                 if run["dag_run_id"] == unquote(rest[1]):
                     return 200, public(run)
         if rest == ["assets", "queuedEvents"] and method == "GET":
-            waiting = dag_id == di.TRANSFORM_DAG and self.queued_event is not None
-            events = [{"dag_id": dag_id, "asset_id": 1, "created_at": "..."}] if waiting else []
+            count = 0
+            if dag_id == di.TRANSFORM_DAG:
+                count = (
+                    di.TRANSFORM_ASSETS if self.queued_event is not None else self.partial_events
+                )
+            events = [
+                {"dag_id": dag_id, "asset_id": n + 1, "created_at": "..."} for n in range(count)
+            ]
             return 200, {"queued_events": events, "total_entries": len(events)}
         return 404, {"detail": "Not Found"}
 
@@ -394,6 +401,38 @@ def card_of(metabase: FakeMetabase, name: str) -> dict[str, Any]:
     return demo_items(metabase)[2][name]
 
 
+# The questions of v0.1 by name, as its demo-init made them: the description, the query on the
+# mart of v0.1, and the column and the series of its charts, spend.
+V01_LAST_7_DAYS = "report_date > (SELECT max(report_date) FROM marts.ad_spend_daily) - 7"
+V01_QUESTIONS = {
+    "Spend, last 7 days": (
+        "The spend of the last seven days that have data.",
+        f"SELECT sum(spend) AS spend\nFROM marts.ad_spend_daily\nWHERE {V01_LAST_7_DAYS}",
+        {"column_settings": {'["name","spend"]': {"column_title": "Spend"}}},
+    ),
+    "Spend by campaign, last 7 days": (
+        "The spend of each campaign in the last seven days that have data.",
+        "SELECT campaign_name, sum(spend) AS spend\nFROM marts.ad_spend_daily\n"
+        f"WHERE {V01_LAST_7_DAYS}\nGROUP BY campaign_name\nORDER BY spend DESC",
+        {
+            "graph.dimensions": ["campaign_name"],
+            "graph.metrics": ["spend"],
+            "series_settings": {"spend": {"color": di.SERIES_COLOR}},
+        },
+    ),
+    "Spend by day": (
+        "The spend of every day that has data.",
+        "SELECT report_date, sum(spend) AS spend\nFROM marts.ad_spend_daily\n"
+        "GROUP BY report_date\nORDER BY report_date",
+        {
+            "graph.dimensions": ["report_date"],
+            "graph.metrics": ["spend"],
+            "series_settings": {"spend": {"color": di.SERIES_COLOR}},
+        },
+    ),
+}
+
+
 def an_earlier_demo(metabase: FakeMetabase) -> tuple[dict, dict[str, dict], dict]:
     """The content of v0.1 in Metabase: the collection Agoranomos demo at the root, with its three
     questions and its dashboard, which shows them, all with the queries and settings of v0.1."""
@@ -401,21 +440,22 @@ def an_earlier_demo(metabase: FakeMetabase) -> tuple[dict, dict[str, dict], dict
     old = content.add_collection(di.COLLECTION_V01, "The demo of Agoranomos: one ad account.")
     cards = {}
     for question in di.QUESTIONS:
-        query = {"database": 2, "type": "native", "native": {"query": question["query"]}}
+        description, sql, settings = V01_QUESTIONS[question["name"]]
+        query = {"database": 2, "type": "native", "native": {"query": sql}}
         cards[question["name"]] = content.add_card(
             {
                 "name": question["name"],
-                "description": question["description"],
+                "description": description,
                 "display": question["display"],
                 "collection_id": old["id"],
                 "dataset_query": query,
-                "visualization_settings": di.visualization_settings(question, TITLES),
+                "visualization_settings": copy.deepcopy(settings),
             }
         )
     board = content.add_dashboard(
         {
             "name": di.DASHBOARD_V01,
-            "description": di.DASHBOARD_DESCRIPTION,
+            "description": "Ad spend of the demo account, from marts.ad_spend_daily.",
             "collection_id": old["id"],
         }
     )
@@ -436,9 +476,9 @@ def test_the_scan_finds_a_secret_in_the_json_of_an_echo():
 
 def test_a_first_start_runs_the_pipeline_and_creates_the_demo(airflow, metabase, capsys):
     assert di.main(env_for(airflow, metabase)) == 0
-    assert airflow.paused == {di.LOAD_DAG: False, di.TRANSFORM_DAG: False, di.HISTORY_DAG: False}
+    assert airflow.paused == {di.LOAD_DAG: False, di.TRANSFORM_DAG: False}
     assert airflow.calls.count(("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns")) == 1
-    # The load starts the transform through the asset of the raw table: demo-init does not.
+    # The history starts the transform through the assets of its five loads: demo-init does not.
     assert ("POST", f"/api/v2/dags/{di.TRANSFORM_DAG}/dagRuns") not in airflow.calls
     [transform] = airflow.runs_of(di.TRANSFORM_DAG)
     assert (transform["run_type"], transform["state"]) == ("asset_triggered", "success")
@@ -449,7 +489,7 @@ def test_a_first_start_runs_the_pipeline_and_creates_the_demo(airflow, metabase,
     for card in cards.values():
         assert card["dataset_query"]["database"] == 2
         assert card["dataset_query"]["type"] == "native"
-        assert "marts.ad_spend_daily" in card["dataset_query"]["native"]["query"]
+        assert "marts.ad_stats_campaign_daily" in card["dataset_query"]["native"]["query"]
     assert (dashboard["name"], dashboard["collection_id"]) == (di.DASHBOARD, demo["id"])
     assert sorted(dashcard["card_id"] for dashcard in dashboard["dashcards"]) == sorted(
         card["id"] for card in cards.values()
@@ -458,12 +498,12 @@ def test_a_first_start_runs_the_pipeline_and_creates_the_demo(airflow, metabase,
     assert out.err == ""
     *lines, line = out.out.splitlines()
     assert line == (
-        "demo-init: the demo pipeline ran now, the history of the demo ran now, and the dashboard "
-        f"{di.DASHBOARD!r} ({dashboard['id']}) is in the collection Agoranomos / Demo"
+        f"demo-init: the demo pipeline ran now, and the dashboard {di.DASHBOARD!r} "
+        f"({dashboard['id']}) is in the collection Agoranomos / Demo"
     )
     # The metadata of the mart, applied after the sync: one line for each change, and then one
     # line for each item of the content that it created.
-    assert "demo-init: first fill: marts.ad_spend_daily display_name: " in lines[0]
+    assert "demo-init: first fill: marts.ad_stats_campaign_daily display_name: " in lines[0]
     assert 'demo-init: created: collection agoranomos "Agoranomos"' in lines
     assert f'demo-init: created: dashboard demo/dashboard "{di.DASHBOARD}"' in lines
     assert not leaked(out.out + out.err)
@@ -515,37 +555,35 @@ def test_a_second_start_changes_nothing(airflow, metabase, capsys):
     assert registry.read_text(encoding="utf-8") == saved
     # One line, which says that nothing ran: no line of a change.
     [line] = capsys.readouterr().out.splitlines()
-    assert line.startswith(
-        "demo-init: the demo pipeline ran before, the history of the demo ran before, and the "
-        "dashboard "
-    )
+    assert line.startswith("demo-init: the demo pipeline ran before, and the dashboard ")
 
 
 def test_a_pause_made_after_the_first_start_stays(airflow, metabase):
     assert di.main(env_for(airflow, metabase)) == 0
     airflow.paused = dict.fromkeys(airflow.paused, True)  # paused in the Airflow UI
     assert di.main(env_for(airflow, metabase)) == 0
-    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True, di.HISTORY_DAG: True}
+    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True}
 
 
 def test_a_success_long_ago_counts_whatever_ran_since(airflow, metabase):
-    # Airflow keeps every run, also after ./agoranomos down. Here the one success is the oldest of
-    # 121 runs of the transform, and of the history, so a page of the newest runs would not show
-    # it: the count of the successful runs does.
-    for dag_id in (di.TRANSFORM_DAG, di.HISTORY_DAG):
-        airflow.add_run(dag_id, "success", at=-10_000)
+    # Airflow keeps every run, also after ./agoranomos down. Here the one success of the history,
+    # and the one of the transform after it, are the oldest of 121 runs of each, so a page of the
+    # newest runs would not show them: the newest success and the count of the successful runs
+    # since it do.
+    for dag_id, at in ((di.LOAD_DAG, -10_000), (di.TRANSFORM_DAG, -9_990)):
+        airflow.add_run(dag_id, "success", at=at)
         for n in range(120):
             airflow.add_run(dag_id, "failed", at=-9_000 + n)
     assert di.main(env_for(airflow, metabase)) == 0
-    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True, di.HISTORY_DAG: True}
+    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True}
     assert [call for call in airflow.calls if call[0] in ("POST", "PATCH")] == [
         ("POST", "/auth/token")
     ]
 
 
-def test_the_newest_of_many_loads_is_awaited_and_not_started_again(airflow, metabase):
-    # 120 loads that ended long ago, and the newest is still running: the oldest 50, which the API
-    # gives unless it is told otherwise, would show only the old ones.
+def test_the_newest_of_many_histories_is_awaited_and_not_started_again(airflow, metabase):
+    # 120 histories that ended long ago, and the newest is still running: the oldest 50, which the
+    # API gives unless it is told otherwise, would show only the old ones.
     for n in range(120):
         airflow.add_run(di.LOAD_DAG, "failed", at=-9_000 + n)
     running = airflow.add_run(di.LOAD_DAG, "running")
@@ -564,10 +602,10 @@ def test_every_listing_of_runs_names_its_order_and_its_limit(airflow, metabase):
         assert len(query.get("limit", [])) == 1, query
 
 
-def test_the_load_starts_only_once_the_transform_is_idle(airflow, metabase):
+def test_the_history_starts_only_once_the_transform_is_idle(airflow, metabase):
     # An earlier start stopped half-way: a run of the transform is running, and an event waits for
-    # the next one. With max_active_runs=1, the event of a load that ended now would be dropped and
-    # would start no run, so demo-init waits until the transform is idle before it loads.
+    # the next one. With max_active_runs=1, the event of a history that ended now would be dropped
+    # and would start no run, so demo-init waits until the transform is idle before the history.
     airflow.paused.update({di.LOAD_DAG: False, di.TRANSFORM_DAG: False})
     airflow.add_run(di.TRANSFORM_DAG, "running", at=-10, result="failed")
     airflow.queued_event = -5.0
@@ -583,9 +621,9 @@ def test_the_load_starts_only_once_the_transform_is_idle(airflow, metabase):
 
 
 def test_an_event_that_waits_makes_the_transform_busy(airflow, metabase):
-    # An event of the raw asset waits, and the scheduler has not made its run yet: no run is
-    # queued or running. The transform is busy all the same, and the load waits until the run of
-    # that event has ended, since its own event would find the waiting one and be dropped.
+    # The events of the five assets wait, and the scheduler has not made their run yet: no run is
+    # queued or running. The transform is busy all the same, and the history waits until the run
+    # of those events has ended, since its own events would find the waiting ones and be dropped.
     airflow.paused.update({di.LOAD_DAG: False, di.TRANSFORM_DAG: False})
     airflow.queued_event = 0.0
     client = di.Airflow(airflow.url)
@@ -598,13 +636,14 @@ def test_an_event_that_waits_makes_the_transform_busy(airflow, metabase):
     assert load["run_after"] >= waiting["end_date"]
 
 
-def test_a_failed_run_of_a_person_does_not_stop_the_job_while_the_run_of_the_load_waits(
+def test_a_failed_run_of_a_person_does_not_stop_the_job_while_the_run_of_the_history_waits(
     airflow, metabase, capsys, monkeypatch
 ):
-    # A person triggers the transform in the Airflow UI while the load runs, and that run fails,
-    # with a run_after after the start of the load. The event of the load waits for that run to
-    # end and becomes a run a loop later. The failed run ends at 35 s, when demo-init looks: the
-    # event still waits then, so the transform is busy, and the job waits for the run of the load.
+    # A person triggers the transform in the Airflow UI while the history runs, and that run fails,
+    # with a run_after after the start of the history. The event of the history waits for that run
+    # to end and becomes a run a loop later. The failed run ends at 35 s, when demo-init looks: the
+    # event still waits then, so the transform is busy, and the job waits for the run of the
+    # history.
     # The look at 35 s needs a poll every 5 s: with another interval the job would never look in
     # that one loop, and the test would pass without the waiting event counting as busy.
     monkeypatch.setattr(di, "POLL_INTERVAL", 5.0)
@@ -619,10 +658,10 @@ def test_a_failed_run_of_a_person_does_not_stop_the_job_while_the_run_of_the_loa
     assert "the demo pipeline ran now" in capsys.readouterr().out
 
 
-def test_a_run_of_the_load_that_succeeds_while_the_job_looks_at_a_failed_one_counts(
+def test_a_run_of_the_history_that_succeeds_while_the_job_looks_at_a_failed_one_counts(
     airflow, metabase, capsys
 ):
-    # A failed run of a person, as above, and the run of the event of the load ends with success
+    # A failed run of a person, as above, and the run of the event of the history ends with success
     # between the count of the successes and the look at whether the transform is busy: the
     # transform is idle then, and the run that the job waited for has succeeded.
     airflow.triggers = [(5.0, di.TRANSFORM_DAG, "failed")]
@@ -642,21 +681,20 @@ def test_a_run_of_the_load_that_succeeds_while_the_job_looks_at_a_failed_one_cou
 
     airflow.handle = racing
     assert di.main(env_for(airflow, metabase)) == 0
-    assert ended, "the run of the load never ended between the two looks"
+    assert ended, "the run of the history never ended between the two looks"
     assert "the demo pipeline ran now" in capsys.readouterr().out
 
 
-def test_a_load_that_is_running_is_awaited_and_not_started_again(airflow, metabase):
+def test_a_history_that_is_running_is_awaited_and_not_started_again(airflow, metabase):
     airflow.add_run(di.LOAD_DAG, "running")
     assert di.main(env_for(airflow, metabase)) == 0
     assert ("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns") not in airflow.calls
 
 
-def test_a_failed_load_stops_with_the_dag_named(airflow, metabase, capsys):
+def test_a_failed_history_stops_with_the_dag_named(airflow, metabase, capsys):
     airflow.results[di.LOAD_DAG] = "failed"
     assert di.main(env_for(airflow, metabase)) == 1
-    line = one_line(capsys)
-    assert f"the DAG {di.LOAD_DAG} failed" in line
+    assert one_line(capsys) == f"demo-init: the DAG {di.LOAD_DAG} failed: see it in Airflow"
     assert metabase.calls == []
 
 
@@ -664,80 +702,62 @@ def test_a_failed_transform_names_the_transform_dag_and_dbt(airflow, metabase, c
     airflow.results[di.TRANSFORM_DAG] = "failed"
     assert di.main(env_for(airflow, metabase)) == 1
     line = one_line(capsys)
-    assert f"the DAG {di.TRANSFORM_DAG} failed after the demo load" in line
+    assert f"the DAG {di.TRANSFORM_DAG} failed after the demo history" in line
     assert "dbt test" in line
     assert metabase.calls == []
 
 
-def test_a_first_start_runs_the_history_once(airflow, metabase, capsys):
+def last_line(capsys: pytest.CaptureFixture[str]) -> str:
+    """The last line that demo-init printed on a success: nothing on standard error."""
+    output = capsys.readouterr()
+    assert output.err == "", output.err
+    return output.out.splitlines()[-1]
+
+
+def test_the_transform_waits_for_one_asset_of_each_platform():
+    from agoranomos_pipelines.demo import platforms
+
+    assert di.LOAD_DAG == "agoranomos_demo_history"
+    assert di.TRANSFORM_ASSETS == len(platforms.PLATFORMS) == 5
+
+
+def test_a_deployment_of_v0_1_runs_the_history_and_a_transform_after_it(airflow, metabase, capsys):
+    # v0.1 left a transform that succeeded and no run of the history.
+    airflow.add_run(di.TRANSFORM_DAG, "success", run_type="asset_triggered", at=-86_400)
     assert di.main(env_for(airflow, metabase)) == 0
-    history = airflow.runs_of(di.HISTORY_DAG)
-    assert [run["state"] for run in history] == ["success"]
-    assert not airflow.paused[di.HISTORY_DAG]
-    out = capsys.readouterr()
-    assert out.err == ""
-    assert out.out.splitlines()[-1].startswith(
-        "demo-init: the demo pipeline ran now, the history of the demo ran now, and the dashboard "
-    )
+    assert [run["state"] for run in airflow.runs_of(di.LOAD_DAG)] == ["success"]
+    assert [run["state"] for run in airflow.runs_of(di.TRANSFORM_DAG)] == ["success", "success"]
+    assert "the demo pipeline ran now" in last_line(capsys)
 
 
-def test_a_history_that_succeeded_before_is_not_run_again(airflow, metabase):
-    airflow.add_run(di.HISTORY_DAG, "success", at=-3600)
-    airflow.add_run(di.TRANSFORM_DAG, "success", run_type="asset_triggered", at=-3500)
+def test_a_history_without_a_good_transform_after_it_runs_again(airflow, metabase):
+    # A deployment of v0.1 whose first transform after the history failed, as on a critical test:
+    # the success of v0.1 came before the history, and a repeat replaces the same days.
+    airflow.add_run(di.TRANSFORM_DAG, "success", run_type="asset_triggered", at=-86_400)
+    airflow.add_run(di.LOAD_DAG, "success", at=-3_600)
+    airflow.add_run(di.TRANSFORM_DAG, "failed", run_type="asset_triggered", at=-3_500)
     assert di.main(env_for(airflow, metabase)) == 0
-    assert [run["state"] for run in airflow.runs_of(di.HISTORY_DAG)] == ["success"]
-    assert airflow.paused[di.HISTORY_DAG]  # a start that finds a success leaves the pause as it is
+    assert [run["state"] for run in airflow.runs_of(di.LOAD_DAG)] == ["success", "success"]
+    assert airflow.runs_of(di.TRANSFORM_DAG)[-1]["state"] == "success"
 
 
-def test_a_stack_whose_pipeline_ran_before_runs_the_history_on_its_next_start(
-    airflow, metabase, capsys
-):
-    # A stack of v0.1, whose transform succeeded: its first start with the history runs the
-    # history and nothing else in Airflow, and the line says which of the two ran now.
-    airflow.add_run(di.TRANSFORM_DAG, "success", run_type="asset_triggered", at=-3500)
+def test_a_history_with_a_good_transform_after_it_is_not_run_again(airflow, metabase, capsys):
+    airflow.add_run(di.LOAD_DAG, "success", at=-3_600)
+    airflow.add_run(di.TRANSFORM_DAG, "success", run_type="asset_triggered", at=-3_500)
     assert di.main(env_for(airflow, metabase)) == 0
-    assert [run["state"] for run in airflow.runs_of(di.HISTORY_DAG)] == ["success"]
-    assert airflow.runs_of(di.LOAD_DAG) == []
-    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True, di.HISTORY_DAG: False}
-    assert (
-        capsys.readouterr()
-        .out.splitlines()[-1]
-        .startswith(
-            "demo-init: the demo pipeline ran before, the history of the demo ran now, and the "
-            "dashboard "
-        )
-    )
+    assert ("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns") not in airflow.calls
+    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True}
+    assert "the demo pipeline ran before" in last_line(capsys)
 
 
-def test_a_failed_history_stops_with_the_dag_named(airflow, metabase, capsys):
-    airflow.results[di.HISTORY_DAG] = "failed"
-    assert di.main(env_for(airflow, metabase)) == 1
-    assert one_line(capsys) == f"demo-init: the DAG {di.HISTORY_DAG} failed: see it in Airflow"
-
-
-def test_a_history_that_is_running_is_awaited_and_not_started_again(airflow, metabase):
-    airflow.paused[di.HISTORY_DAG] = False
-    airflow.add_run(di.HISTORY_DAG, "running")
+def test_the_events_of_a_history_that_failed_half_way_do_not_hold_up_the_start(airflow, metabase):
+    # Two of the five platforms loaded before a history failed: their events wait for the other
+    # three and start no run, so the transform is not busy, and the next history completes them.
+    airflow.add_run(di.LOAD_DAG, "failed", at=-600)
+    airflow.partial_events = 2
     assert di.main(env_for(airflow, metabase)) == 0
-    assert len(airflow.runs_of(di.HISTORY_DAG)) == 1
-    assert ("POST", f"/api/v2/dags/{di.HISTORY_DAG}/dagRuns") not in airflow.calls
-
-
-def test_a_history_that_runs_now_leaves_a_missing_mart_to_the_pipeline_that_ran_before(
-    airflow, metabase, capsys
-):
-    # A stack of v0.1, whose transform succeeded, gets the history on its first start with it.
-    # When its warehouse has lost the mart since, the line points at the load, as after any reset
-    # of the warehouse volume: the transform did not run now.
-    airflow.add_run(di.TRANSFORM_DAG, "success", run_type="asset_triggered", at=-3500)
-    metabase.mart_in_warehouse = False
-    assert di.main(env_for(airflow, metabase)) == 1
-    line = one_line(capsys)
-    assert line.startswith(
-        "demo-init: Metabase finds no marts.ad_spend_daily in the warehouse: the demo pipeline "
-        "ran before"
-    )
-    assert [run["state"] for run in airflow.runs_of(di.HISTORY_DAG)] == ["success"]
+    assert [run["state"] for run in airflow.runs_of(di.TRANSFORM_DAG)] == ["success"]
+    assert airflow.partial_events == 0
 
 
 # A step that runs out of time: how to make it hang, and what its line says.
@@ -760,30 +780,17 @@ HANGING_STEPS = [
         lambda airflow, metabase: airflow.durations.update({di.LOAD_DAG: math.inf}),
         f"the DAG {di.LOAD_DAG} did not finish",
         "see it in Airflow",
-        id="load",
+        id="history",
     ),
     pytest.param(
         lambda airflow, metabase: airflow.durations.update({di.TRANSFORM_DAG: math.inf}),
-        f"the DAG {di.TRANSFORM_DAG} did not succeed after the demo load",
+        f"the DAG {di.TRANSFORM_DAG} did not succeed after the demo history",
         "see it in Airflow",
         id="transform",
     ),
     pytest.param(
-        # The file of the history does not load, as with an import error: Airflow answers 404.
-        lambda airflow, metabase: airflow.paused.pop(di.HISTORY_DAG),
-        f"Airflow did not load the DAG {di.HISTORY_DAG}",
-        "./agoranomos logs airflow-dag-processor",
-        id="history-dag",
-    ),
-    pytest.param(
-        lambda airflow, metabase: airflow.durations.update({di.HISTORY_DAG: math.inf}),
-        f"the DAG {di.HISTORY_DAG} did not finish",
-        "see it in Airflow",
-        id="history",
-    ),
-    pytest.param(
         lambda airflow, metabase: setattr(metabase, "sync_seconds", math.inf),
-        "Metabase did not find marts.ad_spend_daily after a sync of the warehouse",
+        "Metabase did not find marts.ad_stats_campaign_daily after a sync of the warehouse",
         "./agoranomos logs metabase",
         id="sync",
     ),
@@ -805,8 +812,8 @@ def test_a_step_that_runs_out_of_time_names_itself(
 
 
 def test_the_whole_job_has_one_deadline(airflow, metabase, clock, capsys):
-    # The DAGs take 595 of the 600 seconds to load, and a load takes 10: with one deadline for the
-    # whole job, the load runs out of time, five seconds after it starts.
+    # The DAGs take 595 of the 600 seconds to load, and a history takes 10: with one deadline for
+    # the whole job, the history runs out of time, five seconds after it starts.
     airflow.loaded_at = 595
     assert di.main(env_for(airflow, metabase)) == 1
     line = one_line(capsys)
@@ -992,8 +999,8 @@ def test_a_mart_that_is_gone_after_an_earlier_run_names_the_cause_and_the_load(
     assert di.main(env_for(airflow, metabase)) == 1
     line = one_line(capsys)
     assert line.startswith(
-        "demo-init: Metabase finds no marts.ad_spend_daily in the warehouse: the demo pipeline "
-        "ran before"
+        "demo-init: Metabase finds no marts.ad_stats_campaign_daily in the warehouse: the demo "
+        "pipeline ran before"
     )
     assert f"trigger {di.LOAD_DAG} in Airflow" in line
     assert ("POST", "/api/database/2/sync_schema") not in metabase.calls[calls:]
@@ -1008,7 +1015,8 @@ def test_a_transform_that_ran_now_and_left_no_mart_names_the_transform(airflow, 
     assert di.main(env_for(airflow, metabase)) == 1
     line = one_line(capsys)
     assert line == (
-        "demo-init: Metabase finds no marts.ad_spend_daily in the warehouse: see the last run of "
+        "demo-init: Metabase finds no marts.ad_stats_campaign_daily in the warehouse: see the last "
+        "run of "
         f"{di.TRANSFORM_DAG} in Airflow"
     )
     assert airflow.calls.count(("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns")) == 1
@@ -1027,8 +1035,8 @@ def test_an_export_without_the_mart_of_the_demo_stops_before_anything_is_written
     assert di.main(env_for(airflow, metabase)) == 1
     line = one_line(capsys)
     assert line == (
-        "demo-init: the dbt project declares no marts.ad_spend_daily: see ./agoranomos logs "
-        "metadata-export"
+        "demo-init: the dbt project declares no marts.ad_stats_campaign_daily: see ./agoranomos "
+        "logs metadata-export"
     )
     assert airflow.calls == []
     assert metabase.calls == []
@@ -1152,15 +1160,16 @@ def test_an_edited_question_is_put_back_by_the_next_start(airflow, metabase, cap
     card = card_of(metabase, "Spend by day")
     card["name"] = "My spend"
     card["description"] = "Changed in Metabase"
-    card["dataset_query"]["native"]["query"] = "SELECT 1 AS spend"
-    card["visualization_settings"]["series_settings"]["spend"]["color"] = "#000000"
+    card["dataset_query"]["native"]["query"] = "SELECT 1 AS spend_reporting"
+    card["visualization_settings"]["series_settings"]["spend_reporting"]["color"] = "#000000"
     capsys.readouterr()
     assert di.main(env_for(airflow, metabase)) == 0
     [question] = [q for q in di.QUESTIONS if q["key"] == "spend-by-day"]
     assert card["name"] == "Spend by day"
     assert card["description"] == question["description"]
     assert card["dataset_query"]["native"]["query"] == question["query"]
-    assert card["visualization_settings"]["series_settings"]["spend"]["color"] == di.SERIES_COLOR
+    series = card["visualization_settings"]["series_settings"]
+    assert series["spend_reporting"]["color"] == di.SERIES_COLOR
     assert len(metabase.cards) == len(di.QUESTIONS)
     out = capsys.readouterr().out.splitlines()
     revert = "demo-init: revert of an edit: question demo/spend-by-day"
@@ -1242,14 +1251,19 @@ def test_the_collection_of_v0_1_moves_into_agoranomos(airflow, metabase, capsys)
         'demo-init: lowered: group "All Users" on collection "Agoranomos demo": curate -> view'
     ) in out
     # The move is one line: no revert of the name or the place of the collection after it. The
-    # questions and the dashboard of v0.1 are as the code of this release says: no line either.
+    # questions of v0.1 read the mart of v0.1, and they are put back as the code of this release
+    # says, in place: none is made anew.
     assert not [
         line
         for line in out
         if line.startswith("demo-init: revert of an edit: collection")
         and " description: " not in line
     ]
-    assert not [line for line in out if " question demo/" in line or " dashboard demo/" in line]
+    for question in di.QUESTIONS:
+        assert f"demo-init: revert of an edit: question demo/{question['key']} query" in out
+    assert not [line for line in out if line.startswith("demo-init: created") and "demo/" in line]
+    for card in now_cards.values():
+        assert "marts.ad_stats_campaign_daily" in card["dataset_query"]["native"]["query"]
     assert registry_of(metabase)["demo/dashboard"]["entity_id"] == board["entity_id"]
 
 
@@ -1680,7 +1694,7 @@ def metadata_on_the_stand(name: str, after_a_run: bool) -> dict[str, Any]:
     base_type, database_type = {
         "report_date": ("type/Date", "date"),
         "campaign_name": ("type/Text", "text"),
-        "spend": ("type/Decimal", "numeric"),
+        "spend_reporting": ("type/Decimal", "numeric"),
     }[name]
     column = {
         "name": name,
@@ -1727,7 +1741,8 @@ def test_the_metadata_that_metabase_makes_for_the_demo_is_left_as_it_is(
 def test_a_click_behavior_added_to_a_card_of_the_demo_dashboard_is_reverted(airflow, metabase):
     assert di.main(env_for(airflow, metabase)) == 0
     _, _, _, [board] = demo_items(metabase)
-    link = {"type": "link", "linkType": "url", "linkTemplate": "https://example.com/{{spend}}"}
+    template = "https://example.com/{{spend_reporting}}"
+    link = {"type": "link", "linkType": "url", "linkTemplate": template}
     board["dashcards"][0]["visualization_settings"] = {"click_behavior": link}
     assert di.main(env_for(airflow, metabase)) == 0
     assert [d["visualization_settings"] for d in board["dashcards"]] == [{}] * len(di.QUESTIONS)
@@ -1851,23 +1866,25 @@ def test_new_questions_get_the_titles_of_their_columns_and_axes(airflow, metabas
     by_campaign = settings_of(metabase, "Spend by campaign, last 7 days")
     assert by_campaign["column_settings"] == {
         '["name","campaign_name"]': {"column_title": "Campaign Name"},
-        '["name","spend"]': {"column_title": "Spend"},
+        '["name","spend_reporting"]': {"column_title": "Spend in Reporting Currency"},
     }
     assert by_campaign["graph.x_axis.title_text"] == "Campaign Name"
-    assert by_campaign["graph.y_axis.title_text"] == "Spend"
+    assert by_campaign["graph.y_axis.title_text"] == "Spend in Reporting Currency"
     assert settings_of(metabase, "Spend by day")["graph.x_axis.title_text"] == "Report Date"
     # A number has no axes.
     assert settings_of(metabase, "Spend, last 7 days") == {
-        "column_settings": {'["name","spend"]': {"column_title": "Spend"}}
+        "column_settings": {
+            '["name","spend_reporting"]': {"column_title": "Spend in Reporting Currency"}
+        }
     }
 
 
 def test_the_titles_come_from_the_overrides_of_the_deployment(airflow, metabase, tmp_path):
-    overrides = "[marts.ad_spend_daily.columns.spend]\ndisplay_name = 'Cost'\n"
+    overrides = "[marts.ad_stats_campaign_daily.columns.spend_reporting]\ndisplay_name = 'Cost'\n"
     metabase.files.update(metadata_env(tmp_path, overrides=overrides))
     assert di.main(env_for(airflow, metabase)) == 0
     assert settings_of(metabase, "Spend by day")["graph.y_axis.title_text"] == "Cost"
-    assert metabase.field("spend")["display_name"] == "Cost"
+    assert metabase.field("spend_reporting")["display_name"] == "Cost"
 
 
 def question_of(key: str) -> dict[str, Any]:
@@ -1880,7 +1897,7 @@ def test_the_titles_of_a_question_are_put_back_as_the_code_says(airflow, metabas
     settings = settings_of(metabase, "Spend by day")
     settings["graph.x_axis.title_text"] = "Day"  # a title of a person
     del settings["graph.y_axis.title_text"]
-    spend = settings["column_settings"]['["name","spend"]']
+    spend = settings["column_settings"]['["name","spend_reporting"]']
     del spend["column_title"]
     spend["decimals"] = 0  # a format of a person, in the settings of a column that the code sets
     capsys.readouterr()
@@ -1890,9 +1907,8 @@ def test_the_titles_of_a_question_are_put_back_as_the_code_says(airflow, metabas
     assert wanted["graph.x_axis.title_text"] == "Report Date"
     assert capsys.readouterr().out.splitlines() == [
         "demo-init: revert of an edit: question demo/spend-by-day visualization_settings",
-        "demo-init: the demo pipeline ran before, the history of the demo ran before, and the "
-        f"dashboard 'Ad spend (demo)' ({demo_items(metabase)[3][0]['id']}) is in the collection "
-        "Agoranomos / Demo",
+        "demo-init: the demo pipeline ran before, and the dashboard 'Ad spend (demo)' "
+        f"({demo_items(metabase)[3][0]['id']}) is in the collection Agoranomos / Demo",
     ]
 
 
@@ -1902,12 +1918,12 @@ def test_a_display_name_that_changes_reaches_the_titles_at_the_next_start(
     # The titles come from the effective metadata on every start, so a new display name in the
     # overrides of the deployment reaches the questions too, and not only those made after it.
     assert di.main(env_for(airflow, metabase)) == 0
-    overrides = "[marts.ad_spend_daily.columns.spend]\ndisplay_name = 'Cost'\n"
+    overrides = "[marts.ad_stats_campaign_daily.columns.spend_reporting]\ndisplay_name = 'Cost'\n"
     metabase.files.update(metadata_env(tmp_path, overrides=overrides))
     assert di.main(env_for(airflow, metabase)) == 0
     settings = settings_of(metabase, "Spend by day")
     assert settings["graph.y_axis.title_text"] == "Cost"
-    assert settings["column_settings"]['["name","spend"]'] == {"column_title": "Cost"}
+    assert settings["column_settings"]['["name","spend_reporting"]'] == {"column_title": "Cost"}
 
 
 CHARTS = ("Spend by campaign, last 7 days", "Spend by day")
@@ -1916,8 +1932,11 @@ CHARTS = ("Spend by campaign, last 7 days", "Spend by day")
 def test_the_charts_are_drawn_in_the_first_color_of_the_project(airflow, metabase):
     assert di.main(env_for(airflow, metabase)) == 0
     for name in CHARTS:
-        # The series of a chart with the one metric spend is keyed by the name of its column.
-        assert settings_of(metabase, name)["series_settings"] == {"spend": {"color": "#A86400"}}
+        # The series of a chart with the one metric spend_reporting is keyed by the name of its
+        # column.
+        assert settings_of(metabase, name)["series_settings"] == {
+            "spend_reporting": {"color": "#A86400"}
+        }
     # A number has no series.
     assert "series_settings" not in settings_of(metabase, "Spend, last 7 days")
 
@@ -1927,25 +1946,30 @@ def test_a_chart_without_the_color_gets_it_back(airflow, metabase, name):
     assert di.main(env_for(airflow, metabase)) == 0
     settings = settings_of(metabase, name)
     # A title of a person on the series, in place of the color.
-    settings["series_settings"] = {"spend": {"title": "Cost"}}
+    settings["series_settings"] = {"spend_reporting": {"title": "Cost"}}
     assert di.main(env_for(airflow, metabase)) == 0
     settings = settings_of(metabase, name)
-    assert settings["series_settings"] == {"spend": {"color": "#A86400"}}
-    assert settings["graph.metrics"] == ["spend"]
+    assert settings["series_settings"] == {"spend_reporting": {"color": "#A86400"}}
+    assert settings["graph.metrics"] == ["spend_reporting"]
     del settings["series_settings"]
     assert di.main(env_for(airflow, metabase)) == 0
-    assert settings_of(metabase, name)["series_settings"] == {"spend": {"color": "#A86400"}}
+    assert settings_of(metabase, name)["series_settings"] == {
+        "spend_reporting": {"color": "#A86400"}
+    }
 
 
 @pytest.mark.parametrize("name", CHARTS)
 @pytest.mark.parametrize("color", ["#4F6382", "#a86400", "red", ""])
 def test_a_color_that_a_person_set_is_put_back(airflow, metabase, capsys, name, color):
     assert di.main(env_for(airflow, metabase)) == 0
-    settings_of(metabase, name)["series_settings"]["spend"] = {"color": color, "color_name": "x"}
+    series = settings_of(metabase, name)["series_settings"]
+    series["spend_reporting"] = {"color": color, "color_name": "x"}
     writes_before = len(metabase.bodies)
     capsys.readouterr()
     assert di.main(env_for(airflow, metabase)) == 0
-    assert settings_of(metabase, name)["series_settings"] == {"spend": {"color": "#A86400"}}
+    assert settings_of(metabase, name)["series_settings"] == {
+        "spend_reporting": {"color": "#A86400"}
+    }
     # One write: the settings of the question, and its line.
     [(method, path, _)] = [b for b in metabase.bodies[writes_before:] if b[1] != "/api/session"]
     assert (method, path) == ("PUT", f"/api/card/{card_of(metabase, name)['id']}")
@@ -1959,34 +1983,39 @@ def test_a_color_that_a_person_set_is_put_back(airflow, metabase, capsys, name, 
 def test_the_series_settings_of_a_person_give_way_to_those_of_the_code(airflow, metabase):
     assert di.main(env_for(airflow, metabase)) == 0
     settings = settings_of(metabase, "Spend by day")
-    settings["series_settings"] = {"other": {"color": "#000000"}, "spend": {"title": "Cost"}}
+    settings["series_settings"] = {
+        "other": {"color": "#000000"},
+        "spend_reporting": {"title": "Cost"},
+    }
     assert di.main(env_for(airflow, metabase)) == 0
     assert settings_of(metabase, "Spend by day")["series_settings"] == {
-        "spend": {"color": "#A86400"}
+        "spend_reporting": {"color": "#A86400"}
     }
 
 
 @pytest.mark.parametrize("name", CHARTS)
 @pytest.mark.parametrize("others", [{}, {"other": {"color": "#000000"}}])
-def test_a_chart_whose_series_settings_lack_spend_gets_those_of_the_code(
+def test_a_chart_whose_series_settings_lack_its_metric_gets_those_of_the_code(
     airflow, metabase, name, others
 ):
     assert di.main(env_for(airflow, metabase)) == 0
     settings_of(metabase, name)["series_settings"] = dict(others)
     assert di.main(env_for(airflow, metabase)) == 0
-    assert settings_of(metabase, name)["series_settings"] == {"spend": {"color": "#A86400"}}
+    assert settings_of(metabase, name)["series_settings"] == {
+        "spend_reporting": {"color": "#A86400"}
+    }
 
 
 def test_a_mistake_in_the_overrides_stops_demo_init_before_it_writes(
     airflow, metabase, tmp_path, capsys
 ):
-    overrides = "[marts.ad_spend_daily]\ndisplay_name = 7\n"
+    overrides = "[marts.ad_stats_campaign_daily]\ndisplay_name = 7\n"
     metabase.files.update(metadata_env(tmp_path, overrides=overrides))
     assert di.main(env_for(airflow, metabase)) == 1
     line = one_line(capsys)
     assert line == (
-        "demo-init: overrides.toml: marts.ad_spend_daily.display_name: a text in quotes is "
-        "expected, not int"
+        "demo-init: overrides.toml: marts.ad_stats_campaign_daily.display_name: a text in quotes "
+        "is expected, not int"
     )
     assert airflow.calls == []
     assert metabase.calls == []
@@ -2014,23 +2043,23 @@ def test_a_later_step_that_fails_leaves_the_lines_of_the_metadata_in_the_log(
     output = capsys.readouterr()
     applied = output.out.splitlines()
     assert applied[0] == (
-        'demo-init: first fill: marts.ad_spend_daily display_name: "Ad Spend Daily" -> '
-        '"Ad Spend by Day"'
+        'demo-init: first fill: marts.ad_stats_campaign_daily display_name: "Ad Stats Campaign '
+        'Daily" -> "Ad Statistics by Campaign and Day"'
     )
     assert all(line.startswith("demo-init: first fill: ") for line in applied), applied
     [line] = output.err.splitlines()
     assert line.startswith("demo-init: POST /api/collection failed with HTTP 500")
-    assert metabase.mart_table()["display_name"] == "Ad Spend by Day"
+    assert metabase.mart_table()["display_name"] == "Ad Statistics by Campaign and Day"
     assert not leaked(output.out + output.err)
 
 
 def test_the_lines_of_the_metadata_reach_the_log_of_a_process_before_its_error(airflow, metabase):
     # As a container runs it, with its standard output a pipe that Python buffers: each line is
     # flushed as it is printed, so the log has the lines of the metadata before the line of the
-    # error. The pipeline and the history ran before and Metabase knows the mart, so the process
-    # waits for nothing.
+    # error. The pipeline ran before and Metabase knows the mart, so the process waits for
+    # nothing.
+    airflow.add_run(di.LOAD_DAG, "success", at=-20)
     airflow.add_run(di.TRANSFORM_DAG, "success", at=-10)
-    airflow.add_run(di.HISTORY_DAG, "success", at=-10)
     metabase.mart_known = True
     metabase.failures[("POST", "/api/collection")] = 500
     result = subprocess.run(

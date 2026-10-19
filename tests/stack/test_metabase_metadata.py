@@ -299,8 +299,8 @@ def test_the_demo_charts_are_drawn_in_the_color_of_the_project(metabase_url, ses
         for name, card in demo_questions(metabase_url, session).items()
     }
     assert colors == {
-        "Spend by campaign, last 7 days": {"spend": {"color": SERIES_COLOR}},
-        "Spend by day": {"spend": {"color": SERIES_COLOR}},
+        "Spend by campaign, last 7 days": {"spend_reporting": {"color": SERIES_COLOR}},
+        "Spend by day": {"spend_reporting": {"color": SERIES_COLOR}},
         "Spend, last 7 days": None,  # a number has no series
     }, colors
 
@@ -333,7 +333,7 @@ def test_demo_init_puts_back_the_title_of_a_column(env, metabase_url, session, m
     # An admin removes the title of a column, the title of an axis and the color of a chart: the
     # next start puts the settings of display back as the code says, and logs it. The settings go
     # back as they were also when the test fails.
-    [spend] = [c for c in marts.effective[MART].columns if c.name == "spend"]
+    [spend] = [c for c in marts.effective[MART].columns if c.name == "spend_reporting"]
     card = item(metabase_url, session, "demo/spend-by-day")
     card_path = f"{metabase_url}/api/card/{card['id']}"
     before = card["visualization_settings"]
@@ -353,10 +353,10 @@ def test_demo_init_puts_back_the_title_of_a_column(env, metabase_url, session, m
         assert code == 0, f"demo-init exited with {code}"
         settings = item(metabase_url, session, "demo/spend-by-day")["visualization_settings"]
         assert settings.get("graph.y_axis.title_text") == spend.display_name
-        assert settings["column_settings"]['["name","spend"]'] == {
+        assert settings["column_settings"]['["name","spend_reporting"]'] == {
             "column_title": spend.display_name
         }
-        assert settings.get("series_settings") == {"spend": {"color": SERIES_COLOR}}
+        assert settings.get("series_settings") == {"spend_reporting": {"color": SERIES_COLOR}}
         assert settings["graph.dimensions"] == ["report_date"]
         assert changes == [
             "demo-init: revert of an edit: question demo/spend-by-day visualization_settings"

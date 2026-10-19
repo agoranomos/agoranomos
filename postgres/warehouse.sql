@@ -72,18 +72,9 @@ GRANT pg_read_all_data TO backup;
 GRANT CONNECT ON DATABASE warehouse TO backup;
 ALTER ROLE backup SET default_transaction_read_only = on;
 
--- raw_demo holds the demo data, and dlt merges into it through raw_demo_staging. loader owns both,
--- so that it can create its tables there; transformer may read raw_demo.
-CREATE SCHEMA IF NOT EXISTS raw_demo AUTHORIZATION loader;
-CREATE SCHEMA IF NOT EXISTS raw_demo_staging AUTHORIZATION loader;
-ALTER SCHEMA raw_demo OWNER TO loader;
-ALTER SCHEMA raw_demo_staging OWNER TO loader;
-GRANT USAGE ON SCHEMA raw_demo TO transformer;
-GRANT SELECT ON ALL TABLES IN SCHEMA raw_demo TO transformer;
-ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_demo GRANT SELECT ON TABLES TO transformer;
--- The fictional platforms of the demo (ADR-0025): dlt loads each into raw_demo_<platform>, and
--- merges and keeps the versions of its campaigns through raw_demo_<platform>_staging. loader owns
--- both; transformer may read the first.
+-- The fictional platforms of the demo (ADR-0025), which replace the one demo account of v0.1: dlt
+-- loads each into raw_demo_<platform>, and merges and keeps the versions of its campaigns through
+-- raw_demo_<platform>_staging. loader owns both; transformer may read the first.
 CREATE SCHEMA IF NOT EXISTS raw_demo_search AUTHORIZATION loader;
 CREATE SCHEMA IF NOT EXISTS raw_demo_search_staging AUTHORIZATION loader;
 ALTER SCHEMA raw_demo_search OWNER TO loader;
@@ -139,6 +130,16 @@ ALTER SCHEMA marts OWNER TO transformer;
 -- wait behind it. transformer waits at most a minute for a lock, so a blocked run fails and the mart
 -- keeps its data.
 ALTER ROLE transformer SET lock_timeout = '1min';
+
+-- The demo of v0.1: one fictional ad account in raw_demo, which dlt merged through
+-- raw_demo_staging, the view staging.stg_demo__ad_stats_daily and the mart marts.ad_spend_daily.
+-- The model of v0.2 replaces them (ADR-0025), so a warehouse of v0.1 loses them on its first
+-- start of v0.2, and these statements find nothing on every later start. CASCADE drops what a
+-- person built on them, as each rebuild of dbt did in v0.1.
+DROP TABLE IF EXISTS marts.ad_spend_daily CASCADE;
+DROP VIEW IF EXISTS staging.stg_demo__ad_stats_daily CASCADE;
+DROP SCHEMA IF EXISTS raw_demo_staging CASCADE;
+DROP SCHEMA IF EXISTS raw_demo CASCADE;
 
 -- Metabase reads marts only. Its sessions start read-only, against accidental writes; the barrier itself
 -- is that the role has no write grant. dbt creates the tables of marts as transformer, so the

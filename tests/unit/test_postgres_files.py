@@ -366,3 +366,23 @@ def test_the_settings_of_the_model_have_a_schema_of_loader_that_only_transformer
     granted = re.findall(r"\bGRANT [^;]*\braw_settings\b[^;]*;", text, re.IGNORECASE)
     assert granted, "warehouse.sql grants nothing on raw_settings"
     assert all(grant.endswith("TO transformer;") for grant in granted), granted
+
+
+# The statements that remove the demo of v0.1 from a warehouse of that release (ADR-0025).
+V01_REMOVALS = (
+    "DROP TABLE IF EXISTS marts.ad_spend_daily CASCADE;",
+    "DROP VIEW IF EXISTS staging.stg_demo__ad_stats_daily CASCADE;",
+    "DROP SCHEMA IF EXISTS raw_demo_staging CASCADE;",
+    "DROP SCHEMA IF EXISTS raw_demo CASCADE;",
+)
+
+
+def test_warehouse_sql_removes_the_demo_of_v0_1_and_creates_it_no_more():
+    text = normalized("warehouse.sql")
+    for statement in V01_REMOVALS:
+        assert runs(text, statement), statement
+    rest = text.replace("DROP SCHEMA IF EXISTS raw_demo CASCADE;", "")
+    assert not re.search(r"\braw_demo\b(?!_)", rest), "warehouse.sql still names raw_demo"
+    # The tables of v0.1 are in staging and marts: they are dropped after those schemas exist.
+    created = "CREATE SCHEMA IF NOT EXISTS marts AUTHORIZATION transformer;"
+    assert text.index(created) < text.index(V01_REMOVALS[0])
