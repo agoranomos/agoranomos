@@ -750,6 +750,22 @@ def test_a_history_with_a_good_transform_after_it_is_not_run_again(airflow, meta
     assert "the demo pipeline ran before" in last_line(capsys)
 
 
+@pytest.mark.parametrize(("result", "histories"), [("success", 1), ("failed", 2)])
+def test_a_transform_that_an_earlier_start_left_running_after_the_history_is_awaited(
+    airflow, metabase, capsys, result, histories
+):
+    # An earlier start ran out of time while the transform that the history started was running.
+    # The next start waits for that run: when it succeeds, the history does not run again, so a
+    # slow machine gets past the deadline in two starts; when it fails, the history runs again.
+    airflow.paused.update({di.LOAD_DAG: False, di.TRANSFORM_DAG: False})
+    airflow.add_run(di.LOAD_DAG, "success", at=-60)
+    airflow.add_run(di.TRANSFORM_DAG, "running", "asset_triggered", at=-10, result=result)
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert len(airflow.runs_of(di.LOAD_DAG)) == histories
+    assert airflow.runs_of(di.TRANSFORM_DAG)[-1]["state"] == "success"
+    assert "the demo pipeline ran now" in last_line(capsys)
+
+
 def test_the_events_of_a_history_that_failed_half_way_do_not_hold_up_the_start(airflow, metabase):
     # Two of the five platforms loaded before a history failed: their events wait for the other
     # three and start no run, so the transform is not busy, and the next history completes them.

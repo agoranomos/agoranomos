@@ -367,8 +367,10 @@ def run_demo_pipeline(airflow: Airflow, deadline: Deadline) -> bool:
     transform is idle before the history: with max_active_runs=1, Airflow defers the run that the
     assets start while another run of the transform is queued or running, the deferred run
     consumes only the events up to the one that queued it, and an event that comes in between
-    starts no run of its own. A history that is queued or running already is waited for, and not
-    started again.
+    starts no run of its own. A transform that succeeds while the job waits, after a history that
+    had succeeded, as when an earlier start ran out of time during it, counts, and the history
+    does not run again. A history that is queued or running already is waited for, and not started
+    again.
     """
     history = newest_run(airflow, LOAD_DAG, "success")
     if history is not None and count_runs(
@@ -383,6 +385,10 @@ def run_demo_pipeline(airflow: Airflow, deadline: Deadline) -> bool:
         f"the DAG {TRANSFORM_DAG} did not finish its earlier runs",
         "see it in Airflow",
     )
+    if history is not None and count_runs(
+        airflow, TRANSFORM_DAG, "success", since=history["run_after"]
+    ):
+        return True
     load = newest_run(airflow, LOAD_DAG, "queued", "running")
     if load is None:
         load = airflow.call("POST", f"/api/v2/dags/{LOAD_DAG}/dagRuns", {"logical_date": None})
