@@ -74,4 +74,4 @@ Agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0024](0024-one-deployment-is-one-business.md) | One deployment is one business, and clients group its ad accounts | accepted | 2026-10-12 |
 | [0025](0025-model-advertising-statistics-once.md) | Model advertising statistics once, at the grain of a campaign and a day | accepted | 2026-10-12 |
 | [0027](0027-load-the-dbt-project-into-cosmos-from-a-manifest.md) | Load the dbt project into Cosmos from a manifest | accepted | 2026-10-12 |
-| [0028](0028-build-each-node-of-dbt-with-its-tests-in-one-task.md) | Build each node of dbt with its tests in one task | proposed | 2026-10-19 |
+| [0028](0028-build-each-node-of-dbt-with-its-tests-in-one-task.md) | Build each node of dbt with its tests in one task | accepted | 2026-10-19 |
