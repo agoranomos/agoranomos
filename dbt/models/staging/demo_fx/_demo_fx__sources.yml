@@ -1,0 +1,15 @@
+sources:
+  - name: raw_demo_fx
+    description: >-
+      The data of demo_fx, a fictional source of the reference rates of the euro, which the DAG
+      agoranomos_demo_history loads with dlt.
+    schema: raw_demo_fx
+    # The demo has no daily load in this release: no freshness.
+    config:
+      freshness: null
+    tables:
+      - name: rates_daily
+        description: >-
+          The reference rates of the euro of demo_fx, one row for each day of publication: the
+          value of one unit of base in quote. A weekend or a holiday has no row. Each load
+          replaces the days that it covers.

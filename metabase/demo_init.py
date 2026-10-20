@@ -1,23 +1,23 @@
 """The demo of Agoranomos, made ready by the one-shot demo-init service on every start of the demo
 profile.
 
-It runs the demo pipeline once: agoranomos_demo_load, and then agoranomos_demo_transform, which the
-asset of the raw table starts. It also runs agoranomos_demo_history once, which loads the history
-of the fictional platforms of the demo generator into raw_demo_<platform>. Then it makes the demo
-visible in Metabase: it syncs the schema of the warehouse, applies the metadata of the marts
-(metadata.py), as metabase-init does, and puts the demo, its questions and its dashboard, in the
-collection Agoranomos / Demo as the code says (content.py, ADR-0018): an edit is reverted and
-logged, an item in the trash comes back, and every group but Administrators gets at most View on
-them. The questions get the titles of their columns and axes from the display names of the
-metadata, and their charts get the color of the project. The demo collection of v0.1, the one
-whose dashboard the account of demo-init made, moves into Agoranomos as Demo once, after every item
-in it that the demo does not ship has gone to the root.
+It runs the demo pipeline once: agoranomos_demo_history, which loads the history of the fictional
+platforms of the demo generator into raw_demo_<platform>, and then agoranomos_demo_transform, which
+the five assets of the history start. Then it makes the demo visible in Metabase: it syncs the
+schema of the warehouse, applies the metadata of the marts (metadata.py), as metabase-init does,
+and puts the demo, its questions and its dashboard, in the collection Agoranomos / Demo as the code
+says (content.py, ADR-0018): an edit is reverted and logged, an item in the trash comes back, and
+every group but Administrators gets at most View on them. The questions get the titles of their
+columns and axes from the display names of the metadata, and their charts get the color of the
+project. The demo collection of v0.1, the one whose dashboard the account of demo-init made, moves
+into Agoranomos as Demo once, after every item in it that the demo does not ship has gone to the
+root.
 
-Each step looks at the current state first. A start that finds a successful run of the transform
-does not run the pipeline again and leaves the pause state of both of its DAGs as it is, and one
-that finds a successful run of the history does the same with the history. The content of
-Metabase is found by the entity IDs that Metabase gave it, in the registry of the content, never by
-name, but for the one move of the collection of an earlier release.
+Each step looks at the current state first. A start that finds a successful run of the history and
+a successful run of the transform after it does not run the pipeline again and leaves the pause
+state of both DAGs as it is. The content of Metabase is found by the entity IDs that Metabase gave
+it, in the registry of the content, never by name, but for the one move of the collection of an
+earlier release.
 
 The whole job has one deadline, DEADLINE seconds from its start, which every wait shares, and a
 step that runs out of time names itself; ./agoranomos up waits longer than that for the stack.
@@ -56,9 +56,12 @@ from metabase_init import (
     unexpected_shape,
 )
 
-LOAD_DAG = "agoranomos_demo_load"
+LOAD_DAG = "agoranomos_demo_history"
 TRANSFORM_DAG = "agoranomos_demo_transform"
-HISTORY_DAG = "agoranomos_demo_history"
+# The transform runs when each platform of the demo has loaded since its last run: it waits for
+# one asset of each (airflow/dags/agoranomos_pipelines/assets.py), and the events of some of them
+# start no run.
+TRANSFORM_ASSETS = 5
 # The demo as a package of the content (content.py): its key in the registry, and its name, the
 # name of its collection in Agoranomos.
 DEMO_KEY = "demo"
@@ -67,7 +70,9 @@ DEMO_DESCRIPTION = (
     "The demo of Agoranomos: a fictional business, as the demo data of this release shows it."
 )
 DASHBOARD = "Ad spend (demo)"
-DASHBOARD_DESCRIPTION = "Ad spend of the demo account, from marts.ad_spend_daily."
+DASHBOARD_DESCRIPTION = (
+    "Ad spend of the demo, in the reporting currency, from marts.ad_stats_campaign_daily."
+)
 # The names of the demo of v0.1, which the jobs look for once, to move it into Agoranomos: its
 # collection at the root, its dashboard, and its questions, with the key of each in the package.
 # Written out, so that they stay as v0.1 named them when the questions of the code change.
@@ -79,9 +84,9 @@ V01_KEYS = {
     "Spend by day": "spend-by-day",
 }
 MART_SCHEMA = "marts"
-MART_TABLE = "ad_spend_daily"
+MART_TABLE = "ad_stats_campaign_daily"
 # The one deadline of the job, in seconds from its start, shared by the waits for the DAGs, the
-# load, the transform and the sync. ./agoranomos up waits 900 seconds for the whole stack.
+# history, the transform and the sync. ./agoranomos up waits 900 seconds for the whole stack.
 DEADLINE = 600.0
 # How long to wait between two looks at Airflow or Metabase, in seconds.
 POLL_INTERVAL = 5.0
@@ -89,7 +94,7 @@ POLL_INTERVAL = 5.0
 clock = time.monotonic
 pause = time.sleep
 FINISHED = ("success", "failed")
-LAST_7_DAYS = "report_date > (SELECT max(report_date) FROM marts.ad_spend_daily) - 7"
+LAST_7_DAYS = "report_date > (SELECT max(report_date) FROM marts.ad_stats_campaign_daily) - 7"
 AIRFLOW_ADMIN_HINT = (
     "Check AIRFLOW_ADMIN_PASSWORD in .env. If you changed the password of admin in Airflow, put "
     "the same value in .env."
@@ -119,7 +124,7 @@ SERIES_COLOR = "#A86400"
 COLUMN_TYPES = {
     "report_date": ("type/Date", "date"),
     "campaign_name": ("type/Text", "text"),
-    "spend": ("type/Decimal", "numeric"),
+    "spend_reporting": ("type/Decimal", "numeric"),
 }
 
 # The questions of the demo dashboard, in the order of the dashboard, with their place on its grid
@@ -130,44 +135,53 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
     {
         "key": "spend-last-7-days",
         "name": "Spend, last 7 days",
-        "description": "The spend of the last seven days that have data.",
+        "description": (
+            "The spend of the last seven days that have data, in the reporting currency."
+        ),
         "display": "scalar",
-        "columns": ("spend",),
+        "columns": ("spend_reporting",),
         "visualization_settings": {},
-        "query": f"SELECT sum(spend) AS spend\nFROM marts.ad_spend_daily\nWHERE {LAST_7_DAYS}",
+        "query": (
+            "SELECT sum(spend_reporting) AS spend_reporting\nFROM marts.ad_stats_campaign_daily\n"
+            f"WHERE {LAST_7_DAYS}"
+        ),
         "layout": {"row": 0, "col": 0, "size_x": 6, "size_y": 4},
     },
     {
         "key": "spend-by-campaign-last-7-days",
         "name": "Spend by campaign, last 7 days",
-        "description": "The spend of each campaign in the last seven days that have data.",
+        "description": (
+            "The spend of each campaign in the last seven days that have data, in the reporting "
+            "currency."
+        ),
         "display": "row",
-        "columns": ("campaign_name", "spend"),
+        "columns": ("campaign_name", "spend_reporting"),
         "visualization_settings": {
             "graph.dimensions": ["campaign_name"],
-            "graph.metrics": ["spend"],
-            "series_settings": {"spend": {"color": SERIES_COLOR}},
+            "graph.metrics": ["spend_reporting"],
+            "series_settings": {"spend_reporting": {"color": SERIES_COLOR}},
         },
         "query": (
-            "SELECT campaign_name, sum(spend) AS spend\nFROM marts.ad_spend_daily\n"
-            f"WHERE {LAST_7_DAYS}\nGROUP BY campaign_name\nORDER BY spend DESC"
+            "SELECT campaign_name, sum(spend_reporting) AS spend_reporting\n"
+            f"FROM marts.ad_stats_campaign_daily\nWHERE {LAST_7_DAYS}\nGROUP BY campaign_name\n"
+            "ORDER BY spend_reporting DESC"
         ),
         "layout": {"row": 0, "col": 6, "size_x": 18, "size_y": 4},
     },
     {
         "key": "spend-by-day",
         "name": "Spend by day",
-        "description": "The spend of every day that has data.",
+        "description": "The spend of every day that has data, in the reporting currency.",
         "display": "line",
-        "columns": ("report_date", "spend"),
+        "columns": ("report_date", "spend_reporting"),
         "visualization_settings": {
             "graph.dimensions": ["report_date"],
-            "graph.metrics": ["spend"],
-            "series_settings": {"spend": {"color": SERIES_COLOR}},
+            "graph.metrics": ["spend_reporting"],
+            "series_settings": {"spend_reporting": {"color": SERIES_COLOR}},
         },
         "query": (
-            "SELECT report_date, sum(spend) AS spend\nFROM marts.ad_spend_daily\n"
-            "GROUP BY report_date\nORDER BY report_date"
+            "SELECT report_date, sum(spend_reporting) AS spend_reporting\n"
+            "FROM marts.ad_stats_campaign_daily\nGROUP BY report_date\nORDER BY report_date"
         ),
         "layout": {"row": 4, "col": 0, "size_x": 24, "size_y": 6},
     },
@@ -282,18 +296,19 @@ def newest_run(airflow: Airflow, dag_id: str, *states: str) -> dict[str, Any] | 
 
 
 def transform_is_busy(airflow: Airflow) -> bool:
-    """Whether the transform has a run queued or running, or an asset event that waits for a run.
-    The list of queued events has no pages: it holds one event at most for each asset that
-    schedules the DAG."""
+    """Whether the transform has a run queued or running, or a run that Airflow is about to
+    create: an event queued for each of its assets. The events of some of its assets, as a history
+    that failed half way leaves them, start no run until the others come, so they do not count.
+    The list of queued events has no pages: it holds one event at most for each asset."""
     if count_runs(airflow, TRANSFORM_DAG, "queued", "running"):
         return True
     queued = airflow.call("GET", f"/api/v2/dags/{TRANSFORM_DAG}/assets/queuedEvents")
-    return queued["total_entries"] > 0
+    return queued["total_entries"] >= TRANSFORM_ASSETS
 
 
 def wait_for_dags(airflow: Airflow, deadline: Deadline) -> None:
     """Wait until the DAG processor has loaded the demo DAGs; until then Airflow answers 404."""
-    for dag_id in (LOAD_DAG, TRANSFORM_DAG, HISTORY_DAG):
+    for dag_id in (LOAD_DAG, TRANSFORM_DAG):
         wait_until(
             lambda dag_id=dag_id: airflow.call("GET", f"/api/v2/dags/{dag_id}", missing_ok=True),
             deadline,
@@ -313,45 +328,54 @@ def wait_for_run(airflow: Airflow, dag_id: str, run_id: str, deadline: Deadline)
 
 
 def wait_for_transform(airflow: Airflow, since: str, deadline: Deadline) -> None:
-    """Wait until a run of the transform that the load started has succeeded: a run whose
-    run_after, the time of the asset event that started it, is not before since, the start of
-    the load."""
+    """Wait until a run of the transform that the history started has succeeded: a run whose
+    run_after, the time of the newest of the asset events that started it, is not before since,
+    the start of the history."""
 
     def succeeded() -> bool:
         if count_runs(airflow, TRANSFORM_DAG, "success", since=since):
             return True
         failed = count_runs(airflow, TRANSFORM_DAG, "failed", since=since)
         if failed and not transform_is_busy(airflow):
-            # The run that the load started can succeed between the first count and the look at
+            # The run that the history started can succeed between the first count and the look at
             # whether the transform is busy, while a failed run of a person counts: so the
             # successes are counted once more before the job gives up.
             if count_runs(airflow, TRANSFORM_DAG, "success", since=since):
                 return True
             raise SetupError(
-                f"the DAG {TRANSFORM_DAG} failed after the demo load: see it in Airflow; a failed "
-                "dbt test there means that dbt found broken data"
+                f"the DAG {TRANSFORM_DAG} failed after the demo history: see it in Airflow; a "
+                "failed dbt test there means that dbt found broken data"
             )
         return False
 
     wait_until(
         succeeded,
         deadline,
-        f"the DAG {TRANSFORM_DAG} did not succeed after the demo load",
+        f"the DAG {TRANSFORM_DAG} did not succeed after the demo history",
         "see it in Airflow",
     )
 
 
 def run_demo_pipeline(airflow: Airflow, deadline: Deadline) -> bool:
-    """Run the demo pipeline, unless a run of the transform has succeeded before; True if it ran.
+    """Run the demo pipeline, unless the history has succeeded and a run of the transform has
+    succeeded after it; True if it ran.
 
-    A start that finds such a run changes nothing in Airflow, so a pause that a person made stays.
-    Otherwise it unpauses both DAGs and waits until the transform is idle before the load: with
-    max_active_runs=1, Airflow defers the run that an asset event starts while another run of the
-    transform is queued or running, the deferred run consumes only the events up to the one that
-    queued it, and an event that comes in between starts no run of its own. A load that is queued
-    or running already is waited for, and not started again.
+    A start that finds them changes nothing in Airflow, so a pause that a person made stays. A
+    deployment of v0.1 has a transform that succeeded and no history, so its first start of this
+    release runs both; a history with no good transform after it, as after a failed critical test,
+    runs again, which replaces the same days. Otherwise it unpauses both DAGs and waits until the
+    transform is idle before the history: with max_active_runs=1, Airflow defers the run that the
+    assets start while another run of the transform is queued or running, the deferred run
+    consumes only the events up to the one that queued it, and an event that comes in between
+    starts no run of its own. A transform that succeeds while the job waits, after a history that
+    had succeeded, as when an earlier start ran out of time during it, counts, and the history
+    does not run again. A history that is queued or running already is waited for, and not started
+    again.
     """
-    if count_runs(airflow, TRANSFORM_DAG, "success"):
+    history = newest_run(airflow, LOAD_DAG, "success")
+    if history is not None and count_runs(
+        airflow, TRANSFORM_DAG, "success", since=history["run_after"]
+    ):
         return False
     for dag_id in (LOAD_DAG, TRANSFORM_DAG):
         airflow.call("PATCH", f"/api/v2/dags/{dag_id}", {"is_paused": False})
@@ -361,6 +385,10 @@ def run_demo_pipeline(airflow: Airflow, deadline: Deadline) -> bool:
         f"the DAG {TRANSFORM_DAG} did not finish its earlier runs",
         "see it in Airflow",
     )
+    if history is not None and count_runs(
+        airflow, TRANSFORM_DAG, "success", since=history["run_after"]
+    ):
+        return True
     load = newest_run(airflow, LOAD_DAG, "queued", "running")
     if load is None:
         load = airflow.call("POST", f"/api/v2/dags/{LOAD_DAG}/dagRuns", {"logical_date": None})
@@ -368,22 +396,6 @@ def run_demo_pipeline(airflow: Airflow, deadline: Deadline) -> bool:
     if load["state"] != "success":
         raise SetupError(f"the DAG {LOAD_DAG} failed: see it in Airflow")
     wait_for_transform(airflow, load["start_date"], deadline)
-    return True
-
-
-def run_demo_history(airflow: Airflow, deadline: Deadline) -> bool:
-    """Run the history of the fictional platforms once, unless a run of it has succeeded before;
-    True if it ran. A start that finds such a run changes nothing in Airflow. Otherwise it unpauses
-    the DAG and triggers it, or waits for a run that is queued or running, until it ends."""
-    if count_runs(airflow, HISTORY_DAG, "success"):
-        return False
-    airflow.call("PATCH", f"/api/v2/dags/{HISTORY_DAG}", {"is_paused": False})
-    run = newest_run(airflow, HISTORY_DAG, "queued", "running")
-    if run is None:
-        run = airflow.call("POST", f"/api/v2/dags/{HISTORY_DAG}/dagRuns", {"logical_date": None})
-    run = wait_for_run(airflow, HISTORY_DAG, run["dag_run_id"], deadline)
-    if run["state"] != "success":
-        raise SetupError(f"the DAG {HISTORY_DAG} failed: see it in Airflow")
     return True
 
 
@@ -698,8 +710,7 @@ def main(env: Mapping[str, str] | None = None) -> int:
         airflow = Airflow(config.airflow_url)
         sign_in_to_airflow(airflow, config.airflow_password)
         wait_for_dags(airflow, deadline)
-        ran_pipeline = run_demo_pipeline(airflow, deadline)
-        ran_history = run_demo_history(airflow, deadline)
+        ran = run_demo_pipeline(airflow, deadline)
         server, hint = "Metabase", Metabase.logs_hint
         metabase = Metabase(config.metabase_url)
         sign_in(metabase, config.admin_email, config.admin_password)
@@ -709,9 +720,7 @@ def main(env: Mapping[str, str] | None = None) -> int:
             raise SetupError(
                 "Metabase has no connection to the warehouse: see ./agoranomos logs metabase-init"
             )
-        # The history builds no mart: what a missing mart points at depends on whether the
-        # pipeline ran now.
-        ensure_synced(metabase, database["id"], mart, deadline, ran_pipeline)
+        ensure_synced(metabase, database["id"], mart, deadline, ran)
         metadata.apply(
             metabase,
             database["id"],
@@ -730,9 +739,8 @@ def main(env: Mapping[str, str] | None = None) -> int:
         print(f"demo-init: {unexpected_shape(server, error, hint)}", file=sys.stderr)
         return 1
     print(
-        f"demo-init: the demo pipeline {when(ran_pipeline)}, the history of the demo "
-        f"{when(ran_history)}, and the dashboard "
-        f"{DASHBOARD!r} ({dashboard_id}) is in the collection {content.ROOT_NAME} / {DEMO_NAME}"
+        f"demo-init: the demo pipeline {when(ran)}, and the dashboard {DASHBOARD!r} "
+        f"({dashboard_id}) is in the collection {content.ROOT_NAME} / {DEMO_NAME}"
     )
     return 0
 

@@ -1,6 +1,8 @@
-# The dbt project of Agoranomos (ADR-0005). Airflow runs it through Cosmos, in the DAG
-# agoranomos_demo_transform, as the transformer role. The project is mounted read-only: Cosmos runs
-# dbt in a temporary folder that links to the project, where dbt writes its target and logs folders.
+# The dbt project of Agoranomos (ADR-0005): the model of advertising statistics (ADR-0025), from the
+# raw data of each platform through staging and the intermediate models to the marts. Airflow runs
+# it through Cosmos, in the DAG agoranomos_demo_transform, as the transformer role. The project is
+# mounted read-only: Cosmos runs dbt in a temporary folder that links to the project, where dbt
+# writes its target and logs folders.
 name: agoranomos
 version: "0.1.0"
 config-version: 2
@@ -8,6 +10,7 @@ require-dbt-version: [">=1.12.0", "<1.13.0"]
 profile: agoranomos
 
 model-paths: ["models"]
+seed-paths: ["seeds"]
 test-paths: ["tests"]
 macro-paths: ["macros"]
 
@@ -25,6 +28,21 @@ models:
     staging:
       +schema: staging
       +materialized: view
+    # The steps that the platforms share (ADR-0025): views in staging until an AI role needs a
+    # schema of their own.
+    intermediate:
+      +schema: staging
+      +materialized: view
     marts:
       +schema: marts
       +materialized: table
+
+seeds:
+  agoranomos:
+    # The lists that the model checks against: the platforms, the conversion actions, the
+    # currencies of ISO 4217 and the time zones of IANA.
+    +schema: staging
+    +persist_docs:
+      relation: true
+      columns: true
+    +quote_columns: false

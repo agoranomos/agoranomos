@@ -1,0 +1,34 @@
+sources:
+  - name: raw_demo_social
+    description: >-
+      The data of demo_social, a fictional platform of social ads in the shape of the Meta
+      Marketing API v26.0, which the DAG agoranomos_demo_history loads with dlt: its responses as
+      dlt normalizes them, the lists of a row in child tables of their own.
+    schema: raw_demo_social
+    # The demo has no daily load in this release: no freshness.
+    config:
+      freshness: null
+    tables:
+      - name: ad_accounts
+        description: >-
+          The ad accounts of demo_social, one row each, with their currency and time zone; each
+          load replaces them.
+      - name: campaigns
+        description: >-
+          The campaigns of demo_social, one row for each version, from _dlt_valid_from until
+          _dlt_valid_to, as dlt keeps them with its scd2 strategy.
+      - name: insights_campaign
+        description: >-
+          The insights of demo_social at the level of campaigns, one row for each campaign and day
+          with any metric, in the currency and the time zone of the account. Each load replaces the
+          days of each account that it covers, with their actions.
+      - name: insights_campaign__actions
+        description: >-
+          The actions of each row of insights_campaign, one row each, with the count of its
+          default attribution in value and its windows in _1d_click, _7d_click and _1d_view; its
+          _dlt_parent_id is the _dlt_id of its row.
+      - name: insights_campaign__action_values
+        description: >-
+          The values of the actions of each row of insights_campaign, one row each, in the currency
+          of the account, with the value of its default attribution in value and its windows in
+          _1d_click, _7d_click and _1d_view; its _dlt_parent_id is the _dlt_id of its row.

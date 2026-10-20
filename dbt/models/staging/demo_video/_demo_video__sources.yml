@@ -1,0 +1,26 @@
+sources:
+  - name: raw_demo_video
+    description: >-
+      The data of demo_video, a fictional platform of video ads in the shape of the TikTok API for
+      Business v1.3, which the DAG agoranomos_demo_history loads with dlt: its responses as dlt
+      normalizes them, nested objects joined by __, every metric as text.
+    schema: raw_demo_video
+    # The demo has no daily load in this release: no freshness.
+    config:
+      freshness: null
+    tables:
+      - name: advertisers
+        description: >-
+          The advertisers of demo_video, its ad accounts, one row each, with their currency and
+          time zone; each load replaces them.
+      - name: campaigns
+        description: >-
+          The campaigns of demo_video, one row for each version, from _dlt_valid_from until
+          _dlt_valid_to, as dlt keeps them with its scd2 strategy. A removed campaign is not
+          listed, so its last version ends.
+      - name: report_campaign_daily
+        description: >-
+          The integrated report of demo_video by campaign and day, one row for each campaign and
+          day with any metric, in the currency and the time zone of the account, - for a metric
+          that means nothing on the day. Each load replaces the days of each account that it
+          covers.

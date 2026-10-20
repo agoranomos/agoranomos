@@ -1,0 +1,69 @@
+models:
+  - name: stg_settings__clients
+    description: >-
+      The clients of the business that the settings name, one row for each client and origin: those
+      of the deployment in extensions/model/clients.toml, and those of the demo in the base
+      package, which a client of the deployment with the same ID replaces in the model. client_id
+      and origin are its key. Its tests guard the marts: when one of them fails, dbt does not
+      rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [client_id, origin]
+    columns:
+      - name: client_id
+        description: '{{ doc("client_id") }}'
+        data_tests: [not_null]
+      - name: client_name
+        description: '{{ doc("client_name") }}'
+      - name: origin
+        description: '{{ doc("origin") }}'
+        data_tests: [not_null]
+  - name: stg_settings__account_clients
+    description: >-
+      The ad accounts and the properties of web analytics that the settings name, with the client
+      of each, one row for each account and origin: from extensions/model/clients.toml of the
+      deployment, and from the file of the demo in the base package; for an account that both
+      name, the model takes the deployment's. platform, account_id and origin are its key. Its
+      tests guard the marts: when one of them fails, dbt does not rebuild the models that read
+      this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id, origin]
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: client_id
+        description: '{{ doc("client_id") }}'
+      - name: origin
+        description: '{{ doc("origin") }}'
+        data_tests: [not_null]
+  - name: stg_settings__conversion_actions
+    description: >-
+      The conversion actions that the deployment names in extensions/model/conversion_actions.toml,
+      one row each: whether each is primary, and its category, or none where the file names none.
+      They override the seed of conversion actions in the model. platform and conversion_action_id
+      are its key. Its tests guard the marts: when one of them fails, dbt does not rebuild the
+      models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, conversion_action_id]
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: conversion_action_id
+        description: '{{ doc("conversion_action_id") }}'
+        data_tests: [not_null]
+      - name: is_primary
+        description: '{{ doc("is_primary") }}'
+      - name: conversion_category
+        description: '{{ doc("conversion_category") }}'
+      - name: origin
+        description: '{{ doc("origin") }}'

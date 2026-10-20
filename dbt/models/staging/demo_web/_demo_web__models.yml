@@ -1,0 +1,81 @@
+models:
+  - name: stg_demo_web__properties
+    description: >-
+      The properties of web analytics of demo_web, one row each, with the time zone of their days
+      and the currency of their revenue. platform and property_id are its key. Its tests guard the
+      marts: when one of them fails, dbt does not rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, property_id]
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: property_id
+        description: '{{ doc("property_id") }}'
+        data_tests: [not_null]
+      - name: property_name
+        description: '{{ doc("property_name") }}'
+      - name: time_zone
+        description: '{{ doc("time_zone") }}'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('seed_iana_time_zones')
+                field: time_zone
+      - name: currency
+        description: '{{ doc("currency") }}'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('seed_iso_4217_currencies')
+                field: currency_code
+  - name: stg_demo_web__sessions_daily
+    description: >-
+      The sessions of the properties of demo_web, one row for each property, day in the time zone of
+      the property, source, medium and campaign of the sessions, with the default channel group that
+      web analytics gives them. report_date, property_id, session_source, session_medium,
+      session_campaign_name and session_campaign_id are its key. Its tests guard the marts: when one
+      of them fails, dbt does not rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [report_date, property_id, session_source, session_medium, session_campaign_name, session_campaign_id]
+    columns:
+      - name: report_date
+        description: '{{ doc("report_date") }}'
+        data_tests: [not_null]
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: property_id
+        description: '{{ doc("property_id") }}'
+        data_tests: [not_null]
+      - name: session_source
+        description: '{{ doc("session_source") }}'
+        data_tests: [not_null]
+      - name: session_medium
+        description: '{{ doc("session_medium") }}'
+        data_tests: [not_null]
+      - name: session_campaign_name
+        description: '{{ doc("session_campaign_name") }}'
+        data_tests: [not_null]
+      - name: session_campaign_id
+        description: '{{ doc("session_campaign_id") }}'
+        data_tests: [not_null]
+      - name: session_default_channel_group
+        description: '{{ doc("session_default_channel_group") }}'
+      - name: sessions
+        description: '{{ doc("sessions") }}'
+        data_tests: [not_null, non_negative]
+      - name: engaged_sessions
+        description: '{{ doc("engaged_sessions") }}'
+        data_tests: [non_negative]
+      - name: key_events
+        description: '{{ doc("key_events") }}'
+        data_tests: [non_negative]
+      - name: total_revenue
+        description: '{{ doc("total_revenue") }}'
+        data_tests: [non_negative]

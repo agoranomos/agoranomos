@@ -1,0 +1,14 @@
+platform,conversion_action_id,conversion_action_name,conversion_category,is_primary
+demo_search,9001,Purchase,purchase,true
+demo_search,9002,Lead form,lead,true
+demo_search,9003,Calls from ads,lead,false
+demo_search,9101,Kauf,purchase,true
+demo_search,9103,Anrufe,lead,false
+demo_social,link_click,Link clicks,other,false
+demo_social,landing_page_view,Landing page views,other,false
+demo_social,offsite_conversion.fb_pixel_add_to_cart,Adds to cart (pixel),add_to_cart,false
+demo_social,offsite_conversion.fb_pixel_purchase,Purchases (pixel),purchase,true
+demo_social,omni_purchase,Purchases (all surfaces),purchase,false
+demo_social,offsite_conversion.fb_pixel_lead,Leads (pixel),lead,true
+demo_video,complete_payment,Complete payments,purchase,true
+demo_video,conversion,Conversions (the optimization event),other,false

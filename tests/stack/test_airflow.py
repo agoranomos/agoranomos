@@ -19,14 +19,17 @@ from stack_helpers import (
 )
 
 SELFCHECK = "agoranomos_selfcheck"
-# The other DAGs of the base bundle: the demo load and the demo transform.
-DEMO_LOAD = "agoranomos_demo_load"
+# The other DAGs of the base bundle: the history of the demo and the transform.
+DEMO_HISTORY = "agoranomos_demo_history"
 DEMO_TRANSFORM = "agoranomos_demo_transform"
 EXTENSION_CHECK = "ci_extension_check"
 FIXTURE = REPO_ROOT / "tests" / "stack" / "fixtures" / f"{EXTENSION_CHECK}.py"
 EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
 DAG_FOLDERS = ("/opt/agoranomos/dags", "/opt/agoranomos/extensions/dags")
 DBT_PROJECT = "/opt/agoranomos/dbt"
+# The settings of the model of the deployment, extensions/model, which the first task of the
+# transform reads (ADR-0024).
+MODEL_SETTINGS = "/opt/agoranomos/extensions/model"
 # The services that run tasks: with the LocalExecutor the scheduler, with Celery also the worker.
 TASK_RUNNERS = [s for s in ("airflow-scheduler", "airflow-worker") if s in LONG_RUNNING]
 # The services whose health check reads their job from the metadata database (compose.yaml), with
@@ -345,7 +348,7 @@ def test_the_dag_processor_reports_no_import_error(airflow_url, token):
     # The errors of the DAGs of the base package: the extensions folder belongs to the deployment.
     # The DAGs of the base bundle are waited for first, so that the DAG processor has parsed it,
     # whatever ran before this test.
-    for dag_id in (SELFCHECK, DEMO_LOAD, DEMO_TRANSFORM):
+    for dag_id in (SELFCHECK, DEMO_HISTORY, DEMO_TRANSFORM):
         wait_for_dag(airflow_url, token, dag_id)
     status, body = api(airflow_url, token, "GET", "/api/v2/importErrors?bundle_name=agoranomos")
     assert status == 200, body
@@ -422,6 +425,14 @@ def test_the_dag_processor_keeps_no_cache_of_cosmos_in_airflow_variables(airflow
 @pytest.mark.parametrize("service", TASK_RUNNERS)
 def test_dag_folders_are_read_only(service, path):
     result = compose("exec", "-T", service, "touch", f"{path}/should-fail", check=False)
+    assert result.returncode != 0
+    assert "Read-only file system" in result.stderr, result.stderr
+
+
+@pytest.mark.parametrize("service", TASK_RUNNERS)
+def test_the_settings_of_the_model_are_read_only(service):
+    # The tasks read the settings files of the deployment and cannot change them.
+    result = compose("exec", "-T", service, "touch", f"{MODEL_SETTINGS}/should-fail", check=False)
     assert result.returncode != 0
     assert "Read-only file system" in result.stderr, result.stderr
 

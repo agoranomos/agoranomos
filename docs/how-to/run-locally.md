@@ -40,7 +40,7 @@ Keep a copy of `.env` in a password manager. It holds the keys without which the
 ## Look around
 
 - In Metabase, open the collection **Agoranomos / Demo** and its dashboard **Ad spend (demo)**: [See the demo](see-the-demo.md) explains what they show.
-- In Airflow, open the DAGs `agoranomos_demo_load` and `agoranomos_demo_transform`, which loaded and built the demo data. To check the executor, unpause the DAG `agoranomos_selfcheck` and trigger it: its one task runs where the executor runs tasks.
+- In Airflow, open the DAGs `agoranomos_demo_history` and `agoranomos_demo_transform`, which loaded the demo data and built the model from it. To check the executor, unpause the DAG `agoranomos_selfcheck` and trigger it: its one task runs where the executor runs tasks.
 
 ## Add your own DAG
 
@@ -74,7 +74,7 @@ git pull
 ./agoranomos init
 ```
 
-`init` names the settings that it adds, with their defaults or new secrets, and changes no value that is set: an `.env` keeps the values it has. Look at them before you start the stack: an update can bring limits, such as the memory limits that every service got in October 2026, whose defaults fit the demo. A default that an update raises does not reach a setting that `.env` already sets to a value, which keeps that value until you raise it (an empty setting takes the default): compare the `*_MEMORY` settings of `.env` with those of `.env.example`. In October 2026 the default of `AIRFLOW_TASKS_MEMORY` went from `1152m` to `1280m`, that of `AIRFLOW_SCHEDULER_MEMORY`, which only the CeleryExecutor variant uses, from `512m` to `640m`, and that of `PLATFORM_DB_MEMORY` from `384m` to `512m`. If your own DAGs, a higher `AIRFLOW_PARALLELISM` or the questions and dashboards of your Metabase need more, raise the limits now ([Give a service more memory](#give-a-service-more-memory)). With its limit, Metabase gives half of `METABASE_MEMORY` to its heap, 1,088 MiB by default; without one, Java gave the heap a quarter of the memory of Docker, about 1.9 GiB on 8 GB. Then start the stack:
+`init` names the settings that it adds, with their defaults or new secrets, and changes no value that is set: an `.env` keeps the values it has. Look at them before you start the stack: an update can bring limits, such as the memory limits that every service got in October 2026, whose defaults fit the demo. A default that an update raises does not reach a setting that `.env` already sets to a value, which keeps that value until you raise it (an empty setting takes the default): compare the `*_MEMORY` settings of `.env` with those of `.env.example`. In October 2026 the default of `AIRFLOW_TASKS_MEMORY` went from `1152m` to `1280m`, that of `AIRFLOW_SCHEDULER_MEMORY`, which only the CeleryExecutor variant uses, from `512m` to `640m`, and that of `PLATFORM_DB_MEMORY` from `384m` to `512m`. On 19 October 2026 the default of `WAREHOUSE_DB_MEMORY` went from `256m` to `384m`, for the transform of the model of advertising statistics, which comes close to 256 MiB, and that of `AIRFLOW_TRIGGERER_MEMORY` came down from `640m` to `512m` to make room for it: set both in an `.env` that has the old values. If your own DAGs, a higher `AIRFLOW_PARALLELISM` or the questions and dashboards of your Metabase need more, raise the limits now ([Give a service more memory](#give-a-service-more-memory)). With its limit, Metabase gives half of `METABASE_MEMORY` to its heap, 1,088 MiB by default; without one, Java gave the heap a quarter of the memory of Docker, about 1.9 GiB on 8 GB. Then start the stack:
 
 ```bash
 ./agoranomos up

@@ -23,7 +23,8 @@ Agoranomos reads its settings from the `.env` file in the root of the checkout. 
 | Setting | Default | What it does |
 |---|---|---|
 | `AGORANOMOS_ADMIN_EMAIL` | `admin@example.com` | The email of the admin account of Metabase and Airflow (user name `admin` in Airflow), created on the first start. Change it before the first start. |
-| `AGORANOMOS_EXTENSIONS_DIR` | `./extensions` | The folder for the deployment's own extensions ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)): its DAGs, and its overrides of the metadata of the marts ([below](#the-metadata-of-the-marts)). Releases never overwrite it. A relative path starts at the checkout, `~/` at your home folder; `preflight` stops on a value that is none of these and not absolute, which Compose would read as the name of a volume. |
+| `AGORANOMOS_EXTENSIONS_DIR` | `./extensions` | The folder for the deployment's own extensions ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)): its DAGs in `dags/`, its overrides of the metadata of the marts in `metadata/` ([below](#the-metadata-of-the-marts)), and the settings of its model in `model/` ([below](#the-settings-of-the-model)). Releases never overwrite it. A relative path starts at the checkout, `~/` at your home folder; `preflight` stops on a value that is none of these and not absolute, which Compose would read as the name of a volume. |
+| `AGORANOMOS_REPORTING_CURRENCY` | `USD` | The currency in which the marts add up money across ad accounts: the columns that end in `_reporting`, such as `spend_reporting`, at the rate of each day ([ADR-0025](../adr/0025-model-advertising-statistics-once.md)). `USD` or `EUR`, the currencies of the exchange rates of the demo, until a source of rates comes with the connectors; `preflight` stops on another. A change takes effect at the next `./agoranomos up`, which gives the services the new value: in the currency of the fields of Metabase at once, and in the marts at the next run of the transform, which nothing starts by itself in this release: trigger `agoranomos_demo_transform` in Airflow after the `up`. Until it has run, Metabase shows the amounts of the old currency with the code of the new one. |
 | `AIRFLOW_PORT` | `8080` | The port of the Airflow UI and API on `127.0.0.1`. |
 | `METABASE_PORT` | `3000` | The port of Metabase on `127.0.0.1`. |
 | `AIRFLOW_PARALLELISM` | `4` | How many Airflow tasks run at the same time at most, in the whole stack. With LocalExecutor, each one is a process in the scheduler container, so more tasks need more memory; when the container reaches its limit, the kernel stops a task before the scheduler on a host whose kernel restricts ptrace with Yama, such as Ubuntu, and can stop the scheduler on one without it, such as Docker Desktop for macOS ([System requirements](system-requirements.md#when-a-service-reaches-its-limit)). With CeleryExecutor it caps all workers together: raise it together with `AIRFLOW_WORKER_CONCURRENCY` or the number of workers. |
@@ -78,11 +79,11 @@ Every service has a memory limit, also for swap, so that the stack stays within 
 
 | Setting | Default | Service |
 |---|---|---|
-| `WAREHOUSE_DB_MEMORY` | `256m` | `warehouse-db`, the warehouse |
+| `WAREHOUSE_DB_MEMORY` | `384m` | `warehouse-db`, the warehouse |
 | `PLATFORM_DB_MEMORY` | `512m` | `platform-db`, the databases of Airflow and Metabase |
 | `AIRFLOW_APISERVER_MEMORY` | `512m` | `airflow-apiserver` |
 | `AIRFLOW_DAG_PROCESSOR_MEMORY` | `768m` | `airflow-dag-processor`, which renders the transform DAG from the manifest of dbt each time that it parses it (below) |
-| `AIRFLOW_TRIGGERER_MEMORY` | `640m` | `airflow-triggerer` |
+| `AIRFLOW_TRIGGERER_MEMORY` | `512m` | `airflow-triggerer` |
 | `AIRFLOW_TASKS_MEMORY` | `1280m` | The service that runs the Airflow tasks: `airflow-scheduler` with LocalExecutor, `airflow-worker` with CeleryExecutor |
 | `METABASE_MEMORY` | `2176m` | `metabase`; half of it is the heap of Java |
 | `PROXY_MEMORY` | `256m` | Server mode only: `proxy`, the Caddy in front of Metabase |
@@ -112,7 +113,7 @@ The two caches from which Cosmos renders the tasks of dbt stay out of Airflow Va
 
 Cosmos does not run `dbt ls` either: it renders the tasks of the transform DAG from the manifest of the dbt project, which the one-shot job `metadata-export` writes on every start into the volume `dbt-manifest`, which the Airflow services mount read-only ([ADR-0027](../adr/0027-load-the-dbt-project-into-cosmos-from-a-manifest.md)). So a change of the dbt project, such as a new model, reaches Airflow at the next `./agoranomos up`, and a dbt project that dbt cannot read stops the start: `./agoranomos logs metadata-export` shows why. The DAG processor parses a DAG file that has not changed again every five minutes, where Airflow's default is every 30 seconds: `compose.yaml` sets `AIRFLOW__DAG_PROCESSOR__MIN_FILE_PROCESS_INTERVAL=300`. A new DAG file in the extensions folder shows up within about a minute, as the DAG processor looks for new files every minute (`AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL=60`), and a change to a DAG file within seconds, since Airflow parses a file again as soon as it has changed since its last parse (Airflow 3.3.2, as of October 2026). To have a DAG parsed sooner, choose **Reparse Dag** at the top of its page in Airflow, or call `PUT /api/v2/parseDagFile/{file_token}` with the `file_token` that `GET /api/v2/dags/{dag_id}` returns.
 
-The tasks of dbt run in the pool `dbt` of Airflow, at most two at a time, whatever `AIRFLOW_PARALLELISM` allows: each is a process of dbt of its own, and they share the memory of the container that runs them: the scheduler with the LocalExecutor, the worker with the CeleryExecutor. `airflow-init` sets the pool on every start, so an edit of its size in the Airflow UI does not last.
+The tasks of dbt, one for each model and each seed, which builds it and runs its tests ([ADR-0028](../adr/0028-build-each-node-of-dbt-with-its-tests-in-one-task.md)), run in the pool `dbt` of Airflow, at most two at a time, whatever `AIRFLOW_PARALLELISM` allows: each is a process of dbt of its own, and they share the memory of the container that runs them: the scheduler with the LocalExecutor, the worker with the CeleryExecutor. `airflow-init` sets the pool on every start, so an edit of its size in the Airflow UI does not last.
 
 A DAG in the extensions folder should not use two features of Cosmos that still keep state in Variables, and that the stack does not use: `SeedRenderingBehavior.WHEN_SEED_CHANGES`, which keeps `cosmos_seed_checksum__…` Variables, and the watcher execution mode, which keeps a backup of its XComs there.
 
@@ -133,14 +134,14 @@ The overrides are in `metadata/overrides.toml` in the extensions folder, which r
 | `note` | Follows the description of the release after an empty line, so that a better description of a later release still reaches Metabase. | 2,000 characters |
 
 ```toml
-[marts.ad_spend_daily.columns.conversions]
+[marts.ad_stats_campaign_daily.columns.conversions]
 display_name = "Purchases"
 note = "In this business, a conversion is a paid order in the online shop."
 ```
 
 Each value is a text in quotes, and the file has at most 256 KiB. A table, a column or a property that dbt does not have, a value that is not a text or is empty, two columns of a table with one display name, and a mistake in the TOML are errors: the job then writes nothing in Metabase and stops with one line that names the entry, and `./agoranomos up` fails. The file is data: the jobs parse it, and nothing in it runs. Metabase OSS shows one display name for each field to everyone, so names in another language are for the whole deployment.
 
-The code always wins. A display name, a description or a semantic type that someone changes in the Metabase UI is set back at the next start, and each change is one line of `./agoranomos logs metabase-init`, and on the first start with the demo also of `./agoranomos logs demo-init`, which applies the metadata of the mart of the demo once the demo pipeline has built it: a first fill, an update from the code, or the revert of an edit, with the value that it replaced. A line is written as soon as its change is made, so the log keeps it also when a later step of the job fails. What the code does not declare, such as whether a field is hidden, stays as it is. `./agoranomos metadata diff` prints what the next start would change, and changes nothing ([Command line](command-line.md#metadata)).
+The code always wins. A display name, a description or a semantic type that someone changes in the Metabase UI is set back at the next start, and each change is one line of `./agoranomos logs metabase-init`, and on the first start with the demo also of `./agoranomos logs demo-init`, which applies the metadata of the marts of the demo once the demo pipeline has built them: a first fill, an update from the code, or the revert of an edit, with the value that it replaced. A line is written as soon as its change is made, so the log keeps it also when a later step of the job fails. What the code does not declare, such as whether a field is hidden, stays as it is. `./agoranomos metadata diff` prints what the next start would change, and changes nothing ([Command line](command-line.md#metadata)).
 
 A mart, or a column that a release adds or renames, reaches the warehouse with the run of dbt that builds it, which can come after a start. Until the next start, Metabase shows it with its own name and type, and with the description of its comment from its next sync; the next start syncs it and applies its metadata. Until dbt has built it, the log of `metabase-init` has a note that says so.
 
@@ -154,6 +155,19 @@ The content that Agoranomos ships in Metabase is in the collection **Agoranomos*
 - **Admins.** Metabase lets an admin change everything, so an admin's edit holds until the next start, which puts it back and logs it. To keep a variant, copy the dashboard, with copies of its questions, into a collection of your own.
 - **What the jobs leave.** They change only the items of the package. Anything else that an admin puts into **Agoranomos** or into the collection of a package stays as it is, and a collection or a question of the same name that someone else made is never taken for one of the package. The one move of v0.1 takes a collection of the old name only with the dashboard that the account of `demo-init` made, and only its own questions of the names of v0.1.
 - **The registry.** The jobs find the items of the package by the entity IDs that Metabase gave them. Metabase 0.64.1 lets no caller of its API choose an entity ID, so the jobs keep the entity ID of each item of the package, by the key of the item in the code, in a registry. It is the file `/var/tmp/agoranomos-content.json` on the volume `metabase-content`, which only `metabase-init` and `demo-init` mount, and `CONTENT_REGISTRY`, which names it, is fixed in `compose.yaml`. The file holds keys, models and entity IDs, and no secret. A file there that is not a registry of the content stops both jobs before they write anything, with one line that says to move it away; the next start then creates the content again next to the old one. A backup does not hold the registry: [Restore on a new server](../how-to/back-up-and-restore.md#restore-on-a-new-server) says what that means.
+
+## The settings of the model
+
+The model of advertising statistics reads two settings files of the deployment, in `model/` in the extensions folder, which releases never change ([The data model](data-model.md)). Both are optional.
+
+| File | What it holds |
+|---|---|
+| `clients.toml` | The clients of the business, `[clients.<id>]` with a `name`, and the ad accounts of each, `[[accounts]]` with `platform`, `account_id` and `client` ([ADR-0024](../adr/0024-one-deployment-is-one-business.md)). An account that the file does not name belongs to the client `unassigned`. |
+| `conversion_actions.toml` | Which conversion actions count in the `conversions` of a campaign: `[[actions]]` with `platform`, `conversion_action_id`, `is_primary` and, optionally, `conversion_category`; an entry sets whether the action is primary, and its category when it names one, in place of the row of the base package for the same action ([ADR-0025](../adr/0025-model-advertising-statistics-once.md)). |
+
+The first task of each run of `agoranomos_demo_transform`, `load_settings`, reads both files, with the clients of the demo from a file of the same form in the base package, checks them and loads them as the `loader` role into `raw_settings`, in place of what was there; the dbt run that follows uses them. So a change takes effect at the next run of the transform, which you can trigger in Airflow, and needs no `./agoranomos up`. The Airflow services mount the folder read-only.
+
+Each file is UTF-8 TOML of at most 256 KiB. A client ID is lower-case letters, digits, `-` and `_`, at most 64 characters, starting with a letter or a digit, and `unassigned` is reserved; a name is one line of at most 100 characters, and an account ID or an action ID at most 200. A key that the file does not allow, an account or an action listed twice, an account of a client that the file does not name, a text over its limit or with control characters, and a mistake in the TOML are errors: the task fails with one line that names the file and the entry, such as `clients.toml: [clients.Acme]: a client ID is lower-case letters, digits, - and _, at most 64 characters`, nothing is written, no task of dbt runs, and the marts keep their data. The line names a key or an ID of the file only where it says where the mistake is, and repeats no value. The files are data: the task parses them, and nothing in them runs.
 
 ## Secrets
 

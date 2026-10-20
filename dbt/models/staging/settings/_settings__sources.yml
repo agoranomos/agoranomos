@@ -1,0 +1,25 @@
+sources:
+  - name: raw_settings
+    description: >-
+      The settings of the model: the clients of the business and the accounts of each, from
+      extensions/model/clients.toml of the deployment and from the file of the clients of the demo
+      in the base package, and the conversion actions that the deployment names in
+      extensions/model/conversion_actions.toml. The first task of the transform checks the files
+      and loads them with dlt before dbt runs.
+    schema: raw_settings
+    # The settings load at the start of every run of the transform: no freshness.
+    config:
+      freshness: null
+    tables:
+      - name: clients
+        description: >-
+          The clients that the settings name, one row for each client and origin. Each load
+          replaces the table.
+      - name: account_clients
+        description: >-
+          The accounts that the settings name, with the client of each, one row for each account
+          and origin. Each load replaces the table.
+      - name: conversion_actions
+        description: >-
+          The conversion actions that the settings of the deployment name, one row each. Each load
+          replaces the table.

@@ -27,11 +27,11 @@ needs_the_demo = pytest.mark.skipif(
 )
 
 EXPORT = "/opt/agoranomos/metadata/metadata.json"
-MART = ("marts", "ad_spend_daily")
+MART = ("marts", "ad_stats_campaign_daily")
 WAREHOUSE_NAME = "Agoranomos warehouse"
 EDIT = "Edited by a stack test"
 OVERRIDE = """# Written by tests/stack/test_metabase_metadata.py, which removes it.
-[marts.ad_spend_daily.columns.conversions]
+[marts.ad_stats_campaign_daily.columns.conversions]
 display_name = "Purchases (stack test)"
 note = "A note of the stack test."
 """
@@ -196,7 +196,8 @@ def test_an_edit_in_metabase_is_reverted_by_the_next_start_and_logged(
         assert not found, f"the output of metabase-init holds the values of {found}"
         assert code == 0, f"metabase-init exited with {code}"
         assert changes == [
-            f"metabase-init: revert of an edit: marts.ad_spend_daily.conversions display_name: "
+            "metabase-init: revert of an edit: "
+            "marts.ad_stats_campaign_daily.conversions display_name: "
             f'"{EDIT}" -> {json.dumps(conversions.display_name, ensure_ascii=False)}'
         ]
     finally:
@@ -208,8 +209,8 @@ def test_an_edit_in_metabase_is_reverted_by_the_next_start_and_logged(
 
 @needs_the_demo
 def test_a_hidden_field_gets_its_metadata_and_stays_hidden(env, metabase_url, session, marts):
-    [spend] = [c for c in marts.effective[MART].columns if c.name == "spend"]
-    field = field_of(metabase_url, session, "spend")
+    [spend] = [c for c in marts.effective[MART].columns if c.name == "spend_reporting"]
+    field = field_of(metabase_url, session, "spend_reporting")
     put_field(
         metabase_url, session, field["id"], {"visibility_type": "hidden", "display_name": EDIT}
     )
@@ -218,10 +219,11 @@ def test_a_hidden_field_gets_its_metadata_and_stays_hidden(env, metabase_url, se
         assert not found, f"the output of metabase-init holds the values of {found}"
         assert code == 0, f"metabase-init exited with {code}"
         assert changes == [
-            f"metabase-init: revert of an edit: marts.ad_spend_daily.spend display_name: "
+            "metabase-init: revert of an edit: "
+            "marts.ad_stats_campaign_daily.spend_reporting display_name: "
             f'"{EDIT}" -> {json.dumps(spend.display_name, ensure_ascii=False)}'
         ]
-        after = field_of(metabase_url, session, "spend")
+        after = field_of(metabase_url, session, "spend_reporting")
         assert after["display_name"] == spend.display_name
         assert after["visibility_type"] == "hidden"
     finally:
@@ -255,6 +257,22 @@ def test_an_override_shows_after_the_next_start_and_its_removal_brings_the_base_
     assert (field["display_name"], field["description"]) == (base.display_name, base.description)
 
 
+def test_metadata_export_renders_the_currency_of_the_setting(env, marts):
+    # dbt renders env_var() in meta when it reads the project (ADR-0025), so the export carries the
+    # code of the setting, which metabase-init gives the field.
+    [column] = [c for c in marts.effective[MART].columns if c.name == "spend_reporting"]
+    assert column.currency == (env.get("AGORANOMOS_REPORTING_CURRENCY") or "USD")
+    assert column.semantic_type == "type/Currency"
+
+
+@needs_the_demo
+def test_the_reporting_currency_comes_from_the_setting(env, metabase_url, session):
+    # The money of the reporting currency is money in Metabase, in the currency of the setting.
+    field = field_of(metabase_url, session, "spend_reporting")
+    shown = (field["semantic_type"], (field.get("settings") or {}).get("currency"))
+    assert shown == ("type/Currency", env.get("AGORANOMOS_REPORTING_CURRENCY") or "USD")
+
+
 def demo_questions(metabase_url: str, session: dict[str, str]) -> dict[str, dict[str, Any]]:
     """The questions of the demo by name, found through the registry of the content."""
     entries = registry()
@@ -281,8 +299,8 @@ def test_the_demo_charts_are_drawn_in_the_color_of_the_project(metabase_url, ses
         for name, card in demo_questions(metabase_url, session).items()
     }
     assert colors == {
-        "Spend by campaign, last 7 days": {"spend": {"color": SERIES_COLOR}},
-        "Spend by day": {"spend": {"color": SERIES_COLOR}},
+        "Spend by campaign, last 7 days": {"spend_reporting": {"color": SERIES_COLOR}},
+        "Spend by day": {"spend_reporting": {"color": SERIES_COLOR}},
         "Spend, last 7 days": None,  # a number has no series
     }, colors
 
@@ -315,7 +333,7 @@ def test_demo_init_puts_back_the_title_of_a_column(env, metabase_url, session, m
     # An admin removes the title of a column, the title of an axis and the color of a chart: the
     # next start puts the settings of display back as the code says, and logs it. The settings go
     # back as they were also when the test fails.
-    [spend] = [c for c in marts.effective[MART].columns if c.name == "spend"]
+    [spend] = [c for c in marts.effective[MART].columns if c.name == "spend_reporting"]
     card = item(metabase_url, session, "demo/spend-by-day")
     card_path = f"{metabase_url}/api/card/{card['id']}"
     before = card["visualization_settings"]
@@ -335,10 +353,10 @@ def test_demo_init_puts_back_the_title_of_a_column(env, metabase_url, session, m
         assert code == 0, f"demo-init exited with {code}"
         settings = item(metabase_url, session, "demo/spend-by-day")["visualization_settings"]
         assert settings.get("graph.y_axis.title_text") == spend.display_name
-        assert settings["column_settings"]['["name","spend"]'] == {
+        assert settings["column_settings"]['["name","spend_reporting"]'] == {
             "column_title": spend.display_name
         }
-        assert settings.get("series_settings") == {"spend": {"color": SERIES_COLOR}}
+        assert settings.get("series_settings") == {"spend_reporting": {"color": SERIES_COLOR}}
         assert settings["graph.dimensions"] == ["report_date"]
         assert changes == [
             "demo-init: revert of an edit: question demo/spend-by-day visualization_settings"

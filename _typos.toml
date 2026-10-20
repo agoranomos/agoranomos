@@ -6,4 +6,10 @@ suche = "suche"
 
 [files]
 # Mermaid as released, minified: its short names are not words (see .pre-commit-config.yaml).
-extend-exclude = ["docs/assets/javascripts/mermaid.min.js"]
+# The seeds of ISO 4217 and of the tz database are those lists as their publishers write them:
+# codes such as JOD and names such as Som are not misspellings, and a fix would change the data.
+extend-exclude = [
+    "docs/assets/javascripts/mermaid.min.js",
+    "dbt/seeds/seed_iso_4217_currencies.csv",
+    "dbt/seeds/seed_iana_time_zones.csv",
+]

@@ -1,0 +1,43 @@
+# The clients of the fictional business of the demo, and the accounts of each (ADR-0024). A
+# deployment keeps its own in extensions/model/clients.toml, in the same form.
+
+[clients.tarnwick]
+name = "Tarnwick Outfitters"
+
+[clients.brindlemoor]
+name = "Brindlemoor Haus"
+
+[[accounts]]
+platform = "demo_search"
+account_id = "4170000011"
+client = "tarnwick"
+
+[[accounts]]
+platform = "demo_search"
+account_id = "4170000012"
+client = "brindlemoor"
+
+[[accounts]]
+platform = "demo_social"
+account_id = "802000000000001"
+client = "tarnwick"
+
+[[accounts]]
+platform = "demo_social"
+account_id = "802000000000002"
+client = "brindlemoor"
+
+[[accounts]]
+platform = "demo_video"
+account_id = "7300000000000000001"
+client = "tarnwick"
+
+[[accounts]]
+platform = "demo_web"
+account_id = "390000001"
+client = "tarnwick"
+
+[[accounts]]
+platform = "demo_web"
+account_id = "390000002"
+client = "brindlemoor"

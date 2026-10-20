@@ -51,6 +51,9 @@ MART_COLUMNS = (
     "clicks",
     "spend",
     "conversions",
+    "platform",
+    "reporting_currency",
+    "spend_reporting",
 )
 
 
@@ -98,9 +101,9 @@ EXPORT = {
     "models": [
         {
             "schema": "marts",
-            "name": "ad_spend_daily",
+            "name": "ad_stats_campaign_daily",
             "description": "Advertising spend and results by day and campaign.",
-            "meta": {"metabase": {"display_name": "Ad Spend by Day"}},
+            "meta": {"metabase": {"display_name": "Ad Statistics by Campaign and Day"}},
             "columns": [
                 column("report_date", "Report Date", None),
                 column("account_id", "Account ID", "type/Category"),
@@ -111,11 +114,19 @@ EXPORT = {
                 column("clicks", "Clicks", "type/Quantity"),
                 column("spend", "Spend", "type/Currency", currency="USD"),
                 column("conversions", "Conversions", None),
+                column("platform", "Platform Code", "type/Category"),
+                column("reporting_currency", "Reporting Currency", "type/Category"),
+                column(
+                    "spend_reporting",
+                    "Spend in Reporting Currency",
+                    "type/Currency",
+                    currency="USD",
+                ),
             ],
         },
         {
             "schema": "staging",
-            "name": "stg_demo__ad_stats_daily",
+            "name": "stg_demo_search__campaign_stats",
             "description": "The demo statistics of ads.",
             "meta": {},
             "columns": [{"name": "spend", "description": "The spend of a row.", "meta": {}}],
@@ -123,9 +134,9 @@ EXPORT = {
     ],
     "sources": [
         {
-            "source": "raw_demo",
-            "schema": "raw_demo",
-            "name": "ad_stats_daily",
+            "source": "raw_demo_search",
+            "schema": "raw_demo_search",
+            "name": "campaign_stats",
             "description": "The demo statistics as dlt loads them.",
             "meta": {},
             "columns": [],
@@ -640,8 +651,8 @@ class FakeMetabase:
             self.mart = {
                 "id": first,
                 "schema": "marts",
-                "name": "ad_spend_daily",
-                "display_name": humanize("ad_spend_daily"),
+                "name": "ad_stats_campaign_daily",
+                "display_name": humanize("ad_stats_campaign_daily"),
                 "description": None,
                 "visibility_type": None,
                 "active": True,
@@ -793,7 +804,7 @@ class FakeMetabase:
         of the tables of the marts in the warehouse, one row a column."""
         native = (body or {}).get("native") or {}
         if native.get("query") == WAREHOUSE_COLUMNS and self.is_warehouse(body.get("database")):
-            mart = [["marts", "ad_spend_daily", name] for name in MART_COLUMNS]
+            mart = [["marts", "ad_stats_campaign_daily", name] for name in MART_COLUMNS]
             rows = mart if self.mart_in_warehouse else []
             return 202, {"status": "completed", "data": {"rows": rows}}
         return 202, {"status": "failed", "error": "this stand-in does not know the query"}

@@ -32,6 +32,17 @@ def unpause(airflow_url, token, dag_id):
     assert status == 200, body
 
 
+def pause(airflow_url, token, dag_id):
+    status, body = api(airflow_url, token, "PATCH", f"/api/v2/dags/{dag_id}", {"is_paused": True})
+    assert status == 200, body
+
+
+def is_paused(airflow_url, token, dag_id):
+    status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}")
+    assert status == 200, body
+    return body["is_paused"]
+
+
 def trigger(airflow_url, token, dag_id):
     """Start a manual run of a DAG and return it, without waiting for it."""
     status, run = api(
@@ -85,13 +96,17 @@ def run_count(airflow_url, token, dag_id, states=(), run_types=()):
     return body["total_entries"]
 
 
-def is_busy(airflow_url, token, dag_id):
-    """Whether a DAG has a run queued or running, or an asset event that waits for a run."""
+def is_busy(airflow_url, token, dag_id, assets=1):
+    """Whether a DAG has a run queued or running, or a run that Airflow is about to create: an
+    event queued for each of the assets of its schedule, as many as assets says. The events of some
+    of its assets, as a history that failed half way leaves them, start no run until the others
+    come, so they do not count. The list of queued events has no pages: it holds one event at most
+    for each asset."""
     if run_count(airflow_url, token, dag_id, states=("queued", "running")):
         return True
     status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}/assets/queuedEvents")
     assert status == 200, body
-    return body["total_entries"] > 0
+    return body["total_entries"] >= assets
 
 
 def downstream_task_ids(airflow_url, token, dag_id):
@@ -103,10 +118,26 @@ def downstream_task_ids(airflow_url, token, dag_id):
 
 
 def task_instances(airflow_url, token, run):
+    """Every task instance of a run. The API gives 50 to a page unless it is told otherwise, and
+    the transform has more tasks than that: so the helper asks for pages as large as the API allows
+    and reads them until it has as many instances as total_entries counts, each once."""
     path = f"/api/v2/dags/{run['dag_id']}/dagRuns/{run['dag_run_id']}/taskInstances"
-    status, body = api(airflow_url, token, "GET", path)
-    assert status == 200, body
-    return body["task_instances"]
+    found = {}
+    while True:
+        status, body = api(
+            airflow_url, token, "GET", f"{path}?limit={PER_PAGE}&offset={len(found)}"
+        )
+        assert status == 200, body
+        page = body["task_instances"]
+        found.update(((i["task_id"], i.get("map_index", -1)), i) for i in page)
+        if not page or len(found) >= body["total_entries"]:
+            break
+    # pytest rewrites the assertions of test modules only, so this one carries its own message.
+    assert len(found) == body["total_entries"], (
+        f"the run {run['dag_run_id']} has {body['total_entries']} task instances, and the pages "
+        f"gave {len(found)} different ones"
+    )
+    return list(found.values())
 
 
 def task_log(airflow_url, token, instance):

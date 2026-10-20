@@ -1,0 +1,20 @@
+sources:
+  - name: raw_demo_web
+    description: >-
+      The data of demo_web, a fictional platform of web analytics in the shape of the GA4 Data API
+      v1beta and the GA4 Admin API v1beta, which the DAG agoranomos_demo_history loads with dlt:
+      its responses as dlt normalizes them, every value of a report as text.
+    schema: raw_demo_web
+    # The demo has no daily load in this release: no freshness.
+    config:
+      freshness: null
+    tables:
+      - name: properties
+        description: >-
+          The properties of demo_web, one row each, with the time zone of their days and the
+          currency of their revenue; each load replaces them.
+      - name: report_sessions_daily
+        description: >-
+          The sessions of the properties of demo_web, one row for each property, day, source,
+          medium, campaign and default channel group with any session, the day as YYYYMMDD in the
+          time zone of the property. Each load replaces the days of each property that it covers.

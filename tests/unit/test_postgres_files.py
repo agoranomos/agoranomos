@@ -346,3 +346,47 @@ def test_each_demo_platform_has_its_schema_and_its_staging_schema(platform):
     ):
         assert runs(text, statement), statement
     assert not runs(text, f"GRANT USAGE ON SCHEMA {staging}")
+
+
+def test_the_settings_of_the_model_have_a_schema_of_loader_that_only_transformer_reads():
+    # The first task of the transform loads the settings of the deployment (ADR-0024) with dlt into
+    # raw_settings as loader, replacing each table in place, so dlt needs no staging schema there;
+    # transformer reads them for staging, and metabase_reader does not.
+    text = normalized("warehouse.sql")
+    for statement in (
+        "CREATE SCHEMA IF NOT EXISTS raw_settings AUTHORIZATION loader;",
+        "ALTER SCHEMA raw_settings OWNER TO loader;",
+        "GRANT USAGE ON SCHEMA raw_settings TO transformer;",
+        "GRANT SELECT ON ALL TABLES IN SCHEMA raw_settings TO transformer;",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_settings "
+        "GRANT SELECT ON TABLES TO transformer;",
+    ):
+        assert runs(text, statement), statement
+    assert not runs(text, "CREATE SCHEMA IF NOT EXISTS raw_settings_staging")
+    granted = re.findall(r"\bGRANT [^;]*\braw_settings\b[^;]*;", text, re.IGNORECASE)
+    assert granted, "warehouse.sql grants nothing on raw_settings"
+    assert all(grant.endswith("TO transformer;") for grant in granted), granted
+
+
+# The statements that remove the demo of v0.1 from a warehouse of that release (ADR-0025).
+# The mart and the view go only when they are of the kind that v0.1 made: DROP TABLE and DROP VIEW
+# fail on a relation of the other kind, also with IF EXISTS.
+V01_REMOVALS = (
+    "SELECT 'DROP TABLE marts.ad_spend_daily CASCADE' WHERE EXISTS (SELECT FROM pg_tables "
+    "WHERE schemaname = 'marts' AND tablename = 'ad_spend_daily') \\gexec",
+    "SELECT 'DROP VIEW staging.stg_demo__ad_stats_daily CASCADE' WHERE EXISTS ( SELECT FROM "
+    "pg_views WHERE schemaname = 'staging' AND viewname = 'stg_demo__ad_stats_daily' ) \\gexec",
+    "DROP SCHEMA IF EXISTS raw_demo_staging CASCADE;",
+    "DROP SCHEMA IF EXISTS raw_demo CASCADE;",
+)
+
+
+def test_warehouse_sql_removes_the_demo_of_v0_1_and_creates_it_no_more():
+    text = normalized("warehouse.sql")
+    for statement in V01_REMOVALS:
+        assert runs(text, statement), statement
+    rest = text.replace("DROP SCHEMA IF EXISTS raw_demo CASCADE;", "")
+    assert not re.search(r"\braw_demo\b(?!_)", rest), "warehouse.sql still names raw_demo"
+    # The tables of v0.1 are in staging and marts: they are dropped after those schemas exist.
+    created = "CREATE SCHEMA IF NOT EXISTS marts AUTHORIZATION transformer;"
+    assert text.index(created) < text.index(V01_REMOVALS[0])

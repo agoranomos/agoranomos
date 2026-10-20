@@ -915,8 +915,8 @@ def test_every_start_applies_the_metadata_of_the_marts(metabase, capsys):
     assert mi.main(env_for(metabase)) == 0
     lines = capsys.readouterr().out.splitlines()
     assert lines[0] == (
-        'metabase-init: first fill: marts.ad_spend_daily display_name: "Ad Spend Daily" -> '
-        '"Ad Spend by Day"'
+        'metabase-init: first fill: marts.ad_stats_campaign_daily display_name: "Ad Stats Campaign '
+        'Daily" -> "Ad Statistics by Campaign and Day"'
     )
     assert lines[-1].startswith("metabase-init: the admin account is created")
     assert metabase.field("spend")["semantic_type"] == "type/Currency"
@@ -927,19 +927,21 @@ def test_a_first_start_before_the_mart_exists_notes_it_and_waits_for_nothing(met
     assert mi.main(env_for(metabase)) == 0
     lines = capsys.readouterr().out.splitlines()
     assert lines[0] == (
-        "metabase-init: marts.ad_spend_daily: not in the warehouse yet; the start after the dbt "
-        "run that builds it applies its metadata"
+        "metabase-init: marts.ad_stats_campaign_daily: not in the warehouse yet; the start after "
+        "the dbt run that builds it applies its metadata"
     )
     assert ("POST", "/api/database/1/sync_schema") not in metabase.calls
 
 
 def test_a_mistake_in_the_overrides_stops_the_job_before_it_writes(metabase, tmp_path, capsys):
-    metabase.files = metadata_env(tmp_path, overrides="[marts.ad_spend_daily]\nlabel = 'X'\n")
+    metabase.files = metadata_env(
+        tmp_path, overrides="[marts.ad_stats_campaign_daily]\nlabel = 'X'\n"
+    )
     assert mi.main(env_for(metabase)) == 1
     output = capsys.readouterr()
     assert output.out == ""
     assert output.err.splitlines() == [
-        "metabase-init: overrides.toml: marts.ad_spend_daily.label: unknown property; use "
+        "metabase-init: overrides.toml: marts.ad_stats_campaign_daily.label: unknown property; use "
         "display_name, description, note"
     ]
     assert metabase.calls == []
@@ -960,7 +962,7 @@ def test_the_dry_run_prints_the_plan_and_writes_nothing(metabase, capsys):
     # diff turns it into the 1 of its own.
     assert mi.main(env_for(metabase), ["diff"]) == 3
     assert capsys.readouterr().out.splitlines() == [
-        'revert of an edit: marts.ad_spend_daily.conversions display_name: "Leads" -> '
+        'revert of an edit: marts.ad_stats_campaign_daily.conversions display_name: "Leads" -> '
         '"Conversions"',
         "1 change to apply: run ./agoranomos up",
     ]
@@ -984,8 +986,8 @@ def test_the_dry_run_notes_a_mart_that_the_warehouse_does_not_have(metabase, cap
     capsys.readouterr()
     assert mi.main(env_for(metabase), ["diff"]) == 0
     assert capsys.readouterr().out.splitlines() == [
-        "note: marts.ad_spend_daily: not in the warehouse yet; the start after the dbt run that "
-        "builds it applies its metadata",
+        "note: marts.ad_stats_campaign_daily: not in the warehouse yet; the start after the dbt "
+        "run that builds it applies its metadata",
         "Metabase shows the metadata of the code: nothing to change",
     ]
 
@@ -1000,8 +1002,8 @@ def test_the_dry_run_counts_a_mart_that_a_sync_would_show_as_a_change(metabase, 
     writes = len(metabase.bodies)
     assert mi.main(env_for(metabase), ["diff"]) == 3
     assert capsys.readouterr().out.splitlines() == [
-        "would sync: marts.ad_spend_daily: the warehouse has it, and Metabase does not show it "
-        "with its columns yet; up syncs it and applies its metadata",
+        "would sync: marts.ad_stats_campaign_daily: the warehouse has it, and Metabase does not "
+        "show it with its columns yet; up syncs it and applies its metadata",
         "1 change to apply: run ./agoranomos up",
     ]
     assert [path for _, path, _ in metabase.bodies[writes:]] == ["/api/session", "/api/dataset"]
@@ -1023,8 +1025,8 @@ def test_the_dry_run_counts_a_mart_that_metabase_shows_without_a_column_as_a_cha
     writes = len(metabase.bodies)
     assert mi.main(env_for(metabase), ["diff"]) == 3
     assert capsys.readouterr().out.splitlines() == [
-        "would sync: marts.ad_spend_daily: the warehouse has it, and Metabase does not show it "
-        "with its columns yet; up syncs it and applies its metadata",
+        "would sync: marts.ad_stats_campaign_daily: the warehouse has it, and Metabase does not "
+        "show it with its columns yet; up syncs it and applies its metadata",
         "1 change to apply: run ./agoranomos up",
     ]
     assert [path for _, path, _ in metabase.bodies[writes:]] == ["/api/session", "/api/dataset"]
@@ -1109,9 +1111,10 @@ def edited_in_the_ui(metabase: FakeMetabase) -> None:
 
 # The lines of the two writes that the job makes before the write of spend fails.
 REVERTED = [
-    'metabase-init: revert of an edit: marts.ad_spend_daily display_name: "Edited table" -> '
-    '"Ad Spend by Day"',
-    "metabase-init: revert of an edit: marts.ad_spend_daily.account_id display_name: "
+    'metabase-init: revert of an edit: marts.ad_stats_campaign_daily display_name: "Edited table" '
+    "-> "
+    '"Ad Statistics by Campaign and Day"',
+    "metabase-init: revert of an edit: marts.ad_stats_campaign_daily.account_id display_name: "
     '"Edited account" -> "Account ID"',
 ]
 
@@ -1155,8 +1158,8 @@ def test_the_lines_reach_the_log_of_a_process_before_its_error(metabase):
 @pytest.mark.parametrize(
     "row",
     [
-        pytest.param(["marts", "ad_spend_daily"], id="short"),
-        pytest.param(["marts", "ad_spend_daily", "spend", "x"], id="long"),
+        pytest.param(["marts", "ad_stats_campaign_daily"], id="short"),
+        pytest.param(["marts", "ad_stats_campaign_daily", "spend", "x"], id="long"),
         pytest.param("marts", id="text"),
     ],
 )

@@ -17,7 +17,6 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -105,16 +104,16 @@ def test_the_checked_warehouse_helper_returns_the_output_without_the_blanks(monk
 
 
 def test_the_checked_warehouse_helper_fails_with_the_error_of_psql(monkeypatch):
-    error = 'ERROR:  relation "raw_demo.missing" does not exist'
+    error = 'ERROR:  relation "raw_demo_search.missing" does not exist'
     answering_warehouse(monkeypatch, 1, stderr=f"{error}\n")
     with pytest.raises(AssertionError) as raised:
-        stack_helpers.warehouse_output({}, "SELECT 1 FROM raw_demo.missing")
+        stack_helpers.warehouse_output({}, "SELECT 1 FROM raw_demo_search.missing")
     assert error in str(raised.value)
 
 
-def test_totals_reads_the_count_and_the_sums_in_the_types_of_the_generator(monkeypatch):
+def test_totals_reads_the_count_and_the_sums_in_their_types(monkeypatch):
     statements = answering_warehouse(monkeypatch, 0, stdout="168|7388494|81459|53390.56|4054.41\n")
-    found = stack_helpers.totals({}, "raw_demo.ad_stats_daily", until=date(2026, 9, 27))
+    found = stack_helpers.totals({}, "marts.ad_stats_campaign_daily")
     assert found == {
         "rows": 168,
         "impressions": 7_388_494,
@@ -124,7 +123,7 @@ def test_totals_reads_the_count_and_the_sums_in_the_types_of_the_generator(monke
     }
     assert [type(value) for value in found.values()] == [int, int, int, Decimal, Decimal]
     [(sql, role)] = statements
-    assert sql.endswith(" FROM raw_demo.ad_stats_daily WHERE date <= DATE '2026-09-27'"), sql
+    assert sql.endswith(" FROM marts.ad_stats_campaign_daily"), sql
     assert role == "postgres"
 
 
@@ -132,7 +131,7 @@ def test_totals_of_an_empty_table_are_zero(monkeypatch):
     # The sums of no rows are NULL in SQL: totals() reads them as 0, so that a comparison fails on
     # the numbers, and not on a value that it cannot parse.
     statements = answering_warehouse(monkeypatch, 0, stdout="0|0|0|0|0\n")
-    assert set(stack_helpers.totals({}, "marts.ad_spend_daily").values()) == {0}
+    assert set(stack_helpers.totals({}, "marts.ad_stats_campaign_daily").values()) == {0}
     [(sql, _)] = statements
     assert sql.count("coalesce(sum(") == 4, sql
 
@@ -149,28 +148,18 @@ def answering_warehouse_output(monkeypatch, output):
     return statements
 
 
-def test_totals_until_a_day_keeps_the_rows_up_to_that_day(monkeypatch):
-    statements = answering_warehouse_output(monkeypatch, "1|2|3|4.00|5.00")
-    stack_helpers.totals({}, "raw_demo.ad_stats_daily", until=date(2026, 9, 27))
-    stack_helpers.totals({}, "marts.ad_spend_daily")
-    assert [sql.removeprefix(stack_helpers.TOTALS) for sql in statements] == [
-        " raw_demo.ad_stats_daily WHERE date <= DATE '2026-09-27'",
-        " marts.ad_spend_daily",
-    ]
-
-
 @pytest.mark.parametrize(
     "table",
     [
-        pytest.param("ad_stats_daily", id="no-schema"),
-        pytest.param("raw_demo.ad_stats_daily.extra", id="three-parts"),
-        pytest.param("raw_demo.ad_stats_daily WHERE 1 = 1", id="more-sql"),
-        pytest.param("raw_demo.ad_stats_daily; DROP TABLE raw_demo.x", id="another-statement"),
-        pytest.param("raw_demo.ad_stats_daily\n", id="a-line-break-at-the-end"),
-        pytest.param('"raw_demo".ad_stats_daily', id="quoted"),
-        pytest.param("Raw_Demo.ad_stats_daily", id="capitals"),
-        pytest.param("raw_demo.ad-stats", id="a-dash"),
-        pytest.param("1raw.ad_stats_daily", id="a-digit-first"),
+        pytest.param("ad_stats_campaign_daily", id="no-schema"),
+        pytest.param("marts.ad_stats_campaign_daily.extra", id="three-parts"),
+        pytest.param("marts.ad_stats_campaign_daily WHERE 1 = 1", id="more-sql"),
+        pytest.param("marts.ad_stats_campaign_daily; DROP TABLE marts.x", id="another-statement"),
+        pytest.param("marts.ad_stats_campaign_daily\n", id="a-line-break-at-the-end"),
+        pytest.param('"marts".ad_stats_campaign_daily', id="quoted"),
+        pytest.param("Marts.ad_stats_campaign_daily", id="capitals"),
+        pytest.param("marts.ad-stats", id="a-dash"),
+        pytest.param("1marts.ad_stats_campaign_daily", id="a-digit-first"),
         pytest.param("", id="empty"),
     ],
 )
@@ -329,7 +318,7 @@ def test_the_log_helper_reads_every_try_and_each_entry_whole(monkeypatch):
 
 
 URL = "http://127.0.0.1:8080"
-ASSET = "postgres://warehouse-db:5432/warehouse/raw_demo/ad_stats_daily"
+ASSET = "postgres://warehouse-db:5432/warehouse/raw_demo_search/campaign_stats"
 
 
 def fake_asset_events_api(monkeypatch, events, assets=((7, True),)):
@@ -535,22 +524,55 @@ def test_the_run_count_counts_the_runs_of_the_states_and_types_that_it_names(mon
 
 
 @pytest.mark.parametrize(
-    ("runs", "queued_events", "busy"),
+    ("runs", "queued_events", "assets", "busy"),
     [
-        pytest.param(["success"] * 120 + ["running"], 0, True, id="the-newest-runs"),
-        pytest.param(["queued"] + ["success"] * 120, 0, True, id="an-old-queued-run"),
-        pytest.param(["success", "failed"] * 60, 1, True, id="an-event-waits"),
-        pytest.param(["success", "failed"] * 60, 0, False, id="idle"),
+        pytest.param(["success"] * 120 + ["running"], 0, 1, True, id="the-newest-runs"),
+        pytest.param(["queued"] + ["success"] * 120, 0, 1, True, id="an-old-queued-run"),
+        pytest.param(["success", "failed"] * 60, 1, 1, True, id="an-event-waits"),
+        pytest.param(["success", "failed"] * 60, 0, 1, False, id="idle"),
+        # A DAG of five assets: the events of all five make a run, and those of some start none.
+        pytest.param(["success", "failed"] * 60, 5, 5, True, id="the-events-of-every-asset"),
+        pytest.param(["success", "failed"] * 60, 2, 5, False, id="the-events-of-some-assets"),
+        pytest.param(["running"], 2, 5, True, id="a-run-and-the-events-of-some-assets"),
     ],
 )
-def test_a_dag_is_busy_with_a_run_queued_or_running_or_an_event_that_waits(
-    monkeypatch, runs, queued_events, busy
+def test_a_dag_is_busy_with_a_run_queued_or_running_or_the_events_of_its_assets(
+    monkeypatch, runs, queued_events, assets, busy
 ):
     asked = fake_runs_api(monkeypatch, runs, queued_events)
-    assert airflow_api.is_busy(URL, "a-token", "a_dag") is busy
+    assert airflow_api.is_busy(URL, "a-token", "a_dag", assets=assets) is busy
     for path, query in asked:
         if path.endswith("/dagRuns"):
             assert (query["order_by"], query["limit"]) == (["-run_after"], ["1"]), query
+
+
+def fake_task_instances_api(monkeypatch, count):
+    """Make the API of Airflow answer for the task instances of a run as Airflow 3.3.2 does: 50 to
+    a page unless limit says otherwise, at most 100, from offset, with the number of all of them in
+    total_entries. It records the queries."""
+    asked = []
+    instances = [{"task_id": f"dbt.model_{n:03d}.run", "map_index": -1} for n in range(count)]
+
+    def fake_http_json(method, url, body=None, headers=None, timeout=30):
+        parts = urllib.parse.urlsplit(url)
+        query = dict(urllib.parse.parse_qsl(parts.query))
+        assert (method, parts.path) == ("GET", "/api/v2/dags/a_dag/dagRuns/run_1/taskInstances")
+        asked.append(query)
+        start = int(query.get("offset", 0))
+        page = instances[start : start + min(int(query.get("limit", 50)), 100)]
+        return 200, {"task_instances": page, "total_entries": len(instances)}
+
+    monkeypatch.setattr(airflow_api, "http_json", fake_http_json)
+    return asked
+
+
+@pytest.mark.parametrize("count", [0, 3, 82, 250])
+def test_every_task_instance_of_a_run_is_read_whatever_the_pages(monkeypatch, count):
+    # The transform has more tasks than the 50 of a page by default.
+    asked = fake_task_instances_api(monkeypatch, count)
+    found = airflow_api.task_instances(URL, "a-token", {"dag_id": "a_dag", "dag_run_id": "run_1"})
+    assert [i["task_id"] for i in found] == [f"dbt.model_{n:03d}.run" for n in range(count)]
+    assert all(query["limit"] == "100" for query in asked), asked
 
 
 # The value of every Variable that the fake API below holds: a Variable can hold a secret.

@@ -185,6 +185,40 @@ def test_airflow_services_mount_the_dag_folders_and_the_dbt_project_read_only(va
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
+def test_airflow_services_mount_the_settings_of_the_model_read_only(variant):
+    # The first task of the transform reads extensions/model/*.toml (ADR-0024); no Airflow service
+    # can change them, and no other service but the backups, which copy the whole extensions
+    # folder, mounts them.
+    folder = os.path.join(extensions_folder(), "model")
+    target = "/opt/agoranomos/extensions/model"
+    for name, service in airflow_services(variant).items():
+        mounts = {v["target"]: v for v in service["volumes"]}
+        found = (mounts[target]["source"], mounts[target].get("read_only"))
+        assert found == (folder, True), name
+    holders = {
+        name
+        for name, service in rendered(variant).items()
+        for mount in service.get("volumes") or []
+        if mount.get("source") in (folder, extensions_folder())
+    }
+    assert holders == airflow_names(variant) | {"backup"}
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_dbt_gets_the_reporting_currency_wherever_it_runs_and_no_other_service_does(env, variant):
+    # ADR-0025: dbt reads the reporting currency with env_var() in the tasks and in the DAG
+    # processor of every Airflow service, and in metadata-export, which writes it into the currency
+    # of the fields of Metabase. It is no secret, so a failed assertion may print it.
+    wanted = env.get("AGORANOMOS_REPORTING_CURRENCY") or "USD"
+    holders = {
+        name: service["environment"]["AGORANOMOS_REPORTING_CURRENCY"]
+        for name, service in rendered(variant).items()
+        if "AGORANOMOS_REPORTING_CURRENCY" in (service.get("environment") or {})
+    }
+    assert holders == dict.fromkeys(airflow_names(variant) | {"metadata-export"}, wanted)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
 def test_only_the_api_server_publishes_a_port_of_airflow(variant):
     for name, service in airflow_services(variant).items():
         published = [port["published"] for port in service.get("ports", [])]

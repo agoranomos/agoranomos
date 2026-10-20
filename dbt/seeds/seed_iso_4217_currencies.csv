@@ -1,0 +1,179 @@
+currency_code,currency_name,minor_unit,numeric_code
+AED,UAE Dirham,2,784
+AFN,Afghani,2,971
+ALL,Lek,2,008
+AMD,Armenian Dram,2,051
+AOA,Kwanza,2,973
+ARS,Argentine Peso,2,032
+AUD,Australian Dollar,2,036
+AWG,Aruban Florin,2,533
+AZN,Azerbaijan Manat,2,944
+BAM,Convertible Mark,2,977
+BBD,Barbados Dollar,2,052
+BDT,Taka,2,050
+BHD,Bahraini Dinar,3,048
+BIF,Burundi Franc,0,108
+BMD,Bermudian Dollar,2,060
+BND,Brunei Dollar,2,096
+BOB,Boliviano,2,068
+BOV,Mvdol,2,984
+BRL,Brazilian Real,2,986
+BSD,Bahamian Dollar,2,044
+BTN,Ngultrum,2,064
+BWP,Pula,2,072
+BYN,Belarusian Ruble,2,933
+BZD,Belize Dollar,2,084
+CAD,Canadian Dollar,2,124
+CDF,Congolese Franc,2,976
+CHE,WIR Euro,2,947
+CHF,Swiss Franc,2,756
+CHW,WIR Franc,2,948
+CLF,Unidad de Fomento,4,990
+CLP,Chilean Peso,0,152
+CNY,Yuan Renminbi,2,156
+COP,Colombian Peso,2,170
+COU,Unidad de Valor Real,2,970
+CRC,Costa Rican Colon,2,188
+CUP,Cuban Peso,2,192
+CVE,Cabo Verde Escudo,2,132
+CZK,Czech Koruna,2,203
+DJF,Djibouti Franc,0,262
+DKK,Danish Krone,2,208
+DOP,Dominican Peso,2,214
+DZD,Algerian Dinar,2,012
+EGP,Egyptian Pound,2,818
+ERN,Nakfa,2,232
+ETB,Ethiopian Birr,2,230
+EUR,Euro,2,978
+FJD,Fiji Dollar,2,242
+FKP,Falkland Islands Pound,2,238
+GBP,Pound Sterling,2,826
+GEL,Lari,2,981
+GHS,Ghana Cedi,2,936
+GIP,Gibraltar Pound,2,292
+GMD,Dalasi,2,270
+GNF,Guinean Franc,0,324
+GTQ,Quetzal,2,320
+GYD,Guyana Dollar,2,328
+HKD,Hong Kong Dollar,2,344
+HNL,Lempira,2,340
+HTG,Gourde,2,332
+HUF,Forint,2,348
+IDR,Rupiah,2,360
+ILS,New Israeli Sheqel,2,376
+INR,Indian Rupee,2,356
+IQD,Iraqi Dinar,3,368
+IRR,Iranian Rial,2,364
+ISK,Iceland Krona,0,352
+JMD,Jamaican Dollar,2,388
+JOD,Jordanian Dinar,3,400
+JPY,Yen,0,392
+KES,Kenyan Shilling,2,404
+KGS,Som,2,417
+KHR,Riel,2,116
+KMF,Comorian Franc ,0,174
+KPW,North Korean Won,2,408
+KRW,Won,0,410
+KWD,Kuwaiti Dinar,3,414
+KYD,Cayman Islands Dollar,2,136
+KZT,Tenge,2,398
+LAK,Lao Kip,2,418
+LBP,Lebanese Pound,2,422
+LKR,Sri Lanka Rupee,2,144
+LRD,Liberian Dollar,2,430
+LSL,Loti,2,426
+LYD,Libyan Dinar,3,434
+MAD,Moroccan Dirham,2,504
+MDL,Moldovan Leu,2,498
+MGA,Malagasy Ariary,2,969
+MKD,Denar,2,807
+MMK,Kyat,2,104
+MNT,Tugrik,2,496
+MOP,Pataca,2,446
+MRU,Ouguiya,2,929
+MUR,Mauritius Rupee,2,480
+MVR,Rufiyaa,2,462
+MWK,Malawi Kwacha,2,454
+MXN,Mexican Peso,2,484
+MXV,Mexican Unidad de Inversion (UDI),2,979
+MYR,Malaysian Ringgit,2,458
+MZN,Mozambique Metical,2,943
+NAD,Namibia Dollar,2,516
+NGN,Naira,2,566
+NIO,Cordoba Oro,2,558
+NOK,Norwegian Krone,2,578
+NPR,Nepalese Rupee,2,524
+NZD,New Zealand Dollar,2,554
+OMR,Rial Omani,3,512
+PAB,Balboa,2,590
+PEN,Sol,2,604
+PGK,Kina,2,598
+PHP,Philippine Peso,2,608
+PKR,Pakistan Rupee,2,586
+PLN,Zloty,2,985
+PYG,Guarani,0,600
+QAR,Qatari Rial,2,634
+RON,Romanian Leu,2,946
+RSD,Serbian Dinar,2,941
+RUB,Russian Ruble,2,643
+RWF,Rwanda Franc,0,646
+SAR,Saudi Riyal,2,682
+SBD,Solomon Islands Dollar,2,090
+SCR,Seychelles Rupee,2,690
+SDG,Sudanese Pound,2,938
+SEK,Swedish Krona,2,752
+SGD,Singapore Dollar,2,702
+SHP,Saint Helena Pound,2,654
+SLE,Leone,2,925
+SOS,Somali Shilling,2,706
+SRD,Surinam Dollar,2,968
+SSP,South Sudanese Pound,2,728
+STN,Dobra,2,930
+SVC,El Salvador Colon,2,222
+SYP,Syrian Pound,2,760
+SZL,Lilangeni,2,748
+THB,Baht,2,764
+TJS,Somoni,2,972
+TMT,Turkmenistan New Manat,2,934
+TND,Tunisian Dinar,3,788
+TOP,Pa’anga,2,776
+TRY,Turkish Lira,2,949
+TTD,Trinidad and Tobago Dollar,2,780
+TWD,New Taiwan Dollar,2,901
+TZS,Tanzanian Shilling,2,834
+UAH,Hryvnia,2,980
+UGX,Uganda Shilling,0,800
+USD,US Dollar,2,840
+USN,US Dollar (Next day),2,997
+UYI,Uruguay Peso en Unidades Indexadas (UI),0,940
+UYU,Peso Uruguayo,2,858
+UYW,Unidad Previsional,4,927
+UZS,Uzbekistan Sum,2,860
+VED,Bolívar Soberano,2,926
+VES,Bolívar Soberano,2,928
+VND,Dong,0,704
+VUV,Vatu,0,548
+WST,Tala,2,882
+XAD,Arab Accounting Dinar,2,396
+XAF,CFA Franc BEAC,0,950
+XAG,Silver,,961
+XAU,Gold,,959
+XBA,Bond Markets Unit European Composite Unit (EURCO),,955
+XBB,Bond Markets Unit European Monetary Unit (E.M.U.-6),,956
+XBC,Bond Markets Unit European Unit of Account 9 (E.U.A.-9),,957
+XBD,Bond Markets Unit European Unit of Account 17 (E.U.A.-17),,958
+XCD,East Caribbean Dollar,2,951
+XCG,Caribbean Guilder,2,532
+XDR,SDR (Special Drawing Right),,960
+XOF,CFA Franc BCEAO,0,952
+XPD,Palladium,,964
+XPF,CFP Franc,0,953
+XPT,Platinum,,962
+XSU,Sucre,,994
+XTS,Codes specifically reserved for testing purposes,,963
+XUA,ADB Unit of Account,,965
+XXX,The codes assigned for transactions where no currency is involved,,999
+YER,Yemeni Rial,2,886
+ZAR,Rand,2,710
+ZMW,Zambian Kwacha,2,967
+ZWG,Zimbabwe Gold,2,924

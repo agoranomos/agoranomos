@@ -61,9 +61,9 @@ Data moves in one direction, from ad platforms to dashboards and AI clients, and
 
 | Step | Tool | What it does |
 |---|---|---|
-| **Load** | [dlt](https://dlthub.com/) | Pulls data from ad platform APIs, web analytics, CRM systems and files into PostgreSQL. The planned sources include Google, Meta, TikTok, Microsoft Advertising, LinkedIn and GA4. Today only the demo source runs: it needs no accounts or keys and loads synthetic statistics of a fictional ad account. |
-| **Transform** | [dbt Core](https://docs.getdbt.com/) | Turns the raw tables into one unified model of advertising statistics, with a description of every model and column and tests that guard the marts. Today it builds the demo: one staging model and one mart, `ad_spend_daily`. The unified model comes in v0.2.0. |
-| **Orchestrate** | [Apache Airflow](https://airflow.apache.org/) | Schedules the loads and the dbt build, and refreshes Metabase afterwards. Today the DAGs of the demo have no time schedule: the first start runs the load once, and its success starts the dbt build. The refresh is planned. |
+| **Load** | [dlt](https://dlthub.com/) | Pulls data from ad platform APIs, web analytics, CRM systems and files into PostgreSQL. The planned sources include Google, Meta, TikTok, Microsoft Advertising, LinkedIn and GA4. Today only the demo runs: it needs no accounts or keys and loads 18 months of synthetic statistics of a fictional business, on four fictional platforms in the shapes of the APIs of Google Ads, Meta, TikTok and GA4. |
+| **Transform** | [dbt Core](https://docs.getdbt.com/) | Turns the raw tables into one unified model of advertising statistics, with a description of every model and column and tests that guard the marts. Today it builds that model from the demo, with money in the currency of each ad account and in one reporting currency: [The data model](docs/reference/data-model.md) describes its marts, such as `ad_stats_campaign_daily`. |
+| **Orchestrate** | [Apache Airflow](https://airflow.apache.org/) | Schedules the loads and the dbt build, and refreshes Metabase afterwards. Today the DAGs of the demo have no time schedule: the first start runs the load of the demo history once, and the dbt build starts when each of its five sources has loaded. The refresh is planned. |
 | **Explore** | [Metabase](https://www.metabase.com/) | Serves dashboards, metrics and a glossary from the final layer of the warehouse. Today there is one dashboard, the demo one; metrics and a glossary are not built yet. |
 | **Ask** | [MCP](https://modelcontextprotocol.io/) | AI clients reach the same data through MCP servers: the one built into Metabase, and servers for Airflow, the warehouse and dbt. Planned for v0.3.0. An example question: "How much did we spend on each platform last week?" |
 
@@ -84,7 +84,7 @@ cd agoranomos
 | Service | Address | What to open |
 |---|---|---|
 | Metabase | <http://127.0.0.1:3000> | The collection **Agoranomos / Demo** and its dashboard **Ad spend (demo)** |
-| Airflow | <http://127.0.0.1:8080> | The DAGs `agoranomos_demo_load`, `agoranomos_demo_history` and `agoranomos_demo_transform` |
+| Airflow | <http://127.0.0.1:8080> | The DAGs `agoranomos_demo_history` and `agoranomos_demo_transform` |
 
 `./agoranomos credentials` shows the addresses, the user names and the settings of `.env` that hold the passwords, and never prints a password; `./agoranomos down` stops the stack while the data stays. [Run Agoranomos locally](docs/how-to/run-locally.md) covers Windows, updates, memory and troubleshooting.
 

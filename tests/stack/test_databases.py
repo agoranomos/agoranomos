@@ -2,6 +2,8 @@ import pytest
 from services import DEMO
 from stack_helpers import (
     WAREHOUSE_ROLES,
+    compose,
+    job_failed,
     leaked,
     psql,
     psql_over_network,
@@ -103,6 +105,13 @@ def test_metabase_reader_has_a_statement_timeout_and_a_limit_of_connections(env)
 
 
 @pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))
+def test_the_warehouse_compiles_no_query_with_jit(env, role):
+    # db-init sets it on the database on every start: with JIT, the tests of the intermediate models
+    # took warehouse-db past its memory limit (docs/reference/system-requirements.md).
+    assert warehouse_output(env, "SHOW jit", role) == "off"
+
+
+@pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))
 def test_each_role_of_the_warehouse_signs_in_with_its_password_and_with_no_other(env, role):
     # Loopback inside a database container is trust, so psql() cannot tell a wrong password from a
     # right one. From another container the connection crosses the network, where the server asks.
@@ -164,18 +173,13 @@ def test_role_passwords_stay_out_of_pg_stat_statements(env):
 # What each role may do in each schema of the layers, as (USAGE, CREATE): loader writes the raw
 # schemas and the staging schemas of its merges, transformer reads the raw schemas and builds
 # staging and marts, metabase_reader reads marts. The fictional platforms of the demo each have a
-# raw schema and a staging schema of their own.
+# raw schema and a staging schema of their own; the settings of the model have a raw schema only,
+# as dlt replaces its tables in place.
 SCHEMA_PRIVILEGES = {
-    ("loader", "raw_demo"): (True, True),
-    ("loader", "raw_demo_staging"): (True, True),
     ("loader", "staging"): (False, False),
     ("loader", "marts"): (False, False),
-    ("transformer", "raw_demo"): (True, False),
-    ("transformer", "raw_demo_staging"): (False, False),
     ("transformer", "staging"): (True, True),
     ("transformer", "marts"): (True, True),
-    ("metabase_reader", "raw_demo"): (False, False),
-    ("metabase_reader", "raw_demo_staging"): (False, False),
     ("metabase_reader", "staging"): (False, False),
     ("metabase_reader", "marts"): (True, False),
     ("loader", "raw_demo_search"): (True, True),
@@ -208,6 +212,9 @@ SCHEMA_PRIVILEGES = {
     ("transformer", "raw_demo_fx_staging"): (False, False),
     ("metabase_reader", "raw_demo_fx"): (False, False),
     ("metabase_reader", "raw_demo_fx_staging"): (False, False),
+    ("loader", "raw_settings"): (True, True),
+    ("transformer", "raw_settings"): (True, False),
+    ("metabase_reader", "raw_settings"): (False, False),
 }
 # The schemas of the layers, each once, in the order of SCHEMA_PRIVILEGES, and as the literals of
 # the queries below.
@@ -226,18 +233,17 @@ def test_each_schema_of_the_layers_has_its_owner(env):
     assert result.returncode == 0, result.stderr
     assert sorted(result.stdout.split()) == [
         "marts:transformer",
-        "raw_demo:loader",
         "raw_demo_fx:loader",
         "raw_demo_fx_staging:loader",
         "raw_demo_search:loader",
         "raw_demo_search_staging:loader",
         "raw_demo_social:loader",
         "raw_demo_social_staging:loader",
-        "raw_demo_staging:loader",
         "raw_demo_video:loader",
         "raw_demo_video_staging:loader",
         "raw_demo_web:loader",
         "raw_demo_web_staging:loader",
+        "raw_settings:loader",
         "staging:transformer",
     ]
 
@@ -271,12 +277,12 @@ def test_the_default_privileges_are_those_of_the_roles_that_create_the_tables(en
     assert result.returncode == 0, result.stderr
     # Sorted here, as the owners of the schemas are.
     assert sorted(result.stdout.split()) == [
-        "loader:raw_demo:r:{transformer=r/loader}",
         "loader:raw_demo_fx:r:{transformer=r/loader}",
         "loader:raw_demo_search:r:{transformer=r/loader}",
         "loader:raw_demo_social:r:{transformer=r/loader}",
         "loader:raw_demo_video:r:{transformer=r/loader}",
         "loader:raw_demo_web:r:{transformer=r/loader}",
+        "loader:raw_settings:r:{transformer=r/loader}",
         "transformer:marts:r:{metabase_reader=r/transformer}",
     ]
 
@@ -334,17 +340,22 @@ def test_no_role_of_the_layers_creates_a_schema(env, role):
 
 
 def test_data_moves_through_the_layers_as_the_roles_allow(env):
-    # loader writes raw_demo; transformer reads it and builds marts, and cannot write raw_demo;
-    # metabase_reader reads what transformer built, through the default privileges of transformer.
+    # loader writes raw_demo_search; transformer reads it and builds marts, and cannot write
+    # raw_demo_search; metabase_reader reads what transformer built, through the default privileges
+    # of transformer.
     try:
-        result = warehouse(env, "CREATE TABLE raw_demo.layers_check AS SELECT 1 AS id", "loader")
+        result = warehouse(
+            env, "CREATE TABLE raw_demo_search.layers_check AS SELECT 1 AS id", "loader"
+        )
         assert result.returncode == 0, result.stderr
-        result = warehouse(env, "INSERT INTO raw_demo.layers_check VALUES (2)", "transformer")
+        result = warehouse(
+            env, "INSERT INTO raw_demo_search.layers_check VALUES (2)", "transformer"
+        )
         assert result.returncode != 0
         assert "permission denied for table layers_check" in result.stderr
         result = warehouse(
             env,
-            "CREATE TABLE marts.layers_check AS SELECT id FROM raw_demo.layers_check",
+            "CREATE TABLE marts.layers_check AS SELECT id FROM raw_demo_search.layers_check",
             "transformer",
         )
         assert result.returncode == 0, result.stderr
@@ -352,7 +363,74 @@ def test_data_moves_through_the_layers_as_the_roles_allow(env):
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "1"
     finally:
-        warehouse(env, "DROP TABLE IF EXISTS marts.layers_check, raw_demo.layers_check")
+        warehouse(env, "DROP TABLE IF EXISTS marts.layers_check, raw_demo_search.layers_check")
+
+
+# The demo of v0.1 in a warehouse, as its roles made it: the raw schema and the staging schema of
+# its merges, which loader owned, its staging view and its mart.
+V01_DEMO = (
+    ("CREATE SCHEMA raw_demo AUTHORIZATION loader", "postgres"),
+    ("CREATE SCHEMA raw_demo_staging AUTHORIZATION loader", "postgres"),
+    (
+        "CREATE TABLE raw_demo.ad_stats_daily (spend numeric); "
+        "GRANT USAGE ON SCHEMA raw_demo TO transformer; "
+        "GRANT SELECT ON raw_demo.ad_stats_daily TO transformer",
+        "loader",
+    ),
+    (
+        "CREATE VIEW staging.stg_demo__ad_stats_daily AS SELECT spend FROM raw_demo.ad_stats_daily",
+        "transformer",
+    ),
+    (
+        "CREATE TABLE marts.ad_spend_daily AS SELECT spend FROM staging.stg_demo__ad_stats_daily",
+        "transformer",
+    ),
+)
+# What is left of it: its schemas and its relations, counted.
+V01_LEFT = (
+    "SELECT (SELECT count(*) FROM pg_namespace WHERE nspname IN ('raw_demo', 'raw_demo_staging')) "
+    "|| ' ' || (SELECT count(*) FROM (VALUES (to_regclass('marts.ad_spend_daily')), "
+    "(to_regclass('staging.stg_demo__ad_stats_daily'))) AS found (relation) "
+    "WHERE relation IS NOT NULL)"
+)
+# Removes a relation of the name of the mart of v0.1, a table or a view, which a stopped run of a
+# test below can leave.
+V01_MART_GONE = (
+    "DO $$ BEGIN IF to_regclass('marts.ad_spend_daily') IS NOT NULL THEN EXECUTE "
+    "(SELECT CASE relkind WHEN 'v' THEN 'DROP VIEW' ELSE 'DROP TABLE' END FROM pg_class "
+    "WHERE oid = to_regclass('marts.ad_spend_daily')) || ' marts.ad_spend_daily CASCADE'; "
+    "END IF; END $$"
+)
+
+
+def test_db_init_removes_the_demo_of_v0_1_once(env):
+    # A warehouse of v0.1, made on this stand as its roles made it: db-init removes the demo of
+    # v0.1 on its next run, and finds nothing to remove on the run after (ADR-0025). What a
+    # stopped run of this test left is removed first.
+    warehouse_output(env, "DROP SCHEMA IF EXISTS raw_demo, raw_demo_staging CASCADE")
+    warehouse_output(env, V01_MART_GONE)
+    for sql, role in V01_DEMO:
+        warehouse_output(env, sql, role)
+    assert warehouse_output(env, V01_LEFT) == "2 2"
+    for _ in range(2):
+        result = compose("run", "--rm", "--no-deps", "db-init", check=False)
+        assert result.returncode == 0, job_failed("db-init", result)
+        assert warehouse_output(env, V01_LEFT) == "0 0"
+
+
+def test_db_init_keeps_a_view_that_a_person_named_as_the_mart_of_v0_1(env):
+    # After the upgrade, a person keeps the questions of v0.1 working with a view of the name of
+    # their mart. DROP TABLE fails on a view, also with IF EXISTS, and would stop db-init on every
+    # start: db-init drops the mart of v0.1 only as the table that v0.1 made, and leaves the view.
+    warehouse_output(env, V01_MART_GONE)
+    warehouse_output(env, "CREATE VIEW marts.ad_spend_daily AS SELECT 1 AS spend", "transformer")
+    try:
+        result = compose("run", "--rm", "--no-deps", "db-init", check=False)
+        assert result.returncode == 0, job_failed("db-init", result)
+        kind = "SELECT relkind FROM pg_class WHERE oid = to_regclass('marts.ad_spend_daily')"
+        assert warehouse_output(env, kind) == "v"
+    finally:
+        warehouse_output(env, V01_MART_GONE)
 
 
 @pytest.mark.parametrize("database", ["postgres", "template1"])
@@ -535,7 +613,7 @@ BACKUP_TABLE_TARGETS = [
 # A table that another role owns in each of those databases, with its owner: tables that a fresh
 # stack has, with rows in them (that of the warehouse, with the demo profile).
 BACKUP_TABLES = {
-    "warehouse": ("raw_demo.ad_stats_daily", "loader"),
+    "warehouse": ("raw_demo_search.campaign_stats", "loader"),
     "airflow": ("public.dag", "airflow"),
     "metabase": ("public.metabase_database", "metabase"),
 }
