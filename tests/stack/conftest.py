@@ -35,12 +35,14 @@ def token(env, airflow_url):
     return Secret(body["access_token"])
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def daily_load_paused(airflow_url, token):
-    """The daily load of the demo, paused while the tests run and as it was after them. Its
-    schedule could start a run, and the transform after it, in the middle of a test that counts
-    runs or compares the warehouse with the demo generator: the tests of the daily load run it
-    themselves. A run that is queued or running ends first, as a paused DAG starts none."""
+    """The daily load of the demo, paused from the first module that asks for it, in its
+    pytestmark, to the end of the tests, and then as it was. Its schedule could start a run, and
+    the transform after it, in the middle of a test that counts runs or compares the warehouse
+    with the demo generator: the tests of the daily load run it themselves. A run that is queued
+    or running ends first, as a paused DAG starts none. Not autouse: test_helpers.py runs this
+    file with tests of its own, which have a token of their own and no stack."""
     if not DEMO:
         yield
         return

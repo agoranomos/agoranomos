@@ -26,6 +26,8 @@ from stack_helpers import REPO_ROOT, compose, http_json, leaked, read_env, secre
 needs_the_demo = pytest.mark.skipif(
     not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
 )
+# The daily load of the demo stays paused while these tests run (conftest.py).
+pytestmark = pytest.mark.usefixtures("daily_load_paused")
 
 EXPORT = "/opt/agoranomos/metadata/metadata.json"
 MART = ("marts", "ad_stats_campaign_daily")

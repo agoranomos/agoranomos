@@ -34,9 +34,12 @@ from airflow_api import (
 from services import DEMO
 from stack_helpers import leaked, secrets, wait_for, warehouse_output
 
-pytestmark = pytest.mark.skipif(
-    not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
+    ),
+    pytest.mark.usefixtures("daily_load_paused"),
+]
 
 HISTORY = "agoranomos_demo_history"
 TRANSFORM = "agoranomos_demo_transform"

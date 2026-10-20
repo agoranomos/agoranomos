@@ -33,9 +33,12 @@ from metabase_content import (
 from services import DEMO
 from stack_helpers import http_json, secrets, wait_for, warehouse_output
 
-pytestmark = pytest.mark.skipif(
-    not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
+    ),
+    pytest.mark.usefixtures("daily_load_paused"),
+]
 
 # The dashboards of the demo and its questions, by their keys in the package, with their names.
 DASHBOARDS = {"advertising": "Advertising overview (demo)", "web-analytics": "Web analytics (demo)"}

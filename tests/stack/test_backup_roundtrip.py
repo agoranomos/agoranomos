@@ -30,6 +30,9 @@ from stack_helpers import (
     warehouse_output,
 )
 
+# The daily load of the demo stays paused while these tests run (conftest.py).
+pytestmark = pytest.mark.usefixtures("daily_load_paused")
+
 STEP = os.environ.get("AGORANOMOS_ROUNDTRIP", "")
 MARKS = Path(os.environ.get("AGORANOMOS_ROUNDTRIP_FILE", "/nonexistent"))
 VARIABLE = "agoranomos_roundtrip"
