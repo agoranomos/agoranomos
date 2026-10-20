@@ -8,7 +8,7 @@
 <p align="center">
   <b>Open-source marketing BI out of the box.</b><br>
   The goal: ad platforms → a PostgreSQL warehouse of your own → Metabase dashboards → questions in Claude or ChatGPT through MCP.<br>
-  Today: one command, <code>./agoranomos up</code>, starts the stack and a demo dashboard on your machine. Your data stays yours.
+  Today: one command, <code>./agoranomos up</code>, starts the stack and two demo dashboards on your machine. Your data stays yours.
 </p>
 
 <p align="center">
@@ -83,7 +83,7 @@ cd agoranomos
 
 | Service | Address | What to open |
 |---|---|---|
-| Metabase | <http://127.0.0.1:3000> | The collection **Agoranomos / Demo** and its dashboard **Ad spend (demo)** |
+| Metabase | <http://127.0.0.1:3000> | The collection **Agoranomos / Demo** and its dashboards **Advertising overview (demo)** and **Web analytics (demo)** |
 | Airflow | <http://127.0.0.1:8080> | The DAGs `agoranomos_demo_history` and `agoranomos_demo_transform` |
 
 `./agoranomos credentials` shows the addresses, the user names and the settings of `.env` that hold the passwords, and never prints a password; `./agoranomos down` stops the stack while the data stays. [Run Agoranomos locally](docs/how-to/run-locally.md) covers Windows, updates, memory and troubleshooting.

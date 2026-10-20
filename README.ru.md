@@ -8,7 +8,7 @@
 <p align="center">
   <b>BI-система для маркетинга с открытым исходным кодом, которая работает «из коробки».</b><br>
   Цель: рекламные площадки → ваше собственное хранилище PostgreSQL → дашборды Metabase → вопросы в Claude или ChatGPT через MCP.<br>
-  Сегодня: одна команда, <code>./agoranomos up</code>, запускает стек и демо-дашборд на вашей машине. Ваши данные остаются вашими.
+  Сегодня: одна команда, <code>./agoranomos up</code>, запускает стек и два демо-дашборда на вашей машине. Ваши данные остаются вашими.
 </p>
 
 <p align="center">
@@ -83,7 +83,7 @@ cd agoranomos
 
 | Сервис | Адрес | Что открыть |
 |---|---|---|
-| Metabase | <http://127.0.0.1:3000> | Коллекцию **Agoranomos / Demo** и её дашборд **Ad spend (demo)** |
+| Metabase | <http://127.0.0.1:3000> | Коллекцию **Agoranomos / Demo** и её дашборды **Advertising overview (demo)** и **Web analytics (demo)** |
 | Airflow | <http://127.0.0.1:8080> | DAG `agoranomos_demo_history` и `agoranomos_demo_transform` |
 
 `./agoranomos credentials` показывает адреса, имена пользователей и настройки `.env`, в которых лежат пароли, а сам пароль не печатает; `./agoranomos down` останавливает стек, данные при этом остаются. [Run Agoranomos locally](docs/how-to/run-locally.md) (на английском) рассказывает про Windows, обновления, память и решение проблем.

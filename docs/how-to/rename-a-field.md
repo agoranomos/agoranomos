@@ -38,7 +38,7 @@ A description is not an instruction: write facts about the data, and never copy 
 
 ## The questions of the demo
 
-The questions of the demo take the titles of their columns and axes from the display names, with the entries of this file, on every start: `demo-init` puts the settings of display of each question back as the code says ([See the demo](see-the-demo.md#what-later-starts-do)). So a display name that you change here reaches their titles at the next start, which logs it as a `revert of an edit` of the `visualization_settings` of each question that it changed.
+The questions of the demo take the titles of their columns and axes from the display names, with the entries of this file, on every start; the ratios that they compute, such as the click-through rate, are no column of a mart and have titles of their own: `demo-init` puts the settings of display of each question back as the code says ([See the demo](see-the-demo.md#what-later-starts-do)). So a display name that you change here reaches their titles at the next start, which logs it as a `revert of an edit` of the `visualization_settings` of each question that it changed.
 
 ## Keep the file in git
 
