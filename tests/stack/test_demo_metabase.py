@@ -1,16 +1,18 @@
 """The demo in Metabase, made by demo-init: the collection Agoranomos / Demo, its questions and its
-dashboard, found through the registry of the content, each once, with the numbers of the mart,
-view-only for every group but Administrators (ADR-0018); demo-init runs again
-without a change, puts an edit back, never takes a collection of the same name for the package,
-and moves the demo collection of v0.1.
+two dashboards, found through the registry of the content, each once, with the numbers of the marts
+for the filters of the dashboards, view-only for every group but Administrators (ADR-0018);
+demo-init runs again without a change, puts an edit back, never takes a collection of the same name
+for the package, and moves the demo collection of v0.1.
 
 The tests change the content as an admin could, and the next run of demo-init puts it back. The
 test of the move runs last: it rebuilds the content. Answers of Metabase and the output of
 demo-init could hold secrets: the assertions print names, counts, sums and states only.
 """
 
+from datetime import date, timedelta
 from decimal import Decimal
 
+import demo_init
 import pytest
 from agoranomos_pipelines.demo import platforms
 from airflow_api import is_busy, run_count
@@ -35,24 +37,41 @@ pytestmark = pytest.mark.skipif(
     not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
 )
 
-DASHBOARD = "Ad spend (demo)"
-# The questions of the demo by their keys in the package.
-QUESTIONS = {
-    "spend-last-7-days": "Spend, last 7 days",
-    "spend-by-campaign-last-7-days": "Spend by campaign, last 7 days",
+# The dashboards of the demo and its questions, by their keys in the package, with their names.
+DASHBOARDS = {"advertising": "Advertising overview (demo)", "web-analytics": "Web analytics (demo)"}
+QUESTIONS = {question["key"]: question["name"] for question in demo_init.QUESTIONS}
+# The dashboard of each question, by its key.
+BOARD_OF = {question["key"]: question["dashboard"] for question in demo_init.QUESTIONS}
+# The questions and the dashboard of v0.1, by the keys of this release that they become.
+V01_QUESTIONS = {
+    "spend": "Spend, last 7 days",
+    "top-campaigns": "Spend by campaign, last 7 days",
     "spend-by-day": "Spend by day",
 }
+V01_DASHBOARD = "Ad spend (demo)"
 LOAD = "agoranomos_demo_history"
 TRANSFORM = "agoranomos_demo_transform"
 DAGS = (LOAD, TRANSFORM)
-# The spend of the last seven days of the mart, in the reporting currency, as the question of the
-# demo adds it up.
-SPEND_LAST_7_DAYS = (
-    "SELECT sum(spend_reporting) FROM marts.ad_stats_campaign_daily WHERE report_date > "
-    "(SELECT max(report_date) FROM marts.ad_stats_campaign_daily) - 7"
+# The last day of the mart, and the sums of a client in the 30 days that end on it, in the
+# reporting currency, as the questions of the demo add them up for the period and the client of
+# their filters.
+LAST_DAY = "SELECT max(report_date) FROM marts.ad_stats_campaign_daily"
+CLIENT = "SELECT min(client_name) FROM marts.ad_stats_campaign_daily"
+SPEND = (
+    "SELECT sum(spend_reporting) FROM marts.ad_stats_campaign_daily "
+    "WHERE report_date BETWEEN '{start}' AND '{end}' AND client_name = '{client}'"
+)
+SESSIONS = (
+    "SELECT sum(sessions) FROM marts.web_sessions_daily "
+    "WHERE report_date BETWEEN '{start}' AND '{end}' AND client_name = '{client}'"
 )
 # The keys of the content of the demo in the registry.
-KEYS = ("agoranomos", "demo", "demo/dashboard", *(f"demo/{key}" for key in QUESTIONS))
+KEYS = (
+    "agoranomos",
+    "demo",
+    *(f"demo/{key}" for key in DASHBOARDS),
+    *(f"demo/{key}" for key in QUESTIONS),
+)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -75,8 +94,8 @@ def idle_demo_dags(airflow_url, token):
 
 def demo_content(metabase_url, session):
     """The registry of the demo, and what Metabase has for each of its items: the name, the place,
-    whether it is in the trash, and for a question its query and settings of display, for the
-    dashboard its cards."""
+    whether it is in the trash, and for a question its query and settings of display, for a
+    dashboard its cards with their filter mappings, and its filters."""
     entries = registry()
     content = {}
     for key in KEYS:
@@ -91,6 +110,11 @@ def demo_content(metabase_url, session):
                 (d.get("card_id"), d["row"], d["col"], d["size_x"], d["size_y"])
                 for d in found.get("dashcards") or []
             ),
+            sorted(
+                (d.get("card_id"), str(d.get("parameter_mappings")))
+                for d in found.get("dashcards") or []
+            ),
+            found.get("parameters"),
         )
     return {key: entries[key] for key in KEYS}, content
 
@@ -104,10 +128,12 @@ def test_the_demo_is_in_agoranomos_as_demo(metabase_url, session):
     questions = {key: item(metabase_url, session, f"demo/{key}", entries) for key in QUESTIONS}
     assert {key: q["name"] for key, q in questions.items()} == QUESTIONS
     assert {q["collection_id"] for q in questions.values()} == {demo["id"]}
-    board = item(metabase_url, session, "demo/dashboard", entries)
-    assert (board["name"], board["collection_id"]) == (DASHBOARD, demo["id"])
-    shown = sorted(dashcard["card_id"] for dashcard in board["dashcards"])
-    assert shown == sorted(q["id"] for q in questions.values())
+    for key, name in DASHBOARDS.items():
+        board = item(metabase_url, session, f"demo/{key}", entries)
+        assert (board["name"], board["collection_id"]) == (name, demo["id"])
+        shown = sorted(dashcard["card_id"] for dashcard in board["dashcards"])
+        wanted = [q["id"] for k, q in questions.items() if BOARD_OF[k] == key]
+        assert shown == sorted(wanted)
 
 
 def test_every_group_but_administrators_has_at_most_view(metabase_url, session):
@@ -123,17 +149,63 @@ def test_every_group_but_administrators_has_at_most_view(metabase_url, session):
     assert graph["groups"][all_users][demo_id] == "read"
 
 
-def test_the_spend_of_the_last_seven_days_is_that_of_the_mart(env, metabase_url, session):
-    card_id = item(metabase_url, session, "demo/spend-last-7-days")["id"]
-    status, result = http_json("POST", f"{metabase_url}/api/card/{card_id}/query", headers=session)
+def run_card(metabase_url, session, entries, board_key, card_key, values):
+    """The answer of a card of a dashboard of the demo, as a view of the dashboard runs it, with
+    values for the filters of the dashboard by their slugs; a filter without a value is left out,
+    as Metabase leaves it when a person clears it. entries is the registry, read once by a test."""
+    board = item(metabase_url, session, f"demo/{board_key}", entries)
+    card = item(metabase_url, session, f"demo/{card_key}", entries)
+    [dashcard] = [d for d in board["dashcards"] if d["card_id"] == card["id"]]
+    filters = {f["id"]: f for f in board["parameters"]}
+    parameters = [
+        {
+            "id": mapping["parameter_id"],
+            "type": filters[mapping["parameter_id"]]["type"],
+            "value": values[filters[mapping["parameter_id"]]["slug"]],
+            "target": mapping["target"],
+        }
+        for mapping in dashcard["parameter_mappings"]
+        if values.get(filters[mapping["parameter_id"]]["slug"]) is not None
+    ]
+    path = f"/api/dashboard/{board['id']}/dashcard/{dashcard['id']}/card/{card['id']}/query"
+    status, result = http_json(
+        "POST", f"{metabase_url}{path}", {"parameters": parameters}, headers=session
+    )
     # Metabase 0.63.19 and 0.64.1 answer 202, with the rows in data.rows.
     state = result.get("status") if isinstance(result, dict) else None
     assert (status, state) in {(200, "completed"), (202, "completed")}, (status, state)
-    [[spend]] = result["data"]["rows"]
-    expected = Decimal(warehouse_output(env, SPEND_LAST_7_DAYS))
-    assert expected > 0, "the mart has no spend in its last seven days"
+    return result["data"]["rows"]
+
+
+@pytest.mark.parametrize(
+    ("board", "card", "query"),
+    [("advertising", "spend", SPEND), ("web-analytics", "sessions", SESSIONS)],
+)
+def test_a_number_of_a_dashboard_is_that_of_the_mart_for_its_filters(
+    env, metabase_url, session, board, card, query
+):
+    # The 30 days that end on the last day of the mart, and one client: the numbers that the
+    # filters of the dashboard give are those of the mart.
+    last = date.fromisoformat(warehouse_output(env, LAST_DAY))
+    start = last - timedelta(days=29)
+    client = warehouse_output(env, CLIENT)
+    values = {"period": f"{start}~{last}", "client": [client]}
+    [[number]] = run_card(metabase_url, session, registry(), board, card, values)
+    quoted = client.replace("'", "''")
+    expected = Decimal(warehouse_output(env, query.format(start=start, end=last, client=quoted)))
+    assert expected > 0, f"the mart has nothing for the client in the 30 days up to {last}"
     # Metabase answers with a number in JSON, which may round the last of the six places.
-    assert abs(Decimal(str(spend)) - expected) < Decimal("0.0001"), (spend, expected)
+    assert abs(Decimal(str(number)) - expected) < Decimal("0.0001"), (number, expected)
+
+
+def test_every_card_of_the_dashboards_answers_for_the_defaults_of_their_filters(
+    metabase_url, session
+):
+    # The default period, the past 30 days, ends yesterday, and the demo has data up to then.
+    entries = registry()
+    for key, board in BOARD_OF.items():
+        rows = run_card(metabase_url, session, entries, board, key, {"period": "past30days"})
+        assert rows, f"the question {key} has no rows for the past 30 days"
 
 
 def test_metabase_knows_the_mart(metabase_url, session):
@@ -180,7 +252,7 @@ def test_an_edit_of_the_content_is_reverted_by_the_next_start_and_logged(
 ):
     entries = registry()
     question = item(metabase_url, session, "demo/spend-by-day", entries)
-    board = item(metabase_url, session, "demo/dashboard", entries)
+    board = item(metabase_url, session, "demo/web-analytics", entries)
     demo_id = str(item(metabase_url, session, "demo", entries)["id"])
     put(metabase_url, session, f"/api/card/{question['id']}", {"name": "Edited by a test"})
     put(metabase_url, session, f"/api/dashboard/{board['id']}", {"archived": True})
@@ -191,16 +263,19 @@ def test_an_edit_of_the_content_is_reverted_by_the_next_start_and_logged(
     code, changes, found, _ = run_job("demo-init", secrets(env))
     assert not found, f"the output of demo-init holds the values of {found}"
     assert code == 0, f"demo-init exited with {code}"
-    assert item(metabase_url, session, "demo/spend-by-day", entries)["name"] == "Spend by day"
-    board = item(metabase_url, session, "demo/dashboard", entries)
+    assert (
+        item(metabase_url, session, "demo/spend-by-day", entries)["name"]
+        == QUESTIONS["spend-by-day"]
+    )
+    board = item(metabase_url, session, "demo/web-analytics", entries)
     assert (board["archived"], board["collection_id"]) == (False, int(demo_id))
-    assert len(board["dashcards"]) == len(QUESTIONS)
+    assert len(board["dashcards"]) == list(BOARD_OF.values()).count("web-analytics")
     graph = get(metabase_url, session, "/api/collection/graph")
     assert graph["groups"][all_users][demo_id] == "read"
     assert changes == [
         'demo-init: revert of an edit: question demo/spend-by-day name: "Edited by a test" -> '
-        '"Spend by day"',
-        "demo-init: restored from the trash: dashboard demo/dashboard",
+        f'"{QUESTIONS["spend-by-day"]}"',
+        "demo-init: restored from the trash: dashboard demo/web-analytics",
         'demo-init: lowered: group "All Users" on collection "Demo": curate -> view',
     ], changes
 
@@ -211,13 +286,14 @@ def test_a_click_behavior_and_an_extra_setting_are_reverted_by_the_next_start(
     # An admin gives a card of the dashboard a click behavior, which could send whoever clicks it
     # to any address, and a question a setting that the code does not set.
     entries = registry()
-    board = item(metabase_url, session, "demo/dashboard", entries)
-    question = item(metabase_url, session, "demo/spend-by-day", entries)
+    board = item(metabase_url, session, "demo/advertising", entries)
+    question = item(metabase_url, session, "demo/by-client", entries)
     template = "https://example.com/{{spend_reporting}}"
     link = {"type": "link", "linkType": "url", "linkTemplate": template}
+    kept = ("id", "card_id", "row", "col", "size_x", "size_y", "parameter_mappings")
     dashcards = [
         {
-            **{key: d[key] for key in ("id", "card_id", "row", "col", "size_x", "size_y")},
+            **{key: d[key] for key in kept},
             "visualization_settings": {"click_behavior": link} if n == 0 else {},
         }
         for n, d in enumerate(board["dashcards"])
@@ -228,14 +304,15 @@ def test_a_click_behavior_and_an_extra_setting_are_reverted_by_the_next_start(
     code, changes, found, _ = run_job("demo-init", secrets(env))
     assert not found, f"the output of demo-init holds the values of {found}"
     assert code == 0, f"demo-init exited with {code}"
-    board = item(metabase_url, session, "demo/dashboard", entries)
-    assert [d["visualization_settings"] for d in board["dashcards"]] == [{}] * len(QUESTIONS)
-    settings = item(metabase_url, session, "demo/spend-by-day", entries)["visualization_settings"]
+    board = item(metabase_url, session, "demo/advertising", entries)
+    cards = len(board["dashcards"])
+    assert [d["visualization_settings"] for d in board["dashcards"]] == [{}] * cards
+    settings = item(metabase_url, session, "demo/by-client", entries)["visualization_settings"]
     assert "graph.show_values" not in settings
     assert changes == [
-        "demo-init: revert of an edit: question demo/spend-by-day visualization_settings",
-        "demo-init: revert of an edit: dashboard demo/dashboard cards: 3 cards (1 not as the "
-        "code says) and no filter -> 3 cards and no filter",
+        "demo-init: revert of an edit: question demo/by-client visualization_settings",
+        f"demo-init: revert of an edit: dashboard demo/advertising cards: {cards} cards (1 not as "
+        f"the code says) and 3 filters -> {cards} cards and 3 filters",
     ], changes
 
 
@@ -362,12 +439,15 @@ def test_the_collection_of_v0_1_moves_into_agoranomos(env, metabase_url, session
             metabase_url,
             theirs,
             "/api/dashboard",
-            {"name": DASHBOARD, "collection_id": decoy["id"]},
+            {"name": V01_DASHBOARD, "collection_id": decoy["id"]},
         )
         old = post(metabase_url, session, "/api/collection", {"name": "Agoranomos demo"})
-        cards = {name: question(session, old["id"], name) for name in QUESTIONS.values()}
+        cards = {name: question(session, old["id"], name) for name in V01_QUESTIONS.values()}
         board = post(
-            metabase_url, session, "/api/dashboard", {"name": DASHBOARD, "collection_id": old["id"]}
+            metabase_url,
+            session,
+            "/api/dashboard",
+            {"name": V01_DASHBOARD, "collection_id": old["id"]},
         )
         added = question(theirs, old["id"], "Spend by day")
         trashed = question(theirs, old["id"], "Mine")
@@ -392,12 +472,14 @@ def test_the_collection_of_v0_1_moves_into_agoranomos(env, metabase_url, session
             "Demo",
             f"/{root['id']}/",
         )
-        assert item(metabase_url, session, "demo/dashboard", entries)["id"] == board["id"]
-        adopted = {key: item(metabase_url, session, f"demo/{key}", entries) for key in QUESTIONS}
+        assert item(metabase_url, session, "demo/advertising", entries)["id"] == board["id"]
+        adopted = {
+            key: item(metabase_url, session, f"demo/{key}", entries) for key in V01_QUESTIONS
+        }
         assert {q["id"] for q in adopted.values()} == {c["id"] for c in cards.values()}
         assert adopted["spend-by-day"]["dataset_query"]["native"]["query"] != "SELECT 1"
         # The questions of v0.1 were adopted and put right, not replaced: none is in the trash.
-        assert [q["archived"] for q in adopted.values()] == [False] * len(QUESTIONS)
+        assert [q["archived"] for q in adopted.values()] == [False] * len(V01_QUESTIONS)
         # The question of the second account is at the root, and the decoy is as it was.
         assert get(metabase_url, session, f"/api/card/{added['id']}")["collection_id"] is None
         # The one in the trash went to the root too, and stays in the trash: restored, it is not

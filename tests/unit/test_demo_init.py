@@ -12,6 +12,7 @@ import ast
 import copy
 import json
 import math
+import re
 import subprocess
 import sys
 from collections.abc import Callable
@@ -20,11 +21,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
+import content
 import demo_init as di
 import metadata as md
 import pytest
 from metabase_stand_in import (
-    EXPORT,
+    DEMO_EXPORT,
     SAMPLE,
     ContentState,
     FakeClock,
@@ -61,13 +63,24 @@ SECRETS = {
 FINISHED = ("success", "failed")
 # The moment that 0 on the fake clock stands for, in the times that Airflow gives.
 START = datetime(2026, 10, 5, 6, 0, tzinfo=UTC)
-# The display names of the columns of the mart in the export of the stand-in, by name.
+# The display names of the columns of each mart in the export of the stand-in, by mart and name,
+# with the titles of the ratios, which are no column of a mart.
 TITLES = {
-    column["name"]: column["meta"]["metabase"]["display_name"]
-    for model in EXPORT["models"]
+    model["name"]: {
+        **{c["name"]: c["meta"]["metabase"]["display_name"] for c in model["columns"]},
+        **di.RATIO_TITLES,
+    }
+    for model in DEMO_EXPORT["models"]
     if model["schema"] == "marts"
-    for column in model["columns"]
 }
+# The marts that the questions of the demo read, as the lines of demo-init list them.
+MARTS = (
+    "marts.ad_conversions_campaign_daily, marts.ad_stats_campaign_daily and "
+    "marts.web_sessions_daily"
+)
+# The names of the two dashboards of the demo, and the questions of each, by key.
+ADVERTISING, WEB = (di.DASHBOARDS[key][0] for key in (di.ADVERTISING, di.WEB))
+QUESTIONS = {q["key"]: q for q in di.QUESTIONS}
 
 
 def leaked(text: str) -> list[str]:
@@ -291,7 +304,11 @@ def metabase(clock, tmp_path):
     state = FakeMetabase(clock)
     state.set_up(ENV["METABASE_ADMIN_EMAIL"], ENV["METABASE_ADMIN_PASSWORD"])
     state.mart_in_warehouse = True
-    state.files = {**metadata_env(tmp_path), "CONTENT_REGISTRY": str(tmp_path / "content.json")}
+    state.demo_marts = True
+    state.files = {
+        **metadata_env(tmp_path, export=DEMO_EXPORT),
+        "CONTENT_REGISTRY": str(tmp_path / "content.json"),
+    }
     server = serve(state, "X-Metabase-Session")
     yield state
     server.shutdown()
@@ -378,9 +395,9 @@ def registered(metabase: FakeMetabase, key: str) -> dict[str, Any]:
 
 def demo_items(
     metabase: FakeMetabase,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     """The collection Agoranomos and its sub-collection Demo, as the registry finds them, and the
-    questions of Demo by name and its dashboards, those in the trash left out."""
+    questions and the dashboards of Demo by name, those in the trash left out."""
     content = metabase.content_state
     root, demo = registered(metabase, "agoranomos"), registered(metabase, "demo")
     cards = {
@@ -388,11 +405,11 @@ def demo_items(
         for c in content.cards.values()
         if c["collection_id"] == demo["id"] and not c["archived"]
     }
-    boards = [
-        d
+    boards = {
+        d["name"]: d
         for d in content.dashboards.values()
         if d["collection_id"] == demo["id"] and not d["archived"]
-    ]
+    }
     return root, demo, cards, boards
 
 
@@ -401,14 +418,33 @@ def card_of(metabase: FakeMetabase, name: str) -> dict[str, Any]:
     return demo_items(metabase)[2][name]
 
 
+def board_of(metabase: FakeMetabase, name: str = ADVERTISING) -> dict[str, Any]:
+    """The dashboard of the demo with a name."""
+    return demo_items(metabase)[3][name]
+
+
+def done_line(metabase: FakeMetabase, ran: str = "ran now") -> str:
+    """The last line of a start that succeeds, with the IDs of the two dashboards."""
+    named = " and ".join(
+        f"{name!r} ({board_of(metabase, name)['id']})" for name in (ADVERTISING, WEB)
+    )
+    return (
+        f"demo-init: the demo pipeline {ran}, and the dashboards {named} are in the collection "
+        "Agoranomos / Demo"
+    )
+
+
 # The questions of v0.1 by name, as its demo-init made them: the description, the query on the
-# mart of v0.1, and the column and the series of its charts, spend.
+# mart of v0.1, the column and the series of its charts, spend, its display and its place on the
+# grid of its dashboard.
 V01_LAST_7_DAYS = "report_date > (SELECT max(report_date) FROM marts.ad_spend_daily) - 7"
 V01_QUESTIONS = {
     "Spend, last 7 days": (
         "The spend of the last seven days that have data.",
         f"SELECT sum(spend) AS spend\nFROM marts.ad_spend_daily\nWHERE {V01_LAST_7_DAYS}",
         {"column_settings": {'["name","spend"]': {"column_title": "Spend"}}},
+        "scalar",
+        {"row": 0, "col": 0, "size_x": 6, "size_y": 4},
     ),
     "Spend by campaign, last 7 days": (
         "The spend of each campaign in the last seven days that have data.",
@@ -419,6 +455,8 @@ V01_QUESTIONS = {
             "graph.metrics": ["spend"],
             "series_settings": {"spend": {"color": di.SERIES_COLOR}},
         },
+        "row",
+        {"row": 0, "col": 6, "size_x": 18, "size_y": 4},
     ),
     "Spend by day": (
         "The spend of every day that has data.",
@@ -429,6 +467,8 @@ V01_QUESTIONS = {
             "graph.metrics": ["spend"],
             "series_settings": {"spend": {"color": di.SERIES_COLOR}},
         },
+        "line",
+        {"row": 4, "col": 0, "size_x": 24, "size_y": 6},
     ),
 }
 
@@ -439,14 +479,13 @@ def an_earlier_demo(metabase: FakeMetabase) -> tuple[dict, dict[str, dict], dict
     content = metabase.content_state
     old = content.add_collection(di.COLLECTION_V01, "The demo of Agoranomos: one ad account.")
     cards = {}
-    for question in di.QUESTIONS:
-        description, sql, settings = V01_QUESTIONS[question["name"]]
+    for name, (description, sql, settings, display, _) in V01_QUESTIONS.items():
         query = {"database": 2, "type": "native", "native": {"query": sql}}
-        cards[question["name"]] = content.add_card(
+        cards[name] = content.add_card(
             {
-                "name": question["name"],
+                "name": name,
                 "description": description,
-                "display": question["display"],
+                "display": display,
                 "collection_id": old["id"],
                 "dataset_query": query,
                 "visualization_settings": copy.deepcopy(settings),
@@ -460,8 +499,8 @@ def an_earlier_demo(metabase: FakeMetabase) -> tuple[dict, dict[str, dict], dict
         }
     )
     board["dashcards"] = [
-        {"id": 900 + index, "card_id": cards[q["name"]]["id"], **q["layout"]}
-        for index, q in enumerate(di.QUESTIONS)
+        {"id": 900 + index, "card_id": cards[name]["id"], **question[4]}
+        for index, (name, question) in enumerate(V01_QUESTIONS.items())
     ]
     return old, cards, board
 
@@ -483,49 +522,54 @@ def test_a_first_start_runs_the_pipeline_and_creates_the_demo(airflow, metabase,
     [transform] = airflow.runs_of(di.TRANSFORM_DAG)
     assert (transform["run_type"], transform["state"]) == ("asset_triggered", "success")
     assert metabase.calls.count(("POST", "/api/database/2/sync_schema")) == 1
-    _, demo, cards, [dashboard] = demo_items(metabase)
+    _, demo, cards, boards = demo_items(metabase)
     assert sorted(cards) == sorted(question["name"] for question in di.QUESTIONS)
     assert len(metabase.cards) == len(di.QUESTIONS)
-    for card in cards.values():
+    for question in di.QUESTIONS:
+        card = cards[question["name"]]
         assert card["dataset_query"]["database"] == 2
         assert card["dataset_query"]["type"] == "native"
-        assert "marts.ad_stats_campaign_daily" in card["dataset_query"]["native"]["query"]
-    assert (dashboard["name"], dashboard["collection_id"]) == (di.DASHBOARD, demo["id"])
-    assert sorted(dashcard["card_id"] for dashcard in dashboard["dashcards"]) == sorted(
-        card["id"] for card in cards.values()
-    )
+        assert f"marts.{question['mart']}" in card["dataset_query"]["native"]["query"]
+    assert sorted(boards) == sorted([ADVERTISING, WEB])
+    for key, (name, _) in di.DASHBOARDS.items():
+        assert boards[name]["collection_id"] == demo["id"]
+        shown = sorted(dashcard["card_id"] for dashcard in boards[name]["dashcards"])
+        wanted = [cards[q["name"]]["id"] for q in di.QUESTIONS if q["dashboard"] == key]
+        assert shown == sorted(wanted)
     out = capsys.readouterr()
     assert out.err == ""
     *lines, line = out.out.splitlines()
-    assert line == (
-        f"demo-init: the demo pipeline ran now, and the dashboard {di.DASHBOARD!r} "
-        f"({dashboard['id']}) is in the collection Agoranomos / Demo"
-    )
-    # The metadata of the mart, applied after the sync: one line for each change, and then one
+    assert line == done_line(metabase)
+    # The metadata of the marts, applied after the sync: one line for each change, and then one
     # line for each item of the content that it created.
-    assert "demo-init: first fill: marts.ad_stats_campaign_daily display_name: " in lines[0]
+    assert "demo-init: first fill: marts.ad_conversions_campaign_daily display_name: " in lines[0]
     assert 'demo-init: created: collection agoranomos "Agoranomos"' in lines
-    assert f'demo-init: created: dashboard demo/dashboard "{di.DASHBOARD}"' in lines
+    assert f'demo-init: created: dashboard demo/advertising "{ADVERTISING}"' in lines
+    assert f'demo-init: created: dashboard demo/web-analytics "{WEB}"' in lines
     assert not leaked(out.out + out.err)
 
 
 def test_a_first_start_makes_the_demo_in_agoranomos(airflow, metabase):
     assert di.main(env_for(airflow, metabase)) == 0
-    root, demo, cards, [board] = demo_items(metabase)
+    root, demo, cards, boards = demo_items(metabase)
     assert (root["name"], root["location"]) == ("Agoranomos", "/")
     assert (demo["name"], demo["location"]) == ("Demo", f"/{root['id']}/")
     assert set(cards) == {q["name"] for q in di.QUESTIONS}
-    assert board["name"] == di.DASHBOARD
+    assert set(boards) == {ADVERTISING, WEB}
     # All Users may only view the demo, and the Administrators keep Curate.
     assert metabase.content_state.graph["1"][str(demo["id"])] == "read"
     assert metabase.content_state.graph["1"][str(root["id"])] == "read"
     assert metabase.content_state.graph["2"][str(demo["id"])] == "write"
     # The registry knows each item by its key, and by the entity ID that Metabase gave it.
-    keys = {f"demo/{q['key']}" for q in di.QUESTIONS} | {"agoranomos", "demo", "demo/dashboard"}
-    assert set(registry_of(metabase)) == keys
+    keys = {f"demo/{q['key']}" for q in di.QUESTIONS} | {f"demo/{key}" for key in di.DASHBOARDS}
+    assert set(registry_of(metabase)) == keys | {"agoranomos", "demo"}
     assert registry_of(metabase)["demo/spend-by-day"] == {
         "model": "card",
-        "entity_id": cards["Spend by day"]["entity_id"],
+        "entity_id": cards["Spend by day and platform"]["entity_id"],
+    }
+    assert registry_of(metabase)["demo/web-analytics"] == {
+        "model": "dashboard",
+        "entity_id": boards[WEB]["entity_id"],
     }
 
 
@@ -555,7 +599,7 @@ def test_a_second_start_changes_nothing(airflow, metabase, capsys):
     assert registry.read_text(encoding="utf-8") == saved
     # One line, which says that nothing ran: no line of a change.
     [line] = capsys.readouterr().out.splitlines()
-    assert line.startswith("demo-init: the demo pipeline ran before, and the dashboard ")
+    assert line == done_line(metabase, "ran before")
 
 
 def test_a_pause_made_after_the_first_start_stays(airflow, metabase):
@@ -806,7 +850,7 @@ HANGING_STEPS = [
     ),
     pytest.param(
         lambda airflow, metabase: setattr(metabase, "sync_seconds", math.inf),
-        "Metabase did not find marts.ad_stats_campaign_daily after a sync of the warehouse",
+        f"Metabase did not find {MARTS} after a sync of the warehouse",
         "./agoranomos logs metabase",
         id="sync",
     ),
@@ -1014,9 +1058,10 @@ def test_a_mart_that_is_gone_after_an_earlier_run_names_the_cause_and_the_load(
     capsys.readouterr()
     assert di.main(env_for(airflow, metabase)) == 1
     line = one_line(capsys)
+    # Metabase still shows the other marts, active, when it only marked the mart inactive.
+    gone = MARTS if left == "no-table" else "marts.ad_stats_campaign_daily"
     assert line.startswith(
-        "demo-init: Metabase finds no marts.ad_stats_campaign_daily in the warehouse: the demo "
-        "pipeline ran before"
+        f"demo-init: Metabase finds no {gone} in the warehouse: the demo pipeline ran before"
     )
     assert f"trigger {di.LOAD_DAG} in Airflow" in line
     assert ("POST", "/api/database/2/sync_schema") not in metabase.calls[calls:]
@@ -1031,8 +1076,7 @@ def test_a_transform_that_ran_now_and_left_no_mart_names_the_transform(airflow, 
     assert di.main(env_for(airflow, metabase)) == 1
     line = one_line(capsys)
     assert line == (
-        "demo-init: Metabase finds no marts.ad_stats_campaign_daily in the warehouse: see the last "
-        "run of "
+        f"demo-init: Metabase finds no {MARTS} in the warehouse: see the last run of "
         f"{di.TRANSFORM_DAG} in Airflow"
     )
     assert airflow.calls.count(("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns")) == 1
@@ -1043,10 +1087,11 @@ def test_a_transform_that_ran_now_and_left_no_mart_names_the_transform(airflow, 
 def test_an_export_without_the_mart_of_the_demo_stops_before_anything_is_written(
     airflow, metabase, tmp_path, capsys
 ):
-    # The dbt project of a release that renamed or dropped the mart of the demo: demo-init reads
+    # The dbt project of a release that renamed or dropped a mart of the demo: demo-init reads
     # the export first, so it stops before it signs in anywhere, and its line names the job that
     # exported the metadata.
-    export = {**EXPORT, "models": [m for m in EXPORT["models"] if m["schema"] != "marts"]}
+    models = [m for m in DEMO_EXPORT["models"] if m["name"] != "ad_stats_campaign_daily"]
+    export = {**DEMO_EXPORT, "models": models}
     metabase.files.update(metadata_env(tmp_path, export=export))
     assert di.main(env_for(airflow, metabase)) == 1
     line = one_line(capsys)
@@ -1112,17 +1157,17 @@ def test_items_that_come_as_a_bare_list_are_understood(airflow, metabase):
     metabase.items_as_list = True
     old, cards, board = an_earlier_demo(metabase)
     assert di.main(env_for(airflow, metabase)) == 0
-    _, demo, now_cards, [now_board] = demo_items(metabase)
+    _, demo, now_cards, boards = demo_items(metabase)
     assert demo["id"] == old["id"]
-    assert {c["id"] for c in now_cards.values()} == {c["id"] for c in cards.values()}
-    assert now_board["id"] == board["id"]
+    assert {c["id"] for c in cards.values()} <= {c["id"] for c in now_cards.values()}
+    assert boards[ADVERTISING]["id"] == board["id"]
 
 
 def test_a_dashboard_whose_cards_were_changed_gets_those_of_the_code_back(
     airflow, metabase, capsys
 ):
     assert di.main(env_for(airflow, metabase)) == 0
-    _, _, _, [dashboard] = demo_items(metabase)
+    dashboard = board_of(metabase)
 
     def grid():
         return sorted(
@@ -1139,11 +1184,12 @@ def test_a_dashboard_whose_cards_were_changed_gets_those_of_the_code_back(
     capsys.readouterr()
     assert di.main(env_for(airflow, metabase)) == 0
     assert grid() == placed
-    assert dashboard["parameters"] == []
+    filters = [di.DASHBOARD_FILTERS[name] for name in di.AD_FILTERS]
+    assert dashboard["parameters"] == [content.filter_shape(f) for f in filters]
     assert len(metabase.cards) == len(di.QUESTIONS)
     assert (
-        "demo-init: revert of an edit: dashboard demo/dashboard cards: 1 card (1 not as the code "
-        "says) and 1 filter -> 3 cards and no filter"
+        "demo-init: revert of an edit: dashboard demo/advertising cards: 1 card (1 not as the code "
+        "says) and 1 filter (1 not as the code says) -> 9 cards and 3 filters"
     ) in capsys.readouterr().out.splitlines()
 
 
@@ -1151,45 +1197,45 @@ def test_a_question_in_the_trash_comes_back_and_one_deleted_for_good_is_made_aga
     airflow, metabase, capsys
 ):
     assert di.main(env_for(airflow, metabase)) == 0
-    _, _, cards, [dashboard] = demo_items(metabase)
-    trashed, deleted = cards["Spend, last 7 days"], cards["Spend by day"]
+    _, _, cards, boards = demo_items(metabase)
+    dashboard = boards[ADVERTISING]
+    trashed, deleted = cards["Spend"], cards["Spend by day and platform"]
     trashed.update(archived=True, archived_directly=True)  # moved to the trash in Metabase
     # Deleted for good from the trash, which takes its card off the dashboard.
     del metabase.cards[deleted["id"]]
     dashboard["dashcards"] = [d for d in dashboard["dashcards"] if d["card_id"] != deleted["id"]]
     capsys.readouterr()
     assert di.main(env_for(airflow, metabase)) == 0
-    _, _, cards, [same] = demo_items(metabase)
-    assert same is dashboard
-    assert cards["Spend, last 7 days"] is trashed
-    assert cards["Spend by day"]["id"] != deleted["id"]
-    assert sorted(d["card_id"] for d in dashboard["dashcards"]) == sorted(
-        card["id"] for card in cards.values()
-    )
+    _, _, cards, boards = demo_items(metabase)
+    assert boards[ADVERTISING] is dashboard
+    assert cards["Spend"] is trashed
+    assert cards["Spend by day and platform"]["id"] != deleted["id"]
+    shown = [cards[q["name"]]["id"] for q in di.QUESTIONS if q["dashboard"] == di.ADVERTISING]
+    assert sorted(d["card_id"] for d in dashboard["dashcards"]) == sorted(shown)
     out = capsys.readouterr().out.splitlines()
-    assert "demo-init: restored from the trash: question demo/spend-last-7-days" in out
-    assert 'demo-init: created again: question demo/spend-by-day "Spend by day"' in out
+    assert "demo-init: restored from the trash: question demo/spend" in out
+    assert 'demo-init: created again: question demo/spend-by-day "Spend by day and platform"' in out
 
 
 def test_an_edited_question_is_put_back_by_the_next_start(airflow, metabase, capsys):
     assert di.main(env_for(airflow, metabase)) == 0
-    card = card_of(metabase, "Spend by day")
+    card = card_of(metabase, "Spend by client")
     card["name"] = "My spend"
     card["description"] = "Changed in Metabase"
     card["dataset_query"]["native"]["query"] = "SELECT 1 AS spend_reporting"
     card["visualization_settings"]["series_settings"]["spend_reporting"]["color"] = "#000000"
     capsys.readouterr()
     assert di.main(env_for(airflow, metabase)) == 0
-    [question] = [q for q in di.QUESTIONS if q["key"] == "spend-by-day"]
-    assert card["name"] == "Spend by day"
+    question = QUESTIONS["by-client"]
+    assert card["name"] == "Spend by client"
     assert card["description"] == question["description"]
     assert card["dataset_query"]["native"]["query"] == question["query"]
     series = card["visualization_settings"]["series_settings"]
     assert series["spend_reporting"]["color"] == di.SERIES_COLOR
     assert len(metabase.cards) == len(di.QUESTIONS)
     out = capsys.readouterr().out.splitlines()
-    revert = "demo-init: revert of an edit: question demo/spend-by-day"
-    assert f'{revert} name: "My spend" -> "Spend by day"' in out
+    revert = "demo-init: revert of an edit: question demo/by-client"
+    assert f'{revert} name: "My spend" -> "Spend by client"' in out
     assert f'{revert} description: "Changed in Metabase" -> "{question["description"]}"' in out
     assert f"{revert} query" in out
     assert f"{revert} visualization_settings" in out
@@ -1199,10 +1245,10 @@ def test_a_renamed_question_gets_its_name_back_and_no_copy_is_made(airflow, meta
     # demo-init finds its questions by the entity IDs that Metabase gave them, so a renamed one is
     # still the question of the demo.
     assert di.main(env_for(airflow, metabase)) == 0
-    card = card_of(metabase, "Spend by day")
+    card = card_of(metabase, "Spend by day and platform")
     card["name"] = "My spend"
     assert di.main(env_for(airflow, metabase)) == 0
-    assert card["name"] == "Spend by day"
+    assert card["name"] == "Spend by day and platform"
     assert len(metabase.cards) == len(di.QUESTIONS)
 
 
@@ -1210,21 +1256,22 @@ def test_an_edit_of_the_content_is_reverted_by_the_next_start_and_logged(airflow
     # As an admin, or the AI client of one, could do: rename a question, put the dashboard in the
     # trash, and let All Users curate the demo.
     assert di.main(env_for(airflow, metabase)) == 0
-    _, demo, cards, [board] = demo_items(metabase)
-    cards["Spend by day"]["name"] = "Edited by a test"
+    _, demo, cards, boards = demo_items(metabase)
+    board = boards[WEB]
+    cards["Sessions"]["name"] = "Edited by a test"
     board.update(archived=True, archived_directly=True)
     metabase.content_state.graph["1"][str(demo["id"])] = "write"
     capsys.readouterr()
     assert di.main(env_for(airflow, metabase)) == 0
-    assert cards["Spend by day"]["name"] == "Spend by day"
+    assert cards["Sessions"]["name"] == "Sessions"
     assert (board["archived"], board["collection_id"]) == (False, demo["id"])
     assert metabase.content_state.graph["1"][str(demo["id"])] == "read"
     out = capsys.readouterr().out.splitlines()
     assert (
-        'demo-init: revert of an edit: question demo/spend-by-day name: "Edited by a test" -> '
-        '"Spend by day"'
+        'demo-init: revert of an edit: question demo/sessions name: "Edited by a test" -> '
+        '"Sessions"'
     ) in out
-    assert "demo-init: restored from the trash: dashboard demo/dashboard" in out
+    assert "demo-init: restored from the trash: dashboard demo/web-analytics" in out
     assert 'demo-init: lowered: group "All Users" on collection "Demo": curate -> view' in out
 
 
@@ -1244,10 +1291,13 @@ def test_the_collection_of_v0_1_moves_into_agoranomos(airflow, metabase, capsys)
     )
     before = copy.deepcopy(copied)
     assert di.main(env_for(airflow, metabase)) == 0
-    root, demo, now_cards, [now_board] = demo_items(metabase)
+    root, demo, now_cards, boards = demo_items(metabase)
     assert (demo["id"], demo["name"], demo["location"]) == (old["id"], "Demo", f"/{root['id']}/")
+    now_board = boards[ADVERTISING]
     assert now_board["id"] == board["id"], "the dashboard of v0.1 keeps its ID, and its links work"
-    assert {c["id"] for c in now_cards.values()} == {c["id"] for c in cards.values()}
+    # The questions of v0.1 are those of the keys that the names of v0.1 map to.
+    for name, key in di.V01_KEYS.items():
+        assert now_cards[QUESTIONS[key]["name"]]["id"] == cards[name]["id"]
     # The question that the demo does not ship went to the root before the move; the copy in a
     # collection of a person stays as it is.
     assert added["collection_id"] is None
@@ -1268,19 +1318,29 @@ def test_the_collection_of_v0_1_moves_into_agoranomos(airflow, metabase, capsys)
     ) in out
     # The move is one line: no revert of the name or the place of the collection after it. The
     # questions of v0.1 read the mart of v0.1, and they are put back as the code of this release
-    # says, in place: none is made anew.
+    # says, in place; the code makes the questions that v0.1 did not have, and the second
+    # dashboard.
     assert not [
         line
         for line in out
         if line.startswith("demo-init: revert of an edit: collection")
         and " description: " not in line
     ]
+    for key in di.V01_KEYS.values():
+        assert f"demo-init: revert of an edit: question demo/{key} query" in out
+    created = [line for line in out if line.startswith("demo-init: created") and "demo/" in line]
+    assert sorted(created) == sorted(
+        [
+            f'demo-init: created: question demo/{q["key"]} "{q["name"]}"'
+            for q in di.QUESTIONS
+            if q["key"] not in di.V01_KEYS.values()
+        ]
+        + [f'demo-init: created: dashboard demo/web-analytics "{WEB}"']
+    )
     for question in di.QUESTIONS:
-        assert f"demo-init: revert of an edit: question demo/{question['key']} query" in out
-    assert not [line for line in out if line.startswith("demo-init: created") and "demo/" in line]
-    for card in now_cards.values():
-        assert "marts.ad_stats_campaign_daily" in card["dataset_query"]["native"]["query"]
-    assert registry_of(metabase)["demo/dashboard"]["entity_id"] == board["entity_id"]
+        query = now_cards[question["name"]]["dataset_query"]["native"]["query"]
+        assert f"marts.{question['mart']}" in query
+    assert registry_of(metabase)["demo/advertising"]["entity_id"] == board["entity_id"]
 
 
 def test_a_decoy_of_the_old_name_that_another_account_made_is_not_moved(airflow, metabase, capsys):
@@ -1296,8 +1356,8 @@ def test_a_decoy_of_the_old_name_that_another_account_made_is_not_moved(airflow,
     before = copy.deepcopy((decoy, board, card))
     assert di.main(env_for(airflow, metabase)) == 0
     assert (decoy, board, card) == before
-    _, demo, cards, [now_board] = demo_items(metabase)
-    assert (demo["id"], now_board["id"]) != (decoy["id"], board["id"])
+    _, demo, cards, boards = demo_items(metabase)
+    assert (demo["id"], boards[ADVERTISING]["id"]) != (decoy["id"], board["id"])
     assert card["id"] not in {c["id"] for c in cards.values()}
     out = capsys.readouterr().out.splitlines()
     assert (
@@ -1321,8 +1381,8 @@ def test_of_several_collections_of_v0_1_the_one_with_the_lowest_id_moves(airflow
     content.collections.clear()
     content.collections.update(reversed(listed))
     assert di.main(env_for(airflow, metabase)) == 0
-    _, demo, _, [now_board] = demo_items(metabase)
-    assert (demo["id"], now_board["id"]) == (old["id"], board["id"])
+    _, demo, _, boards = demo_items(metabase)
+    assert (demo["id"], boards[ADVERTISING]["id"]) == (old["id"], board["id"])
     for other in (decoy, later):
         assert (other["name"], other["location"]) == (di.COLLECTION_V01, "/")
 
@@ -1359,16 +1419,16 @@ def test_what_the_demo_does_not_ship_leaves_the_collection_of_v0_1_for_the_root(
         {"name": "Inside", "collection_id": old["id"], "dashboard_id": theirs_board["id"]}
     )
     assert di.main(env_for(airflow, metabase)) == 0
-    _, demo, now_cards, [now_board] = demo_items(metabase)
-    assert now_board["id"] == board["id"]
-    assert {c["id"] for c in now_cards.values()} == {c["id"] for c in cards.values()}
+    _, demo, now_cards, boards = demo_items(metabase)
+    assert boards[ADVERTISING]["id"] == board["id"]
+    assert {c["id"] for c in cards.values()} <= {c["id"] for c in now_cards.values()}
     for item in theirs.values():
         assert item["collection_id"] is None, item["name"]
     assert theirs["on the dashboard of v0.1"]["dashboard_id"] is None
     assert (inside["collection_id"], inside["dashboard_id"]) == (None, theirs_board["id"])
     assert notes["location"] == "/"
     inside_demo = [c for c in metabase.cards.values() if c["collection_id"] == demo["id"]]
-    assert sorted(c["id"] for c in inside_demo) == sorted(c["id"] for c in cards.values())
+    assert sorted(c["id"] for c in inside_demo) == sorted(c["id"] for c in now_cards.values())
     out = capsys.readouterr().out.splitlines()
     # One line for each, by its model and its ID; the question of their dashboard moved with it.
     taken_out = [
@@ -1495,7 +1555,7 @@ def test_what_reaches_the_collection_before_its_lock_stops_the_job_and_keeps_it_
     assert di.main(env_for(airflow, metabase)) == 0
     _, demo, now_cards, _ = demo_items(metabase)
     assert demo["id"] == old["id"]
-    assert {c["id"] for c in now_cards.values()} == {c["id"] for c in cards.values()}
+    assert {c["id"] for c in cards.values()} <= {c["id"] for c in now_cards.values()}
     item = late["item"]
     assert item.get("collection_id", "no collection") is None or item.get("location") == "/"
 
@@ -1695,23 +1755,53 @@ def test_a_question_of_v0_1_that_a_person_renamed_goes_to_the_root_and_the_code_
     renamed = cards["Spend by day"]
     renamed["name"] = "Daily spend"
     assert di.main(env_for(airflow, metabase)) == 0
-    _, _, now_cards, [board] = demo_items(metabase)
+    _, _, now_cards, boards = demo_items(metabase)
     assert (renamed["name"], renamed["collection_id"]) == ("Daily spend", None)
-    assert now_cards["Spend by day"]["id"] != renamed["id"]
-    assert renamed["id"] not in {d["card_id"] for d in board["dashcards"]}
-    assert 'demo-init: created: question demo/spend-by-day "Spend by day"' in (
+    assert now_cards["Spend by day and platform"]["id"] != renamed["id"]
+    assert renamed["id"] not in {d["card_id"] for d in boards[ADVERTISING]["dashcards"]}
+    assert 'demo-init: created: question demo/spend-by-day "Spend by day and platform"' in (
         capsys.readouterr().out.splitlines()
     )
 
 
+# The types that Metabase 0.64.1 gave the columns of the answers of the questions of the demo on
+# the stand, in October 2026: the base type, the type of the database, and the semantic type that
+# it gives by the name of a column, which it leaves out of the metadata that it computes when it
+# gives none. Every other column of the answers is a sum or a ratio.
+STAND_TYPES = {
+    "report_date": ("type/Date", "date", None),
+    "is_primary": ("type/Boolean", "bool", None),
+    "click_through_rate": ("type/Decimal", "numeric", "type/Share"),
+    "engagement_rate": ("type/Decimal", "numeric", "type/Share"),
+    "cost_per_conversion": ("type/Decimal", "numeric", "type/Cost"),
+    "session_source": ("type/Text", "text", "type/Source"),
+    "session_default_channel_group": ("type/Text", "text", "type/Source"),
+    **{
+        name: ("type/Text", "text", None)
+        for name in (
+            "platform_name",
+            "client_name",
+            "campaign_name",
+            "conversion_action_name",
+            "conversion_category",
+            "session_medium",
+            "session_campaign_name",
+        )
+    },
+}
+STAND_NUMBER = ("type/Decimal", "numeric", None)
+# The statistics of a run, by the base type of a column.
+FINGERPRINTS = {
+    "type/Date": {"type/DateTime": {"earliest": "2026-08-18", "latest": "2026-10-12"}},
+    "type/Text": {"type/Text": {"average-length": 12.5, "percent-json": 0.0}},
+    "type/Decimal": {"type/Number": {"min": 6664.71, "q1": 6664.71, "skewness": None}},
+}
+
+
 def metadata_on_the_stand(name: str, after_a_run: bool) -> dict[str, Any]:
-    """The metadata of a column of the mart as Metabase 0.64.1 made it on the stand: computed from
+    """The metadata of a column of an answer as Metabase 0.64.1 made it on the stand: computed from
     the query, or recorded after a run of the question, with the keys and statistics of a run."""
-    base_type, database_type = {
-        "report_date": ("type/Date", "date"),
-        "campaign_name": ("type/Text", "text"),
-        "spend_reporting": ("type/Decimal", "numeric"),
-    }[name]
+    base_type, database_type, semantic_type = STAND_TYPES.get(name, STAND_NUMBER)
     column = {
         "name": name,
         "database_type": database_type,
@@ -1719,6 +1809,8 @@ def metadata_on_the_stand(name: str, after_a_run: bool) -> dict[str, Any]:
         "display_name": name,
         "field_ref": ["field", name, {"base-type": base_type}],
     }
+    if semantic_type is not None:
+        column["semantic_type"] = semantic_type
     if after_a_run:
         aliases = (
             "deduplicated-name",
@@ -1727,14 +1819,11 @@ def metadata_on_the_stand(name: str, after_a_run: bool) -> dict[str, Any]:
             "desired-column-alias",
         )
         column |= {f"lib/{alias}": name for alias in aliases}
-        column |= {"effective_type": base_type, "semantic_type": None, "source": "native"}
+        column |= {"effective_type": base_type, "semantic_type": semantic_type, "source": "native"}
         column |= {"lib/source": "source/native"}
-        column["fingerprint"] = {
-            "global": {"distinct-count": 56, "nil%": 0.0},
-            "type": {"type/DateTime": {"earliest": "2026-08-18", "latest": "2026-10-12"}}
-            if base_type == "type/Date"
-            else {"type/Number": {"min": 6664.71, "q1": 6664.71, "skewness": None}},
-        }
+        column["fingerprint"] = {"global": {"distinct-count": 56, "nil%": 0.0}}
+        if base_type in FINGERPRINTS:
+            column["fingerprint"]["type"] = FINGERPRINTS[base_type]
     return column
 
 
@@ -1756,20 +1845,25 @@ def test_the_metadata_that_metabase_makes_for_the_demo_is_left_as_it_is(
 
 def test_a_click_behavior_added_to_a_card_of_the_demo_dashboard_is_reverted(airflow, metabase):
     assert di.main(env_for(airflow, metabase)) == 0
-    _, _, _, [board] = demo_items(metabase)
+    board = board_of(metabase)
     template = "https://example.com/{{spend_reporting}}"
     link = {"type": "link", "linkType": "url", "linkTemplate": template}
     board["dashcards"][0]["visualization_settings"] = {"click_behavior": link}
     assert di.main(env_for(airflow, metabase)) == 0
-    assert [d["visualization_settings"] for d in board["dashcards"]] == [{}] * len(di.QUESTIONS)
+    assert [d["visualization_settings"] for d in board["dashcards"]] == [{}] * len(
+        board["dashcards"]
+    )
+    assert len(board["dashcards"]) == len(
+        [q for q in di.QUESTIONS if q["dashboard"] == di.ADVERTISING]
+    )
 
 
 def test_an_extra_key_in_the_settings_of_a_question_of_the_demo_is_reverted(airflow, metabase):
     assert di.main(env_for(airflow, metabase)) == 0
-    settings_of(metabase, "Spend by day")["graph.show_values"] = True
+    settings_of(metabase, "Spend by client")["graph.show_values"] = True
     assert di.main(env_for(airflow, metabase)) == 0
-    wanted = di.visualization_settings(question_of("spend-by-day"), TITLES)
-    assert settings_of(metabase, "Spend by day") == wanted
+    wanted = di.visualization_settings(QUESTIONS["by-client"], TITLES[di.AD_STATS], "USD")
+    assert settings_of(metabase, "Spend by client") == wanted
 
 
 def test_a_second_root_collection_of_the_old_name_is_left_alone_once_the_demo_is_found(
@@ -1793,9 +1887,9 @@ def test_a_demo_of_v0_1_that_a_restore_brings_back_moves_again(airflow, metabase
     old, cards, board = an_earlier_demo(metabase)
     capsys.readouterr()
     assert di.main(env_for(airflow, metabase)) == 0
-    _, demo, now_cards, [now_board] = demo_items(metabase)
-    assert (demo["id"], now_board["id"]) == (old["id"], board["id"])
-    assert {c["id"] for c in now_cards.values()} == {c["id"] for c in cards.values()}
+    _, demo, now_cards, boards = demo_items(metabase)
+    assert (demo["id"], boards[ADVERTISING]["id"]) == (old["id"], board["id"])
+    assert {c["id"] for c in cards.values()} <= {c["id"] for c in now_cards.values()}
     out = capsys.readouterr().out.splitlines()
     assert any(line.startswith("demo-init: moved: collection ") for line in out)
     assert 'demo-init: created again: collection agoranomos "Agoranomos"' in out
@@ -1879,52 +1973,82 @@ def settings_of(metabase: FakeMetabase, name: str) -> dict[str, Any]:
 
 def test_new_questions_get_the_titles_of_their_columns_and_axes(airflow, metabase):
     assert di.main(env_for(airflow, metabase)) == 0
-    by_campaign = settings_of(metabase, "Spend by campaign, last 7 days")
-    assert by_campaign["column_settings"] == {
-        '["name","campaign_name"]': {"column_title": "Campaign Name"},
-        '["name","spend_reporting"]': {"column_title": "Spend in Reporting Currency"},
+    by_client = settings_of(metabase, "Spend by client")
+    assert by_client["column_settings"] == {
+        '["name","client_name"]': {"column_title": "Client"},
+        '["name","spend_reporting"]': {
+            "column_title": "Spend in Reporting Currency",
+            "number_style": "currency",
+            "currency": "USD",
+        },
     }
-    assert by_campaign["graph.x_axis.title_text"] == "Campaign Name"
-    assert by_campaign["graph.y_axis.title_text"] == "Spend in Reporting Currency"
-    assert settings_of(metabase, "Spend by day")["graph.x_axis.title_text"] == "Report Date"
+    assert by_client["graph.x_axis.title_text"] == "Client"
+    assert by_client["graph.y_axis.title_text"] == "Spend in Reporting Currency"
+    by_day = settings_of(metabase, "Sessions by day and channel group")
+    assert by_day["graph.x_axis.title_text"] == "Report Date"
+    assert by_day["graph.y_axis.title_text"] == "Sessions"
+    # The ratios, which are no column of a mart, get the titles of the code.
+    by_platform = settings_of(metabase, "Results by platform")["column_settings"]
+    assert by_platform['["name","click_through_rate"]'] == {
+        "column_title": "CTR",
+        "number_style": "percent",
+        "decimals": 2,
+    }
+    assert by_platform['["name","roas"]'] == {"column_title": "ROAS", "decimals": 2}
     # A number has no axes.
-    assert settings_of(metabase, "Spend, last 7 days") == {
+    assert settings_of(metabase, "Spend") == {
         "column_settings": {
-            '["name","spend_reporting"]': {"column_title": "Spend in Reporting Currency"}
+            '["name","spend_reporting"]': {
+                "column_title": "Spend in Reporting Currency",
+                "number_style": "currency",
+                "currency": "USD",
+            }
         }
     }
 
 
+def test_the_money_is_in_the_reporting_currency_of_the_metadata(airflow, metabase, tmp_path):
+    # metadata-export renders the reporting currency of the deployment into the currency of the
+    # money of the marts, and the questions show their money in it.
+    export = copy.deepcopy(DEMO_EXPORT)
+    for model in export["models"]:
+        for column in model["columns"]:
+            meta = column["meta"].get("metabase", {})
+            if meta.get("currency") == "USD":
+                meta["currency"] = "EUR"
+    metabase.files.update(metadata_env(tmp_path, export=export))
+    assert di.main(env_for(airflow, metabase)) == 0
+    for question in di.QUESTIONS:
+        settings = settings_of(metabase, question["name"])["column_settings"]
+        for name in question["columns"]:
+            shown = settings.get(f'["name","{name}"]', {})
+            assert shown.get("currency") == ("EUR" if name in di.MONEY else None), name
+
+
 def test_the_titles_come_from_the_overrides_of_the_deployment(airflow, metabase, tmp_path):
     overrides = "[marts.ad_stats_campaign_daily.columns.spend_reporting]\ndisplay_name = 'Cost'\n"
-    metabase.files.update(metadata_env(tmp_path, overrides=overrides))
+    metabase.files.update(metadata_env(tmp_path, export=DEMO_EXPORT, overrides=overrides))
     assert di.main(env_for(airflow, metabase)) == 0
-    assert settings_of(metabase, "Spend by day")["graph.y_axis.title_text"] == "Cost"
+    assert settings_of(metabase, "Spend by client")["graph.y_axis.title_text"] == "Cost"
     assert metabase.field("spend_reporting")["display_name"] == "Cost"
-
-
-def question_of(key: str) -> dict[str, Any]:
-    [question] = [q for q in di.QUESTIONS if q["key"] == key]
-    return question
 
 
 def test_the_titles_of_a_question_are_put_back_as_the_code_says(airflow, metabase, capsys):
     assert di.main(env_for(airflow, metabase)) == 0
-    settings = settings_of(metabase, "Spend by day")
-    settings["graph.x_axis.title_text"] = "Day"  # a title of a person
+    settings = settings_of(metabase, "Spend by client")
+    settings["graph.x_axis.title_text"] = "Brand"  # a title of a person
     del settings["graph.y_axis.title_text"]
     spend = settings["column_settings"]['["name","spend_reporting"]']
     del spend["column_title"]
     spend["decimals"] = 0  # a format of a person, in the settings of a column that the code sets
     capsys.readouterr()
     assert di.main(env_for(airflow, metabase)) == 0
-    wanted = di.visualization_settings(question_of("spend-by-day"), TITLES)
-    assert settings_of(metabase, "Spend by day") == wanted
-    assert wanted["graph.x_axis.title_text"] == "Report Date"
+    wanted = di.visualization_settings(QUESTIONS["by-client"], TITLES[di.AD_STATS], "USD")
+    assert settings_of(metabase, "Spend by client") == wanted
+    assert wanted["graph.x_axis.title_text"] == "Client"
     assert capsys.readouterr().out.splitlines() == [
-        "demo-init: revert of an edit: question demo/spend-by-day visualization_settings",
-        "demo-init: the demo pipeline ran before, and the dashboard 'Ad spend (demo)' "
-        f"({demo_items(metabase)[3][0]['id']}) is in the collection Agoranomos / Demo",
+        "demo-init: revert of an edit: question demo/by-client visualization_settings",
+        done_line(metabase, "ran before"),
     ]
 
 
@@ -1935,14 +2059,21 @@ def test_a_display_name_that_changes_reaches_the_titles_at_the_next_start(
     # overrides of the deployment reaches the questions too, and not only those made after it.
     assert di.main(env_for(airflow, metabase)) == 0
     overrides = "[marts.ad_stats_campaign_daily.columns.spend_reporting]\ndisplay_name = 'Cost'\n"
-    metabase.files.update(metadata_env(tmp_path, overrides=overrides))
+    metabase.files.update(metadata_env(tmp_path, export=DEMO_EXPORT, overrides=overrides))
     assert di.main(env_for(airflow, metabase)) == 0
-    settings = settings_of(metabase, "Spend by day")
+    settings = settings_of(metabase, "Spend by client")
     assert settings["graph.y_axis.title_text"] == "Cost"
-    assert settings["column_settings"]['["name","spend_reporting"]'] == {"column_title": "Cost"}
+    assert settings["column_settings"]['["name","spend_reporting"]'] == {
+        "column_title": "Cost",
+        "number_style": "currency",
+        "currency": "USD",
+    }
 
 
-CHARTS = ("Spend by campaign, last 7 days", "Spend by day")
+# The charts with one series, which the color of the project draws, and those with a series for each
+# value of their breakout, which keep the colors of Metabase.
+CHARTS = ("Spend by client",)
+BREAKOUTS = ("Spend by day and platform", "Sessions by day and channel group")
 
 
 def test_the_charts_are_drawn_in_the_first_color_of_the_project(airflow, metabase):
@@ -1953,8 +2084,9 @@ def test_the_charts_are_drawn_in_the_first_color_of_the_project(airflow, metabas
         assert settings_of(metabase, name)["series_settings"] == {
             "spend_reporting": {"color": "#A86400"}
         }
-    # A number has no series.
-    assert "series_settings" not in settings_of(metabase, "Spend, last 7 days")
+    # A chart with a breakout, and a number, have no series settings.
+    for name in (*BREAKOUTS, "Spend"):
+        assert "series_settings" not in settings_of(metabase, name), name
 
 
 @pytest.mark.parametrize("name", CHARTS)
@@ -1998,13 +2130,13 @@ def test_a_color_that_a_person_set_is_put_back(airflow, metabase, capsys, name, 
 
 def test_the_series_settings_of_a_person_give_way_to_those_of_the_code(airflow, metabase):
     assert di.main(env_for(airflow, metabase)) == 0
-    settings = settings_of(metabase, "Spend by day")
+    settings = settings_of(metabase, "Spend by client")
     settings["series_settings"] = {
         "other": {"color": "#000000"},
         "spend_reporting": {"title": "Cost"},
     }
     assert di.main(env_for(airflow, metabase)) == 0
-    assert settings_of(metabase, "Spend by day")["series_settings"] == {
+    assert settings_of(metabase, "Spend by client")["series_settings"] == {
         "spend_reporting": {"color": "#A86400"}
     }
 
@@ -2020,6 +2152,102 @@ def test_a_chart_whose_series_settings_lack_its_metric_gets_those_of_the_code(
     assert settings_of(metabase, name)["series_settings"] == {
         "spend_reporting": {"color": "#A86400"}
     }
+
+
+def test_each_question_filters_on_the_fields_of_the_mart_that_it_reads(airflow, metabase):
+    # Each question has a field filter for each filter of its dashboard, on the field of the column
+    # of the mart that it reads, with the base type that Metabase gives that field.
+    assert di.main(env_for(airflow, metabase)) == 0
+    fields = {
+        (table["name"], f["name"]): f for table in metabase.all_tables() for f in table["fields"]
+    }
+    for question in di.QUESTIONS:
+        native = card_of(metabase, question["name"])["dataset_query"]["native"]
+        names = di.QUESTION_FILTERS[question["dashboard"]]
+        assert list(native["template-tags"]) == list(names), question["key"]
+        for name in names:
+            display_name, widget_type, column = di.FILTERS[name]
+            field = fields[(question["mart"], column)]
+            assert native["template-tags"][name] == {
+                "id": content.tag_id("demo", question["key"], name),
+                "name": name,
+                "display-name": display_name,
+                "type": "dimension",
+                "dimension": ["field", field["id"], {"base-type": field["base_type"]}],
+                "widget-type": widget_type,
+            }
+            assert f"{{{{{name}}}}}" in native["query"], (question["key"], name)
+        # The parameters stay empty: Metabase shows the filters from the template tags.
+        assert card_of(metabase, question["name"])["parameters"] == []
+
+
+def test_each_dashboard_sets_the_filters_of_each_of_its_cards(airflow, metabase):
+    assert di.main(env_for(airflow, metabase)) == 0
+    for key, (name, _) in di.DASHBOARDS.items():
+        board = board_of(metabase, name)
+        slugs = [f["slug"] for f in board["parameters"]]
+        assert slugs == list(di.QUESTION_FILTERS[key])
+        period = next(f for f in board["parameters"] if f["slug"] == "period")
+        assert (period["type"], period["default"]) == ("date/all-options", "past30days")
+        for dashcard in board["dashcards"]:
+            mappings = dashcard["parameter_mappings"]
+            assert [m["parameter_id"] for m in mappings] == slugs
+            for mapping in mappings:
+                assert mapping["card_id"] == dashcard["card_id"]
+                assert mapping["target"] == ["dimension", ["template-tag", mapping["parameter_id"]]]
+
+
+def test_a_filter_that_a_person_changed_on_a_dashboard_is_put_back(airflow, metabase, capsys):
+    # A person changes the default of the period, drops the filter of the platform, and unhooks a
+    # card from the filter of the client.
+    assert di.main(env_for(airflow, metabase)) == 0
+    board = board_of(metabase)
+    board["parameters"][0]["default"] = "past7days"
+    board["parameters"] = [f for f in board["parameters"] if f["slug"] != "platform"]
+    board["dashcards"][0]["parameter_mappings"] = []
+    capsys.readouterr()
+    assert di.main(env_for(airflow, metabase)) == 0
+    filters = [content.filter_shape(di.DASHBOARD_FILTERS[f]) for f in di.AD_FILTERS]
+    assert board["parameters"] == filters
+    assert all(len(d["parameter_mappings"]) == len(filters) for d in board["dashcards"])
+    assert (
+        "demo-init: revert of an edit: dashboard demo/advertising cards: 9 cards (1 not as the "
+        "code says) and 2 filters (1 not as the code says) -> 9 cards and 3 filters"
+    ) in capsys.readouterr().out.splitlines()
+
+
+def test_a_template_tag_that_a_person_changed_is_put_back(airflow, metabase, capsys):
+    assert di.main(env_for(airflow, metabase)) == 0
+    card = card_of(metabase, "Sessions")
+    card["dataset_query"]["native"]["template-tags"]["client"]["widget-type"] = "string/contains"
+    capsys.readouterr()
+    assert di.main(env_for(airflow, metabase)) == 0
+    tag = card["dataset_query"]["native"]["template-tags"]["client"]
+    assert tag["widget-type"] == "string/="
+    assert "demo-init: revert of an edit: question demo/sessions query" in (
+        capsys.readouterr().out.splitlines()
+    )
+
+
+def test_metabase_gives_the_columns_of_the_answers_the_semantic_types_of_the_code():
+    # Metabase gives a column of an answer a semantic type by its name each time that it computes
+    # the metadata of the question: the code expects that type, or a start would take the metadata
+    # that Metabase made for an edit, and put it back on every start.
+    from test_dbt_project import METABASE_KINDS, METABASE_NAME_TYPES
+
+    kinds_of = {**METABASE_KINDS, "bool": METABASE_KINDS["boolean"]}
+    for question in di.QUESTIONS:
+        for column in di.answer_columns(question):
+            kinds = kinds_of[column.database_type]
+            named = next(
+                (
+                    given
+                    for pattern, kind, given in METABASE_NAME_TYPES
+                    if kind in kinds and re.search(pattern, column.name)
+                ),
+                None,
+            )
+            assert column.semantic_type == named, (question["key"], column.name)
 
 
 def test_a_mistake_in_the_overrides_stops_demo_init_before_it_writes(
@@ -2058,10 +2286,10 @@ def test_a_later_step_that_fails_leaves_the_lines_of_the_metadata_in_the_log(
     assert di.main(env_for(airflow, metabase)) == 1
     output = capsys.readouterr()
     applied = output.out.splitlines()
-    assert applied[0] == (
+    assert (
         'demo-init: first fill: marts.ad_stats_campaign_daily display_name: "Ad Stats Campaign '
         'Daily" -> "Ad Statistics by Campaign and Day"'
-    )
+    ) in applied
     assert all(line.startswith("demo-init: first fill: ") for line in applied), applied
     [line] = output.err.splitlines()
     assert line.startswith("demo-init: POST /api/collection failed with HTTP 500")

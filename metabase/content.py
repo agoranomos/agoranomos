@@ -9,13 +9,14 @@ item, or another one with the same name, cannot take the place of one of the pac
 0.64.1 lets no caller of its API choose an entity ID, so the registry is their only record.
 
 Each start compares each item with the code: the name and the description of a collection, a
-question or a dashboard, and where it is; of a question its type, its whole query, its whole
-settings of display, its filters, the dashboard that it belongs to (none) and the metadata of its
-columns; and each card of a dashboard whole (its question, its place, its settings of display, such
-as a click behavior, its filter mappings and its series), with the filters and the tabs of the
-dashboard. What differs is put back, what is in the trash comes back, what Metabase no longer has
-is created again, an item that the code no longer ships goes to the trash, and one line of the log
-says each change and what it replaced. Metabase keeps the replaced version in the history of
+question or a dashboard, and where it is; of a question its type, its whole query with the
+template tags of its filters, its whole settings of display, its parameters (none: Metabase shows
+its filters from the template tags), the dashboard that it belongs to (none) and the metadata of
+its columns; and each card of a dashboard whole (its question, its place, its settings of display,
+such as a click behavior, its filter mappings and its series), with the filters and the tabs of
+the dashboard. What differs is put back, what is in the trash comes back, what Metabase no longer
+has is created again, an item that the code no longer ships goes to the trash, and one line of the
+log says each change and what it replaced. Metabase keeps the replaced version in the history of
 revisions of the item. Every group but Administrators gets
 at most View on the collection Agoranomos and on every sub-collection of the registry.
 
@@ -29,6 +30,7 @@ import json
 import os
 import re
 import string
+import uuid
 from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -83,12 +85,32 @@ class ContentError(RuntimeError):
 
 @dataclass(frozen=True)
 class Column:
-    """A column of the answer of a question: its name, and the types that Metabase gives it from
-    the warehouse, which the mart that the question reads fixes."""
+    """A column of the answer of a question: its name, the types that Metabase gives it from the
+    warehouse, which the mart that the question reads fixes, and the semantic type that Metabase
+    gives it by its name, None for none (the patterns of src/metabase/analyze/classifiers/name.clj
+    at the tag v0.64.1, such as type/Share for a decimal whose name ends in rate)."""
 
     name: str
     base_type: str
     database_type: str
+    semantic_type: str | None = None
+
+
+@dataclass(frozen=True)
+class Filter:
+    """A filter of a question on a field of the warehouse, a field filter of Metabase: the template
+    tag {{name}} in its SQL, which Metabase replaces with a condition on the field for the value
+    that a person picks, or with one that every row meets when there is none. The condition names
+    the column with its schema and table, so the SQL reads that table without an alias. The field
+    is the ID that Metabase gives the column, with its base type, as Metabase 0.64.1 gives them
+    back in the tag (checked on the stand, October 2026). The name is also the slug of the filter
+    of a dashboard that sets it."""
+
+    name: str
+    display_name: str
+    widget_type: str
+    field_id: int
+    base_type: str
 
 
 @dataclass(frozen=True)
@@ -100,6 +122,7 @@ class Question:
     query: str
     columns: tuple[Column, ...]
     visualization_settings: Mapping[str, Any] = field(default_factory=dict)
+    filters: tuple[Filter, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -112,11 +135,26 @@ class Placement:
 
 
 @dataclass(frozen=True)
+class DashboardFilter:
+    """A filter of a dashboard, which sets the filter of the same name of each question of its
+    cards that has one. Its slug is its ID too, so that the mappings of the cards name it the same
+    way on every start. section_id is the section of the editor of Metabase that it belongs to,
+    and default its value until a person picks another, None for no value."""
+
+    slug: str
+    name: str
+    type: str
+    section_id: str
+    default: Any = None
+
+
+@dataclass(frozen=True)
 class Dashboard:
     key: str
     name: str
     description: str
     cards: tuple[Placement, ...]
+    filters: tuple[DashboardFilter, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -355,6 +393,32 @@ def everything_in(metabase: Client, collection_id: int) -> list[dict[str, Any]]:
     return sorted(found.values(), key=lambda item: (str(item.get("model")), item["id"]))
 
 
+def tag_id(package: str, question: str, name: str) -> str:
+    """The ID of a template tag: a UUID, as the editor of Metabase gives one, made from the keys of
+    the package, the question and the filter, so that it is the same on every start."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"agoranomos:{package}/{question}/{name}"))
+
+
+def native_query(package: Package, question: Question, database_id: int) -> dict[str, Any]:
+    """The query of a question, in the legacy form that find() asks for, with a template tag for
+    each of its filters. A question without filters has no template tags, and Metabase 0.64.1
+    adds none (checked on the stand, October 2026)."""
+    native: dict[str, Any] = {"query": question.query}
+    if question.filters:
+        native["template-tags"] = {
+            f.name: {
+                "id": tag_id(package.key, question.key, f.name),
+                "name": f.name,
+                "display-name": f.display_name,
+                "type": "dimension",
+                "dimension": ["field", f.field_id, {"base-type": f.base_type}],
+                "widget-type": f.widget_type,
+            }
+            for f in question.filters
+        }
+    return {"database": database_id, "type": "native", "native": native}
+
+
 def ensure_question(
     metabase: Client,
     registry: Registry,
@@ -368,11 +432,14 @@ def ensure_question(
     query, in the legacy form that find() asks for, and its settings of display are compared whole:
     Metabase 0.64.1 gives both back as the jobs wrote them, and adds no key of its own (checked on
     the stand, October 2026), so anything that differs, a template tag or a key that someone added
-    included, is put back. The metadata of its columns is kept only when it is what Metabase makes
-    for the columns that the question declares (as_metabase_makes_it), else it is dropped, and
-    Metabase computes it again from the query that goes with the null."""
+    included, is put back. Its parameters stay empty: Metabase 0.64.1 shows the filters of a
+    question with no parameters from its template tags (getParametersFromCard,
+    frontend/src/metabase-lib/v1/parameters/utils/template-tags.ts at the tag v0.64.1, read on
+    2026-10-20). The metadata of its columns is kept only when it is what Metabase makes for the
+    columns that the question declares (as_metabase_makes_it), else it is dropped, and Metabase
+    computes it again from the query that goes with the null."""
     key = f"{package.key}/{question.key}"
-    query = {"database": database_id, "type": "native", "native": {"query": question.query}}
+    query = native_query(package, question, database_id)
     settings = dict(question.visualization_settings)
     found = located(registry, metabase, "card", key)
     if found is None:
@@ -422,21 +489,25 @@ def ensure_question(
 
 def computed_metadata(columns: tuple[Column, ...]) -> list[dict[str, Any]]:
     """The metadata that Metabase 0.64.1 computes for the answer of a native question with these
-    columns, in their order: no description, the name of a column as its display name, and a
-    reference to it by its name and type (read on the stand in October 2026). It computes it from
+    columns, in their order: no description, the name of a column as its display name, a reference
+    to it by its name and type, and the semantic type that it gives the column by its name, a key
+    that it leaves out when it gives none (read on the stand in October 2026). It computes it from
     the query (maybe-async-result-metadata, queries/models/card/metadata.clj), and keeps instead the
     metadata that a request sends with the query unchanged, or with none: so anything else, the
     name of a column included, is text that someone wrote, which people and AI clients read."""
-    return [
-        {
+    computed = []
+    for column in columns:
+        metadata = {
             "name": column.name,
             "database_type": column.database_type,
             "base_type": column.base_type,
             "display_name": column.name,
             "field_ref": ["field", column.name, {"base-type": column.base_type}],
         }
-        for column in columns
-    ]
+        if column.semantic_type is not None:
+            metadata["semantic_type"] = column.semantic_type
+        computed.append(metadata)
+    return computed
 
 
 # The keys that Metabase 0.64.1 adds to the metadata of each column of a native question when it
@@ -445,7 +516,7 @@ def computed_metadata(columns: tuple[Column, ...]) -> list[dict[str, Any]]:
 # /api/card/:id/query), besides fingerprint, the statistics of the data of the column.
 RECORDED_KEYS: dict[str, Callable[[Column], Any]] = {
     "effective_type": lambda column: column.base_type,
-    "semantic_type": lambda column: None,
+    "semantic_type": lambda column: column.semantic_type,
     "lib/deduplicated-name": lambda column: column.name,
     "lib/original-name": lambda column: column.name,
     "lib/source-column-alias": lambda column: column.name,
@@ -605,6 +676,53 @@ def dashcard_shape(dashcard: Mapping[str, Any]) -> str:
     )
 
 
+def filter_shape(dashboard_filter: DashboardFilter) -> dict[str, Any]:
+    """A filter of a dashboard as Metabase 0.64.1 keeps it in the parameters of the dashboard, and
+    gives it back as the jobs wrote it (checked on the stand, October 2026)."""
+    shape = {
+        "id": dashboard_filter.slug,
+        "name": dashboard_filter.name,
+        "slug": dashboard_filter.slug,
+        "type": dashboard_filter.type,
+        "sectionId": dashboard_filter.section_id,
+    }
+    if dashboard_filter.default is not None:
+        shape["default"] = dashboard_filter.default
+    return shape
+
+
+def mappings_of(dashboard: Dashboard, question: Question, card_id: int) -> list[dict[str, Any]]:
+    """The filter mappings of a card: each filter of the dashboard sets the filter of the same name
+    of the question of the card, through its template tag."""
+    names = {f.name for f in question.filters}
+    return [
+        {
+            "parameter_id": f.slug,
+            "card_id": card_id,
+            "target": ["dimension", ["template-tag", f.slug]],
+        }
+        for f in dashboard.filters
+        if f.slug in names
+    ]
+
+
+def filters_line(number: int) -> str:
+    return counted(number, "filter") if number else "no filter"
+
+
+def shapes(items: list[Any]) -> Counter[str]:
+    return Counter(json.dumps(item, sort_keys=True) for item in items)
+
+
+def described(have: Counter[str], wanted: Counter[str], noun: str, none: str) -> str:
+    """How many cards or filters a dashboard has, for the log, and how many of them are not as the
+    code says."""
+    if not have.total():
+        return none
+    astray = (have - wanted).total()
+    return counted(have.total(), noun) + (f" ({astray} not as the code says)" if astray else "")
+
+
 def ensure_dashboard(
     metabase: Client,
     registry: Registry,
@@ -614,6 +732,9 @@ def ensure_dashboard(
     cards: Mapping[str, int],
     log: Log,
 ) -> int:
+    """The dashboard of a key, as the code says: its name, description and place, its cards whole
+    (dashcard_shape()), its filters, and no tab. The cards, the filters and the tabs are written
+    together, in one request, when any of them differs."""
     key = f"{package.key}/{dashboard.key}"
     found = located(registry, metabase, "dashboard", key)
     created = found is None
@@ -647,6 +768,7 @@ def ensure_dashboard(
             # takes it out of the trash: so it comes out first.
             metabase.call("PUT", f"/api/dashboard/{found['id']}", body)
             body = {}
+    questions = {q.key: q for q in package.questions}
     wanted_cards = [
         {
             "card_id": cards[p.question],
@@ -654,7 +776,7 @@ def ensure_dashboard(
             "col": p.col,
             "size_x": p.size_x,
             "size_y": p.size_y,
-            "parameter_mappings": [],
+            "parameter_mappings": mappings_of(dashboard, questions[p.question], cards[p.question]),
             "visualization_settings": {},
             "series": [],
         }
@@ -662,24 +784,24 @@ def ensure_dashboard(
     ]
     wanted = Counter(dashcard_shape(d) for d in wanted_cards)
     have = Counter(dashcard_shape(d) for d in found.get("dashcards") or [])
+    wanted_filters = [filter_shape(f) for f in dashboard.filters]
     filters = found.get("parameters") or []
     tabs = found.get("tabs") or []
-    if have != wanted or filters or tabs:
+    if have != wanted or filters != wanted_filters or tabs:
         body["dashcards"] = [{"id": -(n + 1), **d} for n, d in enumerate(wanted_cards)]
-        body["parameters"] = []
+        body["parameters"] = wanted_filters
         body["tabs"] = []
         if not created:
-            cards_had = counted(have.total(), "card")
-            astray = (have - wanted).total()
-            if astray and have.total():
-                cards_had += f" ({astray} not as the code says)"
-            had = [cards_had, counted(len(filters), "filter") if filters else "no filter"]
+            had = [
+                described(have, wanted, "card", "0 cards"),
+                described(shapes(filters), shapes(wanted_filters), "filter", "no filter"),
+            ]
             if tabs:
                 had.append(counted(len(tabs), "tab"))
             listed = f"{', '.join(had[:-1])} and {had[-1]}"
             log(
                 f"revert of an edit: dashboard {key} cards: {listed} "
-                f"-> {counted(len(wanted_cards), 'card')} and no filter"
+                f"-> {counted(len(wanted_cards), 'card')} and {filters_line(len(wanted_filters))}"
             )
     if body:
         metabase.call("PUT", f"/api/dashboard/{found['id']}", body)

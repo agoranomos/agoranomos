@@ -4,6 +4,7 @@ against the stand-in of Metabase."""
 import ast
 import json
 import sys
+import uuid
 from pathlib import Path
 
 import content as ct
@@ -825,3 +826,114 @@ def test_the_module_imports_only_the_standard_library_and_metadata():
             imported.add(node.module.split(".")[0])
     allowed = set(sys.stdlib_module_names) | {"metadata"}
     assert imported <= allowed, sorted(imported - allowed)
+
+
+# A question with a filter on a field of the warehouse, and a dashboard whose filter sets it: the
+# card of the other question has no filter of that name, so the filter does not reach it.
+FILTERED = ct.Question(
+    key="by-day",
+    name="By day",
+    description="The spend of each day.",
+    display="line",
+    query="SELECT report_date, sum(spend) AS spend FROM marts.facts WHERE {{period}} GROUP BY 1",
+    columns=(
+        ct.Column("report_date", "type/Date", "date"),
+        ct.Column("spend", "type/Integer", "int4"),
+    ),
+    filters=(ct.Filter("period", "Period", "date/all-options", 57, "type/Date"),),
+)
+PERIOD = ct.DashboardFilter("period", "Period", "date/all-options", "date", "past30days")
+WITH_FILTERS = ct.Package(
+    key="demo",
+    name="Demo",
+    description="The demo.",
+    questions=(QUESTION, FILTERED),
+    dashboards=(
+        ct.Dashboard(
+            "dashboard",
+            "Board",
+            "A board.",
+            (ct.Placement("spend", 0, 0, 6, 4), ct.Placement("by-day", 0, 6, 18, 4)),
+            (PERIOD,),
+        ),
+    ),
+)
+
+
+def test_a_filter_becomes_a_template_tag_and_a_filter_of_the_dashboard(metabase, registry):
+    state, client = metabase
+    ids = ct.ensure_package(client, registry, WITH_FILTERS, 2, lambda line: None)
+    card = state.content_state.cards[ids["by-day"]]
+    assert card["dataset_query"]["native"]["template-tags"] == {
+        "period": {
+            "id": ct.tag_id("demo", "by-day", "period"),
+            "name": "period",
+            "display-name": "Period",
+            "type": "dimension",
+            "dimension": ["field", 57, {"base-type": "type/Date"}],
+            "widget-type": "date/all-options",
+        }
+    }
+    assert card["parameters"] == []
+    # A question without a filter has no template tags.
+    assert "template-tags" not in state.content_state.cards[ids["spend"]]["dataset_query"]["native"]
+    board = state.content_state.dashboards[ids["dashboard"]]
+    assert board["parameters"] == [
+        {
+            "id": "period",
+            "name": "Period",
+            "slug": "period",
+            "type": "date/all-options",
+            "sectionId": "date",
+            "default": "past30days",
+        }
+    ]
+    mappings = {d["card_id"]: d["parameter_mappings"] for d in board["dashcards"]}
+    assert mappings == {
+        ids["spend"]: [],
+        ids["by-day"]: [
+            {
+                "parameter_id": "period",
+                "card_id": ids["by-day"],
+                "target": ["dimension", ["template-tag", "period"]],
+            }
+        ],
+    }
+
+
+def test_a_package_with_filters_is_left_as_it_is_by_the_next_start(metabase, registry):
+    state, client = metabase
+    ct.ensure_package(client, registry, WITH_FILTERS, 2, lambda line: None)
+    log, say = lines()
+    writes = len(state.bodies)
+    ct.ensure_package(client, registry, WITH_FILTERS, 2, say)
+    assert log == []
+    assert [b for b in state.bodies[writes:] if b[0] in ("PUT", "POST")] == []
+
+
+def test_the_id_of_a_template_tag_is_a_uuid_that_stays():
+    first = ct.tag_id("demo", "by-day", "period")
+    assert first == ct.tag_id("demo", "by-day", "period")
+    assert first != ct.tag_id("demo", "spend", "period")
+    assert str(uuid.UUID(first)) == first
+
+
+@pytest.mark.parametrize("default", [None, "past30days"])
+def test_a_filter_of_the_dashboard_has_a_default_only_when_the_code_gives_one(default):
+    shape = ct.filter_shape(ct.DashboardFilter("client", "Client", "string/=", "string", default))
+    assert ("default" in shape) == (default is not None)
+
+
+def test_the_semantic_type_that_metabase_gives_by_name_is_part_of_what_it_computes():
+    # Metabase 0.64.1 gives a column of an answer a semantic type by its name, such as type/Share
+    # to a decimal whose name ends in rate, and leaves the key out when it gives none.
+    rate = ct.Column("click_rate", "type/Decimal", "numeric", "type/Share")
+    plain = ct.Column("clicks", "type/Decimal", "numeric")
+    [shared, counted] = ct.computed_metadata((rate, plain))
+    assert shared["semantic_type"] == "type/Share"
+    assert "semantic_type" not in counted
+    assert ct.as_metabase_makes_it([shared, counted], (rate, plain))
+    # After a run, Metabase records the type that it gave, or None.
+    after = [{**shared, "semantic_type": "type/Share"}, {**counted, "semantic_type": None}]
+    assert ct.as_metabase_makes_it(after, (rate, plain))
+    assert not ct.as_metabase_makes_it([{**shared, "semantic_type": None}, counted], (rate, plain))

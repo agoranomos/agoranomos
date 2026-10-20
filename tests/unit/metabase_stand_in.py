@@ -55,6 +55,58 @@ MART_COLUMNS = (
     "reporting_currency",
     "spend_reporting",
 )
+# What the demo adds to the warehouse that the tests of demo-init see (FakeMetabase.demo_marts):
+# columns of the mart above that only its questions read, and the other marts that they read, with
+# the columns that they use. The tests of the metadata keep the one mart of MART_COLUMNS.
+DEMO_COLUMNS = {
+    "ad_stats_campaign_daily": ("platform_name", "client_name", "conversion_value_reporting"),
+    "ad_conversions_campaign_daily": (
+        "report_date",
+        "platform",
+        "platform_name",
+        "client_name",
+        "conversion_action_id",
+        "conversion_action_name",
+        "conversion_category",
+        "is_primary",
+        "conversions",
+        "conversion_value_reporting",
+    ),
+    "web_sessions_daily": (
+        "report_date",
+        "client_name",
+        "session_source",
+        "session_medium",
+        "session_campaign_id",
+        "session_campaign_name",
+        "session_default_channel_group",
+        "ad_platform",
+        "sessions",
+        "engaged_sessions",
+        "key_events",
+        "total_revenue_reporting",
+    ),
+}
+# The base types that Metabase gives the fields of the marts from the types of their columns.
+INTEGERS = {"impressions", "clicks", "sessions", "engaged_sessions"}
+DECIMALS = {
+    "spend",
+    "conversions",
+    "spend_reporting",
+    "conversion_value_reporting",
+    "key_events",
+    "total_revenue_reporting",
+}
+
+
+def base_type(name: str) -> str:
+    if name == "report_date":
+        return "type/Date"
+    if name == "is_primary":
+        return "type/Boolean"
+    if name in INTEGERS:
+        return "type/BigInteger"
+    return "type/Decimal" if name in DECIMALS else "type/Text"
 
 
 def leaked(text: str, secrets: Mapping[str, str]) -> list[str]:
@@ -95,7 +147,7 @@ def column(name: str, display_name: str, semantic_type: str | None, **more: str)
 
 
 # The export of the dbt project of the demo, in short: the mart with its names and types, the
-# staging model, and the source.
+# staging model, and the source. DEMO_EXPORT below adds what the questions of the demo read.
 EXPORT = {
     "format": 1,
     "models": [
@@ -143,6 +195,67 @@ EXPORT = {
         }
     ],
 }
+
+
+# The display names of the columns that the demo adds, by name.
+DEMO_DISPLAY_NAMES = {
+    "platform_name": "Platform",
+    "client_name": "Client",
+    "conversion_value_reporting": "Conversion Value in Reporting Currency",
+    "conversion_action_id": "Conversion Action ID",
+    "conversion_action_name": "Conversion Action",
+    "conversion_category": "Conversion Category",
+    "is_primary": "Is Primary",
+    "session_source": "Session Source",
+    "session_medium": "Session Medium",
+    "session_campaign_id": "Session Campaign ID",
+    "session_campaign_name": "Session Campaign Name",
+    "session_default_channel_group": "Channel Group",
+    "ad_platform": "Ad Platform Code",
+    "sessions": "Sessions",
+    "engaged_sessions": "Engaged Sessions",
+    "key_events": "Key Events",
+    "total_revenue_reporting": "Total Revenue in Reporting Currency",
+}
+# The money of the reporting currency in the columns that the demo adds.
+DEMO_MONEY = {"conversion_value_reporting", "total_revenue_reporting"}
+
+
+def demo_column(name: str, names: Mapping[str, str]) -> dict:
+    money = {"currency": "USD"} if name in DEMO_MONEY else {}
+    semantic = "type/Currency" if money else None
+    return column(name, names[name], semantic, **money)
+
+
+def demo_export() -> dict[str, Any]:
+    """The export with what the questions of the demo read: the columns that the demo adds to the
+    mart of EXPORT, and the other two marts."""
+    export = copy.deepcopy(EXPORT)
+    mart = export["models"][0]
+    names = {
+        **{c["name"]: c["meta"]["metabase"]["display_name"] for c in mart["columns"]},
+        **DEMO_DISPLAY_NAMES,
+    }
+    mart["columns"] += [
+        demo_column(name, names) for name in DEMO_COLUMNS["ad_stats_campaign_daily"]
+    ]
+    for name, display_name in (
+        ("ad_conversions_campaign_daily", "Conversions by Campaign, Day and Action"),
+        ("web_sessions_daily", "Web Sessions by Day"),
+    ):
+        export["models"].append(
+            {
+                "schema": "marts",
+                "name": name,
+                "description": f"The rows of {name}.",
+                "meta": {"metabase": {"display_name": display_name}},
+                "columns": [demo_column(c, names) for c in DEMO_COLUMNS[name]],
+            }
+        )
+    return export
+
+
+DEMO_EXPORT = demo_export()
 
 
 def metadata_env(
@@ -548,12 +661,13 @@ class FakeMetabase:
     works once there is an admin, and a request without a session is refused.
 
     The warehouse holds the table of the mart when mart_in_warehouse is true, and a native query
-    through the warehouse connection lists it. A sync of the schema makes Metabase know it
-    sync_seconds later on the clock, at once when there is no clock, and Metabase then shows it
-    with the fields of its columns, named as Metabase names a new field: fields_seconds after the
-    table itself, as Metabase makes the row of a new table before its fields. A person can hide the
-    table (mart_hidden), or a field (its visibility_type): the metadata of the database then
-    leaves it out unless the request passes include_hidden=true, and a sync does not show it
+    through the warehouse connection lists it; with demo_marts, it holds the columns and the other
+    marts of DEMO_COLUMNS too, which come and go with the mart. A sync of the schema makes Metabase
+    know them sync_seconds later on the clock, at once when there is no clock, and Metabase then
+    shows each with the fields of its columns, named as Metabase names a new field: fields_seconds
+    after the table itself, as Metabase makes the row of a new table before its fields. A person
+    can hide the mart (mart_hidden), or a field (its visibility_type): the metadata of the database
+    then leaves it out unless the request passes include_hidden=true, and a sync does not show it
     again. PUT /api/table/:id and PUT /api/field/:id set what their body says, and a field's
     settings are replaced whole, as Metabase does. bodies keeps what each write sent. The content,
     its collections, questions and dashboards, and the permissions of the collections, are those of
@@ -587,6 +701,8 @@ class FakeMetabase:
         self.mart_known = False
         self.mart_hidden = False
         self.mart: dict[str, Any] | None = None
+        self.demo_marts = False
+        self.other_marts: dict[str, dict[str, Any]] = {}
         self.sync_seconds = 10.0
         self.fields_seconds = 0.0
         self.synced_at: float | None = None
@@ -643,35 +759,59 @@ class FakeMetabase:
             for d in self.databases
         )
 
+    def columns_of(self, name: str) -> tuple[str, ...]:
+        """The columns of a table of the marts in the warehouse."""
+        base = MART_COLUMNS if name == "ad_stats_campaign_daily" else ()
+        return base + (DEMO_COLUMNS.get(name, ()) if self.demo_marts else ())
+
+    def new_table(self, name: str) -> dict[str, Any]:
+        """A table of the marts as Metabase keeps it, with the fields of its columns, named as
+        Metabase names a new field."""
+        first = self.new_id()
+        columns = self.columns_of(name)
+        table = {
+            "id": first,
+            "schema": "marts",
+            "name": name,
+            "display_name": humanize(name),
+            "description": None,
+            "visibility_type": None,
+            "active": True,
+            "fields": [
+                {
+                    "id": first + index + 1,
+                    "name": column,
+                    "display_name": humanize(column),
+                    "description": None,
+                    "base_type": base_type(column),
+                    "semantic_type": None,
+                    "settings": None,
+                    "visibility_type": "normal",
+                    "parent_id": None,
+                }
+                for index, column in enumerate(columns)
+            ],
+        }
+        self.next_id = first + len(columns) + 1
+        return table
+
     def mart_table(self) -> dict[str, Any]:
         """The table of the mart as Metabase keeps it, made on the first sync that finds it. A table
         that goes and comes back is the same row, as in Metabase."""
         if self.mart is None:
-            first = self.new_id()
-            self.mart = {
-                "id": first,
-                "schema": "marts",
-                "name": "ad_stats_campaign_daily",
-                "display_name": humanize("ad_stats_campaign_daily"),
-                "description": None,
-                "visibility_type": None,
-                "active": True,
-                "fields": [
-                    {
-                        "id": first + index + 1,
-                        "name": name,
-                        "display_name": humanize(name),
-                        "description": None,
-                        "semantic_type": None,
-                        "settings": None,
-                        "visibility_type": "normal",
-                        "parent_id": None,
-                    }
-                    for index, name in enumerate(MART_COLUMNS)
-                ],
-            }
-            self.next_id = first + len(MART_COLUMNS) + 1
+            self.mart = self.new_table("ad_stats_campaign_daily")
         return self.mart
+
+    def all_tables(self) -> list[dict[str, Any]]:
+        """The mart, and with demo_marts the other marts of the demo, each made once."""
+        tables = [self.mart_table()]
+        if self.demo_marts:
+            for name in DEMO_COLUMNS:
+                if name != "ad_stats_campaign_daily":
+                    if name not in self.other_marts:
+                        self.other_marts[name] = self.new_table(name)
+                    tables.append(self.other_marts[name])
+        return tables
 
     def field(self, name: str) -> dict[str, Any]:
         return next(f for f in self.mart_table()["fields"] if f["name"] == name)
@@ -682,15 +822,19 @@ class FakeMetabase:
             self.mart_known = True
         if not self.mart_known:
             return []
-        table = copy.deepcopy(self.mart_table())
-        if self.synced_at is not None and self.now() < self.synced_at + self.fields_seconds:
-            table["fields"] = []  # a sync has made the row of the table, and not its fields yet
-        table["visibility_type"] = "hidden" if self.mart_hidden else table["visibility_type"]
-        if not include_hidden:
-            if table["visibility_type"]:
-                return []
-            table["fields"] = [f for f in table["fields"] if f["visibility_type"] == "normal"]
-        return [table]
+        shown = []
+        for kept in self.all_tables():
+            table = copy.deepcopy(kept)
+            if self.synced_at is not None and self.now() < self.synced_at + self.fields_seconds:
+                table["fields"] = []  # a sync has made the row of the table, not its fields yet
+            hidden = self.mart_hidden and kept is self.mart
+            table["visibility_type"] = "hidden" if hidden else table["visibility_type"]
+            if not include_hidden:
+                if table["visibility_type"]:
+                    continue
+                table["fields"] = [f for f in table["fields"] if f["visibility_type"] == "normal"]
+            shown.append(table)
+        return shown
 
     def failure(self, method: str, path: str, body: Any, session: str | None) -> Any:
         for (failing_method, failing_path), status in self.failures.items():
@@ -804,15 +948,18 @@ class FakeMetabase:
         of the tables of the marts in the warehouse, one row a column."""
         native = (body or {}).get("native") or {}
         if native.get("query") == WAREHOUSE_COLUMNS and self.is_warehouse(body.get("database")):
-            mart = [["marts", "ad_stats_campaign_daily", name] for name in MART_COLUMNS]
+            names = ["ad_stats_campaign_daily"]
+            names += [n for n in DEMO_COLUMNS if n not in names] if self.demo_marts else []
+            mart = [["marts", name, column] for name in names for column in self.columns_of(name)]
             rows = mart if self.mart_in_warehouse else []
             return 202, {"status": "completed", "data": {"rows": rows}}
         return 202, {"status": "failed", "error": "this stand-in does not know the query"}
 
     def metadata_write(self, kind: str, object_id: int, body: Any) -> tuple[int, Any]:
-        objects = [self.mart_table()] if self.mart is not None else []
+        tables = self.all_tables() if self.mart is not None else []
+        objects = tables
         if kind == "field":
-            objects = self.mart_table()["fields"] if self.mart is not None else []
+            objects = [field for table in tables for field in table["fields"]]
         for item in objects:
             if item["id"] == object_id:
                 item.update(copy.deepcopy(body))

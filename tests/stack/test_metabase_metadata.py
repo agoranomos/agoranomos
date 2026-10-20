@@ -16,6 +16,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import demo_init
 import metadata
 import pytest
 from metabase_content import item, registry, run_job
@@ -35,9 +36,9 @@ OVERRIDE = """# Written by tests/stack/test_metabase_metadata.py, which removes 
 display_name = "Purchases (stack test)"
 note = "A note of the stack test."
 """
-QUESTIONS = {"Spend, last 7 days", "Spend by campaign, last 7 days", "Spend by day"}
-# The keys of the questions of the demo in the registry of the content.
-QUESTION_KEYS = ("spend-last-7-days", "spend-by-campaign-last-7-days", "spend-by-day")
+# The questions of the demo, by their keys in the registry of the content, and by their names.
+QUESTIONS = {question["key"]: question for question in demo_init.QUESTIONS}
+QUESTIONS_BY_NAME = {question["name"]: question for question in demo_init.QUESTIONS}
 # The first color of the palette of the project for a light background.
 SERIES_COLOR = "#A86400"
 KINDS = (metadata.FIRST, metadata.UPDATE, metadata.REVERT)
@@ -276,32 +277,36 @@ def test_the_reporting_currency_comes_from_the_setting(env, metabase_url, sessio
 def demo_questions(metabase_url: str, session: dict[str, str]) -> dict[str, dict[str, Any]]:
     """The questions of the demo by name, found through the registry of the content."""
     entries = registry()
-    found = (item(metabase_url, session, f"demo/{key}", entries) for key in QUESTION_KEYS)
+    found = (item(metabase_url, session, f"demo/{key}", entries) for key in QUESTIONS)
     return {question["name"]: question for question in found}
 
 
 @needs_the_demo
 def test_the_demo_questions_have_the_titles_of_their_columns_and_axes(metabase_url, session):
+    # Every column of every question has a title, and every chart the titles of its axes.
     titled = {}
     for name, card in demo_questions(metabase_url, session).items():
         settings = card["visualization_settings"]
+        names = [json.loads(key)[1] for key in settings["column_settings"]]
         titles = [entry.get("column_title") for entry in settings["column_settings"].values()]
         axes = [settings.get(key) for key in ("graph.x_axis.title_text", "graph.y_axis.title_text")]
-        titled[name] = all(titles) and (card["display"] == "scalar" or all(axes))
-    assert titled == dict.fromkeys(QUESTIONS, True), titled
+        charted = card["display"] in ("scalar", "table") or all(axes)
+        every = sorted(names) == sorted(QUESTIONS_BY_NAME[name]["columns"])
+        titled[name] = all(titles) and charted and every
+    assert titled == dict.fromkeys(QUESTIONS_BY_NAME, True), titled
 
 
 @needs_the_demo
 def test_the_demo_charts_are_drawn_in_the_color_of_the_project(metabase_url, session):
     # Metabase keys the color of the one series of a chart by the name of its metric column.
+    # A chart with a breakout, a number and a table keep the colors of Metabase.
     colors = {
         name: card["visualization_settings"].get("series_settings")
         for name, card in demo_questions(metabase_url, session).items()
     }
     assert colors == {
-        "Spend by campaign, last 7 days": {"spend_reporting": {"color": SERIES_COLOR}},
-        "Spend by day": {"spend_reporting": {"color": SERIES_COLOR}},
-        "Spend, last 7 days": None,  # a number has no series
+        **dict.fromkeys(QUESTIONS_BY_NAME),
+        "Spend by client": {"spend_reporting": {"color": SERIES_COLOR}},
     }, colors
 
 
@@ -334,7 +339,7 @@ def test_demo_init_puts_back_the_title_of_a_column(env, metabase_url, session, m
     # next start puts the settings of display back as the code says, and logs it. The settings go
     # back as they were also when the test fails.
     [spend] = [c for c in marts.effective[MART].columns if c.name == "spend_reporting"]
-    card = item(metabase_url, session, "demo/spend-by-day")
+    card = item(metabase_url, session, "demo/by-client")
     card_path = f"{metabase_url}/api/card/{card['id']}"
     before = card["visualization_settings"]
     omitted = ("graph.y_axis.title_text", "series_settings")
@@ -351,15 +356,17 @@ def test_demo_init_puts_back_the_title_of_a_column(env, metabase_url, session, m
         code, changes, found, _ = run_job("demo-init", secrets(env))
         assert not found, f"the output of demo-init holds the values of {found}"
         assert code == 0, f"demo-init exited with {code}"
-        settings = item(metabase_url, session, "demo/spend-by-day")["visualization_settings"]
+        settings = item(metabase_url, session, "demo/by-client")["visualization_settings"]
         assert settings.get("graph.y_axis.title_text") == spend.display_name
         assert settings["column_settings"]['["name","spend_reporting"]'] == {
-            "column_title": spend.display_name
+            "column_title": spend.display_name,
+            "number_style": "currency",
+            "currency": spend.currency,
         }
         assert settings.get("series_settings") == {"spend_reporting": {"color": SERIES_COLOR}}
-        assert settings["graph.dimensions"] == ["report_date"]
+        assert settings["graph.dimensions"] == ["client_name"]
         assert changes == [
-            "demo-init: revert of an edit: question demo/spend-by-day visualization_settings"
+            "demo-init: revert of an edit: question demo/by-client visualization_settings"
         ], changes
     finally:
         # No assert here: it would hide the failure of the test when the way back fails too.

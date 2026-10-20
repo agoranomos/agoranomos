@@ -5,13 +5,16 @@ It runs the demo pipeline once: agoranomos_demo_history, which loads the history
 platforms of the demo generator into raw_demo_<platform>, and then agoranomos_demo_transform, which
 the five assets of the history start. Then it makes the demo visible in Metabase: it syncs the
 schema of the warehouse, applies the metadata of the marts (metadata.py), as metabase-init does,
-and puts the demo, its questions and its dashboard, in the collection Agoranomos / Demo as the code
-says (content.py, ADR-0018): an edit is reverted and logged, an item in the trash comes back, and
-every group but Administrators gets at most View on them. The questions get the titles of their
-columns and axes from the display names of the metadata, and their charts get the color of the
-project. The demo collection of v0.1, the one whose dashboard the account of demo-init made, moves
-into Agoranomos as Demo once, after every item in it that the demo does not ship has gone to the
-root.
+and puts the demo, its questions and its two dashboards, Advertising overview and Web analytics,
+in the collection Agoranomos / Demo as the code says (content.py, ADR-0018): an edit is reverted
+and logged, an item in the trash comes back, and every group but Administrators gets at most View
+on them. The questions get the titles of their columns and axes from the display names of the
+metadata, money in the reporting currency of the metadata, and the colors of the project; each
+has the filters of its dashboard, the period, the client and, for the advertising, the platform,
+which the filters of the dashboard set. The demo collection of v0.1, the one whose dashboard the
+account of demo-init made, moves into Agoranomos as Demo once, after every item in it that the
+demo does not ship has gone to the root, and its dashboard and questions become those of the
+advertising.
 
 Each step looks at the current state first. A start that finds a successful run of the history and
 a successful run of the transform after it does not run the pipeline again and leaves the pause
@@ -69,22 +72,35 @@ DEMO_NAME = "Demo"
 DEMO_DESCRIPTION = (
     "The demo of Agoranomos: a fictional business, as the demo data of this release shows it."
 )
-DASHBOARD = "Ad spend (demo)"
-DASHBOARD_DESCRIPTION = (
-    "Ad spend of the demo, in the reporting currency, from marts.ad_stats_campaign_daily."
-)
+# The two dashboards of the demo, by their keys in the package: their names and descriptions.
+ADVERTISING = "advertising"
+WEB = "web-analytics"
+DASHBOARDS = {
+    ADVERTISING: (
+        "Advertising overview (demo)",
+        "The advertising statistics of the demo, in the reporting currency, from "
+        "marts.ad_stats_campaign_daily and marts.ad_conversions_campaign_daily.",
+    ),
+    WEB: (
+        "Web analytics (demo)",
+        "The sessions of web analytics of the demo, from marts.web_sessions_daily.",
+    ),
+}
 # The names of the demo of v0.1, which the jobs look for once, to move it into Agoranomos: its
-# collection at the root, its dashboard, and its questions, with the key of each in the package.
-# Written out, so that they stay as v0.1 named them when the questions of the code change.
+# collection at the root, its dashboard, and its questions, with the key of each in the package,
+# which puts them right as the code says. Written out, so that they stay as v0.1 named them when
+# the questions of the code change.
 COLLECTION_V01 = "Agoranomos demo"
 DASHBOARD_V01 = "Ad spend (demo)"
 V01_KEYS = {
-    "Spend, last 7 days": "spend-last-7-days",
-    "Spend by campaign, last 7 days": "spend-by-campaign-last-7-days",
+    "Spend, last 7 days": "spend",
+    "Spend by campaign, last 7 days": "top-campaigns",
     "Spend by day": "spend-by-day",
 }
 MART_SCHEMA = "marts"
-MART_TABLE = "ad_stats_campaign_daily"
+AD_STATS = "ad_stats_campaign_daily"
+CONVERSIONS = "ad_conversions_campaign_daily"
+SESSIONS = "web_sessions_daily"
 # The one deadline of the job, in seconds from its start, shared by the waits for the DAGs, the
 # history, the transform and the sync. ./agoranomos up waits 900 seconds for the whole stack.
 DEADLINE = 600.0
@@ -94,98 +110,483 @@ POLL_INTERVAL = 5.0
 clock = time.monotonic
 pause = time.sleep
 FINISHED = ("success", "failed")
-LAST_7_DAYS = "report_date > (SELECT max(report_date) FROM marts.ad_stats_campaign_daily) - 7"
 AIRFLOW_ADMIN_HINT = (
     "Check AIRFLOW_ADMIN_PASSWORD in .env. If you changed the password of admin in Airflow, put "
     "the same value in .env."
 )
-# Where to look when Metabase does not show the table of the mart. When the warehouse has it and
-# no sync shows it, Metabase is the suspect. When the warehouse does not have it and the pipeline
-# ran before and not now, Airflow has kept its runs, and the warehouse has lost the table since, as
+# Where to look when Metabase does not show a table of the marts. When the warehouse has it and no
+# sync shows it, Metabase is the suspect. When the warehouse does not have it and the pipeline ran
+# before and not now, Airflow has kept its runs, and the warehouse has lost the table since, as
 # after a reset of the warehouse volume alone. When the pipeline ran now, its transform is.
 SYNC_HINT = "see ./agoranomos logs metabase"
 RAN_BEFORE_HINT = (
-    "the demo pipeline ran before, and the table is gone from the warehouse since, as after a "
-    f"reset of its volume: trigger {LOAD_DAG} in Airflow, and the transform that follows it builds "
-    "the table again"
+    "the demo pipeline ran before, so the warehouse has lost them since, as after a reset of its "
+    f"volume: trigger {LOAD_DAG} in Airflow, and the transform that follows it builds them again"
 )
 RAN_NOW_HINT = f"see the last run of {TRANSFORM_DAG} in Airflow"
 
 # The settings of a chart that hold the titles of its axes.
 AXIS_TITLES = ("graph.x_axis.title_text", "graph.y_axis.title_text")
-# The color of the series of the demo charts: the first color of the chart palette of the project,
-# which is made for a light background (the default of a Metabase dashboard). Metabase keeps the
-# color of a series in series_settings, under the series key, which for a chart with one metric and
-# no breakout is the name of the metric column. A color with no color_name is drawn as it is.
+# The color of the series of a demo chart with one series: the first color of the chart palette of
+# the project, which is made for a light background (the default of a Metabase dashboard). Metabase
+# keeps the color of a series in series_settings, under the series key, which for a chart with one
+# metric and no breakout is the name of the metric column. A color with no color_name is drawn as
+# it is. A chart with a breakout has a series for each value of the data, in the colors of Metabase.
 SERIES_COLOR = "#A86400"
 
-# The types that Metabase 0.64.1 gives the columns of the mart that the questions answer with, read
-# from the warehouse (checked on the stand in October 2026): the contract of the mart fixes them.
+# The filters of the questions, by the names of their template tags: their display names, the type
+# of their widget, and the column of the mart that each filters on. A dashboard filter of the same
+# slug sets each of them. The period starts as the past 30 days, which end yesterday.
+FILTERS = {
+    "period": ("Period", "date/all-options", "report_date"),
+    "client": ("Client", "string/=", "client_name"),
+    "platform": ("Platform", "string/=", "platform_name"),
+}
+DASHBOARD_FILTERS = {
+    "period": content.DashboardFilter("period", "Period", "date/all-options", "date", "past30days"),
+    "client": content.DashboardFilter("client", "Client", "string/=", "string"),
+    "platform": content.DashboardFilter("platform", "Platform", "string/=", "string"),
+}
+AD_FILTERS = ("period", "client", "platform")
+WEB_FILTERS = ("period", "client")
+
+# The types that Metabase 0.64.1 gives the columns of the answers of the questions, read on the
+# stand in October 2026: the contracts of the marts fix the types of the columns that the questions
+# return as they are, and every sum or ratio is numeric in PostgreSQL.
+TEXT = ("type/Text", "text")
+NUMBER = ("type/Decimal", "numeric")
 COLUMN_TYPES = {
     "report_date": ("type/Date", "date"),
-    "campaign_name": ("type/Text", "text"),
-    "spend_reporting": ("type/Decimal", "numeric"),
+    "is_primary": ("type/Boolean", "bool"),
+    **dict.fromkeys(
+        (
+            "platform_name",
+            "client_name",
+            "campaign_name",
+            "conversion_action_name",
+            "conversion_category",
+            "session_default_channel_group",
+            "session_source",
+            "session_medium",
+            "session_campaign_name",
+        ),
+        TEXT,
+    ),
 }
+# The semantic types that Metabase 0.64.1 gives the columns of the answers by their names, each
+# time that it computes their metadata (src/metabase/analyze/classifiers/name.clj at the tag
+# v0.64.1; seen on the stand in October 2026): a decimal whose name ends in rate is a share, one
+# whose name has cost is a cost, and a name with source or channel is a source.
+SEMANTIC_TYPES = {
+    "click_through_rate": "type/Share",
+    "engagement_rate": "type/Share",
+    "cost_per_conversion": "type/Cost",
+    "session_source": "type/Source",
+    "session_default_channel_group": "type/Source",
+}
+# The columns of the answers that are no column of a mart, with their titles: the ratios.
+RATIO_TITLES = {
+    "click_through_rate": "CTR",
+    "cost_per_conversion": "Cost per Conversion",
+    "roas": "ROAS",
+    "engagement_rate": "Engagement Rate",
+}
+# How the numbers of a column are shown: money in the reporting currency, a share as a percentage,
+# and a ratio or a count with this many decimals.
+MONEY = frozenset(
+    {
+        "spend_reporting",
+        "conversion_value_reporting",
+        "total_revenue_reporting",
+        "cost_per_conversion",
+    }
+)
+PERCENT = frozenset({"click_through_rate", "engagement_rate"})
+DECIMALS = {"roas": 2, "conversions": 0, "key_events": 0}
 
-# The questions of the demo dashboard, in the order of the dashboard, with their place on its grid
-# of 24 columns. key is the key of a question in the package, which the registry of the content
-# keeps; columns are the columns of the answer, in their order, which are columns of the mart, so
-# that the titles come from their display names.
+
+def where(*filters: str) -> str:
+    """The WHERE clause of a question: the template tag of each filter, which Metabase replaces."""
+    return "WHERE " + " AND ".join(f"{{{{{name}}}}}" for name in filters)
+
+
+AD_WHERE = where(*AD_FILTERS)
+WEB_WHERE = where(*WEB_FILTERS)
+# The ratios, as SQL over the sums of the rows of the answer, each null where its divisor is 0.
+CTR = "sum(clicks)::numeric / nullif(sum(impressions), 0) AS click_through_rate"
+CPA = "sum(spend_reporting) / nullif(sum(conversions), 0) AS cost_per_conversion"
+ROAS = "sum(conversion_value_reporting) / nullif(sum(spend_reporting), 0) AS roas"
+ENGAGEMENT = "sum(engaged_sessions)::numeric / nullif(sum(sessions), 0) AS engagement_rate"
+
+
+def sql(*lines: str) -> str:
+    return "\n".join(lines)
+
+
+# The questions of the demo, by dashboard and in the order of its cards, with their place on its
+# grid of 24 columns. key is the key of a question in the package, which the registry of the content
+# keeps; mart is the mart that it reads, whose display names give the titles of its columns; and
+# columns are the columns of the answer, in their order. Each question has the filters of its
+# dashboard, and its descriptions say what it counts, as facts for people and AI clients.
 QUESTIONS: tuple[dict[str, Any], ...] = (
     {
-        "key": "spend-last-7-days",
-        "name": "Spend, last 7 days",
+        "dashboard": ADVERTISING,
+        "key": "spend",
+        "name": "Spend",
+        "description": "The spend of the ad accounts, in the reporting currency.",
+        "display": "scalar",
+        "mart": AD_STATS,
+        "columns": ("spend_reporting",),
+        "query": sql(
+            "SELECT sum(spend_reporting) AS spend_reporting",
+            f"FROM {MART_SCHEMA}.{AD_STATS}",
+            AD_WHERE,
+        ),
+        "layout": {"row": 0, "col": 0, "size_x": 6, "size_y": 3},
+    },
+    {
+        "dashboard": ADVERTISING,
+        "key": "conversions",
+        "name": "Conversions",
+        "description": "The conversions of the primary conversion actions of the ad accounts.",
+        "display": "scalar",
+        "mart": AD_STATS,
+        "columns": ("conversions",),
+        "query": sql(
+            "SELECT sum(conversions) AS conversions", f"FROM {MART_SCHEMA}.{AD_STATS}", AD_WHERE
+        ),
+        "layout": {"row": 0, "col": 6, "size_x": 6, "size_y": 3},
+    },
+    {
+        "dashboard": ADVERTISING,
+        "key": "cost-per-conversion",
+        "name": "Cost per conversion",
         "description": (
-            "The spend of the last seven days that have data, in the reporting currency."
+            "The spend divided by the conversions of the primary conversion actions, in the "
+            "reporting currency."
         ),
         "display": "scalar",
-        "columns": ("spend_reporting",),
-        "visualization_settings": {},
-        "query": (
-            "SELECT sum(spend_reporting) AS spend_reporting\nFROM marts.ad_stats_campaign_daily\n"
-            f"WHERE {LAST_7_DAYS}"
-        ),
-        "layout": {"row": 0, "col": 0, "size_x": 6, "size_y": 4},
+        "mart": AD_STATS,
+        "columns": ("cost_per_conversion",),
+        "query": sql(f"SELECT {CPA}", f"FROM {MART_SCHEMA}.{AD_STATS}", AD_WHERE),
+        "layout": {"row": 0, "col": 12, "size_x": 6, "size_y": 3},
     },
     {
-        "key": "spend-by-campaign-last-7-days",
-        "name": "Spend by campaign, last 7 days",
+        "dashboard": ADVERTISING,
+        "key": "roas",
+        "name": "Return on ad spend",
         "description": (
-            "The spend of each campaign in the last seven days that have data, in the reporting "
-            "currency."
+            "The conversion value of the primary conversion actions divided by the spend, both in "
+            "the reporting currency."
         ),
-        "display": "row",
-        "columns": ("campaign_name", "spend_reporting"),
-        "visualization_settings": {
-            "graph.dimensions": ["campaign_name"],
-            "graph.metrics": ["spend_reporting"],
-            "series_settings": {"spend_reporting": {"color": SERIES_COLOR}},
-        },
-        "query": (
-            "SELECT campaign_name, sum(spend_reporting) AS spend_reporting\n"
-            f"FROM marts.ad_stats_campaign_daily\nWHERE {LAST_7_DAYS}\nGROUP BY campaign_name\n"
-            "ORDER BY spend_reporting DESC"
-        ),
-        "layout": {"row": 0, "col": 6, "size_x": 18, "size_y": 4},
+        "display": "scalar",
+        "mart": AD_STATS,
+        "columns": ("roas",),
+        "query": sql(f"SELECT {ROAS}", f"FROM {MART_SCHEMA}.{AD_STATS}", AD_WHERE),
+        "layout": {"row": 0, "col": 18, "size_x": 6, "size_y": 3},
     },
     {
+        "dashboard": ADVERTISING,
         "key": "spend-by-day",
-        "name": "Spend by day",
-        "description": "The spend of every day that has data, in the reporting currency.",
-        "display": "line",
-        "columns": ("report_date", "spend_reporting"),
+        "name": "Spend by day and platform",
+        "description": "The spend of each day on each platform, in the reporting currency.",
+        "display": "area",
+        "mart": AD_STATS,
+        "columns": ("report_date", "platform_name", "spend_reporting"),
         "visualization_settings": {
-            "graph.dimensions": ["report_date"],
+            "graph.dimensions": ["report_date", "platform_name"],
             "graph.metrics": ["spend_reporting"],
-            "series_settings": {"spend_reporting": {"color": SERIES_COLOR}},
+            "stackable.stack_type": "stacked",
         },
-        "query": (
-            "SELECT report_date, sum(spend_reporting) AS spend_reporting\n"
-            "FROM marts.ad_stats_campaign_daily\nGROUP BY report_date\nORDER BY report_date"
+        "query": sql(
+            "SELECT report_date, platform_name, sum(spend_reporting) AS spend_reporting",
+            f"FROM {MART_SCHEMA}.{AD_STATS}",
+            AD_WHERE,
+            "GROUP BY report_date, platform_name",
+            "ORDER BY report_date, platform_name",
         ),
-        "layout": {"row": 4, "col": 0, "size_x": 24, "size_y": 6},
+        "layout": {"row": 3, "col": 0, "size_x": 16, "size_y": 6},
+    },
+    {
+        "dashboard": ADVERTISING,
+        "key": "by-client",
+        "name": "Spend by client",
+        "description": "The spend of the ad accounts of each client, in the reporting currency.",
+        "display": "row",
+        "mart": AD_STATS,
+        "columns": ("client_name", "spend_reporting"),
+        "visualization_settings": {
+            "graph.dimensions": ["client_name"],
+            "graph.metrics": ["spend_reporting"],
+        },
+        "query": sql(
+            "SELECT client_name, sum(spend_reporting) AS spend_reporting",
+            f"FROM {MART_SCHEMA}.{AD_STATS}",
+            AD_WHERE,
+            "GROUP BY client_name",
+            "ORDER BY spend_reporting DESC",
+        ),
+        "layout": {"row": 3, "col": 16, "size_x": 8, "size_y": 6},
+    },
+    {
+        "dashboard": ADVERTISING,
+        "key": "by-platform",
+        "name": "Results by platform",
+        "description": (
+            "The impressions, clicks, spend and conversions of each platform, with the ratios "
+            "between them: the click-through rate, the cost per conversion and the return on ad "
+            "spend. Money is in the reporting currency, and the conversions are those of the "
+            "primary conversion actions."
+        ),
+        "display": "table",
+        "mart": AD_STATS,
+        "columns": (
+            "platform_name",
+            "impressions",
+            "clicks",
+            "click_through_rate",
+            "spend_reporting",
+            "conversions",
+            "cost_per_conversion",
+            "roas",
+        ),
+        "query": sql(
+            "SELECT platform_name, sum(impressions) AS impressions, sum(clicks) AS clicks,",
+            f"  {CTR}, sum(spend_reporting) AS spend_reporting,",
+            f"  sum(conversions) AS conversions, {CPA}, {ROAS}",
+            f"FROM {MART_SCHEMA}.{AD_STATS}",
+            AD_WHERE,
+            "GROUP BY platform_name",
+            "ORDER BY spend_reporting DESC",
+        ),
+        "layout": {"row": 9, "col": 0, "size_x": 24, "size_y": 5},
+    },
+    {
+        "dashboard": ADVERTISING,
+        "key": "top-campaigns",
+        "name": "Top campaigns by spend",
+        "description": (
+            "The 20 campaigns with the most spend, with their platform and client, conversions of "
+            "the primary conversion actions, and money in the reporting currency."
+        ),
+        "display": "table",
+        "mart": AD_STATS,
+        "columns": (
+            "campaign_name",
+            "platform_name",
+            "client_name",
+            "spend_reporting",
+            "conversions",
+            "cost_per_conversion",
+            "roas",
+        ),
+        "query": sql(
+            "SELECT campaign_name, platform_name, client_name,",
+            "  sum(spend_reporting) AS spend_reporting, sum(conversions) AS conversions,",
+            f"  {CPA}, {ROAS}",
+            f"FROM {MART_SCHEMA}.{AD_STATS}",
+            AD_WHERE,
+            "GROUP BY platform, account_id, campaign_id, campaign_name, platform_name, client_name",
+            "ORDER BY spend_reporting DESC",
+            "LIMIT 20",
+        ),
+        "layout": {"row": 14, "col": 0, "size_x": 24, "size_y": 8},
+    },
+    {
+        "dashboard": ADVERTISING,
+        "key": "conversions-by-action",
+        "name": "Conversions by action",
+        "description": (
+            "The conversions and the conversion value of each conversion action of each platform, "
+            "with its category and whether it is primary, the value in the reporting currency."
+        ),
+        "display": "table",
+        "mart": CONVERSIONS,
+        "columns": (
+            "platform_name",
+            "conversion_action_name",
+            "conversion_category",
+            "is_primary",
+            "conversions",
+            "conversion_value_reporting",
+        ),
+        "query": sql(
+            "SELECT platform_name, conversion_action_name, conversion_category, is_primary,",
+            "  sum(conversions) AS conversions,",
+            "  sum(conversion_value_reporting) AS conversion_value_reporting",
+            f"FROM {MART_SCHEMA}.{CONVERSIONS}",
+            AD_WHERE,
+            "GROUP BY platform, conversion_action_id, platform_name, conversion_action_name,",
+            "  conversion_category, is_primary",
+            "ORDER BY is_primary DESC, conversions DESC",
+        ),
+        "layout": {"row": 22, "col": 0, "size_x": 24, "size_y": 7},
+    },
+    {
+        "dashboard": WEB,
+        "key": "sessions",
+        "name": "Sessions",
+        "description": "The sessions of the properties of web analytics.",
+        "display": "scalar",
+        "mart": SESSIONS,
+        "columns": ("sessions",),
+        "query": sql(
+            "SELECT sum(sessions) AS sessions", f"FROM {MART_SCHEMA}.{SESSIONS}", WEB_WHERE
+        ),
+        "layout": {"row": 0, "col": 0, "size_x": 6, "size_y": 3},
+    },
+    {
+        "dashboard": WEB,
+        "key": "engagement-rate",
+        "name": "Engagement rate",
+        "description": "The engaged sessions divided by the sessions.",
+        "display": "scalar",
+        "mart": SESSIONS,
+        "columns": ("engagement_rate",),
+        "query": sql(f"SELECT {ENGAGEMENT}", f"FROM {MART_SCHEMA}.{SESSIONS}", WEB_WHERE),
+        "layout": {"row": 0, "col": 6, "size_x": 6, "size_y": 3},
+    },
+    {
+        "dashboard": WEB,
+        "key": "key-events",
+        "name": "Key events",
+        "description": "The key events of the sessions.",
+        "display": "scalar",
+        "mart": SESSIONS,
+        "columns": ("key_events",),
+        "query": sql(
+            "SELECT sum(key_events) AS key_events", f"FROM {MART_SCHEMA}.{SESSIONS}", WEB_WHERE
+        ),
+        "layout": {"row": 0, "col": 12, "size_x": 6, "size_y": 3},
+    },
+    {
+        "dashboard": WEB,
+        "key": "revenue",
+        "name": "Revenue",
+        "description": "The revenue of the sessions, in the reporting currency.",
+        "display": "scalar",
+        "mart": SESSIONS,
+        "columns": ("total_revenue_reporting",),
+        "query": sql(
+            "SELECT sum(total_revenue_reporting) AS total_revenue_reporting",
+            f"FROM {MART_SCHEMA}.{SESSIONS}",
+            WEB_WHERE,
+        ),
+        "layout": {"row": 0, "col": 18, "size_x": 6, "size_y": 3},
+    },
+    {
+        "dashboard": WEB,
+        "key": "sessions-by-day",
+        "name": "Sessions by day and channel group",
+        "description": "The sessions of each day in each default channel group of web analytics.",
+        "display": "area",
+        "mart": SESSIONS,
+        "columns": ("report_date", "session_default_channel_group", "sessions"),
+        "visualization_settings": {
+            "graph.dimensions": ["report_date", "session_default_channel_group"],
+            "graph.metrics": ["sessions"],
+            "stackable.stack_type": "stacked",
+        },
+        "query": sql(
+            "SELECT report_date, session_default_channel_group, sum(sessions) AS sessions",
+            f"FROM {MART_SCHEMA}.{SESSIONS}",
+            WEB_WHERE,
+            "GROUP BY report_date, session_default_channel_group",
+            "ORDER BY report_date, session_default_channel_group",
+        ),
+        "layout": {"row": 3, "col": 0, "size_x": 24, "size_y": 6},
+    },
+    {
+        "dashboard": WEB,
+        "key": "by-channel-group",
+        "name": "Results by channel group",
+        "description": (
+            "The sessions, engaged sessions, key events and revenue of each default channel "
+            "group, with the engagement rate; revenue in the reporting currency."
+        ),
+        "display": "table",
+        "mart": SESSIONS,
+        "columns": (
+            "session_default_channel_group",
+            "sessions",
+            "engaged_sessions",
+            "engagement_rate",
+            "key_events",
+            "total_revenue_reporting",
+        ),
+        "query": sql(
+            "SELECT session_default_channel_group, sum(sessions) AS sessions,",
+            f"  sum(engaged_sessions) AS engaged_sessions, {ENGAGEMENT},",
+            "  sum(key_events) AS key_events,",
+            "  sum(total_revenue_reporting) AS total_revenue_reporting",
+            f"FROM {MART_SCHEMA}.{SESSIONS}",
+            WEB_WHERE,
+            "GROUP BY session_default_channel_group",
+            "ORDER BY sessions DESC",
+        ),
+        "layout": {"row": 9, "col": 0, "size_x": 24, "size_y": 7},
+    },
+    {
+        "dashboard": WEB,
+        "key": "by-source",
+        "name": "Top sources and mediums",
+        "description": (
+            "The 20 pairs of a source and a medium with the most sessions, with their key events "
+            "and revenue, in the reporting currency."
+        ),
+        "display": "table",
+        "mart": SESSIONS,
+        "columns": (
+            "session_source",
+            "session_medium",
+            "sessions",
+            "key_events",
+            "total_revenue_reporting",
+        ),
+        "query": sql(
+            "SELECT session_source, session_medium, sum(sessions) AS sessions,",
+            "  sum(key_events) AS key_events,",
+            "  sum(total_revenue_reporting) AS total_revenue_reporting",
+            f"FROM {MART_SCHEMA}.{SESSIONS}",
+            WEB_WHERE,
+            "GROUP BY session_source, session_medium",
+            "ORDER BY sessions DESC",
+            "LIMIT 20",
+        ),
+        "layout": {"row": 16, "col": 0, "size_x": 24, "size_y": 7},
+    },
+    {
+        "dashboard": WEB,
+        "key": "ad-campaigns",
+        "name": "Sessions of ad campaigns",
+        "description": (
+            "The sessions, key events and revenue of each campaign that web analytics names, of "
+            "the sessions that it gives an ad platform, with revenue in the reporting currency."
+        ),
+        "display": "table",
+        "mart": SESSIONS,
+        "columns": (
+            "session_campaign_name",
+            "session_source",
+            "session_medium",
+            "sessions",
+            "key_events",
+            "total_revenue_reporting",
+        ),
+        "query": sql(
+            "SELECT session_campaign_name, session_source, session_medium,",
+            "  sum(sessions) AS sessions, sum(key_events) AS key_events,",
+            "  sum(total_revenue_reporting) AS total_revenue_reporting",
+            f"FROM {MART_SCHEMA}.{SESSIONS}",
+            f"{WEB_WHERE} AND ad_platform IS NOT NULL",
+            "GROUP BY session_campaign_id, session_campaign_name, session_source, session_medium",
+            "ORDER BY sessions DESC",
+        ),
+        "layout": {"row": 23, "col": 0, "size_x": 24, "size_y": 7},
     },
 )
+# The filters of the questions of each dashboard.
+QUESTION_FILTERS = {ADVERTISING: AD_FILTERS, WEB: WEB_FILTERS}
 
 ENV_NAMES = {
     "airflow_url": "AIRFLOW_URL",
@@ -399,59 +800,105 @@ def run_demo_pipeline(airflow: Airflow, deadline: Deadline) -> bool:
     return True
 
 
-def mart_is_synced(
-    metabase: Metabase, database_id: int, table: metadata.Table, columns: Iterable[str]
+def marts_are_synced(
+    metabase: Metabase, database_id: int, waiting: Mapping[tuple[str, str], Iterable[str]]
 ) -> bool:
-    """Whether Metabase shows the table of the mart, active, with the fields of these columns, by
-    the rule of metadata.shows(). A person may have hidden the table in Admin > Table Metadata,
-    and the metadata of a database leaves a hidden table out unless the request passes
+    """Whether Metabase shows each table of the marts that waits, active, with the fields of its
+    columns, by the rule of metadata.shows(). A person may have hidden a table in Admin > Table
+    Metadata, and the metadata of a database leaves a hidden table out unless the request passes
     include_hidden=true (Metabase 0.63.19 and 0.64.1); a sync does not show it again. A table that a
     sync marked inactive, as after a reset of the warehouse, does not count."""
-    return metadata.shows(metadata.metadata_of(metabase, database_id), table, columns)
+    shown = metadata.metadata_of(metabase, database_id)
+    return all(
+        metadata.shows(shown, metadata.Table(schema, name, None, None, ()), columns)
+        for (schema, name), columns in waiting.items()
+    )
+
+
+def listed(keys: Iterable[tuple[str, str]]) -> str:
+    """Tables by their schemas and names, as one phrase: a, b and c."""
+    names = [f"{schema}.{name}" for schema, name in keys]
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
 def ensure_synced(
-    metabase: Metabase, database_id: int, table: metadata.Table, deadline: Deadline, ran: bool
+    metabase: Metabase,
+    database_id: int,
+    tables: tuple[metadata.Table, ...],
+    deadline: Deadline,
+    ran: bool,
 ) -> bool:
-    """Make Metabase show the table of the mart with the fields of its columns; True if a sync was
-    needed. When Metabase does not show it so, the warehouse is asked through the connection of
-    Metabase: a warehouse without the table stops the job at once, with what to do (ran says
-    whether the pipeline ran now), and a table that it has gets a sync, waited for until Metabase
-    shows its fields, which come after the table."""
-    key = (table.schema, table.name)
+    """Make Metabase show the tables of the marts of the demo with the fields of their columns;
+    True if a sync was needed. When Metabase does not show them so, the warehouse is asked through
+    the connection of Metabase: a warehouse without one of them stops the job at once, with what to
+    do (ran says whether the pipeline ran now), and the tables that it has get one sync, waited for
+    until Metabase shows their fields, which come after the tables."""
     shown = metadata.metadata_of(metabase, database_id)
-    sync = metadata.sync_needed(metabase, database_id, metadata.Metadata({key: table}), shown)
+    wanted = metadata.Metadata({(t.schema, t.name): t for t in tables})
+    sync = metadata.sync_needed(metabase, database_id, wanted, shown)
     if sync.absent:
         cause = RAN_NOW_HINT if ran else RAN_BEFORE_HINT
-        raise SetupError(f"Metabase finds no {MART_SCHEMA}.{MART_TABLE} in the warehouse: {cause}")
+        raise SetupError(f"Metabase finds no {listed(sync.absent)} in the warehouse: {cause}")
     if not sync.tables:
         return False
     metabase.call("POST", f"/api/database/{database_id}/sync_schema")
     wait_until(
-        lambda: mart_is_synced(metabase, database_id, table, sync.tables[key]),
+        lambda: marts_are_synced(metabase, database_id, sync.tables),
         deadline,
-        f"Metabase did not find {MART_SCHEMA}.{MART_TABLE} after a sync of the warehouse",
+        f"Metabase did not find {listed(sync.tables)} after a sync of the warehouse",
         SYNC_HINT,
     )
     return True
 
 
-def demo_mart(marts: metadata.Metadata) -> metadata.Table:
-    """The table of the mart of the demo in the effective metadata: the dbt project declares it."""
-    table = marts.effective.get((MART_SCHEMA, MART_TABLE))
-    if table is None:
-        raise SetupError(
-            f"the dbt project declares no {MART_SCHEMA}.{MART_TABLE}: see ./agoranomos logs "
-            "metadata-export"
-        )
-    return table
+def demo_marts(marts: metadata.Metadata) -> tuple[metadata.Table, ...]:
+    """The tables of the marts that the questions of the demo read, in the effective metadata: the
+    dbt project declares them."""
+    tables = []
+    for name in dict.fromkeys(q["mart"] for q in QUESTIONS):
+        table = marts.effective.get((MART_SCHEMA, name))
+        if table is None:
+            raise SetupError(
+                f"the dbt project declares no {MART_SCHEMA}.{name}: see ./agoranomos logs "
+                "metadata-export"
+            )
+        tables.append(table)
+    return tuple(tables)
 
 
-def column_titles(marts: metadata.Metadata) -> dict[str, str]:
-    """The display names of the columns of the mart, by name, in the effective metadata."""
-    table = marts.effective.get((MART_SCHEMA, MART_TABLE))
+def column_titles(marts: metadata.Metadata, name: str) -> dict[str, str]:
+    """The display names of the columns of a mart, by name, in the effective metadata, and the
+    titles of the ratios, which are no column of a mart."""
+    table = marts.effective.get((MART_SCHEMA, name))
     columns = table.columns if table is not None else ()
-    return {column.name: column.display_name for column in columns if column.display_name}
+    titles = {column.name: column.display_name for column in columns if column.display_name}
+    return {**titles, **RATIO_TITLES}
+
+
+def reporting_currency(marts: metadata.Metadata) -> str | None:
+    """The reporting currency of the marts, as the metadata gives it to the money of the column
+    spend_reporting: metadata-export renders it from AGORANOMOS_REPORTING_CURRENCY."""
+    table = marts.effective.get((MART_SCHEMA, AD_STATS))
+    columns = {c.name: c for c in table.columns} if table is not None else {}
+    column = columns.get("spend_reporting")
+    return column.currency if column is not None else None
+
+
+Fields = Mapping[tuple[str, str], tuple[int, str]]
+
+
+def fields_of(metabase: Metabase, database_id: int) -> dict[tuple[str, str], tuple[int, str]]:
+    """The fields of the marts that Metabase shows, by the table and the column: the ID and the base
+    type of each, which the filters of the questions name. Hidden ones count, as a filter on a field
+    that a person hid still works."""
+    shown = metadata.tables_of(metadata.metadata_of(metabase, database_id))
+    return {
+        (name, f["name"]): (f["id"], f["base_type"])
+        for (schema, name), table in shown.items()
+        if schema == MART_SCHEMA
+        for f in table.get("fields") or []
+        if f.get("parent_id") is None
+    }
 
 
 def column_key(name: str) -> str:
@@ -460,16 +907,33 @@ def column_key(name: str) -> str:
     return json.dumps(["name", name], separators=(",", ":"))
 
 
-def visualization_settings(question: Mapping[str, Any], titles: Mapping[str, str]) -> dict:
-    """The settings of a question, with the titles of its columns and, for a chart, of its axes,
-    and the series color that its definition holds. A native question takes no title from the
-    fields of the mart, so the titles are its own."""
-    settings = copy.deepcopy(question["visualization_settings"])
-    columns = {
-        column_key(name): {"column_title": titles[name]}
-        for name in question["columns"]
-        if name in titles
-    }
+def column_format(name: str, currency: str | None) -> dict[str, Any]:
+    """How a column shows its numbers: money in the reporting currency, a share as a percentage,
+    and a ratio or a count with the decimals of DECIMALS. Metabase formats the column of a native
+    question only from the settings of the question, as it is linked to no field."""
+    if name in MONEY and currency:
+        return {"number_style": "currency", "currency": currency}
+    if name in PERCENT:
+        return {"number_style": "percent", "decimals": 2}
+    if name in DECIMALS:
+        return {"decimals": DECIMALS[name]}
+    return {}
+
+
+def visualization_settings(
+    question: Mapping[str, Any], titles: Mapping[str, str], currency: str | None
+) -> dict:
+    """The settings of a question: the title and the format of each of its columns, and for a chart
+    the titles of its axes and the color of its series when it has one. A native question takes no
+    title from the fields of a mart, so the titles are its own."""
+    settings = copy.deepcopy(question.get("visualization_settings", {}))
+    columns = {}
+    for name in question["columns"]:
+        shown = column_format(name, currency)
+        if name in titles:
+            shown = {"column_title": titles[name], **shown}
+        if shown:
+            columns[column_key(name)] = shown
     if columns:
         settings["column_settings"] = columns
     dimensions = settings.get("graph.dimensions") or [None]
@@ -477,12 +941,40 @@ def visualization_settings(question: Mapping[str, Any], titles: Mapping[str, str
     for key, name in zip(AXIS_TITLES, (dimensions[0], metrics[0]), strict=True):
         if name in titles:
             settings[key] = titles[name]
+    if len(dimensions) == 1 and len(metrics) == 1 and metrics[0] is not None:
+        settings["series_settings"] = {metrics[0]: {"color": SERIES_COLOR}}
     return settings
 
 
-def demo_package(titles: Mapping[str, str]) -> content.Package:
-    """The demo as a package of the content: its questions, with the titles of their columns and
-    the series color, and its dashboard."""
+def answer_columns(question: Mapping[str, Any]) -> tuple[content.Column, ...]:
+    """The columns of the answer of a question, with the types that Metabase gives them."""
+    return tuple(
+        content.Column(c, *COLUMN_TYPES.get(c, NUMBER), SEMANTIC_TYPES.get(c))
+        for c in question["columns"]
+    )
+
+
+def question_filters(question: Mapping[str, Any], fields: Fields) -> tuple[content.Filter, ...]:
+    """The filters of a question: those of its dashboard, each on the field of its column in the
+    mart that the question reads."""
+    filters = []
+    for name in QUESTION_FILTERS[question["dashboard"]]:
+        display_name, widget_type, column = FILTERS[name]
+        field = fields.get((question["mart"], column))
+        if field is None:
+            raise SetupError(
+                f"Metabase shows no field {MART_SCHEMA}.{question['mart']}.{column} for the filter "
+                f"{name} of the demo: {SYNC_HINT}"
+            )
+        filters.append(content.Filter(name, display_name, widget_type, *field))
+    return tuple(filters)
+
+
+def demo_package(marts: metadata.Metadata, fields: Fields) -> content.Package:
+    """The demo as a package of the content: its questions, with the titles and the formats of
+    their columns, the colors of their series and their filters, and its two dashboards with their
+    filters."""
+    currency = reporting_currency(marts)
     return content.Package(
         key=DEMO_KEY,
         name=DEMO_NAME,
@@ -494,18 +986,27 @@ def demo_package(titles: Mapping[str, str]) -> content.Package:
                 description=q["description"],
                 display=q["display"],
                 query=q["query"],
-                columns=tuple(content.Column(c, *COLUMN_TYPES[c]) for c in q["columns"]),
-                visualization_settings=visualization_settings(q, titles),
+                columns=answer_columns(q),
+                visualization_settings=visualization_settings(
+                    q, column_titles(marts, q["mart"]), currency
+                ),
+                filters=question_filters(q, fields),
             )
             for q in QUESTIONS
         ),
-        dashboards=(
+        dashboards=tuple(
             content.Dashboard(
-                "dashboard",
-                DASHBOARD,
-                DASHBOARD_DESCRIPTION,
-                tuple(content.Placement(q["key"], **q["layout"]) for q in QUESTIONS),
-            ),
+                key,
+                name,
+                description,
+                tuple(
+                    content.Placement(q["key"], **q["layout"])
+                    for q in QUESTIONS
+                    if q["dashboard"] == key
+                ),
+                tuple(DASHBOARD_FILTERS[f] for f in QUESTION_FILTERS[key]),
+            )
+            for key, (name, description) in DASHBOARDS.items()
         ),
     )
 
@@ -558,9 +1059,9 @@ def demo_of_v01(
     package: of each name of v0.1, the oldest question, and the oldest dashboard, that the account
     of demo-init made. A question of the demo is one of the collection, not of a dashboard."""
     found: dict[str, dict[str, Any]] = {}
-    names = {**V01_KEYS, DASHBOARD_V01: "dashboard"}
+    names = {**V01_KEYS, DASHBOARD_V01: ADVERTISING}
     for item in sorted(items, key=lambda item: item["id"]):
-        model = "dashboard" if names.get(item.get("name")) == "dashboard" else "card"
+        model = "dashboard" if item.get("name") == DASHBOARD_V01 else "card"
         key = names.get(item.get("name"))
         if (
             key is not None
@@ -621,7 +1122,7 @@ def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: cont
     for old in candidates:
         items = content.everything_in(metabase, old["id"])
         adopted = demo_of_v01(metabase, items, account_id)
-        if "dashboard" in adopted:
+        if ADVERTISING in adopted:
             break
     else:
         ids = ", ".join(str(c["id"]) for c in candidates)
@@ -638,7 +1139,7 @@ def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: cont
         )
         return False
     kept = {item["id"] for item in adopted.values() if item["model"] == "card"}
-    board_id = adopted["dashboard"]["id"]
+    board_id = adopted[ADVERTISING]["id"]
     others = [
         item
         for item in items
@@ -669,7 +1170,7 @@ def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: cont
             "takes that out and moves it"
         )
     for key, item in adopted.items():
-        model = "dashboard" if key == "dashboard" else "card"
+        model = "dashboard" if key == ADVERTISING else "card"
         registry.set(f"{DEMO_KEY}/{key}", model, item["entity_id"])
     registry.set(DEMO_KEY, "collection", old["entity_id"])
     root = content.ensure_collection(
@@ -704,7 +1205,7 @@ def main(env: Mapping[str, str] | None = None) -> int:
         # the overrides of the deployment, or a registry that is none, stops the job before it
         # writes anything, in Airflow or in Metabase.
         marts = metadata.load(config.metadata_export, config.metadata_overrides)
-        mart = demo_mart(marts)
+        tables = demo_marts(marts)
         log = logged("demo-init")
         registry = content.Registry(config.content_registry, log)
         airflow = Airflow(config.airflow_url)
@@ -720,7 +1221,7 @@ def main(env: Mapping[str, str] | None = None) -> int:
             raise SetupError(
                 "Metabase has no connection to the warehouse: see ./agoranomos logs metabase-init"
             )
-        ensure_synced(metabase, database["id"], mart, deadline, ran)
+        ensure_synced(metabase, database["id"], tables, deadline, ran)
         metadata.apply(
             metabase,
             database["id"],
@@ -729,18 +1230,18 @@ def main(env: Mapping[str, str] | None = None) -> int:
             log=log,
         )
         adopt_earlier_demo(metabase, registry, log)
-        package = demo_package(column_titles(marts))
+        package = demo_package(marts, fields_of(metabase, database["id"]))
         ids = content.ensure_package(metabase, registry, package, database["id"], log)
-        dashboard_id = ids["dashboard"]
     except (SetupError, metadata.MetadataError, content.ContentError) as error:
         print(f"demo-init: {error}", file=sys.stderr)
         return 1
     except SHAPE_ERRORS as error:
         print(f"demo-init: {unexpected_shape(server, error, hint)}", file=sys.stderr)
         return 1
+    boards = " and ".join(f"{name!r} ({ids[key]})" for key, (name, _) in DASHBOARDS.items())
     print(
-        f"demo-init: the demo pipeline {when(ran)}, and the dashboard {DASHBOARD!r} "
-        f"({dashboard_id}) is in the collection {content.ROOT_NAME} / {DEMO_NAME}"
+        f"demo-init: the demo pipeline {when(ran)}, and the dashboards {boards} are in the "
+        f"collection {content.ROOT_NAME} / {DEMO_NAME}"
     )
     return 0
 
