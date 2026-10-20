@@ -1,6 +1,11 @@
 import pytest
 import stack_helpers
-from stack_helpers import NamesOnly, Secret, SecretHeaders, http_json, load_env
+from airflow_api import is_busy, is_paused, pause, unpause, wait_for_dag
+from services import DEMO
+from stack_helpers import NamesOnly, Secret, SecretHeaders, http_json, load_env, wait_for
+
+# The daily load of the demo, which the first start unpauses.
+DAILY = "agoranomos_demo_daily"
 
 
 @pytest.fixture(scope="session")
@@ -28,6 +33,30 @@ def token(env, airflow_url):
     assert status in (200, 201), body
     # pytest prints the arguments of a failed test and of the function that failed: see Secret.
     return Secret(body["access_token"])
+
+
+@pytest.fixture(scope="session", autouse=True)
+def daily_load_paused(airflow_url, token):
+    """The daily load of the demo, paused while the tests run and as it was after them. Its
+    schedule could start a run, and the transform after it, in the middle of a test that counts
+    runs or compares the warehouse with the demo generator: the tests of the daily load run it
+    themselves. A run that is queued or running ends first, as a paused DAG starts none."""
+    if not DEMO:
+        yield
+        return
+    wait_for_dag(airflow_url, token, DAILY)
+    was_paused = is_paused(airflow_url, token, DAILY)
+    if not was_paused:
+        wait_for(
+            lambda: not is_busy(airflow_url, token, DAILY),
+            900,
+            interval=5,
+            message=f"the runs of {DAILY} did not end",
+        )
+        pause(airflow_url, token, DAILY)
+    yield
+    if not was_paused:
+        unpause(airflow_url, token, DAILY)
 
 
 @pytest.fixture(scope="session")

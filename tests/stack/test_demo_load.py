@@ -1,15 +1,17 @@
-"""The history of the fictional platforms, agoranomos_demo_history: each raw_demo_<platform> holds
-what the demo generator makes for the days of each account that a load replaces, a repeated history
-and a row that a platform no longer sends leave no stale row, and each load records the window of
-each account that it replaced. The transform is paused while these tests run the history, which
-would start a run of it each time, and runs once after the last of them.
+"""The history of the fictional platforms, agoranomos_demo_history, and their daily load,
+agoranomos_demo_daily: each raw_demo_<platform> holds what the demo generator makes for the days of
+each account that a load replaces, a repeated history and a row that a platform no longer sends
+leave no stale row, each load records the window of each account that it replaced, and the daily
+load takes the days after the last load, or nothing when the day of every account is loaded. The
+transform is paused while these tests run the loads, which would start a run of it each time, and
+runs once after the last of them.
 
 The generator is deterministic, so the tests compute what the warehouse must hold for the days that
 it holds. The assertions print counts, dates and sums, never a secret.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from itertools import pairwise
 
@@ -17,6 +19,7 @@ import pytest
 from agoranomos_pipelines.demo import common, platforms
 from airflow_api import (
     asset_events,
+    dag_runs,
     is_busy,
     is_paused,
     pause,
@@ -37,6 +40,7 @@ pytestmark = pytest.mark.skipif(
 
 HISTORY = "agoranomos_demo_history"
 TRANSFORM = "agoranomos_demo_transform"
+DAILY = "agoranomos_demo_daily"
 # What each main table holds, as SQL over its columns and as the same from a record of the
 # generator: the account, the day, and the count and the sums that the comparison takes.
 MAIN = {
@@ -138,12 +142,14 @@ def moment(run):
     return datetime.fromisoformat(run["run_after"].replace("Z", "+00:00"))
 
 
-def expected(code, now):
+def expected(code, now, history=None):
     """The count and the sums of the main table of a platform, from the generator, as the history
-    as of now loads it: the days from the first of the history to yesterday of each account."""
+    as of now loads it: the days from the first of the history to yesterday of each account,
+    without the day that the history as of history, by default now, left out."""
     platform = platforms.PLATFORMS[code]
     _, _, _, of = MAIN[code]
-    records = platform.module.records(now, skip=platforms.gap(now))[platform.main_table]
+    skip = platforms.gap(now if history is None else history)
+    records = platform.module.records(now, skip=skip)[platform.main_table]
     found = [of(record) for record in records]
     sums = [sum(values[i] for _, _, values in found) for i in range(3)]
     return [len(found), *sums]
@@ -369,5 +375,149 @@ def test_each_load_of_the_history_updates_its_asset_and_logs_no_secret(
             for entry in task_log(airflow_url, token, instance)
         )
         assert said, f"the log of {instance['task_id']} does not say what it loaded"
+        found = leaked(values, task_log(airflow_url, token, instance))
+        assert not found, f"the log of {instance['task_id']} holds the values of {found}"
+
+
+def run_daily(airflow_url, token):
+    """A run of the daily load now, which the tests keep paused otherwise (conftest.py), as the
+    history: its moment, run_after, is the moment of every load in it. A run that its schedule
+    makes when it is unpaused, for a time that passed while it was paused, ends too, before it is
+    paused again."""
+    wait_for_dag(airflow_url, token, DAILY)
+    unpause(airflow_url, token, DAILY)
+    try:
+        run = trigger(airflow_url, token, DAILY)
+        run = wait_for_run(airflow_url, token, DAILY, run["dag_run_id"], timeout=900)
+        wait_for(
+            lambda: not is_busy(airflow_url, token, DAILY),
+            900,
+            interval=5,
+            message=f"the runs of {DAILY} did not end",
+        )
+    finally:
+        pause(airflow_url, token, DAILY)
+    return run
+
+
+def newest_loads(env):
+    """The day of the newest load of each account of each platform, as _agoranomos_reloads records
+    it."""
+    found = {}
+    for code in platforms.LOAD_ORDER:
+        dataset = platforms.PLATFORMS[code].dataset
+        text = warehouse_output(
+            env,
+            f"SELECT account_id, max(as_of) FROM {dataset}._agoranomos_reloads GROUP BY account_id",  # noqa: S608
+        )
+        for line in text.splitlines():
+            account_id, as_of = line.split("|")
+            found[(code, account_id)] = datetime.fromisoformat(as_of).date()
+    return found
+
+
+def states_of(airflow_url, token, run):
+    return {i["task_id"]: i["state"] for i in task_instances(airflow_url, token, run)}
+
+
+def test_a_daily_load_after_the_history_skips_its_loads(env, airflow_url, token, history_run):
+    # The history took the day of every account, so the task due skips the five loads, which
+    # update no asset. Should a day of an account begin in between, the loads run.
+    loaded = newest_loads(env)
+    run = run_daily(airflow_url, token)
+    assert run["state"] == "success", run["state"]
+    now = moment(run)
+    due = any(
+        loaded[(code, a.account_id)] < common.local_today(now, a.time_zone)
+        for code in platforms.LOAD_ORDER
+        for a in platforms.PLATFORMS[code].module.accounts()
+    )
+    loads = "success" if due else "skipped"
+    wanted = {"due": "success", **{f"load_{code}": loads for code in platforms.LOAD_ORDER}}
+    assert states_of(airflow_url, token, run) == wanted
+    if not due:
+        for code in platforms.LOAD_ORDER:
+            uri = platforms.asset_uri(platforms.PLATFORMS[code])
+            events = asset_events(
+                airflow_url, token, uri, source_dag_id=DAILY, source_run_id=run["dag_run_id"]
+            )
+            assert not events, f"a skipped load updated {uri}"
+
+
+# How many days demo_web lags in the test below: longer than its window of 14 days.
+LAG_DAYS = 40
+
+
+def test_a_daily_load_brings_every_day_after_the_last_load(env, airflow_url, token, history_run):
+    # As after a stand that was off for 40 days: the rows of demo_web, and the record of its loads,
+    # end 40 days before yesterday. The daily load brings every day after the last of each account
+    # and the window of each other platform, in the pool of the loads of the demo, and the main
+    # tables hold what the generator makes, without a hole or a duplicate.
+    web = platforms.PLATFORMS["demo_web"]
+    ends = dict(
+        line.split("|")
+        for line in warehouse_output(
+            env,
+            "SELECT account_id, max(window_end) FROM raw_demo_web._agoranomos_reloads "
+            "GROUP BY account_id",
+        ).splitlines()
+    )
+    lagged = {
+        account_id: datetime.fromisoformat(end).date() - timedelta(days=LAG_DAYS)
+        for account_id, end in ends.items()
+    }
+    for account_id, end in lagged.items():
+        warehouse_output(
+            env,
+            "DELETE FROM raw_demo_web.report_sessions_daily "  # noqa: S608 (values of the demo)
+            f"WHERE property = 'properties/{account_id}' "
+            f"AND to_date(date, 'YYYYMMDD') > DATE '{end.isoformat()}'",
+        )
+    warehouse_output(
+        env,
+        "UPDATE raw_demo_web._agoranomos_reloads "  # noqa: S608 (a constant of this file)
+        f"SET as_of = as_of - {LAG_DAYS}, window_end = window_end - {LAG_DAYS}",
+    )
+    run = run_daily(airflow_url, token)
+    assert run["state"] == "success", run["state"]
+    wanted = {"due": "success", **{f"load_{code}": "success" for code in platforms.LOAD_ORDER}}
+    assert states_of(airflow_url, token, run) == wanted
+    pools = {i["task_id"]: i["pool"] for i in task_instances(airflow_url, token, run)}
+    assert pools == {
+        "due": "default_pool",
+        **{f"load_{c}": "demo_load" for c in platforms.LOAD_ORDER},
+    }
+    later = moment(run)
+    # The day that the newest history left out stays out: a daily load never reaches it.
+    [history] = dag_runs(airflow_url, token, HISTORY, limit=1)
+    for code in platforms.LOAD_ORDER:
+        platform = platforms.PLATFORMS[code]
+        text = warehouse_output(
+            env,
+            "SELECT account_id, window_start, window_end "  # noqa: S608 (names of the demo)
+            f"FROM {platform.dataset}._agoranomos_reloads "
+            f"WHERE now = TIMESTAMPTZ '{later.isoformat()}'",
+        )
+        windows = {
+            account_id: (datetime.fromisoformat(start).date(), datetime.fromisoformat(end).date())
+            for account_id, start, end in (line.split("|") for line in text.splitlines())
+        }
+        # Each window ends on yesterday of its account, as the history's does.
+        yesterdays = {a: end for a, (_, end) in platform.module.windows(later).items()}
+        assert {a: end for a, (_, end) in windows.items()} == yesterdays, code
+        for account_id, (start, end) in windows.items():
+            if platform is web:
+                assert start == lagged[account_id] + timedelta(days=1), account_id
+            else:
+                assert (end - start).days + 1 == platform.window_days, (code, account_id)
+        assert in_warehouse(env, code, later) == expected(code, later, moment(history)), code
+        uri = platforms.asset_uri(platform)
+        events = asset_events(
+            airflow_url, token, uri, source_dag_id=DAILY, source_run_id=run["dag_run_id"]
+        )
+        assert events, f"the load of {code} did not update {uri}"
+    values = secrets(env)
+    assert values, "no secrets in .env: run ./agoranomos init"
+    for instance in task_instances(airflow_url, token, run):
         found = leaked(values, task_log(airflow_url, token, instance))
         assert not found, f"the log of {instance['task_id']} holds the values of {found}"

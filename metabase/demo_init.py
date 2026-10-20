@@ -3,7 +3,8 @@ profile.
 
 It runs the demo pipeline once: agoranomos_demo_history, which loads the history of the fictional
 platforms of the demo generator into raw_demo_<platform>, and then agoranomos_demo_transform, which
-the five assets of the history start. Then it makes the demo visible in Metabase: it syncs the
+the five assets of the history start. Then it unpauses agoranomos_demo_daily, which brings the new
+days every day, if that DAG has never run. Then it makes the demo visible in Metabase: it syncs the
 schema of the warehouse, applies the metadata of the marts (metadata.py), as metabase-init does,
 and puts the demo, its questions and its two dashboards, Advertising overview and Web analytics,
 in the collection Agoranomos / Demo as the code says (content.py, ADR-0018): an edit is reverted
@@ -18,9 +19,10 @@ advertising.
 
 Each step looks at the current state first. A start that finds a successful run of the history and
 a successful run of the transform after it does not run the pipeline again and leaves the pause
-state of both DAGs as it is. The content of Metabase is found by the entity IDs that Metabase gave
-it, in the registry of the content, never by name, but for the one move of the collection of an
-earlier release.
+state of both DAGs as it is, and a start that finds a run of the daily load leaves its pause state
+as it is too. The content of Metabase is found by the entity IDs that Metabase gave it, in the
+registry of the content, never by name, but for the one move of the collection of an earlier
+release.
 
 The whole job has one deadline, DEADLINE seconds from its start, which every wait shares, and a
 step that runs out of time names itself; ./agoranomos up waits longer than that for the stack.
@@ -61,6 +63,7 @@ from metabase_init import (
 
 LOAD_DAG = "agoranomos_demo_history"
 TRANSFORM_DAG = "agoranomos_demo_transform"
+DAILY_DAG = "agoranomos_demo_daily"
 # The transform runs when each platform of the demo has loaded since its last run: it waits for
 # one asset of each (airflow/dags/agoranomos_pipelines/assets.py), and the events of some of them
 # start no run.
@@ -709,7 +712,7 @@ def transform_is_busy(airflow: Airflow) -> bool:
 
 def wait_for_dags(airflow: Airflow, deadline: Deadline) -> None:
     """Wait until the DAG processor has loaded the demo DAGs; until then Airflow answers 404."""
-    for dag_id in (LOAD_DAG, TRANSFORM_DAG):
+    for dag_id in (LOAD_DAG, TRANSFORM_DAG, DAILY_DAG):
         wait_until(
             lambda dag_id=dag_id: airflow.call("GET", f"/api/v2/dags/{dag_id}", missing_ok=True),
             deadline,
@@ -797,6 +800,18 @@ def run_demo_pipeline(airflow: Airflow, deadline: Deadline) -> bool:
     if load["state"] != "success":
         raise SetupError(f"the DAG {LOAD_DAG} failed: see it in Airflow")
     wait_for_transform(airflow, load["start_date"], deadline)
+    return True
+
+
+def start_daily_load(airflow: Airflow) -> bool:
+    """Unpause the daily load if it has never run, after the pipeline, and return True if it did:
+    on the first start of the demo, and on the first start after an update that brings the DAG.
+    Unpaused, the DAG makes a run at once, which loads nothing when the history has taken the day
+    of every account already. A DAG that has run keeps its pause state, so a pause that a person
+    made stays."""
+    if count_runs(airflow, DAILY_DAG):
+        return False
+    airflow.call("PATCH", f"/api/v2/dags/{DAILY_DAG}", {"is_paused": False})
     return True
 
 
@@ -1212,6 +1227,8 @@ def main(env: Mapping[str, str] | None = None) -> int:
         sign_in_to_airflow(airflow, config.airflow_password)
         wait_for_dags(airflow, deadline)
         ran = run_demo_pipeline(airflow, deadline)
+        if start_daily_load(airflow):
+            log(f"unpaused {DAILY_DAG}, which loads the new days of the demo every day")
         server, hint = "Metabase", Metabase.logs_hint
         metabase = Metabase(config.metabase_url)
         sign_in(metabase, config.admin_email, config.admin_password)

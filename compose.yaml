@@ -293,6 +293,9 @@ services:
             "The tasks of dbt of Cosmos, at most two at a time (ADR-0027)",
         ]
         main()
+        # The pool of the loads of the demo, one at a time: those of the history and of the daily load.
+        sys.argv = ["airflow", "pools", "set", "demo_load", "1", "The loads of the demo, one at a time"]
+        main()
     environment:
       <<: *airflow-environment
       _AIRFLOW_DB_MIGRATE: "true"

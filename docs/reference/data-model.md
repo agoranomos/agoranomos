@@ -90,7 +90,7 @@ The tests of dbt run right after their model, in the same task, `dbt build` ([AD
 | `demo_web` | GA4 Data API v1beta | Sessions of two properties by source, medium, campaign and channel group |
 | `demo_fx` | none | Reference rates of the euro in US dollars, on weekdays but four holidays |
 
-The demo has a fictional business with two clients, Tarnwick Outfitters and Brindlemoor Haus, and 18 months of history up to the day before its first start, in the time zone of each account. The codes of real platforms, such as `google_ads`, stay for their connectors.
+The demo has a fictional business with two clients, Tarnwick Outfitters and Brindlemoor Haus, and 18 months of history up to the day before its first start, in the time zone of each account, to which a daily load adds each new day ([See the demo](../how-to/see-the-demo.md#keep-the-demo-up-to-date)). The codes of real platforms, such as `google_ads`, stay for their connectors.
 
 ## Names compared with Fivetran
 

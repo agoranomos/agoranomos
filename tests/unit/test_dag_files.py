@@ -1,10 +1,15 @@
 """Static checks of what the DAG files of the base package import, without Airflow."""
 
 import ast
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
-DAGS = Path(__file__).resolve().parents[2] / "airflow" / "dags"
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+DAGS = ROOT / "airflow" / "dags"
 DAG_FILES = sorted(DAGS.glob("*.py"))
+LOAD_DAGS = ("agoranomos_demo_history.py", "agoranomos_demo_daily.py")
 
 
 def imports(path: Path) -> list[tuple[str, list[str]]]:
@@ -18,20 +23,26 @@ def imports(path: Path) -> list[tuple[str, list[str]]]:
     return found
 
 
-def test_the_load_dag_does_not_import_cosmos():
+@pytest.mark.parametrize("name", LOAD_DAGS)
+def test_the_load_dags_do_not_import_cosmos(name):
     # Cosmos reads the manifest of the dbt project each time that a file that builds a DAG of it is
     # parsed: by the DAG processor, and by each task of that file when it starts. Each load DAG
     # has a file of its own without Cosmos, so that a missing or broken manifest cannot break its
     # import.
-    modules = [module for module, _ in imports(DAGS / "agoranomos_demo_history.py")]
-    assert modules, "agoranomos_demo_history.py imports nothing"
+    modules = [module for module, _ in imports(DAGS / name)]
+    assert modules, f"{name} imports nothing"
     assert [module for module in modules if module.split(".")[0] == "cosmos"] == []
 
 
 def test_no_dag_file_imports_another():
     # A DAG file that imported another would define the DAGs of that file twice.
     stems = {path.stem for path in DAG_FILES}
-    assert {"agoranomos_demo_history", "agoranomos_demo_transform", "agoranomos_selfcheck"} <= stems
+    assert {
+        "agoranomos_demo_daily",
+        "agoranomos_demo_history",
+        "agoranomos_demo_transform",
+        "agoranomos_selfcheck",
+    } <= stems
     for path in DAG_FILES:
         others = stems - {path.stem}
         imported = {module.split(".")[0] for module, _ in imports(path)}
@@ -139,20 +150,87 @@ def test_the_transform_loads_the_settings_of_the_model_before_dbt():
     assert ast.unparse(chain.right.func) == "DbtTaskGroup"
 
 
-def test_the_history_takes_its_assets_and_platforms_from_the_shared_package():
-    found = imports(DAGS / "agoranomos_demo_history.py")
+@pytest.mark.parametrize("name", LOAD_DAGS)
+def test_the_load_dags_take_their_assets_and_platforms_from_the_shared_package(name):
+    found = imports(DAGS / name)
     assert ("agoranomos_pipelines.assets", ["RAW_DEMO_PLATFORMS"]) in found
     assert ("agoranomos_pipelines.demo.platforms", ["LOAD_ORDER"]) in found
     # dlt is imported inside the task, not at the top: the DAG processor parses the file often.
-    tree = ast.parse((DAGS / "agoranomos_demo_history.py").read_text(encoding="utf-8"))
+    tree = ast.parse((DAGS / name).read_text(encoding="utf-8"))
     top = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
     assert not [n for n in top if "sources" in ast.dump(n) or "dlt" in ast.dump(n)]
+
+
+def decorators(path: Path) -> dict[str, list[str]]:
+    """The decorators of each function of a file, at any depth, as source."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return {
+        node.name: [ast.unparse(d) for d in node.decorator_list]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+    }
+
+
+@pytest.mark.parametrize("name", LOAD_DAGS)
+def test_the_loads_of_the_demo_run_one_at_a_time_in_their_pool(name):
+    # The history and the daily load would otherwise replace the days of a platform at the same
+    # time. airflow-init sets the pool, with one slot, on every start.
+    text = (DAGS / name).read_text(encoding="utf-8")
+    assert 'LOAD_POOL = "demo_load"' in text
+    assert decorators(DAGS / name)["load"] == [
+        "task(task_id=f'load_{code}', outlets=[RAW_DEMO_PLATFORMS[code]], pool=LOAD_POOL)"
+    ]
+    compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+    assert '"pools", "set", "demo_load", "1",' in compose
+
+
+def test_the_daily_load_skips_a_run_with_nothing_to_load_and_then_loads_in_order():
+    path = DAGS / "agoranomos_demo_daily.py"
+    assert decorators(path)["due"] == ["task.short_circuit(task_id='due')"]
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    [function] = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "agoranomos_demo_daily"
+    ]
+    # The first task is due, and each load comes after the one before it, in LOAD_ORDER.
+    assert ast.unparse(function.body[0]) == "previous = due()"
+    assert ast.unparse(function.body[1].iter) == "LOAD_ORDER"
+    calls = [ast.unparse(node) for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    assert "sources.due(get_current_context()['dag_run'].run_after)" in calls
+    assert "sources.load_daily(code, get_current_context()['dag_run'].run_after)" in calls
+    assert "mask_secret(sources.credentials()['password'])" in calls
+
+
+def test_the_daily_load_runs_after_midnight_in_every_time_zone_of_the_demo():
+    # At 09:17 UTC it is the same day as in UTC in the time zone of every account of the demo,
+    # summer and winter: so a run takes the same yesterday of every account, and the day of every
+    # account is new since the run before.
+    from agoranomos_pipelines.demo import common, world
+
+    path = DAGS / "agoranomos_demo_daily.py"
+    keywords = {
+        node.arg: ast.unparse(node.value)
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.keyword)
+    }
+    assert keywords["schedule"] == "SCHEDULE"
+    assert keywords["catchup"] == "False"
+    assert keywords["max_active_runs"] == "1"
+    text = path.read_text(encoding="utf-8")
+    assert 'SCHEDULE = CronTriggerTimetable("17 9 * * *", timezone="UTC")' in text
+    zones = {account.time_zone for account in (*world.ACCOUNTS, world.RATES)}
+    assert "Etc/GMT+8" in zones
+    for offset in range(366):
+        day = date(2026, 1, 1) + timedelta(days=offset)
+        moment = datetime.combine(day, time(9, 17), UTC)
+        assert {common.local_today(moment, zone) for zone in zones} == {day}, day
 
 
 def test_the_demo_dags_start_paused():
     # Without the demo profile no job unpauses the demo DAGs, and the docs say that they stay
     # paused: Airflow pauses a new DAG (compose.yaml says so too), unless the DAG says otherwise.
-    for name in ("agoranomos_demo_history.py", "agoranomos_demo_transform.py"):
+    for name in (*LOAD_DAGS, "agoranomos_demo_transform.py"):
         tree = ast.parse((DAGS / name).read_text(encoding="utf-8"))
         overrides = [
             node
