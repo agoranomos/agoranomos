@@ -230,7 +230,11 @@ The day of the rate.
 {% enddocs %}
 
 {% docs rate %}
-How many units of one currency one unit of another is worth on the day, to eight decimal places. In the rates into the reporting currency, as in fx_rates_daily, the value of one unit of currency in reporting_currency, through the reference rates of the euro, such as 1.08320000 from EUR to USD; in the rates of a source, the value of one unit of base_currency in quote_currency.
+How many units of one currency one unit of another is worth on the day, to eight decimal places. In the rates into the reporting currency, as in int_fx_rates__filled, the value of one unit of currency in reporting_currency, through the reference rates of the euro, such as 1.08320000 from EUR to USD; in the rates of a source, the value of one unit of base_currency in quote_currency.
+{% enddocs %}
+
+{% docs rate_into_reporting_currency %}
+The value of one unit of currency in reporting_currency on the day, through the reference rates of the euro, to eight decimal places, such as 1.08320000 from EUR to USD: an amount in currency times this rate is the amount in the reporting currency. The reporting currency has the rate 1.
 {% enddocs %}
 
 {% docs rate_source %}

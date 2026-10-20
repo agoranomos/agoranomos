@@ -315,7 +315,7 @@ models:
       - name: session_default_channel_group
         data_type: text
         description: '{{ doc("session_default_channel_group") }}'
-        config: {meta: {metabase: {display_name: Channel Group, semantic_type: type/Category}}}
+        config: {meta: {metabase: {display_name: Channel Group, semantic_type: type/Source}}}
       - name: ad_platform
         data_type: text
         description: '{{ doc("ad_platform") }}'
@@ -669,14 +669,14 @@ models:
               arguments:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
         config: {meta: {metabase: {display_name: Reporting Currency, semantic_type: type/Category}}}
-      - name: rate
+      - name: rate_into_reporting_currency
         data_type: numeric(18,8)
-        description: '{{ doc("rate") }}'
-        config: {meta: {metabase: {display_name: Rate, semantic_type: null}}}
+        description: '{{ doc("rate_into_reporting_currency") }}'
+        config: {meta: {metabase: {display_name: Rate into Reporting Currency, semantic_type: null}}}
       - name: rate_source
         data_type: text
         description: '{{ doc("rate_source") }}'
-        config: {meta: {metabase: {display_name: Rate Source, semantic_type: type/Category}}}
+        config: {meta: {metabase: {display_name: Rate Source, semantic_type: type/Source}}}
       - name: is_carried_forward
         data_type: boolean
         description: '{{ doc("is_carried_forward") }}'

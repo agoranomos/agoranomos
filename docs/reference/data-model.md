@@ -26,7 +26,7 @@ The staging views of a platform are calls of one macro for each shape of an API 
 | `clients` | A client of the business: a brand, shop or legal entity | `client_id` |
 | `ad_campaigns` | A campaign: its current name, status and type, the days of its statistics, and how many names it had | `platform`, `account_id`, `campaign_id` |
 | `ad_campaign_names` | A name that a campaign had, from when and until when | `platform`, `account_id`, `campaign_id`, `valid_from` |
-| `fx_rates_daily` | A currency on a day: its rate into the reporting currency | `rate_date`, `currency`, `reporting_currency` |
+| `fx_rates_daily` | A currency on a day: its rate into the reporting currency, `rate_into_reporting_currency` | `rate_date`, `currency`, `reporting_currency` |
 
 Every column has a description in the database and in Metabase. The facts carry the names of their platform, client, account and campaign, so that a question needs no join. The marts have primary keys and no foreign keys: tests check the relationships.
 

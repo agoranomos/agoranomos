@@ -330,7 +330,9 @@ def test_the_conversions_of_a_campaign_are_those_of_its_primary_actions(env, tra
 def test_the_rates_of_the_mart_are_those_of_the_generator(env, transform_run):
     reporting = env.get("AGORANOMOS_REPORTING_CURRENCY") or "USD"
     rows = rows_of(
-        env, "SELECT rate_date, currency, reporting_currency, rate FROM marts.fx_rates_daily"
+        env,
+        "SELECT rate_date, currency, reporting_currency, rate_into_reporting_currency "
+        "FROM marts.fx_rates_daily",
     )
     wrong = [
         row

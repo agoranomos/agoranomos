@@ -136,6 +136,129 @@ MART_KEYS = {
 }
 
 
+# The semantic types that Metabase 0.64.1 gives a field by its name, each time that it analyzes the
+# field, over any type but a key (src/metabase/analyze/classifiers/name.clj, read on 2026-10-20):
+# the pattern of the name in lower case, the kinds of base type that it applies to, and the type.
+# The first entry that a field matches counts. The entries for times of day are left out: no mart
+# has one. The pattern of deletion is written dele(?:te|ti): it matches the same names as that of
+# Metabase, which the spell checker would take for a misspelled word.
+METABASE_NAME_TYPES = (
+    (r"^id$", "any", "type/PK"),
+    (r"^lon$", "float", "type/Longitude"),
+    (r"^.*_lon$", "float", "type/Longitude"),
+    (r"^.*_lng$", "float", "type/Longitude"),
+    (r"^.*_long$", "float", "type/Longitude"),
+    (r"^.*_longitude$", "float", "type/Longitude"),
+    (r"^lng$", "float", "type/Longitude"),
+    (r"^long$", "float", "type/Longitude"),
+    (r"^longitude$", "float", "type/Longitude"),
+    (r"^lat$", "float", "type/Latitude"),
+    (r"^.*_lat$", "float", "type/Latitude"),
+    (r"^latitude$", "float", "type/Latitude"),
+    (r"^.*_latitude$", "float", "type/Latitude"),
+    (r"^.*_type$", "text", "type/Category"),
+    (r"^.*_url$", "text", "type/URL"),
+    (r"^city$", "text", "type/City"),
+    (r"^country", "text", "type/Country"),
+    (r"_country$", "text", "type/Country"),
+    (r"^currency$", "text", "type/Category"),
+    (r"^first(?:_?)name$", "text", "type/Name"),
+    (r"^full(?:_?)name$", "text", "type/Name"),
+    (r"^gender$", "text", "type/Category"),
+    (r"^last(?:_?)name$", "text", "type/Name"),
+    (r"^name$", "text", "type/Name"),
+    (r"^postal(?:_?)code$", "int-or-text", "type/ZipCode"),
+    (r"^role$", "text", "type/Category"),
+    (r"^sex$", "text", "type/Category"),
+    (r"^status$", "text", "type/Category"),
+    (r"^type$", "text", "type/Category"),
+    (r"^url$", "text", "type/URL"),
+    (r"^zip(?:_?)code$", "int-or-text", "type/ZipCode"),
+    (r"discount", "number", "type/Discount"),
+    (r"income", "number", "type/Income"),
+    (r"quantity", "int", "type/Quantity"),
+    (r"count$", "int", "type/Quantity"),
+    (r"number", "int", "type/Quantity"),
+    (r"^num_", "int", "type/Quantity"),
+    (r"join", "date", "type/JoinDate"),
+    (r"join", "timestamp", "type/JoinTimestamp"),
+    (r"create", "date", "type/CreationDate"),
+    (r"create", "timestamp", "type/CreationTimestamp"),
+    (r"start", "date", "type/CreationDate"),
+    (r"start", "timestamp", "type/CreationTimestamp"),
+    (r"cancel", "date", "type/CancelationDate"),
+    (r"cancel", "timestamp", "type/CancelationTimestamp"),
+    (r"dele(?:te|ti)", "date", "type/DeletionDate"),
+    (r"dele(?:te|ti)", "timestamp", "type/DeletionTimestamp"),
+    (r"update", "date", "type/UpdatedDate"),
+    (r"update", "timestamp", "type/UpdatedTimestamp"),
+    (r"source", "int-or-text", "type/Source"),
+    (r"channel", "int-or-text", "type/Source"),
+    (r"share", "float", "type/Share"),
+    (r"percent", "float", "type/Share"),
+    (r"rate$", "float", "type/Share"),
+    (r"margin", "number", "type/GrossMargin"),
+    (r"cost", "number", "type/Cost"),
+    (r"duration", "number", "type/Duration"),
+    (r"author", "int-or-text", "type/Author"),
+    (r"creator", "int-or-text", "type/Author"),
+    (r"created(?:_?)by", "int-or-text", "type/Author"),
+    (r"owner", "int-or-text", "type/Owner"),
+    (r"company", "int-or-text", "type/Company"),
+    (r"vendor", "int-or-text", "type/Company"),
+    (r"subscription", "int-or-text", "type/Subscription"),
+    (r"score", "number", "type/Score"),
+    (r"rating", "number", "type/Score"),
+    (r"stars", "number", "type/Score"),
+    (r"description", "text", "type/Description"),
+    (r"title", "text", "type/Title"),
+    (r"comment", "text", "type/Comment"),
+    (r"birthda(?:te|y)", "date", "type/Birthdate"),
+    (r"birthda(?:te|y)", "timestamp", "type/Birthdate"),
+    (r"(?:te|y)(?:_?)of(?:_?)birth", "date", "type/Birthdate"),
+    (r"(?:te|y)(?:_?)of(?:_?)birth", "timestamp", "type/Birthdate"),
+)
+# The kinds of base type of Metabase that the types of PostgreSQL of the marts are: numeric is
+# type/Decimal, a float and a number; bigint is type/BigInteger, an integer and a number;
+# timestamp and timestamptz are a date and time.
+METABASE_KINDS = {
+    "text": {"any", "text", "int-or-text"},
+    "numeric": {"any", "float", "number"},
+    "bigint": {"any", "int", "int-or-text", "number"},
+    "date": {"any", "date"},
+    "boolean": {"any"},
+    "timestamp": {"any", "timestamp"},
+    "timestamptz": {"any", "timestamp"},
+}
+
+
+def test_metabase_gives_no_column_of_a_mart_another_type_by_its_name():
+    # A column whose name Metabase types gets that type in the code, or a name that it does not
+    # type: otherwise every analysis in Metabase changes the type, and every start changes it back,
+    # as fx_rates_daily.rate, a decimal ending in rate, became a percentage.
+    text = (DBT / "models" / "marts" / "_marts__models.yml").read_text(encoding="utf-8")
+    checked = 0
+    for mart, block in blocks(text, 2).items():
+        for column, lines in blocks(block, 6).items():
+            data_type = re.search(r"^        data_type: (\w+)", lines, flags=re.MULTILINE)
+            semantic = re.search(r"semantic_type: ([\w/]+)", lines)
+            assert data_type, (mart, column)
+            assert semantic, (mart, column)
+            kinds = METABASE_KINDS[data_type.group(1)]
+            named = next(
+                (
+                    given
+                    for pattern, kind, given in METABASE_NAME_TYPES
+                    if kind in kinds and re.search(pattern, column)
+                ),
+                None,
+            )
+            if named is not None:
+                checked += 1
+                assert semantic.group(1) == named, (mart, column, named)
+    assert checked, "no column of the marts has a name that Metabase types"
+
+
 def test_every_mart_has_a_contract_and_its_key():
     text = (DBT / "models" / "marts" / "_marts__models.yml").read_text(encoding="utf-8")
     blocks = re.split(r"^  - name: ", text, flags=re.MULTILINE)[1:]
