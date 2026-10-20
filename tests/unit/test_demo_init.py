@@ -93,8 +93,9 @@ def stamp(seconds: float) -> str:
 
 
 class FakeAirflow:
-    """What demo-init can see of Airflow 3.3.2: the two DAGs of the demo, the history and the
-    transform, their runs, and the five assets between them.
+    """What demo-init can see of Airflow 3.3.2: the three DAGs of the demo, the history, the
+    transform and the daily load, their runs, and the five assets between the history and the
+    transform.
 
     A scheduler runs on the fake clock, one loop a second, in the order of the loop of Airflow:
     first a run for an event that waits, then the queued runs start, then the running ones end.
@@ -108,7 +109,9 @@ class FakeAirflow:
     partial_events are the events of some of the five assets, as a history that failed half way
     leaves them: they start no run, and a run of the transform that the one event starts consumes
     them too. The list of queued events counts all five while the fake keeps its event, else the
-    partial ones. triggers are the runs that a person triggers in the Airflow UI, at a time.
+    partial ones. triggers are the runs that a person triggers in the Airflow UI, at a time. The
+    daily load, unpaused without a run, makes a scheduled run at once, for the last time of its
+    schedule: after the history it finds the day of every account loaded, and updates no asset.
 
     The list of runs answers as the API does: the oldest first unless order_by says otherwise, 50
     to a page unless limit says otherwise and at most 100, and total_entries counts every run that
@@ -119,9 +122,9 @@ class FakeAirflow:
         self.clock = clock
         self.url = ""
         self.loaded_at = 0.0  # when the DAG processor has loaded the DAGs
-        self.paused = {di.LOAD_DAG: True, di.TRANSFORM_DAG: True}
-        self.durations = {di.LOAD_DAG: 10.0, di.TRANSFORM_DAG: 30.0}
-        self.results = {di.LOAD_DAG: "success", di.TRANSFORM_DAG: "success"}
+        self.paused = {di.LOAD_DAG: True, di.TRANSFORM_DAG: True, di.DAILY_DAG: True}
+        self.durations = {di.LOAD_DAG: 10.0, di.TRANSFORM_DAG: 30.0, di.DAILY_DAG: 5.0}
+        self.results = dict.fromkeys(self.paused, "success")
         self.runs: list[dict[str, Any]] = []
         self.queued_event: float | None = None
         self.partial_events = 0
@@ -252,6 +255,8 @@ class FakeAirflow:
             return 200, {"dag_id": dag_id, "is_paused": self.paused[dag_id]}
         if not rest and method == "PATCH":
             self.paused[dag_id] = body["is_paused"]
+            if dag_id == di.DAILY_DAG and not body["is_paused"] and not self.runs_of(dag_id):
+                self.add_run(dag_id, "queued", "scheduled")
             return 200, {"dag_id": dag_id, "is_paused": self.paused[dag_id]}
         if rest == ["dagRuns"] and method == "POST":
             return 200, public(self.add_run(dag_id, "queued"))
@@ -342,6 +347,9 @@ CONTENT_LINES = tuple(
 )
 
 
+# The line that demo-init prints when it has unpaused the daily load, after the pipeline.
+DAILY_LINE = f"demo-init: unpaused {di.DAILY_DAG}, which loads the new days of the demo every day"
+
 # The calls that demo-init makes after it applied the metadata of the marts: a failure of one of
 # them comes after the lines of the changes that apply() made, and of those that it made in the
 # content before.
@@ -355,14 +363,17 @@ AFTER_APPLY = {
 
 def one_line(capsys: pytest.CaptureFixture[str], *, after_apply: bool = False) -> str:
     """The line that demo-init prints when it fails: one line on standard error, which names the
-    step, with no traceback and no secret. Standard output is empty, or, for a failure after the
-    metadata was applied, holds no more than the lines of the changes that it made."""
+    step, with no traceback and no secret. Standard output holds no more than the line of the
+    daily load that demo-init unpaused, and, for a failure after the metadata was applied, the
+    lines of the changes that it made."""
     output = capsys.readouterr()
+    lines = output.out.splitlines()
+    if lines[:1] == [DAILY_LINE]:
+        lines = lines[1:]
     if after_apply:
-        lines = output.out.splitlines()
         assert all(line.startswith(METADATA_LINES + CONTENT_LINES) for line in lines), output.out
     else:
-        assert output.out == "", output.out
+        assert lines == [], output.out
     assert "Traceback" not in output.err
     assert not leaked(output.out + output.err), leaked(output.out + output.err)
     [line] = output.err.splitlines()
@@ -515,7 +526,7 @@ def test_the_scan_finds_a_secret_in_the_json_of_an_echo():
 
 def test_a_first_start_runs_the_pipeline_and_creates_the_demo(airflow, metabase, capsys):
     assert di.main(env_for(airflow, metabase)) == 0
-    assert airflow.paused == {di.LOAD_DAG: False, di.TRANSFORM_DAG: False}
+    assert airflow.paused == {di.LOAD_DAG: False, di.TRANSFORM_DAG: False, di.DAILY_DAG: False}
     assert airflow.calls.count(("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns")) == 1
     # The history starts the transform through the assets of its five loads: demo-init does not.
     assert ("POST", f"/api/v2/dags/{di.TRANSFORM_DAG}/dagRuns") not in airflow.calls
@@ -542,7 +553,8 @@ def test_a_first_start_runs_the_pipeline_and_creates_the_demo(airflow, metabase,
     assert line == done_line(metabase)
     # The metadata of the marts, applied after the sync: one line for each change, and then one
     # line for each item of the content that it created.
-    assert "demo-init: first fill: marts.ad_conversions_campaign_daily display_name: " in lines[0]
+    assert lines[0] == DAILY_LINE
+    assert "demo-init: first fill: marts.ad_conversions_campaign_daily display_name: " in lines[1]
     assert 'demo-init: created: collection agoranomos "Agoranomos"' in lines
     assert f'demo-init: created: dashboard demo/advertising "{ADVERTISING}"' in lines
     assert f'demo-init: created: dashboard demo/web-analytics "{WEB}"' in lines
@@ -573,8 +585,12 @@ def test_a_first_start_makes_the_demo_in_agoranomos(airflow, metabase):
     }
 
 
-def test_a_second_start_changes_nothing(airflow, metabase, capsys):
+def test_a_second_start_changes_nothing(airflow, metabase, clock, capsys):
     assert di.main(env_for(airflow, metabase)) == 0
+    # The run that the daily load made when demo-init unpaused it ends before the next start.
+    clock.sleep(60)
+    airflow.catch_up()
+    assert [run["state"] for run in airflow.runs_of(di.DAILY_DAG)] == ["success"]
     calls_before = len(airflow.calls), len(metabase.calls)
     runs_before = copy.deepcopy(airflow.runs)
     content_before = copy.deepcopy(
@@ -606,7 +622,59 @@ def test_a_pause_made_after_the_first_start_stays(airflow, metabase):
     assert di.main(env_for(airflow, metabase)) == 0
     airflow.paused = dict.fromkeys(airflow.paused, True)  # paused in the Airflow UI
     assert di.main(env_for(airflow, metabase)) == 0
-    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True}
+    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True, di.DAILY_DAG: True}
+
+
+def test_the_daily_load_is_unpaused_after_the_history_and_its_first_run_ends(airflow, metabase):
+    # The daily load would bring the history itself on a run before it: demo-init unpauses it
+    # once the transform after the history has succeeded.
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert airflow.calls.count(("PATCH", f"/api/v2/dags/{di.DAILY_DAG}")) == 1
+    [history] = airflow.runs_of(di.LOAD_DAG)
+    [transform] = airflow.runs_of(di.TRANSFORM_DAG)
+    # The stand-in makes the run of the daily load when it is unpaused.
+    [daily] = airflow.runs_of(di.DAILY_DAG)
+    assert daily["run_type"] == "scheduled"
+    assert daily["run_after"] >= transform["end_date"] > history["end_date"]
+
+
+def test_an_update_that_brings_the_daily_load_unpauses_it_without_the_pipeline(
+    airflow, metabase, capsys
+):
+    # A deployment whose pipeline ran before the update: the daily load, which has never run,
+    # brings the days since, and the history does not run again.
+    airflow.add_run(di.LOAD_DAG, "success", at=-3_600)
+    airflow.add_run(di.TRANSFORM_DAG, "success", run_type="asset_triggered", at=-3_500)
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert ("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns") not in airflow.calls
+    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True, di.DAILY_DAG: False}
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == DAILY_LINE
+    assert "the demo pipeline ran before" in lines[-1]
+
+
+def test_a_daily_load_that_has_run_keeps_its_pause_state(airflow, metabase):
+    airflow.add_run(di.LOAD_DAG, "success", at=-3_600)
+    airflow.add_run(di.TRANSFORM_DAG, "success", run_type="asset_triggered", at=-3_500)
+    airflow.add_run(di.DAILY_DAG, "success", "scheduled", at=-3_400)
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert ("PATCH", f"/api/v2/dags/{di.DAILY_DAG}") not in airflow.calls
+    assert airflow.paused[di.DAILY_DAG] is True
+
+
+def test_a_failed_history_leaves_the_daily_load_paused(airflow, metabase):
+    airflow.results[di.LOAD_DAG] = "failed"
+    assert di.main(env_for(airflow, metabase)) == 1
+    assert airflow.paused[di.DAILY_DAG] is True
+    assert airflow.runs_of(di.DAILY_DAG) == []
+
+
+def test_demo_init_waits_for_the_daily_load_to_be_loaded(airflow, metabase, capsys):
+    # The DAG processor may load the daily load last: until it has, demo-init cannot unpause it.
+    del airflow.paused[di.DAILY_DAG]
+    assert di.main(env_for(airflow, metabase)) == 1
+    assert f"Airflow did not load the DAG {di.DAILY_DAG}" in one_line(capsys)
+    assert ("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns") not in airflow.calls
 
 
 def test_a_success_long_ago_counts_whatever_ran_since(airflow, metabase):
@@ -618,8 +686,9 @@ def test_a_success_long_ago_counts_whatever_ran_since(airflow, metabase):
         airflow.add_run(dag_id, "success", at=at)
         for n in range(120):
             airflow.add_run(dag_id, "failed", at=-9_000 + n)
+    airflow.add_run(di.DAILY_DAG, "success", "scheduled", at=-9_980)
     assert di.main(env_for(airflow, metabase)) == 0
-    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True}
+    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True, di.DAILY_DAG: True}
     assert [call for call in airflow.calls if call[0] in ("POST", "PATCH")] == [
         ("POST", "/auth/token")
     ]
@@ -788,9 +857,10 @@ def test_a_history_without_a_good_transform_after_it_runs_again(airflow, metabas
 def test_a_history_with_a_good_transform_after_it_is_not_run_again(airflow, metabase, capsys):
     airflow.add_run(di.LOAD_DAG, "success", at=-3_600)
     airflow.add_run(di.TRANSFORM_DAG, "success", run_type="asset_triggered", at=-3_500)
+    airflow.add_run(di.DAILY_DAG, "success", "scheduled", at=-3_400)
     assert di.main(env_for(airflow, metabase)) == 0
     assert ("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns") not in airflow.calls
-    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True}
+    assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True, di.DAILY_DAG: True}
     assert "the demo pipeline ran before" in last_line(capsys)
 
 
@@ -2285,7 +2355,8 @@ def test_a_later_step_that_fails_leaves_the_lines_of_the_metadata_in_the_log(
     metabase.failures[("POST", "/api/collection")] = 500
     assert di.main(env_for(airflow, metabase)) == 1
     output = capsys.readouterr()
-    applied = output.out.splitlines()
+    daily, *applied = output.out.splitlines()
+    assert daily == DAILY_LINE
     assert (
         'demo-init: first fill: marts.ad_stats_campaign_daily display_name: "Ad Stats Campaign '
         'Daily" -> "Ad Statistics by Campaign and Day"'
@@ -2300,10 +2371,11 @@ def test_a_later_step_that_fails_leaves_the_lines_of_the_metadata_in_the_log(
 def test_the_lines_of_the_metadata_reach_the_log_of_a_process_before_its_error(airflow, metabase):
     # As a container runs it, with its standard output a pipe that Python buffers: each line is
     # flushed as it is printed, so the log has the lines of the metadata before the line of the
-    # error. The pipeline ran before and Metabase knows the mart, so the process waits for
-    # nothing.
+    # error. The pipeline and the daily load ran before and Metabase knows the mart, so the
+    # process waits for nothing.
     airflow.add_run(di.LOAD_DAG, "success", at=-20)
     airflow.add_run(di.TRANSFORM_DAG, "success", at=-10)
+    airflow.add_run(di.DAILY_DAG, "success", "scheduled", at=-5)
     metabase.mart_known = True
     metabase.failures[("POST", "/api/collection")] = 500
     result = subprocess.run(

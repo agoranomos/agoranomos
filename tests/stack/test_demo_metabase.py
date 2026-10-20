@@ -33,9 +33,12 @@ from metabase_content import (
 from services import DEMO
 from stack_helpers import http_json, secrets, wait_for, warehouse_output
 
-pytestmark = pytest.mark.skipif(
-    not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
+    ),
+    pytest.mark.usefixtures("daily_load_paused"),
+]
 
 # The dashboards of the demo and its questions, by their keys in the package, with their names.
 DASHBOARDS = {"advertising": "Advertising overview (demo)", "web-analytics": "Web analytics (demo)"}
@@ -51,7 +54,8 @@ V01_QUESTIONS = {
 V01_DASHBOARD = "Ad spend (demo)"
 LOAD = "agoranomos_demo_history"
 TRANSFORM = "agoranomos_demo_transform"
-DAGS = (LOAD, TRANSFORM)
+DAILY = "agoranomos_demo_daily"
+DAGS = (LOAD, TRANSFORM, DAILY)
 # The last day of the mart, and the sums of a client in the 30 days that end on it, in the
 # reporting currency, as the questions of the demo add them up for the period and the client of
 # their filters.
@@ -230,6 +234,10 @@ def test_the_first_start_ran_the_demo_pipeline(airflow_url, token):
         airflow_url, token, TRANSFORM, states=("success",), run_types=("asset_triggered",)
     )
     assert succeeded > 0, f"{TRANSFORM} has no successful run that the history started"
+    # Then it unpaused the daily load, which made a run at once, for the last time of its
+    # schedule.
+    scheduled = run_count(airflow_url, token, DAILY, run_types=("scheduled",))
+    assert scheduled > 0, f"{DAILY} has no scheduled run: the first start did not unpause it"
 
 
 def test_demo_init_runs_again_without_a_change(env, airflow_url, token, metabase_url, session):

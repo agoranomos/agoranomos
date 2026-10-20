@@ -2,8 +2,9 @@
 
 dlt is in the Airflow image and not in the development environment, so the module is imported
 with a stand-in for dlt that loads nothing: it records the resources that the module makes, with
-their hints, the pipelines and their runs, and answers the question of the module whether a
-dataset holds a load. The stack tests load with dlt itself."""
+their hints, the pipelines and their runs, and answers the questions of the module whether a
+dataset holds a load and what its loads recorded in _agoranomos_reloads. The stack tests load with
+dlt itself."""
 
 import importlib
 import os
@@ -39,14 +40,17 @@ class StandInClient:
 
     def execute_sql(self, sql):
         self.pipeline.queries.append(sql)
-        if self.pipeline.loads is None:
+        found = self.pipeline.reloads if '"_agoranomos_reloads"' in sql else self.pipeline.loads
+        if found is None:
             raise UndefinedRelation(sql)
-        return [(self.pipeline.loads,)]
+        return found if '"_agoranomos_reloads"' in sql else [(found,)]
 
 
 class StandInPipeline:
-    def __init__(self, options, loads):
+    def __init__(self, options, loads, reloads):
         self.options, self.loads, self.queries, self.runs = options, loads, [], []
+        # The rows of SELECT account_id, max(as_of), max(window_end) ... GROUP BY account_id.
+        self.reloads = reloads
         self.last_trace = None
 
     def sql_client(self):
@@ -78,13 +82,17 @@ def resource(data, name, **hints):
 @pytest.fixture
 def sources(monkeypatch):
     """The module with a stand-in for dlt, the pipelines that it makes, and how many loads each
-    dataset holds (None: no table _dlt_loads yet)."""
-    pipelines, loads = [], {"value": None}
+    dataset holds (None: no table _dlt_loads yet), with what the loads of each dataset recorded
+    of each account in "reloads", by dataset (none: no table _agoranomos_reloads yet)."""
+    pipelines, loads = [], {"value": None, "reloads": {}}
     dlt = types.ModuleType("dlt")
     dlt.resource = resource
     dlt.mark = types.SimpleNamespace(materialize_table_schema=lambda: MARKER)
     dlt.pipeline = lambda **options: (
-        pipelines.append(StandInPipeline(options, loads["value"])) or pipelines[-1]
+        pipelines.append(
+            StandInPipeline(options, loads["value"], loads["reloads"].get(options["dataset_name"]))
+        )
+        or pipelines[-1]
     )
     dlt.destinations = types.SimpleNamespace(postgres=lambda credentials: ("postgres", credentials))
     exceptions = types.ModuleType("dlt.destinations.exceptions")
@@ -363,3 +371,167 @@ def test_a_pipeline_opens_as_loader_into_the_dataset_of_its_platform(sources):
         workdir = pipeline.options["pipelines_dir"]
         assert os.path.isdir(workdir)
     assert not os.path.exists(workdir), "dlt keeps the state of a pipeline in its dataset"
+
+
+def loaded(loads, code, days_ago, as_of_days_ago=None, now=NOW, skip=()):
+    """Loads of a platform whose last day of each account is days_ago before yesterday of the
+    account, made on the day as_of_days_ago before today (by default the day after that last day),
+    as _agoranomos_reloads records them; the accounts of skip have no record."""
+    from agoranomos_pipelines.demo import common, platforms
+
+    as_of_days_ago = days_ago if as_of_days_ago is None else as_of_days_ago
+    loads["value"] = 1
+    loads["reloads"][platforms.PLATFORMS[code].dataset] = [
+        (
+            account.account_id,
+            common.local_today(now, account.time_zone) - timedelta(days=as_of_days_ago),
+            common.last_final_day(now, account.time_zone) - timedelta(days=days_ago),
+        )
+        for account in platforms.PLATFORMS[code].module.accounts()
+        if account.account_id not in skip
+    ]
+
+
+def recorded_windows(module, pipelines):
+    """The window of each account that the last run recorded."""
+    rows = pipelines[-1].runs[-1][0][module.RELOADS]
+    return {row["account_id"]: (row["window_start"], row["window_end"]) for row in rows}
+
+
+def test_a_daily_load_takes_the_days_after_the_last_load(sources):
+    # demo_web was last loaded 40 days ago, longer than its window of 14 days: the load takes every
+    # day after the last that it has, so no day is missing in between.
+    module, pipelines, loads = sources
+    from agoranomos_pipelines.demo import common, web
+
+    loaded(loads, "demo_web", 40)
+    module.load_daily("demo_web", NOW)
+    windows = recorded_windows(module, pipelines)
+    for account in web.accounts():
+        yesterday = common.last_final_day(NOW, account.time_zone)
+        assert windows[account.account_id] == (yesterday - timedelta(days=39), yesterday)
+    scope = pipelines[-1].runs[-1][1]["report_sessions_daily"]["write_disposition"]
+    first = (common.last_final_day(NOW, "America/New_York") - timedelta(days=39)).strftime("%Y%m%d")
+    assert (
+        f"(\"property\" = 'properties/390000001' AND \"date\" BETWEEN '{first}' AND "
+        in (scope["destination_scope"])
+    )
+    # A daily load does not replay the names of the campaigns.
+    assert len(pipelines[-1].runs) == 1
+
+
+@pytest.mark.parametrize(
+    "code", ["demo_fx", "demo_search", "demo_social", "demo_video", "demo_web"]
+)
+def test_a_daily_load_takes_at_least_the_reload_window_of_the_platform(sources, code):
+    # Loaded yesterday: the load replaces the recent days whose numbers still change (ADR-0025).
+    module, pipelines, loads = sources
+    from agoranomos_pipelines.demo import platforms
+
+    platform = platforms.PLATFORMS[code]
+    loaded(loads, code, 1)
+    module.load_daily(code, NOW)
+    for start, end in recorded_windows(module, pipelines).values():
+        assert (end - start).days + 1 == platform.window_days
+    assert recorded_windows(module, pipelines).keys() == {
+        account.account_id for account in platform.module.accounts()
+    }
+    # The window ends on the same day as that of a history: yesterday of each account.
+    ends = {a: end for a, (_, end) in platform.module.windows(NOW).items()}
+    assert {a: end for a, (_, end) in recorded_windows(module, pipelines).items()} == ends
+
+
+def test_a_second_daily_load_on_the_same_day_takes_the_same_window(sources):
+    # Its last day is yesterday already: the window of the platform, again.
+    module, pipelines, loads = sources
+    from agoranomos_pipelines.demo import common, social
+
+    loaded(loads, "demo_social", 0)
+    module.load_daily("demo_social", NOW)
+    for account in social.accounts():
+        yesterday = common.last_final_day(NOW, account.time_zone)
+        window = (yesterday - timedelta(days=27), yesterday)
+        assert recorded_windows(module, pipelines)[account.account_id] == window
+
+
+def test_a_daily_load_into_an_empty_dataset_brings_the_history(sources):
+    # As on a stand whose history never ran: the names are replayed, and the gap day stays out.
+    module, pipelines, _ = sources
+    from agoranomos_pipelines.demo import common, platforms, social
+
+    module.load_daily("demo_social", NOW)
+    assert len(pipelines[-1].runs) == len(social.name_versions(NOW)) + 1
+    for account in social.accounts():
+        window = recorded_windows(module, pipelines)[account.account_id]
+        assert window[0] == common.history_first_day(NOW, account.time_zone)
+    [(account, day)] = platforms.gap(NOW)
+    rows = pipelines[-1].runs[-1][0]["insights_campaign"]
+    assert not [
+        r for r in rows if r["account_id"] == account and r["date_start"] == day.isoformat()
+    ]
+
+
+def test_an_account_that_no_load_recorded_gets_the_days_of_the_history(sources):
+    module, pipelines, loads = sources
+    from agoranomos_pipelines.demo import common, search
+
+    loaded(loads, "demo_search", 1, skip={"4170000012"})
+    module.load_daily("demo_search", NOW)
+    windows = recorded_windows(module, pipelines)
+    [new] = [a for a in search.accounts() if a.account_id == "4170000012"]
+    assert windows[new.account_id][0] == common.history_first_day(NOW, new.time_zone)
+    assert (windows["4170000011"][1] - windows["4170000011"][0]).days == 89
+
+
+def test_the_record_of_the_loads_is_read_by_account(sources):
+    module, pipelines, loads = sources
+
+    assert module.last_loads("demo_video") is None
+    assert not [q for q in pipelines[-1].queries if module.RELOADS in q]
+    loaded(loads, "demo_video", 3)
+    last = module.last_loads("demo_video")
+    [query] = [q for q in pipelines[-1].queries if module.RELOADS in q]
+    assert query == (
+        "SELECT account_id, max(as_of), max(window_end) "
+        'FROM "raw_demo_video"."_agoranomos_reloads" GROUP BY account_id'
+    )
+    assert set(last) == {"7300000000000000001"}
+    # Loads, and no record yet: none of the accounts has a last day.
+    loads["reloads"].clear()
+    assert module.last_loads("demo_video") == {}
+
+
+def test_a_daily_load_is_due_when_an_account_has_no_load_of_its_day(sources, caplog):
+    module, _, loads = sources
+    from agoranomos_pipelines.demo import platforms
+
+    caplog.set_level("INFO")
+    for code in platforms.LOAD_ORDER:
+        loaded(loads, code, 0)
+    assert module.due(NOW) is False
+    assert "nothing to load" in caplog.text
+    # The record of demo_video is a day old: that is enough.
+    loaded(loads, "demo_video", 1)
+    assert module.due(NOW) is True
+    assert "demo_video: 1 of 1 accounts have no load of their day at 2026-10-12T09:00:00+00:00" in (
+        caplog.text
+    )
+    # So is a platform with no load at all.
+    loaded(loads, "demo_video", 0)
+    loads["reloads"].pop("raw_demo_web")
+    assert module.due(NOW) is True
+
+
+def test_whether_a_load_is_due_depends_on_the_day_of_each_account(sources):
+    # Late in the evening of UTC, Berlin has a new day and Los Angeles not yet: a load made at
+    # 21:00 UTC has taken the day of Los Angeles and of Etc/GMT+8, and not the next day of Berlin.
+    module, _, loads = sources
+    from agoranomos_pipelines.demo import platforms
+
+    earlier = datetime(2026, 10, 12, 21, 0, tzinfo=UTC)
+    late = datetime(2026, 10, 12, 23, 30, tzinfo=UTC)
+    for code in platforms.LOAD_ORDER:
+        loaded(loads, code, 0, now=earlier)
+    assert module.behind("demo_social", late) == ["802000000000002"]
+    assert module.behind("demo_video", late) == []
+    assert module.due(late) is True

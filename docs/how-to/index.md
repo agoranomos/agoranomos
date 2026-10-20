@@ -7,7 +7,7 @@ How-to guides are short recipes for people who want to get a specific job done w
 - [Run Agoranomos locally](run-locally.md): start the stack on your own machine, sign in, update it, switch to separate workers, and give a service more memory.
 - [Deploy on a server](deploy-on-a-server.md): put Metabase on the internet over HTTPS, with Airflow behind an SSH tunnel and daily backups.
 - [Back up and restore](back-up-and-restore.md): take, schedule and copy backups, and restore them, also on a new server.
-- [See the demo](see-the-demo.md): what the demo shows, and how to bring it up to date or turn it off.
+- [See the demo](see-the-demo.md): what the demo shows, how it stays up to date, and how to turn it off.
 - [Rename a field or add your own definitions](rename-a-field.md): give the tables and fields of the marts names, descriptions and notes of your deployment's own.
 
 ## Planned guides

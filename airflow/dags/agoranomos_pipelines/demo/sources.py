@@ -15,7 +15,8 @@ each account that it replaced and the day of the load in the time zone of the ac
 keeps the state of each pipeline in its dataset, so its local working folder is a temporary one,
 and it empties the staging dataset after each load, which keeps only the rows of the last one
 otherwise. The first load of a platform, the history, also replays the names that its campaigns
-had."""
+had. The daily load reads that record: it takes, for each account, the days after the last that a
+load took, and at least the reload window of the platform."""
 
 from __future__ import annotations
 
@@ -26,13 +27,13 @@ import re
 import tempfile
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import dlt
 from dlt.destinations.exceptions import DatabaseUndefinedRelation
 
 from agoranomos_pipelines.demo.common import local_today
-from agoranomos_pipelines.demo.platforms import PLATFORMS, gap
+from agoranomos_pipelines.demo.platforms import LOAD_ORDER, PLATFORMS, gap
 from agoranomos_pipelines.demo.world import Account
 
 log = logging.getLogger(__name__)
@@ -260,6 +261,60 @@ def has_loads(pipeline) -> bool:
     return bool(rows and rows[0][0])
 
 
+def recorded(pipeline) -> dict[str, tuple[date, date]]:
+    """The day of the newest load (as_of) and the last day loaded (window_end) of each account, as
+    the loads of the dataset of a pipeline recorded them in _agoranomos_reloads; none before the
+    first load."""
+    try:
+        with pipeline.sql_client() as client:
+            table = client.make_qualified_table_name(RELOADS)
+            # A name that dlt quotes, and no value from outside.
+            rows = client.execute_sql(
+                f"SELECT account_id, max(as_of), max(window_end) FROM {table} GROUP BY account_id"  # noqa: S608
+            )
+    except DatabaseUndefinedRelation:
+        return {}
+    return {account_id: (as_of, end) for account_id, as_of, end in rows or ()}
+
+
+def last_loads(code: str) -> dict[str, tuple[date, date]] | None:
+    """What the loads of a platform recorded of each account (recorded()), or None when its dataset
+    holds no complete load."""
+    with open_pipeline(code) as pipeline:
+        return recorded(pipeline) if has_loads(pipeline) else None
+
+
+def behind(code: str, now: datetime) -> list[str]:
+    """The accounts of a platform that no load has taken on their day of now, in the time zone of
+    each: every account before the first load of the platform."""
+    last = last_loads(code) or {}
+    return [
+        account.account_id
+        for account in PLATFORMS[code].module.accounts()
+        if account.account_id not in last
+        or last[account.account_id][0] < local_today(now, account.time_zone)
+    ]
+
+
+def due(now: datetime) -> bool:
+    """Whether a daily load at now brings anything: an account of a platform that no load has
+    taken on its day of now. Another load on the same day brings the same numbers, which change
+    with the age of their day only (common.matured)."""
+    late = {code: behind(code, now) for code in LOAD_ORDER}
+    for code, accounts in late.items():
+        if accounts:
+            log.info(
+                "%s: %d of %d accounts have no load of their day at %s",
+                code,
+                len(accounts),
+                len(PLATFORMS[code].module.accounts()),
+                now.isoformat(),
+            )
+    if not any(late.values()):
+        log.info("Every account has a load of its day at %s: nothing to load", now.isoformat())
+    return any(late.values())
+
+
 def counted(counts: dict[str, int], pipeline) -> None:
     """Add the rows of the tables of the platform that the last run loaded: not those of dlt, nor
     the record of the windows."""
@@ -305,3 +360,24 @@ def load_history(code: str, now: datetime) -> dict[str, int]:
     """The first load of a platform: its history up to yesterday, with the versions of the names of
     its campaigns, and without the day that the demo leaves out."""
     return load(code, now, skip=gap(now), replay_names=True)
+
+
+def load_daily(code: str, now: datetime) -> dict[str, int]:
+    """The daily load of a platform (ADR-0025): for each account, the days from the day after the
+    last that a load took, or from the first day of the reload window of the platform when that is
+    earlier, to yesterday of the account. A platform whose dataset holds no load yet gets its
+    history, and an account that no load has recorded, the days of the history."""
+    platform = PLATFORMS[code]
+    last = last_loads(code)
+    if last is None:
+        return load_history(code, now)
+    history = platform.module.windows(now)
+    reload_days = timedelta(days=platform.window_days - 1)
+
+    def first(account: Account) -> date:
+        start, end = history[account.account_id]
+        if account.account_id not in last:
+            return start
+        return min(last[account.account_id][1] + timedelta(days=1), end - reload_days)
+
+    return load(code, now, first=first)

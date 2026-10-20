@@ -19,9 +19,10 @@ from stack_helpers import (
 )
 
 SELFCHECK = "agoranomos_selfcheck"
-# The other DAGs of the base bundle: the history of the demo and the transform.
+# The other DAGs of the base bundle: the history of the demo, the transform and the daily load.
 DEMO_HISTORY = "agoranomos_demo_history"
 DEMO_TRANSFORM = "agoranomos_demo_transform"
+DEMO_DAILY = "agoranomos_demo_daily"
 EXTENSION_CHECK = "ci_extension_check"
 FIXTURE = REPO_ROOT / "tests" / "stack" / "fixtures" / f"{EXTENSION_CHECK}.py"
 EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
@@ -35,9 +36,9 @@ TASK_RUNNERS = [s for s in ("airflow-scheduler", "airflow-worker") if s in LONG_
 # The services whose health check reads their job from the metadata database (compose.yaml), with
 # the type of the job.
 JOB_CHECKS = {"airflow-dag-processor": "DagProcessorJob", "airflow-triggerer": "TriggererJob"}
-# The pool of the tasks of dbt, and its size, which airflow-init sets on every start (ADR-0027).
-DBT_POOL = "/api/v2/pools/dbt"
-DBT_POOL_SLOTS = 2
+# The pools that airflow-init sets on every start, and their sizes: the tasks of dbt (ADR-0027),
+# and the loads of the demo, one at a time.
+POOLS = {"dbt": 2, "demo_load": 1}
 
 
 @pytest.fixture(scope="module")
@@ -72,16 +73,21 @@ def test_the_admin_signs_in_with_the_generated_password_only(airflow_url, token)
 
 @pytest.fixture(scope="module")
 def airflow_init_again(airflow_url, token):
-    """The pool of dbt as the start left it, and airflow-init run once more after an edit of the
-    size of that pool, as one in the Airflow UI makes it."""
-    status, pool = api(airflow_url, token, "GET", DBT_POOL)
-    assert status == 200, pool
-    # Airflow 3.3.2 answers 422 to a body without the name and include_deferred, as the UI sends.
-    edit = {"pool": pool["name"], "slots": 5, "include_deferred": pool["include_deferred"]}
-    status, body = api(airflow_url, token, "PATCH", f"{DBT_POOL}?update_mask=slots", edit)
-    assert status == 200, body
-    assert body["slots"] == 5, body
-    return pool, compose("run", "--rm", "--no-deps", "-T", "airflow-init", check=False)
+    """The pools as the start left them, and airflow-init run once more after an edit of the size
+    of each, as one in the Airflow UI makes it."""
+    pools = {}
+    for name in POOLS:
+        status, pool = api(airflow_url, token, "GET", f"/api/v2/pools/{name}")
+        assert status == 200, pool
+        pools[name] = pool
+        # Airflow 3.3.2 answers 422 to a body without the name and include_deferred, as the UI
+        # sends.
+        edit = {"pool": name, "slots": 5, "include_deferred": pool["include_deferred"]}
+        path = f"/api/v2/pools/{name}?update_mask=slots"
+        status, body = api(airflow_url, token, "PATCH", path, edit)
+        assert status == 200, body
+        assert body["slots"] == 5, body
+    return pools, compose("run", "--rm", "--no-deps", "-T", "airflow-init", check=False)
 
 
 def test_airflow_init_can_run_again(airflow_init_again):
@@ -92,16 +98,18 @@ def test_airflow_init_can_run_again(airflow_init_again):
     assert said_so, "airflow-init did not find the admin that exists"
 
 
-def test_the_pool_of_dbt_has_its_slots_and_comes_back_at_the_next_start(
-    airflow_url, token, airflow_init_again
+@pytest.mark.parametrize("name", sorted(POOLS))
+def test_each_pool_has_its_slots_and_comes_back_at_the_next_start(
+    airflow_url, token, airflow_init_again, name
 ):
-    # The tasks of dbt run in it, at most two at a time, whatever AIRFLOW_PARALLELISM allows: the
-    # memory of the container of the tasks has room for two processes of dbt (ADR-0027).
-    pool, _ = airflow_init_again
-    assert pool["slots"] == DBT_POOL_SLOTS, pool
-    status, pool = api(airflow_url, token, "GET", DBT_POOL)
+    # The tasks of dbt run in theirs at most two at a time, whatever AIRFLOW_PARALLELISM allows: the
+    # memory of the container of the tasks has room for two processes of dbt (ADR-0027). The loads
+    # of the history and of the daily load of the demo run in theirs one at a time.
+    pools, _ = airflow_init_again
+    assert pools[name]["slots"] == POOLS[name], pools[name]
+    status, pool = api(airflow_url, token, "GET", f"/api/v2/pools/{name}")
     assert status == 200, pool
-    assert pool["slots"] == DBT_POOL_SLOTS, "airflow-init did not put the size of the pool back"
+    assert pool["slots"] == POOLS[name], "airflow-init did not put the size of the pool back"
 
 
 def users_create_in_the_audit_log(env):
@@ -348,7 +356,7 @@ def test_the_dag_processor_reports_no_import_error(airflow_url, token):
     # The errors of the DAGs of the base package: the extensions folder belongs to the deployment.
     # The DAGs of the base bundle are waited for first, so that the DAG processor has parsed it,
     # whatever ran before this test.
-    for dag_id in (SELFCHECK, DEMO_HISTORY, DEMO_TRANSFORM):
+    for dag_id in (SELFCHECK, DEMO_HISTORY, DEMO_TRANSFORM, DEMO_DAILY):
         wait_for_dag(airflow_url, token, dag_id)
     status, body = api(airflow_url, token, "GET", "/api/v2/importErrors?bundle_name=agoranomos")
     assert status == 200, body

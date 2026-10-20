@@ -11,9 +11,12 @@ from airflow_api import is_busy, wait_for_dag
 from services import DEMO
 from stack_helpers import wait_for, warehouse_output
 
-pytestmark = pytest.mark.skipif(
-    not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
+    ),
+    pytest.mark.usefixtures("daily_load_paused"),
+]
 
 TRANSFORM = "agoranomos_demo_transform"
 RATES = "staging.int_fx_rates__filled"

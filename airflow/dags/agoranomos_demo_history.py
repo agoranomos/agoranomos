@@ -7,9 +7,10 @@ rates of demo_fx, in the shapes of the Google Ads API v25, the Meta Marketing AP
 API for Business v1.3 and the GA4 Data API v1beta, up to yesterday in the time zone of each
 account, into raw_demo_<platform>. The first run of each platform also replays the names that its
 campaigns had. A repeat is safe: each load replaces the days of each account that it covers. The
-five loads run one after another, so that one load runs at a time, and each updates the asset of
-its main table. The DAG has no schedule and starts paused: with the demo profile, the one-shot
-demo-init job unpauses it and triggers it once, on the first start.
+five loads run one after another, and each updates the asset of its main table. The loads of this
+DAG and of agoranomos_demo_daily, which brings the new days after the history, run one at a time,
+in the pool demo_load. The DAG has no schedule and starts paused: with the demo profile, the
+one-shot demo-init job unpauses it and triggers it once, on the first start.
 """
 
 from __future__ import annotations
@@ -22,10 +23,13 @@ from airflow.sdk import dag, get_current_context, task
 from airflow.sdk.log import mask_secret
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
+# The pool of the loads of the demo, which airflow-init sets on every start: one slot, so that a
+# load of this DAG and one of the daily load never replace the days of a platform at the same time.
+LOAD_POOL = "demo_load"
 
 
 def load_task(code: str):
-    @task(task_id=f"load_{code}", outlets=[RAW_DEMO_PLATFORMS[code]])
+    @task(task_id=f"load_{code}", outlets=[RAW_DEMO_PLATFORMS[code]], pool=LOAD_POOL)
     def load() -> None:
         # dlt is imported here and not at the top: the DAG processor parses this file often.
         from agoranomos_pipelines.demo import sources

@@ -20,6 +20,9 @@ from airflow_api import is_busy, trigger, unpause, wait_for_dag, wait_for_run
 from services import DEMO
 from stack_helpers import compose, wait_for, warehouse_output
 
+# The daily load of the demo stays paused while these tests run (conftest.py).
+pytestmark = pytest.mark.usefixtures("daily_load_paused")
+
 DBT = "/opt/airflow/dbt_venv/bin/dbt"
 PROJECT = "/opt/agoranomos/dbt"
 # dbt writes its target and logs folders here, in the container of the DAG processor, apart from
