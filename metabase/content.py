@@ -14,9 +14,9 @@ template tags of its filters, its whole settings of display, its parameters (non
 its filters from the template tags), the dashboard that it belongs to (none) and the metadata of
 its columns; and each card of a dashboard whole (its question, its place, its settings of display,
 such as a click behavior, its filter mappings and its series), with the filters and the tabs of
-the dashboard. What differs is put back, what is in the trash comes back, what Metabase no longer has
-is created again, an item that the code no longer ships goes to the trash, and one line of the log
-says each change and what it replaced. Metabase keeps the replaced version in the history of
+the dashboard. What differs is put back, what is in the trash comes back, what Metabase no longer
+has is created again, an item that the code no longer ships goes to the trash, and one line of the
+log says each change and what it replaced. Metabase keeps the replaced version in the history of
 revisions of the item. Every group but Administrators gets
 at most View on the collection Agoranomos and on every sub-collection of the registry.
 
