@@ -45,7 +45,7 @@ The other options were not chosen for these reasons:
 
 ### Consequences
 
-* Good, because a run of the transform starts 41 processes of dbt instead of 81.
+* Good, because a run of the transform starts 41 processes of dbt instead of 81, and takes about a third less time: 318 to 322 seconds on 2 CPUs instead of 487.
 * Good, because the tests of a node still run right after it, and a failed one stops what reads the node.
 * Good, because a model whose own test fails updates no asset: its one task fails, where the task that only built it succeeded and updated the asset before its tests ran.
 * Bad, because the build of a node and its tests are one task with one log, so a failed test fails the task that built the node, and a retry would build it again (the tasks of dbt have no retries).
@@ -53,6 +53,6 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** in place in the pull request that proposes this record: the transform DAG renders its tasks with `TestBehavior.BUILD`, and the unit and stack tests check the ids of the tasks, the order, and a failed critical test.
+* **Implementation status, as of October 2026:** in place in the pull request that proposes this record: the transform DAG renders its tasks with `TestBehavior.BUILD`, and the unit and stack tests check the ids of the tasks, the order, and a failed critical test. Measured in the Stack workflow on 2026-10-19, on the same runner of 2 CPUs: a successful run took 318 to 322 seconds, against 487 with a task for each node and one for its tests, a run that a failed critical test stopped took 156 seconds, and `demo-init` took 374 seconds of its deadline of 600 on the first start, against 545; `warehouse-db` peaked at 305 MiB of its limit of 384 MiB.
 * The facts behind this record, read on 2026-10-19: the source of Cosmos 1.15.1 (`cosmos/airflow/graph.py`: under `TestBehavior.BUILD`, models, snapshots and seeds are rendered as `DbtBuild` tasks with the id `<name>_<resource type>_build` and `--select fqn:<fqn>`, and the indirect selection of `ExecutionConfig` is passed on; `cosmos/operators/local.py`: `DbtBuildLocalOperator` runs `dbt build` and updates the assets of what it builds, as `DbtRunLocalOperator` does), and the logs of the Stack workflow on 2026-10-19: one run of the transform of the model took 487 seconds with `AFTER_EACH`, from 20:10:35 to 20:18:42, on a runner `ubuntu-24.04` with 2 CPUs and 7,938 MiB, and `demo-init` took 545 seconds on the first start.
 * Related decisions: [ADR-0005](0005-transform-with-dbt-core.md) (dbt through Cosmos), [ADR-0025](0025-model-advertising-statistics-once.md) (the model and its critical tests), [ADR-0027](0027-load-the-dbt-project-into-cosmos-from-a-manifest.md) (the manifest and the pool of two).
