@@ -1,16 +1,17 @@
 """First-start setup of Metabase, run by the one-shot metabase-init service on every start.
 
-It waits until Metabase is healthy, creates the admin account when Metabase is not set up yet,
-and connects the warehouse as the read-only metabase_reader role, showing only the marts schema.
-Each step looks at the current state first, so running it again changes nothing but the
-connection details. Settings that must not change in the Metabase UI, such as the AI features
-being off, are environment variables in compose.yaml instead. On a new Metabase it also turns the
-public links off, once. Then it applies the metadata of the marts (metadata.py): the names,
-descriptions and types that dbt and the overrides of the deployment give the tables and fields of
-the marts, with one line for each change. Last, it gives every group but Administrators at most
-View on the collections of the content of the package that the registry of the content records,
-the collection Agoranomos and its packages such as Demo (content.py, ADR-0018), on every start, with
-one line for each permission that it lowers. Run with the argument diff, as ./agoranomos metadata
+It waits until Metabase is healthy, creates the admin account when Metabase is not set up yet, and
+connects the warehouse as the read-only metabase_reader role, showing only the marts schema. Each
+step looks at the current state first, so running it again changes nothing but the connection
+details. Settings that must not change in the Metabase UI, such as the AI features being off, are
+environment variables in compose.yaml instead. On a new Metabase it also turns the public links off,
+once. Then it applies the metadata of the marts (metadata.py): the names, descriptions and types
+that dbt and the overrides of the deployment give the tables and fields of the marts, with one line
+for each change. Last, it keeps the Ops collection, a dashboard about the pipeline itself, in the
+collection Agoranomos as the code says (ops.py, ADR-0029), and gives every group but Administrators
+at most View on the collections of the content of the package that the registry of the content
+records, the collection Agoranomos and its packages such as Demo and Ops (content.py, ADR-0018), on
+every start, with one line for each change. Run with the argument diff, as ./agoranomos metadata
 diff does, it prints the plan of the metadata and applies nothing.
 
 Every secret comes from the environment and goes only into the body of a request. The messages of
@@ -36,6 +37,7 @@ from typing import Any, Protocol
 
 import content
 import metadata
+import ops
 
 WAREHOUSE_NAME = "Agoranomos warehouse"
 # How long the job waits for a sync that adds a table of the marts to Metabase, in seconds.
@@ -506,7 +508,9 @@ def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> in
         wait = metadata.waiter(METADATA_SYNC_TIMEOUT, "see ./agoranomos logs metabase")
         log = logged("metabase-init")
         metadata.apply(metabase, database_id, marts, wait, log=log)
-        content.lock_down(metabase, registry, log)
+        # The Ops collection, with or without the demo; it ends with the lock-down of every
+        # collection of the content of the package.
+        content.ensure_package(metabase, registry, ops.ops_package(), database_id, log)
     except (SetupError, metadata.MetadataError, content.ContentError) as error:
         print(f"metabase-init: {error}", file=sys.stderr)
         return 1

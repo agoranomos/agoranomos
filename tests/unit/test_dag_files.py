@@ -92,8 +92,10 @@ def test_the_transform_renders_from_the_manifest_in_the_pool_of_dbt():
         for key, value in zip(d.keys, d.values, strict=True)
         if isinstance(key, ast.Constant) and key.value == "pool"
     ]
-    assert pools == ["DBT_POOL"], "the pool is set once, on the task group of dbt"
+    assert pools == ["DBT_POOL"], "the pool is set once on the task group of dbt"
     assert 'DBT_POOL = "dbt"' in text
+    # The task that builds the tables of elementary is a process of dbt too.
+    assert [ast.unparse(v) for v in keyword_values(path, "pool")] == ["DBT_POOL"]
 
 
 def test_a_test_of_two_nodes_runs_in_the_task_of_the_one_that_depends_on_the_other():
@@ -139,15 +141,45 @@ def test_the_transform_loads_the_settings_of_the_model_before_dbt():
     assert "source.load()" in calls
     top = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
     assert not [n for n in top if "settings" in ast.dump(n) or "dlt" in ast.dump(n)]
-    # The task comes first: load_settings() >> DbtTaskGroup(...).
-    [chain] = [
-        node
+    # The task comes first, then the tables of elementary, then the task group of dbt.
+    chains = [
+        ast.unparse(node)
         for node in ast.walk(tree)
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.RShift)
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.BinOp)
     ]
-    assert ast.unparse(chain.left) == "load_settings()"
-    assert isinstance(chain.right, ast.Call)
-    assert ast.unparse(chain.right.func) == "DbtTaskGroup"
+    assert chains == ["load_settings() >> elementary >> dbt"]
+    assigned = {
+        node.targets[0].id: ast.unparse(node.value.func)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Name)
+        and isinstance(node.value, ast.Call)
+    }
+    assert assigned["elementary"] == "DbtRunLocalOperator"
+    assert assigned["dbt"] == "DbtTaskGroup"
+
+
+def test_the_transform_builds_elementary_in_one_task_and_records_its_run():
+    # ADR-0029: one task builds the models of the package elementary, before the other tasks of
+    # dbt, and the task group leaves them out; every task of dbt gives dbt the DAG and the run of
+    # Airflow, which elementary records, and none runs dbt deps.
+    path = DAGS / "agoranomos_demo_transform.py"
+    text = path.read_text(encoding="utf-8")
+    assert 'ELEMENTARY = ["package:elementary"]' in text
+    assert 'JOB_ENV = {"DBT_JOB_ID": "{{ dag.dag_id }}", "DBT_JOB_RUN_ID": "{{ run_id }}"}' in text
+    calls = {
+        node.func.id: {k.arg: ast.unparse(k.value) for k in node.keywords}
+        for node in ast.walk(ast.parse(text))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    elementary = calls["DbtRunLocalOperator"]
+    assert elementary["select"] == "ELEMENTARY"
+    assert elementary["env"] == "JOB_ENV"
+    assert elementary["install_deps"] == "False"
+    assert elementary["emit_datasets"] == "False"
+    assert calls["RenderConfig"]["exclude"] == "ELEMENTARY"
+    assert calls["DbtTaskGroup"]["operator_args"] == "{'env': JOB_ENV}"
+    assert calls["ProjectConfig"]["install_dbt_deps"] == "False"
 
 
 @pytest.mark.parametrize("name", LOAD_DAGS)

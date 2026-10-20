@@ -1,14 +1,20 @@
 sources:
   - name: raw_demo_social
     description: >-
-      The data of demo_social, a fictional platform of social ads in the shape of the Meta
-      Marketing API v26.0, which the DAG agoranomos_demo_history loads with dlt: its responses as
-      dlt normalizes them, the lists of a row in child tables of their own.
+      The data of demo_social, a fictional platform of social ads in the shape of the Meta Marketing
+      API v26.0, which the DAGs agoranomos_demo_history and agoranomos_demo_daily load with dlt: its
+      responses as dlt normalizes them, the lists of a row in child tables of their own.
     schema: raw_demo_social
-    # The demo has no daily load in this release: no freshness.
+    # No freshness check of dbt: the Ops collection shows the last load of each account, from
+    # _agoranomos_reloads (models/ops/ops_loads.sql).
     config:
       freshness: null
     tables:
+      - name: _agoranomos_reloads
+        description: >-
+          The record of the loads of demo_social: one row for each account in each load, with the
+          day of the load in the time zone of the account (as_of), the first and last day that
+          the load replaced (window_start, window_end), and the moment of the load.
       - name: ad_accounts
         description: >-
           The ad accounts of demo_social, one row each, with their currency and time zone; each

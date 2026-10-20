@@ -36,7 +36,6 @@ answered.
 from __future__ import annotations
 
 import copy
-import json
 import os
 import sys
 import time
@@ -128,14 +127,6 @@ RAN_BEFORE_HINT = (
 )
 RAN_NOW_HINT = f"see the last run of {TRANSFORM_DAG} in Airflow"
 
-# The settings of a chart that hold the titles of its axes.
-AXIS_TITLES = ("graph.x_axis.title_text", "graph.y_axis.title_text")
-# The color of the series of a demo chart with one series: the first color of the chart palette of
-# the project, which is made for a light background (the default of a Metabase dashboard). Metabase
-# keeps the color of a series in series_settings, under the series key, which for a chart with one
-# metric and no breakout is the name of the metric column. A color with no color_name is drawn as
-# it is. A chart with a breakout has a series for each value of the data, in the colors of Metabase.
-SERIES_COLOR = "#A86400"
 
 # The filters of the questions, by the names of their template tags: their display names, the type
 # of their widget, and the column of the mart that each filters on. A dashboard filter of the same
@@ -916,12 +907,6 @@ def fields_of(metabase: Metabase, database_id: int) -> dict[tuple[str, str], tup
     }
 
 
-def column_key(name: str) -> str:
-    """The key of a column in the column settings of a card, as the frontend of Metabase writes it:
-    JSON.stringify(["name", <column name>]), with no blank."""
-    return json.dumps(["name", name], separators=(",", ":"))
-
-
 def column_format(name: str, currency: str | None) -> dict[str, Any]:
     """How a column shows its numbers: money in the reporting currency, a share as a percentage,
     and a ratio or a count with the decimals of DECIMALS. Metabase formats the column of a native
@@ -948,16 +933,16 @@ def visualization_settings(
         if name in titles:
             shown = {"column_title": titles[name], **shown}
         if shown:
-            columns[column_key(name)] = shown
+            columns[content.column_key(name)] = shown
     if columns:
         settings["column_settings"] = columns
     dimensions = settings.get("graph.dimensions") or [None]
     metrics = settings.get("graph.metrics") or [None]
-    for key, name in zip(AXIS_TITLES, (dimensions[0], metrics[0]), strict=True):
+    for key, name in zip(content.AXIS_TITLES, (dimensions[0], metrics[0]), strict=True):
         if name in titles:
             settings[key] = titles[name]
     if len(dimensions) == 1 and len(metrics) == 1 and metrics[0] is not None:
-        settings["series_settings"] = {metrics[0]: {"color": SERIES_COLOR}}
+        settings["series_settings"] = {metrics[0]: {"color": content.SERIES_COLOR}}
     return settings
 
 

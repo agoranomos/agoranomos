@@ -172,16 +172,19 @@ def test_role_passwords_stay_out_of_pg_stat_statements(env):
 
 # What each role may do in each schema of the layers, as (USAGE, CREATE): loader writes the raw
 # schemas and the staging schemas of its merges, transformer reads the raw schemas and builds
-# staging and marts, metabase_reader reads marts. The fictional platforms of the demo each have a
-# raw schema and a staging schema of their own; the settings of the model have a raw schema only,
-# as dlt replaces its tables in place.
+# staging, marts and ops, metabase_reader reads marts and, in ops, the views that dbt grants it
+# (ADR-0029). The fictional platforms of the demo each have a raw schema and a staging schema of
+# their own; the settings of the model have a raw schema only, as dlt replaces its tables in place.
 SCHEMA_PRIVILEGES = {
     ("loader", "staging"): (False, False),
     ("loader", "marts"): (False, False),
+    ("loader", "ops"): (False, False),
     ("transformer", "staging"): (True, True),
     ("transformer", "marts"): (True, True),
+    ("transformer", "ops"): (True, True),
     ("metabase_reader", "staging"): (False, False),
     ("metabase_reader", "marts"): (True, False),
+    ("metabase_reader", "ops"): (True, False),
     ("loader", "raw_demo_search"): (True, True),
     ("loader", "raw_demo_search_staging"): (True, True),
     ("transformer", "raw_demo_search"): (True, False),
@@ -233,6 +236,7 @@ def test_each_schema_of_the_layers_has_its_owner(env):
     assert result.returncode == 0, result.stderr
     assert sorted(result.stdout.split()) == [
         "marts:transformer",
+        "ops:transformer",
         "raw_demo_fx:loader",
         "raw_demo_fx_staging:loader",
         "raw_demo_search:loader",
@@ -288,7 +292,8 @@ def test_the_default_privileges_are_those_of_the_roles_that_create_the_tables(en
 
 
 # What each role of the layers is, beyond its grants: no attribute but LOGIN, a member of no role,
-# and neither CREATE nor TEMPORARY on the warehouse database. pg_roles shows the attributes.
+# and neither CREATE nor TEMPORARY on the warehouse database, but transformer has TEMPORARY, as
+# elementary writes its tables through temporary tables (ADR-0029). pg_roles shows the attributes.
 ROLE_ATTRIBUTES = {
     "superuser": "f",
     "createdb": "f",
@@ -317,7 +322,10 @@ def test_the_roles_of_the_layers_sign_in_and_have_no_other_power(env):
     for line in result.stdout.splitlines():
         role, *values = line.split("|")
         found[role] = dict(zip(ROLE_ATTRIBUTES, values, strict=True))
-    assert found == dict.fromkeys(WAREHOUSE_ROLES, ROLE_ATTRIBUTES)
+    assert found == {
+        role: ROLE_ATTRIBUTES | {"temporary on warehouse": "t" if role == "transformer" else "f"}
+        for role in WAREHOUSE_ROLES
+    }
     # A session of loader waits at most a minute for a lock, so a load that is blocked fails and is
     # tried again: the timeout of the task cannot interrupt a statement that waits in PostgreSQL.
     result = warehouse(env, "SHOW lock_timeout", "loader")

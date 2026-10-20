@@ -11,6 +11,7 @@ The warehouse holds the advertising statistics of every platform in one model, a
 | `raw_settings` | The settings of the model of the deployment and the clients of the demo, loaded at the start of each run of the transform | `loader` | `transformer` |
 | `staging` | A view for each table of each platform and of the settings, in the names of the model (`stg_<platform>__<table>`, `stg_settings__<table>`); the steps that the platforms share (`int_<entity>__<verb>`), views as well; and the seeds of the base package (`seed_…`) | `transformer` | nobody else |
 | `marts` | The tables of the model, rebuilt in full on each run of the transform | `transformer` | `metabase_reader` |
+| `ops` | The tables in which elementary records each run of dbt and its tests, and the four views of the Ops collection over them ([The schema ops](#the-schema-ops)) | `transformer` | `metabase_reader`, the four views only |
 
 The staging views of a platform are calls of one macro for each shape of an API (`dbt/macros/shapes/`), so that the demo platform `demo_search` and the planned connector of Google Ads are to share one. dbt replaces a view or a table by dropping the old one with every view that depends on it, so build nothing of your own on a relation of `staging` or `marts`: put a question of your own in Metabase, whose SQL PostgreSQL does not track. Between two tasks of one run, and after a run that a test stopped, a view of `staging` can be missing; the marts keep their data.
 
@@ -78,7 +79,20 @@ Every row of a campaign carries its current name, so that a group by name does n
 
 ## Quality
 
-The tests of dbt run right after their model, in the same task, `dbt build` ([ADR-0028](../adr/0028-build-each-node-of-dbt-with-its-tests-in-one-task.md)). The critical ones are in `staging`, on the staging views and on the steps that the platforms share: a failure stops the models that read the model, and the marts keep their data. They check that the keys are unique and not null, that counts and money are not negative, that every currency is in ISO 4217 and every time zone in the tz database of IANA, that every day and currency of the facts has a rate, that every account and campaign of the facts is known, and that the primary actions add up to the conversions of each campaign. Warnings do not stop anything: a day missing in the data of an account, more clicks than impressions, and an account without a client.
+The tests of dbt run right after their model, in the same task, `dbt build` ([ADR-0028](../adr/0028-build-each-node-of-dbt-with-its-tests-in-one-task.md)). The critical ones are in `staging`, on the staging views and on the steps that the platforms share: a failure stops the models that read the model, and the marts keep their data. They check that the keys are unique and not null, that counts and money are not negative, that every currency is in ISO 4217 and every time zone in the tz database of IANA, that every day and currency of the facts has a rate, that every account and campaign of the facts is known, and that the primary actions add up to the conversions of each campaign. Warnings do not stop anything: a day missing in the data of an account, more clicks than impressions, and an account without a client. The package elementary records the status of every test of every run, and the number of rows that it found, in the schema `ops`, which the Ops collection shows ([Watch the pipeline](../how-to/watch-the-pipeline.md)).
+
+## The schema ops
+
+The schema `ops` holds the tables of the package elementary, in which its hooks record each run of dbt, each model, seed and test of it, and the models and tests of the project, and the views of the project that the Ops collection reads ([ADR-0029](../adr/0029-record-the-runs-of-dbt-with-elementary-and-show-them-in-ops.md)). A test records its status and the number of rows that it found, never the rows. `metabase_reader` reads the four views and no table of elementary, which also keep the SQL of the models and the settings of each run.
+
+| View | One row for | What it holds |
+|---|---|---|
+| `ops_loads` | Each account of each platform | The last day that a load took for the account, when it was loaded, how many hours ago, and how many loads the record holds, from `_agoranomos_reloads` of each schema `raw_<platform>` |
+| `ops_transform_nodes` | Each model, seed and test in each run of dbt | Its status, its seconds, when it started and ended, the rows that it changed or found, what dbt said of it, and the DAG and the run of Airflow whose task ran dbt |
+| `ops_transform_tests` | Each test in each run of dbt | The model and the column that it checks, its kind, its severity, its status and the rows that it found |
+| `ops_warehouse_tables` | Each table of the warehouse | The rows that the last ANALYZE estimated and the bytes that the table takes with its indexes, when the view is read |
+
+A task of the transform runs dbt for one node, so one run of the transform is many runs of dbt, which share `airflow_run_id`. dbt rebuilds the views on each run; elementary keeps the rows of its tables, and nothing removes old rows yet.
 
 ## The demo platforms
 

@@ -2,13 +2,19 @@ sources:
   - name: raw_demo_video
     description: >-
       The data of demo_video, a fictional platform of video ads in the shape of the TikTok API for
-      Business v1.3, which the DAG agoranomos_demo_history loads with dlt: its responses as dlt
-      normalizes them, nested objects joined by __, every metric as text.
+      Business v1.3, which the DAGs agoranomos_demo_history and agoranomos_demo_daily load with dlt:
+      its responses as dlt normalizes them, nested objects joined by __, every metric as text.
     schema: raw_demo_video
-    # The demo has no daily load in this release: no freshness.
+    # No freshness check of dbt: the Ops collection shows the last load of each account, from
+    # _agoranomos_reloads (models/ops/ops_loads.sql).
     config:
       freshness: null
     tables:
+      - name: _agoranomos_reloads
+        description: >-
+          The record of the loads of demo_video: one row for each account in each load, with the
+          day of the load in the time zone of the account (as_of), the first and last day that
+          the load replaced (window_start, window_end), and the moment of the load.
       - name: advertisers
         description: >-
           The advertisers of demo_video, its ad accounts, one row each, with their currency and

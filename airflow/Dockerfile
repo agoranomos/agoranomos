@@ -42,6 +42,15 @@ RUN python -m venv /opt/airflow/dbt_venv \
         -r /tmp/agoranomos/dbt-requirements.txt \
     && /opt/airflow/dbt_venv/bin/pip check
 
+# The packages of the dbt project, elementary and dbt_utils (dbt/packages.yml, ADR-0029): dbt deps
+# reads the hub of dbt, hub.getdbt.com, downloads them from GitHub, and installs them into the
+# packages-install-path of dbt_project.yml, /opt/airflow/dbt_packages, so that no task of dbt needs
+# the network. The two files come from the build context dbt, which compose.yaml adds; dbt deps
+# writes its lock file and logs next to them, so their folder belongs to the user of the image, and
+# stays: its parent belongs to root.
+COPY --from=dbt --chown=airflow:root dbt_project.yml packages.yml /tmp/agoranomos/dbt-deps/
+RUN /opt/airflow/dbt_venv/bin/dbt deps --project-dir /tmp/agoranomos/dbt-deps
+
 # The folders that the metadata-export service writes the export and the manifest into, as nobody
 # (65534): a new named volume takes the owner of the folder that it is first mounted on, and without
 # these folders Docker would give the volumes to root, and the job could not write them

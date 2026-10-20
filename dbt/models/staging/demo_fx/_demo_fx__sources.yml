@@ -1,13 +1,19 @@
 sources:
   - name: raw_demo_fx
     description: >-
-      The data of demo_fx, a fictional source of the reference rates of the euro, which the DAG
-      agoranomos_demo_history loads with dlt.
+      The data of demo_fx, a fictional source of the reference rates of the euro, which the DAGs
+      agoranomos_demo_history and agoranomos_demo_daily load with dlt.
     schema: raw_demo_fx
-    # The demo has no daily load in this release: no freshness.
+    # No freshness check of dbt: the Ops collection shows the last load of each account, from
+    # _agoranomos_reloads (models/ops/ops_loads.sql).
     config:
       freshness: null
     tables:
+      - name: _agoranomos_reloads
+        description: >-
+          The record of the loads of demo_fx: one row for each account in each load, with the
+          day of the load in the time zone of the account (as_of), the first and last day that
+          the load replaced (window_start, window_end), and the moment of the load.
       - name: rates_daily
         description: >-
           The reference rates of the euro of demo_fx, one row for each day of publication: the

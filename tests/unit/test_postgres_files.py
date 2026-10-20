@@ -270,6 +270,22 @@ def test_the_sql_files_take_from_public_what_no_role_needs(name):
     assert not missing, f"{name} must also run {missing}"
 
 
+def test_ops_belongs_to_transformer_and_metabase_reader_may_only_enter_it():
+    # ADR-0029: dbt builds the tables of elementary and the views of the Ops collection in ops as
+    # transformer, which writes through temporary tables there. metabase_reader may enter the
+    # schema, and dbt grants it SELECT on each view of the collection: the file grants it no table.
+    text = normalized("warehouse.sql")
+    assert runs(text, "CREATE SCHEMA IF NOT EXISTS ops AUTHORIZATION transformer;")
+    assert runs(text, "ALTER SCHEMA ops OWNER TO transformer;")
+    assert runs(text, "GRANT TEMPORARY ON DATABASE warehouse TO transformer;")
+    granted = re.findall(r"\bGRANT\b[^;]*\bmetabase_reader\b[^;]*;", text, re.IGNORECASE)
+    on_ops = [statement for statement in granted if re.search(r"\bops\b", statement)]
+    assert on_ops == ["GRANT USAGE ON SCHEMA ops TO metabase_reader;"]
+    assert not re.search(r"DEFAULT PRIVILEGES[^;]*\bIN SCHEMA ops\b", text, re.IGNORECASE)
+    temporary = re.findall(r"\bGRANT TEMPORARY\b[^;]*;", text, re.IGNORECASE)
+    assert temporary == ["GRANT TEMPORARY ON DATABASE warehouse TO transformer;"]
+
+
 def test_metabase_reader_gets_its_limits_on_every_start():
     # A query of Metabase that runs longer than five minutes is canceled, so that a dashboard or
     # a question cannot hold the warehouse, and Metabase holds at most 20 connections, more than

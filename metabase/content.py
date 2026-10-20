@@ -62,6 +62,22 @@ ENTITY_ID_ALPHABET = frozenset(string.ascii_letters + string.digits + "_-")
 
 Log = Callable[[str], None]
 
+# The settings of a chart that hold the titles of its axes.
+AXIS_TITLES = ("graph.x_axis.title_text", "graph.y_axis.title_text")
+# The color of the series of a chart of the package with one series: the first color of the chart
+# palette of the project, which is made for a light background (the default of a Metabase
+# dashboard). Metabase keeps the color of a series in series_settings, under the series key, which
+# for a chart with one metric and no breakout is the name of the metric column. A color with no
+# color_name is drawn as it is. A chart with a breakout has a series for each value of the data, in
+# the colors of Metabase.
+SERIES_COLOR = "#A86400"
+
+
+def column_key(name: str) -> str:
+    """The key of a column in the column settings of a card, as the frontend of Metabase writes it:
+    JSON.stringify(["name", <column name>]), with no blank."""
+    return json.dumps(["name", name], separators=(",", ":"))
+
 
 class Client(Protocol):
     """What this module needs of the client of metabase_init.py: call, which raises on a failure

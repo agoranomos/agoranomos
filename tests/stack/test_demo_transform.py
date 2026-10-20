@@ -48,6 +48,9 @@ pytestmark = [
 HISTORY = "agoranomos_demo_history"
 TRANSFORM = "agoranomos_demo_transform"
 SETTINGS = "load_settings"
+# The task that builds the tables of elementary, after the settings and before the tasks of dbt
+# (ADR-0029).
+ELEMENTARY = "elementary"
 MART = "marts.ad_stats_campaign_daily"
 MARTS = (
     "ad_stats_campaign_daily",
@@ -262,14 +265,15 @@ def test_the_settings_load_first_and_each_node_is_built_with_its_tests_in_one_ta
     airflow_url, token, transform_run
 ):
     downstream = downstream_task_ids(airflow_url, token, TRANSFORM)
-    reached, todo = set(), [SETTINGS]
+    assert downstream[SETTINGS] == [ELEMENTARY]
+    reached, todo = set(), [ELEMENTARY]
     while todo:
         for following in downstream.get(todo.pop(), []):
             if following not in reached:
                 reached.add(following)
                 todo.append(following)
-    assert reached == set(downstream) - {SETTINGS}, "a task of dbt does not wait for the settings"
-    built = [task for task in downstream if task != SETTINGS]
+    built = [task for task in downstream if task not in (SETTINGS, ELEMENTARY)]
+    assert reached == set(built), "a task of dbt does not wait for the tables of elementary"
     assert MART_BUILD in built, sorted(built)[:5]
     # One task of dbt build for each model and each seed: no task runs a node or its tests alone.
     alone = [task for task in built if not task.endswith(("_model_build", "_seed_build"))]
@@ -285,6 +289,8 @@ def test_the_tasks_of_dbt_run_in_their_pool(airflow_url, token, transform_run):
     # the settings runs before them, outside it.
     pools = {i["task_id"]: i["pool"] for i in task_instances(airflow_url, token, transform_run)}
     assert pools.pop(SETTINGS) == "default_pool"
+    # The task of elementary runs dbt too, so it takes a slot of the pool.
+    assert pools.pop(ELEMENTARY) == DBT_POOL
     assert pools, "the run has no task of dbt"
     assert {task.split(".")[0] for task in pools} == {"dbt"}, sorted(pools)[:5]
     assert set(pools.values()) == {DBT_POOL}, pools

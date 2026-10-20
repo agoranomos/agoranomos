@@ -1,14 +1,20 @@
 sources:
   - name: raw_demo_search
     description: >-
-      The data of demo_search, a fictional platform of search ads in the shape of the Google Ads
-      API v25, which the DAG agoranomos_demo_history loads with dlt: its responses as dlt
-      normalizes them, nested objects joined by __.
+      The data of demo_search, a fictional platform of search ads in the shape of the Google Ads API
+      v25, which the DAGs agoranomos_demo_history and agoranomos_demo_daily load with dlt: its
+      responses as dlt normalizes them, nested objects joined by __.
     schema: raw_demo_search
-    # The demo has no daily load in this release: no freshness.
+    # No freshness check of dbt: the Ops collection shows the last load of each account, from
+    # _agoranomos_reloads (models/ops/ops_loads.sql).
     config:
       freshness: null
     tables:
+      - name: _agoranomos_reloads
+        description: >-
+          The record of the loads of demo_search: one row for each account in each load, with the
+          day of the load in the time zone of the account (as_of), the first and last day that
+          the load replaced (window_start, window_end), and the moment of the load.
       - name: customer_clients
         description: >-
           The accounts under the manager account of demo_search, as customer_client lists them,

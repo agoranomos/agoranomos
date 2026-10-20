@@ -42,9 +42,12 @@ KEYS = (
     "test_metadata",
 )
 # The layers whose models and columns all need a description, and the one that Metabase shows.
-# Every check below takes the layers from here, the check of the comments too.
-LAYERS = ("staging", "marts")
+# Every check below takes the layers from here, the check of the comments too. ops also holds the
+# models of elementary, which are not this project's to describe: the checks leave out the models
+# of the packages of dbt/packages.yml, by the package in their unique ID.
+LAYERS = ("staging", "marts", "ops")
 MARTS = "marts"
+PACKAGES = {"elementary", "dbt_utils"}
 # The semantic types that Metabase shows as money: type/Currency and the types under it.
 CURRENCY_TYPES = {
     "type/Currency",
@@ -159,7 +162,13 @@ def nodes() -> list[dict[str, Any]]:
 
 
 def models(nodes: list[dict[str, Any]], layers: tuple[str, ...] = LAYERS) -> list[dict[str, Any]]:
-    return [n for n in nodes if n["resource_type"] == "model" and n["schema"] in layers]
+    return [
+        n
+        for n in nodes
+        if n["resource_type"] == "model"
+        and n["schema"] in layers
+        and n["unique_id"].split(".")[1] not in PACKAGES
+    ]
 
 
 def described(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
