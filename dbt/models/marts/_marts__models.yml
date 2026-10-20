@@ -672,7 +672,7 @@ models:
       - name: rate_into_reporting_currency
         data_type: numeric(18,8)
         description: '{{ doc("rate_into_reporting_currency") }}'
-        config: {meta: {metabase: {display_name: Rate into Reporting Currency, semantic_type: null}}}
+        config: {meta: {metabase: {display_name: Rate in Reporting Currency, semantic_type: null}}}
       - name: rate_source
         data_type: text
         description: '{{ doc("rate_source") }}'
