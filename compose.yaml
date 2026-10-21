@@ -373,8 +373,8 @@ services:
   airflow-dag-processor:
     <<: *airflow
     # It renders the transform DAG from the manifest of dbt each time that it parses it (ADR-0027).
-    mem_limit: ${AIRFLOW_DAG_PROCESSOR_MEMORY:-768m}
-    memswap_limit: ${AIRFLOW_DAG_PROCESSOR_MEMORY:-768m}
+    mem_limit: ${AIRFLOW_DAG_PROCESSOR_MEMORY:-512m}
+    memswap_limit: ${AIRFLOW_DAG_PROCESSOR_MEMORY:-512m}
     command: ["dag-processor"]
     # The check of its job (x-airflow-job-check). Five failures in a row, 30 seconds apart, make the
     # service unhealthy, about three minutes after its last heartbeat.
