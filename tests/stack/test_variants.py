@@ -630,10 +630,25 @@ def test_only_the_setup_jobs_hold_the_registry_of_the_content(variant):
         assert path == REGISTRY, name
 
 
-# Metabase 0.63 and 0.64 have these on by default, and compose.yaml switches them off with
-# environment variables until an ADR decides what AI access may do in Metabase (AGENTS.md). The
-# first is the master switch that the other two also require, so the three are checked one by one.
-METABASE_AI_SWITCHES = ("MB_AI_FEATURES_ENABLED", "MB_MCP_ENABLED", "MB_AGENT_API_ENABLED")
+# Metabase 0.63 and 0.64 have these on by default, and compose.yaml sets each with an environment
+# variable. The first is the master switch that the MCP server and the Agent API also require, so
+# they are checked one by one. The first three follow the level of AI access in .env (ADR-0017),
+# which the stack tests run at off; the others are off at every level (ADR-0031).
+METABASE_AI_SWITCHES = (
+    "MB_AI_FEATURES_ENABLED",
+    "MB_MCP_ENABLED",
+    "MB_MCP_EXECUTE_SQL_ENABLED",
+    "MB_AGENT_API_ENABLED",
+    "MB_METABOT_ENABLED",
+    "MB_EMBEDDED_METABOT_ENABLED",
+)
+# The settings of the level in .env, which metabase-init checks before it changes anything.
+AI_ACCESS_SETTINGS = (
+    "METABASE_AI_LEVEL",
+    "METABASE_AI_DEFAULT_LEVEL",
+    "METABASE_MCP",
+    "METABASE_MCP_SQL",
+)
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
@@ -642,6 +657,41 @@ def test_metabase_switches_off_every_ai_entry_point_with_an_environment_variable
     environment = rendered(variant)["metabase"]["environment"]
     states = {name: environment.get(name) for name in METABASE_AI_SWITCHES}
     assert states == dict.fromkeys(METABASE_AI_SWITCHES, "false"), states
+
+
+def test_the_switches_of_metabase_follow_the_settings_of_the_level():
+    # What ./agoranomos ai set writes for a level above off, given to Compose for one call: the MCP
+    # server and the master switch follow METABASE_MCP, the SQL of a client METABASE_MCP_SQL, and
+    # the Agent API and Metabot stay off. The values are flags.
+    output = compose(
+        "config",
+        "--format",
+        "json",
+        env={"COMPOSE_PROFILES": "core", "METABASE_MCP": "true", "METABASE_MCP_SQL": "true"},
+    ).stdout
+    services = json.loads(output, object_hook=NamesOnly)["services"]
+    environment = services["metabase"]["environment"]
+    states = {name: environment.get(name) for name in METABASE_AI_SWITCHES}
+    assert states == {
+        "MB_AI_FEATURES_ENABLED": "true",
+        "MB_MCP_ENABLED": "true",
+        "MB_MCP_EXECUTE_SQL_ENABLED": "true",
+        "MB_AGENT_API_ENABLED": "false",
+        "MB_METABOT_ENABLED": "false",
+        "MB_EMBEDDED_METABOT_ENABLED": "false",
+    }, states
+    job = services["metabase-init"]["environment"]
+    assert {name: job.get(name) for name in AI_ACCESS_SETTINGS[2:]} == {
+        "METABASE_MCP": "true",
+        "METABASE_MCP_SQL": "true",
+    }
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_metabase_init_gets_the_settings_of_the_level_of_ai_access(variant):
+    # The job checks them for a start through plain docker compose. The values are levels and flags.
+    environment = rendered(variant)["metabase-init"]["environment"]
+    assert set(AI_ACCESS_SETTINGS) <= set(environment)
 
 
 @pytest.mark.parametrize("variant", VARIANTS)

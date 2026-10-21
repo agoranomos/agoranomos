@@ -49,6 +49,23 @@ Caddy keeps its certificates in the Docker volume `caddy-data`, which backups le
 
 [Deploy on a server](../how-to/deploy-on-a-server.md) walks through it on a new server.
 
+## AI access in Metabase
+
+The level of AI access sets what AI clients may do in Metabase through its MCP server ([ADR-0017](../adr/0017-set-ai-access-in-metabase-by-levels.md)). `./agoranomos ai` shows the four settings below, `./agoranomos ai set <level> [--default <level>]` writes them together, and `./agoranomos up` applies them ([Command line](command-line.md#ai)). Change them with the command rather than by hand. `./agoranomos preflight`, which `up` runs, stops in these cases and names the command that sets them right:
+
+- the level is not one that this release offers;
+- the default level is not a level from `answers` up, or is higher than the level;
+- the two switches do not follow the level.
+
+`metabase-init` checks the same for a start through plain `docker compose`, and fails before it changes anything. A setting that is not set, or empty, has the default below, which `compose.yaml` gives it too, so a `.env` of an earlier release keeps AI access off.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `METABASE_AI_LEVEL` | `off` | The highest level of AI access that the deployment allows: `off`, `answers`, `explore`, `build` or `build-sql`, each of which adds to the one before it. At `off` the MCP server of Metabase is off. This release offers `off` only: the levels above it come with the permissions that they set in Metabase, and `build-sql` once MCP Toolbox runs with the role `ai_reader`. |
+| `METABASE_AI_DEFAULT_LEVEL` | `explore` | The level that every account gets, from `answers` up, and no higher than `METABASE_AI_LEVEL`. It is not used while the level is `off`. |
+| `METABASE_MCP` | `false` | Follows the level: `true` from `answers` up. Metabase gets it as `MB_MCP_ENABLED`, and as the master switch of its AI features, `MB_AI_FEATURES_ENABLED`, which the MCP server needs. |
+| `METABASE_MCP_SQL` | `false` | Follows the level: `true` only at `build-sql`. Metabase gets it as `MB_MCP_EXECUTE_SQL_ENABLED`, which turns on the SQL that a client writes. |
+
 ## Backups
 
 `./agoranomos backup` takes a backup of the three databases at any time, and with the `ops` profile, which `./agoranomos init --server` turns on, the `backup` service takes one every day ([ADR-0020](../adr/0020-back-up-the-databases-every-day.md)).
@@ -97,7 +114,11 @@ When a service needs more, raise its limit in `.env` and run `./agoranomos up`, 
 
 Some settings are not in `.env`, because changing them is a decision and not a preference. They are environment variables in `compose.yaml`, and a value from an environment variable wins over any value saved in the application.
 
-The AI switches of Metabase are fixed off in `compose.yaml` until the AI layer ships, which is to set them from the level of AI access in `.env` ([ADR-0017](../adr/0017-set-ai-access-in-metabase-by-levels.md)): `MB_AI_FEATURES_ENABLED`, `MB_MCP_ENABLED` and `MB_AGENT_API_ENABLED` are all `false`, which keeps the built-in MCP server, the registration of its OAuth clients and the Agent API off. The switch in Admin > AI has no effect while they are. Changing it saves a value that would apply if a variable were removed, so leave it alone.
+The AI switches of Metabase are environment variables in `compose.yaml`, so that nobody changes them in Metabase, admins included.
+
+- **The MCP server and SQL.** The MCP server, with the registration of its OAuth clients and the master switch `MB_AI_FEATURES_ENABLED` that it needs, follows the level of AI access in `.env` ([AI access in Metabase](#ai-access-in-metabase)), and so does the SQL that a client writes, `MB_MCP_EXECUTE_SQL_ENABLED`.
+- **Always off.** `MB_AGENT_API_ENABLED`, `MB_METABOT_ENABLED` and `MB_EMBEDDED_METABOT_ENABLED` are `false` at every level, which keeps the Agent API and Metabot off ([ADR-0031](../adr/0031-register-and-revoke-the-oauth-clients-of-metabase-with-the-script.md)).
+- **Admin > AI.** The switch there has no effect while the variables are set. Changing it saves a value that would apply if a variable were removed, so leave it alone.
 
 The switches do not cover the keys of LLM providers, which Metabase uses for its own AI features, such as Metabot and the generation of SQL. Metabase 0.64 keeps them in a list of provider connections, to which an admin can add, in Admin > AI and whatever the switches say, a connection with the key of one of eleven providers, such as Anthropic, OpenAI or Google. An Anthropic key also opens `/api/llm/generate-sql`, which does not read the master switch, as in Metabase 0.63. So `compose.yaml` also sets `MB_LLM_PROVIDERS` to an empty list, `[]`: the list then comes from the environment, and Metabase refuses to change it, in Admin > AI and through its provider API, with a message that names the variable (checked on Metabase 0.64.1, as of October 2026). The lock covers the provider API only. The older setting of each provider, such as `llm-anthropic-api-key` or `llm-openai-api-key` (`PUT /api/setting/…`), still saves a value into the stored list, which has no effect while the variable is set. While the variable is set, Metabase neither shows that stored list nor lets anyone clear it through its API, and the list applies as soon as the variable is removed: a change that removes `MB_LLM_PROVIDERS` should check Admin > AI at the first start without it, which is when that list shows. A variable of one provider, such as `MB_LLM_ANTHROPIC_API_KEY`, would still add a connection; `compose.yaml` sets none, and the stack tests check that the list is empty.
 

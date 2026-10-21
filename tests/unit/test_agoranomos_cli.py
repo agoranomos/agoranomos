@@ -284,6 +284,7 @@ def test_help_lists_the_commands(cli):
         "logs",
         "metadata",
         "credentials",
+        "ai",
     )
     for command in (*commands, "help"):
         assert re.search(rf"^  {command}\s", result.stdout, flags=re.MULTILINE)
@@ -2609,6 +2610,7 @@ def test_up_colors_its_messages_on_a_terminal(cli, tmp_path, terminal, colors):
     assert f"{mute}Airflow:{RESET}  {amber}http://127.0.0.1:8080{RESET}" in lines
     assert f"{mute}Metabase:{RESET} {amber}http://127.0.0.1:3000{RESET}" in lines
     assert f"{ok}The stack is up.{RESET} ./agoranomos status shows every service." in lines
+    assert AI_OFF_LINE in lines
     # The words of the messages stay as they are: without the colors, it is the plain output, and
     # nothing is printed to stderr.
     assert SGR.sub("", result.stdout) == plain.stdout
@@ -2627,6 +2629,8 @@ def test_up_prints_the_addresses_of_airflow_and_metabase_after_the_stack_is_heal
     sign_in = lines.index("./agoranomos credentials shows how to sign in.")
     done = next(i for i, line in enumerate(lines) if line.startswith("The stack is up."))
     assert healthy < airflow < metabase < sign_in < done
+    # The level of AI access in Metabase ends it (ADR-0017).
+    assert lines[done + 1 :] == [AI_OFF_LINE]
 
 
 def test_the_address_of_airflow_follows_airflow_port_in_env(cli, tmp_path):
@@ -4601,3 +4605,177 @@ def test_the_user_of_the_service_and_the_owner_of_the_folder_are_compared_as_num
     result = cli.run("backup", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
     assert result.returncode == 0, result.stderr
     assert "cannot write" not in result.stderr
+
+
+# AI access in Metabase (ADR-0017): the level, the default level and the two switches that follow
+# the level, which ./agoranomos ai shows and ai set writes. This release offers the level off only.
+
+# The last line of up, and the first of ai, while the level is off.
+AI_OFF_LINE = (
+    "AI access in Metabase is off: its MCP server is off. ./agoranomos ai shows the levels."
+)
+AI_SETTINGS = ("METABASE_AI_LEVEL", "METABASE_AI_DEFAULT_LEVEL", "METABASE_MCP", "METABASE_MCP_SQL")
+
+
+def ai_settings(cli):
+    return {key: cli.read_env().get(key) for key in AI_SETTINGS}
+
+
+def test_init_writes_the_settings_of_ai_access_with_the_level_off(cli):
+    cli.run("init")
+    assert ai_settings(cli) == {
+        "METABASE_AI_LEVEL": "off",
+        "METABASE_AI_DEFAULT_LEVEL": "explore",
+        "METABASE_MCP": "false",
+        "METABASE_MCP_SQL": "false",
+    }
+
+
+def test_ai_shows_the_level_the_default_and_the_switches(cli):
+    cli.run("init")
+    result = cli.run("ai")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "AI access in Metabase is off: its MCP server is off.",
+        "METABASE_AI_LEVEL=off: the highest level that the deployment allows.",
+        "METABASE_AI_DEFAULT_LEVEL=explore: the level of every account, not used while the level "
+        "is off.",
+        "METABASE_MCP=false, METABASE_MCP_SQL=false: the switches that follow the level.",
+        "The levels that this release offers: off. ./agoranomos ai set <level> [--default <level>] "
+        "changes them.",
+    ]
+
+
+def test_ai_needs_an_env_and_creates_none(cli):
+    result = cli.run("ai")
+    assert result.returncode == 1
+    assert "run ./agoranomos init" in result.stderr
+    assert not cli.env_path.exists()
+
+
+def test_ai_fails_on_settings_that_do_not_agree_after_showing_them(cli):
+    cli.run("init")
+    set_env(cli, METABASE_MCP="true")
+    result = cli.run("ai")
+    assert result.returncode == 1
+    assert "METABASE_MCP=true, METABASE_MCP_SQL=false" in result.stdout
+    assert "do not follow METABASE_AI_LEVEL=off: run ./agoranomos ai set off" in result.stderr
+
+
+def test_ai_set_off_writes_the_switches_that_follow_it(cli):
+    cli.run("init")
+    set_env(cli, METABASE_MCP="true", METABASE_MCP_SQL="true")
+    result = cli.run("ai", "set", "off")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "AI access in Metabase is off: its MCP server is off.",
+        "./agoranomos up applies it.",
+    ]
+    assert ai_settings(cli)["METABASE_MCP"] == "false"
+    assert ai_settings(cli)["METABASE_MCP_SQL"] == "false"
+    assert cli.run("ai").returncode == 0
+
+
+def test_ai_set_writes_only_the_lines_whose_value_changes(cli):
+    # A line with quotes or a comment that means the same value stays as the person wrote it.
+    cli.run("init")
+    set_env(cli, METABASE_AI_LEVEL="'off'", METABASE_MCP="false # the MCP server")
+    before = cli.env_path.read_text(encoding="utf-8")
+    assert cli.run("ai", "set", "off").returncode == 0
+    assert cli.env_path.read_text(encoding="utf-8") == before
+
+
+@pytest.mark.parametrize("level", ["answers", "explore", "build"])
+def test_ai_set_refuses_the_levels_that_need_permissions_this_release_does_not_set(cli, level):
+    cli.run("init")
+    before = cli.env_path.read_text(encoding="utf-8")
+    result = cli.run("ai", "set", level)
+    assert result.returncode == 1
+    assert f"this release does not offer the level {level}." in result.stderr
+    assert "come with the permissions that they set in Metabase" in result.stderr
+    assert cli.env_path.read_text(encoding="utf-8") == before
+
+
+def test_ai_set_refuses_build_sql_and_says_when_it_comes(cli):
+    cli.run("init")
+    result = cli.run("ai", "set", "build-sql")
+    assert result.returncode == 1
+    assert "MCP Toolbox runs with the role ai_reader" in result.stderr
+
+
+@pytest.mark.parametrize("word", ["on", "Build", "full", ""])
+def test_ai_set_refuses_a_word_that_is_not_a_level(cli, word):
+    cli.run("init")
+    result = cli.run("ai", "set", word)
+    assert result.returncode == 1
+    assert "is not a level of AI access in Metabase" in result.stderr
+
+
+def test_ai_set_takes_a_default_level(cli):
+    cli.run("init")
+    assert cli.run("ai", "set", "off", "--default", "answers").returncode == 0
+    assert ai_settings(cli)["METABASE_AI_DEFAULT_LEVEL"] == "answers"
+    # Without --default, the default level stays.
+    assert cli.run("ai", "set", "off").returncode == 0
+    assert ai_settings(cli)["METABASE_AI_DEFAULT_LEVEL"] == "answers"
+
+
+@pytest.mark.parametrize("default", ["off", "most"])
+def test_ai_set_refuses_a_default_that_every_account_cannot_get(cli, default):
+    cli.run("init")
+    result = cli.run("ai", "set", "off", "--default", default)
+    assert result.returncode == 1
+    assert "is not a level that every account can get" in result.stderr
+    assert ai_settings(cli)["METABASE_AI_DEFAULT_LEVEL"] == "explore"
+
+
+def test_ai_set_replaces_a_default_that_is_not_a_level(cli):
+    cli.run("init")
+    set_env(cli, METABASE_AI_DEFAULT_LEVEL="most")
+    assert cli.run("ai", "set", "off").returncode == 0
+    assert ai_settings(cli)["METABASE_AI_DEFAULT_LEVEL"] == "explore"
+
+
+@pytest.mark.parametrize(
+    ("args", "words"),
+    [
+        (["set"], "usage: ./agoranomos ai set <level>"),
+        (["set", "off", "--default"], "--default needs a level"),
+        (["set", "off", "--everyone"], "unknown option of ai set: --everyone"),
+        (["show"], "usage: ./agoranomos ai, or ./agoranomos ai set"),
+    ],
+)
+def test_ai_refuses_what_it_does_not_take(cli, args, words):
+    cli.run("init")
+    before = cli.env_path.read_text(encoding="utf-8")
+    result = cli.run("ai", *args)
+    assert result.returncode == 1
+    assert words in result.stderr
+    assert cli.env_path.read_text(encoding="utf-8") == before
+
+
+@pytest.mark.parametrize(
+    ("values", "words"),
+    [
+        ({"METABASE_AI_LEVEL": "build"}, "METABASE_AI_LEVEL=build in .env is a level that this"),
+        ({"METABASE_AI_LEVEL": "all"}, "METABASE_AI_LEVEL in .env is not a level"),
+        ({"METABASE_AI_DEFAULT_LEVEL": "off"}, "METABASE_AI_DEFAULT_LEVEL in .env is not a level"),
+        ({"METABASE_MCP": "true"}, "do not follow METABASE_AI_LEVEL=off"),
+        ({"METABASE_MCP_SQL": "true"}, "do not follow METABASE_AI_LEVEL=off"),
+    ],
+)
+def test_preflight_stops_on_settings_of_ai_access_that_do_not_agree(cli, values, words):
+    # up runs preflight before Compose starts Metabase with the switches.
+    cli.run("init")
+    set_env(cli, **values)
+    result = cli.run("preflight")
+    assert result.returncode == 1
+    assert words in result.stderr
+    assert "./agoranomos ai set" in result.stderr
+
+
+def test_preflight_reads_empty_settings_of_ai_access_as_their_defaults(cli):
+    # Compose gives an empty setting the default of compose.yaml, which is the same.
+    cli.run("init")
+    set_env(cli, **dict.fromkeys(AI_SETTINGS, ""))
+    assert cli.run("preflight").returncode == 0

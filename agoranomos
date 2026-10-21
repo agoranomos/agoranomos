@@ -37,6 +37,11 @@ force=0
 # reaches Compose.
 extra_profile=""
 
+# The levels of AI access in Metabase, from the lowest (ADR-0017), and those that this release
+# offers. metabase/ai_access.py keeps the same two lists, and a unit test compares them.
+AI_LEVELS="off answers explore build build-sql"
+AI_LEVELS_OFFERED="off"
+
 # The settings that init generates when they are empty.
 SECRET_KEYS="WAREHOUSE_POSTGRES_PASSWORD PLATFORM_POSTGRES_PASSWORD AIRFLOW_DB_PASSWORD
 METABASE_DB_PASSWORD METABASE_READER_PASSWORD WAREHOUSE_LOADER_PASSWORD
@@ -479,6 +484,84 @@ with_profiles() {
   printf '%s' "$profile_list"
 }
 
+# Print the rank of the level $1 of AI access in Metabase, from 0 for off to 4 for build-sql, or
+# nothing for a word that is not a level (ADR-0017).
+ai_rank() {
+  ai_rank_value=0
+  for ai_rank_level in $AI_LEVELS; do
+    if [ "$ai_rank_level" = "$1" ]; then
+      printf '%s' "$ai_rank_value"
+      return 0
+    fi
+    ai_rank_value=$((ai_rank_value + 1))
+  done
+}
+
+# True when this release offers the level $1 of AI access.
+ai_offered() {
+  case " $AI_LEVELS_OFFERED " in
+    *" $1 "*) return 0 ;;
+  esac
+  return 1
+}
+
+# Print the levels that this release offers, for a message, such as "off" or "off, answers".
+ai_offered_words() {
+  printf '%s' "$AI_LEVELS_OFFERED" | sed 's/ /, /g'
+}
+
+# Print why this release does not offer the level $1.
+ai_not_offered_reason() {
+  case "$1" in
+    build-sql) printf 'It comes once MCP Toolbox runs with the role ai_reader (ADR-0017)' ;;
+    *) printf 'The levels above off come with the permissions that they set in Metabase (ADR-0017), which this release does not set yet' ;;
+  esac
+}
+
+# Print the two switches of Metabase that follow the level $1, as .env holds them: METABASE_MCP,
+# the MCP server, on from answers up, and METABASE_MCP_SQL, the SQL that a client writes, on only
+# at build-sql (ADR-0017).
+ai_mcp_for() {
+  if [ "$1" = off ]; then printf false; else printf true; fi
+}
+ai_mcp_sql_for() {
+  if [ "$1" = build-sql ]; then printf true; else printf false; fi
+}
+
+# Print what is wrong with the settings of AI access in Metabase in .env, or nothing (ADR-0017).
+# The level must be one that this release offers. The default level, which every account gets,
+# must be a level from answers up and, while the level is not off, no higher than it. The two
+# switches must follow the level. A setting that is not set, or empty, has the default of
+# compose.yaml, which is the same. Each message names the command that sets it right.
+ai_problem() {
+  ai_level=$(setting METABASE_AI_LEVEL off)
+  ai_default=$(setting METABASE_AI_DEFAULT_LEVEL explore)
+  if [ -z "$(ai_rank "$ai_level")" ]; then
+    printf 'METABASE_AI_LEVEL in .env is not a level of AI access in Metabase: run ./agoranomos ai set with one of %s' "$(ai_offered_words)"
+  elif ! ai_offered "$ai_level"; then
+    printf 'METABASE_AI_LEVEL=%s in .env is a level that this release does not offer. %s. Run ./agoranomos ai set with one of %s' "$ai_level" "$(ai_not_offered_reason "$ai_level")" "$(ai_offered_words)"
+  elif [ -z "$(ai_rank "$ai_default")" ] || [ "$ai_default" = off ]; then
+    printf 'METABASE_AI_DEFAULT_LEVEL in .env is not a level that every account can get, from answers up: run ./agoranomos ai set %s --default <level>' "$ai_level"
+  elif [ "$ai_level" != off ] && [ "$(ai_rank "$ai_default")" -gt "$(ai_rank "$ai_level")" ]; then
+    printf 'METABASE_AI_DEFAULT_LEVEL=%s in .env is higher than METABASE_AI_LEVEL=%s, the highest level that the deployment allows: run ./agoranomos ai set %s --default <level>' "$ai_default" "$ai_level" "$ai_level"
+  elif [ "$(setting METABASE_MCP false)" != "$(ai_mcp_for "$ai_level")" ] ||
+    [ "$(setting METABASE_MCP_SQL false)" != "$(ai_mcp_sql_for "$ai_level")" ]; then
+    printf 'METABASE_MCP and METABASE_MCP_SQL in .env do not follow METABASE_AI_LEVEL=%s: run ./agoranomos ai set %s, which writes them' "$ai_level" "$ai_level"
+  fi
+}
+
+# Print the state of AI access in Metabase in one line, for ./agoranomos up and ai.
+ai_summary() {
+  ai_level=$(setting METABASE_AI_LEVEL off)
+  if [ "$ai_level" = off ]; then
+    printf 'AI access in Metabase is off: its MCP server is off.'
+  else
+    printf 'AI access in Metabase: up to %s, and %s for every account. Its MCP server is on, and SQL that a client writes is %s.' \
+      "$ai_level" "$(setting METABASE_AI_DEFAULT_LEVEL explore)" \
+      "$(if [ "$(setting METABASE_MCP_SQL false)" = true ]; then printf on; else printf off; fi)"
+  fi
+}
+
 cmd_init() {
   server_domain="" server_asked=0
   while [ "$#" -gt 0 ]; do
@@ -732,6 +815,10 @@ EOF
     USD | EUR) ;;
     *) problem "AGORANOMOS_REPORTING_CURRENCY in .env must be USD or EUR: the exchange rates of this release cover these two" ;;
   esac
+  # AI access in Metabase (ADR-0017): a level that this release offers, and the switches that follow
+  # it, before Compose starts Metabase with them.
+  message=$(ai_problem)
+  [ -z "$message" ] || problem "$message"
   # The backup service of the ops profile runs as AGORANOMOS_UID and reads its schedule from .env.
   if ops_mode; then
     message=$(backup_user_problem)
@@ -1193,6 +1280,7 @@ cmd_up() {
   # still fails, so that a start that is not complete never passes as one.
   [ "$demo_failed" -eq 0 ] || die "the stack is up, but the demo is not ready"
   say "$(paint ok 'The stack is up.' 1) ./agoranomos status shows every service."
+  say "$(ai_summary) ./agoranomos ai shows the levels."
 }
 
 cmd_down() {
@@ -1681,6 +1769,73 @@ cmd_credentials() {
   say "The passwords are the values of these settings in $ENV_FILE, which only you can read."
 }
 
+# AI access in Metabase (ADR-0017). ai shows the level, the default level and the two switches that
+# follow the level; ai set <level> [--default <level>] writes them into .env, and ./agoranomos up
+# applies them. A line is written only when its value changes, so that a line with quotes or a
+# comment that means the same stays as it is.
+cmd_ai() {
+  [ -f "$ENV_FILE" ] || die "there is no .env yet: run ./agoranomos init"
+  if [ "$#" -eq 0 ]; then
+    say "$(ai_summary)"
+    say "METABASE_AI_LEVEL=$(setting METABASE_AI_LEVEL off): the highest level that the deployment allows."
+    if [ "$(setting METABASE_AI_LEVEL off)" = off ]; then
+      say "METABASE_AI_DEFAULT_LEVEL=$(setting METABASE_AI_DEFAULT_LEVEL explore): the level of every account, not used while the level is off."
+    else
+      say "METABASE_AI_DEFAULT_LEVEL=$(setting METABASE_AI_DEFAULT_LEVEL explore): the level of every account."
+    fi
+    say "METABASE_MCP=$(setting METABASE_MCP false), METABASE_MCP_SQL=$(setting METABASE_MCP_SQL false): the switches that follow the level."
+    say "The levels that this release offers: $(ai_offered_words). ./agoranomos ai set <level> [--default <level>] changes them."
+    message=$(ai_problem)
+    [ -z "$message" ] || die "$message"
+    return 0
+  fi
+  [ "$1" = set ] || die "usage: ./agoranomos ai, or ./agoranomos ai set <level> [--default <level>]"
+  shift
+  [ "$#" -ge 1 ] || die "usage: ./agoranomos ai set <level> [--default <level>], with a level of $(ai_offered_words)"
+  new_level=$1
+  shift
+  new_default=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --default)
+        [ "$#" -ge 2 ] || die "--default needs a level, such as --default explore"
+        new_default=$2
+        shift 2
+        ;;
+      *) die "unknown option of ai set: $1 (ai set takes --default <level>)" ;;
+    esac
+  done
+  [ -n "$(ai_rank "$new_level")" ] ||
+    die "$new_level is not a level of AI access in Metabase: the levels that this release offers are $(ai_offered_words)"
+  ai_offered "$new_level" ||
+    die "this release does not offer the level $new_level. $(ai_not_offered_reason "$new_level"). The levels that it offers are $(ai_offered_words)"
+  if [ -n "$new_default" ]; then
+    if [ -z "$(ai_rank "$new_default")" ] || [ "$new_default" = off ]; then
+      die "$new_default is not a level that every account can get: the default level is answers or higher, and off is for the level of the deployment"
+    fi
+    if [ "$new_level" != off ] && [ "$(ai_rank "$new_default")" -gt "$(ai_rank "$new_level")" ]; then
+      die "the default level $new_default is higher than the level $new_level, the highest that the deployment allows"
+    fi
+  else
+    # The default stays when it fits under the new level; otherwise it comes down to the level, and
+    # a value that is not a level becomes explore while the level is off.
+    new_default=$(setting METABASE_AI_DEFAULT_LEVEL explore)
+    if [ -z "$(ai_rank "$new_default")" ] || [ "$new_default" = off ]; then
+      if [ "$new_level" = off ]; then new_default=explore; else new_default=$new_level; fi
+    elif [ "$new_level" != off ] && [ "$(ai_rank "$new_default")" -gt "$(ai_rank "$new_level")" ]; then
+      say "The default level comes down from $new_default to $new_level, the new level of the deployment."
+      new_default=$new_level
+    fi
+  fi
+  for ai_pair in "METABASE_AI_LEVEL=$new_level" "METABASE_AI_DEFAULT_LEVEL=$new_default" \
+    "METABASE_MCP=$(ai_mcp_for "$new_level")" "METABASE_MCP_SQL=$(ai_mcp_sql_for "$new_level")"; do
+    ai_key=${ai_pair%%=*}
+    [ "$(env_get "$ai_key")" = "${ai_pair#*=}" ] || env_set "$ai_key" "${ai_pair#*=}"
+  done
+  say "$(ai_summary)"
+  say "./agoranomos up applies it."
+}
+
 cmd_help() {
   print_banner
   usage
@@ -1701,6 +1856,7 @@ Commands:
   logs          Show the logs: the last 200 lines, or pass options and services to docker compose logs
   metadata      metadata diff: show what up would change in the metadata of the marts in Metabase
   credentials   Show where to sign in to Airflow and Metabase, and where the passwords are
+  ai            Show the level of AI access in Metabase (ai set <level> [--default <level>]: change it)
   help          Show this help
 
 Documentation: docs/reference/command-line.md
@@ -1722,6 +1878,7 @@ main() {
     logs) cmd_logs "$@" ;;
     metadata) cmd_metadata "$@" ;;
     credentials) cmd_credentials "$@" ;;
+    ai) cmd_ai "$@" ;;
     help | -h | --help) cmd_help ;;
     *)
       usage >&2
