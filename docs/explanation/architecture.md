@@ -2,7 +2,7 @@
 
 !!! warning "Target design"
 
-    Agoranomos is pre-alpha. This page describes the architecture the project is being built toward, and components arrive release by release. Local mode already runs from the main branch ([Run Agoranomos locally](../how-to/run-locally.md)), with the demo, from a generator of fictional platforms through the model of advertising statistics to a dashboard ([See the demo](../how-to/see-the-demo.md)), which v0.2.0 is to release; v0.1.0 shipped a smaller demo of one ad account.
+    Agoranomos is pre-alpha. This page describes the architecture the project is being built toward, and components arrive release by release. Local mode already runs from the main branch ([Run Agoranomos locally](../how-to/run-locally.md)), with the demo, from a generator of fictional platforms through the model of advertising statistics to two dashboards ([See the demo](../how-to/see-the-demo.md)), which v0.2.0 released on 21 October 2026; v0.1.0 shipped a smaller demo of one ad account.
 
 Marketing data moves through Agoranomos in one direction, from ad platforms to dashboards and AI clients, and every step is code that runs on infrastructure you control.
 
