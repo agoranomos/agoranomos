@@ -4,7 +4,7 @@ This guide puts Agoranomos on a server of your own in server mode: Metabase on t
 
 !!! note "Pre-alpha"
 
-    Server mode and the backups run from the `main` branch, and v0.1.0, released on 11 October 2026, is their first release. The repository is private until v0.3, so cloning it needs an invitation.
+    Server mode and the backups run from the `main` branch, and v0.1.0, released on 11 October 2026, is their first release; v0.2.0, released on 21 October 2026, is the latest. The repository is private until v0.3, so cloning it needs an invitation.
 
 ## Before you begin
 
