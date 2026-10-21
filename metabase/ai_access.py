@@ -266,24 +266,29 @@ def put_graph(
     path: str,
     plan: Callable[[Mapping[str, Any]], tuple[dict[str, Any], list[str]]],
     log: Log,
-) -> None:
-    """Read a graph, plan its changes, and write them, with their lines. The graph is read and
-    planned again once when someone changed it in between (409); a second 409 stops the job."""
+    write: bool = True,
+) -> int:
+    """Read a graph, plan its changes, and write them, with their lines; how many lines. The graph
+    is read and planned again once when someone changed it in between (409); a second 409 stops
+    the job. Without write, the lines of the plan are all."""
     for _attempt in (1, 2):
         graph = metabase.call("GET", path)
         changes, lines = plan(graph["groups"])
         if not changes:
-            return
-        status, _ = metabase.send("PUT", path, {"revision": graph["revision"], "groups": changes})
-        if status == 409:
-            continue
-        if status >= 400:
-            raise AccessError(
-                f"PUT {path} failed with HTTP {status}. See ./agoranomos logs metabase."
+            return 0
+        if write:
+            status, _ = metabase.send(
+                "PUT", path, {"revision": graph["revision"], "groups": changes}
             )
+            if status == 409:
+                continue
+            if status >= 400:
+                raise AccessError(
+                    f"PUT {path} failed with HTTP {status}. See ./agoranomos logs metabase."
+                )
         for line in lines:
             log(line)
-        return
+        return len(lines)
     raise AccessError(
         f"PUT {path} was refused twice with HTTP 409, as the permissions changed in between: the "
         "permissions of the levels are not set yet; run ./agoranomos up again"
@@ -291,11 +296,17 @@ def put_graph(
 
 
 def ensure_groups(
-    metabase: Any, registry: content.Registry, level: str, default: str, log: Log
+    metabase: Any,
+    registry: content.Registry,
+    level: str,
+    default: str,
+    log: Log,
+    write: bool = True,
 ) -> dict[str, tuple[str, str]]:
     """The groups of the setup that exist, by their ID: the level of each and its name. The job
     creates the group of each level above the default, up to the ceiling. One that the registry
-    does not know, but whose name a group has, is that group: Metabase allows a name once."""
+    does not know, but whose name a group has, is that group: Metabase allows a name once. Without
+    write, a group to create is a line that says so, and is not among the groups."""
     groups = metabase.call("GET", "/api/permissions/group")
     by_entity_id = {g.get("entity_id"): g for g in groups if g.get("entity_id")}
     found_groups = {}
@@ -308,33 +319,45 @@ def ensure_groups(
             same = [g for g in groups if str(g.get("name", "")).casefold() == name.casefold()]
             if same:
                 found = same[0]
+                adopted = "adopted" if write else "would adopt"
                 name_of = shown(found["name"])
-                log(f"adopted: group {name_of}, which has the name of a group of the setup")
+                log(f"{adopted}: group {name_of}, which has the name of a group of the setup")
+            elif not write:
+                log(f"would create: group {shown(name)}")
+                continue
             else:
                 found = metabase.call("POST", "/api/permissions/group", {"name": name})
                 log(f"created: group {shown(name)}")
-            registry.set(key, "group", found["entity_id"])
-        elif found is None and entry:
+            if write:
+                registry.set(key, "group", found["entity_id"])
+        elif found is None and entry and write:
             registry.drop(key)
         if found is not None:
             found_groups[str(found["id"])] = (group_level, found["name"])
     return found_groups
 
 
-def ensure_spaces(metabase: Any, registry: content.Registry, log: Log) -> dict[str, Any]:
+def ensure_spaces(
+    metabase: Any, registry: content.Registry, log: Log, write: bool = True
+) -> dict[str, Any]:
     """Workspace and Reports, by their key, created at the root when the registry does not find
     them and brought back from the trash. Their names, descriptions and places stay as people
-    left them."""
+    left them. Without write, one to create is a line that says so, and is not among them."""
     spaces = {}
     for key, (name, description) in SPACES.items():
         registry_key = f"{content.ACCESS_PREFIX}{key}"
         found = content.located(registry, metabase, "collection", registry_key)
+        if found is None and not write:
+            log(f"would create: collection {registry_key} {shown(name)}")
+            continue
         if found is None:
             found = metabase.call(
                 "POST", "/api/collection", {"name": name, "description": description}
             )
             log(content.created_line(registry, "collection", registry_key, name))
             registry.set(registry_key, "collection", found["entity_id"])
+        elif found.get("archived") and not write:
+            log(f"would restore from the trash: collection {registry_key}")
         elif found.get("archived"):
             found = metabase.call("PUT", f"/api/collection/{found['id']}", {"archived": False})
             log(f"restored from the trash: collection {registry_key}")
@@ -357,13 +380,22 @@ def apply(
     warehouse_id: int,
     env: Mapping[str, str],
     log: Log,
-) -> None:
-    """Set the permissions of the level of .env, as the docstring of the module says. At off it
-    changes nothing."""
+    write: bool = True,
+) -> int:
+    """Set the permissions of the level of .env, as the docstring of the module says, and give how
+    many lines of changes it printed. At off it changes nothing. Without write, it prints what it
+    would change and changes nothing: a group or a collection that it would create has no line of
+    its permissions yet, and the next start prints them."""
     value = settings(env)
     level, default = value["METABASE_AI_LEVEL"], value["METABASE_AI_DEFAULT_LEVEL"]
     if level == "off":
-        return
+        return 0
+    counted: list[str] = []
+
+    def note(line: str) -> None:
+        counted.append(line)
+        log(line)
+
     groups = metabase.call("GET", "/api/permissions/group")
     kinds = {str(g["id"]): g.get("magic_group_type") for g in groups}
     names = {str(g["id"]): g.get("name") for g in groups}
@@ -382,19 +414,22 @@ def apply(
             metabase,
             "/api/permissions/graph",
             lambda graph: data_plan(graph, targets, databases, warehouse, default, names),
-            log,
+            note,
+            write,
         )
 
     # All Users first: Metabase 0.64.1 gives a new group the data permissions of All Users.
     data({all_users: default})
-    setup = ensure_groups(metabase, registry, level, default, log)
+    setup = ensure_groups(metabase, registry, level, default, note, write)
     names.update({group: name for group, (_, name) in setup.items()})
     levels = {
         group: effective(group_level, level, default) for group, (group_level, _) in setup.items()
     }
     data(levels)
 
-    spaces = ensure_spaces(metabase, registry, log)
+    spaces = ensure_spaces(metabase, registry, note, write)
+    if len(spaces) < len(SPACES):
+        return len(counted)
     listed = [
         c
         for c in metabase.call("GET", "/api/collection")
@@ -424,5 +459,133 @@ def apply(
             default,
             names,
         ),
-        log,
+        note,
+        write,
     )
+    return len(counted)
+
+
+# What the start warns about (ADR-0017): what the levels cannot keep, and Metabase OSS does not
+# record. The lines name IDs and the names of the groups of the setup, never a text that people or
+# AI clients wrote, such as the name of a question.
+
+
+def setup_groups(metabase: Any, registry: content.Registry) -> list[dict[str, Any]]:
+    """The groups of the setup that the registry knows and Metabase has, from the lowest level."""
+    by_entity_id = {g.get("entity_id"): g for g in metabase.call("GET", "/api/permissions/group")}
+    found = []
+    for group_level in GROUPS:
+        entry = registry.get(f"{content.ACCESS_PREFIX}group/{group_level}")
+        group = by_entity_id.get(entry["entity_id"]) if entry else None
+        if group is not None:
+            found.append(group)
+    return found
+
+
+def members_line(groups: list[dict[str, Any]]) -> str:
+    """The groups of the setup and how many people each has, for the line of up and of ai."""
+    if not groups:
+        return "no group of the setup yet"
+    return ", ".join(
+        f"{shown(g.get('name'))} {content.counted(int(g.get('member_count') or 0), 'member')}"
+        for g in groups
+    )
+
+
+def outside(recipients: list[Any], emails: frozenset[str]) -> int:
+    """How many of the recipients of a channel are not users of Metabase. A recipient of an alert
+    has a type: a user or a group is inside, and an email address that no account has is not. One
+    of a subscription is a user, with an ID, or an email address alone."""
+    count = 0
+    for recipient in recipients:
+        if not isinstance(recipient, Mapping):
+            continue
+        kind = recipient.get("type")
+        if kind is None and recipient.get("id") is not None:
+            continue
+        if kind is not None and kind != "notification-recipient/raw-value":
+            continue
+        email = recipient.get("email") or (recipient.get("details") or {}).get("value")
+        if isinstance(email, str) and email.casefold() in emails:
+            continue
+        count += 1
+    return count
+
+
+def warnings(metabase: Any, registry: content.Registry, env: Mapping[str, str]) -> list[str]:
+    """The lines of the warnings of a start: subscriptions and alerts that send to people who are
+    not users of Metabase, or to Slack or a webhook; SQL questions that members of the groups of
+    the setup saved, as the releases offer no level with SQL; and, above off, groups of the setup
+    without members."""
+    lines = []
+    users = content.items_in(metabase.call("GET", "/api/user", missing_ok=True) or [])
+    emails = frozenset(str(u.get("email", "")).casefold() for u in users)
+    for pulse in metabase.call("GET", "/api/pulse", missing_ok=True) or []:
+        if pulse.get("archived"):
+            continue
+        sent_out = 0
+        for channel in pulse.get("channels") or []:
+            if not channel.get("enabled", True):
+                continue
+            if channel.get("channel_type") != "email":
+                sent_out += 1
+            else:
+                sent_out += outside(channel.get("recipients") or [], emails)
+        if sent_out:
+            lines.append(
+                f"the subscription {pulse['id']} of the dashboard {pulse.get('dashboard_id')} "
+                f"sends to {content.counted(sent_out, 'recipient')} outside Metabase: check it "
+                "in the menu of the dashboard"
+            )
+    alerts = metabase.call(
+        "GET", "/api/notification?payload_type=notification/card", missing_ok=True
+    )
+    for alert in alerts or []:
+        if alert.get("payload_type") != "notification/card" or not alert.get("active", True):
+            continue
+        sent_out = 0
+        for handler in alert.get("handlers") or []:
+            if handler.get("channel_type") != "channel/email":
+                sent_out += 1
+            else:
+                sent_out += outside(handler.get("recipients") or [], emails)
+        if sent_out:
+            card = (alert.get("payload") or {}).get("card_id")
+            lines.append(
+                f"the alert {alert['id']} on the question {card} sends to "
+                f"{content.counted(sent_out, 'recipient')} outside Metabase: check it in the "
+                "menu of the question"
+            )
+    groups = setup_groups(metabase, registry)
+    members: set[int] = set()
+    for group in groups:
+        detail = metabase.call("GET", f"/api/permissions/group/{group['id']}", missing_ok=True)
+        members |= {m["user_id"] for m in (detail or {}).get("members") or [] if "user_id" in m}
+    if members:
+        package = {
+            entry["entity_id"] for entry in registry.items.values() if entry["model"] == "card"
+        }
+        questions = sorted(
+            card["id"]
+            for card in metabase.call("GET", "/api/card?f=all") or []
+            if card.get("query_type") == "native"
+            and not card.get("archived")
+            and card.get("creator_id") in members
+            and card.get("entity_id") not in package
+        )
+        if questions:
+            shown_ids = ", ".join(str(i) for i in questions[:10])
+            more = f" and {len(questions) - 10} more" if len(questions) > 10 else ""
+            lines.append(
+                f"members of the groups of the setup saved "
+                f"{content.counted(len(questions), 'SQL question')}, which no level of this "
+                f"release writes and which keep running: {shown_ids}{more}"
+            )
+    if settings(env)["METABASE_AI_LEVEL"] != "off":
+        for group in groups:
+            if not group.get("member_count"):
+                lines.append(
+                    f"the group {shown(group.get('name'))} has no members: an admin puts people "
+                    "into it in Admin > People > Groups"
+                )
+    return lines

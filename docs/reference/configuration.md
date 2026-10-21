@@ -86,7 +86,15 @@ Above `off`, `metabase-init` sets these permissions on every start, with one lin
 - **Workspace and Reports.** Two collections at the root: Workspace for shared drafts, and Reports for finished work, which everyone views and only admins curate. The setup finds them by their entity IDs, not by name, so you may rename or move them; one in the trash comes back.
 - **What stays.** A group that the deployment made itself keeps its permissions, apart from Curate on Reports, which only admins have. Personal collections keep theirs, and the content of the package stays view-only for everyone but admins ([The content of the package](#the-content-of-the-package)).
 
-At `off` the setup changes no permission, also not those that a higher level set before.
+At `off` the setup changes no permission, also not those that a higher level set before. `./agoranomos ai diff` shows what the next `up` would change in these permissions, and changes nothing ([Command line](command-line.md#ai)).
+
+Metabase OSS records which clients people authorized, but not the calls that the clients make. So, after the permissions, `metabase-init` looks on every start for what the levels do not keep, and `./agoranomos up` shows each as a warning, which does not stop the start:
+
+- a subscription of a dashboard, or an alert on a question, that sends to an email address that no account of Metabase has, or to Slack or a webhook. The warning names the subscription or the alert by its ID, and an admin checks it in the menu of the dashboard or of the question;
+- SQL questions that members of the groups of the setup saved, which no level of this release writes and which keep running, by their IDs;
+- above `off`, a group of the setup without members.
+
+Above `off`, the last line of `up` also names the groups of the setup and how many people each has, and `./agoranomos ai` shows the same while Metabase runs.
 
 ## Backups
 

@@ -4683,6 +4683,7 @@ def test_ai_shows_the_level_the_default_and_the_switches(cli):
         "METABASE_MCP=true, METABASE_MCP_SQL=false: the switches that follow the level.",
         "The levels that this release offers: off, answers, explore, build. ./agoranomos ai set "
         "<level> [--default <level>] changes them.",
+        "The groups of the setup show while Metabase runs: ./agoranomos up starts it.",
     ]
 
 
@@ -4809,7 +4810,7 @@ def test_ai_set_replaces_a_default_that_is_not_a_level(cli):
         (["set"], "usage: ./agoranomos ai set <level>"),
         (["set", "off", "--default"], "--default needs a level"),
         (["set", "off", "--everyone"], "unknown option of ai set: --everyone"),
-        (["show"], "usage: ./agoranomos ai, or ./agoranomos ai set"),
+        (["show"], "usage: ./agoranomos ai, ./agoranomos ai diff, or"),
     ],
 )
 def test_ai_refuses_what_it_does_not_take(cli, args, words):
@@ -4850,3 +4851,117 @@ def test_preflight_reads_empty_settings_of_ai_access_as_their_defaults(cli):
     cli.run("init")
     set_env(cli, **dict.fromkeys(AI_SETTINGS, ""))
     assert cli.run("preflight").returncode == 0
+
+
+# The checks of AI access that read Metabase: the groups of the setup in ai, the dry run of ai
+# diff, and the warnings of metabase-init at the end of up.
+AI_DIFF = (
+    "compose run --rm --no-deps -T metabase-init "
+    "python /opt/agoranomos/metabase/metabase_init.py ai-diff"
+)
+AI_GROUPS = (
+    "compose run --rm --no-deps -T metabase-init "
+    "python /opt/agoranomos/metabase/metabase_init.py ai-groups"
+)
+
+
+def test_ai_shows_the_groups_of_the_setup_while_metabase_runs(cli, tmp_path):
+    cli.run("init")
+    result = cli.run(
+        "ai",
+        FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP),
+        FAKE_RUN_OUTPUT='Groups of the setup: "Agoranomos: Builders" 2 members.',
+    )
+    assert result.returncode == 0, result.stderr
+    assert AI_GROUPS in cli.docker_calls()
+    assert (
+        result.stdout.splitlines()[-1] == 'Groups of the setup: "Agoranomos: Builders" 2 members.'
+    )
+
+
+def test_ai_says_when_the_groups_show_while_metabase_is_down(cli, tmp_path):
+    cli.run("init")
+    result = cli.run("ai", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert result.returncode == 0, result.stderr
+    assert AI_GROUPS not in cli.docker_calls()
+    assert result.stdout.splitlines()[-1] == (
+        "The groups of the setup show while Metabase runs: ./agoranomos up starts it."
+    )
+
+
+def test_ai_reads_no_groups_while_the_level_is_off(cli, tmp_path):
+    cli.run("init")
+    set_env(cli, **OFF)
+    result = cli.run("ai", FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP))
+    assert result.returncode == 0, result.stderr
+    assert AI_GROUPS not in cli.docker_calls()
+
+
+@pytest.mark.parametrize(("job", "code"), [(0, 0), (3, 1), (2, 2), (1, 2)])
+def test_ai_diff_runs_the_dry_run_of_metabase_init_and_passes_on_its_answer(
+    cli, tmp_path, job, code
+):
+    # As metadata diff: 0 when Metabase has the permissions of the level, 1 when the next start
+    # would change them, and 2 when the check could not run.
+    cli.run("init")
+    result = cli.run(
+        "ai", "diff", FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP), FAKE_COMPOSE_EXIT=str(job)
+    )
+    assert result.returncode == code, result.stderr
+    assert AI_DIFF in cli.docker_calls()
+
+
+def test_ai_diff_needs_metabase_to_run(cli, tmp_path):
+    cli.run("init")
+    result = cli.run("ai", "diff", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert result.returncode == 2
+    assert "Metabase is not running" in result.stderr
+    assert AI_DIFF not in cli.docker_calls()
+
+
+def test_ai_diff_stops_on_settings_that_do_not_agree(cli, tmp_path):
+    cli.run("init")
+    set_env(cli, METABASE_MCP="false")
+    result = cli.run("ai", "diff", FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP))
+    assert result.returncode == 2
+    assert "do not follow METABASE_AI_LEVEL=build" in result.stderr
+    assert AI_DIFF not in cli.docker_calls()
+
+
+def test_ai_diff_takes_no_options(cli, tmp_path):
+    cli.run("init")
+    result = cli.run("ai", "diff", "--now", FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP))
+    assert result.returncode == 2
+    assert "usage: ./agoranomos ai diff" in result.stderr
+
+
+def test_up_shows_the_warnings_of_metabase_init_and_the_groups_of_the_setup(cli, tmp_path):
+    # The logs since metabase-init started this time, by the clock of Docker: its container keeps
+    # those of earlier starts.
+    cli.run("init")
+    result = cli.run(
+        "up",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_RUNNING="0123abcd",
+        FAKE_INSPECT="2026-10-21T15:00:00.123456789Z",
+        FAKE_LOGS="\n".join(
+            [
+                'metabase-init: created: group "Agoranomos: Builders"',
+                'metabase-init: warning: the group "Agoranomos: Builders" has no members',
+                'metabase-init: groups of the setup: "Agoranomos: Builders" 0 members',
+            ]
+        ),
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'warning: the group "Agoranomos: Builders" has no members' in result.stderr
+    assert result.stdout.splitlines()[-1] == (
+        "AI access in Metabase: up to build, and explore for every account. Its MCP server is "
+        'on, and SQL that a client writes is off. Groups of the setup: "Agoranomos: Builders" '
+        "0 members. ./agoranomos ai shows the levels."
+    )
+    logs = [call for call in cli.docker_calls() if call.startswith("compose logs")]
+    assert logs == [
+        "compose logs --no-log-prefix --no-color --since 2026-10-21T15:00:00.123456789Z "
+        "metabase-init"
+    ]

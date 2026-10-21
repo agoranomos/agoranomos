@@ -1073,7 +1073,9 @@ def test_the_dry_run_names_a_mistake_in_the_overrides(metabase, tmp_path, capsys
 
 def test_an_unknown_argument_is_a_usage_error(capsys):
     assert mi.main({}, ["apply"]) == 2
-    assert capsys.readouterr().err == "metabase-init: usage: metabase_init.py [diff]\n"
+    assert capsys.readouterr().err == (
+        "metabase-init: usage: metabase_init.py [diff | ai-diff | ai-groups]\n"
+    )
 
 
 def test_the_dry_run_runs_as_the_command_line_runs_it():

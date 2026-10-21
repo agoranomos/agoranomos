@@ -186,6 +186,12 @@ case "$1" in
         if [ "$1" = run ] || [ "$1" = exec ]; then
           case " $* " in *" verify "*) echo "backup: complete, its dumps read to their end" ;; esac
         fi
+        # FAKE_LOGS is what docker compose logs prints, and FAKE_RUN_OUTPUT what a job that run
+        # starts prints, such as the lines of metabase-init.
+        if [ "$1" = logs ] && [ -n "${FAKE_LOGS:-}" ]; then printf '%s\n' "$FAKE_LOGS"; fi
+        if [ "$1" = run ] && [ -n "${FAKE_RUN_OUTPUT:-}" ]; then
+          printf '%s\n' "$FAKE_RUN_OUTPUT"
+        fi
         # FAKE_COMPOSE_EXIT is the exit status of every other subcommand (up, down, logs), and
         # FAKE_COMPOSE_ERROR is what it prints on stderr, as a failing docker compose does.
         if [ -n "${FAKE_COMPOSE_ERROR:-}" ]; then echo "$FAKE_COMPOSE_ERROR" >&2; fi
