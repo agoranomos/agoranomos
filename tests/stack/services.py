@@ -10,7 +10,7 @@ the ops profile, which it adds too, adds the backup service.
 from collections.abc import Collection
 from typing import Any
 
-from stack_helpers import active_profiles, active_variant, rendered
+from stack_helpers import active_profiles, active_variant, ai_level, rendered
 
 BASE_LONG_RUNNING = {
     "warehouse-db",
@@ -85,5 +85,9 @@ DEMO = "demo" in active_profiles()
 SERVER = "server" in active_profiles()
 # Whether .env selects the ops profile: the tests of the backup service skip without it.
 OPS = "ops" in active_profiles()
+# The level of AI access in Metabase that .env selects (ADR-0017), and whether the MCP server of
+# Metabase is on with it: a new installation has build, and an upgraded one off.
+AI_LEVEL = ai_level()
+AI_ON = AI_LEVEL != "off"
 LONG_RUNNING = long_running(active_variant(), active_profiles())
 ONE_SHOT = one_shot(DEMO)

@@ -12,9 +12,9 @@ Agoranomos, which the run of metabase-init that follows puts back to View.
 import time
 
 import pytest
-from ai_switches import readings, switches_on
+from ai_switches import ALLOWED_ON, readings, switches_on
 from metabase_content import get, group_ids, item, put, run_job
-from services import DEMO
+from services import AI_ON, DEMO
 from stack_helpers import compose, http_json, leaked, psql, secrets
 
 WAREHOUSE_NAME = "Agoranomos warehouse"
@@ -121,12 +121,15 @@ def test_metabase_is_set_up(properties):
     assert properties["has-user-setup"] is True
 
 
-def test_the_ai_settings_read_false(properties):
-    # They are public settings, so an anonymous request shows what Metabase reads. mcp-enabled? and
-    # agent-api-enabled? read false whenever ai-features-enabled? does, so they cannot show a
-    # missing variable of their own: the next test does.
+def test_the_ai_settings_follow_the_level(properties):
+    # They are public settings, so an anonymous request shows what Metabase reads. The MCP server
+    # and its master switch follow the level of AI access in .env (ADR-0017), and the Agent API is
+    # off at every level. mcp-enabled? and agent-api-enabled? read false whenever
+    # ai-features-enabled? does, so they cannot show a missing variable of their own: the test of
+    # the environment below does.
     states = {name: properties.get(name) for name in AI_SETTINGS}
-    assert states == dict.fromkeys(AI_SETTINGS, False), states
+    expected = {"ai-features-enabled?": AI_ON, "mcp-enabled?": AI_ON, "agent-api-enabled?": False}
+    assert states == expected, states
 
 
 def test_metabot_reads_false(properties):
@@ -147,7 +150,11 @@ def test_every_ai_switch_of_metabase_reads_false(metabase_url, session, properti
     # Not vacuous: the sweep must see the switches that exist.
     known = {"ai-features-enabled?", "mcp-enabled?", "agent-api-enabled?"}
     assert known <= set(found), f"the sweep does not find {sorted(known - set(found))}"
-    on = switches_on(found)
+    # The MCP server and its master switch are on above off, as the level of .env says.
+    allowed = dict(ALLOWED_ON)
+    if AI_ON:
+        allowed |= dict.fromkeys(("ai-features-enabled?", "mcp-enabled?"), "the level of .env")
+    on = switches_on(found, allowed)
     assert not on, f"AI switches that read true: {on}"
 
 
@@ -195,17 +202,26 @@ def test_the_settings_that_compose_fixes_come_from_the_environment(metabase_url,
 
 
 @pytest.mark.parametrize("path", MCP_PATHS)
-def test_the_mcp_endpoint_answers_403_to_everyone(metabase_url, session, path):
+def test_the_mcp_endpoint_follows_the_level(metabase_url, session, path):
     # With the server on, an anonymous request gets 401 and a WWW-Authenticate challenge that starts
-    # the OAuth flow, and a request with the session of the admin is served. 403 comes before both.
+    # the OAuth flow, and a request with the session of the admin is served. At off, 403 comes
+    # before both.
     url = f"{metabase_url}{path}"
     answers = {
         "anonymous": http_json("POST", url, INITIALIZE)[0],
         "the admin": http_json("POST", url, INITIALIZE, headers=session)[0],
     }
-    assert answers == {"anonymous": 403, "the admin": 403}, f"POST {path}: {answers}"
+    expected = (
+        {"anonymous": 401, "the admin": 200} if AI_ON else {"anonymous": 403, "the admin": 403}
+    )
+    assert answers == expected, f"POST {path}: {answers}"
 
 
+@pytest.mark.skipif(
+    AI_ON,
+    reason="the MCP server is on: Metabase lets clients register inside the stack, and the proxy "
+    "of server mode closes the registration (test_server, ADR-0031)",
+)
 def test_no_oauth_client_can_register(metabase_url):
     # The read-only check comes first, and stops the test when the registration is open: the
     # discovery document that MCP clients read offers the registration then.

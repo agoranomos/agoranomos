@@ -520,7 +520,15 @@ def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> in
         # The Ops collection, with or without the demo; it ends with the lock-down of every
         # collection of the content of the package.
         content.ensure_package(metabase, registry, ops.ops_package(), database_id, log)
-    except (SetupError, metadata.MetadataError, content.ContentError) as error:
+        # The permissions of the level of AI access, above off (ADR-0017): after the lock-down of
+        # the content of the package, which they keep.
+        ai_access.apply(metabase, registry, database_id, environment, log)
+    except (
+        SetupError,
+        metadata.MetadataError,
+        content.ContentError,
+        ai_access.AccessError,
+    ) as error:
         print(f"metabase-init: {error}", file=sys.stderr)
         return 1
     except SHAPE_ERRORS as error:

@@ -40,7 +40,10 @@ from typing import Any, Protocol
 from metadata import shown
 
 FORMAT = 1
-MODELS = ("collection", "card", "dashboard")
+MODELS = ("collection", "card", "dashboard", "group")
+# The keys of the registry that ai_access.py keeps: the collections and groups of AI access, which
+# are not content of the package.
+ACCESS_PREFIX = "access/"
 ROOT_KEY = "agoranomos"
 ROOT_NAME = "Agoranomos"
 ROOT_DESCRIPTION = (
@@ -246,7 +249,12 @@ class Registry:
         return sorted(key for key in self.items if key.startswith(f"{package}/"))
 
     def collection_keys(self) -> list[str]:
-        return [key for key, entry in self.items.items() if entry["model"] == "collection"]
+        """The collections of the content of the package: not those of AI access."""
+        return [
+            key
+            for key, entry in self.items.items()
+            if entry["model"] == "collection" and not key.startswith(ACCESS_PREFIX)
+        ]
 
     def save(self) -> None:
         text = json.dumps({"format": FORMAT, "items": self.items}, indent=2, sort_keys=True) + "\n"

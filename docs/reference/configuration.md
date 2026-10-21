@@ -51,20 +51,42 @@ Caddy keeps its certificates in the Docker volume `caddy-data`, which backups le
 
 ## AI access in Metabase
 
-The level of AI access sets what AI clients may do in Metabase through its MCP server ([ADR-0017](../adr/0017-set-ai-access-in-metabase-by-levels.md)). `./agoranomos ai` shows the four settings below, `./agoranomos ai set <level> [--default <level>]` writes them together, and `./agoranomos up` applies them ([Command line](command-line.md#ai)). Change them with the command rather than by hand. `./agoranomos preflight`, which `up` runs, stops in these cases and names the command that sets them right:
+The level of AI access sets what AI clients may do in Metabase through its MCP server, and what every account may do in the Metabase UI as well ([ADR-0017](../adr/0017-set-ai-access-in-metabase-by-levels.md)). `./agoranomos ai` shows the four settings below, `./agoranomos ai set <level> [--default <level>]` writes them together, and `./agoranomos up` applies them ([Command line](command-line.md#ai)). Change them with the command rather than by hand. `./agoranomos preflight`, which `up` runs, stops in these cases and names the command that sets them right:
 
 - the level is not one that this release offers;
 - the default level is not a level from `answers` up, or is higher than the level;
 - the two switches do not follow the level.
 
-`metabase-init` checks the same for a start through plain `docker compose`, and fails before it changes anything. A setting that is not set, or empty, has the default below, which `compose.yaml` gives it too, so a `.env` of an earlier release keeps AI access off.
+`metabase-init` checks the same for a start through plain `docker compose`, and fails before it changes anything.
+
+A new installation gets the level `build` and the default level `explore`, from `.env.example`. A `.env` of a release from before the levels gets `off` from `init`, which says how to turn AI access on, so an upgrade widens no access. A setting that is not set, or empty, has the default that `compose.yaml` gives it, which is `off` for the level.
 
 | Setting | Default | What it does |
 |---|---|---|
-| `METABASE_AI_LEVEL` | `off` | The highest level of AI access that the deployment allows: `off`, `answers`, `explore`, `build` or `build-sql`, each of which adds to the one before it. At `off` the MCP server of Metabase is off. This release offers `off` only: the levels above it come with the permissions that they set in Metabase, and `build-sql` once MCP Toolbox runs with the role `ai_reader`. |
+| `METABASE_AI_LEVEL` | `build` | The highest level of AI access that the deployment allows: `off`, `answers`, `explore`, `build` or `build-sql`, each of which adds to the one before it. At `off` the MCP server of Metabase is off. This release offers `off`, `answers`, `explore` and `build`; `build-sql` comes once MCP Toolbox runs with the role `ai_reader`. |
 | `METABASE_AI_DEFAULT_LEVEL` | `explore` | The level that every account gets, from `answers` up, and no higher than `METABASE_AI_LEVEL`. It is not used while the level is `off`. |
-| `METABASE_MCP` | `false` | Follows the level: `true` from `answers` up. Metabase gets it as `MB_MCP_ENABLED`, and as the master switch of its AI features, `MB_AI_FEATURES_ENABLED`, which the MCP server needs. |
+| `METABASE_MCP` | `true` | Follows the level: `true` from `answers` up. Metabase gets it as `MB_MCP_ENABLED`, and as the master switch of its AI features, `MB_AI_FEATURES_ENABLED`, which the MCP server needs. |
 | `METABASE_MCP_SQL` | `false` | Follows the level: `true` only at `build-sql`. Metabase gets it as `MB_MCP_EXECUTE_SQL_ENABLED`, which turns on the SQL that a client writes. |
+
+What each level may do:
+
+| Level | Queries on the marts | Workspace |
+|---|---|---|
+| `answers` | Runs the saved questions and dashboards of the collections that the account may view, and builds no new query | No access |
+| `explore` | Also builds new queries on the marts with the query builder, and saves them in the person's own collection | No access |
+| `build` | As `explore` | Curate: creates, changes and trashes questions, dashboards, metrics and documents there |
+
+Above `off`, `metabase-init` sets these permissions on every start, with one line for each change:
+
+- **All Users**, the group of every account, gets the default level:
+    - Create queries on the warehouse, and at most that on every other database;
+    - View on the root collection and on Reports, and at most View on every other collection;
+    - on Workspace and its sub-collections, Curate from `build` up and No access below it.
+- **Groups of the setup.** Each level above the default, up to the level of the deployment, has a group: `Agoranomos: Explorers`, `Agoranomos: Builders`. An admin puts people into them in Metabase, and the setup never changes who is in a group. A group gets the permissions of its level, kept between the default and the level of the deployment when either changes: a group above the level gets the level, and one at or below the default gets the default.
+- **Workspace and Reports.** Two collections at the root: Workspace for shared drafts, and Reports for finished work, which everyone views and only admins curate. The setup finds them by their entity IDs, not by name, so you may rename or move them; one in the trash comes back.
+- **What stays.** A group that the deployment made itself keeps its permissions, apart from Curate on Reports, which only admins have. Personal collections keep theirs, and the content of the package stays view-only for everyone but admins ([The content of the package](#the-content-of-the-package)).
+
+At `off` the setup changes no permission, also not those that a higher level set before.
 
 ## Backups
 

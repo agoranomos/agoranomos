@@ -40,7 +40,7 @@ extra_profile=""
 # The levels of AI access in Metabase, from the lowest (ADR-0017), and those that this release
 # offers. metabase/ai_access.py keeps the same two lists, and a unit test compares them.
 AI_LEVELS="off answers explore build build-sql"
-AI_LEVELS_OFFERED="off"
+AI_LEVELS_OFFERED="off answers explore build"
 
 # The settings that init generates when they are empty.
 SECRET_KEYS="WAREHOUSE_POSTGRES_PASSWORD PLATFORM_POSTGRES_PASSWORD AIRFLOW_DB_PASSWORD
@@ -514,7 +514,7 @@ ai_offered_words() {
 ai_not_offered_reason() {
   case "$1" in
     build-sql) printf 'It comes once MCP Toolbox runs with the role ai_reader (ADR-0017)' ;;
-    *) printf 'The levels above off come with the permissions that they set in Metabase (ADR-0017), which this release does not set yet' ;;
+    *) printf 'This release does not offer it yet (ADR-0017)' ;;
   esac
 }
 
@@ -578,16 +578,28 @@ cmd_init() {
     die "not a domain name: $server_domain. Write the name alone, such as bi.example.com: without https://, a port or a path, and not an IP address, which gets no certificate"
   fi
   [ -f "$ENV_EXAMPLE" ] || die "$ENV_EXAMPLE is missing: run ./agoranomos from an Agoranomos checkout"
+  env_created=0
   if [ ! -f "$ENV_FILE" ]; then
     (umask 077 && cp "$ENV_EXAMPLE" "$ENV_FILE")
     say "Created .env from .env.example."
+    env_created=1
   fi
   chmod 600 "$ENV_FILE"
+  # An upgrade widens no access (ADR-0017): a .env from before the levels of AI access gets the
+  # level off and the switches that follow it, and not the values of a new installation.
+  ai_upgrade=0
+  if [ "$env_created" -eq 0 ] && ! grep -q '^METABASE_AI_LEVEL=' "$ENV_FILE"; then ai_upgrade=1; fi
   # Add the settings that .env.example has and .env does not, for example after an upgrade.
   added=""
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in '' | '#'*) continue ;; esac
     key=${line%%=*}
+    if [ "$ai_upgrade" -eq 1 ]; then
+      case "$key" in
+        METABASE_AI_LEVEL) line="$key=off" ;;
+        METABASE_MCP | METABASE_MCP_SQL) line="$key=false" ;;
+      esac
+    fi
     if ! grep -q "^$key=" "$ENV_FILE"; then
       [ -z "$(tail -c 1 "$ENV_FILE")" ] || printf '\n' >> "$ENV_FILE"
       printf '%s\n' "$line" >> "$ENV_FILE"
@@ -595,6 +607,9 @@ cmd_init() {
     fi
   done < "$ENV_EXAMPLE"
   [ -z "$added" ] || say "Added new settings to .env:$added"
+  if [ "$ai_upgrade" -eq 1 ]; then
+    say "AI access in Metabase stays off on this deployment: ./agoranomos ai set build --default explore turns it on (ADR-0017)."
+  fi
   generated=""
   for key in $SECRET_KEYS; do
     if grep -q "^$key=" "$ENV_FILE" && [ -z "$(env_get "$key")" ]; then
@@ -1280,7 +1295,11 @@ cmd_up() {
   # still fails, so that a start that is not complete never passes as one.
   [ "$demo_failed" -eq 0 ] || die "the stack is up, but the demo is not ready"
   say "$(paint ok 'The stack is up.' 1) ./agoranomos status shows every service."
-  say "$(ai_summary) ./agoranomos ai shows the levels."
+  if [ "$(setting METABASE_AI_LEVEL off)" = off ]; then
+    say "$(ai_summary) ./agoranomos ai set build --default explore turns it on."
+  else
+    say "$(ai_summary) ./agoranomos ai shows the levels."
+  fi
 }
 
 cmd_down() {

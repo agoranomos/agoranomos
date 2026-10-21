@@ -819,7 +819,8 @@ def test_the_module_imports_only_the_standard_library_and_its_own_modules():
     ops_imports = top_imports(Path(mi.__file__).with_name("ops.py"))
     assert ops_imports <= set(sys.stdlib_module_names) | {"content"}, sorted(ops_imports)
     ai_imports = top_imports(Path(mi.__file__).with_name("ai_access.py"))
-    assert ai_imports <= set(sys.stdlib_module_names), sorted(ai_imports)
+    allowed_ai = set(sys.stdlib_module_names) | {"content", "metadata"}
+    assert ai_imports <= allowed_ai, sorted(ai_imports - allowed_ai)
 
 
 def a_registry(tmp_path: Path, **items: dict[str, Any]) -> Path:

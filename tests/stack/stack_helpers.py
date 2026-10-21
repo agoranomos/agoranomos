@@ -77,6 +77,13 @@ def active_profiles() -> set[str]:
     return {profile.strip() for profile in value.split(",") if profile.strip()}
 
 
+def ai_level() -> str:
+    """The level of AI access in Metabase that .env selects (METABASE_AI_LEVEL, ADR-0017), or off
+    when it sets none, the default that compose.yaml gives Metabase then."""
+    path = REPO_ROOT / ".env"
+    return (read_env(path).get("METABASE_AI_LEVEL", "") if path.exists() else "") or "off"
+
+
 def secrets(env: dict[str, str]) -> dict[str, str]:
     """The secrets in .env: the settings that .env.example leaves empty, with their values."""
     example = read_env(REPO_ROOT / ".env.example")

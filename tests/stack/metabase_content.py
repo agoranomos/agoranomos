@@ -19,7 +19,19 @@ from stack_helpers import Secret, SecretHeaders, compose, http_json, leaked
 REGISTRY = "/var/tmp/agoranomos-content.json"  # noqa: S108 (a path in the container of a job)
 WAREHOUSE_NAME = "Agoranomos warehouse"
 # The lines of demo-init and metabase-init that say what they changed in the content.
-CHANGES = ("revert of an edit", "created", "restored from the trash", "retired", "lowered", "moved")
+# The words that start a line of a change: of the content of the package, and of the permissions
+# of the levels of AI access (ai_access.py).
+CHANGES = (
+    "revert of an edit",
+    "created",
+    "restored from the trash",
+    "retired",
+    "lowered",
+    "moved",
+    "raised",
+    "set",
+    "adopted",
+)
 
 
 def in_metabase_init(program: str, *arguments: str) -> subprocess.CompletedProcess[str]:
