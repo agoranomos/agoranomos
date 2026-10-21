@@ -82,7 +82,7 @@ Every service has a memory limit, also for swap, so that the stack stays within 
 | `WAREHOUSE_DB_MEMORY` | `384m` | `warehouse-db`, the warehouse |
 | `PLATFORM_DB_MEMORY` | `512m` | `platform-db`, the databases of Airflow and Metabase |
 | `AIRFLOW_APISERVER_MEMORY` | `512m` | `airflow-apiserver` |
-| `AIRFLOW_DAG_PROCESSOR_MEMORY` | `768m` | `airflow-dag-processor`, which renders the transform DAG from the manifest of dbt each time that it parses it (below) |
+| `AIRFLOW_DAG_PROCESSOR_MEMORY` | `512m` | `airflow-dag-processor`, which renders the transform DAG from the manifest of dbt each time that it parses it (below) |
 | `AIRFLOW_TRIGGERER_MEMORY` | `512m` | `airflow-triggerer` |
 | `AIRFLOW_TASKS_MEMORY` | `1280m` | The service that runs the Airflow tasks: `airflow-scheduler` with LocalExecutor, `airflow-worker` with CeleryExecutor |
 | `METABASE_MEMORY` | `2176m` | `metabase`; half of it is the heap of Java |
