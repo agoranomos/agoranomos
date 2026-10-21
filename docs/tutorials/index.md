@@ -2,8 +2,6 @@
 
 Tutorials are lessons. Each one guides you through a complete, small task from start to finish, so that you learn by doing and end up with something that works. They assume no prior knowledge of Agoranomos.
 
-## Planned tutorials
+- [Run Agoranomos locally with demo data](run-locally-with-demo-data.md): start the stack on your own machine with the demo, which needs no ad platform account and no API key, read its dashboards in Metabase, trace their data to the DAGs of Airflow that made it, and check the health of the pipeline.
 
-- **Run Agoranomos locally with demo data**, arriving in v0.2.0, with the demo generator. You start the stack on your own machine, load generated demo data (no ad platform accounts or API keys needed) and open the first dashboards. Until the tutorial comes, the how-to guide [Run Agoranomos locally](../how-to/run-locally.md) starts the stack with the demo, and [See the demo](../how-to/see-the-demo.md) describes it.
-
-Agoranomos is pre-alpha and not ready for use yet, so there is no tutorial to follow today.
+Agoranomos is pre-alpha: the tutorial follows the `main` branch, and more tutorials come with the connectors to real ad platforms, which are planned.

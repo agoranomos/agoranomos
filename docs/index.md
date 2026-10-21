@@ -19,8 +19,8 @@ To see how the pieces fit together, read the [architecture overview](explanation
 
 The documentation follows [Diátaxis](https://diataxis.fr/): content is split by what you need at the moment, so every part has one job.
 
-- [Tutorials](tutorials/index.md): learn by doing. The first tutorial, running Agoranomos locally with demo data, comes with v0.2.0.
-- [How-to guides](how-to/index.md): recipes for specific tasks, such as adding a data source. Published together with the features they describe: the first guides, [Run Agoranomos locally](how-to/run-locally.md), [Deploy on a server](how-to/deploy-on-a-server.md), [Back up and restore](how-to/back-up-and-restore.md) and [See the demo](how-to/see-the-demo.md), start the stack in local mode and in server mode, back it up and restore it, and cover the demo, from the demo data through the model to a dashboard.
+- [Tutorials](tutorials/index.md): learn by doing. The first tutorial, [Run Agoranomos locally with demo data](tutorials/run-locally-with-demo-data.md), starts the stack with the demo and follows its dashboards back to the pipeline.
+- [How-to guides](how-to/index.md): recipes for specific tasks, such as adding a data source. Published together with the features they describe: the first guides, [Run Agoranomos locally](how-to/run-locally.md), [Deploy on a server](how-to/deploy-on-a-server.md), [Back up and restore](how-to/back-up-and-restore.md), [See the demo](how-to/see-the-demo.md) and [Watch the pipeline](how-to/watch-the-pipeline.md), start the stack in local mode and in server mode, back it up and restore it, cover the demo, from the demo data through the model to a dashboard, and show the health of the pipeline.
 - [Reference](reference/index.md): exact facts to look up, such as configuration and the data model. Published together with the features they describe.
 - [Explanation](explanation/index.md): how Agoranomos works and why it is built that way, starting with the [architecture](explanation/architecture.md).
 - [Decisions](adr/index.md): the architecture decision records, one per significant choice.

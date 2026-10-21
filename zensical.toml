@@ -13,7 +13,10 @@ copyright = "Copyright &copy; 2026 Andrei Gromov and Agoranomos contributors. Ap
 extra_css = ["stylesheets/brand.css"]
 nav = [
   { "Home" = "index.md" },
-  { "Tutorials" = ["tutorials/index.md"] },
+  { "Tutorials" = [
+    "tutorials/index.md",
+    { "Run Agoranomos locally with demo data" = "tutorials/run-locally-with-demo-data.md" },
+  ] },
   { "How-to guides" = [
     "how-to/index.md",
     { "Run Agoranomos locally" = "how-to/run-locally.md" },
