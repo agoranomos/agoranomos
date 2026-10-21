@@ -109,6 +109,16 @@ def test_the_responses_carry_the_security_headers(env):
         ("POST", "//api/Analytics-Proxy"),
         ("POST", "/api/product-feedback"),
         ("POST", "/api/product-feedback;a"),
+        # The registration of the OAuth clients of the MCP server (ADR-0031), which needs no
+        # sign-in either, and where Metabase shows a client its registration. Metabase itself
+        # answers 403 while its MCP server is off, and 201 to a registration while it is on.
+        ("POST", "/oauth/register"),
+        ("POST", "/oauth/register/"),
+        ("POST", "//oauth/register"),
+        ("POST", "/OAUTH/REGISTER"),
+        ("POST", "/oauth/register;x=1"),
+        ("POST", "/oauth/%72egister"),
+        ("GET", "/oauth/register/agoranomos-stack-test"),
     ],
 )
 def test_the_doors_of_metabase_that_need_no_sign_in_are_closed_at_the_proxy(env, method, path):
@@ -123,6 +133,53 @@ def test_the_neighbors_of_the_closed_doors_still_reach_metabase_through_the_prox
     assert status == 200
     status, _, _ = site_request(env, "GET", "/api/setting")
     assert status == 401
+
+
+# A token of the OAuth server of Metabase, which takes it only from the Authorization header,
+# reaches only the MCP server through the proxy (ADR-0031): a token with mb:full would otherwise
+# reach the whole REST API. A token that is not one is enough here: the proxy answers before
+# Metabase reads it. The paths are spellings that Caddy's matcher and the router of Metabase could
+# read apart.
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/session/properties",
+        "/api/user/current",
+        "//api/user/current",
+        "/API/USER/CURRENT",
+        "/api/mcp/../user/current",
+        "/api/mcp/",
+        "/api/mcp;x=1",
+        "/oauth/authorize",
+    ],
+)
+def test_a_request_with_an_authorization_header_is_refused_but_on_the_mcp_server(env, path):
+    status, _, body = site_request(
+        env, "GET", path, headers={"Authorization": "Bearer agoranomos-stack-test"}
+    )
+    # The 403 of the proxy has no body; Metabase answers /api/session/properties with 200.
+    answered = bool(body)
+    assert (status, answered) == (403, False)
+
+
+def test_a_request_with_an_authorization_header_reaches_the_mcp_server(env):
+    # Metabase answers: 401 to a token that is not one while its MCP server is on, and 403 with
+    # its own message while it is off. Either way the body is Metabase's, and the proxy's is empty.
+    status, _, body = site_request(
+        env,
+        "POST",
+        "/api/mcp",
+        body={},
+        headers={"Authorization": "Bearer agoranomos-stack-test"},
+    )
+    answered = bool(body)
+    assert (status in (401, 403), answered) == (True, True), status
+
+
+def test_the_metadata_of_the_oauth_server_still_reaches_clients_through_the_proxy(env):
+    # A client reads it without a token, to learn where to authorize: the rules above leave it.
+    status, _, _ = site_request(env, "GET", "/.well-known/oauth-authorization-server")
+    assert status == 200
 
 
 def test_the_right_name_in_tls_with_another_host_never_reaches_metabase(env):
