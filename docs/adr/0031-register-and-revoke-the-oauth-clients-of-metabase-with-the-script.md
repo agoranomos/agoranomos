@@ -100,7 +100,7 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** planned for v0.3.0. In place: Metabot is off at every level (`MB_METABOT_ENABLED` and `MB_EMBEDDED_METABOT_ENABLED` in `compose.yaml`). The facts below come from a scratch stand, not from the stack.
+* **Implementation status, as of October 2026:** planned for v0.3.0. In place: Metabot is off at every level (`MB_METABOT_ENABLED` and `MB_EMBEDDED_METABOT_ENABLED` in `compose.yaml`), and the proxy closes `/oauth/register` and refuses a request with an `Authorization` header on every path but `/api/mcp` (`caddy/Caddyfile`). The facts below come from a scratch stand, not from the stack.
 * **The stand**, on 21 October 2026:
     * Metabase 0.64.1 from its JAR, with PostgreSQL 16 as its application database and the demo marts.
     * The switches of ADR-0017, with the MCP server on and SQL off.

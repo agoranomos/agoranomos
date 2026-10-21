@@ -41,8 +41,27 @@ def test_the_doors_of_metabase_that_need_no_sign_in_are_closed_by_prefix():
     assert matchers == {
         "setup": "/api/setup*",
         "relays": "/api/analytics-proxy* /api/product-feedback*",
+        # The registration of the OAuth clients of the MCP server (ADR-0031).
+        "register": "/oauth/register*",
     }
-    assert sorted(re.findall(r"^respond @(\w+) 404$", text, re.M)) == ["relays", "setup"]
+    assert sorted(re.findall(r"^respond @(\w+) 404$", text, re.M)) == [
+        "register",
+        "relays",
+        "setup",
+    ]
+
+
+def test_a_request_with_an_authorization_header_reaches_only_the_mcp_server():
+    # Metabase takes an OAuth token only from the Authorization header (ADR-0031): the proxy
+    # refuses the header on every path but /api/mcp, an exact path and not a prefix.
+    text = caddyfile()
+    block = re.search(r"^@token \{\n(.*?)\n\}$", text, re.M | re.S)
+    assert block, "no @token block"
+    assert block.group(1).splitlines() == ["header Authorization *", "not path /api/mcp"]
+    assert re.findall(r"^respond @token (\d+)$", text, re.M) == ["403"]
+    # The rule comes before the proxy, as respond does whatever its place (Caddy sorts the
+    # directives), and nothing else reads the header.
+    assert text.count("Authorization") == 1
 
 
 def test_the_headers_fill_in_only_what_metabase_does_not_set():
