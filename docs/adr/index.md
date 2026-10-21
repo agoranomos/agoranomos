@@ -75,4 +75,4 @@ Agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0025](0025-model-advertising-statistics-once.md) | Model advertising statistics once, at the grain of a campaign and a day | accepted | 2026-10-12 |
 | [0027](0027-load-the-dbt-project-into-cosmos-from-a-manifest.md) | Load the dbt project into Cosmos from a manifest | accepted | 2026-10-12 |
 | [0028](0028-build-each-node-of-dbt-with-its-tests-in-one-task.md) | Build each node of dbt with its tests in one task | accepted | 2026-10-19 |
-| [0029](0029-record-the-runs-of-dbt-with-elementary-and-show-them-in-ops.md) | Record the runs of dbt with elementary in the schema ops, and show them in the Ops collection | proposed | 2026-10-20 |
+| [0029](0029-record-the-runs-of-dbt-with-elementary-and-show-them-in-ops.md) | Record the runs of dbt with elementary in the schema ops, and show them in the Ops collection | accepted | 2026-10-20 |
