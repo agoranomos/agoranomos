@@ -589,3 +589,63 @@ def warnings(metabase: Any, registry: content.Registry, env: Mapping[str, str]) 
                     "into it in Admin > People > Groups"
                 )
     return lines
+
+
+# The OAuth clients of the MCP server of Metabase (ADR-0031). ./agoranomos ai connect registers a
+# client through the network of the stack, as the proxy of server mode closes registration to the
+# internet; ai clients, ai revoke and the level off reach the application database with psql.
+
+# The scope of the whole REST API of Metabase, which no client of the setup gets (ADR-0017).
+FULL_SCOPE = "mb:full"
+# The longest name of a client.
+CLIENT_NAME_LENGTH = 64
+
+
+def register(metabase: Any, name: str, redirect_uris: list[str]) -> str:
+    """Register a public client of the MCP server, with PKCE and no secret, and give its client ID.
+    It asks for the scopes that Metabase offers, without mb:full, so that Metabase refuses mb:full
+    to the client; a client that Metabase still registered with mb:full is an error. Metabase
+    checks the addresses to return to. The registration access token of the answer is neither
+    printed nor kept."""
+    if not name or len(name) > CLIENT_NAME_LENGTH or not name.isprintable():
+        raise AccessError(
+            f"the name of a client has 1 to {CLIENT_NAME_LENGTH} characters, none of them a "
+            "control character"
+        )
+    if not redirect_uris:
+        raise AccessError("a client needs an address to return to")
+    server = metabase.call("GET", "/.well-known/oauth-authorization-server")
+    scopes = [s for s in server.get("scopes_supported") or [] if s != FULL_SCOPE]
+    if not scopes:
+        raise AccessError(
+            "Metabase names no scope of its MCP server. See ./agoranomos logs metabase."
+        )
+    body = {
+        "client_name": name,
+        "redirect_uris": redirect_uris,
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none",
+        "scope": " ".join(scopes),
+    }
+    status, answer = metabase.send("POST", "/oauth/register", body)
+    if status == 403:
+        raise AccessError(
+            "Metabase refused the registration, as its MCP server is off: ./agoranomos up applies "
+            "the level of .env, and turns it on"
+        )
+    if status >= 400:
+        reason = answer.get("error_description") if isinstance(answer, Mapping) else None
+        said = f": {shown(reason)}" if isinstance(reason, str) else ""
+        raise AccessError(f"Metabase refused the registration with HTTP {status}{said}")
+    client_id = answer.get("client_id") if isinstance(answer, Mapping) else None
+    if not isinstance(client_id, str) or not client_id:
+        raise AccessError(
+            "Metabase registered the client but gave no client ID. See ./agoranomos logs metabase."
+        )
+    if FULL_SCOPE in str(answer.get("scope", "")).split():
+        raise AccessError(
+            f"Metabase registered the client {client_id} with {FULL_SCOPE}, which no client of "
+            f"the setup gets: ./agoranomos ai revoke {client_id} deletes it"
+        )
+    return client_id

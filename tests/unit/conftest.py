@@ -147,11 +147,12 @@ case "$1" in
         # FAKE_READ_STDIN: a call of run, exec or up reads all of its standard input, as docker
         # compose does for a command in a container (-T takes away the terminal, not the input),
         # and as up does when it asks whether to recreate a volume; it logs the call with what it
-        # read, separated by a tab. Cli.run passes the input.
+        # read, on one line, separated by a tab. Cli.run passes the input.
         if [ -n "${FAKE_READ_STDIN:-}" ]; then
           case "$1" in
             run | exec | up)
               received=$(cat)
+              received=$(printf '%s' "$received" | tr '\n' ' ')
               printf '%s\t%s\n' "$*" "$received" >> "$FAKE_LOG.stdin"
               ;;
           esac
@@ -185,6 +186,21 @@ case "$1" in
         # The check of a backup says what the backup service says when it passes.
         if [ "$1" = run ] || [ "$1" = exec ]; then
           case " $* " in *" verify "*) echo "backup: complete, its dumps read to their end" ;; esac
+        fi
+        # psql in platform-db reads its SQL from standard input, and prints FAKE_PSQL_OUTPUT, or
+        # by default the counts of a delete of OAuth clients that found none: 0 clients and 0
+        # tokens, separated by the unit separator.
+        if [ "$1" = exec ]; then
+          case " $* " in
+            *" psql "*)
+              [ -n "${FAKE_READ_STDIN:-}" ] || cat > /dev/null
+              if [ -n "${FAKE_PSQL_OUTPUT+set}" ]; then
+                [ -z "$FAKE_PSQL_OUTPUT" ] || printf '%s\n' "$FAKE_PSQL_OUTPUT"
+              else
+                printf '%s\037%s\n' 0 0
+              fi
+              ;;
+          esac
         fi
         # FAKE_LOGS is what docker compose logs prints, and FAKE_RUN_OUTPUT what a job that run
         # starts prints, such as the lines of metabase-init.
