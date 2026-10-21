@@ -464,7 +464,7 @@ V01_QUESTIONS = {
         {
             "graph.dimensions": ["campaign_name"],
             "graph.metrics": ["spend"],
-            "series_settings": {"spend": {"color": di.SERIES_COLOR}},
+            "series_settings": {"spend": {"color": content.SERIES_COLOR}},
         },
         "row",
         {"row": 0, "col": 6, "size_x": 18, "size_y": 4},
@@ -476,7 +476,7 @@ V01_QUESTIONS = {
         {
             "graph.dimensions": ["report_date"],
             "graph.metrics": ["spend"],
-            "series_settings": {"spend": {"color": di.SERIES_COLOR}},
+            "series_settings": {"spend": {"color": content.SERIES_COLOR}},
         },
         "line",
         {"row": 4, "col": 0, "size_x": 24, "size_y": 6},
@@ -1301,7 +1301,7 @@ def test_an_edited_question_is_put_back_by_the_next_start(airflow, metabase, cap
     assert card["description"] == question["description"]
     assert card["dataset_query"]["native"]["query"] == question["query"]
     series = card["visualization_settings"]["series_settings"]
-    assert series["spend_reporting"]["color"] == di.SERIES_COLOR
+    assert series["spend_reporting"]["color"] == content.SERIES_COLOR
     assert len(metabase.cards) == len(di.QUESTIONS)
     out = capsys.readouterr().out.splitlines()
     revert = "demo-init: revert of an edit: question demo/by-client"

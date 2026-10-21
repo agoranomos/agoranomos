@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import metabase_init as mi
+import ops
 import pytest
 from metabase_stand_in import FakeClock, FakeMetabase, free_port, metadata_env, serve
 from metabase_stand_in import leaked as leaked_in
@@ -30,7 +31,7 @@ ENV = {
     # The files of the metadata: env_for points these at files that the fixture writes.
     "METADATA_EXPORT": "/nonexistent/metadata.json",
     "METADATA_OVERRIDES": "/nonexistent/overrides.toml",
-    # The registry of the content of the package: none, as before the first start of demo-init.
+    # The registry of the content of the package: env_for points it at a file of the fixture too.
     "CONTENT_REGISTRY": "/nonexistent/content.json",
 }
 
@@ -61,7 +62,7 @@ def test_the_scan_finds_a_secret_in_the_json_of_an_echo():
 @pytest.fixture
 def metabase(tmp_path):
     state = FakeMetabase()
-    state.files = metadata_env(tmp_path)
+    state.files = {**metadata_env(tmp_path), "CONTENT_REGISTRY": str(tmp_path / "content.json")}
     server = serve(state, "X-Metabase-Session")
     yield state
     server.shutdown()
@@ -797,19 +798,25 @@ def test_the_script_runs_as_compose_runs_it():
     assert "Traceback" not in result.stderr
 
 
-def test_the_module_imports_only_the_standard_library_metadata_and_content():
-    # metabase-init runs in a plain python image: it has the standard library, and metadata.py and
-    # content.py from the same folder, which import nothing of this module.
-    tree = ast.parse(Path(mi.__file__).read_text(encoding="utf-8"))
+def top_imports(path: Path) -> set[str]:
     imported: set[str] = set()
-    for node in ast.walk(tree):
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if isinstance(node, ast.Import):
             imported |= {alias.name.split(".")[0] for alias in node.names}
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             imported.add(node.module.split(".")[0])
-    allowed = set(sys.stdlib_module_names) | {"content", "metadata"}
-    assert {"content", "metadata"} <= imported
+    return imported
+
+
+def test_the_module_imports_only_the_standard_library_metadata_content_and_ops():
+    # metabase-init runs in a plain python image: it has the standard library, and metadata.py,
+    # content.py and ops.py from the same folder, which import nothing of this module.
+    imported = top_imports(Path(mi.__file__))
+    allowed = set(sys.stdlib_module_names) | {"content", "metadata", "ops"}
+    assert {"content", "metadata", "ops"} <= imported
     assert imported <= allowed, sorted(imported - allowed)
+    ops_imports = top_imports(Path(mi.__file__).with_name("ops.py"))
+    assert ops_imports <= set(sys.stdlib_module_names) | {"content"}, sorted(ops_imports)
 
 
 def a_registry(tmp_path: Path, **items: dict[str, Any]) -> Path:
@@ -841,7 +848,10 @@ def test_metabase_init_locks_the_content_of_the_registry_on_every_start(tmp_path
         lines = capsys.readouterr().out.splitlines()
         lowered = [line for line in lines if line.startswith("metabase-init: lowered: ")]
         if start == 1:
+            # Ops, which the start makes, right after it makes it, and then the content of the
+            # registry.
             assert lowered == [
+                'metabase-init: lowered: group "All Users" on collection "Ops": curate -> view',
                 'metabase-init: lowered: group "All Users" on collection "Agoranomos": curate -> '
                 "view",
                 'metabase-init: lowered: group "All Users" on collection "Demo": curate -> view',
@@ -849,7 +859,8 @@ def test_metabase_init_locks_the_content_of_the_registry_on_every_start(tmp_path
             ]
         else:
             assert lowered == [], "a start that finds View changes nothing and says nothing"
-            assert len(content.graph_puts) == 1
+            # The first start wrote the graph twice: for Ops when it made it, then for the rest.
+            assert len(content.graph_puts) == 2
     assert lines[-1].startswith("metabase-init: the admin account exists")
 
 
@@ -872,12 +883,15 @@ def test_metabase_init_locks_every_collection_inside_agoranomos(tmp_path, metaba
     )
 
 
-def test_metabase_init_without_a_registry_changes_no_permission(metabase):
-    # The first start of a stack, before demo-init has made any content: no registry.
-    root = metabase.content_state.add_collection("Agoranomos")
+def test_a_collection_named_agoranomos_that_no_job_made_stays_as_it_is(metabase):
+    # The first start of a stack, with no registry: metabase-init makes Agoranomos for the Ops
+    # collection, and leaves a collection of the same name that a person made alone, as the jobs
+    # find their content by the entity IDs of the registry, never by name.
+    theirs = metabase.content_state.add_collection("Agoranomos")
     assert mi.main(env_for(metabase)) == 0
-    assert metabase.content_state.graph["1"][str(root["id"])] == "write"
-    assert ("GET", "/api/collection/graph") not in metabase.calls
+    assert metabase.content_state.graph["1"][str(theirs["id"])] == "write"
+    named = [c for c in metabase.content_state.collections.values() if c["name"] == "Agoranomos"]
+    assert len(named) == 2
 
 
 def test_a_registry_that_is_no_registry_stops_metabase_init_before_it_writes(
@@ -1176,3 +1190,69 @@ def test_rows_of_the_warehouse_of_another_shape_end_in_one_line(metabase, capsys
         "warehouse_tables). See ./agoranomos logs metabase."
     ]
     assert "Traceback" not in output.err
+
+
+def ops_items(metabase: FakeMetabase) -> tuple[dict[str, Any], dict[str, Any], list, list]:
+    """The collections Agoranomos and Ops, as the registry finds them, and the questions and the
+    dashboards in Ops, those in the trash left out."""
+    entries = json.loads(Path(metabase.files["CONTENT_REGISTRY"]).read_text(encoding="utf-8"))
+    state = metabase.content_state
+    by_entity = {c["entity_id"]: c for c in state.collections.values()}
+    root = by_entity[entries["items"]["agoranomos"]["entity_id"]]
+    collection = by_entity[entries["items"]["ops"]["entity_id"]]
+    cards = [
+        c
+        for c in state.cards.values()
+        if c["collection_id"] == collection["id"] and not c["archived"]
+    ]
+    boards = [
+        d
+        for d in state.dashboards.values()
+        if d["collection_id"] == collection["id"] and not d["archived"]
+    ]
+    return root, collection, cards, boards
+
+
+def test_every_start_keeps_the_ops_collection_in_agoranomos_view_only(metabase, capsys):
+    # ADR-0029: metabase-init makes the Ops collection, with or without the demo, and the next
+    # start finds it as the code says and writes nothing.
+    assert mi.main(env_for(metabase)) == 0
+    root, collection, cards, boards = ops_items(metabase)
+    assert (root["name"], root["location"]) == ("Agoranomos", "/")
+    assert (collection["name"], collection["location"]) == ("Ops", f"/{root['id']}/")
+    assert sorted(c["name"] for c in cards) == sorted(q["name"] for q in ops.QUESTIONS)
+    assert all(c["dataset_query"]["database"] == metabase.databases[0]["id"] for c in cards)
+    [board] = boards
+    assert board["name"] == "Pipeline health"
+    assert len(board["dashcards"]) == len(ops.QUESTIONS)
+    for collection_id in (root["id"], collection["id"]):
+        assert metabase.content_state.graph["1"][str(collection_id)] == "read"
+    out = capsys.readouterr().out
+    assert 'metabase-init: created: dashboard ops/pipeline "Pipeline health"' in out
+    calls = len(metabase.calls)
+    assert mi.main(env_for(metabase)) == 0
+    content_paths = ("/api/card", "/api/dashboard", "/api/collection")
+    written = [
+        c
+        for c in metabase.calls[calls:]
+        if c[0] in ("POST", "PUT", "DELETE") and c[1].startswith(content_paths)
+    ]
+    assert written == []
+    # No line of a change of the content: no line that starts with what content.py logs.
+    lines = capsys.readouterr().out.splitlines()
+    words = ("created: ", "revert of an edit: ", "restored", "retired: ", "lowered: ")
+    assert not [line for line in lines if line.removeprefix("metabase-init: ").startswith(words)]
+
+
+def test_an_edit_of_the_ops_collection_is_reverted_by_the_next_start(metabase, capsys):
+    assert mi.main(env_for(metabase)) == 0
+    _, _, cards, _ = ops_items(metabase)
+    [card] = [c for c in cards if c["name"] == "Late accounts"]
+    card["name"] = "Edited by a person"
+    capsys.readouterr()
+    assert mi.main(env_for(metabase)) == 0
+    assert card["name"] == "Late accounts"
+    assert (
+        'metabase-init: revert of an edit: question ops/late-accounts name: "Edited by a person" '
+        '-> "Late accounts"' in capsys.readouterr().out
+    )

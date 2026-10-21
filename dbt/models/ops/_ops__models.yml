@@ -1,0 +1,108 @@
+models:
+  - name: ops_loads
+    description: >-
+      The last load of each account of each platform, one row each, from the record that each load
+      of the demo writes (_agoranomos_reloads): the last day that a load took, when it was loaded,
+      and how many hours ago, as of the moment that the view is read. The accounts of demo_web are
+      its properties, and demo_fx has one account, EUR, the base of its rates. The Ops collection
+      of Metabase shows it (ADR-0029).
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+      - name: last_day_loaded
+        description: >-
+          The last day that a load took for the account, in the time zone of the account:
+          yesterday of the account at the moment of the load.
+      - name: last_loaded_at
+        description: The moment of the last load of the account, with its time zone.
+      - name: hours_since_load
+        description: >-
+          The hours from the last load of the account to the moment that the view is read, to one
+          decimal place.
+      - name: loads
+        description: How many loads of the account the record holds, the first load among them.
+  - name: ops_transform_nodes
+    description: >-
+      Each model, seed and test of the dbt project in each run of dbt that the hooks of elementary
+      recorded (ADR-0029), one row each, without the nodes of elementary itself. A task of the
+      transform runs dbt for one node, so one run of the transform is many runs of dbt, which share
+      airflow_run_id. A run of dbt by hand has no airflow_run_id. The Ops collection of Metabase
+      shows it.
+    columns:
+      - name: airflow_dag_id
+        description: '{{ doc("airflow_dag_id") }}'
+      - name: airflow_run_id
+        description: '{{ doc("airflow_run_id") }}'
+      - name: invocation_id
+        description: '{{ doc("invocation_id") }}'
+      - name: node_id
+        description: The unique ID of the node in dbt, such as model.agoranomos.clients.
+      - name: node_name
+        description: The name of the node, such as clients.
+      - name: resource_type
+        description: What the node is, model, seed or test.
+      - name: status
+        description: '{{ doc("status") }}'
+      - name: execution_seconds
+        description: How many seconds dbt took for the node.
+      - name: started_at
+        description: When dbt started to run the node, with its time zone; none for a skipped one.
+      - name: completed_at
+        description: When the node ended, with its time zone; none for a skipped one.
+      - name: rows_affected
+        description: How many rows the statement of the node changed, as PostgreSQL reports them.
+      - name: failures
+        description: '{{ doc("failures") }}'
+      - name: message
+        description: What dbt said of the node, such as the error of a model that failed.
+  - name: ops_transform_tests
+    description: >-
+      Each test of the dbt project in each run of dbt that the hooks of elementary recorded
+      (ADR-0029), one row each: its status and how many rows it found, without the rows and
+      without its SQL. The Ops collection of Metabase shows it.
+    columns:
+      - name: airflow_dag_id
+        description: '{{ doc("airflow_dag_id") }}'
+      - name: airflow_run_id
+        description: '{{ doc("airflow_run_id") }}'
+      - name: invocation_id
+        description: '{{ doc("invocation_id") }}'
+      - name: detected_at
+        description: When the test ran, with its time zone.
+      - name: test_id
+        description: The unique ID of the test in dbt.
+      - name: test_type
+        description: The kind of the test, such as not_null, unique or the name of a singular test.
+      - name: schema_name
+        description: '{{ doc("schema_name") }}'
+      - name: model_name
+        description: The model or seed that the test checks.
+      - name: column_name
+        description: The column that the test checks; none for a test of a whole model.
+      - name: severity
+        description: >-
+          What a failure of the test does: error stops the models that read the model, warn does
+          not.
+      - name: status
+        description: '{{ doc("status") }}'
+      - name: failures
+        description: '{{ doc("failures") }}'
+  - name: ops_warehouse_tables
+    description: >-
+      The tables of the warehouse with their size, one row each, from the catalog of PostgreSQL as
+      of the moment that the view is read: the rows that the last ANALYZE estimated and the bytes
+      of the table with its indexes. Views take no room and are not listed. The Ops collection of
+      Metabase shows it (ADR-0029).
+    columns:
+      - name: schema_name
+        description: '{{ doc("schema_name") }}'
+      - name: table_name
+        description: The name of the table.
+      - name: estimated_rows
+        description: >-
+          The rows of the table as the last ANALYZE of PostgreSQL estimated them; 0 for a table
+          that was not analyzed yet.
+      - name: total_bytes
+        description: The bytes that the table takes on disk, with its indexes and TOAST.

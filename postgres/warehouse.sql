@@ -1,8 +1,8 @@
 -- The warehouse instance (ADR-0003). This file creates the roles and schemas of the data layers:
 -- loader is for dlt, which is to load the raw_<source> schemas (ADR-0004), transformer for dbt,
--- which is to read them and build staging and marts (ADR-0005), and metabase_reader reads marts
--- only. No role but the superuser can create a schema, so this file creates every schema that the
--- pipelines are to write. db-init runs it on every start, so each statement is safe to repeat.
+-- which is to read them and build staging, marts and ops (ADR-0005, ADR-0029), and metabase_reader
+-- reads marts and the views of the Ops collection in ops. No role but the superuser can create a
+-- schema, so this file creates every schema that the pipelines are to write. db-init runs it on every start, so each statement is safe to repeat.
 
 -- ALTER ROLE below carries a password in its text, and pg_stat_statements keeps the text of utility
 -- statements in clear, for the Ops collection to read. This session leaves them out; only a superuser
@@ -121,11 +121,17 @@ ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_settings GRANT SELECT ON 
 -- loader waits at most a minute for a lock, so a blocked load fails, and is tried again (ADR-0004).
 ALTER ROLE loader SET lock_timeout = '1min';
 
--- transformer owns staging and marts, the schemas that dbt builds.
+-- transformer owns staging and marts, the schemas that dbt builds, and ops, where dbt builds the
+-- tables of elementary and the views of the Ops collection (ADR-0029).
 CREATE SCHEMA IF NOT EXISTS staging AUTHORIZATION transformer;
 CREATE SCHEMA IF NOT EXISTS marts AUTHORIZATION transformer;
+CREATE SCHEMA IF NOT EXISTS ops AUTHORIZATION transformer;
 ALTER SCHEMA staging OWNER TO transformer;
 ALTER SCHEMA marts OWNER TO transformer;
+ALTER SCHEMA ops OWNER TO transformer;
+-- elementary writes into its tables through temporary tables on PostgreSQL, as dbt does for an
+-- incremental model (ADR-0029). A temporary table lives in the session that made it and goes with it.
+GRANT TEMPORARY ON DATABASE warehouse TO transformer;
 -- dbt renames a table that it rebuilds, which waits for its readers, and the readers that come later
 -- wait behind it. transformer waits at most a minute for a lock, so a blocked run fails and the mart
 -- keeps its data.
@@ -148,8 +154,8 @@ WHERE EXISTS (
 DROP SCHEMA IF EXISTS raw_demo_staging CASCADE;
 DROP SCHEMA IF EXISTS raw_demo CASCADE;
 
--- Metabase reads marts only. Its sessions start read-only, against accidental writes; the barrier itself
--- is that the role has no write grant. dbt creates the tables of marts as transformer, so the
+-- Metabase reads marts, and in ops the views of the Ops collection. Its sessions start read-only,
+-- against accidental writes; the barrier itself is that the role has no write grant. dbt creates the tables of marts as transformer, so the
 -- default privileges that give Metabase the new tables are those of transformer.
 ALTER ROLE metabase_reader SET default_transaction_read_only = on;
 -- A query of Metabase that runs longer than five minutes is canceled, so that a dashboard or a
@@ -164,3 +170,6 @@ GRANT SELECT ON ALL TABLES IN SCHEMA marts TO metabase_reader;
 ALTER DEFAULT PRIVILEGES FOR ROLE transformer IN SCHEMA marts GRANT SELECT ON TABLES TO metabase_reader;
 -- An earlier version of this file gave the same as postgres: an upgraded warehouse drops it.
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA marts REVOKE SELECT ON TABLES FROM metabase_reader;
+-- In ops, Metabase reads the views of the Ops collection only: dbt grants SELECT on each of them as
+-- it builds them (the grants of models/ops in dbt_project.yml), and on no table of elementary.
+GRANT USAGE ON SCHEMA ops TO metabase_reader;

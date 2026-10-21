@@ -2,13 +2,20 @@ sources:
   - name: raw_demo_web
     description: >-
       The data of demo_web, a fictional platform of web analytics in the shape of the GA4 Data API
-      v1beta and the GA4 Admin API v1beta, which the DAG agoranomos_demo_history loads with dlt:
-      its responses as dlt normalizes them, every value of a report as text.
+      v1beta and the GA4 Admin API v1beta, which the DAGs agoranomos_demo_history and
+      agoranomos_demo_daily load with dlt: its responses as dlt normalizes them, every value of a
+      report as text.
     schema: raw_demo_web
-    # The demo has no daily load in this release: no freshness.
+    # No freshness check of dbt: the Ops collection shows the last load of each account, from
+    # _agoranomos_reloads (models/ops/ops_loads.sql).
     config:
       freshness: null
     tables:
+      - name: _agoranomos_reloads
+        description: >-
+          The record of the loads of demo_web: one row for each account in each load, with the
+          day of the load in the time zone of the account (as_of), the first and last day that
+          the load replaced (window_start, window_end), and the moment of the load.
       - name: properties
         description: >-
           The properties of demo_web, one row each, with the time zone of their days and the

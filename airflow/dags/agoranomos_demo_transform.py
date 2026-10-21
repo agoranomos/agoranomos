@@ -6,14 +6,16 @@ extensions/model, and the clients of the demo into raw_settings, as the loader r
 mistake in a file fails that task with one line that names the file and the entry, nothing is
 written, and no task of dbt runs. Then it runs the dbt project through Cosmos, as the transformer
 role: the seeds, the staging models of each platform, the steps that the platforms share, and the
-marts, each built with its tests in one task, dbt build (ADR-0025, ADR-0028). A failed critical
-test stops the models that read it, and the marts keep their data. The DAG runs when each of the
-five platforms of the demo has loaded since its last run: each load updates the asset of its main
-table. A repeat is safe: the settings are loaded again, and dbt rebuilds the models. The DAG starts
-paused. With the demo profile, the one-shot demo-init job unpauses it and runs
-agoranomos_demo_history on the first start; without it, unpause this DAG in the Airflow UI before
-you trigger the history. The DAG keeps the word demo in its id until the first connector of a real
-platform.
+marts, each built with its tests in one task, dbt build (ADR-0025, ADR-0028), and the views of the
+Ops collection. A failed critical test stops the models that read it, and the marts keep their data.
+Before them, one task builds the tables of elementary in the schema ops, into which the hooks of
+elementary in every task of dbt write the results of its models and tests (ADR-0029). The DAG runs
+when each of the five platforms of the demo has loaded since its last run: each load updates the
+asset of its main table. A repeat is safe: the settings are loaded again, and dbt rebuilds the
+models. The DAG starts paused. With the demo profile, the one-shot demo-init job unpauses it and
+runs agoranomos_demo_history on the first start; without it, unpause this DAG in the Airflow UI
+before you trigger the history. The DAG keeps the word demo in its id until the first connector of a
+real platform.
 
 Cosmos renders its tasks from the manifest that metadata-export writes on every start (ADR-0027),
 so a change of the dbt project reaches the DAG at the next ./agoranomos up; its tasks of dbt run at
@@ -29,6 +31,7 @@ from agoranomos_pipelines.assets import DEMO_LOADED
 from airflow.sdk import dag, task
 from airflow.sdk.log import mask_secret
 from cosmos import (
+    DbtRunLocalOperator,
     DbtTaskGroup,
     ExecutionConfig,
     ExecutionMode,
@@ -50,7 +53,18 @@ DBT_MANIFEST = Path("/opt/agoranomos/manifest/manifest.json")
 # The pool of the tasks of dbt, which airflow-init sets on every start: at most two processes of dbt
 # share the memory of the container that runs the tasks (ADR-0027).
 DBT_POOL = "dbt"
+# The models of the package elementary (ADR-0029): one task builds them, before the tasks of dbt,
+# and the task group leaves them out.
+ELEMENTARY = ["package:elementary"]
+# The DAG and the run of Airflow, which elementary records with each run of dbt, from these names
+# of its own, so that the Ops collection can group the runs of dbt of one run of the transform.
+JOB_ENV = {"DBT_JOB_ID": "{{ dag.dag_id }}", "DBT_JOB_RUN_ID": "{{ run_id }}"}
 START = datetime(2026, 1, 1, tzinfo=UTC)
+PROFILE = ProfileConfig(
+    profile_name="agoranomos",
+    target_name="prod",
+    profiles_yml_filepath=DBT_PROJECT / "profiles.yml",
+)
 
 
 @dag(
@@ -83,19 +97,34 @@ def agoranomos_demo_transform():
         # a mistake in a file fails this task, and the tasks of dbt after it do not run.
         source.load()
 
+    # The tables of elementary: its incremental ones keep their rows, and the post-hooks of those of
+    # the artifacts of the project write its models and tests once a run. Built before the other
+    # tasks of dbt, so that the hooks of the first run find them; until they exist, the hooks write
+    # nothing. The image holds the packages (airflow/Dockerfile): no dbt deps.
+    elementary = DbtRunLocalOperator(
+        task_id="elementary",
+        project_dir=DBT_PROJECT,
+        profile_config=PROFILE,
+        dbt_executable_path=DBT_EXECUTABLE,
+        invocation_mode=InvocationMode.SUBPROCESS,
+        install_deps=False,
+        select=ELEMENTARY,
+        env=JOB_ENV,
+        # Its tables are no data of the model: no asset event, which Airflow would log as one of
+        # an asset that no DAG declares.
+        emit_datasets=False,
+        pool=DBT_POOL,
+    )
+
     # Cosmos renders the tasks from the manifest of the project, without dbt ls; the DAG still has a
     # file of its own, so that a missing or broken manifest, which fails the import of this file,
-    # cannot break the import of the other DAGs. Every task of dbt comes after the settings.
-    load_settings() >> DbtTaskGroup(
+    # cannot break the import of the other DAGs.
+    dbt = DbtTaskGroup(
         group_id="dbt",
         project_config=ProjectConfig(
             dbt_project_path=DBT_PROJECT, manifest_path=DBT_MANIFEST, install_dbt_deps=False
         ),
-        profile_config=ProfileConfig(
-            profile_name="agoranomos",
-            target_name="prod",
-            profiles_yml_filepath=DBT_PROJECT / "profiles.yml",
-        ),
+        profile_config=PROFILE,
         execution_config=ExecutionConfig(
             execution_mode=ExecutionMode.LOCAL,
             invocation_mode=InvocationMode.SUBPROCESS,
@@ -114,10 +143,14 @@ def agoranomos_demo_transform():
             # dbt for each node, instead of one for the node and one for its tests, halves the
             # processes of a run (ADR-0028).
             test_behavior=TestBehavior.BUILD,
+            exclude=ELEMENTARY,
         ),
+        operator_args={"env": JOB_ENV},
         # Only the tasks of dbt go into its pool.
         default_args={"pool": DBT_POOL},
     )
+    # Every task of dbt comes after the settings and the tables of elementary.
+    load_settings() >> elementary >> dbt
 
 
 agoranomos_demo_transform()

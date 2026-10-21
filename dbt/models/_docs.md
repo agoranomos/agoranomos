@@ -252,3 +252,27 @@ The currency that a rate of the source is given for one unit of, EUR for the ref
 {% docs quote_currency %}
 The currency in which a rate of the source gives the value of one unit of the base currency, such as USD.
 {% enddocs %}
+
+{% docs airflow_dag_id %}
+The DAG of Airflow whose task ran dbt, such as agoranomos_demo_transform; none for a run of dbt by hand.
+{% enddocs %}
+
+{% docs airflow_run_id %}
+The run of that DAG, which the tasks of one run of the transform share; none for a run of dbt by hand.
+{% enddocs %}
+
+{% docs invocation_id %}
+The ID that dbt gave the run of dbt.
+{% enddocs %}
+
+{% docs status %}
+How the node ended: success or error for a model or a seed, pass, warn, fail or error for a test, and skipped for a node that dbt did not run because a node before it failed.
+{% enddocs %}
+
+{% docs failures %}
+For a test, how many rows it found, 0 when it passed; none for a model or a seed.
+{% enddocs %}
+
+{% docs schema_name %}
+The schema of the table, or of the model or seed that a test checks, such as raw_demo_search or marts.
+{% enddocs %}

@@ -20,6 +20,7 @@ nav = [
     { "Deploy on a server" = "how-to/deploy-on-a-server.md" },
     { "Back up and restore" = "how-to/back-up-and-restore.md" },
     { "See the demo" = "how-to/see-the-demo.md" },
+    { "Watch the pipeline" = "how-to/watch-the-pipeline.md" },
     { "Rename a field or add your own definitions" = "how-to/rename-a-field.md" },
   ] },
   { "Reference" = [
@@ -60,6 +61,7 @@ nav = [
     { "ADR-0025: Model advertising statistics once, at the grain of a campaign and a day" = "adr/0025-model-advertising-statistics-once.md" },
     { "ADR-0027: Load the dbt project into Cosmos from a manifest" = "adr/0027-load-the-dbt-project-into-cosmos-from-a-manifest.md" },
     { "ADR-0028: Build each node of dbt with its tests in one task" = "adr/0028-build-each-node-of-dbt-with-its-tests-in-one-task.md" },
+    { "ADR-0029: Record the runs of dbt with elementary in the schema ops, and show them in the Ops collection" = "adr/0029-record-the-runs-of-dbt-with-elementary-and-show-them-in-ops.md" },
   ] },
 ]
 

@@ -30,10 +30,40 @@ def test_the_project_sends_no_usage_statistics():
     assert re.search(pattern, project, flags=re.MULTILINE)
 
 
-def test_the_project_needs_no_packages():
-    # Without packages, dbt deps never runs, so a task of dbt needs no network.
-    assert (DBT / "dbt_project.yml").is_file(), "there is no dbt project to check"
-    assert not (DBT / "packages.yml").exists()
+def test_the_packages_are_pinned_and_installed_where_the_image_puts_them():
+    # The image installs the packages when it is built (ADR-0029): no task of dbt runs dbt deps,
+    # so a task needs no network. Each package has an exact version.
+    text = (DBT / "packages.yml").read_text(encoding="utf-8")
+    pinned = dict(re.findall(r"^  - package: (\S+)\n    version: (\S+)$", text, re.MULTILINE))
+    assert pinned == {"elementary-data/elementary": "0.26.1", "dbt-labs/dbt_utils": "1.4.1"}
+    assert not (DBT / "package-lock.yml").exists(), "the image resolves the exact versions itself"
+    project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
+    assert "\npackages-install-path: /opt/airflow/dbt_packages\n" in project
+
+
+def test_the_views_of_ops_leave_out_the_rows_and_the_sql_that_elementary_keeps():
+    # metabase_reader reads these views: no rows that a test found, no SQL of a model or a test,
+    # and no variables of a run, which the tables of elementary keep.
+    kept = ("result_rows", "test_results_query", "compiled_code", "test_params", "vars")
+    for path in sorted((DBT / "models" / "ops").glob("*.sql")):
+        text = path.read_text(encoding="utf-8")
+        found = [word for word in kept if re.search(rf"\b{word}\b", text)]
+        assert not found, (path.name, found)
+
+
+def test_elementary_records_no_rows_of_data_and_writes_into_ops():
+    # The tables of elementary go to ops, which metabase_reader may enter but whose tables it may
+    # not read; a test records its status and the number of rows, never the rows; the artifacts of
+    # the project are written by the task of elementary, not by every task of dbt.
+    project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
+    assert "\n  elementary:\n    +schema: ops\n" in project
+    assert "\n  test_sample_row_count: 0\n" in project
+    assert "\n  disable_dbt_artifacts_autoupload: true\n" in project
+    ops = (
+        "\n    ops:\n      +schema: ops\n      +materialized: view\n"
+        "      +grants:\n        select: [metabase_reader]\n"
+    )
+    assert ops in project
     assert not (DBT / "dependencies.yml").exists()
 
 
@@ -512,7 +542,8 @@ def test_the_sources_of_a_platform_are_the_tables_that_its_load_writes():
     from agoranomos_pipelines.demo import platforms, shapes
 
     for code, platform in platforms.PLATFORMS.items():
-        written = set()
+        # And the record of the windows of each load (sources.py), which the Ops collection reads.
+        written = {"_agoranomos_reloads"}
         for (owner, table), shape in shapes.SHAPES.items():
             if owner == code:
                 lists = [field for field, kind in shape.items() if isinstance(kind, list)]

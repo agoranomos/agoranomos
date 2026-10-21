@@ -1,0 +1,9 @@
+# The packages of the dbt project (ADR-0029): elementary, whose hooks record the results of each run
+# of dbt and of its tests in the schema ops, and dbt_utils, which elementary needs. The Airflow image
+# installs them when it is built (airflow/Dockerfile) into packages-install-path of dbt_project.yml,
+# so no task of dbt needs the network. Exact versions, as of October 2026.
+packages:
+  - package: elementary-data/elementary
+    version: 0.26.1
+  - package: dbt-labs/dbt_utils
+    version: 1.4.1

@@ -107,9 +107,10 @@ jobs:
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     # The first start builds the Airflow image and makes the demo ready, with a run of the transform
     # of the model; each of the two runs of the stack tests runs the transform five times more, about
-    # five minutes each on the two CPUs of a runner (ADR-0028). The job server, which does the same
-    # and a round trip of a backup, took 88 minutes on amd64 in October 2026; this job, about 83.
-    timeout-minutes: 110
+    # seven minutes each on the two CPUs of a runner with the hooks of elementary (ADR-0028,
+    # ADR-0029). This job took 51 to 83 minutes on amd64 in October 2026 before elementary, which
+    # added about 20 minutes to the job server, which does the same and a round trip of a backup.
+    timeout-minutes: 130
     permissions:
       contents: read
     env:
@@ -201,10 +202,11 @@ jobs:
         arch: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '["amd64", "arm64"]' || '["amd64"]') }}
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     # A cold build of the Airflow and Caddy images, two runs of the stack tests with a question of
-    # 70 seconds and five runs of the transform of the model each, about five minutes each on the
-    # two CPUs of a runner (ADR-0028), and, from the backups on, the round trip of a backup with two
-    # restores: 88 minutes on amd64 in October 2026, of which each run of the stack tests took 35.
-    timeout-minutes: 120
+    # 70 seconds and five runs of the transform of the model each, about seven minutes each on the
+    # two CPUs of a runner with the hooks of elementary (ADR-0028, ADR-0029), and, from the backups
+    # on, the round trip of a backup with two restores: 110 minutes on amd64 on 20 October 2026, of
+    # which each run of the stack tests took 45 to 46.
+    timeout-minutes: 140
     permissions:
       contents: read
     env:

@@ -200,12 +200,36 @@ def test_the_build_context_holds_only_what_the_dockerfile_copies():
         "!dbt-requirements.txt",
         "!plugins/agoranomos_oom.py",
     ]
-    copied = re.findall(r"^COPY\s+(?:--\S+\s+)*(\S+)\s", dockerfile(), flags=re.MULTILINE)
+    # The files of the build context of the folder; the context dbt is the dbt project.
+    own = [line for line in dockerfile().splitlines() if not line.startswith("COPY --from=")]
+    copied = re.findall(r"^COPY\s+(?:--\S+\s+)*(\S+)\s", "\n".join(own), flags=re.MULTILINE)
     assert sorted(copied) == [
         "dbt-requirements.txt",
         "plugins/agoranomos_oom.py",
         "requirements.txt",
     ]
+
+
+def test_the_image_installs_the_packages_of_the_dbt_project():
+    # dbt deps runs when the image is built, from the two files of the dbt project that it reads,
+    # into the packages-install-path of dbt_project.yml, so no task of dbt needs the network
+    # (ADR-0029). compose.yaml gives the build the context dbt.
+    text = dockerfile()
+    [copy] = [line for line in text.splitlines() if line.startswith("COPY --from=dbt")]
+    assert copy.split() == [
+        "COPY",
+        "--from=dbt",
+        "--chown=airflow:root",
+        "dbt_project.yml",
+        "packages.yml",
+        "/tmp/agoranomos/dbt-deps/",  # noqa: S108 (a folder of the build, not of this host)
+    ]
+    assert "/opt/airflow/dbt_venv/bin/dbt deps --project-dir /tmp/agoranomos/dbt-deps" in text
+    assert text.index(copy) > text.index("/opt/airflow/dbt_venv/bin/pip check")
+    project = (AIRFLOW.parent / "dbt" / "dbt_project.yml").read_text(encoding="utf-8")
+    assert re.search(r"^packages-install-path: /opt/airflow/dbt_packages$", project, re.MULTILINE)
+    compose = (AIRFLOW.parent / "compose.yaml").read_text(encoding="utf-8")
+    assert "      additional_contexts:\n        dbt: ./dbt\n" in compose
 
 
 def test_the_image_gives_the_folder_of_the_export_to_nobody_and_keeps_its_user():

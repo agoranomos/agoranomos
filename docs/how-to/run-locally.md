@@ -12,7 +12,7 @@ This guide starts Agoranomos on your own machine in local mode: the warehouse, A
 - On Windows, run every command of this guide in a WSL2 terminal, such as Ubuntu, in which Docker Desktop's WSL integration is on (Settings → Resources → WSL Integration; it is on for the default distribution). Clone the repository into the Linux file system of WSL, such as your home folder there, not under `/mnt/c`: by default, `chmod` on a file of the Windows file system cannot make it readable only by you, so `.env` would not be private there, and the containers reach files there more slowly (as of October 2026, Microsoft's and Docker's documentation).
 - git.
 - Free ports 8080 and 3000 on `127.0.0.1`, or other ports that you set in `.env`.
-- Access to the internet for the first start, which downloads the images, and the Python packages of the Airflow image from PyPI and GitHub.
+- Access to the internet for the first start, which downloads the images, the Python packages of the Airflow image from PyPI and GitHub, and the packages of the dbt project through the hub of dbt, hub.getdbt.com.
 
 ## Start the stack
 

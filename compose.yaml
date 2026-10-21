@@ -246,6 +246,9 @@ services:
     # The one service that builds the image (see x-airflow).
     build:
       context: ./airflow
+      # The packages of the dbt project, which the image installs with dbt deps (airflow/Dockerfile).
+      additional_contexts:
+        dbt: ./dbt
     pull_policy: build
     restart: "no"
     mem_limit: 384m
@@ -557,7 +560,8 @@ services:
   # Sets Metabase up on the first start and keeps the warehouse connection current on every start. Metabase
   # makes the connection to the warehouse, so this job needs the default network only, to reach Metabase.
   # Then it applies the metadata of the marts: the export and this deployment's overrides, both read-only;
-  # and it gives every group but Administrators at most View on the content of the package (ADR-0018).
+  # it keeps the Ops collection (ADR-0029); and it gives every group but Administrators at most View on
+  # the content of the package (ADR-0018).
   metabase-init:
     image: python:3.13.16-slim-trixie@sha256:3dd7cc108ec1493442514f5c2a871af6af0ec31d768ff6e378a93340c3b3db5f
     profiles: [core]

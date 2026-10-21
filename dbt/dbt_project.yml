@@ -13,6 +13,9 @@ model-paths: ["models"]
 seed-paths: ["seeds"]
 test-paths: ["tests"]
 macro-paths: ["macros"]
+# The packages of packages.yml, which the Airflow image installs here when it is built: the project
+# is mounted read-only, and no task of dbt runs dbt deps (ADR-0029).
+packages-install-path: /opt/airflow/dbt_packages
 
 flags:
   # No usage telemetry; the image also sets DBT_ENGINE_SEND_ANONYMOUS_USAGE_STATS=False.
@@ -36,6 +39,25 @@ models:
     marts:
       +schema: marts
       +materialized: table
+    # The models of the Ops collection in Metabase (ADR-0029): views over the results that
+    # elementary records and over the record of the loads, which metabase_reader may read; the
+    # tables of elementary in the same schema it may not.
+    ops:
+      +schema: ops
+      +materialized: view
+      +grants:
+        select: [metabase_reader]
+  # The tables and views of elementary, in which its hooks record each run of dbt and its tests.
+  elementary:
+    +schema: ops
+
+# The settings of elementary (ADR-0029). No rows of the data that a test finds: the result of a
+# test is its status and the number of rows. The tables of the artifacts of the project, such as
+# its models and tests, are written once a run, by the task that builds the models of elementary,
+# and not by the hooks of each task of dbt, which takes about a second instead of three.
+vars:
+  test_sample_row_count: 0
+  disable_dbt_artifacts_autoupload: true
 
 seeds:
   agoranomos:
