@@ -1,6 +1,6 @@
 # Run Agoranomos locally
 
-This guide starts Agoranomos on your own machine in local mode: the warehouse, Airflow and Metabase, with the demo, reachable from this machine only ([ADR-0011](../adr/0011-local-and-server-modes.md)). It is for engineers who want to try the stack or work on it.
+This guide starts Agoranomos on your own machine in local mode: the warehouse, Airflow and Metabase, with the demo, reachable from this machine only ([ADR-0011](../adr/0011-local-and-server-modes.md)). It is for engineers who want to try the stack or work on it. To be guided through the demo step by step instead, follow the tutorial [Run Agoranomos locally with demo data](../tutorials/run-locally-with-demo-data.md).
 
 !!! note "Pre-alpha"
 

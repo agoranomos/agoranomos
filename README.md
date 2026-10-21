@@ -86,7 +86,7 @@ cd agoranomos
 | Metabase | <http://127.0.0.1:3000> | The collection **Agoranomos / Demo** and its dashboards **Advertising overview (demo)** and **Web analytics (demo)** |
 | Airflow | <http://127.0.0.1:8080> | The DAGs `agoranomos_demo_history`, `agoranomos_demo_daily` and `agoranomos_demo_transform` |
 
-`./agoranomos credentials` shows the addresses, the user names and the settings of `.env` that hold the passwords, and never prints a password; `./agoranomos down` stops the stack while the data stays. [Run Agoranomos locally](docs/how-to/run-locally.md) covers Windows, updates, memory and troubleshooting.
+`./agoranomos credentials` shows the addresses, the user names and the settings of `.env` that hold the passwords, and never prints a password; `./agoranomos down` stops the stack while the data stays. The tutorial [Run Agoranomos locally with demo data](docs/tutorials/run-locally-with-demo-data.md) walks through the demo step by step, and [Run Agoranomos locally](docs/how-to/run-locally.md) covers Windows, updates, memory and troubleshooting.
 
 ## Principles
 
@@ -120,6 +120,7 @@ The documentation is Markdown in [`docs/`](docs/), built with [Zensical](https:/
 
 | Page | What it covers |
 |---|---|
+| [Run Agoranomos locally with demo data](docs/tutorials/run-locally-with-demo-data.md) | A first tour: start the stack, read the demo dashboards and trace their data to the pipeline |
 | [Architecture overview](docs/explanation/architecture.md) | What each part does and how they fit together |
 | [Run Agoranomos locally](docs/how-to/run-locally.md) | Start, stop, update and troubleshoot the stack |
 | [Deploy on a server](docs/how-to/deploy-on-a-server.md) | Put Metabase on the internet over HTTPS, with daily backups |
