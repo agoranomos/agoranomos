@@ -66,6 +66,7 @@ nav = [
     { "ADR-0028: Build each node of dbt with its tests in one task" = "adr/0028-build-each-node-of-dbt-with-its-tests-in-one-task.md" },
     { "ADR-0029: Record the runs of dbt with elementary in the schema ops, and show them in the Ops collection" = "adr/0029-record-the-runs-of-dbt-with-elementary-and-show-them-in-ops.md" },
     { "ADR-0030: Ship three MCP servers in v0.3.0, with the stdio servers in local mode only" = "adr/0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md" },
+    { "ADR-0031: Register and revoke the OAuth clients of Metabase with the script, and close the rest at the proxy" = "adr/0031-register-and-revoke-the-oauth-clients-of-metabase-with-the-script.md" },
   ] },
 ]
 
