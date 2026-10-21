@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-10-21
 decision-makers: Andrei Gromov
 ---
@@ -61,7 +61,7 @@ In practice this means:
     * a role that writes only into those schemas and does not see `ops`, where the hooks of elementary would record its runs ([ADR-0029](0029-record-the-runs-of-dbt-with-elementary-and-show-them-in-ops.md));
     * a container of its own, with a limit from measurements.
 * **Not in this record:**
-    * The limit of `airflow-dag-processor`. The new measurements of CI lower it from 768 to 512 MiB, as AGENTS.md allows, in a pull request of its own. That gives 256 MiB of room in server mode, less than the container needs.
+    * The limit of `airflow-dag-processor`. The new measurements of CI lowered it from 768 to 512 MiB on 21 October 2026, as AGENTS.md allows, in a pull request of its own. That gives 256 MiB of room in server mode, less than the container needs.
     * How the image installs Toolbox on arm64, which is decided with the container.
 * **Server mode later.** Whether the container runs in server mode is decided again once CI has measured the CeleryExecutor variant and arm64 with the model of v0.2.0 and elementary, in a record of its own if that needs other limits or another budget.
 
@@ -109,7 +109,7 @@ The other options were not chosen for these reasons:
     * **The formula of the limits** gives 1.25 × (85 + 181) MiB, 332.5 MiB, rounded up to 384 MiB for Toolbox and astro-airflow-mcp. With dbt-mcp it gives 1.25 × 662 MiB, rounded up to 896 MiB.
     * **The peaks of the services in CI**, from 93 tables of 32 runs of the Stack workflow from 13 to 21 October 2026:
         * No process was killed at a limit, and no container restarted.
-        * `airflow-dag-processor` peaked at 379 MiB at most since the manifest of the dbt project, against its limit of 768 MiB.
+        * `airflow-dag-processor` peaked at 379 MiB at most since the manifest of the dbt project, against its limit of 768 MiB of that time.
         * Metabase peaked at 1,561 MiB with its limit.
         * `platform-db` peaked at 304 MiB.
 * The facts behind this record, read on 21 October 2026:
