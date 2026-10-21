@@ -1,10 +1,12 @@
 """First-start setup of Metabase, run by the one-shot metabase-init service on every start.
 
-It waits until Metabase is healthy, creates the admin account when Metabase is not set up yet, and
-connects the warehouse as the read-only metabase_reader role, showing only the marts schema. Each
-step looks at the current state first, so running it again changes nothing but the connection
-details. Settings that must not change in the Metabase UI, such as the AI features being off, are
-environment variables in compose.yaml instead. On a new Metabase it also turns the public links off,
+First it checks that the level of AI access in .env and the switches that follow it agree
+(ai_access.py, ADR-0017), and stops before it changes anything when they do not. It waits until
+Metabase is healthy, creates the admin account when Metabase is not set up yet, and connects the
+warehouse as the read-only metabase_reader role, showing only the marts schema. Each step looks at
+the current state first, so running it again changes nothing but the connection details. Settings
+that must not change in the Metabase UI, such as the switches of the AI features, are environment
+variables in compose.yaml instead. On a new Metabase it also turns the public links off,
 once. Then it applies the metadata of the marts (metadata.py): the names, descriptions and types
 that dbt and the overrides of the deployment give the tables and fields of the marts, with one line
 for each change. Last, it keeps the Ops collection, a dashboard about the pipeline itself, in the
@@ -35,6 +37,7 @@ from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+import ai_access
 import content
 import metadata
 import ops
@@ -492,6 +495,12 @@ def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> in
     if argv:
         print("metabase-init: usage: metabase_init.py [diff]", file=sys.stderr)
         return 2
+    # The level of AI access and its switches, which Metabase already runs with (ADR-0017): a start
+    # through plain docker compose reaches this check without the one of ./agoranomos up.
+    ai_problem = ai_access.problem(environment)
+    if ai_problem:
+        print(f"metabase-init: {ai_problem}", file=sys.stderr)
+        return 1
     try:
         config = Config.from_env(environment)
         # The metadata and the registry of the content are read and checked first: a mistake in

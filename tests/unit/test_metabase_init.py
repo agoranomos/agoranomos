@@ -808,15 +808,18 @@ def top_imports(path: Path) -> set[str]:
     return imported
 
 
-def test_the_module_imports_only_the_standard_library_metadata_content_and_ops():
-    # metabase-init runs in a plain python image: it has the standard library, and metadata.py,
-    # content.py and ops.py from the same folder, which import nothing of this module.
+def test_the_module_imports_only_the_standard_library_and_its_own_modules():
+    # metabase-init runs in a plain python image: it has the standard library, and ai_access.py,
+    # metadata.py, content.py and ops.py from the same folder, which import nothing of this module.
+    own = {"ai_access", "content", "metadata", "ops"}
     imported = top_imports(Path(mi.__file__))
-    allowed = set(sys.stdlib_module_names) | {"content", "metadata", "ops"}
-    assert {"content", "metadata", "ops"} <= imported
+    allowed = set(sys.stdlib_module_names) | own
+    assert own <= imported
     assert imported <= allowed, sorted(imported - allowed)
     ops_imports = top_imports(Path(mi.__file__).with_name("ops.py"))
     assert ops_imports <= set(sys.stdlib_module_names) | {"content"}, sorted(ops_imports)
+    ai_imports = top_imports(Path(mi.__file__).with_name("ai_access.py"))
+    assert ai_imports <= set(sys.stdlib_module_names), sorted(ai_imports)
 
 
 def a_registry(tmp_path: Path, **items: dict[str, Any]) -> Path:

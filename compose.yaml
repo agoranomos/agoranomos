@@ -457,14 +457,20 @@ services:
       # with marketing data.
       MB_LOAD_SAMPLE_CONTENT: "false"
       # Metabase 0.63 and 0.64 turn their AI entry points on by default: the built-in MCP server (with the
-      # OAuth client registration that goes with it) and the Agent API. They stay off until an ADR decides
-      # what AI access may do in Metabase (AGENTS.md). MB_AI_FEATURES_ENABLED is the master switch, which
-      # the other two settings also require; all three are set, so that no one line opens an entry point.
-      # A value from an environment variable wins over any value saved in Metabase, including one changed
-      # in the Metabase UI.
-      MB_AI_FEATURES_ENABLED: "false"
-      MB_MCP_ENABLED: "false"
+      # OAuth client registration that goes with it), the Agent API and Metabot. The level of AI access
+      # in .env decides the MCP server (ADR-0017): METABASE_MCP turns it on, with the master switch of
+      # the AI features, MB_AI_FEATURES_ENABLED, which it needs, and METABASE_MCP_SQL the SQL that a
+      # client writes. ./agoranomos ai set writes both with the level, and ./agoranomos up and
+      # metabase-init check that they follow it. The Agent API and Metabot stay off at every level
+      # (ADR-0031). Every switch is set, so that no one line opens an entry point, and a value from an
+      # environment variable wins over any value saved in Metabase, including one changed in the
+      # Metabase UI.
+      MB_AI_FEATURES_ENABLED: ${METABASE_MCP:-false}
+      MB_MCP_ENABLED: ${METABASE_MCP:-false}
+      MB_MCP_EXECUTE_SQL_ENABLED: ${METABASE_MCP_SQL:-false}
       MB_AGENT_API_ENABLED: "false"
+      MB_METABOT_ENABLED: "false"
+      MB_EMBEDDED_METABOT_ENABLED: "false"
       # Metabase 0.64 keeps the keys of LLM providers in a list that an admin can add to whatever the three
       # switches say. An empty list here puts the list under the control of the environment, and Metabase
       # then refuses to change it through its provider API and Admin > AI. The older per-provider
@@ -584,6 +590,13 @@ services:
       METADATA_EXPORT: /opt/agoranomos/metadata/metadata.json
       METADATA_OVERRIDES: /opt/agoranomos/extensions/metadata/overrides.toml
       CONTENT_REGISTRY: /var/tmp/agoranomos-content.json
+      # The level of AI access in Metabase and the switches that follow it, with the defaults that
+      # Metabase gets above (ADR-0017): the job checks them before it changes anything, for a start
+      # through plain docker compose, which ./agoranomos up has not checked.
+      METABASE_AI_LEVEL: ${METABASE_AI_LEVEL:-off}
+      METABASE_AI_DEFAULT_LEVEL: ${METABASE_AI_DEFAULT_LEVEL:-explore}
+      METABASE_MCP: ${METABASE_MCP:-false}
+      METABASE_MCP_SQL: ${METABASE_MCP_SQL:-false}
     volumes:
       - ./metabase:/opt/agoranomos/metabase:ro
       - metadata-export:/opt/agoranomos/metadata:ro

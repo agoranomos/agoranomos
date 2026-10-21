@@ -28,6 +28,14 @@ AI_SETTINGS = {
     "mcp-enabled?": "MB_MCP_ENABLED",
     "agent-api-enabled?": "MB_AGENT_API_ENABLED",
 }
+# The AI settings that compose.yaml sets besides, which only the admin sees: the SQL that an MCP
+# client writes, which follows the level of AI access (ADR-0017), and Metabot, off at every level
+# (ADR-0031).
+MORE_AI_SETTINGS = {
+    "mcp-execute-sql-enabled": "MB_MCP_EXECUTE_SQL_ENABLED",
+    "metabot-enabled?": "MB_METABOT_ENABLED",
+    "embedded-metabot-enabled?": "MB_EMBEDDED_METABOT_ENABLED",
+}
 # What else compose.yaml fixes: nothing is reported to the makers of Metabase.
 REPORTING_SETTINGS = {
     "anon-tracking-enabled": "MB_ANON_TRACKING_ENABLED",
@@ -121,6 +129,14 @@ def test_the_ai_settings_read_false(properties):
     assert states == dict.fromkeys(AI_SETTINGS, False), states
 
 
+def test_metabot_reads_false(properties):
+    # Metabot is off at every level (ADR-0031). Public settings, so no session; the values are
+    # flags.
+    names = ("metabot-enabled?", "embedded-metabot-enabled?")
+    states = {name: properties.get(name) for name in names}
+    assert states == dict.fromkeys(names, False), states
+
+
 def test_every_ai_switch_of_metabase_reads_false(metabase_url, session, properties):
     # compose.yaml fixes the three switches that Metabase 0.63 and 0.64 have. A later release can
     # add one that is on by default: this finds every setting that is named like an AI switch (see
@@ -169,7 +185,7 @@ def test_the_settings_that_compose_fixes_come_from_the_environment(metabase_url,
     # Metabase UI, which does not lock these switches (0.63.19 and 0.64.1). This sees each variable
     # apart from the others: with ai-features-enabled? off, the other two AI settings read false
     # without theirs.
-    expected = {**AI_SETTINGS, **REPORTING_SETTINGS}
+    expected = {**AI_SETTINGS, **MORE_AI_SETTINGS, **REPORTING_SETTINGS}
     status, settings = http_json("GET", f"{metabase_url}/api/setting", headers=session)
     assert status == 200, f"GET /api/setting answered HTTP {status}"
     found = {
