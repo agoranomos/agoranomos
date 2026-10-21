@@ -417,6 +417,13 @@ def test_a_collection_with_the_same_name_is_not_taken_for_the_package(env, metab
         put(metabase_url, session, f"/api/collection/{decoy['id']}", {"archived": True})
 
 
+def set_root(metabase_url, session, group, value):
+    """Give the group the permission value, such as write, on the root collection."""
+    graph = get(metabase_url, session, "/api/collection/graph")
+    body = {"revision": graph["revision"], "groups": {group: {"root": value}}}
+    put(metabase_url, session, "/api/collection/graph", body)
+
+
 def test_the_collection_of_v0_1_moves_into_agoranomos(env, metabase_url, session):
     # A Metabase of v0.1, made on this stand: the content of the package goes to the trash, is
     # deleted from it, and leaves the registry. A second account, which may curate the root as on
@@ -441,25 +448,35 @@ def test_the_collection_of_v0_1_moves_into_agoranomos(env, metabase_url, session
         }
         return post(metabase_url, headers, "/api/card", body)
 
-    with another_account(metabase_url, session) as theirs:
-        decoy = post(metabase_url, theirs, "/api/collection", {"name": "Agoranomos demo"})
-        decoy_board = post(
-            metabase_url,
-            theirs,
-            "/api/dashboard",
-            {"name": V01_DASHBOARD, "collection_id": decoy["id"]},
-        )
-        old = post(metabase_url, session, "/api/collection", {"name": "Agoranomos demo"})
-        cards = {name: question(session, old["id"], name) for name in V01_QUESTIONS.values()}
-        board = post(
-            metabase_url,
-            session,
-            "/api/dashboard",
-            {"name": V01_DASHBOARD, "collection_id": old["id"]},
-        )
-        added = question(theirs, old["id"], "Spend by day")
-        trashed = question(theirs, old["id"], "Mine")
-        put(metabase_url, theirs, f"/api/card/{trashed['id']}", {"archived": True})
+    # On v0.1 All Users curated the root, as Metabase gives it them. A level of AI access lets
+    # them view it only (ADR-0017), so the root is open to them while the test makes v0.1, and the
+    # collections made then keep Curate, as on v0.1.
+    _, all_users = group_ids(metabase_url, session)
+    graph = get(metabase_url, session, "/api/collection/graph")
+    held = (graph["groups"].get(all_users) or {}).get("root", "none")
+    set_root(metabase_url, session, all_users, "write")
+    try:
+        with another_account(metabase_url, session) as theirs:
+            decoy = post(metabase_url, theirs, "/api/collection", {"name": "Agoranomos demo"})
+            decoy_board = post(
+                metabase_url,
+                theirs,
+                "/api/dashboard",
+                {"name": V01_DASHBOARD, "collection_id": decoy["id"]},
+            )
+            old = post(metabase_url, session, "/api/collection", {"name": "Agoranomos demo"})
+            cards = {name: question(session, old["id"], name) for name in V01_QUESTIONS.values()}
+            board = post(
+                metabase_url,
+                session,
+                "/api/dashboard",
+                {"name": V01_DASHBOARD, "collection_id": old["id"]},
+            )
+            added = question(theirs, old["id"], "Spend by day")
+            trashed = question(theirs, old["id"], "Mine")
+            put(metabase_url, theirs, f"/api/card/{trashed['id']}", {"archived": True})
+    finally:
+        set_root(metabase_url, session, all_users, held)
     try:
         code, changes, found, _ = run_job("demo-init", secrets(env))
         assert not found, f"the output of demo-init holds the values of {found}"
