@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.2.0](https://github.com/agoranomos/agoranomos/compare/v0.1.5...v0.2.0) (2026-10-21)
+
+
+### Features
+
+* **airflow:** load the dbt project into Cosmos from a manifest, and run dbt tasks in a pool ([#79](https://github.com/agoranomos/agoranomos/issues/79)) ([595daf9](https://github.com/agoranomos/agoranomos/commit/595daf93624987bf049284c522b48cde99882be0))
+* **dbt:** model advertising statistics once, at the grain of a campaign and a day, with a reporting currency ([#94](https://github.com/agoranomos/agoranomos/issues/94)) ([e8fcc17](https://github.com/agoranomos/agoranomos/commit/e8fcc17cc5e0356a13c2119998670fc24b5b2a09))
+* **demo:** load the history of four fictional ad platforms and a source of rates ([#82](https://github.com/agoranomos/agoranomos/issues/82)) ([0064de6](https://github.com/agoranomos/agoranomos/commit/0064de604a3b352c418f7ee712d4dddb1f4276e3))
+* **demo:** load the new days of the demo every day ([#97](https://github.com/agoranomos/agoranomos/issues/97)) ([4c3872d](https://github.com/agoranomos/agoranomos/commit/4c3872dccc3aeda94111122eaeb122a0b9cc861e))
+* **metabase:** keep the content of the package in Metabase as code, view-only for everyone but admins ([#83](https://github.com/agoranomos/agoranomos/issues/83)) ([20f7877](https://github.com/agoranomos/agoranomos/commit/20f78779450782618061161c8ec4157780373f72))
+* **metabase:** show the demo in two dashboards with filters ([#96](https://github.com/agoranomos/agoranomos/issues/96)) ([3ecd5c1](https://github.com/agoranomos/agoranomos/commit/3ecd5c13881513c77940d824ce5c41727e1ced17))
+* **ops:** record the runs of dbt with elementary and show the pipeline in an Ops collection ([#98](https://github.com/agoranomos/agoranomos/issues/98)) ([15630be](https://github.com/agoranomos/agoranomos/commit/15630bebb9ccab6172510b06230e5cf8a724b0f2))
+
+
+### Performance Improvements
+
+* **airflow:** ping the Celery worker without starting Airflow ([#84](https://github.com/agoranomos/agoranomos/issues/84)) ([55c343e](https://github.com/agoranomos/agoranomos/commit/55c343e0f3305d226c61b2f7cf0efb4e78a20a6f))
+
+
+### Documentation
+
+* accept ADR-0027 ([#81](https://github.com/agoranomos/agoranomos/issues/81)) ([c6598b3](https://github.com/agoranomos/agoranomos/commit/c6598b39419eb7adb1db04286893e6b9d85cde8c))
+* **adr:** accept ADR-0028 ([#95](https://github.com/agoranomos/agoranomos/issues/95)) ([24fd5d1](https://github.com/agoranomos/agoranomos/commit/24fd5d1660bda9a0ed36342b3fb35ceb09d7a144))
+* **adr:** accept ADR-0029 ([#100](https://github.com/agoranomos/agoranomos/issues/100)) ([2140229](https://github.com/agoranomos/agoranomos/commit/2140229b97cf2f6967138df78975752386071a6c))
+* **tutorials:** add the tutorial Run Agoranomos locally with demo data ([#99](https://github.com/agoranomos/agoranomos/issues/99)) ([e1f8ce8](https://github.com/agoranomos/agoranomos/commit/e1f8ce888d78d53c559d774ccd5769f8f1ba1e90))
+
 ## [0.1.5](https://github.com/agoranomos/agoranomos/compare/v0.1.4...v0.1.5) (2026-10-13)
 
 
