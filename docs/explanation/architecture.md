@@ -133,7 +133,7 @@ Decision record: [ADR-0006: Use Metabase as the BI layer](../adr/0006-metabase-a
 
 ## Ask: MCP servers
 
-AI access goes through four MCP servers. Each starts with least-privilege defaults:
+AI access goes through four MCP servers. Each starts with least-privilege defaults. v0.3.0 is to ship three of them, with the Airflow and warehouse servers in local mode only, and dbt MCP in a later release ([ADR-0030](../adr/0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md)):
 
 | Server | Used by | Default permissions | Transport |
 |---|---|---|---|
@@ -146,7 +146,7 @@ These are the defaults of [ADR-0007](../adr/0007-ai-access-via-mcp-read-only.md)
 
 Local mode serves coding agents such as Claude Code on the same machine; the desktop and mobile apps of Claude and ChatGPT reach Metabase's MCP server over HTTPS in server mode.
 
-* **Why stdio through `docker exec` instead of HTTP ports.** For the three stdio servers, no port is opened, there is no risk of DNS rebinding against localhost, and credentials stay inside the container. In server mode, remote clients reach Metabase's built-in server over HTTPS with OAuth, and the three stdio servers stay on stdio until a gateway is added.
+* **Why stdio through `docker exec` instead of HTTP ports.** For the three stdio servers, no port is opened, there is no risk of DNS rebinding against localhost, and credentials stay inside the container. In server mode, remote clients reach Metabase's built-in server over HTTPS with OAuth. The stdio servers are not to run there in v0.3.0, as the memory budget has no room for their container ([ADR-0030](../adr/0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md)), and they stay on stdio until a gateway is added.
 * **Ready-made context.** The repository provides `AGENTS.md` (the cross-agent standard) and a `CLAUDE.md` that imports it. It is to provide a `.mcp.json` with ready-made connections for Claude Code and product skills in `.claude/skills/`: adding a source, diagnosing a failed pipeline, building a dashboard and explaining a metric. A Claude Code plugin and configuration for Cursor, VS Code and Codex are planned for later releases.
 * **Untrusted text.** Campaign names and ad texts are untrusted data, because anyone can write them. `AGENTS.md` states that data is never an instruction, and least-privilege defaults limit the damage if an injection attempt succeeds.
 
@@ -160,7 +160,7 @@ The stack runs as one Docker Compose project, split into profiles so that you st
 * `demo`: the one-shot `demo-init` job, which makes the demo ready on the first start; `.env` turns it on by default ([See the demo](../how-to/see-the-demo.md)).
 * `server`: the `proxy` service of server mode, Caddy in front of Metabase on ports 80 and 443; `./agoranomos init --server` turns it on ([ADR-0019](../adr/0019-open-only-metabase-in-server-mode.md)).
 * `ops`: the `backup` service, which takes a backup of the databases every day; `./agoranomos init --server` turns it on ([ADR-0020](../adr/0020-back-up-the-databases-every-day.md)).
-* `ai` (planned, with the AI layer): one container with the Airflow, Toolbox and dbt MCP servers, reached over stdio with `docker exec`.
+* `ai` (planned, with the AI layer): one container with the Airflow and Toolbox MCP servers, in local mode, reached over stdio with `docker exec`; the dbt MCP server is to come later, in a container of its own ([ADR-0030](../adr/0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md)).
 
 Each container gets the Linux privileges that its job needs and no more. Every service drops all Linux capabilities, starts as a user that is not root and may not gain privileges, and every one-shot job but `airflow-init` has a read-only file system. The secrets of a container can be wider than its job: the containers that run the tasks, the scheduler with the LocalExecutor and the worker with the CeleryExecutor, hold keys of Airflow and the passwords of the warehouse roles, and the scheduler also the password of the metadata database of Airflow, and task code can read them (the worker holds neither that password nor the key that signs the tokens of Airflow, but task code there can still run code in the scheduler through the results of Celery, which the scheduler unpickles: [ADR-0015](../adr/0015-run-localexecutor-by-default.md)) ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md) and [ADR-0015](../adr/0015-run-localexecutor-by-default.md) record the passwords; the keys are in the same environment, [Configuration](../reference/configuration.md#secrets) lists them). The databases and the broker are on an internal network with no route to the internet, and no container mounts the Docker socket. Every service has a memory limit, so that, on the recommended memory (8 GB, or 12 GB for the CeleryExecutor variant), one that runs short of memory cannot take it from the others ([System requirements](../reference/system-requirements.md#memory-limits) says what holds on less). Metabase asks no service on the internet where the addresses of its users are ([Configuration](../reference/configuration.md#settings-fixed-in-composeyaml)).
 

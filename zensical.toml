@@ -65,6 +65,7 @@ nav = [
     { "ADR-0027: Load the dbt project into Cosmos from a manifest" = "adr/0027-load-the-dbt-project-into-cosmos-from-a-manifest.md" },
     { "ADR-0028: Build each node of dbt with its tests in one task" = "adr/0028-build-each-node-of-dbt-with-its-tests-in-one-task.md" },
     { "ADR-0029: Record the runs of dbt with elementary in the schema ops, and show them in the Ops collection" = "adr/0029-record-the-runs-of-dbt-with-elementary-and-show-them-in-ops.md" },
+    { "ADR-0030: Ship three MCP servers in v0.3.0, with the stdio servers in local mode only" = "adr/0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md" },
   ] },
 ]
 
