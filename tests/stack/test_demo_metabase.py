@@ -9,6 +9,7 @@ test of the move runs last: it rebuilds the content. Answers of Metabase and the
 demo-init could hold secrets: the assertions print names, counts, sums and states only.
 """
 
+import contextlib
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -417,11 +418,35 @@ def test_a_collection_with_the_same_name_is_not_taken_for_the_package(env, metab
         put(metabase_url, session, f"/api/collection/{decoy['id']}", {"archived": True})
 
 
-def set_root(metabase_url, session, group, value):
-    """Give the group the permission value, such as write, on the root collection."""
-    graph = get(metabase_url, session, "/api/collection/graph")
-    body = {"revision": graph["revision"], "groups": {group: {"root": value}}}
-    put(metabase_url, session, "/api/collection/graph", body)
+@contextlib.contextmanager
+def all_users_as_on_v0_1(metabase_url, session):
+    """All Users with the permissions that Metabase gives them, as on v0.1: Curate on the root,
+    and native queries on the warehouse. A level of AI access gives them less (ADR-0017), View on
+    the root and the query builder at most, so a test that makes v0.1 has these while it does, and
+    the permissions of the level come back after. What it makes in the meantime keeps Curate."""
+    _, all_users = group_ids(metabase_url, session)
+    warehouse = str(warehouse_database_id(metabase_url, session))
+    collections = get(metabase_url, session, "/api/collection/graph")
+    root = (collections["groups"].get(all_users) or {}).get("root", "none")
+    data = get(metabase_url, session, "/api/permissions/graph")
+    queries = ((data["groups"].get(all_users) or {}).get(warehouse) or {}).get(
+        "create-queries", "no"
+    )
+
+    def give(root_value, queries_value):
+        graph = get(metabase_url, session, "/api/collection/graph")
+        body = {"revision": graph["revision"], "groups": {all_users: {"root": root_value}}}
+        put(metabase_url, session, "/api/collection/graph", body)
+        graph = get(metabase_url, session, "/api/permissions/graph")
+        groups = {all_users: {warehouse: {"create-queries": queries_value}}}
+        body = {"revision": graph["revision"], "groups": groups}
+        put(metabase_url, session, "/api/permissions/graph", body)
+
+    give("write", "query-builder-and-native")
+    try:
+        yield
+    finally:
+        give(root, queries)
 
 
 def test_the_collection_of_v0_1_moves_into_agoranomos(env, metabase_url, session):
@@ -448,35 +473,28 @@ def test_the_collection_of_v0_1_moves_into_agoranomos(env, metabase_url, session
         }
         return post(metabase_url, headers, "/api/card", body)
 
-    # On v0.1 All Users curated the root, as Metabase gives it them. A level of AI access lets
-    # them view it only (ADR-0017), so the root is open to them while the test makes v0.1, and the
-    # collections made then keep Curate, as on v0.1.
-    _, all_users = group_ids(metabase_url, session)
-    graph = get(metabase_url, session, "/api/collection/graph")
-    held = (graph["groups"].get(all_users) or {}).get("root", "none")
-    set_root(metabase_url, session, all_users, "write")
-    try:
-        with another_account(metabase_url, session) as theirs:
-            decoy = post(metabase_url, theirs, "/api/collection", {"name": "Agoranomos demo"})
-            decoy_board = post(
-                metabase_url,
-                theirs,
-                "/api/dashboard",
-                {"name": V01_DASHBOARD, "collection_id": decoy["id"]},
-            )
-            old = post(metabase_url, session, "/api/collection", {"name": "Agoranomos demo"})
-            cards = {name: question(session, old["id"], name) for name in V01_QUESTIONS.values()}
-            board = post(
-                metabase_url,
-                session,
-                "/api/dashboard",
-                {"name": V01_DASHBOARD, "collection_id": old["id"]},
-            )
-            added = question(theirs, old["id"], "Spend by day")
-            trashed = question(theirs, old["id"], "Mine")
-            put(metabase_url, theirs, f"/api/card/{trashed['id']}", {"archived": True})
-    finally:
-        set_root(metabase_url, session, all_users, held)
+    with (
+        all_users_as_on_v0_1(metabase_url, session),
+        another_account(metabase_url, session) as theirs,
+    ):
+        decoy = post(metabase_url, theirs, "/api/collection", {"name": "Agoranomos demo"})
+        decoy_board = post(
+            metabase_url,
+            theirs,
+            "/api/dashboard",
+            {"name": V01_DASHBOARD, "collection_id": decoy["id"]},
+        )
+        old = post(metabase_url, session, "/api/collection", {"name": "Agoranomos demo"})
+        cards = {name: question(session, old["id"], name) for name in V01_QUESTIONS.values()}
+        board = post(
+            metabase_url,
+            session,
+            "/api/dashboard",
+            {"name": V01_DASHBOARD, "collection_id": old["id"]},
+        )
+        added = question(theirs, old["id"], "Spend by day")
+        trashed = question(theirs, old["id"], "Mine")
+        put(metabase_url, theirs, f"/api/card/{trashed['id']}", {"archived": True})
     try:
         code, changes, found, _ = run_job("demo-init", secrets(env))
         assert not found, f"the output of demo-init holds the values of {found}"
