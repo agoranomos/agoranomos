@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.1](https://github.com/agoranomos/agoranomos/compare/v0.2.0...v0.2.1) (2026-10-21)
+
+
+### Performance Improvements
+
+* **airflow:** lower the memory limit of the DAG processor from 768 to 512 MiB ([#105](https://github.com/agoranomos/agoranomos/issues/105)) ([3c91f71](https://github.com/agoranomos/agoranomos/commit/3c91f714e61271a317c87624e490b516e2a42e2f))
+
+
+### Documentation
+
+* **adr:** accept ADR-0030 ([#106](https://github.com/agoranomos/agoranomos/issues/106)) ([771e2d1](https://github.com/agoranomos/agoranomos/commit/771e2d164ec1d0ddd5d3b90d3e2ad6b53fd16a76))
+* **adr:** propose ADR-0030, three MCP servers in v0.3.0 with the stdio servers in local mode ([#104](https://github.com/agoranomos/agoranomos/issues/104)) ([e56a77e](https://github.com/agoranomos/agoranomos/commit/e56a77e1055ff7462aca60e59e27b9ac0bad41bf))
+* say that Phase 2 is released as v0.2.0 ([#101](https://github.com/agoranomos/agoranomos/issues/101)) ([0fb0c48](https://github.com/agoranomos/agoranomos/commit/0fb0c48d12521634800a96faec04855de3503746))
+
 ## [0.2.0](https://github.com/agoranomos/agoranomos/compare/v0.1.5...v0.2.0) (2026-10-21)
 
 
