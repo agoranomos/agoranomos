@@ -88,11 +88,15 @@ Above `off`, `metabase-init` sets these permissions on every start, with one lin
 
 At `off` the setup changes no permission, also not those that a higher level set before. `./agoranomos ai diff` shows what the next `up` would change in these permissions, and changes nothing ([Command line](command-line.md#ai)).
 
-Metabase OSS records which clients people authorized, but not the calls that the clients make. So, after the permissions, `metabase-init` looks on every start for what the levels do not keep, and `./agoranomos up` shows each as a warning, which does not stop the start:
+An AI client connects to the MCP server of Metabase with an OAuth client that `./agoranomos ai connect` registers, and each person signs in with their own account, which is not an admin ([ADR-0031](../adr/0031-register-and-revoke-the-oauth-clients-of-metabase-with-the-script.md)). In server mode the proxy closes registration to the internet and lets a token reach only the MCP server. At `off`, `./agoranomos up` and `./agoranomos ai set off` delete every OAuth client, with its tokens, so that no client keeps access; a start with plain `docker compose` deletes none. `./agoranomos ai clients` lists the clients, and `./agoranomos ai revoke` deletes one ([Command line](command-line.md#ai)).
+
+Metabase OSS records which clients people authorized, but not the calls that the clients make. So, after the permissions, `metabase-init` looks on every start for what the levels do not keep, and `./agoranomos up` looks at the OAuth clients in the application database of Metabase. `up` shows each finding as a warning, which does not stop the start:
 
 - a subscription of a dashboard, or an alert on a question, that sends to an email address that no account of Metabase has, or to Slack or a webhook. The warning names the subscription or the alert by its ID, and an admin checks it in the menu of the dashboard or of the question;
 - SQL questions that members of the groups of the setup saved, which no level of this release writes and which keep running, by their IDs;
-- above `off`, a group of the setup without members.
+- above `off`, a group of the setup without members;
+- above `off`, an admin account that holds a token of an OAuth client, which has not expired: an AI client works as the account that connected it, so an admin connects with a second account that is not an admin;
+- above `off`, an account that holds a token with `mb:full`, the scope of the whole REST API of Metabase, which no client that `ai connect` registers gets. The warning names the client, and `./agoranomos ai revoke` cuts it off.
 
 Above `off`, the last line of `up` also names the groups of the setup and how many people each has, and `./agoranomos ai` shows the same while Metabase runs.
 

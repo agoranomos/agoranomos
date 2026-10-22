@@ -2467,9 +2467,13 @@ def test_up_leaves_standard_input_alone(cli, tmp_path):
         **QUICK,
     )
     assert result.returncode == 0, result.stderr
-    reads = cli.stdin_reads()
+    # psql reads its SQL from a pipe of the script, which it gets instead of the input.
+    reads = [(c, r) for c, r in cli.stdin_reads() if " psql " not in f" {c} "]
     assert [call for call, _received in reads] == ["up --detach --remove-orphans"]
     assert [received for _call, received in reads] == [""]
+    sql = [r for c, r in cli.stdin_reads() if " psql " in f" {c} "]
+    assert sql
+    assert all(r.startswith("WITH ") for r in sql), sql
 
 
 def test_up_builds_and_pulls_the_images_before_it_stops_the_stack_for_the_network(cli, tmp_path):
@@ -4810,7 +4814,7 @@ def test_ai_set_replaces_a_default_that_is_not_a_level(cli):
         (["set"], "usage: ./agoranomos ai set <level>"),
         (["set", "off", "--default"], "--default needs a level"),
         (["set", "off", "--everyone"], "unknown option of ai set: --everyone"),
-        (["show"], "usage: ./agoranomos ai, ./agoranomos ai diff, or"),
+        (["show"], "usage: ./agoranomos ai [diff | set <level> [--default <level>] | connect"),
     ],
 )
 def test_ai_refuses_what_it_does_not_take(cli, args, words):
@@ -4965,3 +4969,319 @@ def test_up_shows_the_warnings_of_metabase_init_and_the_groups_of_the_setup(cli,
         "compose logs --no-log-prefix --no-color --since 2026-10-21T15:00:00.123456789Z "
         "metabase-init"
     ]
+
+
+# The OAuth clients of the MCP server of Metabase (ADR-0031): ai connect registers one through
+# metabase-init, and ai clients, ai revoke and the level off reach the application database with
+# psql in platform-db.
+CLIENT_ID = "789a106a-6c42-425c-9b08-da99da57c9b1"
+AI_CONNECT = (
+    "compose run --rm --no-deps -T metabase-init "
+    "python /opt/agoranomos/metabase/metabase_init.py ai-connect"
+)
+PSQL = (
+    "compose exec -T platform-db psql --username=postgres --dbname=metabase --no-psqlrc --quiet "
+    "--tuples-only --no-align --field-separator=\x1f --set=ON_ERROR_STOP=1"
+)
+
+
+def psql_calls(cli):
+    return [call for call in cli.docker_calls() if call.startswith(PSQL)]
+
+
+def test_ai_connect_claude_code_registers_the_two_addresses_and_prints_the_command(cli, tmp_path):
+    cli.run("init")
+    result = cli.run(
+        "ai",
+        "connect",
+        "claude-code",
+        FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP),
+        FAKE_RUN_OUTPUT=CLIENT_ID,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (
+        f"{AI_CONNECT} Claude Code http://localhost:33418/callback http://127.0.0.1:33418/callback"
+    ) in cli.docker_calls()
+    assert f'Registered the OAuth client "Claude Code". Its client ID: {CLIENT_ID}' in result.stdout
+    assert (
+        f"  claude mcp add --transport http --client-id {CLIENT_ID} --callback-port 33418 "
+        "agoranomos-metabase http://localhost:3000/api/mcp"
+    ) in result.stdout.splitlines()
+
+
+def test_ai_connect_claude_code_takes_another_port(cli, tmp_path):
+    cli.run("init")
+    result = cli.run(
+        "ai",
+        "connect",
+        "claude-code",
+        "--port",
+        "47999",
+        FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP),
+        FAKE_RUN_OUTPUT=CLIENT_ID,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--callback-port 47999 " in result.stdout
+    assert any("http://localhost:47999/callback" in c for c in cli.docker_calls())
+
+
+def test_ai_connect_claude_needs_server_mode(cli, tmp_path):
+    cli.run("init")
+    result = cli.run("ai", "connect", "claude", FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP))
+    assert result.returncode == 1
+    assert "only server mode allows" in result.stderr
+    assert not any(c.startswith(AI_CONNECT) for c in cli.docker_calls())
+
+
+def test_ai_connect_claude_registers_the_address_of_the_claude_apps_in_server_mode(cli, tmp_path):
+    server_env(cli, site="https://bi.example.com")
+    result = cli.run(
+        "ai",
+        "connect",
+        "claude",
+        FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP),
+        FAKE_RUN_OUTPUT=CLIENT_ID,
+    )
+    assert result.returncode == 0, result.stderr
+    assert f"{AI_CONNECT} Claude https://claude.ai/api/mcp/auth_callback" in cli.docker_calls()
+    assert "  URL: https://bi.example.com/api/mcp" in result.stdout.splitlines()
+    assert f"with the client ID {CLIENT_ID} and no secret" in result.stdout
+
+
+def test_ai_connect_registers_another_client_with_its_addresses(cli, tmp_path):
+    cli.run("init")
+    result = cli.run(
+        "ai",
+        "connect",
+        "My client",
+        "--redirect-uri",
+        "https://example.com/callback",
+        "--redirect-uri",
+        "http://localhost:9000/cb",
+        FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP),
+        FAKE_RUN_OUTPUT=CLIENT_ID,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (
+        f"{AI_CONNECT} My client https://example.com/callback http://localhost:9000/cb"
+    ) in cli.docker_calls()
+    assert "connects to http://localhost:3000/api/mcp with OAuth, PKCE" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("args", "words"),
+    [
+        ([], "usage: ./agoranomos ai connect claude"),
+        (["My client"], "usage: ./agoranomos ai connect claude"),
+        (["My client", "--redirect-uri"], "--redirect-uri needs the address"),
+        (["My client", "--redirect-uri", "a b"], "an address to return to has no spaces"),
+        (["My client", "--secret"], "unknown option of ai connect: --secret"),
+        (["--redirect-uri", "https://x"], "usage: ./agoranomos ai connect claude"),
+        (["claude", "--port", "1"], "ai connect claude takes no options"),
+        (["claude-code", "--port"], "--port needs a port"),
+        (["claude-code", "--port", "80"], "--port takes a port from 1024 to 65535"),
+        (["claude-code", "--port", "99999"], "--port takes a port from 1024 to 65535"),
+        (["claude-code", "--port", "x1"], "--port takes a port from 1024 to 65535"),
+        (["claude-code", "--host", "x"], "unknown option of ai connect claude-code: --host"),
+    ],
+)
+def test_ai_connect_refuses_what_it_does_not_take(cli, tmp_path, args, words):
+    cli.run("init")
+    result = cli.run("ai", "connect", *args, FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP))
+    assert result.returncode == 1
+    assert words in result.stderr
+    assert not any(c.startswith(AI_CONNECT) for c in cli.docker_calls())
+
+
+def test_ai_connect_needs_a_level_above_off_and_a_running_metabase(cli, tmp_path):
+    cli.run("init")
+    down = cli.run("ai", "connect", "claude-code", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS))
+    assert down.returncode == 1
+    assert "Metabase is not running" in down.stderr
+    set_env(cli, **OFF)
+    off = cli.run("ai", "connect", "claude-code", FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP))
+    assert off.returncode == 1
+    assert "AI access in Metabase is off" in off.stderr
+    assert not any(c.startswith(AI_CONNECT) for c in cli.docker_calls())
+
+
+@pytest.mark.parametrize(("output", "code"), [("", 0), ("not an ID!", 0), (CLIENT_ID, 2)])
+def test_ai_connect_says_when_the_registration_failed(cli, tmp_path, output, code):
+    cli.run("init")
+    result = cli.run(
+        "ai",
+        "connect",
+        "claude-code",
+        FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP),
+        FAKE_RUN_OUTPUT=output,
+        FAKE_COMPOSE_EXIT=str(code),
+    )
+    assert result.returncode == 1
+    assert "Registered" not in result.stdout
+
+
+def test_ai_clients_lists_the_clients_from_the_database_of_metabase(cli, tmp_path):
+    cli.run("init")
+    rows = "\n".join(
+        [
+            f"{CLIENT_ID}\x1fClaude Code\x1f127.0.0.1:33418 localhost:33418\x1f2026-10-21\x1f"
+            "ann@example.com, root@example.com (admin)",
+            "0b6e\x1fClaude\x1fclaude.ai\x1f2026-10-22\x1f",
+        ]
+    )
+    result = cli.run(
+        "ai",
+        "clients",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_PSQL_OUTPUT=rows,
+        FAKE_READ_STDIN="1",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "The OAuth clients of Metabase, by client ID:",
+        f'  {CLIENT_ID}  "Claude Code", returns to 127.0.0.1:33418 localhost:33418, '
+        "registered on 2026-10-21",
+        "      connected now: ann@example.com, root@example.com (admin)",
+        '  0b6e  "Claude", returns to claude.ai, registered on 2026-10-22',
+        "      connected now: nobody",
+        "./agoranomos ai revoke <client ID> cuts a client off.",
+    ]
+    [(_call, sql)] = cli.stdin_reads()
+    assert "FROM oauth_client AS c" in sql
+
+
+def test_ai_clients_says_when_there_is_none_and_needs_the_database(cli, tmp_path):
+    cli.run("init")
+    none = cli.run("ai", "clients", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), FAKE_PSQL_OUTPUT="")
+    assert none.returncode == 0, none.stderr
+    assert none.stdout.startswith("Metabase has no OAuth client.")
+    down = cli.run("ai", "clients", FAKE_PS_FILE=ps_file(tmp_path, "db-init|exited||0\n"))
+    assert down.returncode == 1
+    assert "the database of Metabase is not running" in down.stderr
+
+
+def test_ai_revoke_deletes_one_client_with_its_id_as_a_variable_of_psql(cli, tmp_path):
+    cli.run("init")
+    result = cli.run(
+        "ai",
+        "revoke",
+        CLIENT_ID,
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_PSQL_OUTPUT="1\x1f3",
+        FAKE_READ_STDIN="1",
+    )
+    assert result.returncode == 0, result.stderr
+    assert f"Deleted the OAuth client {CLIENT_ID}, with its 3 tokens" in result.stdout
+    assert psql_calls(cli) == [f"{PSQL} --set=client={CLIENT_ID}"]
+    [(_call, sql)] = cli.stdin_reads()
+    for delete in (
+        "DELETE FROM oauth_access_token WHERE client_id = :'client' RETURNING 1",
+        "DELETE FROM oauth_refresh_token WHERE client_id = :'client' RETURNING 1",
+        "DELETE FROM oauth_authorization_code WHERE client_id = :'client' RETURNING 1",
+        "DELETE FROM oauth_client WHERE client_id = :'client' RETURNING 1",
+    ):
+        assert delete in sql
+
+
+@pytest.mark.parametrize(
+    ("args", "output", "words"),
+    [
+        ([], "1\x1f0", "usage: ./agoranomos ai revoke <client ID>"),
+        (["x'; drop"], "1\x1f0", "that is not a client ID"),
+        ([CLIENT_ID], "0\x1f0", f"Metabase has no OAuth client with the client ID {CLIENT_ID}"),
+        ([CLIENT_ID], "ERROR", "could not delete the OAuth client"),
+    ],
+)
+def test_ai_revoke_refuses_or_says_why_it_deleted_nothing(cli, tmp_path, args, output, words):
+    cli.run("init")
+    result = cli.run(
+        "ai",
+        "revoke",
+        *args,
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_PSQL_OUTPUT=output,
+    )
+    assert result.returncode == 1
+    assert words in result.stderr
+
+
+def test_ai_set_off_deletes_every_client_while_the_stack_runs(cli, tmp_path):
+    cli.run("init")
+    result = cli.run(
+        "ai",
+        "set",
+        "off",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_PSQL_OUTPUT="2\x1f5",
+        FAKE_READ_STDIN="1",
+    )
+    assert result.returncode == 0, result.stderr
+    assert (
+        "Deleted the 2 OAuth clients of Metabase, with their 5 tokens, as AI access is off "
+        "(ADR-0031)."
+    ) in result.stdout.splitlines()
+    [(_call, sql)] = cli.stdin_reads()
+    assert "DELETE FROM oauth_client  RETURNING 1" in sql
+
+
+def test_ai_set_off_leaves_the_clients_to_up_while_the_stack_is_down(cli):
+    cli.run("init")
+    result = cli.run("ai", "set", "off")
+    assert result.returncode == 0, result.stderr
+    assert psql_calls(cli) == []
+
+
+def test_up_at_off_deletes_the_clients_and_says_how_many(cli, tmp_path):
+    cli.run("init")
+    set_env(cli, **OFF)
+    result = cli.run(
+        "up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), FAKE_PSQL_OUTPUT="1\x1f2", **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-2] == (
+        "Deleted the 1 OAuth clients of Metabase, with their 2 tokens, as AI access is off "
+        "(ADR-0031)."
+    )
+    assert len(psql_calls(cli)) == 1
+
+
+def test_up_at_off_fails_when_the_clients_are_not_deleted(cli, tmp_path):
+    cli.run("init")
+    set_env(cli, **OFF)
+    result = cli.run(
+        "up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), FAKE_EXEC_FAIL="psql", **QUICK
+    )
+    assert result.returncode == 1
+    assert "the OAuth clients of Metabase are not deleted, as the level off asks" in result.stderr
+
+
+def test_up_above_off_warns_about_admin_accounts_and_tokens_with_full_access(cli, tmp_path):
+    cli.run("init")
+    rows = "\n".join(
+        [
+            f"admin\x1f{CLIENT_ID}\x1fClaude Code\x1froot@example.com",
+            f"full\x1f{CLIENT_ID}\x1fClaude Code\x1fann@example.com",
+        ]
+    )
+    result = cli.run(
+        "up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), FAKE_PSQL_OUTPUT=rows, **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    assert (
+        f'the admin account root@example.com holds a token of the OAuth client {CLIENT_ID} "Claude '
+        'Code": an AI client works as the account that connected it'
+    ) in result.stderr
+    assert (
+        f'the account ann@example.com holds a token of the OAuth client {CLIENT_ID} "Claude Code" '
+        f"with mb:full, which reaches the whole API of Metabase: ./agoranomos ai revoke {CLIENT_ID}"
+    ) in result.stderr
+    assert "Deleted" not in result.stdout
+
+
+def test_up_above_off_goes_on_when_the_clients_cannot_be_read(cli, tmp_path):
+    cli.run("init")
+    result = cli.run(
+        "up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), FAKE_EXEC_FAIL="psql", **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    assert "could not read the OAuth clients from the database of Metabase" in result.stderr

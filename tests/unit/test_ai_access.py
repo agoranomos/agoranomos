@@ -668,3 +668,92 @@ def test_a_start_warns_about_a_group_of_the_setup_without_members_above_off(tmp_
         "Admin > People > Groups"
     ]
     assert warned(answers, env=FRESH, store=store) == []
+
+
+# The registration of an OAuth client for ./agoranomos ai connect (ADR-0031).
+
+SERVER = {"scopes_supported": ["agent:resource:read", "agent:content:write", "mb:full"]}
+ADDRESSES = ["http://localhost:33418/callback", "http://127.0.0.1:33418/callback"]
+
+
+class Registrar(FakeMetabase):
+    """The metadata of the authorization server, and the answer of the registration."""
+
+    def __init__(self, status=201, answer=None):
+        super().__init__({("GET", "/.well-known/oauth-authorization-server"): SERVER})
+        self.status = status
+        self.answer = answer
+
+    def send(self, method, path, body=None):
+        self.calls.append((method, path, body))
+        return self.status, self.answer
+
+
+def test_a_client_registers_as_a_public_client_without_mb_full():
+    answer = {
+        "client_id": "c1",
+        "scope": "agent:resource:read agent:content:write",
+        "registration_access_token": "a secret of the client",
+    }
+    metabase = Registrar(answer=answer)
+    assert ai_access.register(metabase, "Claude Code", ADDRESSES) == "c1"
+    [(_method, path, body)] = [c for c in metabase.calls if c[0] == "POST"]
+    assert path == "/oauth/register"
+    assert body == {
+        "client_name": "Claude Code",
+        "redirect_uris": ADDRESSES,
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none",
+        "scope": "agent:resource:read agent:content:write",
+    }
+
+
+@pytest.mark.parametrize(
+    ("status", "answer", "words"),
+    [
+        (403, {"error": "registration_not_supported"}, "its MCP server is off"),
+        (
+            400,
+            {"error_description": "Invalid redirect URI: http://example.com/cb"},
+            'HTTP 400: "Invalid redirect URI: http://example.com/cb"',
+        ),
+        (500, "a page", "HTTP 500"),
+        (201, {"scope": "agent:resource:read"}, "gave no client ID"),
+        (201, {"client_id": "c1", "scope": "mb:full agent:resource:read"}, "ai revoke c1"),
+    ],
+)
+def test_a_registration_that_metabase_refuses_or_widens_is_an_error(status, answer, words):
+    with pytest.raises(ai_access.AccessError, match=re.escape(words)):
+        ai_access.register(Registrar(status, answer), "Claude Code", ADDRESSES)
+
+
+@pytest.mark.parametrize("name", ["", "a\tb", "x" * 65])
+def test_the_name_of_a_client_is_short_and_printable(name):
+    metabase = Registrar()
+    with pytest.raises(ai_access.AccessError, match="the name of a client"):
+        ai_access.register(metabase, name, ADDRESSES)
+    assert metabase.calls == []
+
+
+def test_ai_connect_prints_nothing_but_the_client_id(capsys, monkeypatch):
+    monkeypatch.setattr(mi, "healthy", lambda metabase: True)
+    monkeypatch.setattr(ai_access, "register", lambda metabase, name, uris: f"{name}|{uris}")
+    # The job has every setting of metabase-init, which it needs to read, and no account.
+    env = {
+        **dict.fromkeys(mi.ENV_NAMES.values(), "1"),
+        **FRESH,
+        "METABASE_AI_LEVEL": "build",
+        "METABASE_MCP": "true",
+        "METABASE_URL": "http://127.0.0.1:9",
+    }
+    assert mi.main(env, ["ai-connect", "Claude", "https://claude.ai/cb"]) == mi.DIFF_NOTHING
+    assert capsys.readouterr().out == "Claude|['https://claude.ai/cb']\n"
+
+
+def test_ai_connect_needs_a_level_above_off(capsys):
+    env = {**FRESH, "METABASE_URL": "http://127.0.0.1:9"}
+    assert mi.main(env, ["ai-connect", "Claude", "https://claude.ai/cb"]) == mi.DIFF_FAILED
+    assert capsys.readouterr().err == (
+        "ai connect: AI access in Metabase is off, and so is its MCP server\n"
+    )

@@ -527,6 +527,34 @@ def ai_check(env: Mapping[str, str], what: str) -> int:
     return DIFF_NOTHING
 
 
+def ai_connect(env: Mapping[str, str], name: str, redirect_uris: list[str]) -> int:
+    """Register an OAuth client of the MCP server of Metabase for ./agoranomos ai connect
+    (ADR-0031), through the network of the stack, and print its client ID alone. It needs no
+    account: registration is open while the MCP server is on. Exits with 0, or 2 and a line that
+    says why."""
+    try:
+        problem = ai_access.problem(env)
+        if problem:
+            raise SetupError(problem)
+        if ai_access.settings(env)["METABASE_AI_LEVEL"] == "off":
+            raise SetupError("AI access in Metabase is off, and so is its MCP server")
+        config = Config.from_env(env)
+        metabase = Metabase(config.url, timeout=10)
+        if not healthy(metabase):
+            raise SetupError(
+                f"Metabase does not answer at {config.url}: start the stack with ./agoranomos up"
+            )
+        client_id = ai_access.register(metabase, name, redirect_uris)
+    except (SetupError, ai_access.AccessError) as error:
+        print(f"ai connect: {error}", file=sys.stderr)
+        return DIFF_FAILED
+    except SHAPE_ERRORS as error:
+        print(f"ai connect: {unexpected_shape('Metabase', error, LOGS_HINT)}", file=sys.stderr)
+        return DIFF_FAILED
+    print(client_id)
+    return DIFF_NOTHING
+
+
 def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> int:
     environment = os.environ if env is None else env
     arguments = list(argv)
@@ -534,9 +562,13 @@ def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> in
         return diff(environment)
     if arguments in (["ai-diff"], ["ai-groups"]):
         return ai_check(environment, arguments[0])
+    if arguments[:1] == ["ai-connect"] and len(arguments) >= 3:
+        return ai_connect(environment, arguments[1], arguments[2:])
     if arguments:
         print(
-            "metabase-init: usage: metabase_init.py [diff | ai-diff | ai-groups]", file=sys.stderr
+            "metabase-init: usage: metabase_init.py [diff | ai-diff | ai-groups | ai-connect "
+            "<name> <redirect URI>...]",
+            file=sys.stderr,
         )
         return 2
     # The level of AI access and its switches, which Metabase already runs with (ADR-0017): a start

@@ -42,6 +42,17 @@ extra_profile=""
 AI_LEVELS="off answers explore build build-sql"
 AI_LEVELS_OFFERED="off answers explore build"
 
+# The OAuth clients of the MCP server of Metabase (ADR-0031): the address to which the Claude apps
+# return after a person signs in; the port of the callback of Claude Code that ai connect
+# claude-code registers unless --port says another, outside the ports of the stack; and the name of
+# the server in a client (ADR-0017).
+CLAUDE_CALLBACK=https://claude.ai/api/mcp/auth_callback
+CLAUDE_CODE_PORT=33418
+MCP_SERVER_NAME=agoranomos-metabase
+# The separator of the fields of a row that psql prints: the unit separator, a control character,
+# which the SQL removes from every text, with the others.
+FIELD_SEPARATOR=$(printf '\037')
+
 # The settings that init generates when they are empty.
 SECRET_KEYS="WAREHOUSE_POSTGRES_PASSWORD PLATFORM_POSTGRES_PASSWORD AIRFLOW_DB_PASSWORD
 METABASE_DB_PASSWORD METABASE_READER_PASSWORD WAREHOUSE_LOADER_PASSWORD
@@ -560,6 +571,138 @@ ai_summary() {
       "$ai_level" "$(setting METABASE_AI_DEFAULT_LEVEL explore)" \
       "$(if [ "$(setting METABASE_MCP_SQL false)" = true ]; then printf on; else printf off; fi)"
   fi
+}
+
+# The address of the MCP server of Metabase, as a client reaches it: the site in server mode, and
+# localhost in local mode, as MB_SITE_URL in compose.yaml names it.
+mcp_url() {
+  if server_mode; then
+    mcp_site=$(setting AGORANOMOS_SITE_URL '')
+    printf '%s/api/mcp' "${mcp_site%/}"
+  else
+    printf 'http://localhost:%s/api/mcp' "$(setting METABASE_PORT 3000)"
+  fi
+}
+
+# psql in platform-db, as postgres, on the application database of Metabase (ADR-0031), as restore
+# runs pg_restore there. It reads the SQL from standard input and prints each row on a line, with
+# its fields separated by FIELD_SEPARATOR. The options, such as --set=client=<ID>, go to psql.
+metabase_sql() {
+  compose exec -T platform-db psql --username=postgres --dbname=metabase --no-psqlrc --quiet \
+    --tuples-only --no-align --field-separator="$FIELD_SEPARATOR" --set=ON_ERROR_STOP=1 "$@"
+}
+
+# The SQL of the OAuth clients, on the tables of Metabase 0.64.1, which are not an API: the stack
+# tests check them (ADR-0031). The live tokens: those that are not revoked and whose expiry, in
+# milliseconds since 1970, is to come; a refresh token without one does not expire. A text that a
+# client or a person gave, such as the name of a client, loses its control characters.
+oauth_live_sql() {
+  cat << 'SQL'
+WITH live AS (
+  SELECT client_id, user_id, scope FROM oauth_access_token
+  WHERE revoked_at IS NULL AND expiry > extract(epoch FROM now()) * 1000
+  UNION
+  SELECT client_id, user_id, scope FROM oauth_refresh_token
+  WHERE revoked_at IS NULL AND (expiry IS NULL OR expiry > extract(epoch FROM now()) * 1000)
+)
+SQL
+}
+
+# Each client: its client ID, its name, the hosts that it returns to, the day it registered, and the
+# accounts that hold a live token of it, the admins marked.
+oauth_clients_sql() {
+  oauth_live_sql
+  cat << 'SQL'
+SELECT regexp_replace(c.client_id, '[[:cntrl:]]', '?', 'g'),
+  left(regexp_replace(coalesce(c.client_name, ''), '[[:cntrl:]]', '?', 'g'), 64),
+  coalesce((
+    SELECT string_agg(DISTINCT h, ' ' ORDER BY h)
+    FROM (
+      SELECT regexp_replace(substring(u FROM '^[^:/]+://([^/?#]*)'), '[[:cntrl:]]', '?', 'g') AS h
+      FROM json_array_elements_text(c.redirect_uris::json) AS u
+    ) AS hosts
+  ), ''),
+  to_char(c.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD'),
+  coalesce((
+    SELECT string_agg(a, ', ' ORDER BY a)
+    FROM (
+      SELECT regexp_replace(p.email, '[[:cntrl:]]', '?', 'g')
+        || CASE WHEN p.is_superuser THEN ' (admin)' ELSE '' END AS a
+      FROM core_user AS p
+      WHERE p.id IN (SELECT user_id FROM live WHERE live.client_id = c.client_id)
+    ) AS accounts
+  ), '')
+FROM oauth_client AS c
+ORDER BY c.created_at, c.client_id;
+SQL
+}
+
+# What up warns about (ADR-0017, ADR-0031): each admin account that holds a live token of a client,
+# and each account that holds a live token with mb:full.
+oauth_warnings_sql() {
+  oauth_live_sql
+  cat << 'SQL'
+SELECT DISTINCT kind, regexp_replace(c.client_id, '[[:cntrl:]]', '?', 'g'),
+  left(regexp_replace(coalesce(c.client_name, ''), '[[:cntrl:]]', '?', 'g'), 64),
+  regexp_replace(p.email, '[[:cntrl:]]', '?', 'g')
+FROM (
+  SELECT 'admin' AS kind, live.client_id, live.user_id
+  FROM live JOIN core_user AS a ON a.id = live.user_id WHERE a.is_superuser
+  UNION
+  SELECT 'full', client_id, user_id FROM live WHERE scope::jsonb ? 'mb:full'
+) AS found
+JOIN oauth_client AS c ON c.client_id = found.client_id
+JOIN core_user AS p ON p.id = found.user_id
+ORDER BY 1, 2, 4;
+SQL
+}
+
+# Delete OAuth clients, with their tokens and codes, in one statement, and print how many clients
+# and tokens went. $1 is empty for every client, or the condition of one, on the psql variable
+# client. The log of registrations and approvals, oauth_client_event, keeps its entries: Metabase
+# sets their client to none.
+oauth_delete_sql() {
+  printf '%s\n' \
+    "WITH access AS (DELETE FROM oauth_access_token $1 RETURNING 1)," \
+    "  refresh AS (DELETE FROM oauth_refresh_token $1 RETURNING 1)," \
+    "  codes AS (DELETE FROM oauth_authorization_code $1 RETURNING 1)," \
+    "  clients AS (DELETE FROM oauth_client $1 RETURNING 1)" \
+    "SELECT (SELECT count(*) FROM clients), (SELECT count(*) FROM access) + (SELECT count(*) FROM refresh);"
+}
+
+# Run oauth_delete_sql with the condition $1 and the psql options after it, and set oauth_clients
+# and oauth_tokens to the counts. Fails when psql does, or prints something else.
+oauth_delete() {
+  oauth_where=$1
+  shift
+  oauth_counts=$(oauth_delete_sql "$oauth_where" | metabase_sql "$@") || return 1
+  case "$oauth_counts" in
+    *"$FIELD_SEPARATOR"*) ;;
+    *) return 1 ;;
+  esac
+  oauth_clients=${oauth_counts%%"$FIELD_SEPARATOR"*}
+  oauth_tokens=${oauth_counts#*"$FIELD_SEPARATOR"}
+  case "$oauth_clients" in '' | *[!0-9]*) return 1 ;; esac
+  case "$oauth_tokens" in '' | *[!0-9]*) return 1 ;; esac
+}
+
+# The line of the clients that the level off deleted, or nothing when there were none.
+oauth_deleted_line() {
+  [ "$oauth_clients" -eq 0 ] ||
+    printf 'Deleted the %s OAuth clients of Metabase, with their %s tokens, as AI access is off (ADR-0031).' "$oauth_clients" "$oauth_tokens"
+}
+
+# Warn about the admin accounts and the tokens with mb:full that oauth_warnings_sql finds. Fails
+# when psql does.
+oauth_warnings() {
+  oauth_rows=$(oauth_warnings_sql | metabase_sql) || return 1
+  [ -n "$oauth_rows" ] || return 0
+  printf '%s\n' "$oauth_rows" | while IFS="$FIELD_SEPARATOR" read -r oauth_kind oauth_id oauth_name oauth_email; do
+    case "$oauth_kind" in
+      admin) warn "the admin account $oauth_email holds a token of the OAuth client $oauth_id \"$oauth_name\": an AI client works as the account that connected it, so an admin connects with a second account that is not an admin (ADR-0017)" ;;
+      full) warn "the account $oauth_email holds a token of the OAuth client $oauth_id \"$oauth_name\" with mb:full, which reaches the whole API of Metabase: ./agoranomos ai revoke $oauth_id cuts the client off" ;;
+    esac
+  done
 }
 
 cmd_init() {
@@ -1291,6 +1434,12 @@ cmd_up() {
   stop_for_changed_network
   say "Starting the stack. The first start builds the Airflow image, which takes a few minutes..."
   start_stack
+  # At off the OAuth clients of Metabase go, with their tokens, also when the demo failed (ADR-0031).
+  oauth_failed=0
+  deleted_line=""
+  if [ "$(setting METABASE_AI_LEVEL off)" = off ]; then
+    if oauth_delete ""; then deleted_line=$(oauth_deleted_line); else oauth_failed=1; fi
+  fi
   # Only demo-init failed: Airflow and Metabase run, and its log names what to look at in them. up
   # still fails, so that a start that is not complete never passes as one.
   [ "$demo_failed" -eq 0 ] || die "the stack is up, but the demo is not ready"
@@ -1310,6 +1459,14 @@ cmd_up() {
     warn "$job_warning"
   done
   groups_line=$(printf '%s\n' "$job_lines" | sed -n 's/^metabase-init: groups of the setup: //p' | tail -n 1)
+  # The admin accounts and the tokens with mb:full that the OAuth clients hold, above off.
+  if [ "$(setting METABASE_AI_LEVEL off)" != off ]; then
+    oauth_warnings ||
+      warn "could not read the OAuth clients from the database of Metabase: the error above says why"
+  fi
+  [ "$oauth_failed" -eq 0 ] ||
+    die "the stack is up, but the OAuth clients of Metabase are not deleted, as the level off asks (ADR-0031): the error above says why. ./agoranomos ai set off deletes them"
+  [ -z "$deleted_line" ] || say "$deleted_line"
   if [ "$(setting METABASE_AI_LEVEL off)" = off ]; then
     say "$(ai_summary) ./agoranomos ai set build --default explore turns it on."
   elif [ -n "$groups_line" ]; then
@@ -1825,6 +1982,139 @@ ai_diff() {
   esac
 }
 
+# Register an OAuth client of the MCP server of Metabase (ADR-0031): claude, the Claude apps, in
+# server mode; claude-code [--port <port>], Claude Code; or <name> --redirect-uri <uri>..., another
+# client. metabase-init registers it, in a container of its own, through the network of the stack,
+# as the proxy of server mode closes registration to the internet, and prints the client ID alone.
+ai_connect() {
+  ai_connect_usage="usage: ./agoranomos ai connect claude, ./agoranomos ai connect claude-code [--port <port>], or ./agoranomos ai connect <name> --redirect-uri <uri>"
+  [ "$#" -ge 1 ] || die "$ai_connect_usage"
+  [ "$(setting METABASE_AI_LEVEL off)" != off ] ||
+    die "AI access in Metabase is off, and so is its MCP server: ./agoranomos ai set build --default explore turns it on, and ./agoranomos up applies it"
+  message=$(ai_problem)
+  [ -z "$message" ] || die "$message"
+  client=$1
+  shift
+  case "$client" in
+    claude)
+      [ "$#" -eq 0 ] || die "ai connect claude takes no options"
+      server_mode ||
+        die "the Claude apps reach Metabase from the internet, which only server mode allows: in local mode Metabase listens on 127.0.0.1. ./agoranomos ai connect claude-code connects Claude Code"
+      client_name="Claude"
+      set -- "$CLAUDE_CALLBACK"
+      ;;
+    claude-code)
+      client_port=$CLAUDE_CODE_PORT
+      while [ "$#" -gt 0 ]; do
+        case "$1" in
+          --port)
+            [ "$#" -ge 2 ] || die "--port needs a port, such as --port $CLAUDE_CODE_PORT"
+            client_port=$2
+            shift 2
+            ;;
+          *) die "unknown option of ai connect claude-code: $1 (it takes --port <port>)" ;;
+        esac
+      done
+      case "$client_port" in
+        '' | *[!0-9]*) die "--port takes a port from 1024 to 65535" ;;
+      esac
+      if [ "${#client_port}" -gt 5 ] || [ "$client_port" -lt 1024 ] || [ "$client_port" -gt 65535 ]; then
+        die "--port takes a port from 1024 to 65535"
+      fi
+      client_name="Claude Code"
+      # Claude Code returns to localhost; version 2.1.229 returned to 127.0.0.1 instead.
+      set -- "http://localhost:$client_port/callback" "http://127.0.0.1:$client_port/callback"
+      ;;
+    -*) die "$ai_connect_usage" ;;
+    *)
+      client_name=$client
+      client_uris=""
+      while [ "$#" -gt 0 ]; do
+        case "$1" in
+          --redirect-uri)
+            [ "$#" -ge 2 ] || die "--redirect-uri needs the address to which the client returns, as its documentation gives it"
+            case "$2" in
+              '' | *[[:space:]]*) die "an address to return to has no spaces: $2" ;;
+            esac
+            client_uris="${client_uris:+$client_uris }$2"
+            shift 2
+            ;;
+          *) die "unknown option of ai connect: $1 (another client takes --redirect-uri <uri>)" ;;
+        esac
+      done
+      [ -n "$client_uris" ] || die "$ai_connect_usage"
+      # The addresses have no spaces, so they split on them.
+      # shellcheck disable=SC2086
+      set -- $client_uris
+      ;;
+  esac
+  metabase_is_up || die "Metabase is not running: start the stack with ./agoranomos up"
+  if network_is_stale; then
+    die "the network of the stack is not the one that this release asks for, so Compose cannot run the registration: run ./agoranomos up first, which makes it again (ADR-0023)"
+  fi
+  client_id=$(compose run --rm --no-deps -T metabase-init \
+    python /opt/agoranomos/metabase/metabase_init.py ai-connect "$client_name" "$@" < /dev/null) ||
+    die "the client is not registered: the line above says why"
+  case "$client_id" in
+    '' | *[!A-Za-z0-9._~-]*) die "metabase-init gave no client ID: see ./agoranomos logs metabase" ;;
+  esac
+  say "Registered the OAuth client \"$client_name\". Its client ID: $client_id"
+  case "$client" in
+    claude)
+      say "In Claude, open Customize > Connectors and add a custom connector; on a Team or Enterprise plan, an Owner adds it in Organization settings > Connectors > Add > Custom:"
+      say "  Name: $MCP_SERVER_NAME"
+      say "  URL: $(mcp_url)"
+      say "  OAuth client: Use your own OAuth client, with the client ID $client_id and no secret (under Advanced settings)"
+      say "Each person then connects with their own account of Metabase, which is not an admin."
+      ;;
+    claude-code)
+      say "Add Metabase to Claude Code, then run /mcp in Claude Code and sign in with an account of Metabase that is not an admin:"
+      say "  claude mcp add --transport http --client-id $client_id --callback-port $client_port $MCP_SERVER_NAME $(mcp_url)"
+      ;;
+    *)
+      say "The client connects to $(mcp_url) with OAuth, PKCE and this client ID, and no secret. Each person signs in with an account of Metabase that is not an admin."
+      ;;
+  esac
+  say "./agoranomos ai clients lists the clients, and ./agoranomos ai revoke $client_id cuts this one off."
+}
+
+# The OAuth clients of Metabase, from its application database (ADR-0031): the client ID, the
+# name, the hosts that the client returns to, the day it registered, and the accounts that hold a
+# live token of it.
+ai_clients() {
+  [ "$#" -eq 0 ] || die "usage: ./agoranomos ai clients"
+  running_service platform-db ||
+    die "the database of Metabase is not running: start the stack with ./agoranomos up"
+  clients_rows=$(oauth_clients_sql | metabase_sql) ||
+    die "could not read the OAuth clients from the database of Metabase: the error above says why"
+  if [ -z "$clients_rows" ]; then
+    say "Metabase has no OAuth client. ./agoranomos ai connect <client> registers one."
+    return 0
+  fi
+  say "The OAuth clients of Metabase, by client ID:"
+  printf '%s\n' "$clients_rows" | while IFS="$FIELD_SEPARATOR" read -r row_id row_name row_hosts row_day row_accounts; do
+    say "  $row_id  \"$row_name\", returns to ${row_hosts:-no address}, registered on $row_day"
+    say "      connected now: ${row_accounts:-nobody}"
+  done
+  say "./agoranomos ai revoke <client ID> cuts a client off."
+}
+
+# Delete one OAuth client of Metabase, with its tokens and codes, as the level off deletes them all
+# (ADR-0031). The people who connected through it connect again with a new client ID.
+ai_revoke() {
+  [ "$#" -eq 1 ] || die "usage: ./agoranomos ai revoke <client ID>, with a client ID that ./agoranomos ai clients shows"
+  case "$1" in
+    '' | *[!A-Za-z0-9._~-]*) die "that is not a client ID: ./agoranomos ai clients shows them" ;;
+  esac
+  running_service platform-db ||
+    die "the database of Metabase is not running: start the stack with ./agoranomos up"
+  oauth_delete "WHERE client_id = :'client'" --set=client="$1" ||
+    die "could not delete the OAuth client from the database of Metabase: the error above says why"
+  [ "$oauth_clients" -gt 0 ] ||
+    die "Metabase has no OAuth client with the client ID $1: ./agoranomos ai clients shows them"
+  say "Deleted the OAuth client $1, with its $oauth_tokens tokens: Metabase refuses them now. The people who connected through it connect again with a client ID from ./agoranomos ai connect."
+}
+
 # AI access in Metabase (ADR-0017). ai shows the level, the default level and the two switches that
 # follow the level; ai set <level> [--default <level>] writes them into .env, and ./agoranomos up
 # applies them. A line is written only when its value changes, so that a line with quotes or a
@@ -1855,11 +2145,20 @@ cmd_ai() {
     fi
     return 0
   fi
-  if [ "$1" = diff ]; then
-    [ "$#" -eq 1 ] || check_failed "usage: ./agoranomos ai diff"
-    ai_diff
-  fi
-  [ "$1" = set ] || die "usage: ./agoranomos ai, ./agoranomos ai diff, or ./agoranomos ai set <level> [--default <level>]"
+  case "$1" in
+    diff)
+      [ "$#" -eq 1 ] || check_failed "usage: ./agoranomos ai diff"
+      ai_diff
+      ;;
+    connect | clients | revoke)
+      ai_command=$1
+      shift
+      "ai_$ai_command" "$@"
+      return 0
+      ;;
+    set) ;;
+    *) die "usage: ./agoranomos ai [diff | set <level> [--default <level>] | connect <client> | clients | revoke <client ID>]" ;;
+  esac
   shift
   [ "$#" -ge 1 ] || die "usage: ./agoranomos ai set <level> [--default <level>], with a level of $(ai_offered_words)"
   new_level=$1
@@ -1903,6 +2202,14 @@ cmd_ai() {
     [ "$(env_get "$ai_key")" = "${ai_pair#*=}" ] || env_set "$ai_key" "${ai_pair#*=}"
   done
   say "$(ai_summary)"
+  # At off the OAuth clients go at once, with their tokens, while the stack runs; otherwise the next
+  # up deletes them (ADR-0031).
+  if [ "$new_level" = off ] && running_service platform-db; then
+    oauth_delete "" ||
+      die "could not delete the OAuth clients of Metabase: the error above says why. ./agoranomos up deletes them too"
+    deleted_line=$(oauth_deleted_line)
+    [ -z "$deleted_line" ] || say "$deleted_line"
+  fi
   say "./agoranomos up applies it."
 }
 
@@ -1926,7 +2233,8 @@ Commands:
   logs          Show the logs: the last 200 lines, or pass options and services to docker compose logs
   metadata      metadata diff: show what up would change in the metadata of the marts in Metabase
   credentials   Show where to sign in to Airflow and Metabase, and where the passwords are
-  ai            Show the level of AI access in Metabase (ai set <level> [--default <level>]: change it; ai diff: what up would change)
+  ai            Show the level of AI access in Metabase (ai set <level> [--default <level>]: change it; ai diff: what up would change;
+                ai connect <client>, ai clients, ai revoke <client ID>: the OAuth clients of its MCP server)
   help          Show this help
 
 Documentation: docs/reference/command-line.md
