@@ -488,12 +488,56 @@ def diff(env: Mapping[str, str]) -> int:
     return DIFF_NOTHING
 
 
+def ai_check(env: Mapping[str, str], what: str) -> int:
+    """The checks of AI access for ./agoranomos ai, which change nothing (ADR-0017). ai-diff prints
+    what the next start would change in the permissions of the level, and exits with 0 when
+    nothing, 3 when something, and 2 when the check could not run, as diff does. ai-groups prints
+    the groups of the setup and how many people each has."""
+    try:
+        problem = ai_access.problem(env)
+        if problem:
+            raise SetupError(problem)
+        config = Config.from_env(env)
+        registry = content.Registry(config.content_registry)
+        metabase = Metabase(config.url, timeout=10)
+        if not healthy(metabase):
+            raise SetupError(
+                f"Metabase does not answer at {config.url}: start the stack with ./agoranomos up"
+            )
+        sign_in(metabase, config.admin_email, config.admin_password)
+        if what == "ai-groups":
+            groups = ai_access.setup_groups(metabase, registry)
+            print(f"Groups of the setup: {ai_access.members_line(groups)}.")
+            return DIFF_NOTHING
+        warehouse = find_warehouse(list_databases(metabase), config, warn=False)
+        if warehouse is None:
+            raise SetupError("Metabase has no connection to the warehouse: run ./agoranomos up")
+        count = ai_access.apply(metabase, registry, warehouse["id"], env, print, write=False)
+    except (SetupError, content.ContentError, ai_access.AccessError) as error:
+        print(f"ai {what.removeprefix('ai-')}: {error}", file=sys.stderr)
+        return DIFF_FAILED
+    except SHAPE_ERRORS as error:
+        message = unexpected_shape("Metabase", error, LOGS_HINT)
+        print(f"ai {what.removeprefix('ai-')}: {message}", file=sys.stderr)
+        return DIFF_FAILED
+    if count:
+        print(f"{metadata.counted(count, 'change')} to apply: run ./agoranomos up")
+        return DIFF_CHANGES
+    print("Metabase has the permissions of the level of .env: nothing to change")
+    return DIFF_NOTHING
+
+
 def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> int:
     environment = os.environ if env is None else env
-    if list(argv) == ["diff"]:
+    arguments = list(argv)
+    if arguments == ["diff"]:
         return diff(environment)
-    if argv:
-        print("metabase-init: usage: metabase_init.py [diff]", file=sys.stderr)
+    if arguments in (["ai-diff"], ["ai-groups"]):
+        return ai_check(environment, arguments[0])
+    if arguments:
+        print(
+            "metabase-init: usage: metabase_init.py [diff | ai-diff | ai-groups]", file=sys.stderr
+        )
         return 2
     # The level of AI access and its switches, which Metabase already runs with (ADR-0017): a start
     # through plain docker compose reaches this check without the one of ./agoranomos up.
@@ -523,6 +567,13 @@ def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> in
         # The permissions of the level of AI access, above off (ADR-0017): after the lock-down of
         # the content of the package, which they keep.
         ai_access.apply(metabase, registry, database_id, environment, log)
+        # What the start warns about, which ./agoranomos up shows, and the groups of the setup with
+        # their members, which it adds to its line about AI access.
+        for warning in ai_access.warnings(metabase, registry, environment):
+            log(f"warning: {warning}")
+        if ai_access.settings(environment)["METABASE_AI_LEVEL"] != "off":
+            groups = ai_access.setup_groups(metabase, registry)
+            log(f"groups of the setup: {ai_access.members_line(groups)}")
     except (
         SetupError,
         metadata.MetadataError,

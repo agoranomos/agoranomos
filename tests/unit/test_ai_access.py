@@ -451,3 +451,220 @@ def test_off_changes_no_permission():
     metabase = FakeMetabase()
     ai_access.apply(metabase, None, 1, {"METABASE_AI_LEVEL": "off"}, print)
     assert metabase.calls == []
+
+
+# The dry run of ./agoranomos ai diff.
+
+
+def test_the_dry_run_names_the_groups_and_collections_to_create_and_creates_none(tmp_path):
+    store = registry(tmp_path)
+    groups = [*GROUPS, {"id": 9, "name": "agoranomos: explorers", "entity_id": "c" * 21}]
+    metabase = FakeMetabase({("GET", "/api/permissions/group"): groups})
+    log = []
+    found = ai_access.ensure_groups(metabase, store, "build", "answers", log.append, write=False)
+    assert found == {"9": ("explore", "agoranomos: explorers")}
+    spaces = ai_access.ensure_spaces(metabase, store, log.append, write=False)
+    assert spaces == {}
+    assert log == [
+        'would adopt: group "agoranomos: explorers", which has the name of a group of the setup',
+        'would create: group "Agoranomos: Builders"',
+        'would create: collection access/workspace "Workspace"',
+        'would create: collection access/reports "Reports"',
+    ]
+    assert [c for c in metabase.calls if c[0] != "GET"] == []
+    assert store.items == {}
+
+
+def test_the_dry_run_names_a_collection_in_the_trash_and_brings_none_back(tmp_path):
+    store = registry(tmp_path)
+    store.set("access/workspace", "collection", "1" * 21)
+    store.set("access/reports", "collection", "2" * 21)
+    metabase = FakeMetabase(
+        {
+            ("GET", f"/api/collection/{'1' * 21}"): {"id": 21, "name": "Workspace"},
+            ("GET", f"/api/collection/{'2' * 21}"): {"id": 22, "name": "Reports", "archived": True},
+        }
+    )
+    log = []
+    spaces = ai_access.ensure_spaces(metabase, store, log.append, write=False)
+    assert set(spaces) == {"workspace", "reports"}
+    assert log == ["would restore from the trash: collection access/reports"]
+    assert [c for c in metabase.calls if c[0] != "GET"] == []
+
+
+def test_the_dry_run_of_a_graph_prints_its_lines_and_writes_nothing():
+    metabase = FakeMetabase({("GET", "/api/collection/graph"): {"revision": 4, "groups": {}}})
+    log = []
+    count = ai_access.put_graph(
+        metabase,
+        "/api/collection/graph",
+        lambda g: ({"1": {"root": "read"}}, ["a line", "another line"]),
+        log.append,
+        write=False,
+    )
+    assert count == 2
+    assert log == ["a line", "another line"]
+    assert [c for c in metabase.calls if c[0] == "PUT"] == []
+
+
+def test_ai_diff_and_ai_groups_stop_on_a_problem_before_they_reach_metabase(capsys):
+    env = {**FRESH, "METABASE_URL": "http://127.0.0.1:9", "METABASE_MCP": "true"}
+    assert mi.main(env, ["ai-diff"]) == mi.DIFF_FAILED
+    assert capsys.readouterr().err.startswith("ai diff: METABASE_MCP and METABASE_MCP_SQL in .env")
+    assert mi.main(env, ["ai-groups"]) == mi.DIFF_FAILED
+    assert capsys.readouterr().err.startswith("ai groups: METABASE_MCP and")
+
+
+# The groups of the setup, and what a start warns about.
+
+
+def test_the_groups_of_the_setup_are_those_the_registry_knows_from_the_lowest_level(tmp_path):
+    store = registry(tmp_path)
+    store.set("access/group/build", "group", "c" * 21)
+    store.set("access/group/explore", "group", "d" * 21)
+    store.set("access/group/answers", "group", "e" * 21)
+    groups = [
+        *GROUPS,
+        {"id": 9, "name": "Agoranomos: Builders", "entity_id": "c" * 21, "member_count": 2},
+        {"id": 8, "name": "Agoranomos: Explorers", "entity_id": "d" * 21, "member_count": 1},
+    ]
+    metabase = FakeMetabase({("GET", "/api/permissions/group"): groups})
+    found = ai_access.setup_groups(metabase, store)
+    assert [g["id"] for g in found] == [8, 9]
+    assert ai_access.members_line(found) == (
+        '"Agoranomos: Explorers" 1 member, "Agoranomos: Builders" 2 members'
+    )
+    assert ai_access.members_line([]) == "no group of the setup yet"
+
+
+@pytest.mark.parametrize(
+    ("recipient", "counted"),
+    [
+        ({"id": 3, "email": "ann@example.com"}, 0),
+        ({"email": "ann@example.com"}, 0),
+        ({"email": "Ann@Example.com"}, 0),
+        ({"email": "someone@example.org"}, 1),
+        ({"id": 40, "type": "notification-recipient/user", "user_id": 3}, 0),
+        ({"id": 41, "type": "notification-recipient/group", "permissions_group_id": 5}, 0),
+        (
+            {"id": 42, "type": "notification-recipient/raw-value", "details": {"value": "x@y.org"}},
+            1,
+        ),
+        (
+            {
+                "id": 43,
+                "type": "notification-recipient/raw-value",
+                "details": {"value": "ann@example.com"},
+            },
+            0,
+        ),
+    ],
+)
+def test_a_recipient_is_outside_when_no_account_has_its_email(recipient, counted):
+    assert ai_access.outside([recipient], frozenset({"ann@example.com"})) == counted
+
+
+def warned(answers, env=None, store=None):
+    """The warnings of a start, with Ann the one user, Builders of the setup with Ann in it, and
+    the answers of the test."""
+    metabase = FakeMetabase(
+        {
+            ("GET", "/api/user"): {"data": [{"id": 3, "email": "ann@example.com"}]},
+            ("GET", "/api/permissions/group"): [
+                *GROUPS,
+                {"id": 9, "name": "Agoranomos: Builders", "entity_id": "c" * 21, "member_count": 1},
+            ],
+            ("GET", "/api/permissions/group/9"): {"members": [{"user_id": 3}]},
+            ("GET", "/api/card?f=all"): [],
+            **answers,
+        }
+    )
+    settings = env or {**FRESH, "METABASE_AI_LEVEL": "build", "METABASE_MCP": "true"}
+    return ai_access.warnings(metabase, store, settings)
+
+
+def builders_store(tmp_path):
+    store = registry(tmp_path)
+    store.set("access/group/build", "group", "c" * 21)
+    return store
+
+
+def test_a_start_warns_about_subscriptions_that_send_outside_metabase(tmp_path):
+    pulses = [
+        {
+            "id": 1,
+            "dashboard_id": 7,
+            "channels": [
+                {"channel_type": "email", "recipients": [{"email": "x@y.org"}, {"id": 3}]},
+                {"channel_type": "slack", "recipients": []},
+                {"channel_type": "email", "enabled": False, "recipients": [{"email": "z@y.org"}]},
+            ],
+        },
+        {"id": 2, "dashboard_id": 7, "channels": [{"channel_type": "email", "recipients": []}]},
+        {"id": 3, "archived": True, "channels": [{"channel_type": "slack"}]},
+    ]
+    lines = warned({("GET", "/api/pulse"): pulses}, store=builders_store(tmp_path))
+    assert lines == [
+        "the subscription 1 of the dashboard 7 sends to 2 recipients outside Metabase: check it "
+        "in the menu of the dashboard"
+    ]
+
+
+def test_a_start_warns_about_alerts_that_send_outside_metabase(tmp_path):
+    alerts = [
+        {
+            "id": 5,
+            "payload_type": "notification/card",
+            "payload": {"card_id": 12},
+            "handlers": [
+                {
+                    "channel_type": "channel/email",
+                    "recipients": [
+                        {"type": "notification-recipient/user", "user_id": 3},
+                        {"type": "notification-recipient/raw-value", "details": {"value": "x@y"}},
+                    ],
+                }
+            ],
+        },
+        {
+            "id": 6,
+            "active": False,
+            "payload_type": "notification/card",
+            "handlers": [{"channel_type": "channel/slack"}],
+        },
+    ]
+    answers = {("GET", "/api/notification?payload_type=notification/card"): alerts}
+    lines = warned(answers, store=builders_store(tmp_path))
+    assert lines == [
+        "the alert 5 on the question 12 sends to 1 recipient outside Metabase: check it in the "
+        "menu of the question"
+    ]
+
+
+def test_a_start_warns_about_sql_questions_of_members_but_not_those_of_the_package(tmp_path):
+    store = builders_store(tmp_path)
+    store.set("agoranomos/card/spend", "card", "p" * 21)
+    cards = [
+        {"id": 30, "query_type": "native", "creator_id": 3, "entity_id": "q" * 21},
+        {"id": 31, "query_type": "native", "creator_id": 3, "entity_id": "p" * 21},
+        {"id": 32, "query_type": "query", "creator_id": 3, "entity_id": "r" * 21},
+        {"id": 33, "query_type": "native", "creator_id": 4, "entity_id": "s" * 21},
+        {"id": 34, "query_type": "native", "creator_id": 3, "archived": True},
+    ]
+    lines = warned({("GET", "/api/card?f=all"): cards}, store=store)
+    assert lines == [
+        "members of the groups of the setup saved 1 SQL question, which no level of this release "
+        "writes and which keep running: 30"
+    ]
+
+
+def test_a_start_warns_about_a_group_of_the_setup_without_members_above_off(tmp_path):
+    store = registry(tmp_path)
+    store.set("access/group/explore", "group", "d" * 21)
+    empty = [*GROUPS, {"id": 8, "name": "Agoranomos: Explorers", "entity_id": "d" * 21}]
+    answers = {("GET", "/api/permissions/group"): empty, ("GET", "/api/permissions/group/8"): {}}
+    assert warned(answers, store=store) == [
+        'the group "Agoranomos: Explorers" has no members: an admin puts people into it in '
+        "Admin > People > Groups"
+    ]
+    assert warned(answers, env=FRESH, store=store) == []

@@ -2,15 +2,17 @@
 
 The tests run when .env sets a level above off, as a new installation does: metabase-init has set
 the permissions of the level on its start. They read the groups, the data graph and the collection
-graph, and run metabase-init once more, which must change nothing then. They print names, levels
-and permissions, never a value of .env.
+graph, and run metabase-init once more, and the dry run of ./agoranomos ai diff, which must find
+nothing to change then. They print names, levels and permissions, never a value of .env.
 """
+
+import subprocess
 
 import ai_access
 import pytest
 from metabase_content import get, group_ids, run_job, warehouse_database_id
 from services import AI_LEVEL, AI_ON
-from stack_helpers import secrets
+from stack_helpers import REPO_ROOT, leaked, secrets
 
 pytestmark = pytest.mark.skipif(not AI_ON, reason="AI access in Metabase is off in .env")
 
@@ -114,3 +116,33 @@ def test_metabase_init_changes_no_permission_when_they_are_set(env):
     assert not found, f"the output of metabase-init holds the values of {found}"
     assert code == 0, f"metabase-init exited with {code}"
     assert changes == [], changes
+
+
+def agoranomos(env, *args):
+    """A command of ./agoranomos, whose output must hold no value of .env."""
+    result = subprocess.run(
+        [str(REPO_ROOT / "agoranomos"), *args],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    found = leaked(secrets(env), [result.stdout, result.stderr])
+    assert not found, f"the output of ./agoranomos {' '.join(args)} holds the values of {found}"
+    return result
+
+
+def test_the_dry_run_finds_nothing_to_change_after_a_start(env):
+    result = agoranomos(env, "ai", "diff")
+    assert result.returncode == 0, f"ai diff exited with {result.returncode}: {result.stderr}"
+    last = result.stdout.splitlines()[-1]
+    assert last == "Metabase has the permissions of the level of .env: nothing to change"
+
+
+def test_ai_shows_the_groups_of_the_setup_and_their_members(env, default):
+    result = agoranomos(env, "ai")
+    assert result.returncode == 0, f"ai exited with {result.returncode}: {result.stderr}"
+    line = result.stdout.splitlines()[-1]
+    assert line.startswith("Groups of the setup: "), line
+    for level in setup_levels(default):
+        assert f'"{ai_access.GROUPS[level]}" ' in line, line

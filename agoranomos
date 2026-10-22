@@ -1295,8 +1295,25 @@ cmd_up() {
   # still fails, so that a start that is not complete never passes as one.
   [ "$demo_failed" -eq 0 ] || die "the stack is up, but the demo is not ready"
   say "$(paint ok 'The stack is up.' 1) ./agoranomos status shows every service."
+  # What metabase-init warns about, and the groups of the setup (ADR-0017): the warnings do not
+  # stop the start. Its container keeps the logs of earlier starts, so only those since it started
+  # this time count, by the clock of Docker.
+  job_lines=""
+  job_id=$(compose ps --all --quiet metabase-init 2> /dev/null | head -n 1) || job_id=""
+  if [ -n "$job_id" ]; then
+    job_started=$(docker inspect --format '{{.State.StartedAt}}' "$job_id" 2> /dev/null) || job_started=""
+    if [ -n "$job_started" ]; then
+      job_lines=$(compose logs --no-log-prefix --no-color --since "$job_started" metabase-init 2> /dev/null) || job_lines=""
+    fi
+  fi
+  printf '%s\n' "$job_lines" | sed -n 's/^metabase-init: warning: //p' | while IFS= read -r job_warning; do
+    warn "$job_warning"
+  done
+  groups_line=$(printf '%s\n' "$job_lines" | sed -n 's/^metabase-init: groups of the setup: //p' | tail -n 1)
   if [ "$(setting METABASE_AI_LEVEL off)" = off ]; then
     say "$(ai_summary) ./agoranomos ai set build --default explore turns it on."
+  elif [ -n "$groups_line" ]; then
+    say "$(ai_summary) Groups of the setup: $groups_line. ./agoranomos ai shows the levels."
   else
     say "$(ai_summary) ./agoranomos ai shows the levels."
   fi
@@ -1788,6 +1805,26 @@ cmd_credentials() {
   say "The passwords are the values of these settings in $ENV_FILE, which only you can read."
 }
 
+# The dry run of the permissions of the level of AI access in Metabase: metabase-init, in a
+# container of its own, prints what the next up would change in them, and changes nothing. It
+# exits with 0, 1 and 2 as metadata diff does.
+ai_diff() {
+  message=$(ai_problem)
+  [ -z "$message" ] || check_failed "$message"
+  metabase_is_up || check_failed "Metabase is not running: start the stack with ./agoranomos up"
+  if network_is_stale; then
+    check_failed "the network of the stack is not the one that this release asks for, so Compose cannot run the dry run: run ./agoranomos up first, which makes it again (ADR-0023)"
+  fi
+  code=0
+  compose run --rm --no-deps -T metabase-init \
+    python /opt/agoranomos/metabase/metabase_init.py ai-diff < /dev/null || code=$?
+  case "$code" in
+    0 | 2) exit "$code" ;;
+    3) exit 1 ;;
+    *) check_failed "the dry run did not finish (exit code $code); the error above names the cause" ;;
+  esac
+}
+
 # AI access in Metabase (ADR-0017). ai shows the level, the default level and the two switches that
 # follow the level; ai set <level> [--default <level>] writes them into .env, and ./agoranomos up
 # applies them. A line is written only when its value changes, so that a line with quotes or a
@@ -1806,9 +1843,23 @@ cmd_ai() {
     say "The levels that this release offers: $(ai_offered_words). ./agoranomos ai set <level> [--default <level>] changes them."
     message=$(ai_problem)
     [ -z "$message" ] || die "$message"
+    # The groups of the setup and their members, which Metabase knows: only while it runs.
+    if [ "$(setting METABASE_AI_LEVEL off)" != off ]; then
+      if metabase_is_up && ! network_is_stale; then
+        compose run --rm --no-deps -T metabase-init \
+          python /opt/agoranomos/metabase/metabase_init.py ai-groups < /dev/null ||
+          warn "could not read the groups of the setup from Metabase: the line above says why"
+      else
+        say "The groups of the setup show while Metabase runs: ./agoranomos up starts it."
+      fi
+    fi
     return 0
   fi
-  [ "$1" = set ] || die "usage: ./agoranomos ai, or ./agoranomos ai set <level> [--default <level>]"
+  if [ "$1" = diff ]; then
+    [ "$#" -eq 1 ] || check_failed "usage: ./agoranomos ai diff"
+    ai_diff
+  fi
+  [ "$1" = set ] || die "usage: ./agoranomos ai, ./agoranomos ai diff, or ./agoranomos ai set <level> [--default <level>]"
   shift
   [ "$#" -ge 1 ] || die "usage: ./agoranomos ai set <level> [--default <level>], with a level of $(ai_offered_words)"
   new_level=$1
@@ -1875,7 +1926,7 @@ Commands:
   logs          Show the logs: the last 200 lines, or pass options and services to docker compose logs
   metadata      metadata diff: show what up would change in the metadata of the marts in Metabase
   credentials   Show where to sign in to Airflow and Metabase, and where the passwords are
-  ai            Show the level of AI access in Metabase (ai set <level> [--default <level>]: change it)
+  ai            Show the level of AI access in Metabase (ai set <level> [--default <level>]: change it; ai diff: what up would change)
   help          Show this help
 
 Documentation: docs/reference/command-line.md
