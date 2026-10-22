@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
-from services import BASE_AIRFLOW, airflow_names, airflow_services
+from services import AI_ON, BASE_AIRFLOW, airflow_names, airflow_services
 from stack_helpers import (
     FILES,
     REPO_ROOT,
@@ -632,8 +632,8 @@ def test_only_the_setup_jobs_hold_the_registry_of_the_content(variant):
 
 # Metabase 0.63 and 0.64 have these on by default, and compose.yaml sets each with an environment
 # variable. The first is the master switch that the MCP server and the Agent API also require, so
-# they are checked one by one. The first three follow the level of AI access in .env (ADR-0017),
-# which the stack tests run at off; the others are off at every level (ADR-0031).
+# they are checked one by one. The first three follow the level of AI access in .env (ADR-0017);
+# the others are off at every level (ADR-0031).
 METABASE_AI_SWITCHES = (
     "MB_AI_FEATURES_ENABLED",
     "MB_MCP_ENABLED",
@@ -652,11 +652,15 @@ AI_ACCESS_SETTINGS = (
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
-def test_metabase_switches_off_every_ai_entry_point_with_an_environment_variable(variant):
-    # The values are flags, so a failed assertion may print them.
+def test_metabase_sets_every_ai_entry_point_with_an_environment_variable(variant):
+    # The MCP server and its master switch follow the level of .env, and the rest is off: the
+    # releases offer no level with the SQL of a client yet. The values are flags.
     environment = rendered(variant)["metabase"]["environment"]
     states = {name: environment.get(name) for name in METABASE_AI_SWITCHES}
-    assert states == dict.fromkeys(METABASE_AI_SWITCHES, "false"), states
+    expected = dict.fromkeys(METABASE_AI_SWITCHES, "false")
+    if AI_ON:
+        expected |= dict.fromkeys(("MB_AI_FEATURES_ENABLED", "MB_MCP_ENABLED"), "true")
+    assert states == expected, states
 
 
 def test_the_switches_of_metabase_follow_the_settings_of_the_level():

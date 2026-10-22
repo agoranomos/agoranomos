@@ -9,9 +9,11 @@ test of the move runs last: it rebuilds the content. Answers of Metabase and the
 demo-init could hold secrets: the assertions print names, counts, sums and states only.
 """
 
+import contextlib
 from datetime import date, timedelta
 from decimal import Decimal
 
+import content
 import demo_init
 import pytest
 from agoranomos_pipelines.demo import platforms
@@ -417,17 +419,64 @@ def test_a_collection_with_the_same_name_is_not_taken_for_the_package(env, metab
         put(metabase_url, session, f"/api/collection/{decoy['id']}", {"archived": True})
 
 
+# Leave in the registry of the content, the file of argv[1], only the entries whose keys start
+# with argv[2], in one step, as the jobs save it.
+KEEP_ACCESS = """
+import json, os, sys
+path, prefix = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as registry:
+    document = json.load(registry)
+document["items"] = {k: v for k, v in document["items"].items() if k.startswith(prefix)}
+with open(path + ".tmp", "w", encoding="utf-8") as registry:
+    json.dump(document, registry)
+os.replace(path + ".tmp", path)
+"""
+
+
+@contextlib.contextmanager
+def all_users_as_on_v0_1(metabase_url, session):
+    """All Users with the permissions that Metabase gives them, as on v0.1: Curate on the root,
+    and native queries on the warehouse. A level of AI access gives them less (ADR-0017), View on
+    the root and the query builder at most, so a test that makes v0.1 has these while it does, and
+    the permissions of the level come back after. What it makes in the meantime keeps Curate."""
+    _, all_users = group_ids(metabase_url, session)
+    warehouse = str(warehouse_database_id(metabase_url, session))
+    collections = get(metabase_url, session, "/api/collection/graph")
+    root = (collections["groups"].get(all_users) or {}).get("root", "none")
+    data = get(metabase_url, session, "/api/permissions/graph")
+    queries = ((data["groups"].get(all_users) or {}).get(warehouse) or {}).get(
+        "create-queries", "no"
+    )
+
+    def give(root_value, queries_value):
+        graph = get(metabase_url, session, "/api/collection/graph")
+        body = {"revision": graph["revision"], "groups": {all_users: {"root": root_value}}}
+        put(metabase_url, session, "/api/collection/graph", body)
+        graph = get(metabase_url, session, "/api/permissions/graph")
+        groups = {all_users: {warehouse: {"create-queries": queries_value}}}
+        body = {"revision": graph["revision"], "groups": groups}
+        put(metabase_url, session, "/api/permissions/graph", body)
+
+    give("write", "query-builder-and-native")
+    try:
+        yield
+    finally:
+        give(root, queries)
+
+
 def test_the_collection_of_v0_1_moves_into_agoranomos(env, metabase_url, session):
     # A Metabase of v0.1, made on this stand: the content of the package goes to the trash, is
     # deleted from it, and leaves the registry. A second account, which may curate the root as on
     # v0.1, makes a decoy of the old name first, with a dashboard of the old name; the admin then
     # makes the collection of v0.1 with its questions and its dashboard; and the second account
-    # adds a question of a name of v0.1 to it.
+    # adds a question of a name of v0.1 to it. The registry keeps the entries of AI access, as
+    # v0.1 had no Workspace or Reports to forget: without them the next start would make the two
+    # collections again.
     root = item(metabase_url, session, "agoranomos")
     put(metabase_url, session, f"/api/collection/{root['id']}", {"archived": True})
     delete(metabase_url, session, f"/api/collection/{root['id']}")
-    removed = in_metabase_init("rm", "-f", REGISTRY)
-    assert removed.returncode == 0, f"the registry was not removed: exit code {removed.returncode}"
+    removed = in_metabase_init("python", "-c", KEEP_ACCESS, REGISTRY, content.ACCESS_PREFIX)
+    assert removed.returncode == 0, f"the registry was not cut down: exit code {removed.returncode}"
     database_id = warehouse_database_id(metabase_url, session)
     native = {"database": database_id, "type": "native", "native": {"query": "SELECT 1"}}
 
@@ -441,7 +490,10 @@ def test_the_collection_of_v0_1_moves_into_agoranomos(env, metabase_url, session
         }
         return post(metabase_url, headers, "/api/card", body)
 
-    with another_account(metabase_url, session) as theirs:
+    with (
+        all_users_as_on_v0_1(metabase_url, session),
+        another_account(metabase_url, session) as theirs,
+    ):
         decoy = post(metabase_url, theirs, "/api/collection", {"name": "Agoranomos demo"})
         decoy_board = post(
             metabase_url,
