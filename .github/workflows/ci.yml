@@ -23,12 +23,12 @@ jobs:
         with:
           fetch-depth: 0 # a full clone: the history scan below needs every commit
           persist-credentials: false
-      - uses: j178/prek-action@af4d4fcb6922b8e6f65c0426947125fcc38794ce # v3.0.2
+      - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
         with:
           prek-version: "v0.5.6"
       - name: Scan the full git history for secrets (gitleaks)
         if: ${{ !cancelled() }}
-        uses: j178/prek-action@af4d4fcb6922b8e6f65c0426947125fcc38794ce # v3.0.2
+        uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
         with:
           prek-version: "v0.5.6"
           cache: false
