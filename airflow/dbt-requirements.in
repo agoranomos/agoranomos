@@ -1,5 +1,5 @@
 # dbt for the image of Agoranomos, in a virtual environment of its own (ADR-0005). To update the
 # lock file after a change here, run in this folder:
-#   uv pip compile dbt-requirements.in --universal --python-version 3.13 --generate-hashes --output-file dbt-requirements.txt
+#   uv pip compile dbt-requirements.in --universal --python-version=3.13 --generate-hashes --output-file=dbt-requirements.txt
 dbt-core==1.12.5
 dbt-postgres==1.11.0

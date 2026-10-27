@@ -15,8 +15,8 @@ AIRFLOW = ROOT / "airflow"
 # the version of ADR-0012.
 BASE_IMAGE = r"apache/airflow:[0-9]+\.[0-9]+\.[0-9]+-python3\.13@sha256:[0-9a-f]{64}"
 LOCK_COMMAND = (
-    "uv pip compile dbt-requirements.in --universal --python-version 3.13 --generate-hashes "
-    "--output-file dbt-requirements.txt"
+    "uv pip compile dbt-requirements.in --universal --python-version=3.13 --generate-hashes "
+    "--output-file=dbt-requirements.txt"
 )
 TELEMETRY = {
     "RUNTIME__DLTHUB_TELEMETRY": "false",
@@ -167,7 +167,9 @@ def test_every_locked_package_has_a_hash():
 
 
 def test_the_lock_file_names_the_command_that_made_it():
-    # Renovate's pip-compile manager reruns the command from this header.
+    # Renovate's pip-compile manager reruns the command from this header. It reads the header
+    # only when an option that takes a value has it after an equal sign (renovatebot/renovate
+    # 44.132.5): with a space, it skips the file with a warning and never updates the lock.
     header = (AIRFLOW / "dbt-requirements.txt").read_text(encoding="utf-8").splitlines()[:2]
     assert header[1].removeprefix("#").strip() == LOCK_COMMAND
     assert LOCK_COMMAND in (AIRFLOW / "dbt-requirements.in").read_text(encoding="utf-8")
