@@ -96,15 +96,24 @@ class Session:
             self.process.wait()
 
 
+def switch_on(env: dict[str, str], server: str) -> bool:
+    """Whether the switch of a server is on in .env; the tests of a server that is off skip."""
+    return env.get({"warehouse": "WAREHOUSE_MCP", "airflow": "AIRFLOW_MCP"}[server]) == "true"
+
+
 @pytest.fixture(scope="module")
-def warehouse_server():
+def warehouse_server(env):
+    if not switch_on(env, "warehouse"):
+        pytest.skip("WAREHOUSE_MCP is off in .env")
     session = Session("warehouse")
     yield session
     session.close()
 
 
 @pytest.fixture(scope="module")
-def airflow_server():
+def airflow_server(env):
+    if not switch_on(env, "airflow"):
+        pytest.skip("AIRFLOW_MCP is off in .env")
     session = Session("airflow")
     yield session
     session.close()
@@ -154,7 +163,9 @@ def test_ai_reader_keeps_the_limits_of_the_decision(env):
         " FROM pg_roles WHERE rolname = 'ai_reader'",
     )
     can_login, connections, config = found.split("|")
-    assert (can_login, connections) == ("t", "3")
+    # It signs in only while the MCP server of the warehouse is on.
+    assert can_login == ("t" if switch_on(env, "warehouse") else "f")
+    assert connections == "3"
     assert set(config.split(",")) == {
         "default_transaction_read_only=on",
         "statement_timeout=1min",
@@ -187,6 +198,8 @@ def test_the_airflow_server_refuses_every_tool_that_writes(airflow_server, tool,
 
 
 def test_the_airflow_user_ai_is_a_viewer(env, airflow_url):
+    if not switch_on(env, "airflow"):
+        pytest.skip("AIRFLOW_MCP is off in .env: the user ai is gone, as a test below checks")
     status, body = http_json(
         "POST",
         f"{airflow_url}/auth/token",
@@ -215,3 +228,14 @@ def test_a_server_whose_switch_is_off_does_not_start(server):
     )
     assert result.returncode == 1
     assert f"./agoranomos ai {server} on" in result.stderr
+
+
+def test_the_airflow_user_ai_is_gone_while_its_switch_is_off(env, airflow_url):
+    if switch_on(env, "airflow"):
+        pytest.skip("AIRFLOW_MCP is on in .env")
+    status, _ = http_json(
+        "POST",
+        f"{airflow_url}/auth/token",
+        {"username": "ai", "password": env["AIRFLOW_AI_PASSWORD"]},
+    )
+    assert status == 401
