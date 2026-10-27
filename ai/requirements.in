@@ -1,0 +1,4 @@
+# The MCP server of Airflow for the image ai (ADR-0007, ADR-0030). To update the lock file after a
+# change here, run in this folder:
+#   uv pip compile requirements.in --universal --python-version=3.13 --generate-hashes --output-file=requirements.txt
+astro-airflow-mcp==0.9.1

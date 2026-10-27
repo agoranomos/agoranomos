@@ -1,8 +1,9 @@
 # The Agoranomos stack. Start it with ./agoranomos up (docs/reference/command-line.md).
 # Settings and secrets come from .env, which ./agoranomos init creates from .env.example; without it,
 # docker compose stops and asks for ./agoranomos init. .env also sets COMPOSE_PROFILES: core is the whole
-# stack in local mode (ADR-0011), demo adds the demo-init job, server adds the proxy of server mode
-# (ADR-0019), and ops the backup service (ADR-0020). Images are pinned by tag and digest, and Renovate
+# stack in local mode (ADR-0011), demo adds the demo-init job, ai the container of the MCP servers of
+# the warehouse and of Airflow in local mode (ADR-0030), server the proxy of server mode (ADR-0019),
+# and ops the backup service (ADR-0020). Images are pinned by tag and digest, and Renovate
 # updates them.
 # Airflow runs on an image of its own, built from airflow/Dockerfile, with the LocalExecutor: the
 # scheduler runs the tasks. compose.celery.yaml adds a broker and a separate worker (CeleryExecutor);
@@ -212,6 +213,9 @@ services:
       WAREHOUSE_LOADER_PASSWORD: ${WAREHOUSE_LOADER_PASSWORD:?run ./agoranomos init}
       WAREHOUSE_TRANSFORMER_PASSWORD: ${WAREHOUSE_TRANSFORMER_PASSWORD:?run ./agoranomos init}
       BACKUP_DB_PASSWORD: ${BACKUP_DB_PASSWORD:?run ./agoranomos init}
+      # The role of MCP Toolbox, which signs in only while its switch is on (ADR-0030).
+      AI_READER_PASSWORD: ${AI_READER_PASSWORD:?run ./agoranomos init}
+      WAREHOUSE_MCP: ${WAREHOUSE_MCP:-false}
       # The role of the results of Celery, which only the CeleryExecutor variant uses
       # (compose.celery.yaml): db-init sets it up in both variants, and signs in as it to delete
       # the old results.
@@ -234,8 +238,8 @@ services:
     security_opt: ["no-new-privileges:true"]
     logging: *logging
 
-  # Migrates the metadata database, creates the admin user and sets the pool of the tasks of dbt, on every
-  # start. The entrypoint of the image migrates the database (_AIRFLOW_DB_MIGRATE) and then runs the
+  # Migrates the metadata database, creates the admin user, keeps the user of the MCP server of Airflow
+  # and sets the pools, on every start. The entrypoint of the image migrates the database (_AIRFLOW_DB_MIGRATE) and then runs the
   # command. The command creates the admin with the Airflow CLI, called inside this Python process: the
   # entrypoint's own way, _AIRFLOW_WWW_USER_CREATE, runs airflow users create --password <the password>,
   # which puts the password on the command line of a process. Here the arguments exist only in sys.argv,
@@ -299,11 +303,46 @@ services:
         # The pool of the loads of the demo, one at a time: those of the history and of the daily load.
         sys.argv = ["airflow", "pools", "set", "demo_load", "1", "The loads of the demo, one at a time"]
         main()
+        # The user ai, as which the MCP server of Airflow signs in (ADR-0030): while its switch is on,
+        # it has the role Viewer alone and the password of .env, set again on every start, so that a
+        # role or a password changed in the Airflow UI goes back; while it is off, the user is
+        # deleted. This goes through the security manager of the FAB provider and not through the
+        # CLI, which would write the password into the audit log of Airflow.
+        from airflow.providers.fab.auth_manager.cli_commands.utils import get_application_builder
+
+        with get_application_builder() as appbuilder:
+            security = appbuilder.sm
+            ai_user = security.find_user(username="ai")
+            if os.environ["AIRFLOW_MCP"] == "true":
+                viewer = security.find_role("Viewer")
+                password = os.environ["AIRFLOW_AI_PASSWORD"]
+                if ai_user is None:
+                    ai_user = security.add_user(
+                        "ai", "Agoranomos", "AI", "ai@agoranomos.invalid", viewer, password
+                    )
+                    if not ai_user:
+                        raise SystemExit("could not create the Airflow user ai")
+                else:
+                    ai_user.roles = [viewer]
+                    ai_user.active = True
+                    if not security.update_user(ai_user) or not security.reset_password(
+                        ai_user.id, password
+                    ):
+                        raise SystemExit("could not update the Airflow user ai")
+                print('The Airflow user "ai" has the role Viewer')
+            elif ai_user is not None:
+                # As airflow users delete does it.
+                ai_user.roles.clear()
+                if not security.del_register_user(ai_user):
+                    raise SystemExit("could not delete the Airflow user ai")
+                print('Deleted the Airflow user "ai": the MCP server of Airflow is off')
     environment:
       <<: *airflow-environment
       _AIRFLOW_DB_MIGRATE: "true"
       AGORANOMOS_ADMIN_EMAIL: ${AGORANOMOS_ADMIN_EMAIL:-admin@example.com}
       AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?run ./agoranomos init}
+      AIRFLOW_MCP: ${AIRFLOW_MCP:-false}
+      AIRFLOW_AI_PASSWORD: ${AIRFLOW_AI_PASSWORD:?run ./agoranomos init}
 
   airflow-apiserver:
     <<: *airflow
@@ -665,6 +704,59 @@ services:
         condition: service_completed_successfully
     # As metabase-init, it writes nothing but the registry of the content, on its volume.
     read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+  # The container of the MCP servers of the warehouse and of Airflow (the ai profile, ADR-0030), in
+  # local mode only: ./agoranomos mcp <server> starts one of them in it with docker compose exec, on
+  # the standard input and output of the AI client, and no port is opened. The container itself only
+  # waits. It is on the data network alone, which reaches warehouse-db and the API of Airflow and has
+  # no route to the internet. It holds the passwords of ai_reader and of the Airflow user ai, and no
+  # other; each server starts only while its switch is on (ai/mcp.sh). Its image, built from ai/,
+  # holds the two servers, and the tools of Toolbox and the script come from the checkout,
+  # read-only. Its limit fits one session of a client at a time.
+  ai:
+    image: agoranomos-ai:local
+    build:
+      context: ./ai
+    pull_policy: build
+    profiles: [ai]
+    restart: unless-stopped
+    user: "65534:65534"
+    mem_limit: ${AI_MEMORY:-384m}
+    memswap_limit: ${AI_MEMORY:-384m}
+    # A small init as the first process, which waits, ends on the signals of Docker at once, and reaps
+    # what a server leaves behind.
+    init: true
+    command: ["sleep", "infinity"]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      HOME: /tmp
+      WAREHOUSE_MCP: ${WAREHOUSE_MCP:-false}
+      AI_READER_PASSWORD: ${AI_READER_PASSWORD:?run ./agoranomos init}
+      AIRFLOW_MCP: ${AIRFLOW_MCP:-false}
+      AIRFLOW_API_URL: http://airflow-apiserver:8080
+      AIRFLOW_USERNAME: ai
+      AIRFLOW_PASSWORD: ${AIRFLOW_AI_PASSWORD:?run ./agoranomos init}
+      # The server refuses every tool that writes, such as triggering or pausing a DAG, before it
+      # reaches Airflow, where the role Viewer refuses it too; and it sends no telemetry, which the
+      # network would block anyway.
+      AF_READ_ONLY: "true"
+      AF_TELEMETRY_DISABLED: "1"
+    # The folder and not its files one by one: a file mounted alone stays the version that the
+    # container started with once an editor replaces it.
+    volumes:
+      - ./ai:/opt/agoranomos/ai:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks: [data]
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      airflow-init:
+        condition: service_completed_successfully
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     logging: *logging

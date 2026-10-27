@@ -287,7 +287,8 @@ def test_the_default_privileges_are_those_of_the_roles_that_create_the_tables(en
         "loader:raw_demo_video:r:{transformer=r/loader}",
         "loader:raw_demo_web:r:{transformer=r/loader}",
         "loader:raw_settings:r:{transformer=r/loader}",
-        "transformer:marts:r:{metabase_reader=r/transformer}",
+        "transformer:marts:r:{metabase_reader=r/transformer,ai_reader=r/transformer}",
+        "transformer:staging:r:{ai_reader=r/transformer}",
     ]
 
 
@@ -315,15 +316,19 @@ def test_the_roles_of_the_layers_sign_in_and_have_no_other_power(env):
         "FROM pg_auth_members WHERE member = pg_roles.oid), "
         "has_database_privilege(rolname, 'warehouse', 'CREATE'), "
         "has_database_privilege(rolname, 'warehouse', 'TEMP') "
-        "FROM pg_roles WHERE rolname IN ('loader', 'transformer', 'metabase_reader')",
+        "FROM pg_roles WHERE rolname IN ('loader', 'transformer', 'metabase_reader', 'ai_reader')",
     )
     assert result.returncode == 0, result.stderr
     found = {}
     for line in result.stdout.splitlines():
         role, *values = line.split("|")
         found[role] = dict(zip(ROLE_ATTRIBUTES, values, strict=True))
+    # ai_reader, the role of MCP Toolbox, signs in only while its switch is on (ADR-0030).
+    ai_reader_login = "t" if env.get("WAREHOUSE_MCP") == "true" else "f"
     assert found == {
-        role: ROLE_ATTRIBUTES | {"temporary on warehouse": "t" if role == "transformer" else "f"}
+        role: ROLE_ATTRIBUTES
+        | {"temporary on warehouse": "t" if role == "transformer" else "f"}
+        | ({"login": ai_reader_login} if role == "ai_reader" else {})
         for role in WAREHOUSE_ROLES
     }
     # A session of loader waits at most a minute for a lock, so a load that is blocked fails and is

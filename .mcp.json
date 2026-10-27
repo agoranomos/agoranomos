@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "agoranomos-warehouse": {
+      "type": "stdio",
+      "command": "./agoranomos",
+      "args": ["mcp", "warehouse"]
+    },
+    "agoranomos-airflow": {
+      "type": "stdio",
+      "command": "./agoranomos",
+      "args": ["mcp", "airflow"]
+    }
+  }
+}

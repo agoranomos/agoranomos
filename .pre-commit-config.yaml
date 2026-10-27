@@ -19,6 +19,8 @@ repos:
       - id: check-json
       - id: check-toml
       - id: check-yaml
+        # ai/tools.yaml holds one resource of MCP Toolbox in each YAML document; each is still parsed.
+        args: [--allow-multiple-documents]
       - id: detect-private-key
       - id: end-of-file-fixer
         exclude: ^docs/assets/javascripts/mermaid\.min\.js$
