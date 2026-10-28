@@ -60,5 +60,6 @@ The other options were not chosen for these reasons:
 
 * Versions as of October 2026: Zensical 0.0.67. Material for MkDocs is at 9.7.7, in maintenance mode. Its team's [end-of-life notice](https://github.com/squidfunk/mkdocs-material/issues/8523) says that critical bug fixes and security updates continue through May 5, 2027, six months beyond the end-of-life date announced earlier, November 5, 2026.
 * The site is configured in `zensical.toml`. Zensical also shows the `status` of an ADR as a page status, which is why the statuses are defined there.
+* **Implementation status, as of October 2026:** the site is published on GitHub Pages at <https://agoranomos.dev>, from v0.3.0 on. The release workflow builds it from the tag of each release with `.github/workflows/docs.yml`, so it describes the latest release, and the guides clone that tag, whose version release-please writes into them. The documentation of the `main` branch is read locally, with `zensical serve`.
 * Planned: the dbt documentation is generated and published together with the site.
 * [Zensical](https://zensical.org/) and [Diátaxis](https://diataxis.fr/) are described on their own sites.

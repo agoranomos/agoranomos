@@ -4,7 +4,8 @@ This guide puts Agoranomos on a server of your own in server mode: Metabase on t
 
 !!! note "Pre-alpha"
 
-    Server mode and the backups run from the `main` branch, and v0.1.0, released on 11 October 2026, is their first release; v0.2.0, released on 21 October 2026, is the latest. The repository is private until v0.3, so cloning it needs an invitation.
+    This guide installs v0.2.1, the latest release. <!-- x-release-please-version -->
+    Each release has its notes on [the releases](https://github.com/agoranomos/agoranomos/releases).
 
 ## Before you begin
 
@@ -75,19 +76,17 @@ hcloud firewall describe agoranomos
 
 On the server, as `agoranomos`:
 
+<!-- x-release-please-start-version -->
+
 ```bash
-git clone https://github.com/agoranomos/agoranomos.git
+git clone --branch v0.2.1 https://github.com/agoranomos/agoranomos.git
 cd agoranomos
 ./agoranomos init --server bi.example.com
 ```
 
-A server without access to the private repository can get the code from a checkout on your own machine instead. In that checkout, with the commit or the tag to deploy:
+<!-- x-release-please-end -->
 
-```bash
-git archive --format=tar --prefix=agoranomos/ <commit> | ssh agoranomos@<server> tar -xf -
-```
-
-Then, on the server, `cd agoranomos` and `./agoranomos init --server bi.example.com`. Such a copy has no history, so `git pull` cannot update it: it suits a check of a release, and a server that you keep gets a clone.
+`--branch` takes the tag of the release, so git says that the checkout is in a detached `HEAD`: that is expected.
 
 `init` creates `.env` with new secrets, sets `AGORANOMOS_SITE_URL=https://bi.example.com` and `AGORANOMOS_IPV6=true` (IPv6 on the network of the stack), and adds the profiles `server` and `ops`, which run the proxy and the daily backups, to `COMPOSE_PROFILES`. It puts the user ID and the group ID of the user who runs it into `AGORANOMOS_UID` and `AGORANOMOS_GID`, makes the folder `backups/` for that user alone, and sets the rules of Metabase for the internet: new and changed passwords need at least 15 characters (`METABASE_PASSWORD_COMPLEXITY=strong-enough`), and a person who does nothing for 24 hours is signed out (`METABASE_SESSION_TIMEOUT`) ([Configuration](../reference/configuration.md#server-mode)). It tells you to point the A record of the domain, and its AAAA record if it has one, at the server, if you have not yet. Before the first start, open `.env` and set `AGORANOMOS_ADMIN_EMAIL` to your own address, the login of the admin of Metabase. To start without the demo, set `COMPOSE_PROFILES=core,server,ops`.
 
@@ -132,16 +131,17 @@ A backup on the same server is lost with the server: copy the backups to another
 
 ## Update
 
-Note the commit that you run now, and take a backup, before you update the checkout: the backup records the images of the checkout as they are when it runs, and a restore needs the checkout at the commit that took it:
+Note the commit that you run now, and take a backup, before you update the checkout: the backup records the images of the checkout as they are when it runs, and a restore needs the checkout at the commit that took it. Put the tag of the release that you update to in place of `<tag>`, such as `v0.4.0`; after `git fetch --tags`, `git tag --sort=-v:refname | head -n 1` names the newest:
 
 ```bash
 git rev-parse HEAD   # note this commit: the way back needs it
 ./agoranomos backup
-git pull
+git fetch --tags
+git checkout <tag>
 ./agoranomos up
 ```
 
-`up` adds the settings that the new release brings to `.env`, builds the images that changed and starts the services again; the data stays. Save a new copy of `.env` after the update, as [Start the stack](#start-the-stack) says, since `init` may have added settings and secrets. A release that moves Metabase to a new major version migrates its database one way, and only the backup can undo that: [Update to the latest main](run-locally.md#update-to-the-latest-main) shows how to see whether an update does, and [Configuration](../reference/configuration.md#back-up-metabase-before-an-upgrade) how to go back. To go back, see whether the update also changed the Airflow image, while the checkout is still at the new release, then check out the commit that you noted and restore the backup, `--only metabase` or `--only metabase,airflow`: [Go back from an upgrade](back-up-and-restore.md#go-back-from-an-upgrade) shows the commands. `git checkout main` returns the checkout to the branch when you update again, as `git pull` does not work on a detached `HEAD`.
+`up` adds the settings that the new release brings to `.env`, builds the images that changed and starts the services again; the data stays. Save a new copy of `.env` after the update, as [Start the stack](#start-the-stack) says, since `init` may have added settings and secrets. A release that moves Metabase to a new major version migrates its database one way, and only the backup can undo that: [Update to a new release](run-locally.md#update-to-a-new-release) shows how to see whether an update does, and [Configuration](../reference/configuration.md#back-up-metabase-before-an-upgrade) how to go back. To go back, see whether the update also changed the Airflow image, while the checkout is still at the new release, then check out the commit that you noted and restore the backup, `--only metabase` or `--only metabase,airflow`: [Go back from an upgrade](back-up-and-restore.md#go-back-from-an-upgrade) shows the commands.
 
 The first `up` after the release that gave the network of the stack a label for IPv6 ([ADR-0023](../adr/0023-give-the-network-of-the-stack-ipv6.md)) builds and pulls the images, so that a failure leaves the stack running, then stops the stack once, says so in one line, and makes the network and the containers again, because Compose would otherwise recreate the network and join the containers that it keeps to it without the names of their services (the cause is under [If something goes wrong](#if-something-goes-wrong)). A server that was set up before has no `AGORANOMOS_IPV6` in its `.env`: the `init` that `up` runs adds `AGORANOMOS_IPV6=true`, since `server` is in `COMPOSE_PROFILES`, and says so, and that same `up` makes the network with IPv6. The data and the certificates stay in their volumes, and the site is down from the stop until `up` ends, a few minutes. `restore` stops the stack for a network that is not the one the setting asks for in the same way: on a server that is set up before this release, a `restore` before any `up` stops it for the network that has no label, since without the setting `.env` asks for no IPv6, and the next `up`, which adds the setting, stops it once more, so run `up` first. Until the first `up` after an update, `./agoranomos metadata diff` says to run `up` first.
 
