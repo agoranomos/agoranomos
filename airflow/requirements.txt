@@ -10,3 +10,10 @@ pathvalidate==3.3.1
 requirements-parser==0.13.1
 semver==3.1.0
 simplejson==4.2.0
+
+# Packages pinned above the constraints of Airflow, for a security fix that the constraints of the
+# base image do not have yet: airflow/Dockerfile takes their lines out of the constraints. Remove
+# such a pin, and its name in the Dockerfile, once the constraints of a new Airflow version hold the
+# fix. certifi 2026.7.22, which the constraints of Airflow 3.3.2 pin, bundles the emSign root CAs,
+# whose intermediate CA keys are compromised (GHSA-6q48-6c7w-9gw2); 2026.10.18 has the fix.
+certifi==2026.10.23

@@ -1,6 +1,8 @@
 [default.extend-words]
 agoranomos = "agoranomos"
 agoranomoi = "agoranomoi"
+# The Python package of the Mozilla root certificates, which airflow/requirements.txt pins.
+certifi = "certifi"
 # German for "search", in the name of an ad account of the demo.
 suche = "suche"
 
