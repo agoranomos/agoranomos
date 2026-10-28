@@ -133,7 +133,7 @@ Decision record: [ADR-0006: Use Metabase as the BI layer](../adr/0006-metabase-a
 
 ## Ask: MCP servers
 
-AI access goes through four MCP servers. Each starts with least-privilege defaults. v0.3.0 is to ship three of them, with the Airflow and warehouse servers in local mode only, and dbt MCP in a later release ([ADR-0030](../adr/0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md)). The servers of Metabase, of Airflow and of the warehouse run today; dbt MCP is planned:
+AI access goes through four MCP servers. Each starts with least-privilege defaults. v0.3.0 shipped three of them, with the Airflow and warehouse servers in local mode only, and dbt MCP in a later release ([ADR-0030](../adr/0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md)). The servers of Metabase, of Airflow and of the warehouse run today; dbt MCP is planned:
 
 | Server | Used by | Default permissions | Transport |
 |---|---|---|---|
