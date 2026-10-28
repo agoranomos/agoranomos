@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.3.0](https://github.com/agoranomos/agoranomos/compare/v0.2.1...v0.3.0) (2026-10-28)
+
+
+### Features
+
+* **ai:** add the product skills for Claude Code and the guide Talk to your data ([#129](https://github.com/agoranomos/agoranomos/issues/129)) ([8a28dbd](https://github.com/agoranomos/agoranomos/commit/8a28dbd09094b19915c45ab22b880a5a411dccc8))
+* **ai:** run the MCP servers of the warehouse and of Airflow in the container ai of local mode ([#128](https://github.com/agoranomos/agoranomos/issues/128)) ([46087ed](https://github.com/agoranomos/agoranomos/commit/46087edfa44d8c0ae759911186fa95e085b1d7b1))
+* **caddy:** close the registration of OAuth clients and keep tokens to the MCP server of Metabase ([#111](https://github.com/agoranomos/agoranomos/issues/111)) ([a8ca1e0](https://github.com/agoranomos/agoranomos/commit/a8ca1e07e96754d7217a1a6db45987038f014651))
+* **metabase:** add the settings of AI access in Metabase, with off as the only level ([#110](https://github.com/agoranomos/agoranomos/issues/110)) ([84f157a](https://github.com/agoranomos/agoranomos/commit/84f157a3893f8af355b54ab157826778612876f9))
+* **metabase:** register, list and revoke the OAuth clients of its MCP server ([#116](https://github.com/agoranomos/agoranomos/issues/116)) ([04b1ada](https://github.com/agoranomos/agoranomos/commit/04b1adabdb1e820b6cb49725e2f578c60fe426a2))
+* **metabase:** set the permissions of the levels of AI access, and offer answers, explore and build ([#112](https://github.com/agoranomos/agoranomos/issues/112)) ([04cce9a](https://github.com/agoranomos/agoranomos/commit/04cce9a4569fc6d23c36ed92ce4d844fbf2a0728))
+* **metabase:** warn about AI access on up, and add ai diff and the groups of the setup ([#115](https://github.com/agoranomos/agoranomos/issues/115)) ([a7508d5](https://github.com/agoranomos/agoranomos/commit/a7508d5152666848a560b608663af6a5c3417c4b))
+
+
+### Documentation
+
+* **adr:** accept ADR-0031 ([#109](https://github.com/agoranomos/agoranomos/issues/109)) ([28095b0](https://github.com/agoranomos/agoranomos/commit/28095b0dcda342dc2a17ede8ac0b3f51620b736b))
+* **adr:** propose ADR-0031, register and revoke the OAuth clients of Metabase with the script ([#107](https://github.com/agoranomos/agoranomos/issues/107)) ([3689245](https://github.com/agoranomos/agoranomos/commit/36892451fa6edf613052b3aa2a6a9ec49c318b42))
+* publish the site on agoranomos.dev with each release, and prepare the public release ([#130](https://github.com/agoranomos/agoranomos/issues/130)) ([c941b35](https://github.com/agoranomos/agoranomos/commit/c941b35f59ef475f47a45ff444154f0900095c3a))
+
 ## [0.2.1](https://github.com/agoranomos/agoranomos/compare/v0.2.0...v0.2.1) (2026-10-21)
 
 
