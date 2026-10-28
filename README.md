@@ -28,7 +28,7 @@
 </p>
 
 > [!WARNING]
-> **Pre-alpha.** Local mode and server mode, with its backups, run from the main branch, and the demo goes end to end, from a demo source to a dashboard. AI access runs: the MCP servers of Metabase, of the warehouse and of Airflow, the skills for coding agents and the guide [Talk to your data](docs/how-to/talk-to-your-data.md). The first public release comes next, then the connectors to real sources. The repository is private until v0.3.
+> **Pre-alpha.** Local mode and server mode, with its backups, run from the latest release, and the demo goes end to end, from a demo source to a dashboard. AI access runs: the MCP servers of Metabase, of the warehouse and of Airflow, the skills for coding agents and the guide [Talk to your data](docs/how-to/talk-to-your-data.md). The connectors to real sources come next.
 
 <p align="center">
   <picture>
@@ -126,9 +126,10 @@ The documentation is Markdown in [`docs/`](docs/), built with [Zensical](https:/
 | [Deploy on a server](docs/how-to/deploy-on-a-server.md) | Put Metabase on the internet over HTTPS, with daily backups |
 | [Back up and restore](docs/how-to/back-up-and-restore.md) | Take, schedule and copy backups, and restore them |
 | [See the demo](docs/how-to/see-the-demo.md) | What the first start builds and where to look at it |
+| [Talk to your data](docs/how-to/talk-to-your-data.md) | Connect Claude or another AI client through MCP, and keep a session safe |
 | [Command line](docs/reference/command-line.md) and [Configuration](docs/reference/configuration.md) | Every command of `./agoranomos` and every setting of `.env` |
 
-The site will be published when the repository goes public. Until then, read it locally with [uv](https://docs.astral.sh/uv/): run `uv sync` and `uv run zensical serve`, then open <http://localhost:8000>.
+The site, <https://agoranomos.dev>, describes the latest release and is published with each one. To read the documentation of the main branch, use [uv](https://docs.astral.sh/uv/): run `uv sync` and `uv run zensical serve`, then open <http://localhost:8000>.
 
 ## Contributing
 

@@ -2,7 +2,7 @@
 
 Thank you for your interest in Agoranomos. This guide describes how work is done in this repository today.
 
-Agoranomos is pre-alpha, and the repository is private until v0.3, so for now it is open to invited collaborators only. Besides the project's tooling, its documentation and the architecture decision records, the stack runs in local mode and in server mode, with its backups, and the rest is being built; the [README](README.md) has the roadmap.
+Agoranomos is pre-alpha. Besides the project's tooling, its documentation and the architecture decision records, the stack runs in local mode and in server mode, with its backups, and the rest is being built; the [README](README.md) has the roadmap. Contributors work on the `main` branch, while the guides of the documentation site describe the latest release.
 
 By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). If you found a security vulnerability, do not open an issue: follow the [security policy](SECURITY.md).
 
@@ -108,6 +108,8 @@ An accepted record keeps its decision: its status, the implementation status of 
 ## Releases
 
 release-please keeps a pull request of the next release open, titled `chore(main): release <version>`, which it updates after every merge into `main`: the version from the Conventional Commits since the last release (a `feat` raises the minor version and a `fix` the patch version; versions stay 0.x, and a breaking change raises the minor version too) and the new part of `CHANGELOG.md`. The maintainer merges it, and release-please then tags the release and publishes it on GitHub. Its commits are signed off by the bot of the GitHub App of the releases.
+
+The same run of the release workflow then builds the documentation site from the tag and publishes it on GitHub Pages at <https://agoranomos.dev> (`.github/workflows/docs.yml`), so the site describes the latest release, and a fix of the documentation reaches it with the next release. To publish a release again, for example after a failed run, run the workflow Docs by hand from `main` with the tag of that release. The release pull request also writes the new version into the files that `extra-files` of `release-please-config.json` lists: on each line marked `x-release-please-version`, and between the lines `x-release-please-start-version` and `x-release-please-end`, such as around the `git clone --branch` commands of the guides. Keep those markers, which are HTML comments that the site does not show, when you edit the lines around them.
 
 Because the pull request title becomes the commit title, the title is what release-please reads, so the type of the title decides what the changelog says. The changelog has the sections Features, Bug Fixes, Performance Improvements, Reverts and Documentation, so a `docs` commit appears in the notes of a release while it raises no version; `chore`, `ci`, `test`, `build`, `refactor` and `style` commits appear nowhere. Do not edit `version.txt`, `.release-please-manifest.json` or `CHANGELOG.md` by hand, and leave `version` in `pyproject.toml` at `0.0.0`: the root is never built, and another value would put `uv.lock` out of date. The configuration is in `release-please-config.json`, and the workflow in `.github/workflows/release.yml`.
 

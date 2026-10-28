@@ -28,7 +28,7 @@
 </p>
 
 > [!WARNING]
-> **Pre-alpha.** Локальный режим и серверный режим с резервными копиями запускаются из ветки main, а демо проходит весь путь — от демо-источника до дашборда. Доступ AI-клиентов работает: MCP-серверы Metabase, хранилища и Airflow, навыки для кодовых агентов и руководство [Talk to your data](docs/how-to/talk-to-your-data.md) (на английском). Следующий — первый публичный релиз, затем коннекторы к настоящим источникам. Репозиторий приватный до версии v0.3.
+> **Pre-alpha.** Локальный режим и серверный режим с резервными копиями запускаются из последнего релиза, а демо проходит весь путь — от демо-источника до дашборда. Доступ AI-клиентов работает: MCP-серверы Metabase, хранилища и Airflow, навыки для кодовых агентов и руководство [Talk to your data](docs/how-to/talk-to-your-data.md) (на английском). Следующими будут коннекторы к настоящим источникам.
 
 <p align="center">
   <picture>
@@ -126,9 +126,10 @@ cd agoranomos
 | [Deploy on a server](docs/how-to/deploy-on-a-server.md) | Metabase в интернете по HTTPS, с ежедневными резервными копиями |
 | [Back up and restore](docs/how-to/back-up-and-restore.md) | Резервные копии: создать, запланировать, скопировать и восстановить |
 | [See the demo](docs/how-to/see-the-demo.md) | Что строит первый запуск и где на это посмотреть |
+| [Talk to your data](docs/how-to/talk-to-your-data.md) | Как подключить Claude или другой AI-клиент через MCP и не потерять контроль над сессией |
 | [Command line](docs/reference/command-line.md) и [Configuration](docs/reference/configuration.md) | Все команды `./agoranomos` и все настройки `.env` |
 
-Сайт будет опубликован, когда репозиторий станет публичным. До тех пор его можно читать локально с [uv](https://docs.astral.sh/uv/): выполните `uv sync` и `uv run zensical serve`, затем откройте <http://localhost:8000>.
+Сайт <https://agoranomos.dev> описывает последний релиз и обновляется с каждым выпуском. Документацию ветки main можно читать локально с [uv](https://docs.astral.sh/uv/): выполните `uv sync` и `uv run zensical serve`, затем откройте <http://localhost:8000>.
 
 ## Участие в проекте
 

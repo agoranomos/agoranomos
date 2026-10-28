@@ -4,7 +4,8 @@ This guide starts Agoranomos on your own machine in local mode: the warehouse, A
 
 !!! note "Pre-alpha"
 
-    Local mode runs from the `main` branch, and so do server mode and backups ([Deploy on a server](deploy-on-a-server.md)); v0.1.0, released on 11 October 2026, is the first release, and v0.2.0, released on 21 October 2026, the latest. The repository is private until v0.3, so cloning it needs an invitation.
+    This guide installs v0.2.1, the latest release. <!-- x-release-please-version -->
+    Each release has its notes on [the releases](https://github.com/agoranomos/agoranomos/releases), and the `main` branch holds what comes next.
 
 ## Before you begin
 
@@ -16,11 +17,17 @@ This guide starts Agoranomos on your own machine in local mode: the warehouse, A
 
 ## Start the stack
 
+<!-- x-release-please-start-version -->
+
 ```bash
-git clone https://github.com/agoranomos/agoranomos.git
+git clone --branch v0.2.1 https://github.com/agoranomos/agoranomos.git
 cd agoranomos
 ./agoranomos up
 ```
+
+<!-- x-release-please-end -->
+
+`--branch` takes the tag of the release, so git says that the checkout is in a detached `HEAD`: that is expected. To work on Agoranomos itself, clone without `--branch`, which gives the `main` branch.
 
 `up` creates `.env` with new secrets, checks the machine, builds the Airflow image, starts the stack, and waits until every service is healthy and the demo is ready. The first start takes a few minutes; later starts take the image from the cache of Docker. When it is done, it prints the addresses:
 
@@ -56,13 +63,13 @@ Put a DAG file into `extensions/dags/`. Airflow shows it within about a minute, 
 
 To delete the stack together with its data, run `docker compose down --volumes` in the checkout. This cannot be undone.
 
-## Update to the latest `main`
+## Update to a new release
 
-First, in the root of the checkout, see whether the update changes the version of Metabase:
+First, in the root of the checkout, get the tags of the new releases, and see whether the release that you update to changes the version of Metabase. In the commands of this section, put the tag of that release in place of `<tag>`, such as `v0.4.0`; `git tag --sort=-v:refname | head -n 1` names the newest. A checkout of the `main` branch uses `origin/main` in place of `<tag>`, and `git pull` in place of `git checkout <tag>`.
 
 ```bash
-git fetch
-git diff HEAD origin/main -- compose.yaml | grep '^[-+].*metabase/metabase:'
+git fetch --tags
+git diff HEAD <tag> -- compose.yaml | grep '^[-+].*metabase/metabase:'
 ```
 
 When it prints nothing, the version stays. When it prints the old and the new image of Metabase, and the second number of the version changes, such as from `v0.64.1` to `v0.65.0`, the update moves Metabase to a new major version: the next `up` migrates the database of Metabase, and only a backup made before it can take that back. Then back up Metabase first, as [Back up Metabase before an upgrade](../reference/configuration.md#back-up-metabase-before-an-upgrade) says, and note the commit that you come from, which `git rev-parse HEAD` prints, to go back to.
@@ -70,7 +77,7 @@ When it prints nothing, the version stays. When it prints the old and the new im
 Then update, and let `init` add the settings that the new version brings to `.env`:
 
 ```bash
-git pull
+git checkout <tag>
 ./agoranomos init
 ```
 

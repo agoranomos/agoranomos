@@ -2,6 +2,9 @@
 site_name = "Agoranomos"
 site_description = "Open-source marketing BI out of the box, with AI access via MCP."
 site_author = "Andrei Gromov"
+# The address of the published site: GitHub Pages, with the domain of the project (ADR-0009). The
+# workflow Docs publishes it from the tag of each release.
+site_url = "https://agoranomos.dev/"
 # The header shows a link to the repository. For a repository on GitHub the theme also asks api.github.com for its
 # stars, forks and latest release, in two requests from the reader's browser. Zensical 0.0.68 has no setting to turn
 # that off while the link stays (its cookie consent form only makes the request opt-in, behind a banner that covers

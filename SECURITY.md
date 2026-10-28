@@ -10,7 +10,7 @@ Please report vulnerabilities privately. Do not open a public issue or pull requ
 
 Use GitHub private vulnerability reporting: open the **Security** tab of the repository and choose **Report a vulnerability**. Only the maintainers can see the report.
 
-If that option is not available, for example while the repository is private, write to the maintainer, [@andrei-gromov](https://github.com/andrei-gromov), at the email address on their GitHub profile. Do not describe the problem in public.
+If that option is not available, write to the maintainer, [@andrei-gromov](https://github.com/andrei-gromov), at the email address on their GitHub profile. Do not describe the problem in public.
 
 A good report says:
 

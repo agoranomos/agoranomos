@@ -2,7 +2,8 @@ name: Release
 
 # Opens and updates the pull request of the next release with release-please, from the Conventional
 # Commits on main, and, when the owner merges that pull request, tags the release and publishes it
-# on GitHub with its part of CHANGELOG.md (ADR-0012). It acts as the GitHub App of the releases:
+# on GitHub with its part of CHANGELOG.md (ADR-0012), then publishes the documentation site of the
+# release with the workflow Docs (ADR-0009). It acts as the GitHub App of the releases:
 # a pull request that GITHUB_TOKEN opens starts no workflow, and the checks of CI must run on it.
 # The app's client ID is the repository variable RELEASE_APP_CLIENT_ID, and its private key the
 # repository secret RELEASE_APP_PRIVATE_KEY.
@@ -24,6 +25,9 @@ jobs:
     timeout-minutes: 10
     # The job needs no GITHUB_TOKEN permissions: release-please acts with the app's token.
     permissions: {}
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - name: Create an installation token for the app
         id: app-token
@@ -35,8 +39,23 @@ jobs:
           permission-issues: write
           permission-pull-requests: write
       - name: Open the release pull request, or release
+        id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  docs:
+    name: Documentation site
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    # What the jobs of the workflow Docs ask for: read the tag, and publish on Pages.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    # The form $/ of GitHub (July 2026) is not in actionlint 1.7.12 yet, which fails on it.
+    uses: ./.github/workflows/docs.yml # zizmor: ignore[self-repository]
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}

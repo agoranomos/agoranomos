@@ -95,14 +95,12 @@ You delete old copies by hand, as `agoranomos-copy` or root on the other machine
 
 ## Restore
 
-Restore with the release that took the backup. If the checkout is already at the commit that you ran then, as when you restore on the same server after a failure and no update, go on. If it is not, check that commit out: the one that you noted with `git rev-parse HEAD` before the upgrade. The manifest of a backup records the images and the times, not the commit, so note the commit in the password manager with `.env` at every upgrade; if you did not, `git reflog` shows where the checkout was before a `git pull`, and on a new server the message of [`restore`](../reference/command-line.md#restore) names the versions that the backup has, and `git log -S'<the tag it names>' -- compose.yaml airflow/Dockerfile` lists the commit that replaced the tag and, below it, the one that added it: check out the lower one, or a commit between the two, and `restore` says again if a version still differs. `restore` compares what the backup records with the checkout, for the databases it restores: the major version of PostgreSQL and the versions of Airflow and Metabase. It stops when they differ.
+Restore with the release that took the backup. If the checkout is already at the commit that you ran then, as when you restore on the same server after a failure and no update, go on. If it is not, check that commit out: the one that you noted with `git rev-parse HEAD` before the upgrade. The manifest of a backup records the images and the times, not the commit, so note the commit in the password manager with `.env` at every upgrade; if you did not, `git reflog` shows where the checkout was before the update, and on a new server the message of [`restore`](../reference/command-line.md#restore) names the versions that the backup has, and `git log -S'<the tag it names>' -- compose.yaml airflow/Dockerfile` lists the commit that replaced the tag and, below it, the one that added it: check out the lower one, or a commit between the two, and `restore` says again if a version still differs. `restore` compares what the backup records with the checkout, for the databases it restores: the major version of PostgreSQL and the versions of Airflow and Metabase. It stops when they differ.
 
 ```bash
 git checkout <commit>   # only if the checkout is at another commit
 ./agoranomos restore 20261011T030012Z
 ```
-
-When you update again, `git checkout main` returns the checkout to the branch: `git pull` does not work on a detached `HEAD`.
 
 `latest` names the last good backup. `restore` replaces the databases it restores, so if the current ones still hold something that you may need, take a backup of them first with `./agoranomos backup`, and take no backup by hand while a restore runs: it could dump a database that is half restored. `restore` needs the `.env` of the deployment that took the backup: its keys decrypt the connections that Airflow and Metabase saved.
 

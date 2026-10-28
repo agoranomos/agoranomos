@@ -6,7 +6,7 @@ It takes about half an hour, most of it the first start.
 
 !!! note "Pre-alpha"
 
-    The tutorial follows the `main` branch. The repository is private until v0.3, so cloning it needs an invitation.
+    The tutorial follows v0.2.1, the latest release. <!-- x-release-please-version -->
 
 ## What you need
 
@@ -16,12 +16,18 @@ It takes about half an hour, most of it the first start.
 
 ## Start the stack
 
-1. Clone the repository and go into it:
+1. Clone the latest release of the repository and go into it:
+
+    <!-- x-release-please-start-version -->
 
     ```bash
-    git clone https://github.com/agoranomos/agoranomos.git
+    git clone --branch v0.2.1 https://github.com/agoranomos/agoranomos.git
     cd agoranomos
     ```
+
+    <!-- x-release-please-end -->
+
+    git says that the checkout is in a detached `HEAD`, because `--branch` takes the tag of the release: that is expected.
 
 2. Start the stack:
 
