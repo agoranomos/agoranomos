@@ -1,3 +1,10 @@
+[default]
+# The links to commits in CHANGELOG.md, which release-please writes: a short hash such as
+# 7ba175e is not a word, and nobody can choose it.
+extend-ignore-re = [
+    '\[[0-9a-f]{7,}\]\(https://github\.com/[^)]+/commit/[0-9a-f]{40}\)',
+]
+
 [default.extend-words]
 agoranomos = "agoranomos"
 agoranomoi = "agoranomoi"
