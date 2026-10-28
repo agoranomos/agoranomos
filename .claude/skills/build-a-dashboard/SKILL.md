@@ -16,6 +16,7 @@ Build in Metabase, through the MCP server `agoranomos-metabase`, with the accoun
     - `build`: you also create and change questions, dashboards, metrics and documents in the collection **Workspace**, the shared drafts.
 - The collection **Agoranomos** holds the content of the package and stays view-only. To change one of its dashboards, copy it into Workspace and change the copy. **Reports** is for finished work, which only admins curate.
 - This release writes no SQL through Metabase. Build every question with the query builder. A call that Metabase refuses for lack of permission is the limit: report it, and do not look for another way.
+- A save refused with `insufficient_scope`, or as if the token had expired, while reading works, means that the token lacks `agent:content:write`, which the first consent page does not offer. Ask the user to run `/mcp`, choose `agoranomos-metabase`, Re-authenticate and tick `agent:content:write`, if their level allows saving ([Which scopes to tick](../../../docs/how-to/talk-to-your-data.md#which-scopes-to-tick)).
 
 ## Steps
 
