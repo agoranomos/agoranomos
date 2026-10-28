@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.1](https://github.com/agoranomos/agoranomos/compare/v0.3.0...v0.3.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **airflow:** move certifi and opentelemetry-api to the versions with the security fixes ([#134](https://github.com/agoranomos/agoranomos/issues/134)) ([2112840](https://github.com/agoranomos/agoranomos/commit/2112840a96b6216d071c08416aff1018a677f9dc))
+
+
+### Documentation
+
+* say that ChatGPT is not checked yet, and that a docs commit makes a patch release ([#133](https://github.com/agoranomos/agoranomos/issues/133)) ([7ba175e](https://github.com/agoranomos/agoranomos/commit/7ba175eab4801017360ca852cb9a5a062cdfcd1f))
+* say that Phase 3 is released as v0.3.0 ([#131](https://github.com/agoranomos/agoranomos/issues/131)) ([206e62e](https://github.com/agoranomos/agoranomos/commit/206e62e16bf4702cc81d559fde92747cd09cda13))
+
 ## [0.3.0](https://github.com/agoranomos/agoranomos/compare/v0.2.1...v0.3.0) (2026-10-28)
 
 
