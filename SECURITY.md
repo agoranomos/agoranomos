@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Agoranomos is pre-1.0. Its first release, v0.1.0, came out on 11 October 2026, and v0.2.0 on 21 October 2026. Until version 1.0, only the latest minor release is supported: it receives security fixes, and earlier minor releases do not. Today that is v0.2, and v0.1 is no longer supported.
+Agoranomos is pre-1.0. Its first release, v0.1.0, came out on 11 October 2026, v0.2.0 on 21 October 2026, and v0.3.0, the first public release, on 28 October 2026. Until version 1.0, only the latest minor release is supported: it receives security fixes, and earlier minor releases do not. Today that is v0.3, and v0.1 and v0.2 are no longer supported.
 
 ## Reporting a vulnerability
 
