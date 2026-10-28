@@ -59,7 +59,7 @@ The Claude apps answer questions and build queries, but they cannot save questio
 
 ## Connect another client
 
-Register it with its name and the address to return to that its documentation gives:
+ChatGPT and other remote clients are not checked yet. Register one with its name and the address to return to that its documentation gives:
 
 ```bash
 ./agoranomos ai connect <name> --redirect-uri <uri>
