@@ -129,19 +129,35 @@ def test_the_image_starts_from_the_pinned_official_image():
 # The dependencies of dlt 1.30.0 that the constraints of Airflow 3.3.2 leave open:
 # airflow/requirements.txt pins them, so that every machine builds the same image.
 DLT_DEPENDENCIES = {"giturlparse", "pathvalidate", "requirements-parser", "semver", "simplejson"}
+# The packages pinned above the constraints of Airflow 3.3.2 for a security fix, with the first
+# version that has it: certifi, for GHSA-6q48-6c7w-9gw2.
+OVERRIDES = {"certifi": (2026, 10, 18)}
 
 
 def test_airflow_gets_dlt_and_cosmos_under_its_constraints():
     # Renovate updates their versions: the test fixes the names, and pins() requires the ==.
     requirements = AIRFLOW / "requirements.txt"
-    assert set(pins(requirements)) == {"dlt", "astronomer-cosmos"} | DLT_DEPENDENCIES
+    assert set(pins(requirements)) == {"dlt", "astronomer-cosmos"} | DLT_DEPENDENCIES | set(
+        OVERRIDES
+    )
     # dlt keeps the extra that its postgres destination needs.
     extra = r"^dlt\[[^\]]*\bpostgres\b[^\]]*\]=="
     assert re.search(extra, requirements.read_text(encoding="utf-8"), flags=re.MULTILINE)
     text = dockerfile()
     assert '"apache-airflow==${AIRFLOW_VERSION}"' in text  # pip fails rather than move Airflow
-    assert '--constraint "${HOME}/constraints.txt"' in text
+    assert "--constraint /tmp/constraints.txt" in text
     assert "&& pip check" in text
+
+
+def test_the_overrides_of_the_constraints_keep_their_fix():
+    # The Dockerfile takes exactly these lines out of the constraints, and the pin of each stays at
+    # or above the version with the fix, also when Renovate moves it.
+    text = dockerfile()
+    taken_out = re.findall(r"grep -v '\^([a-z0-9-]+)==' \"\$\{HOME\}/constraints\.txt\"", text)
+    assert taken_out == sorted(OVERRIDES)
+    pinned = pins(AIRFLOW / "requirements.txt")
+    for name, fixed in OVERRIDES.items():
+        assert tuple(int(part) for part in pinned[name].split(".")) >= fixed, name
 
 
 def test_dbt_has_a_locked_environment_of_its_own():
