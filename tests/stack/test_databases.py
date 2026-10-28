@@ -104,8 +104,23 @@ def test_metabase_reader_has_a_statement_timeout_and_a_limit_of_connections(env)
     assert limit == "20"
 
 
+def signs_in(env: dict[str, str], role: str) -> bool:
+    """Whether a role of the layers may sign in with the .env of the stack: ai_reader, the role of
+    MCP Toolbox, only while the MCP server of the warehouse is on, as in local mode by default, and
+    never in server mode (ADR-0030)."""
+    return role != "ai_reader" or env.get("WAREHOUSE_MCP") == "true"
+
+
+def skip_unless_it_signs_in(env: dict[str, str], role: str) -> None:
+    """Skip a test that signs in as the role, while the role cannot sign in: a test of its own
+    checks that it cannot."""
+    if not signs_in(env, role):
+        pytest.skip("ai_reader cannot sign in while WAREHOUSE_MCP is off (ADR-0030)")
+
+
 @pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))
 def test_the_warehouse_compiles_no_query_with_jit(env, role):
+    skip_unless_it_signs_in(env, role)
     # db-init sets it on the database on every start: with JIT, the tests of the intermediate models
     # took warehouse-db past its memory limit (docs/reference/system-requirements.md).
     assert warehouse_output(env, "SHOW jit", role) == "off"
@@ -118,6 +133,11 @@ def test_each_role_of_the_warehouse_signs_in_with_its_password_and_with_no_other
     right = psql_over_network(
         "warehouse-db", role, env[WAREHOUSE_ROLES[role]], "warehouse", "SELECT 1"
     )
+    if not signs_in(env, role):
+        # Off, the role keeps its password and cannot sign in with it.
+        assert right.returncode != 0
+        assert f'role "{role}" is not permitted to log in' in right.stderr
+        return
     assert right.returncode == 0, right.stderr
     assert right.stdout.strip() == "1"
     wrong = psql_over_network("warehouse-db", role, "not-the-password", "warehouse", "SELECT 1")
@@ -287,7 +307,8 @@ def test_the_default_privileges_are_those_of_the_roles_that_create_the_tables(en
         "loader:raw_demo_video:r:{transformer=r/loader}",
         "loader:raw_demo_web:r:{transformer=r/loader}",
         "loader:raw_settings:r:{transformer=r/loader}",
-        "transformer:marts:r:{metabase_reader=r/transformer}",
+        "transformer:marts:r:{metabase_reader=r/transformer,ai_reader=r/transformer}",
+        "transformer:staging:r:{ai_reader=r/transformer}",
     ]
 
 
@@ -315,15 +336,19 @@ def test_the_roles_of_the_layers_sign_in_and_have_no_other_power(env):
         "FROM pg_auth_members WHERE member = pg_roles.oid), "
         "has_database_privilege(rolname, 'warehouse', 'CREATE'), "
         "has_database_privilege(rolname, 'warehouse', 'TEMP') "
-        "FROM pg_roles WHERE rolname IN ('loader', 'transformer', 'metabase_reader')",
+        "FROM pg_roles WHERE rolname IN ('loader', 'transformer', 'metabase_reader', 'ai_reader')",
     )
     assert result.returncode == 0, result.stderr
     found = {}
     for line in result.stdout.splitlines():
         role, *values = line.split("|")
         found[role] = dict(zip(ROLE_ATTRIBUTES, values, strict=True))
+    # ai_reader, the role of MCP Toolbox, signs in only while its switch is on (ADR-0030).
+    ai_reader_login = "t" if env.get("WAREHOUSE_MCP") == "true" else "f"
     assert found == {
-        role: ROLE_ATTRIBUTES | {"temporary on warehouse": "t" if role == "transformer" else "f"}
+        role: ROLE_ATTRIBUTES
+        | {"temporary on warehouse": "t" if role == "transformer" else "f"}
+        | ({"login": ai_reader_login} if role == "ai_reader" else {})
         for role in WAREHOUSE_ROLES
     }
     # A session of loader waits at most a minute for a lock, so a load that is blocked fails and is
@@ -339,6 +364,7 @@ def test_the_roles_of_the_layers_sign_in_and_have_no_other_power(env):
 
 @pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))
 def test_no_role_of_the_layers_creates_a_schema(env, role):
+    skip_unless_it_signs_in(env, role)
     # The sessions of metabase_reader start read-only, and PostgreSQL refuses a write in a read-only
     # transaction before it checks the permission: the transaction is made read-write first, so that
     # the permission decides, for every role.
@@ -444,6 +470,7 @@ def test_db_init_keeps_a_view_that_a_person_named_as_the_mart_of_v0_1(env):
 @pytest.mark.parametrize("database", ["postgres", "template1"])
 @pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))
 def test_the_roles_of_the_layers_connect_to_the_warehouse_database_only(env, role, database):
+    skip_unless_it_signs_in(env, role)
     # PUBLIC gets no CONNECT on the other databases of the instance; template0 takes no connections.
     result = psql("warehouse-db", role, env[WAREHOUSE_ROLES[role]], database, "SELECT 1")
     assert result.returncode != 0
@@ -470,6 +497,7 @@ STATEMENT_STATISTICS = {
 @pytest.mark.parametrize("sql", sorted(STATEMENT_STATISTICS))
 @pytest.mark.parametrize("role", sorted(WAREHOUSE_ROLES))
 def test_the_roles_of_the_layers_cannot_read_the_statistics_of_the_statements(env, role, sql):
+    skip_unless_it_signs_in(env, role)
     result = warehouse(env, sql, role)
     assert result.returncode != 0
     assert STATEMENT_STATISTICS[sql] in result.stderr

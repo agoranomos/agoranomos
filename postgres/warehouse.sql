@@ -1,7 +1,8 @@
 -- The warehouse instance (ADR-0003). This file creates the roles and schemas of the data layers:
 -- loader is for dlt, which is to load the raw_<source> schemas (ADR-0004), transformer for dbt,
--- which is to read them and build staging, marts and ops (ADR-0005, ADR-0029), and metabase_reader
--- reads marts and the views of the Ops collection in ops. No role but the superuser can create a
+-- which is to read them and build staging, marts and ops (ADR-0005, ADR-0029), metabase_reader
+-- reads marts and the views of the Ops collection in ops, and ai_reader, the role of MCP Toolbox,
+-- reads marts and staging (ADR-0007, ADR-0030). No role but the superuser can create a
 -- schema, so this file creates every schema that the pipelines are to write. db-init runs it on every start, so each statement is safe to repeat.
 
 -- ALTER ROLE below carries a password in its text, and pg_stat_statements keeps the text of utility
@@ -15,6 +16,8 @@ SET pg_stat_statements.track_utility = off;
 \getenv transformer_password WAREHOUSE_TRANSFORMER_PASSWORD
 \getenv metabase_reader_password METABASE_READER_PASSWORD
 \getenv backup_password BACKUP_DB_PASSWORD
+\getenv ai_reader_password AI_READER_PASSWORD
+\getenv warehouse_mcp WAREHOUSE_MCP
 
 -- Run again, this file would print a notice for every object that exists already.
 SET client_min_messages = warning;
@@ -56,7 +59,15 @@ SELECT format(
   'ALTER ROLE metabase_reader WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
   :'metabase_reader_password'
 ) \gexec
-GRANT CONNECT ON DATABASE warehouse TO loader, transformer, metabase_reader;
+-- ai_reader signs in only while the MCP server of the warehouse is on (WAREHOUSE_MCP in .env):
+-- off, the role keeps its grants and cannot sign in, so the switch and the role are two limits.
+SELECT 'CREATE ROLE ai_reader' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'ai_reader') \gexec
+SELECT format(
+  'ALTER ROLE ai_reader WITH %s NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+  CASE WHEN :'warehouse_mcp' = 'true' THEN 'LOGIN' ELSE 'NOLOGIN' END,
+  :'ai_reader_password'
+) \gexec
+GRANT CONNECT ON DATABASE warehouse TO loader, transformer, metabase_reader, ai_reader;
 
 -- backup takes the backups (ADR-0020). On this instance it connects to warehouse only, and it may
 -- read every table there (pg_read_all_data), the hashes of the passwords of the roles in pg_authid
@@ -173,3 +184,20 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA marts REVOKE SELECT ON TABL
 -- In ops, Metabase reads the views of the Ops collection only: dbt grants SELECT on each of them as
 -- it builds them (the grants of models/ops in dbt_project.yml), and on no table of elementary.
 GRANT USAGE ON SCHEMA ops TO metabase_reader;
+
+-- MCP Toolbox reads marts and staging as ai_reader, and neither the raw schemas nor ops (ADR-0007,
+-- ADR-0030): the views of staging read the raw schemas as their owner, transformer, so the role
+-- sees the data that they show and no more. Its sessions start read-only, a statement that runs
+-- longer than a minute is canceled, so is a transaction left open for a minute, and it holds at
+-- most three connections: an AI client sends one statement at a time, and the pipelines keep
+-- theirs. As for metabase_reader, the barrier itself is that the role has no write grant, and
+-- these lines run on every start.
+ALTER ROLE ai_reader SET default_transaction_read_only = on;
+ALTER ROLE ai_reader SET statement_timeout = '1min';
+ALTER ROLE ai_reader SET idle_in_transaction_session_timeout = '1min';
+ALTER ROLE ai_reader CONNECTION LIMIT 3;
+GRANT USAGE ON SCHEMA marts, staging TO ai_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA marts TO ai_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA staging TO ai_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE transformer IN SCHEMA marts GRANT SELECT ON TABLES TO ai_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE transformer IN SCHEMA staging GRANT SELECT ON TABLES TO ai_reader;

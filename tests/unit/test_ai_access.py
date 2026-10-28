@@ -89,7 +89,7 @@ def test_empty_or_missing_settings_have_their_defaults():
     [
         ({"METABASE_AI_LEVEL": "everything"}, "is not a level of AI access in Metabase"),
         ({"METABASE_AI_LEVEL": "build-sql"}, "a level that this release does not offer"),
-        ({"METABASE_AI_LEVEL": "build-sql"}, "MCP Toolbox runs with the role ai_reader"),
+        ({"METABASE_AI_LEVEL": "build-sql"}, "SQL from AI clients goes through MCP Toolbox"),
         ({"METABASE_AI_LEVEL": "build"}, "do not follow METABASE_AI_LEVEL=build"),
         ({"METABASE_AI_DEFAULT_LEVEL": "off"}, "not a level that every account can get"),
         ({"METABASE_AI_DEFAULT_LEVEL": "most"}, "not a level that every account can get"),

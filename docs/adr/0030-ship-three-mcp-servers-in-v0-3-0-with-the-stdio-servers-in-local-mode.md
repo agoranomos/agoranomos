@@ -94,7 +94,7 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** planned for v0.3.0. The measurements below come from a scratch stand, not from the stack.
+* **Implementation status, as of October 2026:** the three servers run. The container `ai` of the profile `ai` holds MCP Toolbox 1.15.0 and astro-airflow-mcp 0.9.1, and runs in local mode only; an AI client starts a server in it with `./agoranomos mcp warehouse` or `./agoranomos mcp airflow`, through `docker compose exec`, and each server has a switch of its own in `.env`, `WAREHOUSE_MCP` and `AIRFLOW_MCP`. Its limit is 384 MiB, as below: on a Mac on 27 October 2026, one session of each server at once peaked at 223 MiB, with Toolbox returning the biggest mart of the demo. The limits of local mode add up to 7,296 MiB of 7,680, since the limit of `airflow-dag-processor` came down to 512 MiB. Toolbox for arm64 comes from its official container image, which has a binary for Linux on amd64 and on arm64 (as of version 1.15.0), so the image builds nothing from source. dbt-mcp is planned. The measurements below come from a scratch stand, not from the stack.
 * The measurements behind this record, taken on 21 October 2026 on x86_64 with Python 3.13 and the demo data. The memory is the resident memory of the server and of the processes that it starts, sampled every 100 ms.
     * **astro-airflow-mcp 0.9.1**, against Airflow 3.3.2 with the FAB provider 3.9.0, signed in as a user with the Viewer role and with `AF_READ_ONLY=true`:
         * Memory: 76 MiB idle and 85 MiB at its peak, over 34 tools.

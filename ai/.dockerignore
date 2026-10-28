@@ -1,0 +1,3 @@
+# The build needs only the lock file; the tools and the script come from the checkout at run time.
+*
+!requirements.txt

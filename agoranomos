@@ -57,7 +57,7 @@ FIELD_SEPARATOR=$(printf '\037')
 SECRET_KEYS="WAREHOUSE_POSTGRES_PASSWORD PLATFORM_POSTGRES_PASSWORD AIRFLOW_DB_PASSWORD
 METABASE_DB_PASSWORD METABASE_READER_PASSWORD WAREHOUSE_LOADER_PASSWORD
 WAREHOUSE_TRANSFORMER_PASSWORD BACKUP_DB_PASSWORD VALKEY_PASSWORD CELERY_RESULTS_DB_PASSWORD
-AIRFLOW_FERNET_KEY AIRFLOW_JWT_SECRET AIRFLOW_API_SECRET_KEY AIRFLOW_ADMIN_PASSWORD
+AI_READER_PASSWORD AIRFLOW_AI_PASSWORD AIRFLOW_FERNET_KEY AIRFLOW_JWT_SECRET AIRFLOW_API_SECRET_KEY AIRFLOW_ADMIN_PASSWORD
 METABASE_ENCRYPTION_KEY METABASE_SESSION_KEY METABASE_ADMIN_PASSWORD"
 
 say() { printf '%s\n' "$*"; }
@@ -380,6 +380,15 @@ ops_mode() {
   return 1
 }
 
+# True when .env runs the container of the MCP servers of the warehouse and of Airflow: COMPOSE_PROFILES
+# lists ai (ADR-0030).
+ai_mode() {
+  case ",$(setting COMPOSE_PROFILES core,demo)," in
+    *,ai,*) return 0 ;;
+  esac
+  return 1
+}
+
 # Print what is wrong with the user that the backups are written as, or nothing. Each of the user ID
 # and the group ID must be a number, of digits only; a user ID of zeros only, such as 0 or 00, which
 # Docker reads as 0, is root.
@@ -495,6 +504,63 @@ with_profiles() {
   printf '%s' "$profile_list"
 }
 
+# Print the comma-separated list of profiles $1 without the profile $2.
+without_profile() {
+  printf ',%s,' "$1" | sed "s/,$2,/,/g; s/^,//; s/,\$//"
+}
+
+# The MCP servers of the container ai (ADR-0030): warehouse, MCP Toolbox as ai_reader, and airflow,
+# astro-airflow-mcp as the Airflow user ai. Print the setting of the switch of the server $1.
+ai_server_key() {
+  case "$1" in
+    warehouse) printf WAREHOUSE_MCP ;;
+    airflow) printf AIRFLOW_MCP ;;
+  esac
+}
+
+# Print what is wrong with the settings of the container ai in .env, or nothing (ADR-0030). Each
+# switch is true or false; the container runs in local mode only; and the ai profile is not listed
+# while both switches are off, so that no container holds passwords that no server uses. A switch
+# that is on while the ai profile is not listed, as in COMPOSE_PROFILES=core, is no problem: no
+# server runs then. Each message names the command that sets it right.
+ai_servers_problem() {
+  servers_on=""
+  for server in warehouse airflow; do
+    server_key=$(ai_server_key "$server")
+    case "$(setting "$server_key" false)" in
+      true) servers_on="${servers_on:+$servers_on }$server" ;;
+      false) ;;
+      *)
+        printf '%s in .env must be true or false: run ./agoranomos ai %s on or ./agoranomos ai %s off' "$server_key" "$server" "$server"
+        return 0
+        ;;
+    esac
+  done
+  if server_mode; then
+    if [ -n "$servers_on" ] || ai_mode; then
+      printf 'the MCP servers of the warehouse and of Airflow run in local mode only (ADR-0030), and this .env runs server mode: run ./agoranomos ai warehouse off and ./agoranomos ai airflow off'
+    fi
+  elif [ -z "$servers_on" ] && ai_mode; then
+    printf 'COMPOSE_PROFILES in .env lists ai, and both of its MCP servers are off: run ./agoranomos ai warehouse off, which takes ai out'
+  fi
+}
+
+# Print the state of the MCP servers of the container ai in one line, for ./agoranomos up and ai: a
+# server is on while its switch is on and COMPOSE_PROFILES lists ai.
+ai_servers_summary() {
+  if server_mode; then
+    printf 'The MCP servers of the warehouse and of Airflow run in local mode only.'
+    return 0
+  fi
+  printf 'The MCP server of the warehouse is %s, and that of Airflow is %s: ./agoranomos mcp <server> starts one for an AI client.' \
+    "$(ai_server_state warehouse)" "$(ai_server_state airflow)"
+}
+
+# Print on or off for the MCP server $1 of the container ai, as ai_servers_summary counts it.
+ai_server_state() {
+  if ai_mode && [ "$(setting "$(ai_server_key "$1")" false)" = true ]; then printf on; else printf off; fi
+}
+
 # Print the rank of the level $1 of AI access in Metabase, from 0 for off to 4 for build-sql, or
 # nothing for a word that is not a level (ADR-0017).
 ai_rank() {
@@ -524,7 +590,7 @@ ai_offered_words() {
 # Print why this release does not offer the level $1.
 ai_not_offered_reason() {
   case "$1" in
-    build-sql) printf 'It comes once MCP Toolbox runs with the role ai_reader (ADR-0017)' ;;
+    build-sql) printf 'It comes after the first release of the AI layer, and until then SQL from AI clients goes through MCP Toolbox, ./agoranomos mcp warehouse (ADR-0017)' ;;
     *) printf 'This release does not offer it yet (ADR-0017)' ;;
   esac
 }
@@ -743,6 +809,13 @@ cmd_init() {
         METABASE_MCP | METABASE_MCP_SQL) line="$key=false" ;;
       esac
     fi
+    # The same for the MCP servers of the container ai (ADR-0030): a .env from before them gets
+    # them off, and its COMPOSE_PROFILES, which it has already, does not list ai.
+    if [ "$env_created" -eq 0 ]; then
+      case "$key" in
+        WAREHOUSE_MCP | AIRFLOW_MCP) line="$key=false" ;;
+      esac
+    fi
     if ! grep -q "^$key=" "$ENV_FILE"; then
       [ -z "$(tail -c 1 "$ENV_FILE")" ] || printf '\n' >> "$ENV_FILE"
       printf '%s\n' "$line" >> "$ENV_FILE"
@@ -776,9 +849,14 @@ cmd_init() {
     # nothing, also in a .env that a person edited: a line with quotes or a comment stays as it is.
     [ "$(env_get AGORANOMOS_SITE_URL)" = "https://$server_domain" ] ||
       env_set AGORANOMOS_SITE_URL "https://$server_domain"
+    # The container ai runs in local mode only (ADR-0030): server mode takes it out, with its
+    # switches.
     current_profiles=$(setting COMPOSE_PROFILES core,demo)
-    server_profiles=$(with_profiles "$current_profiles" server ops)
+    server_profiles=$(with_profiles "$(without_profile "$current_profiles" ai)" server ops)
     [ "$server_profiles" = "$current_profiles" ] || env_set COMPOSE_PROFILES "$server_profiles"
+    for server_key in WAREHOUSE_MCP AIRFLOW_MCP; do
+      [ "$(env_get "$server_key")" = false ] || env_set "$server_key" false
+    done
     # Metabase on the internet (ADR-0019): passwords of at least 15 characters, and a sign-out after
     # 24 hours without activity. A value that a person set stays.
     [ -n "$(env_get METABASE_PASSWORD_COMPLEXITY)" ] || env_set METABASE_PASSWORD_COMPLEXITY strong-enough
@@ -976,6 +1054,9 @@ EOF
   # AI access in Metabase (ADR-0017): a level that this release offers, and the switches that follow
   # it, before Compose starts Metabase with them.
   message=$(ai_problem)
+  [ -z "$message" ] || problem "$message"
+  # The MCP servers of the container ai (ADR-0030): their switches, local mode, and the ai profile.
+  message=$(ai_servers_problem)
   [ -z "$message" ] || problem "$message"
   # The backup service of the ops profile runs as AGORANOMOS_UID and reads its schedule from .env.
   if ops_mode; then
@@ -1331,6 +1412,11 @@ remove_leftover_services() {
       "The ops profile is off: the backup service is stopped and removed." \
       "which may still write backups"
   fi
+  if ! ai_mode; then
+    remove_leftover_container ai ai "the container of the MCP servers" \
+      "The ai profile is off: the container of the MCP servers of the warehouse and of Airflow is stopped and removed." \
+      "which still holds the passwords of their accounts"
+  fi
 }
 
 # Stop and remove the container of the service $1 of the profile $2, if there is one. $3 names it,
@@ -1467,6 +1553,7 @@ cmd_up() {
   [ "$oauth_failed" -eq 0 ] ||
     die "the stack is up, but the OAuth clients of Metabase are not deleted, as the level off asks (ADR-0031): the error above says why. ./agoranomos ai set off deletes them"
   [ -z "$deleted_line" ] || say "$deleted_line"
+  say "$(ai_servers_summary)"
   if [ "$(setting METABASE_AI_LEVEL off)" = off ]; then
     say "$(ai_summary) ./agoranomos ai set build --default explore turns it on."
   elif [ -n "$groups_line" ]; then
@@ -2115,6 +2202,34 @@ ai_revoke() {
   say "Deleted the OAuth client $1, with its $oauth_tokens tokens: Metabase refuses them now. The people who connected through it connect again with a client ID from ./agoranomos ai connect."
 }
 
+# Turn the MCP server $1 of the container ai on or off ($2), in .env (ADR-0030): its switch, and the ai
+# profile, which is listed while a switch is on. ./agoranomos up applies it: it starts or removes the
+# container, lets ai_reader sign in or not, and creates or deletes the Airflow user ai. A line is
+# written only when its value changes.
+ai_server_switch() {
+  [ "$#" -eq 2 ] || die "usage: ./agoranomos ai $1 on|off"
+  server_key=$(ai_server_key "$1")
+  case "$2" in
+    on)
+      server_mode &&
+        die "the MCP servers of the warehouse and of Airflow run in local mode only (ADR-0030): in server mode, AI clients reach Metabase over HTTPS"
+      [ "$(env_get "$server_key")" = true ] || env_set "$server_key" true
+      new_profiles=$(with_profiles "$(setting COMPOSE_PROFILES core,demo)" ai)
+      ;;
+    off)
+      [ "$(env_get "$server_key")" = false ] || env_set "$server_key" false
+      new_profiles=$(setting COMPOSE_PROFILES core,demo)
+      if [ "$(setting WAREHOUSE_MCP false)" != true ] && [ "$(setting AIRFLOW_MCP false)" != true ]; then
+        new_profiles=$(without_profile "$new_profiles" ai)
+      fi
+      ;;
+    *) die "usage: ./agoranomos ai $1 on|off" ;;
+  esac
+  [ "$new_profiles" = "$(setting COMPOSE_PROFILES core,demo)" ] || env_set COMPOSE_PROFILES "$new_profiles"
+  say "$(ai_servers_summary)"
+  say "./agoranomos up applies it."
+}
+
 # AI access in Metabase (ADR-0017). ai shows the level, the default level and the two switches that
 # follow the level; ai set <level> [--default <level>] writes them into .env, and ./agoranomos up
 # applies them. A line is written only when its value changes, so that a line with quotes or a
@@ -2131,7 +2246,13 @@ cmd_ai() {
     fi
     say "METABASE_MCP=$(setting METABASE_MCP false), METABASE_MCP_SQL=$(setting METABASE_MCP_SQL false): the switches that follow the level."
     say "The levels that this release offers: $(ai_offered_words). ./agoranomos ai set <level> [--default <level>] changes them."
+    say "$(ai_servers_summary)"
+    if ! server_mode; then
+      say "WAREHOUSE_MCP=$(setting WAREHOUSE_MCP false), AIRFLOW_MCP=$(setting AIRFLOW_MCP false): ./agoranomos ai warehouse|airflow on|off changes them."
+    fi
     message=$(ai_problem)
+    [ -z "$message" ] || die "$message"
+    message=$(ai_servers_problem)
     [ -z "$message" ] || die "$message"
     # The groups of the setup and their members, which Metabase knows: only while it runs.
     if [ "$(setting METABASE_AI_LEVEL off)" != off ]; then
@@ -2156,8 +2277,12 @@ cmd_ai() {
       "ai_$ai_command" "$@"
       return 0
       ;;
+    warehouse | airflow)
+      ai_server_switch "$@"
+      return 0
+      ;;
     set) ;;
-    *) die "usage: ./agoranomos ai [diff | set <level> [--default <level>] | connect <client> | clients | revoke <client ID>]" ;;
+    *) die "usage: ./agoranomos ai [diff | set <level> [--default <level>] | connect <client> | clients | revoke <client ID> | warehouse|airflow on|off]" ;;
   esac
   shift
   [ "$#" -ge 1 ] || die "usage: ./agoranomos ai set <level> [--default <level>], with a level of $(ai_offered_words)"
@@ -2213,6 +2338,26 @@ cmd_ai() {
   say "./agoranomos up applies it."
 }
 
+# Start the MCP server $1 of the container ai, warehouse or airflow, on the standard input and output
+# of this script, for an AI client that runs it as a stdio server, as .mcp.json does (ADR-0030). It
+# prints nothing on the standard output but what the server sends: the messages go to the standard
+# error. Unlike every other call of exec, this one passes the standard input on, which is the client.
+cmd_mcp() {
+  [ "$#" -eq 1 ] || die "usage: ./agoranomos mcp warehouse|airflow"
+  case "$1" in
+    warehouse | airflow) ;;
+    *) die "usage: ./agoranomos mcp warehouse|airflow" ;;
+  esac
+  [ -f "$ENV_FILE" ] || die "there is no .env yet: run ./agoranomos up"
+  server_mode &&
+    die "the MCP servers of the warehouse and of Airflow run in local mode only (ADR-0030): in server mode, AI clients reach Metabase over HTTPS"
+  [ "$(ai_server_state "$1")" = on ] ||
+    die "the MCP server of $1 is off: ./agoranomos ai $1 on turns it on, and ./agoranomos up applies it"
+  running_service ai ||
+    die "the container ai is not running: ./agoranomos up starts it"
+  compose exec -T ai /opt/agoranomos/ai/mcp.sh "$1"
+}
+
 cmd_help() {
   print_banner
   usage
@@ -2235,6 +2380,8 @@ Commands:
   credentials   Show where to sign in to Airflow and Metabase, and where the passwords are
   ai            Show the level of AI access in Metabase (ai set <level> [--default <level>]: change it; ai diff: what up would change;
                 ai connect <client>, ai clients, ai revoke <client ID>: the OAuth clients of its MCP server)
+                and the MCP servers of the warehouse and of Airflow (ai warehouse|airflow on|off: turn one on or off)
+  mcp           mcp warehouse|airflow: run the MCP server of the warehouse or of Airflow on stdio, for an AI client
   help          Show this help
 
 Documentation: docs/reference/command-line.md
@@ -2257,6 +2404,7 @@ main() {
     metadata) cmd_metadata "$@" ;;
     credentials) cmd_credentials "$@" ;;
     ai) cmd_ai "$@" ;;
+    mcp) cmd_mcp "$@" ;;
     help | -h | --help) cmd_help ;;
     *)
       usage >&2

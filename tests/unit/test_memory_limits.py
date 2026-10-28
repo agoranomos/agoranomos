@@ -14,13 +14,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # memory that Docker reports with the recommended memory of the variant, 512 MiB below it, as
 # ./agoranomos preflight counts it: 8 GB for the LocalExecutor, 12 GB for the CeleryExecutor.
 BUDGET_MIB = {"local": 7680, "celery": 11776}
-# The profiles of each mode (ADR-0011). The demo counts in both, because .env.example turns it on.
+# The profiles of each mode (ADR-0011). The demo counts in both, because .env.example turns it on,
+# and the container ai in local mode, the only mode that runs it (ADR-0030).
 MODES = {
-    "local": frozenset({"core", "demo"}),
+    "local": frozenset({"core", "demo", "ai"}),
     "server": frozenset({"core", "demo", "server", "ops"}),
 }
-# The services that only server mode runs: the proxy and the backups.
+# The services that only server mode runs, the proxy and the backups, and the one that only local
+# mode runs, the container of the MCP servers.
 SERVER_ONLY: list[str] = ["backup", "proxy"]
+LOCAL_ONLY: list[str] = ["ai"]
 SERVICE = re.compile(r"^  ([a-z][a-z0-9-]*):$")
 LIMIT = re.compile(r"^    mem_limit: (?:\$\{([A-Z_]+):-(\d+[mg])\}|(\d+[mg]))$")
 SWAP = re.compile(r"^    memswap_limit: (.+)$")
@@ -138,6 +141,7 @@ def test_the_services_of_the_variants_are_the_ones_that_have_limits():
     # A new service needs a limit: the list of the services of each variant, which
     # tests/stack/test_variants.py checks with Compose, is here as a literal on purpose.
     assert sorted(variant("local")) == [
+        "ai",
         "airflow-apiserver",
         "airflow-dag-processor",
         "airflow-init",
@@ -155,6 +159,8 @@ def test_the_services_of_the_variants_are_the_ones_that_have_limits():
     for executor in BUDGET_MIB:
         added = set(variant(executor, "server")) - set(variant(executor, "local"))
         assert sorted(added) == SERVER_ONLY, executor
+        removed = set(variant(executor, "local")) - set(variant(executor, "server"))
+        assert sorted(removed) == LOCAL_ONLY, executor
 
 
 def test_the_reference_gives_the_defaults_of_env_example():

@@ -4,7 +4,8 @@ The default variant runs Airflow with the LocalExecutor, inside the scheduler. T
 which .env selects with COMPOSE_FILE=compose.yaml:compose.celery.yaml, adds the broker and a worker.
 The demo profile, which COMPOSE_PROFILES in .env lists by default, adds the one-shot demo-init.
 The server profile, which ./agoranomos init --server adds to COMPOSE_PROFILES, adds the proxy, and
-the ops profile, which it adds too, adds the backup service.
+the ops profile, which it adds too, adds the backup service. The ai profile, which a new .env lists
+in local mode, adds the container of the MCP servers of the warehouse and of Airflow (ADR-0030).
 """
 
 from collections.abc import Collection
@@ -26,6 +27,8 @@ CELERY_LONG_RUNNING = {"broker", "airflow-worker"}
 SERVER_LONG_RUNNING = {"proxy"}
 # The services that the ops profile adds: the backups.
 OPS_LONG_RUNNING = {"backup"}
+# The services that the ai profile adds: the container of the MCP servers.
+AI_LONG_RUNNING = {"ai"}
 BASE_ONE_SHOT = {"db-init", "airflow-init", "metadata-export", "metabase-init"}
 # The Airflow services of the base stack: airflow-init, a one-shot job, and the four that stay up.
 BASE_AIRFLOW = {
@@ -46,6 +49,8 @@ def long_running(variant: str, profiles: Collection[str] = ()) -> set[str]:
         services |= SERVER_LONG_RUNNING
     if "ops" in profiles:
         services |= OPS_LONG_RUNNING
+    if "ai" in profiles:
+        services |= AI_LONG_RUNNING
     return services
 
 
@@ -85,6 +90,9 @@ DEMO = "demo" in active_profiles()
 SERVER = "server" in active_profiles()
 # Whether .env selects the ops profile: the tests of the backup service skip without it.
 OPS = "ops" in active_profiles()
+# Whether .env selects the ai profile: the tests of the MCP servers of the warehouse and of Airflow
+# skip without it.
+AI_SERVERS = "ai" in active_profiles()
 # The level of AI access in Metabase that .env selects (ADR-0017), and whether the MCP server of
 # Metabase is on with it: a new installation has build, and an upgraded one off.
 AI_LEVEL = ai_level()

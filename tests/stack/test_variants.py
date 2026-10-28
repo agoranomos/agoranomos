@@ -61,6 +61,7 @@ def test_a_variant_has_the_services_it_needs(variant):
         "metadata-export",
         "proxy",
         "backup",
+        "ai",
     }
     expected |= BASE_AIRFLOW | METABASE
     assert expected <= names
@@ -332,6 +333,9 @@ def expected_holders(variant: str) -> dict[str, set[str]]:
       the code of an Airflow task, an extension DAG included, never holds one.
     - Metabase holds its own database password and its two keys. It learns the password of the
       warehouse from metabase-init, which holds it with the admin password that it signs in with.
+    - The container ai holds the passwords of the accounts of its two MCP servers, ai_reader in the
+      warehouse, which db-init sets up, and the Airflow user ai, which airflow-init keeps, and no
+      other (ADR-0030).
     """
     airflow = airflow_names(variant)
     runner = TASK_RUNNER[variant]
@@ -349,6 +353,8 @@ def expected_holders(variant: str) -> dict[str, set[str]]:
         "BACKUP_DB_PASSWORD": {"db-init", "backup"},
         "VALKEY_PASSWORD": {"broker", *celery_queue} if variant == "celery" else set(),
         "CELERY_RESULTS_DB_PASSWORD": {"db-init", *celery_queue},
+        "AI_READER_PASSWORD": {"db-init", "ai"},
+        "AIRFLOW_AI_PASSWORD": {"airflow-init", "ai"},
         "AIRFLOW_FERNET_KEY": airflow,
         "AIRFLOW_JWT_SECRET": control,
         "AIRFLOW_API_SECRET_KEY": airflow,

@@ -33,8 +33,8 @@ from metadata import shown
 
 # The levels, from the lowest. Each adds to the one before it.
 LEVELS = ("off", "answers", "explore", "build", "build-sql")
-# The levels that this release offers: build-sql comes once MCP Toolbox runs with the role
-# ai_reader.
+# The levels that this release offers: build-sql comes after the first release of the AI layer,
+# and until then SQL from AI clients goes through MCP Toolbox, as the role ai_reader.
 OFFERED = ("off", "answers", "explore", "build")
 
 # The settings in .env, with the defaults that compose.yaml gives a setting that is not set.
@@ -109,7 +109,10 @@ def switches(level: str) -> tuple[str, str]:
 def not_offered_reason(level: str) -> str:
     """Why this release does not offer a level, as ./agoranomos says it."""
     if level == "build-sql":
-        return "It comes once MCP Toolbox runs with the role ai_reader (ADR-0017)"
+        return (
+            "It comes after the first release of the AI layer, and until then SQL from AI clients"
+            " goes through MCP Toolbox, ./agoranomos mcp warehouse (ADR-0017)"
+        )
     return "This release does not offer it yet (ADR-0017)"
 
 

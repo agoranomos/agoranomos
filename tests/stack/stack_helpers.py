@@ -120,10 +120,10 @@ def rendered_config(variant: str, ipv6: str | None = None) -> dict[str, Any]:
     """The whole configuration of a variant, as docker compose config renders it: its services,
     networks and volumes. COMPOSE_FILE and COMPOSE_PROFILES are set for the call, so neither the
     variant nor the profiles that .env selects matter, and no stack has to run: every service of
-    the variant is there, demo-init and those of server mode too. ipv6 sets AGORANOMOS_IPV6 for the
-    call, which wins over .env: "" is the setting left empty, as when it is not set (the network
-    default then has no IPv6), and None leaves it to .env. Cached, because the Compose files do not
-    change during a run.
+    the variant is there, demo-init, the container ai and those of server mode too. ipv6 sets
+    AGORANOMOS_IPV6 for the call, which wins over .env: "" is the setting left empty, as when it is
+    not set (the network default then has no IPv6), and None leaves it to .env. Cached, because the
+    Compose files do not change during a run.
 
     The configuration holds secrets, so every object of the JSON becomes a NamesOnly dict, which
     pytest prints by its names: a frame or an assertion of a failed test that holds a service, or
@@ -136,7 +136,7 @@ def rendered_config(variant: str, ipv6: str | None = None) -> dict[str, Any]:
             "json",
             env={
                 "COMPOSE_FILE": FILES[variant],
-                "COMPOSE_PROFILES": "core,demo,server,ops",
+                "COMPOSE_PROFILES": "core,demo,server,ops,ai",
                 **({} if ipv6 is None else {"AGORANOMOS_IPV6": ipv6}),
             },
         ).stdout,
@@ -508,6 +508,7 @@ WAREHOUSE_ROLES = {
     "loader": "WAREHOUSE_LOADER_PASSWORD",
     "transformer": "WAREHOUSE_TRANSFORMER_PASSWORD",
     "metabase_reader": "METABASE_READER_PASSWORD",
+    "ai_reader": "AI_READER_PASSWORD",
 }
 
 
