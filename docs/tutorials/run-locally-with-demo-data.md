@@ -6,7 +6,7 @@ It takes about half an hour, most of it the first start.
 
 !!! note "Pre-alpha"
 
-    The tutorial follows v0.2.1, the latest release. <!-- x-release-please-version -->
+    The tutorial follows v0.3.0, the latest release. <!-- x-release-please-version -->
 
 ## What you need
 
@@ -21,7 +21,7 @@ It takes about half an hour, most of it the first start.
     <!-- x-release-please-start-version -->
 
     ```bash
-    git clone --branch v0.2.1 https://github.com/agoranomos/agoranomos.git
+    git clone --branch v0.3.0 https://github.com/agoranomos/agoranomos.git
     cd agoranomos
     ```
 
