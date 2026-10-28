@@ -8,6 +8,7 @@ How-to guides are short recipes for people who want to get a specific job done w
 - [Deploy on a server](deploy-on-a-server.md): put Metabase on the internet over HTTPS, with Airflow behind an SSH tunnel and daily backups.
 - [Back up and restore](back-up-and-restore.md): take, schedule and copy backups, and restore them, also on a new server.
 - [See the demo](see-the-demo.md): what the demo shows, how it stays up to date, and how to turn it off.
+- [Talk to your data](talk-to-your-data.md): connect Claude Code, the Claude apps or another AI client to your data through MCP, choose what it may do, and turn it off.
 - [Watch the pipeline](watch-the-pipeline.md): what the dashboard of the Ops collection shows about the loads, the runs of the transform and the warehouse, and where its data comes from.
 - [Rename a field or add your own definitions](rename-a-field.md): give the tables and fields of the marts names, descriptions and notes of your deployment's own.
 
@@ -15,6 +16,5 @@ How-to guides are short recipes for people who want to get a specific job done w
 
 - **Add a data source**: connect another ad platform, analytics or CRM source, or load files.
 - **Upgrade**: move to a newer release of Agoranomos.
-- **Connect an AI client**: give Claude, ChatGPT or a coding agent access to your data through MCP.
 
 Guides are published together with the features they describe.
