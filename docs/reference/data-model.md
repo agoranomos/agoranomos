@@ -1,6 +1,6 @@
 # The data model
 
-The warehouse holds the advertising statistics of every platform in one model, at the grain of a campaign and a day, with the clients of the business, the conversions of each conversion action, the sessions of web analytics and the exchange rates into one reporting currency ([ADR-0024](../adr/0024-one-deployment-is-one-business.md), [ADR-0025](../adr/0025-model-advertising-statistics-once.md)). Metabase reads its marts only. Today its data comes from the demo: a fictional business on four fictional platforms in the shapes of real APIs, with a fictional source of exchange rates. The connectors of real platforms are planned.
+The warehouse holds the advertising statistics of every platform in one model, by day at the grains of a campaign, an ad group and an ad, with the clients of the business, the conversions of each conversion action, the sessions of web analytics and the exchange rates into one reporting currency ([ADR-0024](../adr/0024-one-deployment-is-one-business.md), [ADR-0025](../adr/0025-model-advertising-statistics-once.md), [ADR-0034](../adr/0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md)). Metabase reads its marts only. Its data comes from the demo, a fictional business on four fictional platforms in the shapes of real APIs with a fictional source of exchange rates, and from the accounts of Google Ads and the rates of the ECB once a deployment connects them ([Google Ads](#google-ads), [The rates of the ECB](#the-rates-of-the-ecb)). The connectors of the other real platforms are planned.
 
 ## Layers
 
@@ -9,11 +9,11 @@ The warehouse holds the advertising statistics of every platform in one model, a
 | `raw_<platform>` | The responses of each platform as dlt loads them: nested objects become columns joined by `__`, and lists become child tables | `loader` | `transformer` |
 | `raw_<platform>_staging` | The rows of a load on their way into `raw_<platform>` | `loader` | nobody else |
 | `raw_settings` | The settings of the model of the deployment and the clients of the demo, loaded at the start of each run of the transform | `loader` | `transformer` |
-| `staging` | A view for each table of each platform and of the settings, in the names of the model (`stg_<platform>__<table>`, `stg_settings__<table>`); the steps that the platforms share (`int_<entity>__<verb>`), views as well; and the seeds of the base package (`seed_…`) | `transformer` | nobody else |
+| `staging` | A view for each table of each platform and of the settings, in the names of the model (`stg_<platform>__<table>`, `stg_settings__<table>`); the steps that the platforms share (`int_<entity>__<verb>`), views as well, but for the statistics of ad groups and of ads, which are tables, so that each of their tests reads a table rather than computes them again; and the seeds of the base package (`seed_…`) | `transformer` | nobody else |
 | `marts` | The tables of the model, rebuilt in full on each run of the transform | `transformer` | `metabase_reader` |
 | `ops` | The tables in which elementary records each run of dbt and its tests, and the four views of the Ops collection over them ([The schema ops](#the-schema-ops)) | `transformer` | `metabase_reader`, the four views only |
 
-The staging views of a platform are calls of one macro for each shape of an API (`dbt/macros/shapes/`), so that the demo platform `demo_search` and the planned connector of Google Ads are to share one. dbt replaces a view or a table by dropping the old one with every view that depends on it, so build nothing of your own on a relation of `staging` or `marts`: put a question of your own in Metabase, whose SQL PostgreSQL does not track. Between two tasks of one run, and after a run that a test stopped, a view of `staging` can be missing; the marts keep their data.
+The staging views of a platform are calls of one macro for each shape of an API (`dbt/macros/shapes/`), so that the demo platform `demo_search` and the connector of Google Ads share one. A macro of statistics or conversions takes the level of its report: a campaign, an ad group or an ad. dbt replaces a view or a table by dropping the old one with every view that depends on it, so build nothing of your own on a relation of `staging` or `marts`: put a question of your own in Metabase, whose SQL PostgreSQL does not track. Between two tasks of one run, and after a run that a test stopped, a view of `staging` can be missing; the marts keep their data.
 
 ## The marts
 
@@ -21,15 +21,19 @@ The staging views of a platform are calls of one macro for each shape of an API 
 |---|---|---|
 | `ad_stats_campaign_daily` | A campaign on a day: impressions, clicks, spend, and the conversions of its primary conversion actions | `report_date`, `platform`, `account_id`, `campaign_id` |
 | `ad_conversions_campaign_daily` | A campaign, a day and a conversion action: conversions and their value | the key above and `conversion_action_id` |
+| `ad_stats_ad_group_daily` | An ad group on a day, an ad set of Meta among them: impressions, clicks, spend, and the conversions of its primary conversion actions | `report_date`, `platform`, `account_id`, `ad_group_id` |
+| `ad_stats_ad_daily` | An ad on a day: impressions, clicks, spend, and the conversions of its primary conversion actions | `report_date`, `platform`, `account_id`, `ad_group_id`, `ad_id` |
 | `web_sessions_daily` | A property of web analytics on a day, by source, medium and campaign: sessions, engaged sessions, key events and revenue | `report_date`, `property_id`, `session_source`, `session_medium`, `session_campaign_name`, `session_campaign_id` |
 | `ad_platforms` | A platform: its name, its kind, and for a demo platform the API that it mimics | `platform` |
 | `ad_accounts` | An ad account: its client, currency, time zone and status, and the first and last day of its statistics | `platform`, `account_id` |
 | `clients` | A client of the business: a brand, shop or legal entity | `client_id` |
 | `ad_campaigns` | A campaign: its current name, status and type, the days of its statistics, and how many names it had | `platform`, `account_id`, `campaign_id` |
 | `ad_campaign_names` | A name that a campaign had, from when and until when | `platform`, `account_id`, `campaign_id`, `valid_from` |
+| `ad_groups` | An ad group: its campaign, its current name, status and type, and the days of its statistics | `platform`, `account_id`, `ad_group_id` |
+| `ads` | An ad: its campaign and ad group, its current name, status and type, and the days of its statistics | `platform`, `account_id`, `ad_group_id`, `ad_id` |
 | `fx_rates_daily` | A currency on a day: its rate into the reporting currency, `rate_into_reporting_currency` | `rate_date`, `currency`, `reporting_currency` |
 
-Every column has a description in the database and in Metabase. The facts carry the names of their platform, client, account and campaign, so that a question needs no join. The marts have primary keys and no foreign keys: tests check the relationships.
+Every column has a description in the database and in Metabase. The facts carry the names of their platform, client, account and campaign, and of their ad group and ad, so that a question needs no join. Each level comes from a report of its own of the platform, never as a sum of a lower one, so a sum of the ad groups of a campaign is not its row: a Performance Max campaign of Google has no ad groups and no ads, and its statistics are in `ad_stats_campaign_daily` only. An ad of a type that has no name on its platform, such as a responsive search ad of Google, has its ID as its name. The marts have primary keys and no foreign keys: tests check the relationships.
 
 ## Clients
 
@@ -51,7 +55,7 @@ An account that no file names belongs to the client `unassigned`, named Unassign
 
 ## Conversions
 
-Each platform reports conversions by conversion action: an action of Google, an action type of Meta, a metric of TikTok. `ad_conversions_campaign_daily` has every action, with a category (`purchase`, `lead`, `sign_up`, `add_to_cart`, `app_install` or `other`) and whether it is primary. The `conversions` and `conversion_value` of `ad_stats_campaign_daily` are the sums of its primary actions. The seed `seed_conversion_actions` of the base package says which actions are primary; a deployment overrides a row, or sets an action of its data that the seed does not name, in `extensions/model/conversion_actions.toml`:
+Each platform reports conversions by conversion action: an action of Google, an action type of Meta, a metric of TikTok. `ad_conversions_campaign_daily` has every action, with a category (`purchase`, `lead`, `sign_up`, `add_to_cart`, `app_install` or `other`) and whether it is primary. The `conversions` and `conversion_value` of `ad_stats_campaign_daily` are the sums of its primary actions, and those of `ad_stats_ad_group_daily` and `ad_stats_ad_daily` the sums of the primary actions of the report by action of their own level; the conversions by action are kept at the grain of campaigns only ([ADR-0034](../adr/0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md)). The seed `seed_conversion_actions` of the base package says which actions are primary; a deployment overrides a row, or sets an action of its data that the seed does not name, in `extensions/model/conversion_actions.toml`:
 
 ```toml
 [[actions]]
@@ -79,7 +83,7 @@ Every row of a campaign carries its current name, so that a group by name does n
 
 ## Quality
 
-The tests of dbt run right after their model, in the same task, `dbt build` ([ADR-0028](../adr/0028-build-each-node-of-dbt-with-its-tests-in-one-task.md)). The critical ones are in `staging`, on the staging views and on the steps that the platforms share: a failure stops the models that read the model, and the marts keep their data. They check that the keys are unique and not null, that counts and money are not negative, that every currency is in ISO 4217 and every time zone in the tz database of IANA, that every day and currency of the facts has a rate, that every account and campaign of the facts is known, and that the primary actions add up to the conversions of each campaign. Warnings do not stop anything: a day missing in the data of an account, more clicks than impressions, and an account without a client. The package elementary records the status of every test of every run, and the number of rows that it found, in the schema `ops`, which the Ops collection shows ([Watch the pipeline](../how-to/watch-the-pipeline.md)).
+The tests of dbt run right after their model, in the same task, `dbt build` ([ADR-0028](../adr/0028-build-each-node-of-dbt-with-its-tests-in-one-task.md)). The critical ones are in `staging`, on the staging views and on the steps that the platforms share: a failure stops the models that read the model, and the marts keep their data. They check that the keys are unique and not null, that counts and money are not negative, that every currency is in ISO 4217 and every time zone in the tz database of IANA, that every day and currency of the facts has a rate, that every account and campaign of the facts is known, and that the primary actions add up to the conversions of each campaign. Warnings do not stop anything: a day missing in the data of an account, more clicks than impressions, an account without a client, and ad groups that add up to more than their campaign on a day, or ads to more than their ad group, beyond a cent for each row, as two reports loaded at different moments can disagree on recent days. The package elementary records the status of every test of every run, and the number of rows that it found, in the schema `ops`, which the Ops collection shows ([Watch the pipeline](../how-to/watch-the-pipeline.md)).
 
 ## The schema ops
 
@@ -98,19 +102,19 @@ A task of the transform runs dbt for one node, so one run of the transform is ma
 
 | Code | Mimics | What it gives |
 |---|---|---|
-| `demo_search` | Google Ads API v25 | Search and Performance Max campaigns of two accounts under a manager account, cost in micros, conversions by conversion action |
-| `demo_social` | Meta Marketing API v26.0 | Insights of campaigns with their actions and action values |
-| `demo_video` | TikTok API for Business v1.3 | The daily report of campaigns, in an account whose time zone is `Etc/GMT+8` |
+| `demo_search` | Google Ads API v25 | Search, Shopping, Display, Video and Performance Max campaigns of two accounts under a manager account, with their ad groups and ads, cost in micros, conversions by conversion action at each level |
+| `demo_social` | Meta Marketing API v26.0 | Insights of campaigns, ad sets and ads with their actions and action values |
+| `demo_video` | TikTok API for Business v1.3 | The daily reports of campaigns, ad groups and ads, in an account whose time zone is `Etc/GMT+8` |
 | `demo_web` | GA4 Data API v1beta | Sessions of two properties by source, medium, campaign and channel group |
 | `demo_fx` | none | Reference rates of the euro in US dollars, on weekdays but four holidays |
 
-The demo has a fictional business with two clients, Tarnwick Outfitters and Brindlemoor Haus, and 18 months of history up to the day before its first start, in the time zone of each account, to which a daily load adds each new day ([See the demo](../how-to/see-the-demo.md#keep-the-demo-up-to-date)). The codes of real platforms, such as `google_ads`, are those of their connectors ([Google Ads](#google-ads)).
+The demo has a fictional business with two clients, Tarnwick Outfitters and Brindlemoor Haus, and 18 months of history up to the day before its first start, in the time zone of each account, to which a daily load adds each new day ([See the demo](../how-to/see-the-demo.md#keep-the-demo-up-to-date)). The numbers of each campaign of the demo on a day are divided among its ad groups, and those of each ad group among its ads, by shares that vary a little by day, so that they add up exactly, as on a platform. The codes of real platforms, such as `google_ads`, are those of their connectors ([Google Ads](#google-ads)).
 
 ## Google Ads
 
-The connector of Google Ads, the platform `google_ads`, is the first of a real ad platform ([ADR-0032](../adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md), [Connect Google Ads](../how-to/connect-google-ads.md)). The DAG `agoranomos_google_ads_daily` loads, as the role `loader`, the accounts of `google_ads` that `extensions/model/clients.toml` names, from the REST interface of the Google Ads API v26, into `raw_google_ads`: each account (`customers`), its campaigns with their versions (`campaigns`), and its statistics and its conversions by conversion action by day (`campaign_stats`, `campaign_conversions`), each result as the API gives it. The staging models read them through the macros that `demo_search` calls, and `google_ads_customers` for the accounts, which the load reads one by one, so `manager_account_id` stays empty. Each is empty until the first load, as the DAG starts paused. The window of a daily load is the days since the last that a load took, and at least the last 90, as on `demo_search`; the first load takes the last 36 months, as Google Ads keeps data by day for 37 only.
+The connector of Google Ads, the platform `google_ads`, is the first of a real ad platform ([ADR-0032](../adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md), [Connect Google Ads](../how-to/connect-google-ads.md)). The DAG `agoranomos_google_ads_daily` loads, as the role `loader`, the accounts of `google_ads` that `extensions/model/clients.toml` names, from the REST interface of the Google Ads API v26, into `raw_google_ads`: each account (`customers`), its campaigns, ad groups and ads with their versions (`campaigns`, `ad_groups`, `ads`), and the statistics and the conversions by conversion action by day of each of the three levels (`campaign_stats`, `campaign_conversions`, `ad_group_stats`, `ad_group_conversions`, `ad_stats`, `ad_conversions`), each result as the API gives it. The staging models read them through the macros that `demo_search` calls, and `google_ads_customers` for the accounts, which the load reads one by one, so `manager_account_id` stays empty. Each is empty until the first load, as the DAG starts paused. The window of a daily load is the days since the last that a load took, and at least the last 90, as on `demo_search`; the first load takes the last 36 months, as Google Ads keeps data by day for 37 only.
 
-A conversion action of Google Ads counts in `ad_stats_campaign_daily` only once `extensions/model/conversion_actions.toml` names it as primary, while `ad_conversions_campaign_daily` has the conversions of every action. Performance Max campaigns count at the grain of campaigns, as every campaign does today.
+A conversion action of Google Ads counts in `ad_stats_campaign_daily`, `ad_stats_ad_group_daily` and `ad_stats_ad_daily` only once `extensions/model/conversion_actions.toml` names it as primary, while `ad_conversions_campaign_daily` has the conversions of every action. Performance Max campaigns have asset groups instead of ad groups, and the API returns none of their ad groups or ads, so they count at the grain of campaigns only.
 
 ## The rates of the ECB
 
@@ -118,16 +122,20 @@ The source `ecb` is the first that is not a demo ([ADR-0032](../adr/0032-connect
 
 ## Names compared with Fivetran
 
-The model follows the design of Fivetran's dbt package `dbt_ad_reporting` (v2.8.1, Apache License 2.0, read on 19 October 2026) and takes none of its code. For those who know it:
+The model follows the design of Fivetran's dbt package `dbt_ad_reporting` (v2.8.1, Apache License 2.0, read on 19 October 2026, and its reports of ad groups and ads on 29 October 2026) and takes none of its code. For those who know it:
 
 | Agoranomos | `dbt_ad_reporting` |
 |---|---|
 | `ad_stats_campaign_daily` | `ad_reporting__campaign_report` |
+| `ad_stats_ad_group_daily` | `ad_reporting__ad_group_report` |
+| `ad_stats_ad_daily` | `ad_reporting__ad_report` |
 | `report_date` | `date_day` |
 | `platform` | `platform` |
 | `platform`, one schema `raw_<platform>` for each | `source_relation`, the source of a row when several are unioned |
 | `account_id`, `account_name` | `account_id`, `account_name` |
 | `campaign_id`, `campaign_name` (the current name) | `campaign_id`, `campaign_name` (the most recent) |
+| `ad_group_id`, `ad_group_name` | `ad_group_id`, `ad_group_name` |
+| `ad_id`, `ad_name` (its ID where the platform gives it no name) | `ad_id`, `ad_name` |
 | `impressions`, `clicks` (clicks to the site) | `impressions`, `clicks` (link clicks of Meta) |
 | `spend` (in the currency of the account), `currency` | `spend` (in the currency of the account), no column of the currency |
 | `spend_reporting`, `reporting_currency` | none |

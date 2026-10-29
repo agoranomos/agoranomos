@@ -19,7 +19,7 @@ Answer from the definition in the code, then show it in the data. Say where each
 
 - `report_date` is the day in the time zone of the account. A sum over accounts in different time zones adds days that cover different hours.
 - Money is in the currency of the account (`spend`, `conversion_value`) and in the reporting currency (`spend_reporting`, `conversion_value_reporting`). Add up money across accounts only in the columns that end in `_reporting`.
-- `conversions` and `conversion_value` of `ad_stats_campaign_daily` are the sums of the primary actions only. `ad_conversions_campaign_daily` has every action. A conversion is what its platform counts as one, in its own attribution.
+- `conversions` and `conversion_value` of `ad_stats_campaign_daily`, `ad_stats_ad_group_daily` and `ad_stats_ad_daily` are the sums of the primary actions only. The ad groups of a campaign add up to it, except a Performance Max campaign of Google, which has none. `ad_conversions_campaign_daily` has every action. A conversion is what its platform counts as one, in its own attribution.
 - `clicks` are clicks to the site, not every click.
 - The marts store no ratio, because a sum of ratios is wrong. Compute one from sums over the same rows, for example CTR as `sum(clicks) / nullif(sum(impressions), 0)`, CPC as `sum(spend_reporting) / nullif(sum(clicks), 0)`, CPA as `sum(spend_reporting) / nullif(sum(conversions), 0)`, and ROAS as `sum(conversion_value_reporting) / nullif(sum(spend_reporting), 0)`.
 - Today the data is the demo: fictional platforms with codes such as `demo_search`, which follow the shapes of real APIs. Say so when it matters for the answer.

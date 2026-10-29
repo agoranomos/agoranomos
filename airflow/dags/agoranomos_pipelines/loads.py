@@ -1,7 +1,8 @@
 """What the dlt sources of the agoranomos bundle share: the connection of the loader role, the
-hints of the record of the windows that each load replaces (_agoranomos_reloads), and how a load
-reads that record (ADR-0004). The sources of the demo (demo/sources.py) and of the rates of the ECB
-(ecb.py) load through them."""
+settings of dlt for each load, the hints of the record of the windows that each load replaces
+(_agoranomos_reloads), and how a load reads that record (ADR-0004). The sources of the demo
+(demo/sources.py), of the rates of the ECB (ecb.py) and of Google Ads (google_ads.py) load through
+them."""
 
 from __future__ import annotations
 
@@ -14,6 +15,17 @@ import dlt
 from dlt.destinations.exceptions import DatabaseUndefinedRelation
 
 MERGE = {"disposition": "merge", "strategy": "delete-insert"}
+# The settings of dlt 1.31.0 that every load sets, as environment variables of its configuration:
+DLT_SETTINGS = {
+    # dlt leaves the rows of the last load in the staging dataset unless it is told to empty it.
+    "LOAD__TRUNCATE_STAGING_DATASET": "true",
+    # dlt inserts a file of rows into PostgreSQL as statements of up to 16 MiB of SQL, up to 20
+    # files at once, and PostgreSQL takes many times the text of a statement to parse it: the
+    # history of the demo took warehouse-db past its memory limit. Files of at most 5,000 rows,
+    # two at a time, keep each statement to a few MiB and the load within the limit.
+    "NORMALIZE__DATA_WRITER__FILE_MAX_ITEMS": "5000",
+    "LOAD__WORKERS": "2",
+}
 TEXT, DATE, TIMESTAMP = {"data_type": "text"}, {"data_type": "date"}, {"data_type": "timestamp"}
 
 # Each load also appends the window of each account that it replaced, in the same run as the

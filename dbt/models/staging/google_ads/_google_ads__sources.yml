@@ -37,3 +37,33 @@ sources:
           as segments.conversion_action cannot be selected with the cost: the conversions of the
           platform and all conversions, with their values. Each load replaces the days of each
           account that it covers.
+      - name: ad_groups
+        description: >-
+          The ad groups of each account, with their campaign, status and type, one row for each
+          version that the loads saw: dlt keeps the versions (scd2), from _dlt_valid_from until
+          _dlt_valid_to. A Performance Max campaign has none.
+      - name: ad_group_stats
+        description: >-
+          The statistics of each ad group by day (segments.date): impressions and clicks as strings,
+          the INT64 numbers of the REST interface, cost in micros, and the conversions of the
+          platform. Each load replaces the days of each account that it covers.
+      - name: ad_group_conversions
+        description: >-
+          The conversions of each ad group by day and conversion action, from a query of its own, as
+          segments.conversion_action cannot be selected with the cost: the conversions of the
+          platform and all conversions, with their values. Each load replaces the days of each
+          account that it covers.
+      - name: ads
+        description: >-
+          The ads of each account in their ad groups (ad_group_ad), with their status and type, one
+          row for each version that the loads saw: dlt keeps the versions (scd2), from
+          _dlt_valid_from until _dlt_valid_to. A type of ad that has no name on Google has no value
+          in ad_group_ad__ad__name.
+      - name: ad_stats
+        description: >-
+          The statistics of each ad by day (segments.date), in the form of ad_group_stats. Each load
+          replaces the days of each account that it covers.
+      - name: ad_conversions
+        description: >-
+          The conversions of each ad by day and conversion action, in the form of
+          ad_group_conversions. Each load replaces the days of each account that it covers.

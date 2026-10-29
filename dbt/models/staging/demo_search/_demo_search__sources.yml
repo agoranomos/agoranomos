@@ -32,3 +32,30 @@ sources:
         description: >-
           The conversions of the campaigns of demo_search by conversion action, one row for each
           campaign, day and action with any conversion.
+      - name: ad_groups
+        description: >-
+          The ad groups of demo_search, one row for each version, from _dlt_valid_from until
+          _dlt_valid_to, as dlt keeps them with its scd2 strategy.
+      - name: ad_group_stats
+        description: >-
+          The statistics of the ad groups of demo_search, one row for each ad group and day with any
+          metric, in the currency and the time zone of the account. Each load replaces the days of
+          each account that it covers. A Performance Max campaign has no ad groups.
+      - name: ad_group_conversions
+        description: >-
+          The conversions of the ad groups of demo_search by conversion action, one row for each ad
+          group, day and action with any conversion.
+      - name: ads
+        description: >-
+          The ads of demo_search in their ad groups, one row for each version, from _dlt_valid_from
+          until _dlt_valid_to, as dlt keeps them with its scd2 strategy. A type of ad that has no
+          name on Google has no value in ad_group_ad__ad__name.
+      - name: ad_stats
+        description: >-
+          The statistics of the ads of demo_search, one row for each ad and day with any metric, in
+          the currency and the time zone of the account. Each load replaces the days of each account
+          that it covers.
+      - name: ad_conversions
+        description: >-
+          The conversions of the ads of demo_search by conversion action, one row for each ad, day
+          and action with any conversion.

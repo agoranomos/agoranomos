@@ -22,12 +22,12 @@ Build in Metabase, through the MCP server `agoranomos-metabase`, with the accoun
 
 1. Ask what the dashboard is for, who reads it, and its period, if the request does not say.
 2. Pick the marts. [The data model](../../../docs/reference/data-model.md) lists them:
-    - `ad_stats_campaign_daily` for spend, impressions, clicks and primary conversions;
+    - `ad_stats_campaign_daily` for spend, impressions, clicks and primary conversions, and `ad_stats_ad_group_daily` and `ad_stats_ad_daily` for the same by ad group and by ad, without the Performance Max campaigns of Google, which have no ad groups;
     - `ad_conversions_campaign_daily` for conversions by action;
     - `web_sessions_daily` for the sessions of web analytics;
-    - the dimensions, such as `clients` and `ad_accounts`, for filters.
+    - the dimensions, such as `clients`, `ad_accounts`, `ad_groups` and `ads`, for filters.
 
-    The facts carry the names of their platform, client, account and campaign, so most questions need no join.
+    The facts carry the names of their platform, client, account and campaign, and of their ad group and ad, so most questions need no join.
 3. Use the right columns:
     - money across accounts only in the columns that end in `_reporting`;
     - ratios such as CTR, CPC, CPA and ROAS from sums, never as an average of ratios;

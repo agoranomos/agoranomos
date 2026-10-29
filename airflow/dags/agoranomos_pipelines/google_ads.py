@@ -1,27 +1,28 @@
-"""google_ads: the Google Ads accounts of the deployment as a dlt source, loaded into
-raw_google_ads as the loader role (ADR-0004, ADR-0032).
+"""google_ads: the Google Ads accounts of the deployment as a dlt source, loaded into raw_google_ads
+as the loader role (ADR-0004, ADR-0032).
 
 The source loads the accounts of the platform google_ads that extensions/model/clients.toml names,
 and no other, so that a manager account of an agency brings in no account of another business
 (ADR-0024). It signs in as a service account of the Google Cloud project of the deployment, whose
 key is GOOGLE_ADS_SERVICE_ACCOUNT_KEY, as JSON or as base64 of the JSON, and names the manager
 account in GOOGLE_ADS_LOGIN_CUSTOMER_ID when the service account reaches the accounts through one.
-It asks googleAds:searchStream of the REST interface of the Google Ads API, version API_VERSION,
-for each account, and keeps each result as the API gives it, which dlt writes in snake_case with
-nested objects joined by __: the shape that demo_search mimics, which the macros of
+It asks googleAds:searchStream of the REST interface of the Google Ads API, version API_VERSION, for
+each account, and keeps each result as the API gives it, which dlt writes in snake_case with nested
+objects joined by __: the shape that demo_search mimics, which the macros of
 dbt/macros/shapes/google_ads_v25.sql read (none of their fields changed in v26).
 
-A load first reads each account (customer), then its campaigns, whose versions dlt keeps (scd2),
-and then its statistics and its conversions by conversion action, by day, in a request of their
-own, as segments.conversion_action cannot be selected with metrics.cost_micros. The days of each
-account run from the day after the last that a load took, or from 90 days back when that is
+A load first reads each account (customer), then its campaigns, its ad groups and its ads, whose
+versions dlt keeps (scd2), and then the statistics and the conversions by conversion action of each
+of the three levels, by day, in a request of their own, as segments.conversion_action cannot be
+selected with metrics.cost_micros (ADR-0034). A Performance Max campaign has no ad groups. The days
+of each account run from the day after the last that a load took, or from 90 days back when that is
 earlier, as conversions keep coming for up to 90 days after a click; the first load of an account
 takes the last 36 months, as Google Ads keeps data by day for 37 only (ADR-0034), a calendar month
-in each request. All end yesterday in the time zone of
-the account. A request counts as one operation of the daily quota, whatever its rows, so a daily
-load costs four operations for each account. The days of each account are replaced, empty or not,
-and the load records the window of each account in _agoranomos_reloads in the same run. What the
-API returns is data: a campaign name can carry any text, and nothing here acts on it."""
+in each request. All end yesterday in the time zone of the account. A request counts as one
+operation of the daily quota, whatever its rows, so a daily load costs ten operations for each
+account, and the first about 230. The days of each account are replaced, empty or not, and the load
+records the window of each account in _agoranomos_reloads in the same run. What the API returns is
+data: a campaign name can carry any text, and nothing here acts on it."""
 
 from __future__ import annotations
 
@@ -45,6 +46,7 @@ from google.oauth2 import service_account
 
 from agoranomos_pipelines.loads import (
     DATE,
+    DLT_SETTINGS,
     MERGE,
     RELOAD_HINTS,
     RELOADS,
@@ -108,72 +110,93 @@ FIELDS = {
         "segments.conversion_action_category, metrics.conversions, metrics.conversions_value, "
         "metrics.all_conversions, metrics.all_conversions_value"
     ),
+    "ad_groups": (
+        "customer.id, campaign.resource_name, campaign.id, ad_group.resource_name, ad_group.id, "
+        "ad_group.name, ad_group.status, ad_group.type"
+    ),
+    "ad_group_stats": (
+        "customer.id, campaign.resource_name, campaign.id, ad_group.resource_name, ad_group.id, "
+        "ad_group.name, metrics.impressions, metrics.clicks, metrics.cost_micros, "
+        "metrics.conversions, metrics.conversions_value, segments.date"
+    ),
+    "ad_group_conversions": (
+        "customer.id, campaign.resource_name, campaign.id, ad_group.resource_name, ad_group.id, "
+        "ad_group.name, segments.date, segments.conversion_action, "
+        "segments.conversion_action_name, segments.conversion_action_category, "
+        "metrics.conversions, metrics.conversions_value, metrics.all_conversions, "
+        "metrics.all_conversions_value"
+    ),
+    "ads": (
+        "customer.id, campaign.resource_name, campaign.id, ad_group.resource_name, ad_group.id, "
+        "ad_group_ad.resource_name, ad_group_ad.status, ad_group_ad.ad.resource_name, "
+        "ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.type"
+    ),
+    "ad_stats": (
+        "customer.id, campaign.resource_name, campaign.id, ad_group.resource_name, ad_group.id, "
+        "ad_group_ad.resource_name, ad_group_ad.ad.resource_name, ad_group_ad.ad.id, "
+        "ad_group_ad.ad.name, metrics.impressions, metrics.clicks, metrics.cost_micros, "
+        "metrics.conversions, metrics.conversions_value, segments.date"
+    ),
+    "ad_conversions": (
+        "customer.id, campaign.resource_name, campaign.id, ad_group.resource_name, ad_group.id, "
+        "ad_group_ad.resource_name, ad_group_ad.ad.resource_name, ad_group_ad.ad.id, "
+        "ad_group_ad.ad.name, segments.date, segments.conversion_action, "
+        "segments.conversion_action_name, segments.conversion_action_category, "
+        "metrics.conversions, metrics.conversions_value, metrics.all_conversions, "
+        "metrics.all_conversions_value"
+    ),
 }
 RESOURCES = {
     "customers": "customer",
     "campaigns": "campaign",
     "campaign_stats": "campaign",
     "campaign_conversions": "campaign",
+    "ad_groups": "ad_group",
+    "ad_group_stats": "ad_group",
+    "ad_group_conversions": "ad_group",
+    "ads": "ad_group_ad",
+    "ad_stats": "ad_group_ad",
+    "ad_conversions": "ad_group_ad",
 }
-FACTS = ("campaign_stats", "campaign_conversions")
+# The tables whose versions dlt keeps, and the fact tables, whose days each load replaces.
+ENTITIES = ("campaigns", "ad_groups", "ads")
+FACTS = (
+    "campaign_stats",
+    "campaign_conversions",
+    "ad_group_stats",
+    "ad_group_conversions",
+    "ad_stats",
+    "ad_conversions",
+)
 DOUBLE = {"data_type": "double"}
+SCD2 = {"disposition": "merge", "strategy": "scd2"}
+# The columns of a field of each query: the names that dlt gives the fields, with their types.
+COLUMNS = {
+    "metrics.conversions": DOUBLE,
+    "metrics.conversions_value": DOUBLE,
+    "metrics.all_conversions": DOUBLE,
+    "metrics.all_conversions_value": DOUBLE,
+    "segments.date": DATE,
+    "customer.manager": {"data_type": "bool"},
+}
+
+
+def columns(table: str) -> dict[str, dict]:
+    """The column of each field of the query of a table, as dlt names it: text, unless COLUMNS
+    gives it another type."""
+    return {
+        field.replace(".", "__"): COLUMNS.get(field, TEXT)
+        for field in (part.strip() for part in FIELDS[table].split(","))
+    }
+
+
 # The hints of each table, by the names that dlt gives the fields: every field of its query, so
 # that dlt makes each column even when no row of a load has it, with the INT64 numbers as text, as
 # the REST interface writes them, and the other numbers as the API gives them.
 HINTS = {
-    "customers": {
-        "write_disposition": "replace",
-        "columns": {
-            "customer__resource_name": TEXT,
-            "customer__id": TEXT,
-            "customer__descriptive_name": TEXT,
-            "customer__currency_code": TEXT,
-            "customer__time_zone": TEXT,
-            "customer__manager": {"data_type": "bool"},
-            "customer__status": TEXT,
-        },
-    },
-    "campaigns": {
-        "write_disposition": {"disposition": "merge", "strategy": "scd2"},
-        "columns": {
-            "customer__id": TEXT,
-            "campaign__resource_name": TEXT,
-            "campaign__id": TEXT,
-            "campaign__name": TEXT,
-            "campaign__status": TEXT,
-            "campaign__advertising_channel_type": TEXT,
-        },
-    },
-    "campaign_stats": {
-        "columns": {
-            "customer__id": TEXT,
-            "campaign__resource_name": TEXT,
-            "campaign__id": TEXT,
-            "campaign__name": TEXT,
-            "metrics__impressions": TEXT,
-            "metrics__clicks": TEXT,
-            "metrics__cost_micros": TEXT,
-            "metrics__conversions": DOUBLE,
-            "metrics__conversions_value": DOUBLE,
-            "segments__date": DATE,
-        },
-    },
-    "campaign_conversions": {
-        "columns": {
-            "customer__id": TEXT,
-            "campaign__resource_name": TEXT,
-            "campaign__id": TEXT,
-            "campaign__name": TEXT,
-            "segments__date": DATE,
-            "segments__conversion_action": TEXT,
-            "segments__conversion_action_name": TEXT,
-            "segments__conversion_action_category": TEXT,
-            "metrics__conversions": DOUBLE,
-            "metrics__conversions_value": DOUBLE,
-            "metrics__all_conversions": DOUBLE,
-            "metrics__all_conversions_value": DOUBLE,
-        },
-    },
+    "customers": {"write_disposition": "replace", "columns": columns("customers")},
+    **{table: {"write_disposition": SCD2, "columns": columns(table)} for table in ENTITIES},
+    **{table: {"columns": columns(table)} for table in FACTS},
 }
 
 
@@ -328,6 +351,12 @@ def scope(windows: dict[str, tuple[date, date]]) -> str:
     )
 
 
+def entities(api: Api, table: str, wanted: list[str]) -> Iterator[dict]:
+    """The rows of a table of entities, campaigns, ad groups or ads, of each account."""
+    for account_id in wanted:
+        yield from api.search(account_id, query(table))
+
+
 def facts(api: Api, table: str, windows: dict[str, tuple[date, date]]) -> Iterator[dict]:
     """The rows of a fact table of each account in its window."""
     for account_id, (first, last) in sorted(windows.items()):
@@ -370,8 +399,7 @@ def load(now: datetime, extensions: Path = EXTENSIONS) -> dict[str, int]:
     missing = [account_id for account_id in wanted if account_id not in zones]
     if missing:
         raise GoogleAdsError(f"Google Ads account {missing[0]}: the API returned no customer")
-    # dlt leaves the rows of the last load in the staging dataset unless it is told to empty it.
-    os.environ["LOAD__TRUNCATE_STAGING_DATASET"] = "true"
+    os.environ.update(DLT_SETTINGS)
     with open_pipeline() as pipeline:
         last = recorded(pipeline) if has_loads(pipeline) else {}
         windows = {
@@ -382,13 +410,13 @@ def load(now: datetime, extensions: Path = EXTENSIONS) -> dict[str, int]:
             for account_id in wanted
         }
         resources = [dlt.resource(customers, name="customers", **own(HINTS["customers"]))]
-        hints = own(HINTS["campaigns"])
-        hints["write_disposition"] = {
-            **hints["write_disposition"],
-            "boundary_timestamp": now.isoformat(),
-        }
-        rows = (row for account_id in wanted for row in api.search(account_id, query("campaigns")))
-        resources.append(dlt.resource(rows, name="campaigns", **hints))
+        for table in ENTITIES:
+            hints = own(HINTS[table])
+            hints["write_disposition"] = {
+                **hints["write_disposition"],
+                "boundary_timestamp": now.isoformat(),
+            }
+            resources.append(dlt.resource(entities(api, table, wanted), name=table, **hints))
         for table in FACTS:
             hints = own(HINTS[table])
             hints["write_disposition"] = {**MERGE, "destination_scope": scope(windows)}

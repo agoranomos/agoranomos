@@ -2,7 +2,9 @@
 REST interface answers searchStream: lowerCamelCase keys, INT64 numbers as strings and DOUBLE
 numbers as JSON numbers. Every row has the name of its campaign as of the load, a day without
 metrics has no row, and the conversions by action come in a report of their own, as
-segments.conversion_action cannot be selected with the metrics of cost (ADR-0025)."""
+segments.conversion_action cannot be selected with the metrics of cost (ADR-0025). The ad groups
+(FROM ad_group) and the ads (FROM ad_group_ad) have the same two reports, and a Performance Max
+campaign has neither (ADR-0034)."""
 
 from __future__ import annotations
 
@@ -49,11 +51,49 @@ def status(campaign: world.Campaign, day: date) -> str:
     return "ENABLED" if campaign.active(day) else "PAUSED"
 
 
+def child_status(campaign: world.Campaign, day: date) -> str:
+    """The status of an ad group or an ad: removed with its campaign, enabled until then."""
+    return "REMOVED" if campaign.removed(day) else "ENABLED"
+
+
 def campaign_part(campaign: world.Campaign, day: date) -> dict[str, object]:
     return {
         "resourceName": f"customers/{campaign.account_id}/campaigns/{campaign.campaign_id}",
         "id": campaign.campaign_id,
         "name": campaign.name_at(day),
+    }
+
+
+def campaign_ref(campaign: world.Campaign) -> dict[str, object]:
+    """The campaign of a row of a lower level, by its ID, which comes with its resource name."""
+    return {
+        "resourceName": f"customers/{campaign.account_id}/campaigns/{campaign.campaign_id}",
+        "id": campaign.campaign_id,
+    }
+
+
+def ad_group_ref(group: world.AdGroup) -> dict[str, object]:
+    return {
+        "resourceName": f"customers/{group.account_id}/adGroups/{group.ad_group_id}",
+        "id": group.ad_group_id,
+    }
+
+
+def ad_group_part(group: world.AdGroup) -> dict[str, object]:
+    return {**ad_group_ref(group), "name": group.name}
+
+
+def ad_part(group: world.AdGroup, ad: world.Ad) -> dict[str, object]:
+    """The ad_group_ad of an ad, with its ad: a type of ad that has no name has no field name, as
+    the REST interface leaves out a field without a value."""
+    named = {} if ad.name is None else {"name": ad.name}
+    return {
+        "resourceName": (f"customers/{group.account_id}/adGroupAds/{group.ad_group_id}~{ad.ad_id}"),
+        "ad": {
+            "resourceName": f"customers/{group.account_id}/ads/{ad.ad_id}",
+            "id": ad.ad_id,
+            **named,
+        },
     }
 
 
@@ -91,6 +131,37 @@ def campaigns(day: date) -> Iterator[dict[str, object]]:
         }
 
 
+def ad_groups(day: date) -> Iterator[dict[str, object]]:
+    """The ad groups as a query FROM ad_group lists them on a day."""
+    for campaign, group in world.listed_ad_groups(PLATFORM, day):
+        yield {
+            "customer": {"id": group.account_id},
+            "campaign": campaign_ref(campaign),
+            "adGroup": {
+                **ad_group_part(group),
+                "status": child_status(campaign, day),
+                "type": group.kind,
+            },
+        }
+
+
+def ads(day: date) -> Iterator[dict[str, object]]:
+    """The ads as a query FROM ad_group_ad lists them on a day."""
+    for campaign, group in world.listed_ad_groups(PLATFORM, day):
+        for ad in group.ads:
+            part = ad_part(group, ad)
+            yield {
+                "customer": {"id": group.account_id},
+                "campaign": campaign_ref(campaign),
+                "adGroup": ad_group_ref(group),
+                "adGroupAd": {
+                    **part,
+                    "status": child_status(campaign, day),
+                    "ad": {**part["ad"], "type": ad.kind},
+                },
+            }
+
+
 def action_finals(account_id: str, final: world.Final) -> Iterator[tuple[tuple, int, int]]:
     """Each conversion action of an account with its final conversions of a campaign and day, in
     hundredths, and their final value, in cents."""
@@ -115,44 +186,92 @@ def number(hundredths: int) -> float:
     return hundredths / 100
 
 
-def campaign_stats(now, first=None, skip=frozenset()) -> Iterator[dict[str, object]]:
+Numbers = dict[tuple[str, str], int]
+
+
+def measured(
+    account_id: str, final: world.Final, days_old: int
+) -> tuple[Numbers, frozenset[tuple[str, str]]]:
+    """The numbers of a campaign on a day as a load sees them at an age: impressions, clicks and
+    cost, and the conversions and their value of each conversion action; and those that are
+    conversions, which the ad groups and the ads share by their conversions."""
+    numbers = {
+        ("impressions", ""): matured(final.impressions, days_old, DELIVERY),
+        ("clicks", ""): matured(final.clicks, days_old, DELIVERY),
+        ("cost", ""): matured(final.spend_micros, days_old, DELIVERY),
+    }
+    for (action_id, *_), c, v in action_finals(account_id, final):
+        numbers[("conversions", action_id)] = matured(c, days_old, CONVERSIONS)
+        numbers[("value", action_id)] = matured(v, days_old, CONVERSIONS)
+    return numbers, frozenset(key for key in numbers if key[0] in ("conversions", "value"))
+
+
+Level = tuple[dict[str, dict[str, object]], Numbers]
+
+
+def levels(now, first, skip, level: str) -> Iterator[tuple[world.Account, date, Level]]:
+    """Each row of a report at a level, campaign, ad_group or ad, before its metrics: the account,
+    the day, the objects that name the row, and its numbers. The numbers of an ad group are its
+    share of those of its campaign, and those of an ad its share of those of its ad group."""
     name_day = as_of(now)
     for account, campaign, day, final, days_old in world.observed(PLATFORM, now, first, skip):
-        counted = [
-            (matured(c, days_old, CONVERSIONS), matured(v, days_old, CONVERSIONS))
-            for (_, _, _, counts, _), c, v in action_finals(account.account_id, final)
-            if counts
-        ]
+        numbers, converting = measured(account.account_id, final, days_old)
+        named = {"customer": {"id": account.account_id}}
+        if level == "campaign":
+            yield account, day, ({**named, "campaign": campaign_part(campaign, name_day)}, numbers)
+            continue
+        named["campaign"] = campaign_ref(campaign)
+        groups = world.ad_groups_of(campaign)
+        for group, in_group in zip(
+            groups, world.divided(numbers, converting, groups, day), strict=True
+        ):
+            if level == "ad_group":
+                yield account, day, ({**named, "adGroup": ad_group_part(group)}, in_group)
+                continue
+            for ad, in_ad in zip(
+                group.ads, world.divided(in_group, converting, group.ads, day), strict=True
+            ):
+                parts = {**named, "adGroup": ad_group_ref(group)}
+                yield account, day, ({**parts, "adGroupAd": ad_part(group, ad)}, in_ad)
+
+
+def counted(account_id: str, numbers: Numbers) -> tuple[int, int]:
+    """The conversions, in hundredths, and their value of the actions that count in
+    metrics.conversions."""
+    actions = [action_id for action_id, _, _, counts, _ in ACTIONS[account_id] if counts]
+    return (
+        sum(numbers[("conversions", action_id)] for action_id in actions),
+        sum(numbers[("value", action_id)] for action_id in actions),
+    )
+
+
+def stats(now, first=None, skip=frozenset(), level="campaign") -> Iterator[dict[str, object]]:
+    for account, day, (named, numbers) in levels(now, first, skip, level):
+        if not any(numbers.values()):
+            continue  # a day without metrics has no row
+        conversions, value = counted(account.account_id, numbers)
         yield {
-            "customer": {"id": account.account_id},
-            "campaign": campaign_part(campaign, name_day),
+            **named,
             "metrics": {
-                "impressions": str(matured(final.impressions, days_old, DELIVERY)),
-                "clicks": str(matured(final.clicks, days_old, DELIVERY)),
-                "costMicros": str(matured(final.spend_micros, days_old, DELIVERY)),
-                "conversions": number(sum(c for c, _ in counted)),
-                "conversionsValue": number(sum(v for _, v in counted)),
+                "impressions": str(numbers[("impressions", "")]),
+                "clicks": str(numbers[("clicks", "")]),
+                "costMicros": str(numbers[("cost", "")]),
+                "conversions": number(conversions),
+                "conversionsValue": number(value),
             },
             "segments": {"date": day.isoformat()},
         }
 
 
-def campaign_conversions(now, first=None, skip=frozenset()) -> Iterator[dict[str, object]]:
-    name_day = as_of(now)
-    for account, campaign, day, final, days_old in world.observed(PLATFORM, now, first, skip):
-        for (action_id, name, category, counts, _), c, v in action_finals(
-            account.account_id, final
-        ):
-            conversions, value = (
-                matured(c, days_old, CONVERSIONS),
-                matured(v, days_old, CONVERSIONS),
-            )
-            if conversions == 0:
+def conversions(now, first=None, skip=frozenset(), level="campaign") -> Iterator[dict[str, object]]:
+    for account, day, (named, numbers) in levels(now, first, skip, level):
+        for action_id, name, category, counts, _ in ACTIONS[account.account_id]:
+            converted, value = numbers[("conversions", action_id)], numbers[("value", action_id)]
+            if converted == 0:
                 continue  # rows with zero conversions are excluded
             resource = f"customers/{account.account_id}/conversionActions/{action_id}"
             yield {
-                "customer": {"id": account.account_id},
-                "campaign": campaign_part(campaign, name_day),
+                **named,
                 "segments": {
                     "date": day.isoformat(),
                     "conversionAction": resource,
@@ -160,9 +279,9 @@ def campaign_conversions(now, first=None, skip=frozenset()) -> Iterator[dict[str
                     "conversionActionCategory": category,
                 },
                 "metrics": {
-                    "conversions": number(conversions if counts else 0),
+                    "conversions": number(converted if counts else 0),
                     "conversionsValue": number(value if counts else 0),
-                    "allConversions": number(conversions),
+                    "allConversions": number(converted),
                     "allConversionsValue": number(value),
                 },
             }
@@ -172,8 +291,14 @@ def records(now, first=None, skip=frozenset()) -> dict[str, Iterator[dict[str, o
     return {
         "customer_clients": customer_clients(now),
         "campaigns": campaigns(as_of(now)),
-        "campaign_stats": campaign_stats(now, first, skip),
-        "campaign_conversions": campaign_conversions(now, first, skip),
+        "campaign_stats": stats(now, first, skip),
+        "campaign_conversions": conversions(now, first, skip),
+        "ad_groups": ad_groups(as_of(now)),
+        "ad_group_stats": stats(now, first, skip, "ad_group"),
+        "ad_group_conversions": conversions(now, first, skip, "ad_group"),
+        "ads": ads(as_of(now)),
+        "ad_stats": stats(now, first, skip, "ad"),
+        "ad_conversions": conversions(now, first, skip, "ad"),
     }
 
 

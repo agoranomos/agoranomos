@@ -103,8 +103,14 @@ def sources(monkeypatch):
     monkeypatch.setenv("WAREHOUSE_LOADER_PASSWORD", "loader-password")
     # A load sets this setting of dlt in its environment: set and then deleted here, so that the
     # end of the test puts back what was there before, and no other test sees it.
-    monkeypatch.setenv("LOAD__TRUNCATE_STAGING_DATASET", "unset")
-    monkeypatch.delenv("LOAD__TRUNCATE_STAGING_DATASET")
+    # The settings of dlt that a load sets go when the test ends.
+    for name in (
+        "LOAD__TRUNCATE_STAGING_DATASET",
+        "NORMALIZE__DATA_WRITER__FILE_MAX_ITEMS",
+        "LOAD__WORKERS",
+    ):
+        monkeypatch.setenv(name, "unset")
+        monkeypatch.delenv(name)
     # The shared module imports dlt too, so it takes the stand-in only when imported again.
     names = ("agoranomos_pipelines.demo.sources", "agoranomos_pipelines.loads")
     for name in names:
@@ -122,7 +128,7 @@ def test_every_table_of_every_platform_has_its_hints(sources):
     assert set(module.TABLE_HINTS) == set(shapes.SHAPES)
     for (code, table), hints in module.TABLE_HINTS.items():
         disposition = hints["write_disposition"]
-        if table in ("campaigns",):
+        if table in ("campaigns", "ad_groups", "adsets", "adgroups", "ads"):
             assert disposition == {"disposition": "merge", "strategy": "scd2"}, (code, table)
         elif table in ("customer_clients", "ad_accounts", "advertisers", "properties"):
             assert disposition == "replace", (code, table)
@@ -223,7 +229,7 @@ def test_a_load_of_a_window_replaces_only_that_window(sources):
 
 def test_the_history_replays_the_names_into_an_empty_dataset_and_then_loads_everything(sources):
     module, pipelines, _ = sources
-    from agoranomos_pipelines.demo import common, search
+    from agoranomos_pipelines.demo import common, search, shapes
 
     counts = module.load_history("demo_search", NOW)
     [pipeline] = pipelines
@@ -235,7 +241,8 @@ def test_the_history_replays_the_names_into_an_empty_dataset_and_then_loads_ever
     for (rows, hints), moment in zip(replays, moments, strict=True):
         assert set(rows) == {"campaigns"}
         assert hints["campaigns"]["write_disposition"]["boundary_timestamp"] == moment.isoformat()
-    tables = {"customer_clients", "campaigns", "campaign_stats", "campaign_conversions"}
+    tables = {t for code, t in shapes.SHAPES if code == "demo_search"}
+    assert "ad_conversions" in tables
     assert set(full[0]) == tables | {module.RELOADS}
     assert full[1]["campaigns"]["write_disposition"]["boundary_timestamp"] == NOW.isoformat()
     assert counts["campaign_stats"] == len(full[0]["campaign_stats"])
@@ -297,6 +304,10 @@ def test_a_load_empties_the_staging_dataset_and_signs_in_as_loader(sources):
     module.load("demo_fx", NOW)
 
     assert os.environ["LOAD__TRUNCATE_STAGING_DATASET"] == "true"
+    # Files of at most 5,000 rows, two at a time, so that the statements of dlt keep warehouse-db
+    # within its memory.
+    assert os.environ["NORMALIZE__DATA_WRITER__FILE_MAX_ITEMS"] == "5000"
+    assert os.environ["LOAD__WORKERS"] == "2"
     credentials = module.credentials()
     assert credentials["username"] == "loader"
     assert credentials["database"] == "warehouse"

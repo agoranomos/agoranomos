@@ -30,3 +30,25 @@ sources:
           day with any metric, in the currency and the time zone of the account, - for a metric
           that means nothing on the day. Each load replaces the days of each account that it
           covers.
+      - name: adgroups
+        description: >-
+          The ad groups of demo_video, one row for each version, from _dlt_valid_from until
+          _dlt_valid_to, as dlt keeps them with its scd2 strategy. The ad groups of a removed
+          campaign are not listed, so their last versions end.
+      - name: report_adgroup_daily
+        description: >-
+          The integrated report of demo_video by ad group and day, one row for each ad group and day
+          with any metric, with the campaign of the ad group among its metrics, in the currency and
+          the time zone of the account, - for a metric that means nothing on the day. Each load
+          replaces the days of each account that it covers.
+      - name: ads
+        description: >-
+          The ads of demo_video, one row for each version, from _dlt_valid_from until _dlt_valid_to,
+          as dlt keeps them with its scd2 strategy. The ads of a removed campaign are not listed, so
+          their last versions end.
+      - name: report_ad_daily
+        description: >-
+          The integrated report of demo_video by ad and day, one row for each ad and day with any
+          metric, with the campaign and the ad group of the ad among its metrics, in the currency
+          and the time zone of the account, - for a metric that means nothing on the day. Each load
+          replaces the days of each account that it covers.

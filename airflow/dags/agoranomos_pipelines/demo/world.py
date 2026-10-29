@@ -1,6 +1,6 @@
 """The fictional business of the demo: two clients, their ad accounts on three fictional ad
-platforms and their properties on a fictional platform of web analytics, and the campaigns of each
-account (ADR-0024, ADR-0025).
+platforms and their properties on a fictional platform of web analytics, the campaigns of each
+account, and their ad groups and ads (ADR-0024, ADR-0025, ADR-0034).
 
 The world runs on absolute dates with periodic rules, so that the value of a day never depends on
 the day that it is loaded, but through its maturity (common.py), and the demo looks alike whenever
@@ -8,13 +8,18 @@ it starts. A campaign runs every day, in flights of some weeks on and some off, 
 year, or as a test that a new campaign repeats every few months and that ends removed. Two
 campaigns change their names, one at the start of each half-year and one at the start of each
 year. The names are made up and name no real brand.
+
+The numbers of a campaign on a day are divided among its ad groups, and those of an ad group among
+its ads, by their shares of that day, so that the ad groups of a campaign add up to it exactly, as
+on a platform. A Performance Max campaign has no ad groups, as it has asset groups instead.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
+from functools import cache
 
 from agoranomos_pipelines.demo.common import (
     EPOCH,
@@ -140,6 +145,7 @@ class Campaign:
     aov_minor: int  # the value of a conversion
     start: date | None = None  # the first day of a test of a cycle
     end: date | None = None  # its last day; it is removed after it
+    template_id: str | None = None  # the campaign of a cycle whose round this is
 
     def exists(self, day: date) -> bool:
         return self.start is None or self.start <= day
@@ -173,6 +179,7 @@ class Cycle:
             names=Fixed(f"{self.template.names.at(start)} #{n}"),
             start=start,
             end=start + timedelta(days=self.life - 1),
+            template_id=self.template.campaign_id,
         )
 
     def rounds(self, first: date, last: date) -> Iterator[Campaign]:
@@ -196,6 +203,42 @@ class Final:
     spend_micros: int
     conversions_hundredths: int
     value_minor: int
+
+
+@dataclass(frozen=True)
+class Ad:
+    """An ad of an ad group. Its share of the delivery of its ad group, and how its conversions
+    for each click compare with those of the ad group, in percent, vary a little by day."""
+
+    platform: str
+    ad_id: str
+    name: str | None  # None for a type of ad that has no name on its platform
+    kind: str | None  # the type of the ad, None on a platform whose ads have none
+    weight: int
+    cvr_pct: int
+
+    @property
+    def key(self) -> str:
+        return self.ad_id
+
+
+@dataclass(frozen=True)
+class AdGroup:
+    """An ad group of a campaign, an ad set of Meta, with its ads."""
+
+    platform: str
+    account_id: str
+    campaign_id: str
+    ad_group_id: str
+    name: str
+    kind: str  # the type of Google, or the optimization goal of Meta or of TikTok
+    weight: int  # its share of the delivery of the campaign
+    cvr_pct: int  # its conversions for each click, in percent of those of the campaign
+    ads: tuple[Ad, ...]
+
+    @property
+    def key(self) -> str:
+        return self.ad_group_id
 
 
 CLIENTS = (Client("tarnwick", "Tarnwick Outfitters"), Client("brindlemoor", "Brindlemoor Haus"))
@@ -587,6 +630,77 @@ CYCLES = (
     ),
 )
 
+# The ad groups of each campaign, by its ID or that of the template of its cycle: the name, the
+# share of the delivery of the campaign, and the conversions for each click in percent of those of
+# the campaign. A Performance Max campaign has none.
+AD_GROUPS: dict[str, tuple[tuple[str, int, int], ...]] = {
+    "21000000101": (("Brand - Exact", 75, 115), ("Brand - Phrase", 25, 80)),
+    "21000000102": (("Rain Jackets", 40, 100), ("Hiking Boots", 35, 110), ("Base Layers", 25, 85)),
+    "21000000104": (("All Products", 100, 100),),
+    "21000000105": (("Gift Ideas", 55, 105), ("Sale Items", 45, 95)),
+    "21000000106": (("Outdoor Stories", 100, 100),),
+    "21000000201": (("Marke - Exakt", 80, 110), ("Marke - Phrase", 20, 75)),
+    "21000000202": (("Sofas", 40, 100), ("Esstische", 35, 105), ("Regale", 25, 90)),
+    "21000000204": (("Wintersale", 100, 100),),
+    "21000000205": (("Alle Produkte", 100, 100),),
+    "21000000700": (("Remarketing", 50, 130), ("Similar Interests", 50, 70)),
+    "120200000000101": (("Broad - US", 60, 100), ("Interests - Outdoor", 40, 105)),
+    "120200000000102": (("Site Visitors 30d", 70, 90), ("Cart Abandoners", 30, 125)),
+    "120200000000103": (("Lead Form - Guide", 100, 100),),
+    "120200000000104": (("Black Friday - Broad", 60, 95), ("Black Friday - Retargeting", 40, 108)),
+    "120200000000201": (("Breit - DE", 100, 100),),
+    "120200000000202": (("Besucher 30 Tage", 100, 100),),
+    "120200000000203": (("Leadformular", 100, 100),),
+    "120200000000700": (("Test - Video", 50, 100), ("Test - Static", 50, 100)),
+    "1790000000000101": (("Creators - Broad", 60, 100), ("Creators - Interests", 40, 110)),
+    "1790000000000102": (("Collab - Broad", 100, 100),),
+    "1790000000000103": (("Holiday - Broad", 100, 100),),
+    "1790000000000700": (("Hashtag Challenge", 100, 100),),
+}
+# The type of the ad groups of each kind of campaign: the type of Google, or the optimization goal
+# of Meta or of TikTok.
+AD_GROUP_KINDS = {
+    ("demo_search", "SEARCH"): "SEARCH_STANDARD",
+    ("demo_search", "SHOPPING"): "SHOPPING_PRODUCT_ADS",
+    ("demo_search", "DISPLAY"): "DISPLAY_STANDARD",
+    ("demo_search", "VIDEO"): "VIDEO_RESPONSIVE",
+    ("demo_social", "OUTCOME_SALES"): "OFFSITE_CONVERSIONS",
+    ("demo_social", "OUTCOME_LEADS"): "LEAD_GENERATION",
+    ("demo_social", "OUTCOME_TRAFFIC"): "LANDING_PAGE_VIEWS",
+    ("demo_video", "WEB_CONVERSIONS"): "CONVERT",
+    ("demo_video", "TRAFFIC"): "CLICK",
+}
+# The ads of each type of ad group: what follows the name of the ad group in the name of the ad,
+# None for a type of ad that Google gives no name, the type of the ad, its share of the delivery of
+# the ad group, and its conversions for each click in percent of those of the ad group.
+_SOCIAL_ADS = (("Video", None, 55, 95), ("Carousel", None, 45, 106))
+_VIDEO_ADS = (("Hook A", "SINGLE_VIDEO", 55, 104), ("Hook B", "SINGLE_VIDEO", 45, 95))
+ADS: dict[str, tuple[tuple[str | None, str | None, int, int], ...]] = {
+    "SEARCH_STANDARD": (
+        (None, "RESPONSIVE_SEARCH_AD", 60, 105),
+        (None, "RESPONSIVE_SEARCH_AD", 40, 92),
+    ),
+    "SHOPPING_PRODUCT_ADS": ((None, "SHOPPING_PRODUCT_AD", 100, 100),),
+    "DISPLAY_STANDARD": (
+        (None, "RESPONSIVE_DISPLAY_AD", 50, 104),
+        (None, "RESPONSIVE_DISPLAY_AD", 50, 96),
+    ),
+    "VIDEO_RESPONSIVE": (("30s", "VIDEO_RESPONSIVE_AD", 100, 100),),
+    "OFFSITE_CONVERSIONS": _SOCIAL_ADS,
+    "LEAD_GENERATION": _SOCIAL_ADS,
+    "LANDING_PAGE_VIEWS": _SOCIAL_ADS,
+    "CONVERT": _VIDEO_ADS,
+    "CLICK": _VIDEO_ADS,
+}
+# How the IDs of the ad groups and of the ads of each platform are made, so that they look like
+# those of the platform: a prefix of each, then the last digits of the ID of the campaign, then the
+# number of the ad group and of the ad.
+ID_FORMS = {
+    "demo_search": ("16", "7", 7),
+    "demo_social": ("12021", "12022", 9),
+    "demo_video": ("1791", "1792", 10),
+}
+
 FirstDay = Callable[[Account], date]
 
 
@@ -622,6 +736,78 @@ def listed_campaigns(platform: str, day: date) -> list[Campaign]:
     if platform == "demo_video":
         found = [campaign for campaign in found if not campaign.removed(day)]
     return found
+
+
+@cache
+def ad_groups_of(campaign: Campaign) -> tuple[AdGroup, ...]:
+    """The ad groups of a campaign, with their ads: none for a Performance Max campaign."""
+    group_prefix, ad_prefix, width = ID_FORMS[campaign.platform]
+    base = campaign.campaign_id[-width:]
+    found = []
+    specs = AD_GROUPS.get(campaign.template_id or campaign.campaign_id, ())
+    for i, (name, weight, cvr_pct) in enumerate(specs, 1):
+        kind = AD_GROUP_KINDS[(campaign.platform, campaign.kind)]
+        ads = tuple(
+            Ad(
+                campaign.platform,
+                f"{ad_prefix}{base}{i:02d}{j:02d}",
+                None if suffix is None else f"{name} - {suffix}",
+                ad_kind,
+                ad_weight,
+                ad_cvr_pct,
+            )
+            for j, (suffix, ad_kind, ad_weight, ad_cvr_pct) in enumerate(ADS[kind], 1)
+        )
+        found.append(
+            AdGroup(
+                campaign.platform,
+                campaign.account_id,
+                campaign.campaign_id,
+                f"{group_prefix}{base}{i:02d}",
+                name,
+                kind,
+                weight,
+                cvr_pct,
+                ads,
+            )
+        )
+    return tuple(found)
+
+
+def listed_ad_groups(platform: str, day: date) -> list[tuple[Campaign, AdGroup]]:
+    """The ad groups that the API of the platform lists on a day, with their campaigns: those of
+    the campaigns that it lists (listed_campaigns)."""
+    return [
+        (campaign, group)
+        for campaign in listed_campaigns(platform, day)
+        for group in ad_groups_of(campaign)
+    ]
+
+
+def divide(total: int, weights: Sequence[int]) -> list[int]:
+    """A whole number in parts by weights, which add up to it exactly: each part rounded down,
+    and what is left, one each, to the parts with the largest remainders, the first on a tie."""
+    whole = sum(weights)
+    parts = [total * weight // whole for weight in weights]
+    by_remainder = sorted(range(len(weights)), key=lambda i: (-(total * weights[i] % whole), i))
+    for i in by_remainder[: total - sum(parts)]:
+        parts[i] += 1
+    return parts
+
+
+def divided[K](
+    numbers: dict[K, int], converting: frozenset[K], parts: Sequence[AdGroup | Ad], day: date
+) -> list[dict[K, int]]:
+    """The numbers of a campaign on a day among its ad groups, or those of an ad group among its
+    ads: the numbers that converting names by the shares of the conversions of the day, the rest by
+    those of the delivery."""
+    delivery = [part.weight * pct(90, 110, part.platform, part.key, day, "w") for part in parts]
+    conversions = [share * part.cvr_pct for share, part in zip(delivery, parts, strict=True)]
+    split = {
+        key: divide(value, conversions if key in converting else delivery)
+        for key, value in numbers.items()
+    }
+    return [{key: values[i] for key, values in split.items()} for i in range(len(parts))]
 
 
 def final(campaign: Campaign, day: date) -> Final | None:

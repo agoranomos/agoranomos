@@ -151,3 +151,58 @@ def test_the_api_lists_the_tests_of_two_years_and_tiktok_leaves_out_the_removed_
     assert any(c.removed(day) for c in search), "Google lists removed campaigns"
     video = world.listed_campaigns("demo_video", day)
     assert not any(c.removed(day) for c in video)
+
+
+@pytest.mark.parametrize(
+    ("total", "weights", "parts"),
+    [
+        (10, [1, 1, 1], [4, 3, 3]),
+        (7, [60, 40], [4, 3]),
+        (0, [5, 5], [0, 0]),
+        (1, [1, 2], [0, 1]),
+        (1_000_003, [75, 25], [750_002, 250_001]),
+    ],
+)
+def test_a_number_divides_into_parts_that_add_up_to_it(total, weights, parts):
+    assert world.divide(total, weights) == parts
+    assert sum(world.divide(total, weights)) == total
+
+
+def test_every_campaign_but_performance_max_has_ad_groups_with_ads_of_unique_ids():
+    day = date(2026, 10, 12)
+    for platform in ("demo_search", "demo_social", "demo_video"):
+        campaigns = world.listed_campaigns(platform, day)
+        groups = [g for c in campaigns for g in world.ad_groups_of(c)]
+        ads = [a for g in groups for a in g.ads]
+        for campaign in campaigns:
+            found = world.ad_groups_of(campaign)
+            assert bool(found) == (campaign.kind != "PERFORMANCE_MAX"), campaign.campaign_id
+            assert all(g.campaign_id == campaign.campaign_id and g.ads for g in found)
+        assert len({g.ad_group_id for g in groups}) == len(groups), platform
+        assert len({a.ad_id for a in ads}) == len(ads), platform
+    # The rounds of a test have the ad groups of its template, under IDs of their own.
+    [cycle] = [c for c in world.CYCLES if c.template.platform == "demo_search"]
+    first, second = cycle.round_of(1), cycle.round_of(2)
+    assert [g.name for g in world.ad_groups_of(first)] == ["Remarketing", "Similar Interests"]
+    assert {g.ad_group_id for g in world.ad_groups_of(first)}.isdisjoint(
+        g.ad_group_id for g in world.ad_groups_of(second)
+    )
+
+
+def test_a_campaign_divides_among_its_ad_groups_and_an_ad_group_among_its_ads():
+    campaign = next(c for c in world.CAMPAIGNS if c.campaign_id == "21000000102")
+    day = date(2026, 10, 1)
+    numbers = {"impressions": 40_000, "clicks": 700, "conversions": 1_751}
+    converting = frozenset({"conversions"})
+    groups = world.ad_groups_of(campaign)
+    split = world.divided(numbers, converting, groups, day)
+    assert [sum(part[key] for part in split) for key in numbers] == list(numbers.values())
+    assert split == world.divided(numbers, converting, groups, day)
+    # Boots convert better than the campaign and base layers worse, for each click.
+    boots, layers = split[1], split[2]
+    assert boots["conversions"] / boots["clicks"] > layers["conversions"] / layers["clicks"]
+    for group, part in zip(groups, split, strict=True):
+        ads = world.divided(part, converting, group.ads, day)
+        assert {key: sum(ad[key] for ad in ads) for key in numbers} == part
+    # The shares change a little from day to day.
+    assert split != world.divided(numbers, converting, groups, day + timedelta(days=1))
