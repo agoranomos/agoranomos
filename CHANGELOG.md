@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/agoranomos/agoranomos/compare/v0.3.2...v0.3.3) (2026-10-29)
+
+
+### Documentation
+
+* support Claude, ChatGPT and Gemini first ([#140](https://github.com/agoranomos/agoranomos/issues/140)) ([b1e9077](https://github.com/agoranomos/agoranomos/commit/b1e9077a8ba4feaaa04bd270ef2e9a6d52ae0933))
+
 ## [0.3.2](https://github.com/agoranomos/agoranomos/compare/v0.3.1...v0.3.2) (2026-10-29)
 
 
