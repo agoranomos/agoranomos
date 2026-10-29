@@ -33,8 +33,14 @@ CPM = {
 }
 
 
-def export(*metrics, table="ad_stats_campaign_daily", columns=COLUMNS):
-    """An export of the dbt project with one mart that declares these metrics."""
+SCOPE = "Over every campaign."
+
+
+def export(
+    *metrics, table="ad_stats_campaign_daily", level="Campaigns", scope=SCOPE, columns=COLUMNS
+):
+    """An export of the dbt project with one mart that declares these KPIs at a level."""
+    declared = {"metric_level": level, "metric_scope": scope, "metrics": list(metrics)}
     return {
         "format": md.FORMAT,
         "models": [
@@ -42,12 +48,17 @@ def export(*metrics, table="ad_stats_campaign_daily", columns=COLUMNS):
                 "schema": "marts",
                 "name": table,
                 "description": "",
-                "meta": {"metabase": {"metrics": list(metrics)}},
+                "meta": {"metabase": declared},
                 "columns": [{"name": c, "description": "", "meta": {}} for c in columns],
             }
         ],
         "sources": [],
     }
+
+
+def both(*exports):
+    """The marts of several exports in one."""
+    return {**exports[0], "models": [m for e in exports for m in e["models"]]}
 
 
 def written(tmp_path, document):
@@ -72,11 +83,12 @@ def metabase():
     server.server_close()
 
 
-def test_the_campaign_mart_declares_the_kpis_of_adr_0034():
+def test_the_campaign_mart_declares_the_kpis_of_adr_0034_and_the_others_take_them():
     # The six KPIs, each the sum of one column over the sum of another, money in the reporting
-    # currency (docs/reference/describe-the-marts.md).
+    # currency (docs/reference/describe-the-marts.md), declared once and taken by the marts of
+    # ad groups and ads at their own levels.
     text = MARTS_YAML.read_text(encoding="utf-8")
-    block = text.split("          metrics:\n", 1)[1].split("    config:", 1)[0]
+    block = text.split("          metrics: &kpis\n", 1)[1].split("    config:", 1)[0]
     found = [
         (m.group(1), m.group(2), m.group(3), m.group(4))
         for m in re.finditer(
@@ -95,6 +107,9 @@ def test_the_campaign_mart_declares_the_kpis_of_adr_0034():
     ]
     assert block.count(f'currency: "{CURRENCY}"') == 3
     assert "scale: 1000" in block
+    levels = re.findall(r"^          metric_level: (.+)\n          metric_scope: >-\n", text, re.M)
+    assert levels == ["Campaigns", "Ad Groups", "Ads"]
+    assert text.count("          metrics: *kpis\n") == 2
 
 
 def test_a_metric_names_two_columns_of_its_mart_and_a_format():
@@ -105,6 +120,9 @@ def test_a_metric_names_two_columns_of_its_mart_and_a_format():
         1,
         None,
     )
+    # Every metric is named with the level of its mart, and described by its scope first.
+    assert metric.name == "CTR (Campaigns)"
+    assert metric.described == "Over every campaign. Click-through rate."
     assert mx.declared(export({**CTR, "name": "Cost per Conversion"}))[0].slug == (
         "cost_per_conversion"
     )
@@ -123,6 +141,11 @@ def test_a_metric_names_two_columns_of_its_mart_and_a_format():
         mx.declared(export({**CPM, "currency": None}))
     with pytest.raises(md.MetadataError, match="the same name"):
         mx.declared(export(CTR, CTR))
+    with pytest.raises(md.MetadataError, match="has a metric_level and a metric_scope"):
+        mx.declared(export(CTR, scope=""))
+    ads = export(CTR, table="ad_stats_ad_daily", level="campaigns")
+    with pytest.raises(md.MetadataError, match="the same metric_level"):
+        mx.declared(both(export(CTR), ads))
 
 
 def test_a_metric_is_a_ratio_of_sums_with_no_breakout():
@@ -165,24 +188,35 @@ def test_the_metrics_and_their_terms_come_once_and_an_edit_goes_back(metabase, t
     found = []
     ids = mx.ensure(client, registry, path, 1, found.append)
     cards = {card["name"]: card for card in state.cards.values()}
-    assert set(cards) == {"CTR", "CPM"}
+    assert set(cards) == {"CTR (Campaigns)", "CPM (Campaigns)"}
     assert {card["type"] for card in cards.values()} == {"metric"}
-    ctr = cards["CTR"]
+    ctr = cards["CTR (Campaigns)"]
     assert ctr["dataset_query"]["query"]["source-table"] == state.mart["id"]
-    assert ctr["description"] == "Click-through rate."
+    assert ctr["description"] == "Over every campaign. Click-through rate."
+    # The column of its value is the KPI alone: a card shows the level around it.
+    assert ctr["dataset_query"]["query"]["aggregation"][0][2]["display-name"] == "CTR"
     assert ids["ad_stats_campaign_daily.ctr"] == ctr["id"]
     # Each creation is one line, in order; the lock-down of the collections says its own.
     assert [line for line in found if line.startswith("created: ")] == [
         'created: collection agoranomos "Agoranomos"',
         'created: collection metrics "Metrics"',
-        'created: metric metrics/ad_stats_campaign_daily.ctr "CTR"',
-        'created: metric metrics/ad_stats_campaign_daily.cpm "CPM"',
+        'created: metric metrics/ad_stats_campaign_daily.ctr "CTR (Campaigns)"',
+        'created: metric metrics/ad_stats_campaign_daily.cpm "CPM (Campaigns)"',
         'created: term "CTR" of the glossary',
         'created: term "CPM" of the glossary',
     ]
+    level = "whose descriptions say what each level covers."
     assert [(e["term"], e["definition"]) for e in state.glossary] == [
-        ("CTR", "Click-through rate."),
-        ("CPM", "Cost per mille."),
+        (
+            "CTR",
+            "Click-through rate. Metabase computes it over the statistics of each level as "
+            f"CTR (Campaigns), {level}",
+        ),
+        (
+            "CPM",
+            "Cost per mille. Metabase computes it over the statistics of each level as "
+            f"CPM (Campaigns), {level}",
+        ),
     ]
     # A second start changes nothing; an edit of the query, of the name or of a term goes back.
     again = []
@@ -194,12 +228,13 @@ def test_the_metrics_and_their_terms_come_once_and_an_edit_goes_back(metabase, t
     edits = []
     mx.ensure(client, registry, path, 1, edits.append)
     assert edits == [
-        'revert of an edit: metric metrics/ad_stats_campaign_daily.ctr name: "Click rate" -> "CTR"',
+        'revert of an edit: metric metrics/ad_stats_campaign_daily.ctr name: "Click rate" -> '
+        '"CTR (Campaigns)"',
         "revert of an edit: metric metrics/ad_stats_campaign_daily.ctr query",
         'revert of an edit: term "CTR" of the glossary definition',
     ]
     assert ctr["dataset_query"]["query"]["aggregation"][0][1][0] == "/"
-    assert state.glossary[0]["definition"] == "Click-through rate."
+    assert state.glossary[0]["definition"].startswith("Click-through rate. Metabase computes")
 
 
 def test_the_metrics_of_a_mart_that_metabase_does_not_show_wait(metabase, tmp_path):
@@ -217,11 +252,19 @@ def test_the_metrics_of_a_mart_that_metabase_does_not_show_wait(metabase, tmp_pa
     assert [e["term"] for e in state.glossary] == ["CTR"]
 
 
-def test_one_term_has_one_definition():
-    other = export({**CTR, "description": "Another rate."}, table="ad_stats_ad_daily")
-    both = {**export(CTR), "models": export(CTR)["models"] + other["models"]}
+def test_a_kpi_of_several_marts_is_one_term_with_the_names_of_its_metrics():
+    ads = export(CTR, table="ad_stats_ad_daily", level="Ads", scope="Over the ads.")
+    groups = export(CTR, table="ad_stats_ad_group_daily", level="Ad Groups", scope="Over groups.")
+    metrics = mx.declared(both(export(CTR), groups, ads))
+    assert sorted(m.name for m in metrics) == ["CTR (Ad Groups)", "CTR (Ads)", "CTR (Campaigns)"]
+    assert mx.glossary(metrics) == {
+        "CTR": "Click-through rate. Metabase computes it over the statistics of each level as "
+        "CTR (Ad Groups), CTR (Ads) and CTR (Campaigns), whose descriptions say what each level "
+        "covers."
+    }
+    other = export({**CTR, "description": "Another rate."}, table="ad_stats_ad_daily", level="Ads")
     with pytest.raises(md.MetadataError, match="two descriptions"):
-        mx.glossary(mx.declared(both))
+        mx.glossary(mx.declared(both(export(CTR), other)))
 
 
 def test_the_week_starts_on_monday_unless_an_admin_chose_another_day(metabase):

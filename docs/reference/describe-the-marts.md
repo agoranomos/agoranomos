@@ -89,12 +89,16 @@ The jobs that apply the metadata never send a display name of `null`, which the 
 
 ## Metrics
 
-A mart declares its KPIs under `config: meta: metabase: metrics:`, and `metabase-init` keeps each as a metric of Metabase in the collection Agoranomos / Metrics, and its name and description as a term of the glossary of Metabase, on every start ([ADR-0034](../adr/0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md)). A metric is a ratio of sums: the sum of `numerator` divided by the sum of `denominator`, times `scale`, over the rows that a question selects, so that every card, every question and every MCP client computes it alike, and never as an average of the ratio of each row. Metabase gives no value where the sum of the denominator is zero.
+A mart declares its KPIs under `config: meta: metabase: metrics:`, and `metabase-init` keeps each as a metric of Metabase in the collection Agoranomos / Metrics, and each KPI as a term of the glossary of Metabase, on every start ([ADR-0034](../adr/0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md)). A metric is a ratio of sums: the sum of `numerator` divided by the sum of `denominator`, times `scale`, over the rows that a question selects, so that every card, every question and every MCP client computes it alike, and never as an average of the ratio of each row. Metabase gives no value where the sum of the denominator is zero.
+
+**Names.** A metric of Metabase belongs to one table, so a KPI of three marts is three metrics, and each is named by one rule, `<KPI> (<level>)`, the level of its mart included, as `CTR (Campaigns)`, `CTR (Ad Groups)` and `CTR (Ads)`. The level is in every name, with no plain `CTR` for one of them: the lists and the searches of Metabase and of its MCP server show a metric by its name, and the totals of the levels differ, as the ad groups and the ads leave out Performance Max. The KPI comes first, so the metrics of one KPI stand together in a list. The description of each starts with what its level covers, then defines the KPI, and the glossary holds the KPI once, as `CTR`, with its definition and the names of its metrics. The column of the value of a metric is the KPI alone, so a card on a tab of one level shows `CTR`.
+
+A mart that declares metrics also has two keys under `config: meta: metabase:`: `metric_level`, the level in the names of its metrics, such as `Ad Groups`, which no other mart has, and `metric_scope`, the sentence that starts their descriptions, such as what the level leaves out. The marts of one KPI share its declaration through an anchor of YAML: `ad_stats_campaign_daily` declares `metrics: &kpis`, and the marts of ad groups and of ads take `metrics: *kpis`.
 
 | Key | Required | What it holds |
 |---|---|---|
-| `name` | yes | The name of the metric in Metabase and the term of the glossary, such as `CTR`; its column is the name in lower case, `ctr` |
-| `description` | yes | What the metric means and how it is computed, for people and AI clients: the description of the metric and the definition of the term |
+| `name` | yes | The KPI, such as `CTR`: the term of the glossary, and the start of the name of the metric; its column is the KPI in lower case, `ctr` |
+| `description` | yes | What the KPI means and how it is computed, for people and AI clients: the definition of the term, and the end of the description of each metric |
 | `numerator`, `denominator` | yes | Two columns of the mart, each summed |
 | `scale` | no | A whole number that multiplies the ratio, such as 1000 for CPM; 1 by default |
 | `format` | no | `percent`, `currency` or `number` (by default), with two decimals |
@@ -112,7 +116,7 @@ A mart declares its KPIs under `config: meta: metabase: metrics:`, and `metabase
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
 ```
 
-Two marts may declare a metric of one name only with one description, as the glossary holds one definition for each term. A metric whose mart Metabase does not show yet, before the first run of the transform, comes at a later start. The metrics, like the rest of the content of the package, are view-only, and an edit of one in Metabase is put back at the next start; a term of the glossary is found by its text, and a term that the code no longer ships stays.
+Two marts may declare a KPI only with one description, as the glossary holds one definition for each term. A metric whose mart Metabase does not show yet, before the first run of the transform, comes at a later start. The metrics, like the rest of the content of the package, are view-only, and an edit of one in Metabase is put back at the next start; a term of the glossary is found by its text, and a term that the code no longer ships stays.
 
 **Reserved keys.** `synonyms` (a list of other names) and `ai_context` (a text for AI clients only) are reserved under `config: meta:` of a model or a column. They are not used yet: the tests do not require them, and nothing reads them.
 

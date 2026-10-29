@@ -8,9 +8,14 @@ ratio of each row. Metabase divides by NULLIF of the denominator, so a sum of ze
 mart that Metabase does not show yet, before the first run of the transform, gets its metrics at the
 next start after it.
 
-A term of the glossary is the name of a metric, and its definition the description of the metric in
-dbt. The job finds its terms by their text: a term of the same text that a person wrote is put back
-as the code says, and a term that the code no longer ships stays."""
+A metric of Metabase belongs to one table, so a KPI that several marts declare is a metric of each,
+and every one of them is named <KPI> (<level>), such as CTR (Campaigns) and CTR (Ad Groups): the
+level of its mart, metric_level, tells them apart in the lists and the searches of Metabase and of
+its MCP server, and its description starts with what the level covers, metric_scope (ADR-0034,
+docs/reference/describe-the-marts.md#metrics). A term of the glossary is a KPI, such as CTR, once,
+with the description of the KPI in dbt and the names of its metrics. The job finds its terms by
+their text: a term of the same text that a person wrote is put back as the code says, and a term
+that the code no longer ships stays."""
 
 from __future__ import annotations
 
@@ -39,34 +44,59 @@ Log = Callable[[str], None]
 
 @dataclass(frozen=True)
 class Declared:
-    """A metric as a mart declares it in dbt."""
+    """A KPI as a mart declares it in dbt, with the level and the scope of the mart."""
 
     table: str
-    name: str
+    kpi: str
     description: str
     numerator: str
     denominator: str
     scale: int
     format: str
     currency: str | None
+    level: str
+    scope: str
 
     @property
     def slug(self) -> str:
         """The name of the column of the metric, and of its key: CTR is ctr."""
-        return re.sub(r"[^a-z0-9]+", "_", self.name.casefold()).strip("_")
+        return re.sub(r"[^a-z0-9]+", "_", self.kpi.casefold()).strip("_")
+
+    @property
+    def name(self) -> str:
+        """The name of the metric in Metabase: the KPI and the level of its mart."""
+        return f"{self.kpi} ({self.level})"
+
+    @property
+    def described(self) -> str:
+        """The description of the metric in Metabase: what its level covers, then the KPI."""
+        return f"{self.scope} {self.description}"
+
+
+def text_of(value: Any) -> str:
+    """A text of the YAML on one line: folded, with its blanks as single spaces."""
+    return " ".join(value.split()) if isinstance(value, str) else ""
 
 
 def declared(document: Mapping[str, Any]) -> list[Declared]:
-    """The metrics that the marts of the export declare, checked: each names two columns of its
-    mart, and its name, slug and description are text."""
+    """The KPIs that the marts of the export declare, checked: each names two columns of its mart,
+    its name, slug and description are text, and a mart that declares any has a level and a scope,
+    the level of no other mart."""
     found = []
     for model in document.get("models") or []:
         if model["schema"] != MART_SCHEMA:
             continue
-        entries = metadata.metabase_meta(model).get("metrics") or []
+        meta = metadata.metabase_meta(model)
+        entries = meta.get("metrics") or []
         where = f"{MART_SCHEMA}.{model['name']}"
         if not isinstance(entries, list):
             raise metadata.MetadataError(f"{where}: meta metabase metrics is a list")
+        level, scope = text_of(meta.get("metric_level")), text_of(meta.get("metric_scope"))
+        if entries and not (level and scope):
+            raise metadata.MetadataError(
+                f"{where}: a mart with metrics has a metric_level and a metric_scope, which name "
+                "its metrics and start their descriptions"
+            )
         columns = {column["name"] for column in model.get("columns") or []}
         for entry in entries:
             if not isinstance(entry, dict) or not set(entry) <= KEYS:
@@ -75,26 +105,35 @@ def declared(document: Mapping[str, Any]) -> list[Declared]:
                 )
             metric = Declared(
                 table=model["name"],
-                name=entry.get("name") or "",
-                description=" ".join(str(entry.get("description") or "").split()),
+                kpi=text_of(entry.get("name")),
+                description=text_of(entry.get("description")),
                 numerator=entry.get("numerator") or "",
                 denominator=entry.get("denominator") or "",
                 scale=entry.get("scale", 1),
                 format=entry.get("format", "number"),
                 currency=entry.get("currency"),
+                level=level,
+                scope=scope,
             )
             problem = problem_of(metric, columns)
             if problem:
-                raise metadata.MetadataError(f"{where}: metric {metric.name!r}: {problem}")
+                raise metadata.MetadataError(f"{where}: metric {metric.kpi!r}: {problem}")
             found.append(metric)
     keys = [(m.table, m.slug) for m in found]
     if len(keys) != len(set(keys)):
         raise metadata.MetadataError("two metrics of one mart have the same name")
+    levels = {}
+    for metric in found:
+        if levels.setdefault(metric.level.casefold(), metric.table) != metric.table:
+            raise metadata.MetadataError(
+                f"the marts {levels[metric.level.casefold()]} and {metric.table} have the same "
+                f"metric_level {metric.level!r}, so their metrics would have the same names"
+            )
     return found
 
 
 def problem_of(metric: Declared, columns: set[str]) -> str | None:
-    if not isinstance(metric.name, str) or not metric.slug:
+    if not metric.slug:
         return "the name is text with a letter or a digit"
     if not metric.description:
         return "the description is text"
@@ -128,7 +167,7 @@ def query_of(metric: Declared, table_id: int, fields: Fields) -> dict[str, Any]:
     ]
     if metric.scale != 1:
         ratio = ["*", ratio, metric.scale]
-    named = {"name": metric.slug, "display-name": metric.name}
+    named = {"name": metric.slug, "display-name": metric.kpi}
     return {"source-table": table_id, "aggregation": [["aggregation-options", ratio, named]]}
 
 
@@ -162,7 +201,7 @@ def package_of(
             content.Metric(
                 key=f"{metric.table}.{metric.slug}",
                 name=metric.name,
-                description=metric.description,
+                description=metric.described,
                 query=query_of(metric, tables[metric.table], fields),
                 visualization_settings=settings_of(metric),
             )
@@ -187,15 +226,26 @@ def shown_marts(database: Mapping[str, Any]) -> tuple[dict[str, int], dict[tuple
 
 
 def glossary(metrics: list[Declared]) -> dict[str, str]:
-    """The terms of the glossary, by their text: the name of each metric with its description. Two
-    marts may declare a metric of one name only with one description."""
-    terms: dict[str, str] = {}
+    """The terms of the glossary, by their text: each KPI once, with its description and the names
+    of its metrics in order. Two marts may declare a KPI only with one description, as the glossary
+    holds one definition for each term."""
+    described: dict[str, str] = {}
+    names: dict[str, list[str]] = {}
     for metric in metrics:
-        if terms.setdefault(metric.name, metric.description) != metric.description:
+        if described.setdefault(metric.kpi, metric.description) != metric.description:
             raise metadata.MetadataError(
-                f"the metric {metric.name!r} has two descriptions in the marts: the glossary "
-                "holds one definition for each term"
+                f"the KPI {metric.kpi!r} has two descriptions in the marts: the glossary holds one "
+                "definition for each term"
             )
+        names.setdefault(metric.kpi, []).append(metric.name)
+    terms = {}
+    for kpi, description in described.items():
+        listed = sorted(names[kpi])
+        shown = listed[0] if len(listed) == 1 else f"{', '.join(listed[:-1])} and {listed[-1]}"
+        terms[kpi] = (
+            f"{description} Metabase computes it over the statistics of each level as {shown}, "
+            "whose descriptions say what each level covers."
+        )
     return terms
 
 
