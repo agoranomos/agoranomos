@@ -7,7 +7,7 @@
 
 <p align="center">
   <b>Open-source marketing BI out of the box.</b><br>
-  The goal: ad platforms → a PostgreSQL warehouse of your own → Metabase dashboards → questions in Claude or ChatGPT through MCP.<br>
+  The goal: ad platforms → a PostgreSQL warehouse of your own → Metabase dashboards → questions in Claude, ChatGPT or Gemini through MCP.<br>
   Today: one command, <code>./agoranomos up</code>, starts the stack and two demo dashboards on your machine. Your data stays yours.
 </p>
 
@@ -53,11 +53,11 @@ Agoranomos is meant to close these gaps: it keeps the history in a warehouse you
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/pipeline-dark.svg">
-    <img alt="The pipeline: demo data, dlt, the PostgreSQL warehouse with raw, staging and marts built by dbt, Metabase and the MCP servers run today, and Airflow runs the load and the dbt build. AI clients such as the Claude apps and Claude Code reach the data through the MCP servers: the one built into Metabase and, in local mode, the read-only servers of the warehouse and of Airflow. The Metabase refresh, ad platform connectors, the MCP server of dbt and other AI clients such as ChatGPT and Kimi are planned. Metabase and the AI clients, which people work with, are framed in blue" src="docs/assets/readme/pipeline-light.svg" width="100%">
+    <img alt="The pipeline: demo data, dlt, the PostgreSQL warehouse with raw, staging and marts built by dbt, Metabase and the MCP servers run today, and Airflow runs the load and the dbt build. The Claude apps and Claude Code reach the data through the MCP servers: the one built into Metabase and, in local mode, the read-only servers of the warehouse and of Airflow. The Metabase refresh, ad platform connectors, the MCP server of dbt and the AI clients ChatGPT, Gemini and Kimi are planned. Metabase and the AI clients, which people work with, are framed in blue" src="docs/assets/readme/pipeline-light.svg" width="100%">
   </picture>
 </p>
 
-Data moves in one direction, from ad platforms to dashboards and AI clients, and every step is code that runs on infrastructure you control. The diagram is the target design. Solid lines show what runs today: the colored ones carry data, and the thin gray ones are Airflow starting a step. Dashed lines are planned, and components arrive release by release. A blue frame marks what people work with: Metabase and the AI clients.
+Data moves in one direction, from ad platforms to dashboards and AI clients, and every step is code that runs on infrastructure you control. The diagram is the target design. Solid lines show what runs today: the colored ones carry data, and the thin gray ones are Airflow starting a step. Dashed lines are planned, and components arrive release by release. A blue frame marks what people work with: Metabase and the AI clients. Claude is the AI client checked today, in its apps and in Claude Code. ChatGPT and Gemini, which with Claude are the most used AI assistants, come next, and Kimi is planned too ([ADR-0033](docs/adr/0033-support-claude-chatgpt-and-gemini-first.md)).
 
 | Step | Tool | What it does |
 |---|---|---|
@@ -97,7 +97,7 @@ cd agoranomos
 
 ## Who it is for
 
-- **Implementers**: analysts, freelancers, small agencies and data engineers who set up marketing analytics for their clients or for themselves. They get a stack of standard open-source parts that they can read, change and run, documentation to maintain it without its author, and every significant decision recorded in the open. Their coding agents work with the stack through MCP servers: Claude Code with the `.mcp.json` and the skills of the repository, and other agents, such as Cursor and Codex, through the same commands, which are not checked with them yet.
+- **Implementers**: analysts, freelancers, small agencies and data engineers who set up marketing analytics for their clients or for themselves. They get a stack of standard open-source parts that they can read, change and run, documentation to maintain it without its author, and every significant decision recorded in the open. Their coding agents work with the stack through MCP servers: Claude Code with the `.mcp.json` and the skills of the repository. Codex and Antigravity, the agents of ChatGPT and Gemini, are planned, and other agents, such as GitHub Copilot and Cursor, can run the same commands, which are not checked with them.
 - **Business owners and marketers**, who want to see in one place what their advertising delivers across all platforms, and to ask about it in plain language in the AI app they already use, without writing SQL. They get Agoranomos through a specialist who runs it for them, or through a hosted version that is planned for later.
 
 ## Status and roadmap

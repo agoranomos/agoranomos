@@ -59,7 +59,7 @@ The Claude apps answer questions and build queries, but they cannot save questio
 
 ## Connect another client
 
-ChatGPT and other remote clients are not checked yet. Register one with its name and the address to return to that its documentation gives:
+Claude is the client checked today. ChatGPT with Codex and Gemini with Antigravity come next, and Kimi is planned too ([ADR-0033](../adr/0033-support-claude-chatgpt-and-gemini-first.md)). Until a release checks them, they connect like any other client that speaks MCP, unchecked. Register one with its name and the address to return to that its documentation gives:
 
 ```bash
 ./agoranomos ai connect <name> --redirect-uri <uri>

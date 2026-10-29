@@ -72,6 +72,7 @@ nav = [
     { "ADR-0030: Ship three MCP servers in v0.3.0, with the stdio servers in local mode only" = "adr/0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md" },
     { "ADR-0031: Register and revoke the OAuth clients of Metabase with the script, and close the rest at the proxy" = "adr/0031-register-and-revoke-the-oauth-clients-of-metabase-with-the-script.md" },
     { "ADR-0032: Connect Google Ads first, with the reference rates of the European Central Bank" = "adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md" },
+    { "ADR-0033: Support Claude, ChatGPT and Gemini first among AI clients" = "adr/0033-support-claude-chatgpt-and-gemini-first.md" },
   ] },
 ]
 
