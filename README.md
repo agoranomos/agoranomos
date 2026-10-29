@@ -53,11 +53,11 @@ Agoranomos is meant to close these gaps: it keeps the history in a warehouse you
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/pipeline-dark.svg">
-    <img alt="The pipeline: demo data, dlt, the PostgreSQL warehouse with raw, staging and marts built by dbt, and Metabase run today, and Airflow runs the load and the dbt build; the Metabase refresh, ad platform connectors, MCP and AI clients are planned" src="docs/assets/readme/pipeline-light.svg" width="100%">
+    <img alt="The pipeline: demo data, dlt, the PostgreSQL warehouse with raw, staging and marts built by dbt, Metabase and the MCP servers run today, and Airflow runs the load and the dbt build. AI clients such as the Claude apps and Claude Code reach the data through the MCP servers: the one built into Metabase and, in local mode, the read-only servers of the warehouse and of Airflow. The Metabase refresh, ad platform connectors, the MCP server of dbt and other AI clients such as ChatGPT and Kimi are planned. Metabase and the AI clients, which people work with, are framed in blue" src="docs/assets/readme/pipeline-light.svg" width="100%">
   </picture>
 </p>
 
-Data moves in one direction, from ad platforms to dashboards and AI clients, and every step is code that runs on infrastructure you control. The diagram is the target design. Solid lines show what runs today: the colored ones carry data, and the thin gray ones are Airflow starting a step. Dashed lines are planned, and components arrive release by release.
+Data moves in one direction, from ad platforms to dashboards and AI clients, and every step is code that runs on infrastructure you control. The diagram is the target design. Solid lines show what runs today: the colored ones carry data, and the thin gray ones are Airflow starting a step. Dashed lines are planned, and components arrive release by release. A blue frame marks what people work with: Metabase and the AI clients.
 
 | Step | Tool | What it does |
 |---|---|---|
