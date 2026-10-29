@@ -80,3 +80,4 @@ Agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0031](0031-register-and-revoke-the-oauth-clients-of-metabase-with-the-script.md) | Register and revoke the OAuth clients of Metabase with the script, and close the rest at the proxy | accepted | 2026-10-21 |
 | [0032](0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md) | Connect Google Ads first, with the reference rates of the European Central Bank | proposed | 2026-10-29 |
 | [0033](0033-support-claude-chatgpt-and-gemini-first.md) | Support Claude, ChatGPT and Gemini first among AI clients | proposed | 2026-10-29 |
+| [0034](0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md) | Define a basic data set of the marts and the dashboards, and the modules of an extended one | proposed | 2026-10-29 |
