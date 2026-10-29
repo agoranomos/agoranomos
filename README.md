@@ -97,7 +97,7 @@ cd agoranomos
 
 ## Who it is for
 
-- **Implementers**: analysts, freelancers, small agencies and data engineers who set up marketing analytics for their clients or for themselves. They get a stack of standard open-source parts that they can read, change and run, documentation to maintain it without its author, and every significant decision recorded in the open. Their coding agents, such as Claude Code, Cursor and Codex, are to work with the stack through MCP servers.
+- **Implementers**: analysts, freelancers, small agencies and data engineers who set up marketing analytics for their clients or for themselves. They get a stack of standard open-source parts that they can read, change and run, documentation to maintain it without its author, and every significant decision recorded in the open. Their coding agents work with the stack through MCP servers: Claude Code with the `.mcp.json` and the skills of the repository, and other agents, such as Cursor and Codex, through the same commands, which are not checked with them yet.
 - **Business owners and marketers**, who want to see in one place what their advertising delivers across all platforms, and to ask about it in plain language in the AI app they already use, without writing SQL. They get Agoranomos through a specialist who runs it for them, or through a hosted version that is planned for later.
 
 ## Status and roadmap

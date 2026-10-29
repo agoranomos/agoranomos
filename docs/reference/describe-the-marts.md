@@ -1,6 +1,6 @@
 # Describe the marts
 
-Every model, seed and column of the dbt project, and every table of its sources, has a description. Every mart also has a display name for Metabase, and each of its columns a display name and a semantic type. People read the descriptions in SQL clients and in Metabase, and the planned AI access through MCP ([ADR-0007](../adr/0007-ai-access-via-mcp-read-only.md)) is to take its context from them, so they follow the rules on this page. Tests check them ([How the rules are checked](#how-the-rules-are-checked)).
+Every model, seed and column of the dbt project, and every table of its sources, has a description. Every mart also has a display name for Metabase, and each of its columns a display name and a semantic type. People read the descriptions in SQL clients and in Metabase, and AI clients take their context from them through the MCP servers of Metabase and of the warehouse ([ADR-0007](../adr/0007-ai-access-via-mcp-read-only.md)), so they follow the rules on this page. Tests check them ([How the rules are checked](#how-the-rules-are-checked)).
 
 Metabase gets them on every start: the one-shot job `metadata-export` exports them from dbt, and `metabase-init` applies them, with the overrides of a deployment, as `demo-init` does for the marts of the demo once the demo pipeline has built them ([A deployment's own words](#a-deployments-own-words)).
 
@@ -103,7 +103,7 @@ The constraint has no `name`. dbt builds a table under a temporary name and then
 
 ## Comments in the warehouse
 
-`+persist_docs` in `dbt/dbt_project.yml` makes dbt write the descriptions into the comments of the tables, views and columns that it builds, so SQL clients see them too, and so will the planned AI access to the warehouse. dbt does not comment the tables of the sources.
+`+persist_docs` in `dbt/dbt_project.yml` makes dbt write the descriptions into the comments of the tables, views and columns that it builds, so SQL clients see them too, and so do AI clients through the tools `list_tables` and `describe_table` of the MCP server of the warehouse (`ai/tools.yaml`). dbt does not comment the tables of the sources.
 
 Metabase copies the comment of a table or column into its description when it syncs, but only while that description is empty, as of Metabase 0.63.19 and 0.64.1: a changed description does not reach Metabase this way. In 0.64.1, a sync no longer fills the description of a column that someone cleared in Metabase either. The jobs that apply the metadata on every start bring it there instead.
 
