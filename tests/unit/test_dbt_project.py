@@ -308,6 +308,35 @@ def test_every_mart_has_a_contract_and_its_key():
         assert unique in found[name], name
 
 
+# The foreign keys of the marts in Metabase (ADR-0034): the column of each name, in every mart but
+# the one whose key it is, points at that key. Metabase joins a foreign key on its one column, so
+# only a key of one column can be a target: an account, a campaign, an ad group and an ad are each
+# a key only with its platform and its account, and their IDs have no foreign key.
+FOREIGN_KEYS = {"client_id": "clients", "platform": "ad_platforms"}
+
+
+def test_the_foreign_keys_of_the_marts_point_at_a_key_of_one_column():
+    text = (DBT / "models" / "marts" / "_marts__models.yml").read_text(encoding="utf-8")
+    found = 0
+    for mart, block in blocks(text, 2).items():
+        for column, lines in blocks(block, 6).items():
+            semantic = re.search(r"semantic_type: ([\w/]+)", lines).group(1)
+            target = re.search(r"fk_target_table: ([\w.]+)\n +fk_target_field: (\w+)\n", lines)
+            home = FOREIGN_KEYS.get(column)
+            if home is None or mart == home:
+                assert "fk_target" not in lines, (mart, column)
+            if home is None:
+                assert semantic not in ("type/FK", "type/PK"), (mart, column)
+            elif mart == home:
+                assert (semantic, MART_KEYS[mart]) == ("type/PK", f"[{column}]")
+            else:
+                found += 1
+                assert semantic == "type/FK", (mart, column)
+                assert target is not None, (mart, column)
+                assert target.groups() == (f"marts.{home}", column), (mart, column)
+    assert found == 19
+
+
 def seed_rows(name: str) -> list[dict[str, str]]:
     with (SEEDS / f"{name}.csv").open(encoding="utf-8", newline="") as file:
         return list(csv.DictReader(file))

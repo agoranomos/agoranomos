@@ -97,7 +97,13 @@ models:
         data_type: text
         description: '{{ doc("platform") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform Code
+              semantic_type: type/FK
+              fk_target_table: marts.ad_platforms
+              fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
@@ -106,7 +112,13 @@ models:
         data_type: text
         description: '{{ doc("client_id") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client ID
+              semantic_type: type/FK
+              fk_target_table: marts.clients
+              fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
@@ -221,7 +233,13 @@ models:
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
-        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform Code
+              semantic_type: type/FK
+              fk_target_table: marts.ad_platforms
+              fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
@@ -229,7 +247,13 @@ models:
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
-        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client ID
+              semantic_type: type/FK
+              fk_target_table: marts.clients
+              fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
@@ -337,7 +361,13 @@ models:
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
-        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform Code
+              semantic_type: type/FK
+              fk_target_table: marts.ad_platforms
+              fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
@@ -345,7 +375,13 @@ models:
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
-        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client ID
+              semantic_type: type/FK
+              fk_target_table: marts.clients
+              fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
@@ -448,7 +484,7 @@ models:
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
-        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/PK}}}
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
@@ -489,7 +525,13 @@ models:
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
-        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform Code
+              semantic_type: type/FK
+              fk_target_table: marts.ad_platforms
+              fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
@@ -505,7 +547,13 @@ models:
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
-        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client ID
+              semantic_type: type/FK
+              fk_target_table: marts.clients
+              fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
@@ -557,7 +605,7 @@ models:
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
-        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/Category}}}
+        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/PK}}}
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
@@ -591,7 +639,13 @@ models:
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
-        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform Code
+              semantic_type: type/FK
+              fk_target_table: marts.ad_platforms
+              fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
@@ -599,7 +653,13 @@ models:
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
-        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client ID
+              semantic_type: type/FK
+              fk_target_table: marts.clients
+              fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
@@ -665,7 +725,13 @@ models:
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
-        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform Code
+              semantic_type: type/FK
+              fk_target_table: marts.ad_platforms
+              fk_target_field: platform
       - name: account_id
         data_type: text
         description: '{{ doc("account_id") }}'
@@ -786,7 +852,13 @@ models:
         data_type: text
         description: '{{ doc("platform") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform Code
+              semantic_type: type/FK
+              fk_target_table: marts.ad_platforms
+              fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
@@ -795,7 +867,13 @@ models:
         data_type: text
         description: '{{ doc("client_id") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client ID
+              semantic_type: type/FK
+              fk_target_table: marts.clients
+              fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
@@ -929,7 +1007,13 @@ models:
         data_type: text
         description: '{{ doc("platform") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform Code
+              semantic_type: type/FK
+              fk_target_table: marts.ad_platforms
+              fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
@@ -938,7 +1022,13 @@ models:
         data_type: text
         description: '{{ doc("client_id") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client ID
+              semantic_type: type/FK
+              fk_target_table: marts.clients
+              fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
@@ -1062,7 +1152,13 @@ models:
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
-        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform Code
+              semantic_type: type/FK
+              fk_target_table: marts.ad_platforms
+              fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
@@ -1070,7 +1166,13 @@ models:
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
-        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client ID
+              semantic_type: type/FK
+              fk_target_table: marts.clients
+              fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
@@ -1139,7 +1241,13 @@ models:
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
-        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform Code
+              semantic_type: type/FK
+              fk_target_table: marts.ad_platforms
+              fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
@@ -1147,7 +1255,13 @@ models:
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
-        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client ID
+              semantic_type: type/FK
+              fk_target_table: marts.clients
+              fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
