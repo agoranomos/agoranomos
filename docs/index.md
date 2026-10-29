@@ -1,6 +1,6 @@
 # Agoranomos
 
-Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreSQL warehouse → Metabase dashboards → ask anything in Claude or ChatGPT via MCP.
+Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreSQL warehouse → Metabase dashboards → ask anything in Claude, ChatGPT or Gemini via MCP.
 
 !!! warning "Status: pre-alpha"
 
@@ -11,7 +11,7 @@ Agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 - **Loads** data from ad platforms, web analytics, CRM systems and files into a PostgreSQL warehouse, on a schedule.
 - **Models** that data with dbt into one unified view of advertising performance across all platforms.
 - **Shows** it in Metabase, with dashboards, metrics and a glossary that come ready-made.
-- **Lets you ask** questions about the data in AI clients such as Claude and ChatGPT, through MCP servers with least-privilege defaults.
+- **Lets you ask** questions about the data in AI clients, through MCP servers with least-privilege defaults. Claude works today, in its apps and in Claude Code, and ChatGPT, Gemini and Kimi are planned ([ADR-0033](adr/0033-support-claude-chatgpt-and-gemini-first.md)).
 
 To see how the pieces fit together, read the [architecture overview](explanation/architecture.md).
 
