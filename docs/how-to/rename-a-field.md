@@ -32,7 +32,7 @@ The tables and columns go by their names in the warehouse, the ones that a SQL q
 - A change or the removal of an entry shows in the log as the `revert of an edit`, with the value of the entry before: the jobs keep no copy of the earlier file, so they cannot tell it from an edit in the Metabase UI.
 - Two columns of a table cannot get one display name.
 - Metabase OSS shows one name for each field, to everyone, so names in another language are for the whole deployment. Keep the English word in a note, so that a question asked in English still finds the field.
-- It changes Metabase only: SQL clients, and the planned AI access to the warehouse, see the comments of the release.
+- It changes Metabase only: SQL clients, and AI clients through the MCP server of the warehouse, see the comments of the release.
 
 A description is not an instruction: write facts about the data, and never copy text from an ad platform into the file, because anyone can write that text.
 
