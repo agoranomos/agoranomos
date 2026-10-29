@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2](https://github.com/agoranomos/agoranomos/compare/v0.3.1...v0.3.2) (2026-10-29)
+
+
+### Documentation
+
+* describe the AI access of v0.3.0 as built ([#136](https://github.com/agoranomos/agoranomos/issues/136)) ([0de66ba](https://github.com/agoranomos/agoranomos/commit/0de66ba7bd5f827207dbeb7ee7da378ceeb0972d))
+* draw the MCP servers in the pipeline picture ([#138](https://github.com/agoranomos/agoranomos/issues/138)) ([cfad062](https://github.com/agoranomos/agoranomos/commit/cfad062ea225dffadcdeeafcf549cab669fb482a))
+
 ## [0.3.1](https://github.com/agoranomos/agoranomos/compare/v0.3.0...v0.3.1) (2026-10-28)
 
 
