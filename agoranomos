@@ -1053,6 +1053,11 @@ EOF
     EUR | AUD | BRL | CAD | CHF | CNY | CZK | DKK | GBP | HKD | HUF | IDR | ILS | INR | ISK | JPY | KRW | MXN | MYR | NOK | NZD | PHP | PLN | RON | SEK | SGD | THB | TRY | USD | ZAR) ;;
     *) problem "AGORANOMOS_REPORTING_CURRENCY in .env must be EUR or a currency of the reference rates of the ECB, such as USD or GBP" ;;
   esac
+  # The manager account of Google Ads (ADR-0032): ten digits without hyphens, or empty.
+  case "$(setting GOOGLE_ADS_LOGIN_CUSTOMER_ID '')" in
+    '' | [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+    *) problem "GOOGLE_ADS_LOGIN_CUSTOMER_ID in .env must be the ten digits of a manager account of Google Ads, without hyphens, or empty" ;;
+  esac
   # AI access in Metabase (ADR-0017): a level that this release offers, and the switches that follow
   # it, before Compose starts Metabase with them.
   message=$(ai_problem)

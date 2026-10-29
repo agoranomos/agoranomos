@@ -7,6 +7,8 @@ with versions as (
     select * from {{ ref('stg_demo_social__campaigns') }}
     union all
     select * from {{ ref('stg_demo_video__campaigns') }}
+    union all
+    select * from {{ ref('stg_google_ads__campaigns') }}
 ),
 
 marked as (

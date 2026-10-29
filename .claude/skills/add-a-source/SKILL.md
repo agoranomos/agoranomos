@@ -5,7 +5,7 @@ description: Adds a new data source, an ad platform or a source of web analytics
 
 # Add a source
 
-A source goes through every layer of the model ([ADR-0025](../../../docs/adr/0025-model-advertising-statistics-once.md), [The data model](../../../docs/reference/data-model.md)). Take one demo platform of the same kind as your example, and follow it file by file: `git grep -n demo_video` lists every place that names the platform of video ads. Today the base package holds only the demo. The connectors of real platforms are planned for Phase 4, and a deployment cannot add a source of its own in `extensions/` yet ([ADR-0013](../../../docs/adr/0013-keep-extensions-apart-from-the-base-package.md)).
+A source goes through every layer of the model ([ADR-0025](../../../docs/adr/0025-model-advertising-statistics-once.md), [The data model](../../../docs/reference/data-model.md)). Take one demo platform of the same kind as your example, and follow it file by file: `git grep -n demo_video` lists every place that names the platform of video ads. Today the base package holds the demo and the first real connector, `google_ads` (`airflow/dags/agoranomos_pipelines/google_ads.py`), whose staging models read their raw tables through `relation_or_empty`, as a deployment may never load them. The other real platforms come in Phase 4, one in each minor release, and a deployment cannot add a source of its own in `extensions/` yet ([ADR-0013](../../../docs/adr/0013-keep-extensions-apart-from-the-base-package.md)).
 
 ## Decide first
 

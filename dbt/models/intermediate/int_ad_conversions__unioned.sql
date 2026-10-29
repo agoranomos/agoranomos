@@ -8,6 +8,8 @@ with conversions as (
     select * from {{ ref('stg_demo_social__campaign_conversions') }}
     union all
     select * from {{ ref('stg_demo_video__campaign_conversions') }}
+    union all
+    select * from {{ ref('stg_google_ads__campaign_conversions') }}
 )
 
 select

@@ -8,6 +8,8 @@ with stats as (
     select * from {{ ref('stg_demo_social__campaign_stats') }}
     union all
     select * from {{ ref('stg_demo_video__campaign_stats') }}
+    union all
+    select * from {{ ref('stg_google_ads__campaign_stats') }}
 ),
 
 primary_conversions as (

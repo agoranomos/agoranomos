@@ -395,6 +395,10 @@ services:
       # hides the values of DBT_ENV_SECRET_ variables in its logs.
       WAREHOUSE_LOADER_PASSWORD: ${WAREHOUSE_LOADER_PASSWORD:?run ./agoranomos init}
       DBT_ENV_SECRET_WAREHOUSE_PASSWORD: ${WAREHOUSE_TRANSFORMER_PASSWORD:?run ./agoranomos init}
+      # The key of the service account of Google Ads and its manager account, for the load of
+      # google_ads (ADR-0032): empty until a deployment connects it.
+      GOOGLE_ADS_SERVICE_ACCOUNT_KEY: ${GOOGLE_ADS_SERVICE_ACCOUNT_KEY:-}
+      GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${GOOGLE_ADS_LOGIN_CUSTOMER_ID:-}
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://localhost:8974/health"]
       interval: 10s

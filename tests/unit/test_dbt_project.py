@@ -383,8 +383,8 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
     rows = {r["platform"]: r for r in seed_rows("seed_ad_platforms")}
     from agoranomos_pipelines.demo import platforms
 
-    # And the real sources, which mimic nothing: the rates of the ECB (ADR-0032).
-    assert set(rows) == {*platforms.PLATFORMS, "ecb"}
+    # And the real sources, which mimic nothing: the rates of the ECB and Google Ads (ADR-0032).
+    assert set(rows) == {*platforms.PLATFORMS, "ecb", "google_ads"}
     for code, platform in platforms.PLATFORMS.items():
         assert rows[code]["mimics"] == platform.mimics
         assert rows[code]["is_demo"] == "true"
@@ -392,6 +392,13 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
         "platform": "ecb",
         "platform_name": "European Central Bank",
         "kind": "exchange_rates",
+        "mimics": "",
+        "is_demo": "false",
+    }
+    assert rows["google_ads"] == {
+        "platform": "google_ads",
+        "platform_name": "Google Ads",
+        "kind": "ads",
         "mimics": "",
         "is_demo": "false",
     }
@@ -410,6 +417,7 @@ def test_the_seeds_of_currencies_and_time_zones_hold_what_the_demo_uses():
 
 
 STAGING = DBT / "models" / "staging"
+DAGS_PIPELINES = DBT.parent / "airflow" / "dags" / "agoranomos_pipelines"
 # The staging models of the platforms of the demo (ADR-0025), by platform: each is one call of the
 # macro of the shape of its API, over these raw tables of the platform, in this order.
 SHAPED = {
@@ -880,3 +888,97 @@ def test_the_rates_take_the_ecb_alone_once_it_has_any_and_the_loads_show_it_befo
     assert "where not exists (select from {{ ref('stg_ecb__rates_daily') }})" in rates
     loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
     assert "{{ relation_or_empty(source('raw_ecb', '_agoranomos_reloads'), {" in loads
+
+
+GOOGLE_ADS = STAGING / "google_ads"
+# The staging models of Google Ads, each one call of a macro of the shape that demo_search mimics,
+# over a table of raw_google_ads, through relation_or_empty, as the DAG starts paused (ADR-0032).
+GOOGLE_ADS_MODELS = {
+    "campaign_stats": ("google_ads_campaign_stats", "campaign_stats"),
+    "campaign_conversions": ("google_ads_campaign_conversions", "campaign_conversions"),
+    "accounts": ("google_ads_customers", "customers"),
+    "campaigns": ("google_ads_campaigns", "campaigns"),
+}
+
+
+def test_each_staging_model_of_google_ads_is_one_call_of_the_shape_that_the_demo_shares():
+    found = {path.name for path in GOOGLE_ADS.glob("*.sql")}
+    assert found == {f"stg_google_ads__{model}.sql" for model in GOOGLE_ADS_MODELS}
+    for model, (macro, table) in GOOGLE_ADS_MODELS.items():
+        text = (GOOGLE_ADS / f"stg_google_ads__{model}.sql").read_text(encoding="utf-8")
+        assert text.startswith(f"-- stg_google_ads__{model}.sql: "), model
+        call = f"{{{{ {macro}(relation_or_empty(source('raw_google_ads', '{table}'), {{"
+        assert text.count(call) == 1, model
+        assert text.rstrip().endswith("}), 'google_ads') }}"), model
+        # The model of the accounts names the seeds that its tests read, as that of the demo does.
+        seeds = re.findall(r"^-- depends_on: \{\{ ref\('(\w+)'\) \}\}$", text, flags=re.MULTILINE)
+        assert seeds == (
+            ["seed_iso_4217_currencies", "seed_iana_time_zones"] if model == "accounts" else []
+        )
+    macros = (DBT / "macros" / "shapes" / "google_ads_v25.sql").read_text(encoding="utf-8")
+    assert "{% macro google_ads_customers(relation, platform) %}" in macros
+
+
+def test_the_columns_of_the_empty_tables_of_google_ads_are_the_fields_of_its_queries():
+    # The empty query of a table before the first load has the columns that dlt makes from the
+    # fields of its query, so that the model builds the same before and after it.
+    source = (DAGS_PIPELINES / "google_ads.py").read_text(encoding="utf-8")
+    for model, (_, table) in GOOGLE_ADS_MODELS.items():
+        text = (GOOGLE_ADS / f"stg_google_ads__{model}.sql").read_text(encoding="utf-8")
+        columns = set(re.findall(r"'(\w+)': '[\w ]+'", text))
+        block = source.split(f'    "{table}": {{\n', 1)[1].split("\n    },\n", 1)[0]
+        hinted = set(re.findall(r'^            "(\w+)": ', block, flags=re.MULTILINE))
+        scd2 = {"_dlt_valid_from", "_dlt_valid_to"} if table == "campaigns" else set()
+        assert columns == hinted | scd2, (model, sorted(columns ^ (hinted | scd2)))
+
+
+def test_the_staging_of_google_ads_has_the_tests_of_the_staging_of_demo_search():
+    # The same macros give the same columns, and the same critical tests guard both.
+    demo = (STAGING / "demo_search" / "_demo_search__models.yml").read_text(encoding="utf-8")
+    ads = (GOOGLE_ADS / "_google_ads__models.yml").read_text(encoding="utf-8")
+
+    def tests(text):
+        return [
+            line
+            for line in text.replace("demo_search", "google_ads").splitlines()
+            if "description" not in line and not line.startswith("      ")
+        ]
+
+    assert [
+        b.split("    data_tests:", 1)[1].split("  - name:", 1)[0]
+        for b in ads.split("  - name: stg_")[1:]
+    ] == [
+        b.split("    data_tests:", 1)[1].split("  - name:", 1)[0]
+        for b in demo.replace("demo_search", "google_ads").split("  - name: stg_")[1:]
+    ]
+    assert tests(ads) == tests(demo)
+
+
+def test_the_sources_of_google_ads_are_the_tables_that_its_load_writes():
+    text = (GOOGLE_ADS / "_google_ads__sources.yml").read_text(encoding="utf-8")
+    [source] = re.findall(r"^  - name: (\w+)\n    description:", text, flags=re.MULTILINE)
+    assert source == "raw_google_ads"
+    pattern = r"^      - name: (\w+)\n        description:"
+    assert set(re.findall(pattern, text, flags=re.MULTILINE)) == {
+        "_agoranomos_reloads",
+        "customers",
+        "campaigns",
+        "campaign_stats",
+        "campaign_conversions",
+    }
+
+
+def test_every_union_of_the_platforms_reads_google_ads_and_the_loads_show_it():
+    unions = {
+        "int_ad_stats__unioned": "stg_google_ads__campaign_stats",
+        "int_ad_conversions__unioned": "stg_google_ads__campaign_conversions",
+        "int_ad_accounts__unioned": "stg_google_ads__accounts",
+        "int_ad_campaigns__unioned": "stg_google_ads__campaigns",
+        "int_ad_campaign_names__collapsed": "stg_google_ads__campaigns",
+        "int_conversion_actions__resolved": "stg_google_ads__campaign_conversions",
+    }
+    for model, staged in unions.items():
+        text = (INTERMEDIATE / f"{model}.sql").read_text(encoding="utf-8")
+        assert f"from {{{{ ref('{staged}') }}}}" in text, model
+    loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
+    assert "{{ relation_or_empty(source('raw_google_ads', '_agoranomos_reloads'), {" in loads

@@ -7,6 +7,8 @@ with accounts as (
     select * from {{ ref('stg_demo_social__accounts') }}
     union all
     select * from {{ ref('stg_demo_video__accounts') }}
+    union all
+    select * from {{ ref('stg_google_ads__accounts') }}
 ),
 
 mapped as (
