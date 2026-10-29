@@ -168,6 +168,12 @@ def test_metabase_shows_the_effective_metadata_of_the_marts(metabase_url, sessio
                 for prop, value in wanted.items()
                 if current[prop] != value
             ]
+            if column.fk_target is not None:
+                # A foreign key points at the field of its target, the key of another mart.
+                schema, name, key = column.fk_target.split(".")
+                target = {f["name"]: f for f in shown[(schema, name)]["fields"]}[key]
+                if field.get("fk_target_field_id") != target["id"]:
+                    wrong.append(f"{table.name}.{column.name} fk_target")
     assert not wrong, wrong
 
 

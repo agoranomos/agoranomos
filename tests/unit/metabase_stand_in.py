@@ -668,10 +668,11 @@ class FakeMetabase:
     after the table itself, as Metabase makes the row of a new table before its fields. A person
     can hide the mart (mart_hidden), or a field (its visibility_type): the metadata of the database
     then leaves it out unless the request passes include_hidden=true, and a sync does not show it
-    again. PUT /api/table/:id and PUT /api/field/:id set what their body says, and a field's
-    settings are replaced whole, as Metabase does. bodies keeps what each write sent. The content,
-    its collections, questions and dashboards, and the permissions of the collections, are those of
-    content_state (ContentState).
+    again. key_marts adds marts of its own, such as the target of a foreign key. PUT /api/table/:id
+    and PUT /api/field/:id set what their body says, a field's settings are replaced whole, and a
+    field that stops being a foreign key loses its target, as Metabase does. bodies keeps what each
+    write sent. The content, its collections, questions and dashboards, and the permissions of the
+    collections, are those of content_state (ContentState).
     """
 
     def __init__(self, clock: Any = None) -> None:
@@ -702,6 +703,9 @@ class FakeMetabase:
         self.mart_hidden = False
         self.mart: dict[str, Any] | None = None
         self.demo_marts = False
+        # The marts that a test adds to the warehouse, by name with their columns, such as the
+        # target of a foreign key.
+        self.key_marts: dict[str, tuple[str, ...]] = {}
         self.other_marts: dict[str, dict[str, Any]] = {}
         self.sync_seconds = 10.0
         self.fields_seconds = 0.0
@@ -763,6 +767,8 @@ class FakeMetabase:
 
     def columns_of(self, name: str) -> tuple[str, ...]:
         """The columns of a table of the marts in the warehouse."""
+        if name in self.key_marts:
+            return self.key_marts[name]
         base = MART_COLUMNS if name == "ad_stats_campaign_daily" else ()
         return base + (DEMO_COLUMNS.get(name, ()) if self.demo_marts else ())
 
@@ -787,6 +793,7 @@ class FakeMetabase:
                     "description": None,
                     "base_type": base_type(column),
                     "semantic_type": None,
+                    "fk_target_field_id": None,
                     "settings": None,
                     "visibility_type": "normal",
                     "parent_id": None,
@@ -805,14 +812,16 @@ class FakeMetabase:
         return self.mart
 
     def all_tables(self) -> list[dict[str, Any]]:
-        """The mart, and with demo_marts the other marts of the demo, each made once."""
+        """The mart, with demo_marts the other marts of the demo, and the key marts, each made
+        once."""
+        names = (
+            [n for n in DEMO_COLUMNS if n != "ad_stats_campaign_daily"] if self.demo_marts else []
+        )
         tables = [self.mart_table()]
-        if self.demo_marts:
-            for name in DEMO_COLUMNS:
-                if name != "ad_stats_campaign_daily":
-                    if name not in self.other_marts:
-                        self.other_marts[name] = self.new_table(name)
-                    tables.append(self.other_marts[name])
+        for name in (*names, *self.key_marts):
+            if name not in self.other_marts:
+                self.other_marts[name] = self.new_table(name)
+            tables.append(self.other_marts[name])
         return tables
 
     def field(self, name: str) -> dict[str, Any]:
@@ -975,6 +984,7 @@ class FakeMetabase:
         if native.get("query") == WAREHOUSE_COLUMNS and self.is_warehouse(body.get("database")):
             names = ["ad_stats_campaign_daily"]
             names += [n for n in DEMO_COLUMNS if n not in names] if self.demo_marts else []
+            names += list(self.key_marts)
             mart = [["marts", name, column] for name in names for column in self.columns_of(name)]
             rows = mart if self.mart_in_warehouse else []
             return 202, {"status": "completed", "data": {"rows": rows}}
@@ -987,6 +997,9 @@ class FakeMetabase:
             objects = [field for table in tables for field in table["fields"]]
         for item in objects:
             if item["id"] == object_id:
+                new_type = body.get("semantic_type", item.get("semantic_type"))
+                if item.get("semantic_type") == "type/FK" and new_type != "type/FK":
+                    item["fk_target_field_id"] = None
                 item.update(copy.deepcopy(body))
                 return 200, copy.deepcopy(item)
         return 404, "Not found"

@@ -38,6 +38,9 @@ from typing import Any, Protocol
 # The one property that the code may clear: a semantic type that it declares as none. Every other
 # property with no value in the code is left out of a request.
 CLEARABLE = frozenset({"semantic_type"})
+# The semantic types of a key of a mart, and of a column that points at one: the field of the second
+# gets its target too, as fk_target_field_id in PUT /api/field/:id (Metabase 0.64.1).
+PRIMARY_KEY, FOREIGN_KEY = "type/PK", "type/FK"
 # The version of the JSON that export() writes and load() reads.
 FORMAT = 1
 # Where the export runs: the dbt of the Airflow image, the project, a folder of the tmpfs for the
@@ -104,7 +107,9 @@ Waiter = Callable[[Callable[[], Any], str], Any]
 class Column:
     """A column of a mart, with the properties that the code gives its field in Metabase. A
     semantic type of None is declared as none when semantic_type_declared is true, which clears the
-    type that Metabase shows, and is not declared at all otherwise, which leaves it as it is."""
+    type that Metabase shows, and is not declared at all otherwise, which leaves it as it is. A
+    column of the type of a foreign key has its target, the key of another mart, as
+    schema.table.column (foreign_keys())."""
 
     name: str
     display_name: str | None
@@ -112,6 +117,7 @@ class Column:
     semantic_type: str | None
     currency: str | None
     semantic_type_declared: bool = True
+    fk_target: str | None = None
 
 
 @dataclass(frozen=True)
@@ -408,6 +414,13 @@ def base_tables(document: Mapping[str, Any]) -> Tables:
         columns = []
         for column in model.get("columns") or []:
             meta = metabase_meta(column)
+            # dbt-metabase names the target of a foreign key with these two keys.
+            target = [text_or_none(meta.get(k)) for k in ("fk_target_table", "fk_target_field")]
+            if any(target) and not all(target):
+                raise MetadataError(
+                    f"{model['schema']}.{model['name']}.{column['name']}: a foreign key has both "
+                    "fk_target_table and fk_target_field"
+                )
             columns.append(
                 Column(
                     name=column["name"],
@@ -416,6 +429,7 @@ def base_tables(document: Mapping[str, Any]) -> Tables:
                     semantic_type=text_or_none(meta.get("semantic_type")),
                     currency=text_or_none(meta.get("currency")),
                     semantic_type_declared="semantic_type" in meta,
+                    fk_target=f"{target[0]}.{target[1]}" if all(target) else None,
                 )
             )
         tables[(model["schema"], model["name"])] = Table(
@@ -425,7 +439,36 @@ def base_tables(document: Mapping[str, Any]) -> Tables:
             description=text_or_none(model.get("description")),
             columns=tuple(columns),
         )
+    foreign_keys(tables)
     return tables
+
+
+def foreign_keys(tables: Tables) -> None:
+    """Check the foreign keys of the marts: a column of the type of a foreign key, and no other,
+    names its target, fk_target_table as schema.table and fk_target_field, a column of another mart
+    of the type of a primary key. Metabase joins a
+    foreign key on its one column, and the dbt project gives the type of a primary key only to a
+    column that is the whole key of its mart (tests/unit/test_dbt_project.py)."""
+    for table in tables.values():
+        for column in table.columns:
+            where = f"{table.schema}.{table.name}.{column.name}"
+            if (column.semantic_type == FOREIGN_KEY) != (column.fk_target is not None):
+                raise MetadataError(
+                    f"{where}: a column of the semantic type {FOREIGN_KEY} has an "
+                    "fk_target_table and an fk_target_field, and no other has them"
+                )
+            if column.fk_target is None:
+                continue
+            schema, _, rest = column.fk_target.partition(".")
+            name, _, target = rest.partition(".")
+            found = tables.get((schema, name))
+            key = next((c for c in found.columns if c.name == target), None) if found else None
+            if key is None or found is table or key.semantic_type != PRIMARY_KEY:
+                raise MetadataError(
+                    f"{where}: the target of its foreign key, {column.fk_target}, is not a "
+                    f"column of another mart of the semantic type {PRIMARY_KEY}: fk_target_table "
+                    "is schema.table"
+                )
 
 
 def read_overrides(path: str | Path) -> dict[str, Any]:
@@ -669,6 +712,15 @@ def changes_of(
 def make_plan(metadata: Metadata, database: Mapping[str, Any]) -> Plan:
     """What apply() would change in Metabase, from what Metabase shows now."""
     known = tables_of(database)
+    # The fields of the marts by their path schema.table.column, and the paths by the IDs, for the
+    # targets of the foreign keys.
+    field_ids = {
+        f"{schema}.{name}.{f['name']}": f["id"]
+        for (schema, name), shown_table in known.items()
+        for f in shown_table.get("fields") or []
+        if f.get("parent_id") is None
+    }
+    paths = {field_id: path for path, field_id in field_ids.items()}
     requests, notes, unknown = [], [], []
     for key, table in sorted(metadata.effective.items()):
         path = f"{table.schema}.{table.name}"
@@ -707,17 +759,37 @@ def make_plan(metadata: Metadata, database: Mapping[str, Any]) -> Plan:
             ]
             earlier = {
                 prop: {getattr(c, prop) for c in before} - {None}
-                for prop in ("display_name", "description", "semantic_type", "currency")
+                for prop in (
+                    "display_name",
+                    "description",
+                    "semantic_type",
+                    "currency",
+                    "fk_target",
+                )
             }
             settings = shown_field.get("settings") or {}
-            current = {**shown_field, "currency": settings.get("currency")}
+            target_id = shown_field.get("fk_target_field_id")
+            current = {
+                **shown_field,
+                "currency": settings.get("currency"),
+                "fk_target": paths.get(target_id, f"field {target_id}") if target_id else None,
+            }
             wanted = {
                 "display_name": column.display_name,
                 "description": column.description,
                 "semantic_type": column.semantic_type,
                 "currency": column.currency,
+                "fk_target": column.fk_target,
             }
-            if not column.semantic_type_declared:
+            if column.fk_target is not None and column.fk_target not in field_ids:
+                # A foreign key with no target would let Metabase join nothing: the field keeps
+                # the type that it shows until Metabase shows the target.
+                notes.append(
+                    f"{field_path}: its foreign key waits for {column.fk_target}, which Metabase "
+                    "does not show yet: a start after the dbt run that builds it applies the key"
+                )
+                del wanted["semantic_type"], wanted["fk_target"]
+            elif not column.semantic_type_declared:
                 # The code says nothing of the type: Metabase keeps the one that it shows.
                 del wanted["semantic_type"]
             body, changes = changes_of(field_path, column.name, current, wanted, earlier)
@@ -725,6 +797,8 @@ def make_plan(metadata: Metadata, database: Mapping[str, Any]) -> Plan:
                 # PUT /api/field/:id replaces the whole map of settings: the settings that Metabase
                 # has stay, and only the currency changes.
                 body["settings"] = {**settings, "currency": body.pop("currency")}
+            if "fk_target" in body:
+                body["fk_target_field_id"] = field_ids[body.pop("fk_target")]
             if body:
                 requests.append(Request(f"/api/field/{shown_field['id']}", body, tuple(changes)))
     return Plan(requests=tuple(requests), notes=tuple(notes), unknown=tuple(unknown))

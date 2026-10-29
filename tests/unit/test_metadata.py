@@ -17,7 +17,15 @@ from typing import Any
 import metabase_init as mi
 import metadata as md
 import pytest
-from metabase_stand_in import EXPORT, MART_COLUMNS, FakeClock, FakeMetabase, metadata_env, serve
+from metabase_stand_in import (
+    EXPORT,
+    MART_COLUMNS,
+    FakeClock,
+    FakeMetabase,
+    metadata_env,
+    serve,
+)
+from metabase_stand_in import column as export_column
 
 # What dbt ls printed for the demo project, a model and the source, cut short: the stand-in for dbt
 # prints these lines, or the error of a project that dbt cannot read.
@@ -789,6 +797,99 @@ def test_a_column_that_does_not_declare_a_semantic_type_keeps_the_one_of_metabas
     assert not any("report_date semantic_type" in line for line in lines), lines
     path = f"/api/field/{metabase.field('report_date')['id']}"
     assert all("semantic_type" not in body for put, body in puts(metabase) if put == path)
+
+
+PLATFORMS = ("platform", "platform_name")
+# The target of the foreign key of the column platform, as dbt-metabase names it.
+TARGET = {"fk_target_table": "marts.ad_platforms", "fk_target_field": "platform"}
+
+
+def with_platforms(platform: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The export with the mart ad_platforms, whose key platform is the target of the column
+    platform of the mart, or of what platform says."""
+    export = copy.deepcopy(EXPORT)
+    [column] = [c for c in export["models"][0]["columns"] if c["name"] == "platform"]
+    column["meta"]["metabase"] |= platform or {"semantic_type": "type/FK", **TARGET}
+    columns = [
+        export_column("platform", "Platform Code", "type/PK"),
+        export_column("platform_name", "Platform", "type/Category"),
+    ]
+    export["models"].append(
+        {
+            "schema": "marts",
+            "name": "ad_platforms",
+            "description": "",
+            "meta": {},
+            "columns": columns,
+        }
+    )
+    return export
+
+
+def test_a_foreign_key_points_at_the_key_of_its_target_and_an_edit_of_it_goes_back(
+    tmp_path, metabase
+):
+    # Metabase joins a foreign key on its target, so the field of the column gets the semantic type
+    # and the ID of the field of the target in one PUT, and its line names the target by its path.
+    metabase.key_marts = {"ad_platforms": PLATFORMS}
+    marts = loaded(tmp_path, export=with_platforms())
+    lines = md.apply(client(metabase), 2, marts, md.waiter(120, "x"))
+    key = next(f for f in metabase.other_marts["ad_platforms"]["fields"] if f["name"] == "platform")
+    field = metabase.field("platform")
+    assert (field["semantic_type"], field["fk_target_field_id"]) == ("type/FK", key["id"])
+    assert key["semantic_type"] == "type/PK"
+    assert [line for line in lines if "fk_target" in line] == [
+        "first fill: marts.ad_stats_campaign_daily.platform fk_target: none -> "
+        '"marts.ad_platforms.platform"'
+    ]
+    [(_, body)] = [(p, b) for p, b in puts(metabase) if p == f"/api/field/{field['id']}"]
+    assert (body["semantic_type"], body["fk_target_field_id"]) == ("type/FK", key["id"])
+    assert "fk_target" not in body
+    assert md.apply(client(metabase), 2, marts, md.waiter(120, "x")) == []
+    # A target that someone changed goes back; so does a type, and Metabase drops the target with
+    # it, which the job sets again in the same PUT.
+    other = next(
+        f for f in metabase.other_marts["ad_platforms"]["fields"] if f["name"] != "platform"
+    )
+    field["fk_target_field_id"] = other["id"]
+    assert md.apply(client(metabase), 2, marts, md.waiter(120, "x")) == [
+        "revert of an edit: marts.ad_stats_campaign_daily.platform fk_target: "
+        '"marts.ad_platforms.platform_name" -> "marts.ad_platforms.platform"'
+    ]
+    field |= {"semantic_type": "type/Category", "fk_target_field_id": None}
+    lines = md.apply(client(metabase), 2, marts, md.waiter(120, "x"))
+    assert len(lines) == 2, lines
+    assert field["fk_target_field_id"] == key["id"]
+
+
+def test_a_foreign_key_waits_for_a_target_that_metabase_does_not_show(tmp_path, metabase):
+    # Without its target, Metabase would show a foreign key that joins nothing: the field keeps its
+    # type, and a note says what waits.
+    marts = loaded(tmp_path, export=with_platforms())
+    lines = md.apply(client(metabase), 2, marts, md.waiter(120, "x"))
+    assert metabase.field("platform")["semantic_type"] is None
+    assert metabase.field("platform")["fk_target_field_id"] is None
+    assert (
+        "marts.ad_stats_campaign_daily.platform: its foreign key waits for "
+        "marts.ad_platforms.platform, which Metabase does not show yet: a start after the dbt run "
+        "that builds it applies the key"
+    ) in lines
+
+
+def test_a_foreign_key_names_the_key_of_another_mart(tmp_path):
+    foreign = {"semantic_type": "type/FK"}
+    for wrong in (
+        foreign,
+        TARGET,
+        {**foreign, "fk_target_table": "marts.ad_platforms"},
+        {**foreign, **TARGET, "fk_target_field": "platform_name"},
+        {**foreign, **TARGET, "fk_target_table": "ad_platforms"},
+        {**foreign, **TARGET, "fk_target_table": "marts.clients"},
+        {**foreign, **TARGET, "fk_target_table": "marts.ad_stats_campaign_daily"},
+    ):
+        export = with_platforms({"semantic_type": "type/Category", **wrong})
+        with pytest.raises(md.MetadataError, match=r"^marts\.ad_stats_campaign_daily\.platform: "):
+            md.base_tables(export)
 
 
 def test_hidden_tables_and_fields_get_their_metadata_and_stay_hidden(tmp_path, metabase):

@@ -45,6 +45,7 @@ The marts declare them under `config: meta: metabase:`, with the key names of [d
 | `display_name` | Every mart and every column of a mart | The name that Metabase shows. |
 | `semantic_type` | Every column of a mart | The semantic type of the field in Metabase, such as `type/Category`, or `null` for none. |
 | `currency` | A column whose semantic type is money | The ISO 4217 code of its currency, such as `USD`. |
+| `fk_target_table`, `fk_target_field` | A column whose semantic type is `type/FK` | The mart, as `schema.table`, and the column that the foreign key points at ([Foreign keys](#foreign-keys)). |
 
 **Names are in Title Case.** After the first word, a, an, and, as, at, by, for, in, of, on, or, per, the and to stay in lower case, and these abbreviations are in capitals: ID, CTR, CPC, CPM, CPA, ROAS and ISO. Two columns of one table never share a display name.
 
@@ -55,6 +56,8 @@ The jobs that apply the metadata never send a display name of `null`, which the 
 | Kind of column | `semantic_type` | In the demo |
 |---|---|---|
 | The day or the time of the statistics | `null` | `report_date` |
+| The key of a mart that is one column, which other marts name | `type/PK` | `clients.client_id`, `ad_platforms.platform` |
+| A column that names that key in another mart | `type/FK`, with `fk_target_table` and `fk_target_field` | `client_id`, `platform` |
 | An identifier from a source that is not the key of the table on its own | `type/Category` | `account_id`, `campaign_id` |
 | The name of something, or a code from a short list | `type/Category` | `campaign_name`, `currency` |
 | Where something comes from: the source or the channel of the sessions, or the source of a rate | `type/Source` | `session_source`, `session_default_channel_group`, `rate_source` |
@@ -86,6 +89,27 @@ The jobs that apply the metadata never send a display name of `null`, which the 
           semantic_type: type/Currency
           currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
 ```
+
+## Foreign keys
+
+A column that names the key of another mart is a foreign key in Metabase, with the key as its target, so that Metabase can join the two marts in a question and link the filters of a dashboard on them ([ADR-0034](../adr/0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md)). In PostgreSQL the marts have no foreign keys, and the tests of the model check the relationships. The column declares the target with the key names of dbt-metabase, the mart as `schema.table` and the column:
+
+```yaml
+      - name: client_id
+        data_type: text
+        description: '{{ doc("client_id") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Client ID
+              semantic_type: type/FK
+              fk_target_table: marts.clients
+              fk_target_field: client_id
+```
+
+**Only a key of one column is a target.** Metabase joins a foreign key on its one column, so a target is the whole key of its mart, with the semantic type `type/PK`. Two keys are: `client_id` of `clients` and `platform` of `ad_platforms`, which every other mart that has the column names as its foreign key. An account, a campaign, an ad group and an ad are each a key only with its platform and its account, so `account_id`, `campaign_id`, `ad_group_id` and `ad_id` stay `type/Category`: a join on the ID alone could match a row of another platform. The facts carry the names of all of them, so a question needs no join, and the filters of one mart are linked in Metabase as columns of one table.
+
+`metabase-init` gives the field the semantic type and the ID of the field of its target, `fk_target_field_id`, in one request, and a line of the log names the target by its path, as `fk_target: none -> "marts.clients.client_id"`. A target that someone changed in Metabase goes back at the next start. Until Metabase shows the target, before the transform has built its mart, the field keeps the type that it shows, and a line says that its foreign key waits.
 
 ## Metrics
 
@@ -144,8 +168,8 @@ A deployment can override the display name and the description of a table or a f
 
 ## How the rules are checked
 
-- `tests/unit/test_dbt_project.py` reads the files: `persist_docs` is on, every description over several lines is `>-`, every seed and each of its columns has a description, every mart has its contract, its key and a test of its key, no primary key has a name, in whatever order its keys are written, and the columns of the staging and intermediate models take the doc blocks of their names.
+- `tests/unit/test_dbt_project.py` reads the files: `persist_docs` is on, every description over several lines is `>-`, every seed and each of its columns has a description, every mart has its contract, its key and a test of its key, every `client_id` and `platform` of a mart is a foreign key of the key of one column that it names, and no other column is a key in Metabase, no primary key has a name, in whatever order its keys are written, and the columns of the staging and intermediate models take the doc blocks of their names.
 - `tests/stack/test_dbt_metadata.py` asks dbt itself, with `dbt ls` in the Airflow image, which resolves the doc blocks and the configs as dbt does: every model, seed, column and source table has a description, every mart has a display name and each of its columns a display name and a semantic type, columns of one name have one description, money has its tests of one currency and no NULL, the names follow the style, and every mart has its contract. It also checks the warehouse after a build: each table and view that dbt builds in `staging` and `marts` has exactly the columns that dbt declares, it and each of them carry the description as their comment, and the key of the mart is a primary key in PostgreSQL.
-- `tests/stack/test_metabase_metadata.py` checks Metabase after a start: every table and field of the marts shows the display name, the description and the semantic type of the code, also a semantic type of none, and the currency of money; an edit in the Metabase UI is reverted at the next start, and a field that someone hid stays hidden.
+- `tests/stack/test_metabase_metadata.py` checks Metabase after a start: every table and field of the marts shows the display name, the description and the semantic type of the code, also a semantic type of none, the currency of money, and the target of a foreign key; an edit in the Metabase UI is reverted at the next start, and a field that someone hid stays hidden.
 
 CI runs the first on every pull request, and the other two on every pull request that changes the stack, such as `dbt/` or `metabase/`.

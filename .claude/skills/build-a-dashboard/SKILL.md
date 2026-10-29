@@ -27,7 +27,7 @@ Build in Metabase, through the MCP server `agoranomos-metabase`, with the accoun
     - `web_sessions_daily` for the sessions of web analytics;
     - the dimensions, such as `clients`, `ad_accounts`, `ad_groups` and `ads`, for filters.
 
-    The facts carry the names of their platform, client, account and campaign, and of their ad group and ad, so most questions need no join.
+    The facts carry the names of their platform, client, account and campaign, and of their ad group and ad, so most questions need no join. In Metabase, `client_id` and `platform` are foreign keys of `clients` and `ad_platforms`. An account, a campaign, an ad group and an ad are each a key only with its platform and its account, so a join on one of them takes all three columns ([Describe the marts](../../../docs/reference/describe-the-marts.md#foreign-keys)).
 3. Use the right columns:
     - money across accounts only in the columns that end in `_reporting`;
     - ratios such as CTR, CPC, CPA and ROAS from sums, never as an average of ratios;
