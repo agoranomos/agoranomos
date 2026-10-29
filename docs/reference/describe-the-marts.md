@@ -87,7 +87,34 @@ The jobs that apply the metadata never send a display name of `null`, which the 
           currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
 ```
 
-**Reserved keys.** `synonyms` (a list of other names) and `ai_context` (a text for AI clients only) are reserved under `config: meta:` of a model or a column, for the step that adds a glossary and metrics. They are not used yet: the tests do not require them, and nothing reads them.
+## Metrics
+
+A mart declares its KPIs under `config: meta: metabase: metrics:`, and `metabase-init` keeps each as a metric of Metabase in the collection Agoranomos / Metrics, and its name and description as a term of the glossary of Metabase, on every start ([ADR-0034](../adr/0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md)). A metric is a ratio of sums: the sum of `numerator` divided by the sum of `denominator`, times `scale`, over the rows that a question selects, so that every card, every question and every MCP client computes it alike, and never as an average of the ratio of each row. Metabase gives no value where the sum of the denominator is zero.
+
+| Key | Required | What it holds |
+|---|---|---|
+| `name` | yes | The name of the metric in Metabase and the term of the glossary, such as `CTR`; its column is the name in lower case, `ctr` |
+| `description` | yes | What the metric means and how it is computed, for people and AI clients: the description of the metric and the definition of the term |
+| `numerator`, `denominator` | yes | Two columns of the mart, each summed |
+| `scale` | no | A whole number that multiplies the ratio, such as 1000 for CPM; 1 by default |
+| `format` | no | `percent`, `currency` or `number` (by default), with two decimals |
+| `currency` | with `currency` | The currency of the value: the reporting currency, written as the expression above |
+
+```yaml
+          metrics:
+            - name: CPC
+              description: >-
+                Cost per click: the spend for each click to the site, the sum of spend_reporting
+                divided by the sum of clicks, in the reporting currency.
+              numerator: spend_reporting
+              denominator: clicks
+              format: currency
+              currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
+```
+
+Two marts may declare a metric of one name only with one description, as the glossary holds one definition for each term. A metric whose mart Metabase does not show yet, before the first run of the transform, comes at a later start. The metrics, like the rest of the content of the package, are view-only, and an edit of one in Metabase is put back at the next start; a term of the glossary is found by its text, and a term that the code no longer ships stays.
+
+**Reserved keys.** `synonyms` (a list of other names) and `ai_context` (a text for AI clients only) are reserved under `config: meta:` of a model or a column. They are not used yet: the tests do not require them, and nothing reads them.
 
 ## The contract of a mart
 

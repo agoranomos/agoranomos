@@ -810,14 +810,18 @@ def top_imports(path: Path) -> set[str]:
 
 def test_the_module_imports_only_the_standard_library_and_its_own_modules():
     # metabase-init runs in a plain python image: it has the standard library, and ai_access.py,
-    # metadata.py, content.py and ops.py from the same folder, which import nothing of this module.
-    own = {"ai_access", "content", "metadata", "ops"}
+    # metadata.py, content.py, metrics.py and ops.py from the same folder, which import nothing of
+    # this module.
+    own = {"ai_access", "content", "metadata", "metrics", "ops"}
     imported = top_imports(Path(mi.__file__))
     allowed = set(sys.stdlib_module_names) | own
     assert own <= imported
     assert imported <= allowed, sorted(imported - allowed)
     ops_imports = top_imports(Path(mi.__file__).with_name("ops.py"))
     assert ops_imports <= set(sys.stdlib_module_names) | {"content"}, sorted(ops_imports)
+    metrics_imports = top_imports(Path(mi.__file__).with_name("metrics.py"))
+    allowed_metrics = set(sys.stdlib_module_names) | {"content", "metadata"}
+    assert metrics_imports <= allowed_metrics, sorted(metrics_imports - allowed_metrics)
     ai_imports = top_imports(Path(mi.__file__).with_name("ai_access.py"))
     allowed_ai = set(sys.stdlib_module_names) | {"content", "metadata"}
     assert ai_imports <= allowed_ai, sorted(ai_imports - allowed_ai)
@@ -852,10 +856,10 @@ def test_metabase_init_locks_the_content_of_the_registry_on_every_start(tmp_path
         lines = capsys.readouterr().out.splitlines()
         lowered = [line for line in lines if line.startswith("metabase-init: lowered: ")]
         if start == 1:
-            # Ops, which the start makes, right after it makes it, and then the content of the
-            # registry.
+            # Metrics, which the start makes first, and the content of the registry with it; Ops,
+            # which it makes next in Agoranomos, then has the View of its parent.
             assert lowered == [
-                'metabase-init: lowered: group "All Users" on collection "Ops": curate -> view',
+                'metabase-init: lowered: group "All Users" on collection "Metrics": curate -> view',
                 'metabase-init: lowered: group "All Users" on collection "Agoranomos": curate -> '
                 "view",
                 'metabase-init: lowered: group "All Users" on collection "Demo": curate -> view',
@@ -863,7 +867,7 @@ def test_metabase_init_locks_the_content_of_the_registry_on_every_start(tmp_path
             ]
         else:
             assert lowered == [], "a start that finds View changes nothing and says nothing"
-            # The first start wrote the graph twice: for Ops when it made it, then for the rest.
+            # The first start wrote the graph twice: for Metrics when it made it, then for the rest.
             assert len(content.graph_puts) == 2
     assert lines[-1].startswith("metabase-init: the admin account exists")
 

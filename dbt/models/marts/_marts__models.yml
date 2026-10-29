@@ -15,6 +15,62 @@ models:
       meta:
         metabase:
           display_name: Ad Statistics by Campaign and Day
+          # The KPIs of the mart, which metabase-init keeps as metrics of Metabase in Agoranomos /
+          # Metrics and as terms of its glossary (ADR-0034, metabase/metrics.py): each the sum of
+          # numerator over the sum of denominator, times scale, over the rows that a question
+          # selects.
+          metrics:
+            - name: CTR
+              description: >-
+                Click-through rate: the share of the impressions that led to a click to the site,
+                the sum of clicks divided by the sum of impressions over the same rows, not an
+                average of the rates of the rows.
+              numerator: clicks
+              denominator: impressions
+              format: percent
+            - name: CPC
+              description: >-
+                Cost per click: the spend for each click to the site, the sum of spend_reporting
+                divided by the sum of clicks, in the reporting currency.
+              numerator: spend_reporting
+              denominator: clicks
+              format: currency
+              currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
+            - name: CPM
+              description: >-
+                Cost per mille: the spend for a thousand impressions, the sum of spend_reporting
+                divided by the sum of impressions, times 1,000, in the reporting currency.
+              numerator: spend_reporting
+              denominator: impressions
+              scale: 1000
+              format: currency
+              currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
+            - name: Cost per Conversion
+              description: >-
+                Cost per conversion, also called cost per acquisition (CPA): the spend for each
+                conversion of the primary conversion actions, the sum of spend_reporting divided by
+                the sum of conversions, in the reporting currency.
+              numerator: spend_reporting
+              denominator: conversions
+              format: currency
+              currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
+            - name: Conversion Rate
+              description: >-
+                The conversions of the primary conversion actions for each click to the site, the
+                sum of conversions divided by the sum of clicks. A platform can count more than one
+                conversion for a click, and conversions after a view, so it can exceed 100%.
+              numerator: conversions
+              denominator: clicks
+              format: percent
+            - name: ROAS
+              description: >-
+                Return on ad spend: the value of the conversions of the primary conversion actions
+                for each unit of spend, the sum of conversion_value_reporting divided by the sum of
+                spend_reporting, both in the reporting currency; 4.2 means 4.20 of value for each
+                1.00 spent.
+              numerator: conversion_value_reporting
+              denominator: spend_reporting
+              format: number
     # The key, as a constraint that PostgreSQL enforces. It has no name on purpose: dbt builds the
     # table under a temporary name and renames it, and the index of the key keeps the name it got,
     # so a named key would collide with itself on the next run.

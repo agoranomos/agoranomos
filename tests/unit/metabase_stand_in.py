@@ -710,6 +710,8 @@ class FakeMetabase:
         self.next_id = 100
         # The settings that the jobs write, with their default values in Metabase 0.64.1.
         self.settings: dict[str, Any] = {"enable-public-sharing": True}
+        # The terms of the glossary, as GET /api/glossary of Metabase 0.64.1 lists them.
+        self.glossary: list[dict[str, Any]] = []
 
     # The content as the tests of the jobs read it: the tables of content_state, by ID.
     @property
@@ -911,10 +913,33 @@ class FakeMetabase:
             account = {"id": self.content_state.user_id, "email": admin.get("email")}
             return 200, {**account, "is_superuser": True}
         if segments[:3] == ["", "api", "setting"] and len(segments) == 4 and method == "PUT":
-            # PUT /api/setting/<key> with {"value": ...} answers 204 with no body.
+            # PUT /api/setting/<key> with {"value": ...} answers 204 with no body. Metabase 0.64.1
+            # keeps no value of start-of-week that is its default, sunday.
             self.settings[segments[3]] = body["value"]
+            if segments[3] == "start-of-week" and body["value"] == "sunday":
+                del self.settings[segments[3]]
             return 204, b""
+        if (method, path) == ("GET", "/api/setting/start-of-week"):
+            # The value as text, or 204 with no body at the default.
+            value = self.settings.get("start-of-week")
+            return (200, value.encode()) if value else (204, b"")
+        if segments[:3] == ["", "api", "glossary"]:
+            return self.glossary_call(method, segments[3:], body)
         return self.content(method, path, query, body)
+
+    def glossary_call(self, method: str, rest: list[str], body: Any) -> tuple[int, Any]:
+        if method == "GET" and not rest:
+            return 200, {"data": copy.deepcopy(self.glossary), "can_write": True}
+        if method == "POST" and not rest:
+            entry = {"id": self.new_id(), "term": body["term"], "definition": body["definition"]}
+            self.glossary.append(entry)
+            return 200, copy.deepcopy(entry)
+        if method == "PUT" and len(rest) == 1:
+            for entry in self.glossary:
+                if entry["id"] == int(rest[0]):
+                    entry.update(term=body["term"], definition=body["definition"])
+                    return 200, copy.deepcopy(entry)
+        return 404, "Not found"
 
     def database(
         self,

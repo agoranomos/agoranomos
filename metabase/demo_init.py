@@ -46,6 +46,7 @@ from urllib.parse import quote, urlencode
 
 import content
 import metadata
+import metrics
 from metabase_init import (
     SHAPE_ERRORS,
     ApiClient,
@@ -1234,6 +1235,9 @@ def main(env: Mapping[str, str] | None = None) -> int:
         adopt_earlier_demo(metabase, registry, log)
         package = demo_package(marts, fields_of(metabase, database["id"]))
         ids = content.ensure_package(metabase, registry, package, database["id"], log)
+        # The metrics of the marts that the first run of the transform has just built, which
+        # metabase-init could not create before them.
+        metrics.ensure(metabase, registry, config.metadata_export, database["id"], log)
     except (SetupError, metadata.MetadataError, content.ContentError) as error:
         print(f"demo-init: {error}", file=sys.stderr)
         return 1

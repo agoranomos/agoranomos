@@ -574,7 +574,8 @@ def test_a_first_start_makes_the_demo_in_agoranomos(airflow, metabase):
     assert metabase.content_state.graph["2"][str(demo["id"])] == "write"
     # The registry knows each item by its key, and by the entity ID that Metabase gave it.
     keys = {f"demo/{q['key']}" for q in di.QUESTIONS} | {f"demo/{key}" for key in di.DASHBOARDS}
-    assert set(registry_of(metabase)) == keys | {"agoranomos", "demo"}
+    # And the collection of the metrics, which demo-init keeps after the transform too.
+    assert set(registry_of(metabase)) == keys | {"agoranomos", "demo", "metrics"}
     assert registry_of(metabase)["demo/spend-by-day"] == {
         "model": "card",
         "entity_id": cards["Spend by day and platform"]["entity_id"],
@@ -2031,7 +2032,7 @@ def test_the_module_imports_only_the_standard_library_and_the_other_jobs():
             imported |= {alias.name.split(".")[0] for alias in node.names}
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             imported.add(node.module.split(".")[0])
-    allowed = set(sys.stdlib_module_names) | {"content", "metabase_init", "metadata"}
+    allowed = set(sys.stdlib_module_names) | {"content", "metabase_init", "metadata", "metrics"}
     assert "content" in imported
     assert imported <= allowed, sorted(imported - allowed)
 
