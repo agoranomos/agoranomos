@@ -131,6 +131,16 @@ ALTER SCHEMA raw_ecb_staging OWNER TO loader;
 GRANT USAGE ON SCHEMA raw_ecb TO transformer;
 GRANT SELECT ON ALL TABLES IN SCHEMA raw_ecb TO transformer;
 ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_ecb GRANT SELECT ON TABLES TO transformer;
+-- The Google Ads accounts of the deployment (ADR-0032), which dlt loads into raw_google_ads and
+-- merges, and whose campaigns it keeps the versions of, through raw_google_ads_staging. loader owns
+-- both; transformer may read the first.
+CREATE SCHEMA IF NOT EXISTS raw_google_ads AUTHORIZATION loader;
+CREATE SCHEMA IF NOT EXISTS raw_google_ads_staging AUTHORIZATION loader;
+ALTER SCHEMA raw_google_ads OWNER TO loader;
+ALTER SCHEMA raw_google_ads_staging OWNER TO loader;
+GRANT USAGE ON SCHEMA raw_google_ads TO transformer;
+GRANT SELECT ON ALL TABLES IN SCHEMA raw_google_ads TO transformer;
+ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_google_ads GRANT SELECT ON TABLES TO transformer;
 -- The settings of the model of the deployment (ADR-0024): the first task of the transform loads
 -- them with dlt into raw_settings, replacing each table in place, so the schema needs no staging
 -- schema. loader owns it; transformer may read it, and metabase_reader may not.

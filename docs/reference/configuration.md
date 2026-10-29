@@ -142,6 +142,15 @@ Each server has two limits that do not depend on each other: its switch, and the
 
 `./agoranomos ai warehouse on` or `off`, and `./agoranomos ai airflow on` or `off`, set a switch and keep the `ai` profile listed while a switch is on, and `./agoranomos up` applies it ([Command line](command-line.md#ai)). A new installation gets both on in local mode. A `.env` of a release from before them gets both off from `init`, and its `COMPOSE_PROFILES` stays as it was, so an upgrade widens no access. `./agoranomos init --server` turns both off and takes `ai` out: in server mode AI clients reach Metabase over HTTPS ([AI access in Metabase](#ai-access-in-metabase)). `./agoranomos preflight`, which `up` runs, stops when a switch is not `true` or `false`, when server mode lists `ai` or has a switch on, and when `ai` is listed while both switches are off. A switch that is on while `COMPOSE_PROFILES` does not list `ai`, as with `COMPOSE_PROFILES=core`, runs no server, and `./agoranomos ai` shows it as off.
 
+## Google Ads
+
+The load of Google Ads signs in as a service account of the Google Cloud project of the deployment and loads the accounts of `google_ads` that `extensions/model/clients.toml` names ([ADR-0032](../adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md), [Connect Google Ads](../how-to/connect-google-ads.md)). Only the container that runs the tasks gets these settings: the scheduler with the LocalExecutor, the worker with the CeleryExecutor.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `GOOGLE_ADS_SERVICE_ACCOUNT_KEY` | empty | The key of the service account: the JSON file that Google Cloud makes, as base64 on one line, or as the JSON on one line in single quotes. It reads every Google Ads account that the service account is a user of, so keep it as you keep the other secrets of `.env`. A load without it fails with a line that says so. |
+| `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | empty | The ten digits of the manager account through which the service account reaches the accounts, without hyphens; empty when the service account is a user of each account. `preflight` stops on another value. |
+
 ## Memory limits
 
 Every service has a memory limit, also for swap, so that the stack stays within the memory of [System requirements](system-requirements.md) and, on the recommended memory (8 GB, or 12 GB for the CeleryExecutor variant), a service that runs short of memory cannot take it from the others ([System requirements](system-requirements.md#memory-limits) says what holds on the minimum of 6 GB). The limits of the services that run all the time are these settings, with defaults from measurements on the demo; those of the one-shot setup jobs are fixed in `compose.yaml`. A value is a number of MiB with `m`, or of GiB with `g`: `preflight` stops on a number without a unit, which Compose would read as bytes, and on a size below 6 MiB, the smallest limit that Docker accepts.

@@ -47,6 +47,22 @@ from {{ relation }}
 where not customer_client__manager
 {% endmacro %}
 
+{#- An account as its own customer resource gives it, for the connector of Google Ads, which reads
+    each account that clients.toml names on its own (ADR-0032): the columns of google_ads_accounts,
+    with no manager account. -#}
+{% macro google_ads_customers(relation, platform) %}
+select
+    '{{ platform }}' as platform,
+    customer__id as account_id,
+    customer__descriptive_name as account_name,
+    customer__currency_code as currency,
+    customer__time_zone as time_zone,
+    cast(null as text) as manager_account_id,
+    customer__status as account_status
+from {{ relation }}
+where not customer__manager
+{% endmacro %}
+
 {#- The versions of the campaigns that dlt keeps (scd2). -#}
 {% macro google_ads_campaigns(relation, platform) %}
 select

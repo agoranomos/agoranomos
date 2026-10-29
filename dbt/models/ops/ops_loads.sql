@@ -22,6 +22,12 @@ with reloads as (
     from {{ relation_or_empty(source('raw_ecb', '_agoranomos_reloads'), {
         'account_id': 'text', 'window_end': 'date', 'loaded_at': 'timestamp with time zone',
     }) }}
+    union all
+    -- Empty while no load has taken an account of Google Ads, whose DAG starts paused.
+    select 'google_ads' as platform, account_id, window_end, loaded_at
+    from {{ relation_or_empty(source('raw_google_ads', '_agoranomos_reloads'), {
+        'account_id': 'text', 'window_end': 'date', 'loaded_at': 'timestamp with time zone',
+    }) }}
 )
 
 select

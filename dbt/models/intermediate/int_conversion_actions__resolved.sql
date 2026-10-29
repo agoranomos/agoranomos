@@ -10,6 +10,9 @@ with found as (
     union all
     select platform, conversion_action_id, conversion_action_name, platform_category
     from {{ ref('stg_demo_video__campaign_conversions') }}
+    union all
+    select platform, conversion_action_id, conversion_action_name, platform_category
+    from {{ ref('stg_google_ads__campaign_conversions') }}
 ),
 
 observed as (

@@ -23,8 +23,9 @@ SELFCHECK = "agoranomos_selfcheck"
 DEMO_HISTORY = "agoranomos_demo_history"
 DEMO_TRANSFORM = "agoranomos_demo_transform"
 DEMO_DAILY = "agoranomos_demo_daily"
-# The load of the rates of the ECB, which starts paused (ADR-0032).
+# The loads of the rates of the ECB and of Google Ads, which start paused (ADR-0032).
 ECB_DAILY = "agoranomos_ecb_daily"
+GOOGLE_ADS_DAILY = "agoranomos_google_ads_daily"
 EXTENSION_CHECK = "ci_extension_check"
 FIXTURE = REPO_ROOT / "tests" / "stack" / "fixtures" / f"{EXTENSION_CHECK}.py"
 EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
@@ -358,18 +359,26 @@ def test_the_dag_processor_reports_no_import_error(airflow_url, token):
     # The errors of the DAGs of the base package: the extensions folder belongs to the deployment.
     # The DAGs of the base bundle are waited for first, so that the DAG processor has parsed it,
     # whatever ran before this test.
-    for dag_id in (SELFCHECK, DEMO_HISTORY, DEMO_TRANSFORM, DEMO_DAILY, ECB_DAILY):
+    for dag_id in (
+        SELFCHECK,
+        DEMO_HISTORY,
+        DEMO_TRANSFORM,
+        DEMO_DAILY,
+        ECB_DAILY,
+        GOOGLE_ADS_DAILY,
+    ):
         wait_for_dag(airflow_url, token, dag_id)
     status, body = api(airflow_url, token, "GET", "/api/v2/importErrors?bundle_name=agoranomos")
     assert status == 200, body
     assert body["total_entries"] == 0, [error["filename"] for error in body["import_errors"]]
 
 
-def test_the_load_of_the_rates_of_the_ecb_stays_paused(airflow_url, token):
-    # The demo keeps its own rates and asks the ECB nothing (ADR-0032): no job of the stack
-    # unpauses the DAG, and the stack tests run without the network.
-    wait_for_dag(airflow_url, token, ECB_DAILY)
-    status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{ECB_DAILY}")
+@pytest.mark.parametrize("dag_id", [ECB_DAILY, GOOGLE_ADS_DAILY])
+def test_the_loads_of_the_real_sources_stay_paused(airflow_url, token, dag_id):
+    # The demo keeps its own rates and asks Google and the ECB nothing (ADR-0032): no job of the
+    # stack unpauses these DAGs, and the stack tests run without the network.
+    wait_for_dag(airflow_url, token, dag_id)
+    status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}")
     assert status == 200, body
     assert body["is_paused"] is True
 

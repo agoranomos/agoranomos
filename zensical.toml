@@ -26,6 +26,7 @@ nav = [
     { "Deploy on a server" = "how-to/deploy-on-a-server.md" },
     { "Back up and restore" = "how-to/back-up-and-restore.md" },
     { "See the demo" = "how-to/see-the-demo.md" },
+    { "Connect Google Ads" = "how-to/connect-google-ads.md" },
     { "Talk to your data" = "how-to/talk-to-your-data.md" },
     { "Watch the pipeline" = "how-to/watch-the-pipeline.md" },
     { "Rename a field or add your own definitions" = "how-to/rename-a-field.md" },

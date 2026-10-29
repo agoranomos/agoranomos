@@ -341,8 +341,9 @@ def test_the_cleanup_of_the_results_of_celery_deletes_the_old_ones_and_does_noth
     assert normalized("celery_results.sql") == CELERY_RESULTS_CLEANUP
 
 
-# The sources that dlt loads: the platforms of the demo, and the rates of the ECB (ADR-0032).
-SOURCES = ("demo_search", "demo_social", "demo_video", "demo_web", "demo_fx", "ecb")
+# The sources that dlt loads: the platforms of the demo, the rates of the ECB and Google Ads
+# (ADR-0032).
+SOURCES = ("demo_search", "demo_social", "demo_video", "demo_web", "demo_fx", "ecb", "google_ads")
 
 
 @pytest.mark.parametrize("source", SOURCES)

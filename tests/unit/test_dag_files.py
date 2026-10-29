@@ -42,6 +42,7 @@ def test_no_dag_file_imports_another():
         "agoranomos_demo_history",
         "agoranomos_demo_transform",
         "agoranomos_ecb_daily",
+        "agoranomos_google_ads_daily",
         "agoranomos_selfcheck",
     } <= stems
     for path in DAG_FILES:
@@ -50,14 +51,15 @@ def test_no_dag_file_imports_another():
         assert not imported & others, f"{path.name} imports {sorted(imported & others)}"
 
 
-def test_the_transform_runs_when_each_platform_of_the_demo_has_loaded():
-    # One condition of all five assets, which another schedule can combine with | or &.
+def test_the_transform_runs_when_the_demo_has_loaded_or_google_ads_has():
+    # One condition of all five assets of the demo, or the asset of Google Ads (ADR-0032).
     text = (DAGS / "agoranomos_demo_transform.py").read_text(encoding="utf-8")
-    assert "schedule=DEMO_LOADED" in text
+    assert "schedule=LOADED" in text
     found = imports(DAGS / "agoranomos_demo_transform.py")
-    assert ("agoranomos_pipelines.assets", ["DEMO_LOADED"]) in found
+    assert ("agoranomos_pipelines.assets", ["LOADED"]) in found
     assets = (DAGS / "agoranomos_pipelines" / "assets.py").read_text(encoding="utf-8")
     assert "DEMO_LOADED = AssetAll(*RAW_DEMO_PLATFORMS.values())" in assets
+    assert "LOADED = DEMO_LOADED | RAW_GOOGLE_ADS" in assets
 
 
 def test_the_demo_of_v0_1_is_gone():
@@ -316,3 +318,36 @@ def test_the_load_of_the_rates_of_the_ecb_runs_after_midnight_in_frankfurt():
     assert 'CronTriggerTimetable("17 9 * * *"' in (DAGS / "agoranomos_demo_daily.py").read_text(
         encoding="utf-8"
     )
+
+
+GOOGLE_ADS_DAILY = DAGS / "agoranomos_google_ads_daily.py"
+
+
+def test_the_load_of_google_ads_imports_dlt_and_google_auth_in_its_task_and_no_cosmos():
+    found = imports(GOOGLE_ADS_DAILY)
+    assert ("agoranomos_pipelines.assets", ["RAW_GOOGLE_ADS"]) in found
+    assert [module for module, _ in found if module.split(".")[0] == "cosmos"] == []
+    tree = ast.parse(GOOGLE_ADS_DAILY.read_text(encoding="utf-8"))
+    top = [
+        node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert not [
+        m
+        for m in top
+        if m.split(".")[0] in {"dlt", "google"} or m.endswith((".google_ads", ".loads"))
+    ]
+
+
+def test_the_load_of_google_ads_starts_paused_and_masks_the_key():
+    # A deployment unpauses it once its key and accounts are in place (ADR-0032).
+    text = GOOGLE_ADS_DAILY.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    paused = [
+        node.value.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.keyword) and node.arg == "is_paused_upon_creation"
+    ]
+    assert paused == [True]
+    assert 'mask_secret(google_ads.key_info()["private_key"])' in text

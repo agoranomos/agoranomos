@@ -1,7 +1,7 @@
 """The daily load of the reference rates of the euro of the European Central Bank (ADR-0032).
 
 agoranomos_ecb_daily runs at 06:47 UTC, after midnight in Frankfurt, and loads with dlt, as the
-loader role, the rates of the ECB into raw_ecb: on the first run, those of the last two years, and
+loader role, the rates of the ECB into raw_ecb: on the first run, those of the last 37 months, and
 then the days from the day after the last that a load took, or from 7 days back when that is
 earlier, to yesterday in Frankfurt (agoranomos_pipelines/ecb.py). The first task, due, skips the
 run when a load has taken the day already. The transform takes the rates at its next run; where the

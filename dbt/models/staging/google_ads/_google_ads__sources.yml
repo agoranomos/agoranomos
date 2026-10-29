@@ -1,0 +1,39 @@
+sources:
+  - name: raw_google_ads
+    description: >-
+      The Google Ads accounts of the deployment that extensions/model/clients.toml names, which the
+      DAG agoranomos_google_ads_daily loads with dlt from the REST interface of the Google Ads API
+      (ADR-0032), each result as the API gives it, nested objects joined by __. The DAG starts
+      paused, so a deployment without Google Ads has no table here, and the models that read these
+      tables then read none.
+    schema: raw_google_ads
+    # No freshness check of dbt: the Ops collection shows the last load of each account, from
+    # _agoranomos_reloads (models/ops/ops_loads.sql).
+    config:
+      freshness: null
+    tables:
+      - name: _agoranomos_reloads
+        description: >-
+          The record of the loads of Google Ads: one row for each account in each load, with the
+          day of the load in the time zone of the account (as_of), the first and last day that the
+          load replaced (window_start, window_end), and the moment of the load.
+      - name: customers
+        description: >-
+          Each account as its customer resource gives it: its ID, name, currency, time zone,
+          status and whether it is a manager account. Each load replaces the table.
+      - name: campaigns
+        description: >-
+          The campaigns of each account, with their status and channel type, one row for each
+          version that the loads saw: dlt keeps the versions (scd2), from _dlt_valid_from until
+          _dlt_valid_to.
+      - name: campaign_stats
+        description: >-
+          The statistics of each campaign by day (segments.date): impressions and clicks as
+          strings, the INT64 numbers of the REST interface, cost in micros, and the conversions of
+          the platform. Each load replaces the days of each account that it covers.
+      - name: campaign_conversions
+        description: >-
+          The conversions of each campaign by day and conversion action, from a query of its own,
+          as segments.conversion_action cannot be selected with the cost: the conversions of the
+          platform and all conversions, with their values. Each load replaces the days of each
+          account that it covers.

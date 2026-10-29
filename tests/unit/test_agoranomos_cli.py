@@ -4545,6 +4545,21 @@ def test_preflight_stops_on_a_reporting_currency_without_rates(cli, value, outco
         assert "EUR or a currency of the reference rates of the ECB" in result.stderr
 
 
+@pytest.mark.parametrize(
+    ("value", "outcome"),
+    [("", "pass"), ("1234567890", "pass"), ("123-456-7890", "stop"), ("123456789", "stop")],
+)
+def test_preflight_stops_on_a_manager_account_of_google_ads_that_is_not_ten_digits(
+    cli, value, outcome
+):
+    # ADR-0032: the load sends it as the header login-customer-id, which takes ten digits. The
+    # template keeps it commented out, so a person adds it.
+    cli.run("init")
+    add_env(cli, GOOGLE_ADS_LOGIN_CUSTOMER_ID=value)
+    result = cli.run("preflight")
+    check_limit(result, outcome, "GOOGLE_ADS_LOGIN_CUSTOMER_ID")
+
+
 def test_preflight_stops_on_keep_daily_of_zeros(cli):
     ops_env(cli, BACKUP_KEEP_DAILY="00")
     result = cli.run("preflight")

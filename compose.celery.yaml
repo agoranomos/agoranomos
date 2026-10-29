@@ -110,6 +110,7 @@ services:
       # values apply to the scheduler only.
       WAREHOUSE_LOADER_PASSWORD: ""
       DBT_ENV_SECRET_WAREHOUSE_PASSWORD: ""
+      GOOGLE_ADS_SERVICE_ACCOUNT_KEY: ""
     depends_on:
       broker:
         condition: service_healthy
