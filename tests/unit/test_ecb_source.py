@@ -169,7 +169,7 @@ def test_a_load_asks_the_ecb_for_the_data_of_its_window_with_explicit_retries(ec
 
 
 def test_a_load_keeps_the_rows_as_the_csv_names_them_and_replaces_its_days(ecb):
-    module, state, made = ecb
+    module, _, made = ecb
     assert module.load(NOW) == 2
     [pipeline] = made["pipelines"]
     assert pipeline.options["dataset_name"] == "raw_ecb"
