@@ -21,7 +21,8 @@ import pytest
 NOW = datetime(2026, 10, 29, 2, 0, tzinfo=UTC)
 MARKER = "<materialize_table_schema>"
 DAGS = Path(__file__).resolve().parents[2] / "airflow" / "dags"
-KEY = {"type": "service_account", "private_key": "-----BEGIN PRIVATE KEY-----\nsecret\n"}
+# A stand-in for the key of a service account: the hook detect-private-key would stop a real one.
+KEY = {"type": "service_account", "private_key": "stand-in key, secret"}
 CLIENTS = """[clients.acme]
 name = "Acme Outdoor"
 
