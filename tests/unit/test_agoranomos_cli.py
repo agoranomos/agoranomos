@@ -4523,17 +4523,26 @@ def test_preflight_accepts_a_folder_that_compose_reads_as_a_path(cli, setting, v
 
 @pytest.mark.parametrize(
     ("value", "outcome"),
-    [("USD", "pass"), ("EUR", "pass"), ("GBP", "stop"), ("usd", "stop"), ("", "pass")],
+    [
+        ("USD", "pass"),
+        ("EUR", "pass"),
+        ("GBP", "pass"),
+        ("ZAR", "pass"),
+        ("KZT", "stop"),
+        ("BGN", "stop"),
+        ("usd", "stop"),
+        ("", "pass"),
+    ],
 )
 def test_preflight_stops_on_a_reporting_currency_without_rates(cli, value, outcome):
-    # ADR-0025: until a source of rates comes with the connectors, the rates of the demo cover USD
-    # and EUR. Empty is the default, USD.
+    # ADR-0032: EUR or a currency of the reference rates of the ECB, which publishes no rate of the
+    # tenge, and none of the lev since 2026. Empty is the default, USD.
     cli.run("init")
     set_env(cli, AGORANOMOS_REPORTING_CURRENCY=value)
     result = cli.run("preflight")
     check_limit(result, outcome, "AGORANOMOS_REPORTING_CURRENCY")
     if outcome == "stop":
-        assert "USD or EUR" in result.stderr
+        assert "EUR or a currency of the reference rates of the ECB" in result.stderr
 
 
 def test_preflight_stops_on_keep_daily_of_zeros(cli):

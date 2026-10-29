@@ -14,7 +14,7 @@ from pathlib import Path
 
 import dlt
 
-from agoranomos_pipelines.demo.sources import credentials
+from agoranomos_pipelines.loads import credentials
 from agoranomos_pipelines.settings.files import load_settings
 
 # The folder of the settings of the deployment, extensions/model, which compose.yaml mounts

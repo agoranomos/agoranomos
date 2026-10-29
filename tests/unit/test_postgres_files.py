@@ -341,15 +341,16 @@ def test_the_cleanup_of_the_results_of_celery_deletes_the_old_ones_and_does_noth
     assert normalized("celery_results.sql") == CELERY_RESULTS_CLEANUP
 
 
-DEMO_PLATFORMS = ("search", "social", "video", "web", "fx")
+# The sources that dlt loads: the platforms of the demo, and the rates of the ECB (ADR-0032).
+SOURCES = ("demo_search", "demo_social", "demo_video", "demo_web", "demo_fx", "ecb")
 
 
-@pytest.mark.parametrize("platform", DEMO_PLATFORMS)
-def test_each_demo_platform_has_its_schema_and_its_staging_schema(platform):
-    # dlt loads raw_demo_<platform> as loader and merges through raw_demo_<platform>_staging;
-    # transformer reads the first, and no role but loader the second (ADR-0004).
+@pytest.mark.parametrize("source", SOURCES)
+def test_each_source_has_its_schema_and_its_staging_schema(source):
+    # dlt loads raw_<source> as loader and merges through raw_<source>_staging; transformer reads
+    # the first, and no role but loader the second (ADR-0004).
     text = normalized("warehouse.sql")
-    raw, staging = f"raw_demo_{platform}", f"raw_demo_{platform}_staging"
+    raw, staging = f"raw_{source}", f"raw_{source}_staging"
     for statement in (
         f"CREATE SCHEMA IF NOT EXISTS {raw} AUTHORIZATION loader;",
         f"CREATE SCHEMA IF NOT EXISTS {staging} AUTHORIZATION loader;",

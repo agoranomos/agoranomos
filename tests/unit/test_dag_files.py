@@ -41,6 +41,7 @@ def test_no_dag_file_imports_another():
         "agoranomos_demo_daily",
         "agoranomos_demo_history",
         "agoranomos_demo_transform",
+        "agoranomos_ecb_daily",
         "agoranomos_selfcheck",
     } <= stems
     for path in DAG_FILES:
@@ -275,3 +276,43 @@ def test_the_demo_dags_start_paused():
             if not (isinstance(node.value, ast.Constant) and node.value.value is True)
         ]
         assert not unpaused, f"{name} sets is_paused_upon_creation to something other than True"
+
+
+ECB_DAILY = DAGS / "agoranomos_ecb_daily.py"
+
+
+def test_the_load_of_the_rates_of_the_ecb_imports_dlt_in_its_tasks_and_no_cosmos():
+    # As the loads of the demo: the DAG processor parses the file often, and a broken manifest of
+    # dbt must not break its import.
+    found = imports(ECB_DAILY)
+    assert ("agoranomos_pipelines.assets", ["RAW_ECB"]) in found
+    assert [module for module, _ in found if module.split(".")[0] == "cosmos"] == []
+    tree = ast.parse(ECB_DAILY.read_text(encoding="utf-8"))
+    top = [
+        node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert not [m for m in top if m.split(".")[0] == "dlt" or m.endswith((".ecb", ".loads"))]
+
+
+def test_the_load_of_the_rates_of_the_ecb_starts_paused():
+    # The demo keeps its own rates and asks the ECB nothing, so a deployment with the demo alone
+    # and the stack tests need no network (ADR-0032): the setup of a real source unpauses it.
+    tree = ast.parse(ECB_DAILY.read_text(encoding="utf-8"))
+    paused = [
+        node.value.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.keyword) and node.arg == "is_paused_upon_creation"
+    ]
+    assert paused == [True]
+
+
+def test_the_load_of_the_rates_of_the_ecb_runs_after_midnight_in_frankfurt():
+    # 06:47 UTC is 07:47 in CET and 08:47 in CEST, and before the daily load of the demo, so that
+    # its transform takes the rates of the day.
+    text = ECB_DAILY.read_text(encoding="utf-8")
+    assert 'SCHEDULE = CronTriggerTimetable("47 6 * * *", timezone="UTC")' in text
+    assert 'CronTriggerTimetable("17 9 * * *"' in (DAGS / "agoranomos_demo_daily.py").read_text(
+        encoding="utf-8"
+    )

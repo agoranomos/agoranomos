@@ -4,3 +4,4 @@ demo_search,Demo Search,ads,Google Ads API v25,true
 demo_social,Demo Social,ads,Meta Marketing API v26.0,true
 demo_video,Demo Video,ads,TikTok API for Business v1.3,true
 demo_web,Demo Web Analytics,web_analytics,GA4 Data API v1beta,true
+ecb,European Central Bank,exchange_rates,,false

@@ -18,3 +18,7 @@ RAW_DEMO_PLATFORMS = {code: Asset(asset_uri(platform)) for code, platform in PLA
 # run. A schedule that is a list means the same to Airflow; as one condition, it can be combined
 # with another asset by | or &.
 DEMO_LOADED = AssetAll(*RAW_DEMO_PLATFORMS.values())
+
+# The asset of the rates of the ECB (ADR-0032), in the same form, which each of its loads updates.
+# The transform does not wait on it: it takes the rates at its next run.
+RAW_ECB = Asset("postgres://warehouse-db:5432/warehouse/raw_ecb/rates_daily")

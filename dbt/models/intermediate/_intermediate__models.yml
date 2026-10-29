@@ -294,9 +294,11 @@ models:
       int_ad_stats__unioned, int_ad_conversions__unioned and int_web_sessions__unioned. The
       reporting currency has the rate 1 on every day, whether or not a source publishes rates;
       another currency has a row from the first day on which the source published a rate for it.
-      rate_date and currency are its key. It also reads stg_demo_fx__rates_daily. Its tests guard
-      the marts: when one of them fails, dbt does not rebuild the models that read this one; a
-      currency of the data without a rate fails the tests of the models whose rows it converts.
+      rate_date and currency are its key. It also reads stg_ecb__rates_daily and
+      stg_demo_fx__rates_daily: the rates of the ECB once there are any, and those of the demo
+      only without them. Its tests guard the marts: when one of them fails, dbt does not rebuild
+      the models that read this one; a currency of the data without a rate fails the tests of the
+      models whose rows it converts.
     data_tests:
       - unique_combination:
           arguments:

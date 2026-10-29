@@ -3,14 +3,26 @@
 -- days run from the first published rate or the first day of the data, whichever comes first, to
 -- the last day of either, and the data is that of every platform, as the unioned models hold it.
 -- The reporting currency has the rate 1 on every day, whether or not a source publishes rates;
--- another currency has a rate from the first day that the source published one.
-with published as (
-    select rate_date, quote_currency as currency, rate as euro_rate, rate_source
+-- another currency has a rate from the first day that the source published one. The source is the
+-- ECB once it has rates, and the demo only in a deployment without them, so that a day on which
+-- the ECB publishes nothing, such as Good Friday, carries its last rate forward and never takes a
+-- fictional one (ADR-0032).
+with rates as (
+    select rate_date, base_currency, quote_currency, rate, rate_source
+    from {{ ref('stg_ecb__rates_daily') }}
+    union all
+    select rate_date, base_currency, quote_currency, rate, rate_source
     from {{ ref('stg_demo_fx__rates_daily') }}
+    where not exists (select from {{ ref('stg_ecb__rates_daily') }})
+),
+
+published as (
+    select rate_date, quote_currency as currency, rate as euro_rate, rate_source
+    from rates
     where base_currency = 'EUR'
     union all
     select distinct rate_date, 'EUR', cast(1 as numeric(18,8)), rate_source
-    from {{ ref('stg_demo_fx__rates_daily') }}
+    from rates
 ),
 
 facts as (

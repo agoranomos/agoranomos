@@ -1,0 +1,25 @@
+sources:
+  - name: raw_ecb
+    description: >-
+      The reference rates of the euro of the European Central Bank, which the DAG
+      agoranomos_ecb_daily loads with dlt from the data API of the ECB (ADR-0032). The DAG starts
+      paused, so a deployment with the demo alone has no table here, and the models that read
+      these tables then read none.
+    schema: raw_ecb
+    # No freshness check of dbt: the Ops collection shows the last load, from _agoranomos_reloads
+    # (models/ops/ops_loads.sql).
+    config:
+      freshness: null
+    tables:
+      - name: _agoranomos_reloads
+        description: >-
+          The record of the loads of the rates of the ECB: one row for each load, with the account
+          EUR, the base of the rates, the day of the load in Frankfurt (as_of), the first and last
+          day that the load replaced (window_start, window_end), and the moment of the load.
+      - name: rates_daily
+        description: >-
+          The daily reference rates of the euro of the ECB, the series EXR D..EUR.SP00.A, one row
+          for each currency and day of publication, as the CSV of the data API of the ECB names
+          its columns, every one text: the value of one unit of currency_denom in currency on the
+          day of time_period, in obs_value. A weekend or a closing day of TARGET has no row. Each
+          load replaces the days that it covers.
