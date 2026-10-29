@@ -53,7 +53,7 @@ Agoranomos создаётся, чтобы закрыть эти пробелы: 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/pipeline-ru-dark.svg">
-    <img alt="Конвейер: демо-данные, dlt, хранилище PostgreSQL со слоями raw, staging и marts, которые строит dbt, и Metabase работают уже сейчас, Airflow запускает загрузку и сборку dbt; обновление Metabase, коннекторы площадок, MCP и AI-клиенты в плане" src="docs/assets/readme/pipeline-ru-light.svg" width="100%">
+    <img alt="Конвейер: демо-данные, dlt, хранилище PostgreSQL со слоями raw, staging и marts, которые строит dbt, и Metabase работают уже сейчас, Airflow запускает загрузку и сборку dbt; AI-клиенты, например приложения Claude и Claude Code, получают данные через MCP-сервер Metabase, а в локальном режиме еще и через MCP-серверы хранилища и Airflow с доступом только на чтение; обновление Metabase, коннекторы площадок и MCP-сервер dbt в плане" src="docs/assets/readme/pipeline-ru-light.svg" width="100%">
   </picture>
 </p>
 
