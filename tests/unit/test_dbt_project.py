@@ -1,5 +1,6 @@
 """Static checks of the dbt project in dbt/, for what Cosmos and the stack rely on, without dbt."""
 
+import ast
 import csv
 import re
 from pathlib import Path
@@ -163,6 +164,10 @@ MART_KEYS = {
     "ad_campaigns": "[platform, account_id, campaign_id]",
     "ad_campaign_names": "[platform, account_id, campaign_id, valid_from]",
     "fx_rates_daily": "[rate_date, currency, reporting_currency]",
+    "ad_stats_ad_group_daily": "[report_date, platform, account_id, ad_group_id]",
+    "ad_stats_ad_daily": "[report_date, platform, account_id, ad_group_id, ad_id]",
+    "ad_groups": "[platform, account_id, ad_group_id]",
+    "ads": "[platform, account_id, ad_group_id, ad_id]",
 }
 
 
@@ -346,10 +351,21 @@ def test_the_seeds_go_to_staging_and_comment_their_tables():
 
 
 def test_the_intermediate_models_are_views_in_staging():
-    # ADR-0025: until an AI role needs to tell them apart, intermediate models are views in staging.
+    # ADR-0025: until an AI role needs to tell them apart, intermediate models are views in staging,
+    # but for the statistics of ad groups and of ads, whose many tests would each compute a view of
+    # their size again (ADR-0034).
     project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
     pattern = r"^    intermediate:\n      \+schema: staging\n      \+materialized: view$"
     assert re.search(pattern, project, flags=re.MULTILINE)
+    tables = {
+        path.stem
+        for path in (DBT / "models" / "intermediate").glob("*.sql")
+        if "materialized=" in path.read_text(encoding="utf-8")
+    }
+    assert tables == {"int_ad_stats_ad_group__unioned", "int_ad_stats_ad__unioned"}
+    for name in tables:
+        text = (DBT / "models" / "intermediate" / f"{name}.sql").read_text(encoding="utf-8")
+        assert "{{ config(materialized='table') }}" in text, name
 
 
 def test_the_reporting_currency_is_written_one_way_everywhere():
@@ -418,29 +434,52 @@ def test_the_seeds_of_currencies_and_time_zones_hold_what_the_demo_uses():
 
 STAGING = DBT / "models" / "staging"
 DAGS_PIPELINES = DBT.parent / "airflow" / "dags" / "agoranomos_pipelines"
+
+
+def meta_insights(level: str) -> list[str]:
+    """The insights of Meta at a level, with their child tables of actions."""
+    return [f"insights_{level}", f"insights_{level}__actions", f"insights_{level}__action_values"]
+
+
 # The staging models of the platforms of the demo (ADR-0025), by platform: each is one call of the
-# macro of the shape of its API, over these raw tables of the platform, in this order.
+# macro of the shape of its API, over these raw tables of the platform, in this order, with the
+# level of a report of statistics or conversions where it is not that of campaigns (ADR-0034).
 SHAPED = {
     "demo_search": {
-        "campaign_stats": ("google_ads_campaign_stats", ["campaign_stats"]),
-        "campaign_conversions": ("google_ads_campaign_conversions", ["campaign_conversions"]),
+        "campaign_stats": ("google_ads_stats", ["campaign_stats"]),
+        "campaign_conversions": ("google_ads_conversions", ["campaign_conversions"]),
         "accounts": ("google_ads_accounts", ["customer_clients"]),
         "campaigns": ("google_ads_campaigns", ["campaigns"]),
+        "ad_groups": ("google_ads_ad_groups", ["ad_groups"]),
+        "ad_group_stats": ("google_ads_stats", ["ad_group_stats"], "ad_group"),
+        "ad_group_conversions": ("google_ads_conversions", ["ad_group_conversions"], "ad_group"),
+        "ads": ("google_ads_ads", ["ads"]),
+        "ad_stats": ("google_ads_stats", ["ad_stats"], "ad"),
+        "ad_conversions": ("google_ads_conversions", ["ad_conversions"], "ad"),
     },
     "demo_social": {
-        "campaign_stats": ("meta_campaign_stats", ["insights_campaign"]),
-        "campaign_conversions": (
-            "meta_campaign_conversions",
-            ["insights_campaign", "insights_campaign__actions", "insights_campaign__action_values"],
-        ),
+        "campaign_stats": ("meta_stats", ["insights_campaign"]),
+        "campaign_conversions": ("meta_conversions", meta_insights("campaign")),
         "accounts": ("meta_accounts", ["ad_accounts"]),
         "campaigns": ("meta_campaigns", ["campaigns"]),
+        "ad_groups": ("meta_ad_groups", ["adsets"]),
+        "ad_group_stats": ("meta_stats", ["insights_adset"], "ad_group"),
+        "ad_group_conversions": ("meta_conversions", meta_insights("adset"), "ad_group"),
+        "ads": ("meta_ads", ["ads"]),
+        "ad_stats": ("meta_stats", ["insights_ad"], "ad"),
+        "ad_conversions": ("meta_conversions", meta_insights("ad"), "ad"),
     },
     "demo_video": {
-        "campaign_stats": ("tiktok_campaign_stats", ["report_campaign_daily"]),
-        "campaign_conversions": ("tiktok_campaign_conversions", ["report_campaign_daily"]),
+        "campaign_stats": ("tiktok_stats", ["report_campaign_daily"]),
+        "campaign_conversions": ("tiktok_conversions", ["report_campaign_daily"]),
         "accounts": ("tiktok_accounts", ["advertisers"]),
         "campaigns": ("tiktok_campaigns", ["campaigns"]),
+        "ad_groups": ("tiktok_ad_groups", ["adgroups"]),
+        "ad_group_stats": ("tiktok_stats", ["report_adgroup_daily"], "ad_group"),
+        "ad_group_conversions": ("tiktok_conversions", ["report_adgroup_daily"], "ad_group"),
+        "ads": ("tiktok_ads", ["ads"]),
+        "ad_stats": ("tiktok_stats", ["report_ad_daily"], "ad"),
+        "ad_conversions": ("tiktok_conversions", ["report_ad_daily"], "ad"),
     },
     "demo_web": {
         "properties": ("ga4_properties", ["properties"]),
@@ -450,6 +489,10 @@ SHAPED = {
 }
 STATS_KEY = ["report_date", "platform", "account_id", "campaign_id"]
 ACCOUNT_KEY = ["platform", "account_id"]
+AD_GROUP_KEY = ["report_date", "platform", "account_id", "ad_group_id"]
+AD_KEY = [*AD_GROUP_KEY, "ad_id"]
+METRICS = ["impressions", "clicks", "spend"]
+CONVERTED = ["conversions", "conversion_value"]
 # The critical tests of each kind of staging model: its key, which unique_combination checks, the
 # columns that not_null checks, and those that non_negative checks.
 CRITICAL = {
@@ -467,6 +510,28 @@ CRITICAL = {
     "campaigns": (
         [*ACCOUNT_KEY, "campaign_id", "valid_from"],
         [*ACCOUNT_KEY, "campaign_id", "valid_from", "observed_name"],
+        [],
+    ),
+    "ad_group_stats": (AD_GROUP_KEY, [*AD_GROUP_KEY, "campaign_id", *METRICS], METRICS),
+    "ad_group_conversions": (
+        [*AD_GROUP_KEY, "conversion_action_id"],
+        [*AD_GROUP_KEY, "campaign_id", "conversion_action_id", *CONVERTED],
+        CONVERTED,
+    ),
+    "ad_stats": (AD_KEY, [*AD_KEY, "campaign_id", *METRICS], METRICS),
+    "ad_conversions": (
+        [*AD_KEY, "conversion_action_id"],
+        [*AD_KEY, "campaign_id", "conversion_action_id", *CONVERTED],
+        CONVERTED,
+    ),
+    "ad_groups": (
+        [*ACCOUNT_KEY, "ad_group_id", "valid_from"],
+        [*ACCOUNT_KEY, "campaign_id", "ad_group_id", "valid_from", "observed_name"],
+        [],
+    ),
+    "ads": (
+        [*ACCOUNT_KEY, "ad_group_id", "ad_id", "valid_from"],
+        [*ACCOUNT_KEY, "campaign_id", "ad_group_id", "ad_id", "valid_from"],
         [],
     ),
     "properties": (
@@ -542,14 +607,15 @@ def test_each_staging_model_of_a_platform_is_one_call_of_the_shape_of_its_api():
     assert found == wanted, sorted(found ^ wanted)
     for code, models in SHAPED.items():
         dataset = platforms.PLATFORMS[code].dataset
-        for model, (macro, tables) in models.items():
+        for model, (macro, tables, *level) in models.items():
             path = STAGING / code / f"stg_{code}__{model}.sql"
             comment, *body = path.read_text(encoding="utf-8").splitlines()
             relations = ", ".join(f"source('{dataset}', '{table}')" for table in tables)
+            arguments = ", ".join([relations, f"'{code}'", *(f"'{name}'" for name in level)])
             seeds = [seed for seed, _ in IN_SEEDS.values()] if model in SEEDED else []
             depends = [f"-- depends_on: {{{{ ref('{seed}') }}}}" for seed in seeds]
             assert comment.startswith(f"-- {path.name}: "), path.name
-            assert body == [*depends, f"{{{{ {macro}({relations}, '{code}') }}}}"], path.name
+            assert body == [*depends, f"{{{{ {macro}({arguments}) }}}}"], path.name
 
 
 def test_the_sources_of_a_platform_are_the_tables_that_its_load_writes():
@@ -696,7 +762,19 @@ TO_CAMPAIGNS = (
     "int_ad_campaigns__unioned",
     ["platform", "account_id", "campaign_id"],
 )
+TO_AD_GROUPS = (
+    ["platform", "account_id", "ad_group_id"],
+    "int_ad_groups__unioned",
+    ["platform", "account_id", "ad_group_id"],
+)
+TO_ADS = (
+    ["platform", "account_id", "ad_group_id", "ad_id"],
+    "int_ads__unioned",
+    ["platform", "account_id", "ad_group_id", "ad_id"],
+)
 TO_RATES = (["report_date", "currency"], "int_fx_rates__filled", ["rate_date", "currency"])
+# The columns of the statistics of an ad group or an ad that must not be null, after their key.
+NAMED = ["currency", "client_id", "campaign_id", "campaign_name", "ad_group_name"]
 SESSIONS_KEY = CRITICAL["sessions_daily"][0]
 # The critical tests of each intermediate model, every one an error: its key, which
 # unique_combination checks, or unique for a key of one column; the columns that not_null checks;
@@ -729,6 +807,30 @@ INTERMEDIATE_TESTS = {
         [*STATS_KEY, "currency", "client_id", "campaign_name", "spend"],
         {},
         [TO_ACCOUNTS, TO_CAMPAIGNS, TO_RATES],
+    ),
+    "int_ad_groups__unioned": (
+        [*ACCOUNT_KEY, "ad_group_id"],
+        ["campaign_id", "ad_group_name"],
+        {},
+        [TO_CAMPAIGNS],
+    ),
+    "int_ads__unioned": (
+        [*ACCOUNT_KEY, "ad_group_id", "ad_id"],
+        ["campaign_id", "ad_name"],
+        {},
+        [TO_AD_GROUPS],
+    ),
+    "int_ad_stats_ad_group__unioned": (
+        AD_GROUP_KEY,
+        [*AD_GROUP_KEY, *NAMED, "spend"],
+        {},
+        [TO_ACCOUNTS, TO_CAMPAIGNS, TO_AD_GROUPS, TO_RATES],
+    ),
+    "int_ad_stats_ad__unioned": (
+        AD_KEY,
+        [*AD_KEY, *NAMED, "ad_name", "spend"],
+        {},
+        [TO_ACCOUNTS, TO_CAMPAIGNS, TO_ADS, TO_RATES],
     ),
     "int_fx_rates__filled": (["rate_date", "currency"], ["rate", "rate_source"], {}, []),
     "int_web_sessions__unioned": (SESSIONS_KEY, ["client_id", "currency"], {}, [TO_RATES]),
@@ -795,14 +897,24 @@ def test_the_intermediate_models_have_their_critical_tests():
 
 
 def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
-    # Clicks above impressions and an account of no client can be right, so they warn; primary
-    # actions that do not add up to the conversions of a campaign cannot.
+    # Clicks above impressions, an account of no client and lower levels above their parents can be
+    # right, so they warn; primary actions that do not add up to the conversions of a campaign
+    # cannot.
     wanted = {
         "assert_clicks_within_impressions": ({"int_ad_stats__unioned"}, True),
         "assert_every_account_has_a_client": ({"int_ad_accounts__unioned"}, True),
         "assert_primary_actions_add_up_to_the_conversions": (
             {"int_ad_conversions__unioned", "int_ad_stats__unioned"},
             False,
+        ),
+        # Reports of two levels loaded at different moments can disagree on recent days.
+        "assert_ad_groups_add_up_to_no_more_than_their_campaigns": (
+            {"int_ad_stats__unioned", "int_ad_stats_ad_group__unioned"},
+            True,
+        ),
+        "assert_ads_add_up_to_no_more_than_their_ad_groups": (
+            {"int_ad_stats_ad_group__unioned", "int_ad_stats_ad__unioned"},
+            True,
         ),
     }
     for name, (reads, warns) in wanted.items():
@@ -894,22 +1006,29 @@ GOOGLE_ADS = STAGING / "google_ads"
 # The staging models of Google Ads, each one call of a macro of the shape that demo_search mimics,
 # over a table of raw_google_ads, through relation_or_empty, as the DAG starts paused (ADR-0032).
 GOOGLE_ADS_MODELS = {
-    "campaign_stats": ("google_ads_campaign_stats", "campaign_stats"),
-    "campaign_conversions": ("google_ads_campaign_conversions", "campaign_conversions"),
+    "campaign_stats": ("google_ads_stats", "campaign_stats"),
+    "campaign_conversions": ("google_ads_conversions", "campaign_conversions"),
     "accounts": ("google_ads_customers", "customers"),
     "campaigns": ("google_ads_campaigns", "campaigns"),
+    "ad_groups": ("google_ads_ad_groups", "ad_groups"),
+    "ad_group_stats": ("google_ads_stats", "ad_group_stats", "ad_group"),
+    "ad_group_conversions": ("google_ads_conversions", "ad_group_conversions", "ad_group"),
+    "ads": ("google_ads_ads", "ads"),
+    "ad_stats": ("google_ads_stats", "ad_stats", "ad"),
+    "ad_conversions": ("google_ads_conversions", "ad_conversions", "ad"),
 }
 
 
 def test_each_staging_model_of_google_ads_is_one_call_of_the_shape_that_the_demo_shares():
     found = {path.name for path in GOOGLE_ADS.glob("*.sql")}
     assert found == {f"stg_google_ads__{model}.sql" for model in GOOGLE_ADS_MODELS}
-    for model, (macro, table) in GOOGLE_ADS_MODELS.items():
+    for model, (macro, table, *level) in GOOGLE_ADS_MODELS.items():
         text = (GOOGLE_ADS / f"stg_google_ads__{model}.sql").read_text(encoding="utf-8")
         assert text.startswith(f"-- stg_google_ads__{model}.sql: "), model
         call = f"{{{{ {macro}(relation_or_empty(source('raw_google_ads', '{table}'), {{"
         assert text.count(call) == 1, model
-        assert text.rstrip().endswith("}), 'google_ads') }}"), model
+        arguments = ", ".join(["'google_ads'", *(f"'{name}'" for name in level)])
+        assert text.rstrip().endswith(f"}}), {arguments}) }}}}"), model
         # The model of the accounts names the seeds that its tests read, as that of the demo does.
         seeds = re.findall(r"^-- depends_on: \{\{ ref\('(\w+)'\) \}\}$", text, flags=re.MULTILINE)
         assert seeds == (
@@ -922,13 +1041,23 @@ def test_each_staging_model_of_google_ads_is_one_call_of_the_shape_that_the_demo
 def test_the_columns_of_the_empty_tables_of_google_ads_are_the_fields_of_its_queries():
     # The empty query of a table before the first load has the columns that dlt makes from the
     # fields of its query, so that the model builds the same before and after it.
-    source = (DAGS_PIPELINES / "google_ads.py").read_text(encoding="utf-8")
-    for model, (_, table) in GOOGLE_ADS_MODELS.items():
+    # The source hints a column for each field of its queries (google_ads.columns), and dlt is not
+    # in the development environment, so the fields come from the text of the source.
+    source = ast.parse((DAGS_PIPELINES / "google_ads.py").read_text(encoding="utf-8"))
+    [fields] = [
+        ast.literal_eval(node.value)
+        for node in source.body
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == "FIELDS"
+    ]
+    for model, (_, table, *_) in GOOGLE_ADS_MODELS.items():
         text = (GOOGLE_ADS / f"stg_google_ads__{model}.sql").read_text(encoding="utf-8")
         columns = set(re.findall(r"'(\w+)': '[\w ]+'", text))
-        block = source.split(f'    "{table}": {{\n', 1)[1].split("\n    },\n", 1)[0]
-        hinted = set(re.findall(r'^            "(\w+)": ', block, flags=re.MULTILINE))
-        scd2 = {"_dlt_valid_from", "_dlt_valid_to"} if table == "campaigns" else set()
+        hinted = {field.strip().replace(".", "__") for field in fields[table].split(",")}
+        scd2 = (
+            {"_dlt_valid_from", "_dlt_valid_to"}
+            if table in ("campaigns", "ad_groups", "ads")
+            else set()
+        )
         assert columns == hinted | scd2, (model, sorted(columns ^ (hinted | scd2)))
 
 
@@ -965,6 +1094,12 @@ def test_the_sources_of_google_ads_are_the_tables_that_its_load_writes():
         "campaigns",
         "campaign_stats",
         "campaign_conversions",
+        "ad_groups",
+        "ad_group_stats",
+        "ad_group_conversions",
+        "ads",
+        "ad_stats",
+        "ad_conversions",
     }
 
 
@@ -976,6 +1111,10 @@ def test_every_union_of_the_platforms_reads_google_ads_and_the_loads_show_it():
         "int_ad_campaigns__unioned": "stg_google_ads__campaigns",
         "int_ad_campaign_names__collapsed": "stg_google_ads__campaigns",
         "int_conversion_actions__resolved": "stg_google_ads__campaign_conversions",
+        "int_ad_groups__unioned": "stg_google_ads__ad_groups",
+        "int_ads__unioned": "stg_google_ads__ads",
+        "int_ad_stats_ad_group__unioned": "stg_google_ads__ad_group_stats",
+        "int_ad_stats_ad__unioned": "stg_google_ads__ad_stats",
     }
     for model, staged in unions.items():
         text = (INTERMEDIATE / f"{model}.sql").read_text(encoding="utf-8")

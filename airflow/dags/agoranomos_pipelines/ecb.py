@@ -30,6 +30,7 @@ import dlt
 from dlt.sources.helpers.requests import Client
 
 from agoranomos_pipelines.loads import (
+    DLT_SETTINGS,
     MERGE,
     RELOAD_HINTS,
     RELOADS,
@@ -174,8 +175,7 @@ def due(now: datetime) -> bool:
 def load(now: datetime) -> int:
     """Load the rates of the window of now (window()), record it in _agoranomos_reloads, and return
     the rows of rates_daily that dlt reports."""
-    # dlt leaves the rows of the last load in the staging dataset unless it is told to empty it.
-    os.environ["LOAD__TRUNCATE_STAGING_DATASET"] = "true"
+    os.environ.update(DLT_SETTINGS)
     with open_pipeline() as pipeline:
         first, last = window(now, last_end(pipeline))
         hints = own(HINTS)

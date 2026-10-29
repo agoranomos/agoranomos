@@ -62,6 +62,10 @@ MARTS = (
     "ad_campaigns",
     "ad_campaign_names",
     "fx_rates_daily",
+    "ad_stats_ad_group_daily",
+    "ad_stats_ad_daily",
+    "ad_groups",
+    "ads",
 )
 # The task of the mart: each model and each seed is one task, dbt build (ADR-0028).
 MART_BUILD = "dbt.ad_stats_campaign_daily_model_build"

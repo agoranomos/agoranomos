@@ -30,6 +30,10 @@ facts as (
     union
     select report_date, currency from {{ ref('int_ad_conversions__unioned') }}
     union
+    select report_date, currency from {{ ref('int_ad_stats_ad_group__unioned') }}
+    union
+    select report_date, currency from {{ ref('int_ad_stats_ad__unioned') }}
+    union
     select report_date, currency from {{ ref('int_web_sessions__unioned') }}
 ),
 

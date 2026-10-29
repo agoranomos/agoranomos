@@ -128,7 +128,7 @@ The other options were not chosen for these reasons:
 * Good, because 36 months keep what the platforms would drop, and are enough for a model of marketing mix.
 * Good, because one definition of each KPI serves the dashboards, the questions of people and the AI clients.
 * Good, because a deployment pays in quota and storage only for the modules that it turns on.
-* Bad, because the first load of an account takes longer: about 150 operations of Google Ads for the four reports of facts of the basic set, a month in each request, against about 40 for 18 months of campaigns.
+* Bad, because the first load of an account takes longer: about 230 operations of Google Ads for the six reports of facts of the basic set, the statistics and the conversions by action of campaigns, ad groups and ads, a month in each request, against about 40 for 18 months of campaigns.
 * Bad, because the marts of a module exist, empty, in every deployment, and a person who browses the warehouse sees them.
 * Bad, because Google Ads gives reach only for campaigns of Display, Video, Demand Gen and App, for 92 days at most, and at the level of campaigns only, so its overlaps are those of periods within one campaign; Microsoft Advertising gives no reach at all.
 * Bad, because the overlaps of pairs depend on behavior that the documentation of Meta and LinkedIn does not state, and wait for a test on a real account.
@@ -136,7 +136,7 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** nothing of this record is built. The basic set of today has the marts by campaign and day, two dashboards of the demo and the Ops collection; Google Ads and the rates of the ECB come in v0.4.0 (ADR-0032).
+* **Implementation status, as of October 2026:** the ad groups and the ads of the basic set are in place for v0.4.0: the marts `ad_stats_ad_group_daily`, `ad_stats_ad_daily`, `ad_groups` and `ads`, with the conversions of the primary actions from the reports by action of each level, which the demo fills on its three ad platforms and the connector of Google Ads loads (ADR-0032); the history of 36 months of Google Ads and of 37 of the rates of the ECB. Not built yet: the metrics of Metabase and their glossary, the foreign keys of the metadata of the marts, the first day of the week of Metabase, the dashboard Advertising, and the modules.
 * The facts behind this record, read on 29 October 2026:
     * Fivetran's [dbt_ad_reporting](https://github.com/fivetran/dbt_ad_reporting) v2.8.1 (15 October 2026) has reports of accounts, campaigns, ad groups and ads by day for 11 platforms, of keywords, search queries and URLs for some, and of countries and regions by month; it added conversions in v1.10.0 and has no reach ([DECISIONLOG](https://github.com/fivetran/dbt_ad_reporting/blob/main/DECISIONLOG.md)). Funnel standardizes cost, clicks and impressions across sources ([standard metric rules](https://help.funnel.io/en/articles/2308315-funnel-s-standard-metric-rules)).
     * Google Ads keeps data by date, week and hour for 37 months ([Segmentation](https://developers.google.com/google-ads/api/docs/reporting/segmentation)); `metrics.unique_users` "cannot be aggregated", needs a range of 92 days or less and is selectable with `campaign` only ([Metrics v26](https://developers.google.com/google-ads/api/fields/v26/metrics)); reach covers Display, Demand Gen, Video and App ([Measuring reach and frequency](https://support.google.com/google-ads/answer/2472714)).

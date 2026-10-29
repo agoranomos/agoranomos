@@ -74,29 +74,35 @@ PLATFORMS = {
             search,
             "campaign_stats",
             90,
-            FactTable("campaign_stats", '"customer__id"', "{}", *SEARCH_DAY),
-            FactTable("campaign_conversions", '"customer__id"', "{}", *SEARCH_DAY),
+            *(
+                FactTable(table, '"customer__id"', "{}", *SEARCH_DAY)
+                for table in (
+                    "campaign_stats",
+                    "campaign_conversions",
+                    "ad_group_stats",
+                    "ad_group_conversions",
+                    "ad_stats",
+                    "ad_conversions",
+                )
+            ),
         ),
         _platform(
             social,
             "insights_campaign",
             28,
-            # Its child tables of actions follow it through _dlt_root_id.
-            FactTable(
-                "insights_campaign", '"account_id"', "{}", '"date_start"', ISO, '"date_start"'
+            # Their child tables of actions follow them through _dlt_root_id.
+            *(
+                FactTable(table, '"account_id"', "{}", '"date_start"', ISO, '"date_start"')
+                for table in ("insights_campaign", "insights_adset", "insights_ad")
             ),
         ),
         _platform(
             video,
             "report_campaign_daily",
             28,
-            FactTable(
-                "report_campaign_daily",
-                '"advertiser_id"',
-                "{}",
-                VIDEO_DAY,
-                ISO,
-                f"{VIDEO_DAY}::date",
+            *(
+                FactTable(table, '"advertiser_id"', "{}", VIDEO_DAY, ISO, f"{VIDEO_DAY}::date")
+                for table in ("report_campaign_daily", "report_adgroup_daily", "report_ad_daily")
             ),
         ),
         _platform(

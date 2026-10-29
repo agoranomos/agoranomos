@@ -62,7 +62,7 @@ The name of the campaign that the row carried when it was loaded. A platform giv
 {% enddocs %}
 
 {% docs observed_name %}
-A name that the campaign had, from valid_from until valid_to, as the loads saw it.
+A name that the campaign, the ad group or the ad had, from valid_from until valid_to, as the loads saw it; none for an ad of a type that has no name on its platform, such as a responsive search ad of Google.
 {% enddocs %}
 
 {% docs currency %}
@@ -74,15 +74,15 @@ The currency of the columns that end in _reporting, as a three-letter code of IS
 {% enddocs %}
 
 {% docs impressions %}
-How many times the ads of the campaign were shown on the day, as the ad platform counts them. It counts showings, not people: one person can see an ad many times, so impressions are not reach.
+How many times the ads of the row, of its campaign, its ad group or its ad, were shown on the day, as the ad platform counts them. It counts showings, not people: one person can see an ad many times, so impressions are not reach.
 {% enddocs %}
 
 {% docs clicks %}
-How many times the ads of the campaign were clicked on the day with a click that leads to the site, as the ad platform counts them: the clicks of Google, the clicks (destination) of TikTok, and the link clicks of Meta, whose own clicks count every click. It counts clicks, not people, and not the visits that web analytics records.
+How many times the ads of the row, of its campaign, its ad group or its ad, were clicked on the day with a click that leads to the site, as the ad platform counts them: the clicks of Google, the clicks (destination) of TikTok, and the link clicks of Meta, whose own clicks count every click. It counts clicks, not people, and not the visits that web analytics records.
 {% enddocs %}
 
 {% docs spend %}
-What the ads of the campaign cost on the day, as the ad platform reports it in its statistics, in the currency of the account (see currency), exact to six decimal places. Also called cost or ad spend. It is not the amount that the platform invoices, which can differ from it, for example by taxes or later credits, and the platform can still change it for recent days.
+What the ads of the row, of its campaign, its ad group or its ad, cost on the day, as the ad platform reports it in its statistics, in the currency of the account (see currency), exact to six decimal places. Also called cost or ad spend. It is not the amount that the platform invoices, which can differ from it, for example by taxes or later credits, and the platform can still change it for recent days.
 {% enddocs %}
 
 {% docs spend_reporting %}
@@ -90,11 +90,11 @@ The spend of the row in the reporting currency (see reporting_currency), at the 
 {% enddocs %}
 
 {% docs conversions %}
-The conversions that the ad platform attributes to the campaign on the day: in a table by conversion action, those of the action of the row; in a table by campaign, those of its primary actions together (is_primary). Attribution can give a campaign part of a conversion, so the number can be fractional, and the platform can still change it for recent days. It is the count of the ad platform, which can differ from what web analytics or a CRM records.
+The conversions that the ad platform attributes to the campaign, the ad group or the ad of the row on the day: in a table by conversion action, those of the action of the row; in a table by campaign, ad group or ad, those of its primary actions together (is_primary). Attribution can give an ad part of a conversion, so the number can be fractional, and the platform can still change it for recent days. It is the count of the ad platform, which can differ from what web analytics or a CRM records.
 {% enddocs %}
 
 {% docs conversion_value %}
-The value of the conversions of the row, as the ad platform reports it, in the currency of the account (see currency): of the action of the row in a table by conversion action, of the primary actions together in a table by campaign.
+The value of the conversions of the row, as the ad platform reports it, in the currency of the account (see currency): of the action of the row in a table by conversion action, of the primary actions together in a table by campaign, ad group or ad.
 {% enddocs %}
 
 {% docs conversion_value_reporting %}
@@ -145,12 +145,52 @@ The status of the campaign at the last load, or in a version of the campaign its
 The type of the campaign as the ad platform gives it: the advertising channel type of Google, such as SEARCH or PERFORMANCE_MAX, or the objective of Meta or of TikTok.
 {% enddocs %}
 
+{% docs ad_group_id %}
+The ID of the ad group, as the ad platform gives it, as text: an ad group of Google or of TikTok, or an ad set of Meta. platform, account_id and ad_group_id together identify an ad group on any platform. A Performance Max campaign of Google has no ad groups.
+{% enddocs %}
+
+{% docs ad_group_name %}
+The current name of the ad group, the same on every day, as the newest version of the ad group has it. The name comes from the ad platform, where anyone with access to the account can change it.
+{% enddocs %}
+
+{% docs loaded_ad_group_name %}
+The name of the ad group that the row carried when it was loaded. A platform gives the current name for every day of a report, so rows loaded at different times can carry different names of one ad group.
+{% enddocs %}
+
+{% docs ad_group_status %}
+The status of the ad group at the last load, or in a version of the ad group its status in that version, as the ad platform writes it, such as ENABLED or REMOVED for Google, ACTIVE or DELETED for Meta, or ENABLE for TikTok. It is the status of the ad group itself: an ad group of a paused campaign can still be enabled.
+{% enddocs %}
+
+{% docs ad_group_type %}
+The type of the ad group as the ad platform gives it: the type of Google, such as SEARCH_STANDARD or SHOPPING_PRODUCT_ADS, or the optimization goal of the ad set of Meta or of the ad group of TikTok.
+{% enddocs %}
+
+{% docs ad_id %}
+The ID of the ad, as the ad platform gives it, as text. platform, account_id, ad_group_id and ad_id together identify an ad on any platform.
+{% enddocs %}
+
+{% docs ad_name %}
+The current name of the ad, as the newest version of the ad has it, or its ID where the platform gives the ad no name, as Google gives none to most of its types, such as a responsive search ad. The name comes from the ad platform, where anyone with access to the account can change it.
+{% enddocs %}
+
+{% docs loaded_ad_name %}
+The name of the ad that the row carried when it was loaded, none for a type of ad that has no name on its platform. A platform gives the current name for every day of a report, so rows loaded at different times can carry different names of one ad.
+{% enddocs %}
+
+{% docs ad_status %}
+The status of the ad at the last load, or in a version of the ad its status in that version, as the ad platform writes it, such as ENABLED or REMOVED for an ad in its ad group of Google, ACTIVE or DELETED for Meta, or ENABLE for TikTok.
+{% enddocs %}
+
+{% docs ad_type %}
+The type of the ad as the ad platform gives it: the type of Google, such as RESPONSIVE_SEARCH_AD, or the format of TikTok, such as SINGLE_VIDEO; none for Meta, whose ads have no type.
+{% enddocs %}
+
 {% docs valid_from %}
-The moment from which the row held, as the loads saw it: for a version of a campaign, its values, as a change of any of its fields, such as its name or its status, starts a new version; for a name of a campaign, as in ad_campaign_names, the name. It is the moment of the load that first saw it, or, for the versions that the first load of the demo replays, 00:00 UTC of the day on which a name changed, or of the first day of the history for the first of them.
+The moment from which the row held, as the loads saw it: for a version of a campaign, an ad group or an ad, its values, as a change of any of its fields, such as its name or its status, starts a new version; for a name of a campaign, as in ad_campaign_names, the name. It is the moment of the load that first saw it, or, for the versions that the first load of the demo replays, 00:00 UTC of the day on which a name changed, or of the first day of the history for the first of them.
 {% enddocs %}
 
 {% docs valid_to %}
-The moment until which the row held: that of the load that saw the campaign change, or no longer saw it; none while the row holds, as for the current version or name of a campaign.
+The moment until which the row held: that of the load that saw the campaign, the ad group or the ad change, or no longer saw it; none while the row holds, as for the current version or name of a campaign.
 {% enddocs %}
 
 {% docs is_current %}
@@ -158,11 +198,11 @@ Whether the row holds the current name of the campaign.
 {% enddocs %}
 
 {% docs first_report_date %}
-The first day that the advertising statistics hold for the account or the campaign of the row; none for one without statistics.
+The first day that the advertising statistics hold for the account, the campaign, the ad group or the ad of the row; none for one without statistics.
 {% enddocs %}
 
 {% docs last_report_date %}
-The last day that the advertising statistics hold for the account or the campaign of the row; none for one without statistics.
+The last day that the advertising statistics hold for the account, the campaign, the ad group or the ad of the row; none for one without statistics.
 {% enddocs %}
 
 {% docs name_count %}

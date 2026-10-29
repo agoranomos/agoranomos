@@ -10,8 +10,11 @@ agoranomos = "agoranomos"
 agoranomoi = "agoranomoi"
 # The Python package of the Mozilla root certificates, which airflow/requirements.txt pins.
 certifi = "certifi"
-# German for "search", in the name of an ad account of the demo.
+# German for "search", in the name of an ad account of the demo, and for "all" and "days", in the
+# names of its ad groups.
 suche = "suche"
+alle = "alle"
+tage = "tage"
 
 [files]
 # Mermaid as released, minified: its short names are not words (see .pre-commit-config.yaml).

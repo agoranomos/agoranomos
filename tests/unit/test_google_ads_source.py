@@ -116,6 +116,15 @@ def answer(account_id: str, gaql: str, failing: set[str]) -> list[dict]:
     campaign = {"resourceName": f"customers/{account_id}/campaigns/7", "id": "7", "name": "Brand"}
     if gaql.endswith("FROM campaign"):
         return [{"results": [{"customer": {"id": account_id}, "campaign": campaign}]}]
+    group = {"resourceName": f"customers/{account_id}/adGroups/8", "id": "8", "name": "Boots"}
+    if gaql.endswith("FROM ad_group"):
+        return [
+            {"results": [{"customer": {"id": account_id}, "campaign": campaign, "adGroup": group}]}
+        ]
+    if gaql.endswith("FROM ad_group_ad"):
+        ad = {"resourceName": f"customers/{account_id}/adGroupAds/8~9", "ad": {"id": "9"}}
+        row = {"customer": {"id": account_id}, "campaign": campaign, "adGroup": group}
+        return [{"results": [{**row, "adGroupAd": ad}]}]
     day = gaql.split("BETWEEN '")[1][:10]
     row = {
         "customer": {"id": account_id},
@@ -189,8 +198,14 @@ def ads(monkeypatch, tmp_path):
     monkeypatch.setenv("WAREHOUSE_LOADER_PASSWORD", "loader-password")
     monkeypatch.setenv("GOOGLE_ADS_SERVICE_ACCOUNT_KEY", json.dumps(KEY))
     monkeypatch.delenv("GOOGLE_ADS_LOGIN_CUSTOMER_ID", raising=False)
-    monkeypatch.setenv("LOAD__TRUNCATE_STAGING_DATASET", "unset")
-    monkeypatch.delenv("LOAD__TRUNCATE_STAGING_DATASET")
+    # The settings of dlt that a load sets go when the test ends.
+    for name in (
+        "LOAD__TRUNCATE_STAGING_DATASET",
+        "NORMALIZE__DATA_WRITER__FILE_MAX_ITEMS",
+        "LOAD__WORKERS",
+    ):
+        monkeypatch.setenv(name, "unset")
+        monkeypatch.delenv(name)
     extensions = tmp_path / "model"
     extensions.mkdir()
     (extensions / "clients.toml").write_text(CLIENTS, encoding="utf-8")
@@ -302,19 +317,30 @@ def test_a_load_asks_v26_for_each_account_as_the_service_account(ads, monkeypatc
         f"https://googleads.googleapis.com/v26/customers/{account_id}/googleAds:searchStream"
         for account_id in ZONES
     }
-    # A customer, the campaigns, the statistics and the conversions of each account.
-    assert len(made["requests"]) == 8
+    # A customer of each account, its campaigns, ad groups and ads, and the statistics and the
+    # conversions of each of the three levels.
+    assert len(made["requests"]) == 20
     assert all(
         headers == {"Authorization": "Bearer access-token", "login-customer-id": "9999999999"}
         for _, _, headers in made["requests"]
     )
     queries = [gaql for url, gaql, _ in made["requests"] if "1111111111" in url]
     assert queries[0].startswith("SELECT customer.resource_name, customer.id")
-    assert queries[2].endswith(
+    assert [query.split(" FROM ")[1].split(" WHERE ")[0] for query in queries] == [
+        "customer",
+        "campaign",
+        "ad_group",
+        "ad_group_ad",
+        *("campaign", "campaign", "ad_group", "ad_group", "ad_group_ad", "ad_group_ad"),
+    ]
+    assert queries[4].endswith(
         "FROM campaign WHERE segments.date BETWEEN '2026-07-30' AND '2026-10-27'"
     )
-    assert "segments.conversion_action, " in queries[3]
-    assert "metrics.cost_micros" not in queries[3]
+    for conversions in queries[5::2]:
+        assert "segments.conversion_action, " in conversions
+        assert "metrics.cost_micros" not in conversions
+    for stats in queries[4::2]:
+        assert "metrics.cost_micros" in stats
     assert made["clients"] == [
         {"request_timeout": 120, "request_max_attempts": 5, "request_backoff_factor": 2}
     ]
@@ -323,13 +349,14 @@ def test_a_load_asks_v26_for_each_account_as_the_service_account(ads, monkeypatc
 def test_a_load_keeps_the_rows_as_the_api_gives_them_and_replaces_the_days_of_each_account(ads):
     module, _, made, extensions = ads
     counts = module.load(NOW, extensions)
-    # The first load of each account: a row in each of the 37 calendar months of its history.
+    # The first load of each account: a row in each of the 37 calendar months of its history, in
+    # each fact table.
     assert counts == {
         "customers": 2,
-        "campaigns": 2,
-        "campaign_stats": 74,
-        "campaign_conversions": 74,
+        **{table: 2 for table in module.ENTITIES},
+        **{table: 74 for table in module.FACTS},
     }
+    assert len(made["requests"]) == 2 * (1 + 3 + 6 * 37)
     [pipeline] = made["pipelines"]
     assert pipeline.options["dataset_name"] == "raw_google_ads"
     [(rows, hints)] = pipeline.runs
@@ -343,14 +370,22 @@ def test_a_load_keeps_the_rows_as_the_api_gives_them_and_replaces_the_days_of_ea
             "'2026-10-28')"
         ),
     }
-    assert hints["campaigns"]["write_disposition"] == {
-        "disposition": "merge",
-        "strategy": "scd2",
-        "boundary_timestamp": NOW.isoformat(),
-    }
+    for table in module.FACTS:
+        assert hints[table]["write_disposition"] == hints["campaign_stats"]["write_disposition"]
+    for table in ("campaigns", "ad_groups", "ads"):
+        assert hints[table]["write_disposition"] == {
+            "disposition": "merge",
+            "strategy": "scd2",
+            "boundary_timestamp": NOW.isoformat(),
+        }
     assert hints["customers"]["write_disposition"] == "replace"
-    # Every field of each query has a hint of its own, so that dlt makes every column.
-    for table in ("customers", "campaigns", "campaign_stats", "campaign_conversions"):
+    # Every field of each query has a hint of its own, so that dlt makes every column, as text
+    # unless it is a date, a DOUBLE or a flag.
+    assert hints["ad_stats"]["columns"]["ad_group_ad__ad__name"]["data_type"] == "text"
+    assert hints["ad_stats"]["columns"]["segments__date"]["data_type"] == "date"
+    assert hints["ad_conversions"]["columns"]["metrics__all_conversions"]["data_type"] == "double"
+    assert hints["customers"]["columns"]["customer__manager"]["data_type"] == "bool"
+    for table in module.FIELDS:
         fields = module.FIELDS[table].split(", ")
         assert len(hints[table]["columns"]) == len(fields), table
         assert all(hint["name"] == name for name, hint in hints[table]["columns"].items())

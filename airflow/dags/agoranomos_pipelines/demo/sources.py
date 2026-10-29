@@ -2,7 +2,8 @@
 loader role (ADR-0004, ADR-0025).
 
 Each table of a platform is a resource with the hints of TABLE_HINTS: the entities as they are
-(replace), the campaigns with their history (scd2, from the moment of each load), and the facts,
+(replace), the campaigns, the ad groups and the ads with their history (scd2, from the moment of
+each load), and the facts,
 whose load replaces the days of each account that it covers (delete-insert with a destination
 scope that every run sets, as a run without one would reuse the last scope stored in the schema of
 dlt), so a repeated load creates no duplicates and a row that a platform no longer sends goes. No
@@ -35,6 +36,7 @@ from agoranomos_pipelines.demo.platforms import LOAD_ORDER, PLATFORMS, gap
 from agoranomos_pipelines.demo.world import Account
 from agoranomos_pipelines.loads import (
     DATE,
+    DLT_SETTINGS,
     MERGE,
     RELOAD_HINTS,
     RELOADS,
@@ -49,6 +51,9 @@ from agoranomos_pipelines.loads import (
 log = logging.getLogger(__name__)
 
 SCD2 = {"disposition": "merge", "strategy": "scd2"}
+# The IDs of the tables of the ad groups and of the ads of demo_search.
+SEARCH_AD_GROUP = {"customer__id": TEXT, "campaign__id": TEXT, "ad_group__id": TEXT}
+SEARCH_AD = {**SEARCH_AD_GROUP, "ad_group_ad__ad__id": TEXT, "ad_group_ad__ad__name": TEXT}
 
 # The hints of each table, by the names that dlt gives the columns: the fields of the API in
 # snake_case, nested objects joined by __ (dlt 1.31.0, the naming convention snake_case).
@@ -69,6 +74,28 @@ TABLE_HINTS: dict[tuple[str, str], dict] = {
         "write_disposition": MERGE,
         "columns": {"customer__id": TEXT, "campaign__id": TEXT, "segments__date": DATE},
     },
+    ("demo_search", "ad_groups"): {
+        "write_disposition": SCD2,
+        "columns": {"customer__id": TEXT, "campaign__id": TEXT, "ad_group__id": TEXT},
+    },
+    ("demo_search", "ad_group_stats"): {
+        "write_disposition": MERGE,
+        "columns": {**SEARCH_AD_GROUP, "segments__date": DATE},
+    },
+    ("demo_search", "ad_group_conversions"): {
+        "write_disposition": MERGE,
+        "columns": {**SEARCH_AD_GROUP, "segments__date": DATE},
+    },
+    # A type of ad that Google gives no name has no field name, so its column is hinted.
+    ("demo_search", "ads"): {"write_disposition": SCD2, "columns": SEARCH_AD},
+    ("demo_search", "ad_stats"): {
+        "write_disposition": MERGE,
+        "columns": {**SEARCH_AD, "segments__date": DATE},
+    },
+    ("demo_search", "ad_conversions"): {
+        "write_disposition": MERGE,
+        "columns": {**SEARCH_AD, "segments__date": DATE},
+    },
     ("demo_social", "ad_accounts"): {
         "write_disposition": "replace",
         "columns": {"account_id": TEXT},
@@ -80,6 +107,35 @@ TABLE_HINTS: dict[tuple[str, str], dict] = {
     ("demo_social", "insights_campaign"): {
         "write_disposition": MERGE,
         "columns": {"account_id": TEXT, "campaign_id": TEXT, "date_start": DATE, "date_stop": DATE},
+    },
+    ("demo_social", "adsets"): {
+        "write_disposition": SCD2,
+        "columns": {"id": TEXT, "account_id": TEXT, "campaign_id": TEXT},
+    },
+    ("demo_social", "insights_adset"): {
+        "write_disposition": MERGE,
+        "columns": {
+            "account_id": TEXT,
+            "campaign_id": TEXT,
+            "adset_id": TEXT,
+            "date_start": DATE,
+            "date_stop": DATE,
+        },
+    },
+    ("demo_social", "ads"): {
+        "write_disposition": SCD2,
+        "columns": {"id": TEXT, "account_id": TEXT, "campaign_id": TEXT, "adset_id": TEXT},
+    },
+    ("demo_social", "insights_ad"): {
+        "write_disposition": MERGE,
+        "columns": {
+            "account_id": TEXT,
+            "campaign_id": TEXT,
+            "adset_id": TEXT,
+            "ad_id": TEXT,
+            "date_start": DATE,
+            "date_stop": DATE,
+        },
     },
     ("demo_video", "advertisers"): {
         "write_disposition": "replace",
@@ -96,6 +152,38 @@ TABLE_HINTS: dict[tuple[str, str], dict] = {
             "advertiser_id": TEXT,
             "dimensions__campaign_id": TEXT,
             "dimensions__stat_time_day": TEXT,
+        },
+    },
+    ("demo_video", "adgroups"): {
+        "write_disposition": SCD2,
+        "columns": {"advertiser_id": TEXT, "campaign_id": TEXT, "adgroup_id": TEXT},
+    },
+    ("demo_video", "report_adgroup_daily"): {
+        "write_disposition": MERGE,
+        "columns": {
+            "advertiser_id": TEXT,
+            "dimensions__adgroup_id": TEXT,
+            "dimensions__stat_time_day": TEXT,
+            "metrics__campaign_id": TEXT,
+        },
+    },
+    ("demo_video", "ads"): {
+        "write_disposition": SCD2,
+        "columns": {
+            "advertiser_id": TEXT,
+            "campaign_id": TEXT,
+            "adgroup_id": TEXT,
+            "ad_id": TEXT,
+        },
+    },
+    ("demo_video", "report_ad_daily"): {
+        "write_disposition": MERGE,
+        "columns": {
+            "advertiser_id": TEXT,
+            "dimensions__ad_id": TEXT,
+            "dimensions__stat_time_day": TEXT,
+            "metrics__campaign_id": TEXT,
+            "metrics__adgroup_id": TEXT,
         },
     },
     ("demo_web", "properties"): {"write_disposition": "replace", "columns": {"name": TEXT}},
@@ -265,8 +353,7 @@ def load(
     platform that dlt reports. With replay_names, a dataset that holds no load yet first gets the
     names of the campaigns at each of the platform's name_versions(now)."""
     platform = PLATFORMS[code]
-    # dlt leaves the rows of the last load in the staging dataset unless it is told to empty it.
-    os.environ["LOAD__TRUNCATE_STAGING_DATASET"] = "true"
+    os.environ.update(DLT_SETTINGS)
     counts: dict[str, int] = {}
     with open_pipeline(code) as pipeline:
         if replay_names and not has_loads(pipeline):

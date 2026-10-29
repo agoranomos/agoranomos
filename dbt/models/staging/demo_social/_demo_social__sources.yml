@@ -38,3 +38,41 @@ sources:
           The values of the actions of each row of insights_campaign, one row each, in the currency
           of the account, with the value of its default attribution in value and its windows in
           _1d_click, _7d_click and _1d_view; its _dlt_parent_id is the _dlt_id of its row.
+      - name: adsets
+        description: >-
+          The ad sets of demo_social, its ad groups, one row for each version, from _dlt_valid_from
+          until _dlt_valid_to, as dlt keeps them with its scd2 strategy.
+      - name: insights_adset
+        description: >-
+          The insights of demo_social at the level of ad sets, one row for each ad set and day with
+          any metric, in the currency and the time zone of the account. Each load replaces the days
+          of each account that it covers, with their actions.
+      - name: insights_adset__actions
+        description: >-
+          The actions of each row of insights_adset, one row each, with the count of its default
+          attribution in value and its windows in _1d_click, _7d_click and _1d_view; its
+          _dlt_parent_id is the _dlt_id of its row.
+      - name: insights_adset__action_values
+        description: >-
+          The values of the actions of each row of insights_adset, one row each, in the currency of
+          the account, with the value of its default attribution in value and its windows in
+          _1d_click, _7d_click and _1d_view; its _dlt_parent_id is the _dlt_id of its row.
+      - name: ads
+        description: >-
+          The ads of demo_social, one row for each version, from _dlt_valid_from until
+          _dlt_valid_to, as dlt keeps them with its scd2 strategy.
+      - name: insights_ad
+        description: >-
+          The insights of demo_social at the level of ads, one row for each ad and day with any
+          metric, in the currency and the time zone of the account. Each load replaces the days of
+          each account that it covers, with their actions.
+      - name: insights_ad__actions
+        description: >-
+          The actions of each row of insights_ad, one row each, with the count of its default
+          attribution in value and its windows in _1d_click, _7d_click and _1d_view; its
+          _dlt_parent_id is the _dlt_id of its row.
+      - name: insights_ad__action_values
+        description: >-
+          The values of the actions of each row of insights_ad, one row each, in the currency of the
+          account, with the value of its default attribution in value and its windows in _1d_click,
+          _7d_click and _1d_view; its _dlt_parent_id is the _dlt_id of its row.

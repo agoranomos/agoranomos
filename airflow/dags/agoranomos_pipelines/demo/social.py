@@ -2,7 +2,9 @@
 the insights of each ad account at the level of campaigns, a row a day (time_increment=1), numbers
 as strings, money in major units, and the actions and their values as lists of AdsActionStats with
 the windows 1d_click, 7d_click and 1d_view, which dlt loads as child tables. Meta gives no 7d_view
-or 28d_view since 12 January 2026, so the records have none (ADR-0025)."""
+or 28d_view since 12 January 2026, so the records have none (ADR-0025). The insights at the levels
+of ad sets and of ads have the same shape, with the IDs and the name of their level, and the ad
+sets and the ads are listed like the campaigns (ADR-0034)."""
 
 from __future__ import annotations
 
@@ -37,6 +39,11 @@ def status(campaign: world.Campaign, day: date) -> str:
     return "ACTIVE" if campaign.active(day) else "PAUSED"
 
 
+def child_status(campaign: world.Campaign, day: date) -> str:
+    """The status of an ad set or an ad: deleted with its campaign, active until then."""
+    return "DELETED" if campaign.removed(day) else "ACTIVE"
+
+
 def ad_accounts(now: datetime) -> Iterator[dict[str, object]]:
     for account in accounts():
         offset = now.astimezone(ZoneInfo(account.time_zone)).utcoffset()
@@ -62,6 +69,31 @@ def campaigns(day: date) -> Iterator[dict[str, object]]:
         }
 
 
+def adsets(day: date) -> Iterator[dict[str, object]]:
+    for campaign, group in world.listed_ad_groups(PLATFORM, day):
+        yield {
+            "id": group.ad_group_id,
+            "account_id": group.account_id,
+            "campaign_id": campaign.campaign_id,
+            "name": group.name,
+            "status": child_status(campaign, day),
+            "optimization_goal": group.kind,
+        }
+
+
+def ads(day: date) -> Iterator[dict[str, object]]:
+    for campaign, group in world.listed_ad_groups(PLATFORM, day):
+        for ad in group.ads:
+            yield {
+                "id": ad.ad_id,
+                "account_id": group.account_id,
+                "campaign_id": campaign.campaign_id,
+                "adset_id": group.ad_group_id,
+                "name": ad.name,
+                "status": child_status(campaign, day),
+            }
+
+
 def action_finals(
     campaign: world.Campaign, final: world.Final
 ) -> list[tuple[str, int, int, Curve]]:
@@ -84,56 +116,110 @@ def action_finals(
     return found
 
 
-def attributed(total: int, days_old: int, curve: Curve, text) -> dict[str, str]:
-    """An AdsActionStats of a final total: value, the default attribution of seven days after a
-    click and one after a view, and its windows, each matured by the curve and written by text."""
+WINDOWS = ("value", "1d_click", "7d_click", "1d_view")
+
+
+def attributed(total: int, days_old: int, curve: Curve) -> dict[str, int]:
+    """The windows of an AdsActionStats of a final total: value, the default attribution of seven
+    days after a click and one after a view, and its windows, each matured by the curve."""
     seven = total * 85 // 100
     view = total - seven
     one = seven * 60 // 100
     return {
-        "value": text(matured(seven + view, days_old, curve)),
-        "1d_click": text(matured(one, days_old, curve)),
-        "7d_click": text(matured(seven, days_old, curve)),
-        "1d_view": text(matured(view, days_old, curve)),
+        "value": matured(seven + view, days_old, curve),
+        "1d_click": matured(one, days_old, curve),
+        "7d_click": matured(seven, days_old, curve),
+        "1d_view": matured(view, days_old, curve),
     }
 
 
-def insights_campaign(now, first=None, skip=frozenset()) -> Iterator[dict[str, object]]:
+Numbers = dict[tuple[str, str, str], int]
+
+
+def measured(
+    campaign: world.Campaign, final: world.Final, days_old: int
+) -> tuple[Numbers, frozenset[tuple[str, str, str]]]:
+    """The numbers of a campaign on a day as a load sees them at an age: impressions, clicks,
+    spend in cents, and the count and the value of each action in each window; and those of the
+    actions that mature as conversions, which the ad sets and the ads share by their conversions."""
+    numbers = {
+        ("impressions", "", ""): matured(final.impressions, days_old, DELIVERY),
+        # Every click, and those to the site, which the model counts (ADR-0025).
+        ("clicks", "", ""): matured(final.clicks * 125 // 100, days_old, DELIVERY),
+        ("inline_link_clicks", "", ""): matured(final.clicks, days_old, DELIVERY),
+        ("spend", "", ""): matured(final.spend_micros, days_old, DELIVERY) // 10_000,
+    }
+    converting = set()
+    for action_type, count, value, curve in action_finals(campaign, final):
+        for kind, total in (("count", count), ("value", value)):
+            for window, number in attributed(total, days_old, curve).items():
+                numbers[(kind, action_type, window)] = number
+                if curve is CONVERSIONS:
+                    converting.add((kind, action_type, window))
+    return numbers, frozenset(converting)
+
+
+def stats_list(numbers: Numbers, kind: str, text) -> list[dict[str, str]]:
+    """The AdsActionStats of the actions of a kind, count or value, that have a value."""
+    found = []
+    for action_type in dict.fromkeys(a for k, a, _ in numbers if k == kind):
+        if numbers[(kind, action_type, "value")]:
+            windows = {w: text(numbers[(kind, action_type, w)]) for w in WINDOWS}
+            found.append({"action_type": action_type, **windows})
+    return found
+
+
+def insights(now, first=None, skip=frozenset(), level="campaign") -> Iterator[dict[str, object]]:
+    """The insights of a level, campaign, adset or ad, one row a day. The numbers of an ad set are
+    its share of those of its campaign, and those of an ad its share of those of its ad set."""
     name_day = as_of(now)
     for account, campaign, day, final, days_old in world.observed(PLATFORM, now, first, skip):
-        actions, values = [], []
-        for action_type, count, value, curve in action_finals(campaign, final):
-            counted = attributed(count, days_old, curve, str)
-            if counted["value"] != "0":
-                actions.append({"action_type": action_type, **counted})
-            if value:
-                valued = attributed(value, days_old, curve, trimmed)
-                if valued["value"] != "0":
-                    values.append({"action_type": action_type, **valued})
-        yield {
-            "account_id": account.account_id,
-            "account_name": account.name,
-            "account_currency": account.currency,
-            "campaign_id": campaign.campaign_id,
-            "campaign_name": campaign.name_at(name_day),
-            "date_start": day.isoformat(),
-            "date_stop": day.isoformat(),
-            "impressions": str(matured(final.impressions, days_old, DELIVERY)),
-            # Every click, and those to the site, which the model counts (ADR-0025).
-            "clicks": str(matured(final.clicks * 125 // 100, days_old, DELIVERY)),
-            "inline_link_clicks": str(matured(final.clicks, days_old, DELIVERY)),
-            "spend": trimmed(matured(final.spend_micros, days_old, DELIVERY) // 10_000),
-            "attribution_setting": ATTRIBUTION,
-            "actions": actions,
-            "action_values": values,
-        }
+        numbers, converting = measured(campaign, final, days_old)
+        found = [({"campaign_name": campaign.name_at(name_day)}, numbers)]
+        if level != "campaign":
+            groups = world.ad_groups_of(campaign)
+            found = [
+                ({"adset_id": group.ad_group_id, "adset_name": group.name}, in_group, group)
+                for group, in_group in zip(
+                    groups, world.divided(numbers, converting, groups, day), strict=True
+                )
+            ]
+        if level == "ad":
+            found = [
+                ({"adset_id": named["adset_id"], "ad_id": ad.ad_id, "ad_name": ad.name}, in_ad)
+                for named, in_group, group in found
+                for ad, in_ad in zip(
+                    group.ads, world.divided(in_group, converting, group.ads, day), strict=True
+                )
+            ]
+        for named, part, *_ in found:
+            yield {
+                "account_id": account.account_id,
+                "account_name": account.name,
+                "account_currency": account.currency,
+                "campaign_id": campaign.campaign_id,
+                **named,
+                "date_start": day.isoformat(),
+                "date_stop": day.isoformat(),
+                "impressions": str(part[("impressions", "", "")]),
+                "clicks": str(part[("clicks", "", "")]),
+                "inline_link_clicks": str(part[("inline_link_clicks", "", "")]),
+                "spend": trimmed(part[("spend", "", "")]),
+                "attribution_setting": ATTRIBUTION,
+                "actions": stats_list(part, "count", str),
+                "action_values": stats_list(part, "value", trimmed),
+            }
 
 
 def records(now, first=None, skip=frozenset()) -> dict[str, Iterator[dict[str, object]]]:
     return {
         "ad_accounts": ad_accounts(now),
         "campaigns": campaigns(as_of(now)),
-        "insights_campaign": insights_campaign(now, first, skip),
+        "insights_campaign": insights(now, first, skip),
+        "adsets": adsets(as_of(now)),
+        "insights_adset": insights(now, first, skip, "adset"),
+        "ads": ads(as_of(now)),
+        "insights_ad": insights(now, first, skip, "ad"),
     }
 
 

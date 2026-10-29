@@ -4,6 +4,7 @@ the numbers within the reload window of each platform, the names as of the load,
 and the rules that each API has of its own."""
 
 import hashlib
+import itertools
 import json
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -34,9 +35,9 @@ FACT_TABLES = {
 # shows here. They come from a first run of the generator, checked by a person.
 GOLDEN = {
     "demo_fx": "5abc425fd6176c725d9a5de32d69121604b951fb96972781cd64cfa59e2643fb",
-    "demo_search": "9682d2d2e32bc8b3df4171a57724cdb96bfa3374c16944bb5b1d99460998f09d",
-    "demo_social": "6920405dfd561491dcad5e580c0ca6f8fc6f51009f3f1d5c10ab814183cee2d2",
-    "demo_video": "70cd30471a6dec38aee14f46c61bedab1726b56cee639a375a06a819ef348658",
+    "demo_search": "08748d3f1515f5aeb44489c96d277382b6e2973c5fefd789b530c69ff9ee34cc",
+    "demo_social": "8e69473975db3205d4ae87493fa65da6eff3c3abd87bb983ebc544e59ea3b5e8",
+    "demo_video": "81ee94ee5b8ac0f78abdfe555b52e6f53b4bd68f69d81ce78a09efd70d974b6d",
     "demo_web": "335d391844f7585e98d451db4c2b997fe878fe05a6d416e10fc9079879102eb4",
 }
 
@@ -381,9 +382,16 @@ def test_each_platform_names_how_its_fact_tables_hold_an_account_and_a_day():
     # each account through them, without dlt.
     assert {p.code: [f.table for f in p.facts] for p in platforms.PLATFORMS.values()} == {
         "demo_fx": ["rates_daily"],
-        "demo_search": ["campaign_stats", "campaign_conversions"],
-        "demo_social": ["insights_campaign"],
-        "demo_video": ["report_campaign_daily"],
+        "demo_search": [
+            "campaign_stats",
+            "campaign_conversions",
+            "ad_group_stats",
+            "ad_group_conversions",
+            "ad_stats",
+            "ad_conversions",
+        ],
+        "demo_social": ["insights_campaign", "insights_adset", "insights_ad"],
+        "demo_video": ["report_campaign_daily", "report_adgroup_daily", "report_ad_daily"],
         "demo_web": ["report_sessions_daily"],
     }
     for p in platforms.PLATFORMS.values():
@@ -395,5 +403,85 @@ def test_each_platform_names_how_its_fact_tables_hold_an_account_and_a_day():
     assert web.account_text.format("390000001") == "properties/390000001"
     assert date(2026, 10, 11).strftime(web.day_text) == "20261011"
     assert web.day_date_sql == "to_date(\"date\", 'YYYYMMDD')"
-    [video] = platforms.PLATFORMS["demo_video"].facts
+    video = platforms.PLATFORMS["demo_video"].facts[0]
     assert video.day_date_sql == 'left("dimensions__stat_time_day"::text, 10)::date'
+
+
+# The levels of each ad platform, campaign, ad group and ad: the table of each, how a row names
+# its level and its parent, and the numbers of a row that add up.
+LEVELS = {
+    "demo_search": (
+        ("campaign_stats", "ad_group_stats", "ad_stats"),
+        {
+            "campaign_stats": lambda r: (r["campaign"]["id"], None),
+            "ad_group_stats": lambda r: (r["adGroup"]["id"], r["campaign"]["id"]),
+            "ad_stats": lambda r: (r["adGroupAd"]["ad"]["id"], r["adGroup"]["id"]),
+        },
+        lambda r: (
+            r["segments"]["date"],
+            int(r["metrics"]["impressions"]),
+            int(r["metrics"]["clicks"]),
+            int(r["metrics"]["costMicros"]),
+            round(Decimal(str(r["metrics"]["conversions"])), 2),
+        ),
+    ),
+    "demo_social": (
+        ("insights_campaign", "insights_adset", "insights_ad"),
+        {
+            "insights_campaign": lambda r: (r["campaign_id"], None),
+            "insights_adset": lambda r: (r["adset_id"], r["campaign_id"]),
+            "insights_ad": lambda r: (r["ad_id"], r["adset_id"]),
+        },
+        lambda r: (
+            r["date_start"],
+            int(r["impressions"]),
+            int(r["inline_link_clicks"]),
+            Decimal(r["spend"]),
+            sum(int(a["value"]) for a in r["actions"] if "purchase" in a["action_type"]),
+        ),
+    ),
+    "demo_video": (
+        ("report_campaign_daily", "report_adgroup_daily", "report_ad_daily"),
+        {
+            "report_campaign_daily": lambda r: (r["dimensions"]["campaign_id"], None),
+            "report_adgroup_daily": lambda r: (
+                r["dimensions"]["adgroup_id"],
+                r["metrics"]["campaign_id"],
+            ),
+            "report_ad_daily": lambda r: (r["dimensions"]["ad_id"], r["metrics"]["adgroup_id"]),
+        },
+        lambda r: (
+            r["dimensions"]["stat_time_day"][:10],
+            int(r["metrics"]["impressions"]),
+            int(r["metrics"]["clicks"]),
+            Decimal(r["metrics"]["spend"]),
+            int(r["metrics"]["complete_payment"]),
+        ),
+    ),
+}
+
+
+@pytest.mark.parametrize("code", sorted(LEVELS))
+def test_the_ad_groups_of_a_campaign_add_up_to_it_and_the_ads_to_their_ad_group(code):
+    # Each level is a report of its own, as on a platform; the demo divides the numbers of a
+    # campaign among its ad groups and those of an ad group among its ads (world.divided).
+    tables, keys, numbers = LEVELS[code]
+    records = all_records(platforms.PLATFORMS[code].module, first=last_month)
+    for parent, child in itertools.pairwise(tables):
+        totals, sums = {}, {}
+        for row in records[parent]:
+            day, *values = numbers(row)
+            totals[(keys[parent](row)[0], day)] = values
+        for row in records[child]:
+            day, *values = numbers(row)
+            key = (keys[child](row)[1], day)
+            sums[key] = [
+                a + b for a, b in zip(sums.get(key, [0] * len(values)), values, strict=True)
+            ]
+        assert sums, (code, child)
+        assert set(sums) <= set(totals), (code, child)
+        assert all(sums[key] == totals[key] for key in sums), (code, child)
+    if code == "demo_search":
+        # Performance Max has no ad groups, so some campaign days have none.
+        grouped = {keys["ad_group_stats"](r)[1] for r in records["ad_group_stats"]}
+        assert "21000000103" not in grouped

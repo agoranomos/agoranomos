@@ -114,8 +114,14 @@ def ecb(monkeypatch):
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.setenv("WAREHOUSE_LOADER_PASSWORD", "loader-password")
-    monkeypatch.setenv("LOAD__TRUNCATE_STAGING_DATASET", "unset")
-    monkeypatch.delenv("LOAD__TRUNCATE_STAGING_DATASET")
+    # The settings of dlt that a load sets go when the test ends.
+    for name in (
+        "LOAD__TRUNCATE_STAGING_DATASET",
+        "NORMALIZE__DATA_WRITER__FILE_MAX_ITEMS",
+        "LOAD__WORKERS",
+    ):
+        monkeypatch.setenv(name, "unset")
+        monkeypatch.delenv(name)
     names = ("agoranomos_pipelines.ecb", "agoranomos_pipelines.loads")
     for name in names:
         sys.modules.pop(name, None)
