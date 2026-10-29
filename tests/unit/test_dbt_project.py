@@ -383,10 +383,18 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
     rows = {r["platform"]: r for r in seed_rows("seed_ad_platforms")}
     from agoranomos_pipelines.demo import platforms
 
-    assert set(rows) == set(platforms.PLATFORMS)
+    # And the real sources, which mimic nothing: the rates of the ECB (ADR-0032).
+    assert set(rows) == {*platforms.PLATFORMS, "ecb"}
     for code, platform in platforms.PLATFORMS.items():
         assert rows[code]["mimics"] == platform.mimics
         assert rows[code]["is_demo"] == "true"
+    assert rows["ecb"] == {
+        "platform": "ecb",
+        "platform_name": "European Central Bank",
+        "kind": "exchange_rates",
+        "mimics": "",
+        "is_demo": "false",
+    }
 
 
 def test_the_seeds_of_currencies_and_time_zones_hold_what_the_demo_uses():
@@ -810,3 +818,65 @@ def test_every_column_of_the_intermediate_models_takes_the_doc_block_of_its_name
             assert description, (model, name)
             assert description.group(1) == f"'{{{{ doc(\"{name}\") }}}}'", (model, name)
             assert name in written, (model, name)
+
+
+ECB = STAGING / "ecb"
+# The columns of the CSV of the ECB, as dlt names them, which the load keeps as text (ecb.py).
+ECB_COLUMNS = (
+    "key",
+    "freq",
+    "currency",
+    "currency_denom",
+    "exr_type",
+    "exr_suffix",
+    "time_period",
+    "obs_value",
+)
+
+
+def test_the_staging_of_the_ecb_reads_its_csv_through_its_shape_even_before_a_load():
+    # The DAG of the rates starts paused, so a deployment with the demo alone never has the table:
+    # the model reads an empty query of the same columns until a load writes it (ADR-0032).
+    text = (ECB / "stg_ecb__rates_daily.sql").read_text(encoding="utf-8")
+    comment, *_ = text.splitlines()
+    assert comment.startswith("-- stg_ecb__rates_daily.sql: ")
+    columns = dict(re.findall(r"'(\w+)': '([\w ]+)'", text))
+    assert columns == dict.fromkeys(ECB_COLUMNS, "text")
+    assert text.count("{{ ecb_exr(relation_or_empty(source('raw_ecb', 'rates_daily'), {") == 1
+    assert text.rstrip().endswith("}), 'ecb') }}")
+    macro = (DBT / "macros" / "shapes" / "ecb_exr.sql").read_text(encoding="utf-8")
+    for column in ("time_period", "currency_denom", "currency", "obs_value"):
+        assert column in macro
+    assert "'{{ platform }}' as rate_source" in macro
+
+
+def test_the_sources_of_the_ecb_are_the_tables_that_its_load_writes():
+    text = (ECB / "_ecb__sources.yml").read_text(encoding="utf-8")
+    [source] = re.findall(r"^  - name: (\w+)\n    description:", text, flags=re.MULTILINE)
+    assert source == "raw_ecb"
+    assert re.search(r"^    schema: raw_ecb$", text, flags=re.MULTILINE)
+    pattern = r"^      - name: (\w+)\n        description:"
+    assert set(re.findall(pattern, text, flags=re.MULTILINE)) == {
+        "rates_daily",
+        "_agoranomos_reloads",
+    }
+
+
+def test_the_staging_of_the_ecb_has_the_critical_tests_of_the_rates_of_the_demo():
+    # The model of the rates of the ECB and that of the demo give the same columns, and the same
+    # tests guard both.
+    ecb = (ECB / "_ecb__models.yml").read_text(encoding="utf-8").split("    data_tests:", 1)[1]
+    demo = (STAGING / "demo_fx" / "_demo_fx__models.yml").read_text(encoding="utf-8")
+    assert ecb == demo.split("    data_tests:", 1)[1]
+    assert "severity" not in ecb
+
+
+def test_the_rates_take_the_ecb_alone_once_it_has_any_and_the_loads_show_it_before_a_load():
+    # Never a fictional rate of the demo on a day on which the ECB publishes none (ADR-0032).
+    rates = (DBT / "models" / "intermediate" / "int_fx_rates__filled.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "    from {{ ref('stg_ecb__rates_daily') }}\n    union all\n" in rates
+    assert "where not exists (select from {{ ref('stg_ecb__rates_daily') }})" in rates
+    loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
+    assert "{{ relation_or_empty(source('raw_ecb', '_agoranomos_reloads'), {" in loads

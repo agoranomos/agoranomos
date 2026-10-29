@@ -121,6 +121,16 @@ ALTER SCHEMA raw_demo_fx_staging OWNER TO loader;
 GRANT USAGE ON SCHEMA raw_demo_fx TO transformer;
 GRANT SELECT ON ALL TABLES IN SCHEMA raw_demo_fx TO transformer;
 ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_demo_fx GRANT SELECT ON TABLES TO transformer;
+-- The reference rates of the euro of the European Central Bank (ADR-0032), which dlt loads into
+-- raw_ecb and merges through raw_ecb_staging, as it loads a platform. loader owns both;
+-- transformer may read the first.
+CREATE SCHEMA IF NOT EXISTS raw_ecb AUTHORIZATION loader;
+CREATE SCHEMA IF NOT EXISTS raw_ecb_staging AUTHORIZATION loader;
+ALTER SCHEMA raw_ecb OWNER TO loader;
+ALTER SCHEMA raw_ecb_staging OWNER TO loader;
+GRANT USAGE ON SCHEMA raw_ecb TO transformer;
+GRANT SELECT ON ALL TABLES IN SCHEMA raw_ecb TO transformer;
+ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_ecb GRANT SELECT ON TABLES TO transformer;
 -- The settings of the model of the deployment (ADR-0024): the first task of the transform loads
 -- them with dlt into raw_settings, replacing each table in place, so the schema needs no staging
 -- schema. loader owns it; transformer may read it, and metabase_reader may not.

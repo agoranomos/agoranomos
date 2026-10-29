@@ -1,0 +1,28 @@
+models:
+  - name: stg_ecb__rates_daily
+    description: >-
+      The reference rates of the euro of the European Central Bank, one row for each day of
+      publication and currency: the value of one euro, the base_currency, in quote_currency. A
+      weekend or a closing day of TARGET has no row, and the model is empty while no load has taken
+      the rates. rate_date, base_currency and quote_currency are its key. Its tests guard the
+      marts: when one of them fails, dbt does not rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [rate_date, base_currency, quote_currency]
+    columns:
+      - name: rate_date
+        description: '{{ doc("rate_date") }}'
+        data_tests: [not_null]
+      - name: base_currency
+        description: '{{ doc("base_currency") }}'
+        data_tests: [not_null]
+      - name: quote_currency
+        description: '{{ doc("quote_currency") }}'
+        data_tests: [not_null]
+      - name: rate
+        description: '{{ doc("rate") }}'
+        data_tests: [not_null, non_negative]
+      - name: rate_source
+        description: '{{ doc("rate_source") }}'
+        data_tests: [not_null]

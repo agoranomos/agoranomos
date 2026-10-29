@@ -65,7 +65,7 @@ def source(monkeypatch):
     monkeypatch.setitem(sys.modules, "dlt.destinations", types.ModuleType("dlt.destinations"))
     monkeypatch.setitem(sys.modules, "dlt.destinations.exceptions", exceptions)
     monkeypatch.setenv("WAREHOUSE_LOADER_PASSWORD", "loader-password")
-    names = ("agoranomos_pipelines.settings.source", "agoranomos_pipelines.demo.sources")
+    names = ("agoranomos_pipelines.settings.source", "agoranomos_pipelines.loads")
     for name in names:
         sys.modules.pop(name, None)
     module = importlib.import_module("agoranomos_pipelines.settings.source")

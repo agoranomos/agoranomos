@@ -16,6 +16,12 @@ with reloads as (
     union all
     select 'demo_web' as platform, account_id, window_end, loaded_at
     from {{ source('raw_demo_web', '_agoranomos_reloads') }}
+    union all
+    -- Empty while no load has taken the rates of the ECB, whose DAG starts paused.
+    select 'ecb' as platform, account_id, window_end, loaded_at
+    from {{ relation_or_empty(source('raw_ecb', '_agoranomos_reloads'), {
+        'account_id': 'text', 'window_end': 'date', 'loaded_at': 'timestamp with time zone',
+    }) }}
 )
 
 select

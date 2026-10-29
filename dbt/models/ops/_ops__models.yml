@@ -2,10 +2,10 @@ models:
   - name: ops_loads
     description: >-
       The last load of each account of each platform, one row each, from the record that each load
-      of the demo writes (_agoranomos_reloads): the last day that a load took, when it was loaded,
-      and how many hours ago, as of the moment that the view is read. The accounts of demo_web are
-      its properties, and demo_fx has one account, EUR, the base of its rates. The Ops collection
-      of Metabase shows it (ADR-0029).
+      writes (_agoranomos_reloads): the last day that a load took, when it was loaded, and how
+      many hours ago, as of the moment that the view is read. The accounts of demo_web are its
+      properties, and demo_fx and ecb have one account each, EUR, the base of their rates; ecb has
+      none until its first load. The Ops collection of Metabase shows it (ADR-0029).
     columns:
       - name: platform
         description: '{{ doc("platform") }}'

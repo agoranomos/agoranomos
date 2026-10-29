@@ -105,10 +105,14 @@ def sources(monkeypatch):
     # end of the test puts back what was there before, and no other test sees it.
     monkeypatch.setenv("LOAD__TRUNCATE_STAGING_DATASET", "unset")
     monkeypatch.delenv("LOAD__TRUNCATE_STAGING_DATASET")
-    sys.modules.pop("agoranomos_pipelines.demo.sources", None)
+    # The shared module imports dlt too, so it takes the stand-in only when imported again.
+    names = ("agoranomos_pipelines.demo.sources", "agoranomos_pipelines.loads")
+    for name in names:
+        sys.modules.pop(name, None)
     module = importlib.import_module("agoranomos_pipelines.demo.sources")
     yield module, pipelines, loads
-    sys.modules.pop("agoranomos_pipelines.demo.sources", None)
+    for name in names:
+        sys.modules.pop(name, None)
 
 
 def test_every_table_of_every_platform_has_its_hints(sources):
