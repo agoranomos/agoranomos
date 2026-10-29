@@ -133,11 +133,11 @@ def test_a_load_ends_yesterday_in_frankfurt(ecb):
     assert module.yesterday(datetime(2026, 7, 14, 22, 30, tzinfo=UTC)) == date(2026, 7, 14)
 
 
-def test_the_first_load_takes_the_months_of_two_years_back(ecb):
+def test_the_first_load_takes_37_months_one_before_the_history_of_google_ads(ecb):
     module, _, _ = ecb
-    assert module.window(NOW, None) == (date(2024, 10, 1), date(2026, 10, 28))
-    assert module.history_start(datetime(2026, 1, 15, 12, tzinfo=UTC)) == date(2024, 1, 1)
-    assert module.history_start(datetime(2026, 12, 31, 12, tzinfo=UTC)) == date(2024, 12, 1)
+    assert module.window(NOW, None) == (date(2023, 9, 1), date(2026, 10, 28))
+    assert module.history_start(datetime(2026, 1, 15, 12, tzinfo=UTC)) == date(2022, 12, 1)
+    assert module.history_start(datetime(2026, 12, 31, 12, tzinfo=UTC)) == date(2023, 11, 1)
 
 
 def test_a_later_load_takes_the_new_days_and_at_least_the_last_seven(ecb):
@@ -188,7 +188,7 @@ def test_a_load_keeps_the_rows_as_the_csv_names_them_and_replaces_its_days(ecb):
     assert hints["rates_daily"]["write_disposition"] == {
         "disposition": "merge",
         "strategy": "delete-insert",
-        "destination_scope": "time_period BETWEEN '2024-10-01' AND '2026-10-28'",
+        "destination_scope": "time_period BETWEEN '2023-09-01' AND '2026-10-28'",
     }
     # Every column stays text, as the ECB writes it, and each hint has a dict of its own.
     columns = hints["rates_daily"]["columns"]
@@ -207,7 +207,7 @@ def test_a_load_records_its_window_in_the_same_run(ecb):
     assert {key: record[key] for key in ("account_id", "as_of", "window_start", "window_end")} == {
         "account_id": "EUR",
         "as_of": date(2026, 10, 29),
-        "window_start": date(2024, 10, 1),
+        "window_start": date(2023, 9, 1),
         "window_end": date(2026, 10, 28),
     }
     assert record["now"] == NOW

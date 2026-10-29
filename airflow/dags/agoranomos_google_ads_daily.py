@@ -4,7 +4,7 @@ agoranomos_google_ads_daily runs at 10:37 UTC, after midnight in every time zone
 UTC-10 east, and loads with dlt, as the loader role, the accounts of google_ads that
 extensions/model/clients.toml names into raw_google_ads: for each account, the days from the day
 after the last that a load took, or from 90 days back when that is earlier, to yesterday in its
-time zone, and the last 18 months on its first load (agoranomos_pipelines/google_ads.py). It signs
+time zone, and the last 36 months on its first load (agoranomos_pipelines/google_ads.py). It signs
 in with the key of the service account in GOOGLE_ADS_SERVICE_ACCOUNT_KEY. Each load updates the
 asset of its statistics, and the transform runs after it.
 

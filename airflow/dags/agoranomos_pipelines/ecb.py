@@ -8,9 +8,10 @@ row as the CSV names its columns, which dlt writes in snake_case into raw_ecb.ra
 text, as the ECB writes them: the macro ecb_exr of dbt/macros/shapes/ reads them. A window without
 a rate, such as a weekend, comes back empty and still replaces its days. Each load records its
 window in _agoranomos_reloads in the same run, with the account EUR, the base of the rates, as the
-loads of the demo do. The first load takes the rates from the first day of the month two years
-back; a later one, the days from the day after the last that a load took, or from 7 days back when
-that is earlier, so that a rate that the ECB corrects comes again. Both end yesterday in Frankfurt,
+loads of the demo do. The first load takes the rates from the first day of the month 37 months
+back, one month before the history of Google Ads (ADR-0034), so that its first day has a rate; a
+later one, the days from the day after the last that a load took, or from 7 days back when that is
+earlier, so that a rate that the ECB corrects comes again. Both end yesterday in Frankfurt,
 where the ECB publishes."""
 
 from __future__ import annotations
@@ -51,7 +52,7 @@ URL = "https://data-api.ecb.europa.eu/service/data/EXR/D..EUR.SP00.A"
 ACCOUNT = "EUR"
 TIME_ZONE = ZoneInfo("Europe/Berlin")
 WINDOW_DAYS = 7
-HISTORY_MONTHS = 24
+HISTORY_MONTHS = 37
 # The hints of the table, by the names that dlt gives the columns of the CSV. Every column stays
 # text, as the ECB writes it, and staging casts it.
 HINTS = {
@@ -80,7 +81,7 @@ def yesterday(now: datetime) -> date:
 
 
 def history_start(now: datetime) -> date:
-    """The first day of the first load at now: the first day of the month two years before
+    """The first day of the first load at now: the first day of the month HISTORY_MONTHS before
     yesterday."""
     last = yesterday(now)
     months = last.year * 12 + last.month - 1 - HISTORY_MONTHS

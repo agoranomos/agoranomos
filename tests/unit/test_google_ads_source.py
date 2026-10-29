@@ -264,10 +264,10 @@ def test_the_days_end_yesterday_in_the_time_zone_of_each_account(ads):
     assert module.yesterday(NOW, "Europe/Berlin") == date(2026, 10, 28)
 
 
-def test_the_first_load_takes_18_months_and_a_later_one_at_least_90_days(ads):
+def test_the_first_load_takes_36_months_and_a_later_one_at_least_90_days(ads):
     module, _, _, _ = ads
     last = date(2026, 10, 28)
-    assert module.window(last, None) == (date(2025, 4, 1), last)
+    assert module.window(last, None) == (date(2023, 10, 1), last)
     assert module.window(last, date(2026, 10, 27)) == (date(2026, 7, 31), last)
     assert module.window(last, date(2026, 6, 1)) == (date(2026, 6, 2), last)
 
@@ -323,12 +323,12 @@ def test_a_load_asks_v26_for_each_account_as_the_service_account(ads, monkeypatc
 def test_a_load_keeps_the_rows_as_the_api_gives_them_and_replaces_the_days_of_each_account(ads):
     module, _, made, extensions = ads
     counts = module.load(NOW, extensions)
-    # The first load of each account: a row in each of the 19 months of its history.
+    # The first load of each account: a row in each of the 37 calendar months of its history.
     assert counts == {
         "customers": 2,
         "campaigns": 2,
-        "campaign_stats": 38,
-        "campaign_conversions": 38,
+        "campaign_stats": 74,
+        "campaign_conversions": 74,
     }
     [pipeline] = made["pipelines"]
     assert pipeline.options["dataset_name"] == "raw_google_ads"
@@ -338,8 +338,8 @@ def test_a_load_keeps_the_rows_as_the_api_gives_them_and_replaces_the_days_of_ea
         "disposition": "merge",
         "strategy": "delete-insert",
         "destination_scope": (
-            "(customer__id = '1111111111' AND segments__date BETWEEN '2025-04-01' AND '2026-10-27')"
-            " OR (customer__id = '2222222222' AND segments__date BETWEEN '2025-04-01' AND "
+            "(customer__id = '1111111111' AND segments__date BETWEEN '2023-10-01' AND '2026-10-27')"
+            " OR (customer__id = '2222222222' AND segments__date BETWEEN '2023-10-01' AND "
             "'2026-10-28')"
         ),
     }
@@ -364,7 +364,7 @@ def test_a_load_records_the_window_of_each_account_on_its_own_day(ads):
     assert record["1111111111"]["as_of"] == date(2026, 10, 28)
     assert record["1111111111"]["window_end"] == date(2026, 10, 27)
     assert record["2222222222"]["as_of"] == date(2026, 10, 29)
-    assert record["2222222222"]["window_start"] == date(2025, 4, 1)
+    assert record["2222222222"]["window_start"] == date(2023, 10, 1)
 
 
 def test_an_error_of_the_api_stops_the_load_with_the_account_and_the_error(ads):

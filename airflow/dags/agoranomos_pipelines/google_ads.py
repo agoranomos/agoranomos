@@ -16,7 +16,8 @@ and then its statistics and its conversions by conversion action, by day, in a r
 own, as segments.conversion_action cannot be selected with metrics.cost_micros. The days of each
 account run from the day after the last that a load took, or from 90 days back when that is
 earlier, as conversions keep coming for up to 90 days after a click; the first load of an account
-takes the last 18 months, a calendar month in each request. All end yesterday in the time zone of
+takes the last 36 months, as Google Ads keeps data by day for 37 only (ADR-0034), a calendar month
+in each request. All end yesterday in the time zone of
 the account. A request counts as one operation of the daily quota, whatever its rows, so a daily
 load costs four operations for each account. The days of each account are replaced, empty or not,
 and the load records the window of each account in _agoranomos_reloads in the same run. What the
@@ -77,7 +78,7 @@ LOGIN = "GOOGLE_ADS_LOGIN_CUSTOMER_ID"
 # the URL of each request and the SQL of each scope, so nothing else may.
 ACCOUNT_ID = re.compile(r"\d{10}")
 WINDOW_DAYS = 90
-HISTORY_MONTHS = 18
+HISTORY_MONTHS = 36
 # A window longer than this goes in a request for each calendar month.
 ONE_REQUEST_DAYS = 92
 # The retries of a request are explicit, as the contract of the sources asks (ADR-0004): five
