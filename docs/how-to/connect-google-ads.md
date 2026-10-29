@@ -65,7 +65,7 @@ Name the conversion actions that count as conversions in `extensions/model/conve
 
 1. Run `./agoranomos up`, which gives the new settings to the container that runs the tasks.
 2. In the Airflow UI, unpause the DAGs `agoranomos_ecb_daily` and `agoranomos_google_ads_daily`, and `agoranomos_demo_transform` if the demo did not unpause it. Each starts paused, so that a deployment without Google Ads asks Google and the ECB nothing.
-3. Trigger `agoranomos_ecb_daily` and then `agoranomos_google_ads_daily` once, or wait for 06:47 and 10:37 UTC. The first load of Google Ads takes the last 36 months of each account, as Google Ads keeps data by day for 37 only, and the transform runs after it.
+3. Trigger `agoranomos_ecb_daily` and then `agoranomos_google_ads_daily` once, or wait for 06:47 and 10:37 UTC. The first load of Google Ads takes the last 36 months of each account, as Google Ads keeps data by day for 37 only ([ADR-0034](../adr/0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md)), and the transform runs after it.
 
 After the transform, the Ops collection of Metabase shows the loads of `ecb` and `google_ads` ([Watch the pipeline](watch-the-pipeline.md)), and the marts have the rows of the platform `google_ads`.
 
