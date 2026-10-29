@@ -34,7 +34,7 @@ Build in Metabase, through the MCP server `agoranomos-metabase`, with the accoun
     - `report_date` as the day in the time zone of the account.
 
     The skill `explain-a-metric` has the details.
-4. Look at what exists first: the dashboards of the collection **Agoranomos / Demo**, and anything similar in Workspace. Reuse or copy before you build new.
+4. Look at what exists first: the dashboard **Advertising** of the collection **Agoranomos / Advertising** ([Read the advertising dashboard](../../../docs/how-to/read-the-advertising-dashboard.md)), the dashboards of the collection **Agoranomos / Demo**, and anything similar in Workspace. Reuse or copy before you build new.
 5. Build each question, run it, and check that its numbers are plausible before you add it to a dashboard. Add filters of the period, the client and the platform when the dashboard spans them, as the demo dashboards do.
 6. Save in the collection that the level allows. Report the name and the link of each question and dashboard, and what each shows.
 

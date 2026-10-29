@@ -319,9 +319,10 @@ class ContentState:
     collection takes the permissions of its parent, and All Users may curate the root; the graph
     that a GET gives leaves out No access; a PUT of the graph with a revision that is not the
     newest is refused with 409; a PUT of a collection without archived takes it out of the trash;
-    a PUT of a dashboard with dashcards replaces them all, and a dashcard with a negative id is a
-    new one, but a dashboard in the trash, or a question in the trash on a new dashcard, makes it
-    404; a write with a key that its endpoint does not take is refused with 400. A question or a
+    a PUT of a dashboard with dashcards replaces them all, and a dashcard or a tab with a negative
+    id is a new one, which the cards of the request name a new tab by, but a dashboard in the
+    trash, or a question in the trash on a new dashcard, makes it 404; a write with a key that its
+    endpoint does not take is refused with 400. A question or a
     dashboard keeps the account that made it (creator_id: user_id unless a test says otherwise);
     the items of a collection are of every model unless models says, and leave out the questions
     of a dashboard unless show_dashboard_questions is true; with archived=true they are the
@@ -616,10 +617,30 @@ class ContentState:
                     }
             if method == "PUT":
                 placed_before = (item.get("dashboard_id"), item.get("collection_id"))
+                # A tab with a negative id is a new one, which the cards of the same request name by
+                # that id (update-dashboard!, dashboards_rest/api.clj).
+                new_tabs = {}
+                if "tabs" in body:
+                    for tab in body["tabs"]:
+                        if tab["id"] < 0:
+                            new_tabs[tab["id"]] = self.new_ids()[0]
+                    body = {
+                        **body,
+                        "tabs": [
+                            {**t, "id": new_tabs.get(t["id"], t["id"]), "position": n}
+                            for n, t in enumerate(body["tabs"])
+                        ],
+                    }
                 for key, value in body.items():
                     if key == "dashcards":
                         item["dashcards"] = [
-                            {**d, "id": d["id"] if d["id"] > 0 else self.new_ids()[0]}
+                            {
+                                **d,
+                                "id": d["id"] if d["id"] > 0 else self.new_ids()[0],
+                                "dashboard_tab_id": new_tabs.get(
+                                    d.get("dashboard_tab_id"), d.get("dashboard_tab_id")
+                                ),
+                            }
                             for d in copy.deepcopy(value)
                         ]
                     elif key == "archived":

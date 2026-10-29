@@ -11,13 +11,14 @@ it applies the metadata of the marts (metadata.py): the names, descriptions and 
 the overrides of the deployment give the tables and fields of the marts, with one line for each
 change, and keeps the KPIs that the marts declare as metrics in the collection Agoranomos / Metrics
 and as terms of the glossary (metrics.py, ADR-0034). While Metabase starts its weeks on its default,
-Sunday, the job starts them on Monday, as ISO 8601 does. Last, it keeps the Ops collection, a
-dashboard about the pipeline itself, in the collection Agoranomos as the code says (ops.py,
-ADR-0029), and gives every group but Administrators at most View on the collections of the content
-of the package that the registry of the content records, the collection Agoranomos and its packages
-such as Demo and Ops (content.py, ADR-0018), on every start, with one line for each change. Run with
-the argument diff, as ./agoranomos metadata diff does, it prints the plan of the metadata and
-applies nothing.
+Sunday, the job starts them on Monday, as ISO 8601 does. It keeps the dashboard Advertising, with
+its tabs, in the collection Agoranomos / Advertising (advertising.py, ADR-0034), once Metabase shows
+the marts. Last, it keeps the Ops collection, a dashboard about the pipeline itself, in the
+collection Agoranomos as the code says (ops.py, ADR-0029), and gives every group but
+Administrators at most View on the collections of the content of the package that the registry of
+the content records, the collection Agoranomos and its packages such as Demo, Advertising and Ops
+(content.py, ADR-0018), on every start, with one line for each change. Run with the argument diff,
+as ./agoranomos metadata diff does, it prints the plan of the metadata and applies nothing.
 
 Every secret comes from the environment and goes only into the body of a request. The messages of
 this script name a step and an HTTP status, or the class of an error (and, for an answer of an
@@ -40,6 +41,7 @@ from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+import advertising
 import ai_access
 import content
 import metadata
@@ -614,6 +616,8 @@ def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> in
         ensure_week_start(metabase, log)
         # The KPIs of the marts, as metrics and terms of the glossary (ADR-0034).
         metrics.ensure(metabase, registry, config.metadata_export, database_id, log)
+        # The dashboard Advertising, with or without the demo, once Metabase shows the marts.
+        advertising.ensure(metabase, registry, marts, config.metadata_export, database_id, log)
         # The Ops collection, with or without the demo; it ends with the lock-down of every
         # collection of the content of the package.
         content.ensure_package(metabase, registry, ops.ops_package(), database_id, log)

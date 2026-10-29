@@ -19,6 +19,8 @@ Agoranomos comes with a demo: the history of 18 months of a fictional business w
     - **Web analytics (demo)**: the sessions, the engagement rate, the key events and the revenue; the sessions of each day in each default channel group, and the results of each channel group; the 20 pairs of a source and a medium with the most sessions; and the sessions of the campaigns that web analytics gives an ad platform.
 
     The filters of a dashboard, **Period**, **Client** and, on the advertising, **Platform**, set every card of it. The period starts as the past 30 days, which end yesterday, the last day that the daily load has brought ([Keep the demo up to date](#keep-the-demo-up-to-date)). A chart with one series uses the first chart color of the project.
+
+    The demo also fills the dashboard **Advertising** of the collection **Agoranomos / Advertising**, which every deployment gets, with its tabs of the platforms, the campaigns, the ad groups and ads, and the conversions: [Read the advertising dashboard](read-the-advertising-dashboard.md).
 - **Airflow**, at the address that `up` prints: sign in as `admin` with `AIRFLOW_ADMIN_PASSWORD` from `.env`, and open the DAGs `agoranomos_demo_history`, whose five tasks load one platform each, `agoranomos_demo_transform`, `agoranomos_demo_daily`, their runs and the assets between them.
 
 ## What later starts do
