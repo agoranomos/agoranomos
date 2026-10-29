@@ -6,15 +6,18 @@ Metabase is healthy, creates the admin account when Metabase is not set up yet, 
 warehouse as the read-only metabase_reader role, showing only the marts schema. Each step looks at
 the current state first, so running it again changes nothing but the connection details. Settings
 that must not change in the Metabase UI, such as the switches of the AI features, are environment
-variables in compose.yaml instead. On a new Metabase it also turns the public links off,
-once. Then it applies the metadata of the marts (metadata.py): the names, descriptions and types
-that dbt and the overrides of the deployment give the tables and fields of the marts, with one line
-for each change. Last, it keeps the Ops collection, a dashboard about the pipeline itself, in the
-collection Agoranomos as the code says (ops.py, ADR-0029), and gives every group but Administrators
-at most View on the collections of the content of the package that the registry of the content
-records, the collection Agoranomos and its packages such as Demo and Ops (content.py, ADR-0018), on
-every start, with one line for each change. Run with the argument diff, as ./agoranomos metadata
-diff does, it prints the plan of the metadata and applies nothing.
+variables in compose.yaml instead. On a new Metabase it also turns the public links off, once. Then
+it applies the metadata of the marts (metadata.py): the names, descriptions and types that dbt and
+the overrides of the deployment give the tables and fields of the marts, with one line for each
+change, and keeps the KPIs that the marts declare as metrics in the collection Agoranomos / Metrics
+and as terms of the glossary (metrics.py, ADR-0034). While Metabase starts its weeks on its default,
+Sunday, the job starts them on Monday, as ISO 8601 does. Last, it keeps the Ops collection, a
+dashboard about the pipeline itself, in the collection Agoranomos as the code says (ops.py,
+ADR-0029), and gives every group but Administrators at most View on the collections of the content
+of the package that the registry of the content records, the collection Agoranomos and its packages
+such as Demo and Ops (content.py, ADR-0018), on every start, with one line for each change. Run with
+the argument diff, as ./agoranomos metadata diff does, it prints the plan of the metadata and
+applies nothing.
 
 Every secret comes from the environment and goes only into the body of a request. The messages of
 this script name a step and an HTTP status, or the class of an error (and, for an answer of an
@@ -40,6 +43,7 @@ from typing import Any, Protocol
 import ai_access
 import content
 import metadata
+import metrics
 import ops
 
 WAREHOUSE_NAME = "Agoranomos warehouse"
@@ -555,6 +559,20 @@ def ai_connect(env: Mapping[str, str], name: str, redirect_uris: list[str]) -> i
     return DIFF_NOTHING
 
 
+# The first day of the week of Metabase, which its filters of time grouping and its weeks use
+# (ADR-0034): Monday, as ISO 8601 has it.
+WEEK_START = "monday"
+
+
+def ensure_week_start(metabase: Metabase, log: Callable[[str], None]) -> None:
+    """Weeks from WEEK_START while Metabase keeps its default, Sunday: Metabase answers null for a
+    setting at its default, so a day that an admin chose in Admin > Settings > Localization
+    stays."""
+    if metabase.call("GET", "/api/setting/start-of-week") is None:
+        metabase.call("PUT", "/api/setting/start-of-week", {"value": WEEK_START})
+        log(f"set: the first day of the week of Metabase, {WEEK_START}")
+
+
 def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> int:
     environment = os.environ if env is None else env
     arguments = list(argv)
@@ -593,6 +611,9 @@ def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> in
         wait = metadata.waiter(METADATA_SYNC_TIMEOUT, "see ./agoranomos logs metabase")
         log = logged("metabase-init")
         metadata.apply(metabase, database_id, marts, wait, log=log)
+        ensure_week_start(metabase, log)
+        # The KPIs of the marts, as metrics and terms of the glossary (ADR-0034).
+        metrics.ensure(metabase, registry, config.metadata_export, database_id, log)
         # The Ops collection, with or without the demo; it ends with the lock-down of every
         # collection of the content of the package.
         content.ensure_package(metabase, registry, ops.ops_package(), database_id, log)

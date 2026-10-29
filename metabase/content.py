@@ -53,6 +53,8 @@ ROOT_DESCRIPTION = (
 ADMIN_GROUP_TYPE = "admin"
 # The type of every question that the package ships: not a model, not a metric.
 QUESTION_TYPE = "question"
+# The type of a metric of Metabase, a card too (ADR-0034).
+METRIC_TYPE = "metric"
 WHAT = {"collection": "collection", "card": "question", "dashboard": "dashboard"}
 # The word of the log for each model of the items of a collection, and the model of a question by
 # its type in those items (collections/children.clj of Metabase 0.64.1).
@@ -145,6 +147,20 @@ class Question:
 
 
 @dataclass(frozen=True)
+class Metric:
+    """A metric of Metabase: a card of type metric whose query, in the legacy form of MBQL, has one
+    aggregation over a table of the marts, with no breakout, so that a question or an AI client
+    groups it by any column. query is the inner query of MBQL, with the IDs that Metabase gives the
+    table and its fields."""
+
+    key: str
+    name: str
+    description: str
+    query: Mapping[str, Any]
+    visualization_settings: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class Placement:
     question: str
     row: int
@@ -183,6 +199,7 @@ class Package:
     description: str
     questions: tuple[Question, ...]
     dashboards: tuple[Dashboard, ...]
+    metrics: tuple[Metric, ...] = ()
 
 
 def is_entity_id(value: object) -> bool:
@@ -291,10 +308,12 @@ def counted(number: int, noun: str) -> str:
     return f"{number} {noun}" if number == 1 else f"{number} {noun}s"
 
 
-def created_line(registry: Registry, model: str, key: str, name: str) -> str:
+def created_line(
+    registry: Registry, model: str, key: str, name: str, what: str | None = None
+) -> str:
     """The line of an item that a job creates: created again when the registry knew it."""
     again = "created again" if registry.get(key) else "created"
-    return f"{again}: {WHAT[model]} {key} {shown(name)}"
+    return f"{again}: {what or WHAT[model]} {key} {shown(name)}"
 
 
 def changed(
@@ -506,6 +525,59 @@ def ensure_question(
     if not as_metabase_makes_it(have["result_metadata"], question.columns):
         body |= {"result_metadata": None, "dataset_query": query}
         log(f"revert of an edit: question {key} result_metadata")
+    if body:
+        metabase.call("PUT", f"/api/card/{found['id']}", body)
+    return found["id"]
+
+
+def ensure_metric(
+    metabase: Client,
+    registry: Registry,
+    package: Package,
+    metric: Metric,
+    collection_id: int,
+    database_id: int,
+    log: Log,
+) -> int:
+    """The metric of a key, as the code says: its name, description, display, place, trash, query
+    and settings of display, each put back when it differs. Its query is compared in the legacy
+    form that find() asks for, whole, and the metadata of its column is left to Metabase, which
+    computes it from the query."""
+    key = f"{package.key}/{metric.key}"
+    query = {"database": database_id, "type": "query", "query": dict(metric.query)}
+    settings = dict(metric.visualization_settings)
+    wanted = {
+        "name": metric.name,
+        "type": METRIC_TYPE,
+        "description": metric.description,
+        "display": "scalar",
+        "collection_id": collection_id,
+    }
+    found = located(registry, metabase, "card", key)
+    if found is None:
+        created = metabase.call(
+            "POST",
+            "/api/card",
+            {
+                **wanted,
+                "parameters": [],
+                "dataset_query": query,
+                "visualization_settings": settings,
+            },
+        )
+        log(created_line(registry, "card", key, metric.name, "metric"))
+        registry.set(key, "card", created["entity_id"])
+        return created["id"]
+    body = restore("card", key, found, log)
+    if body:
+        body["collection_id"] = wanted.pop("collection_id")
+    body |= changed("metric", key, found, wanted, log)
+    if found.get("dataset_query") != query:
+        body["dataset_query"] = query
+        log(f"revert of an edit: metric {key} query")
+    if (found.get("visualization_settings") or {}) != settings:
+        body["visualization_settings"] = settings
+        log(f"revert of an edit: metric {key} visualization_settings")
     if body:
         metabase.call("PUT", f"/api/card/{found['id']}", body)
     return found["id"]
@@ -835,7 +907,11 @@ def ensure_dashboard(
 def retire_missing(metabase: Client, registry: Registry, package: Package, log: Log) -> None:
     """Move to the trash each item of the package that the registry holds and the code no longer
     ships, and drop it from the registry."""
-    shipped = {q.key for q in package.questions} | {d.key for d in package.dashboards}
+    shipped = (
+        {q.key for q in package.questions}
+        | {d.key for d in package.dashboards}
+        | {m.key for m in package.metrics}
+    )
     for key in registry.keys_of(package.key):
         if key.split("/", 1)[1] in shipped:
             continue
@@ -852,7 +928,7 @@ def ensure_package(
     metabase: Client, registry: Registry, package: Package, database_id: int, log: Log
 ) -> dict[str, int]:
     """Make a package of the content as the code says, under Agoranomos, and return the IDs of its
-    questions and dashboards by key."""
+    questions, dashboards and metrics by key."""
     root = ensure_collection(metabase, registry, ROOT_KEY, ROOT_NAME, ROOT_DESCRIPTION, None, log)
     collection = ensure_collection(
         metabase, registry, package.key, package.name, package.description, root["id"], log
@@ -863,6 +939,10 @@ def ensure_package(
     }
     for d in package.dashboards:
         ids[d.key] = ensure_dashboard(metabase, registry, package, d, collection["id"], ids, log)
+    for m in package.metrics:
+        ids[m.key] = ensure_metric(
+            metabase, registry, package, m, collection["id"], database_id, log
+        )
     retire_missing(metabase, registry, package, log)
     lock_down(metabase, registry, log)
     return ids
