@@ -13,7 +13,7 @@ dev = [
     "prek==0.5.7",
     "pytest==9.1.1",
     "ruff==0.17.2",
-    "zensical==0.0.72",
+    "zensical==0.0.73",
 ]
 
 [tool.uv]
