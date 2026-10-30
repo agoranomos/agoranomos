@@ -434,6 +434,16 @@ def board_of(metabase: FakeMetabase, name: str = ADVERTISING) -> dict[str, Any]:
     return demo_items(metabase)[3][name]
 
 
+def printed(out: str) -> list[str]:
+    """The lines that a start printed, without the one that says that the dashboard Advertising
+    waits: the stand-in shows no mart of ad groups or ads, so it waits on every start, which
+    changes nothing (tests/unit/test_advertising.py makes it)."""
+    return [line for line in out.splitlines() if not line.startswith(ADVERTISING_WAITS)]
+
+
+ADVERTISING_WAITS = "demo-init: waiting: the dashboard Advertising"
+
+
 def done_line(metabase: FakeMetabase, ran: str = "ran now") -> str:
     """The last line of a start that succeeds, with the IDs of the two dashboards."""
     named = " and ".join(
@@ -615,7 +625,7 @@ def test_a_second_start_changes_nothing(airflow, metabase, clock, capsys):
     )
     assert registry.read_text(encoding="utf-8") == saved
     # One line, which says that nothing ran: no line of a change.
-    [line] = capsys.readouterr().out.splitlines()
+    [line] = printed(capsys.readouterr().out)
     assert line == done_line(metabase, "ran before")
 
 
@@ -1196,7 +1206,7 @@ def test_a_mart_that_a_person_hid_in_metabase_counts_as_synced(airflow, metabase
     assert di.main(env_for(airflow, metabase)) == 0
     assert ("POST", "/api/database/2/sync_schema") not in metabase.calls[calls:]
     assert clock.now == started
-    assert capsys.readouterr().out.startswith("demo-init: the demo pipeline ran before")
+    assert printed(capsys.readouterr().out)[0].startswith("demo-init: the demo pipeline ran before")
 
 
 def test_a_collection_of_the_old_name_that_is_not_at_the_root_does_not_move(airflow, metabase):
@@ -2032,7 +2042,8 @@ def test_the_module_imports_only_the_standard_library_and_the_other_jobs():
             imported |= {alias.name.split(".")[0] for alias in node.names}
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             imported.add(node.module.split(".")[0])
-    allowed = set(sys.stdlib_module_names) | {"content", "metabase_init", "metadata", "metrics"}
+    own = {"advertising", "content", "metabase_init", "metadata", "metrics"}
+    allowed = set(sys.stdlib_module_names) | own
     assert "content" in imported
     assert imported <= allowed, sorted(imported - allowed)
 
@@ -2117,7 +2128,7 @@ def test_the_titles_of_a_question_are_put_back_as_the_code_says(airflow, metabas
     wanted = di.visualization_settings(QUESTIONS["by-client"], TITLES[di.AD_STATS], "USD")
     assert settings_of(metabase, "Spend by client") == wanted
     assert wanted["graph.x_axis.title_text"] == "Client"
-    assert capsys.readouterr().out.splitlines() == [
+    assert printed(capsys.readouterr().out) == [
         "demo-init: revert of an edit: question demo/by-client visualization_settings",
         done_line(metabase, "ran before"),
     ]

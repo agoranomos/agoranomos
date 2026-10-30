@@ -83,7 +83,7 @@ cd agoranomos
 
 | Сервис | Адрес | Что открыть |
 |---|---|---|
-| Metabase | <http://127.0.0.1:3000> | Коллекцию **Agoranomos / Demo** и её дашборды **Advertising overview (demo)** и **Web analytics (demo)** |
+| Metabase | <http://127.0.0.1:3000> | Коллекцию **Agoranomos / Advertising** с дашбордом **Advertising**, а также коллекцию **Agoranomos / Demo** и её дашборды **Advertising overview (demo)** и **Web analytics (demo)** |
 | Airflow | <http://127.0.0.1:8080> | DAG `agoranomos_demo_history`, `agoranomos_demo_daily` и `agoranomos_demo_transform` |
 
 `./agoranomos credentials` показывает адреса, имена пользователей и настройки `.env`, в которых лежат пароли, а сам пароль не печатает; `./agoranomos down` останавливает стек, данные при этом остаются. Туториал [Run Agoranomos locally with demo data](docs/tutorials/run-locally-with-demo-data.md) (на английском) шаг за шагом проводит по демо, а [Run Agoranomos locally](docs/how-to/run-locally.md) (на английском) рассказывает про Windows, обновления, память и решение проблем.
