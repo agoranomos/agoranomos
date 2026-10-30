@@ -76,6 +76,21 @@ AXIS_TITLES = ("graph.x_axis.title_text", "graph.y_axis.title_text")
 # color_name is drawn as it is. A chart with a breakout has a series for each value of the data, in
 # the colors of Metabase.
 SERIES_COLOR = "#A86400"
+# The widget type of a filter that changes the grouping of time of a question, and does not filter
+# it: its template tag has the type temporal-unit, and a card of a dashboard targets it with the
+# number of the stage of its query, 0 for a native question (buildTemplateTagVariableTarget,
+# frontend/src/metabase-lib/v1/parameters/utils/targets.ts at the tag v0.64.1).
+TEMPORAL_UNIT = "temporal-unit"
+# A card of text on a dashboard: a card with no question, which Metabase 0.64.1 keeps as this
+# virtual card in the settings of display, with the text beside it (checked on the stand, October
+# 2026).
+TEXT_CARD = {
+    "name": None,
+    "display": "text",
+    "visualization_settings": {},
+    "dataset_query": {},
+    "archived": False,
+}
 
 
 def column_key(name: str) -> str:
@@ -125,13 +140,17 @@ class Filter:
     the column with its schema and table, so the SQL reads that table without an alias. The field
     is the ID that Metabase gives the column, with its base type, as Metabase 0.64.1 gives them
     back in the tag (checked on the stand, October 2026). The name is also the slug of the filter
-    of a dashboard that sets it."""
+    of a dashboard that sets it. An alias, when there is one, is the column as the SQL names it:
+    Metabase puts it into the condition in place of the column of the field, so that a question
+    can filter the rows of its own table on the field of another (replace-alias in
+    src/metabase/driver/sql/parameters/substitution.clj at the tag v0.64.1)."""
 
     name: str
     display_name: str
     widget_type: str
     field_id: int
     base_type: str
+    alias: str = ""
 
 
 @dataclass(frozen=True)
@@ -161,12 +180,28 @@ class Metric:
 
 
 @dataclass(frozen=True)
+class Click:
+    """What a click on a value of a column of a card does: it opens the tab of the same dashboard
+    with the filter set to the value, as a link of Metabase to a tab of a dashboard."""
+
+    column: str
+    tab: str
+    filter: str
+
+
+@dataclass(frozen=True)
 class Placement:
-    question: str
+    """A card of a dashboard: a question, or a text when question is None, its place on the grid
+    of 24 columns, the tab that holds it on a dashboard with tabs, and what a click on it does."""
+
+    question: str | None
     row: int
     col: int
     size_x: int
     size_y: int
+    tab: str | None = None
+    text: str | None = None
+    click: Click | None = None
 
 
 @dataclass(frozen=True)
@@ -174,22 +209,28 @@ class DashboardFilter:
     """A filter of a dashboard, which sets the filter of the same name of each question of its
     cards that has one. Its slug is its ID too, so that the mappings of the cards name it the same
     way on every start. section_id is the section of the editor of Metabase that it belongs to,
-    and default its value until a person picks another, None for no value."""
+    and default its value until a person picks another, None for no value. filtering names the
+    filters that limit the values that it offers, such as the client for the campaigns, as linked
+    filters of Metabase."""
 
     slug: str
     name: str
     type: str
     section_id: str
     default: Any = None
+    filtering: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class Dashboard:
+    """A dashboard: its cards, its filters, and its tabs by name, in order, or none."""
+
     key: str
     name: str
     description: str
     cards: tuple[Placement, ...]
     filters: tuple[DashboardFilter, ...] = ()
+    tabs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -449,17 +490,29 @@ def native_query(package: Package, question: Question, database_id: int) -> dict
     native: dict[str, Any] = {"query": question.query}
     if question.filters:
         native["template-tags"] = {
-            f.name: {
-                "id": tag_id(package.key, question.key, f.name),
-                "name": f.name,
-                "display-name": f.display_name,
-                "type": "dimension",
-                "dimension": ["field", f.field_id, {"base-type": f.base_type}],
-                "widget-type": f.widget_type,
-            }
-            for f in question.filters
+            f.name: template_tag(package, question, f) for f in question.filters
         }
     return {"database": database_id, "type": "native", "native": native}
+
+
+def template_tag(package: Package, question: Question, f: Filter) -> dict[str, Any]:
+    """The template tag of a filter: a field filter, or, for a filter of the grouping of time, a
+    tag of the type temporal-unit on its field, which has no widget type (the template tags of
+    src/metabase/lib/schema/template_tag.cljc at the tag v0.64.1)."""
+    tag = {
+        "id": tag_id(package.key, question.key, f.name),
+        "name": f.name,
+        "display-name": f.display_name,
+        "type": "dimension",
+        "dimension": ["field", f.field_id, {"base-type": f.base_type}],
+        "widget-type": f.widget_type,
+    }
+    if f.alias:
+        tag["alias"] = f.alias
+    if f.widget_type == TEMPORAL_UNIT:
+        del tag["widget-type"]
+        tag["type"] = TEMPORAL_UNIT
+    return tag
 
 
 def ensure_question(
@@ -784,22 +837,87 @@ def filter_shape(dashboard_filter: DashboardFilter) -> dict[str, Any]:
     }
     if dashboard_filter.default is not None:
         shape["default"] = dashboard_filter.default
+    if dashboard_filter.filtering:
+        shape["filteringParameters"] = list(dashboard_filter.filtering)
     return shape
 
 
 def mappings_of(dashboard: Dashboard, question: Question, card_id: int) -> list[dict[str, Any]]:
     """The filter mappings of a card: each filter of the dashboard sets the filter of the same name
     of the question of the card, through its template tag."""
+    units = {f.name for f in question.filters if f.widget_type == TEMPORAL_UNIT}
     names = {f.name for f in question.filters}
     return [
         {
             "parameter_id": f.slug,
             "card_id": card_id,
-            "target": ["dimension", ["template-tag", f.slug]],
+            "target": ["dimension", ["template-tag", f.slug]]
+            + ([{"stage-number": 0}] if f.slug in units else []),
         }
         for f in dashboard.filters
         if f.slug in names
     ]
+
+
+def click_settings(click: Click, dashboard_id: int, tab_ids: Mapping[str, int]) -> dict[str, Any]:
+    """The settings of display of a card whose column opens a tab of its dashboard on a click, with
+    the value in a filter: the click behavior that Metabase 0.64.1 keeps in the settings of the
+    column (DashboardCustomDestinationClickBehavior, frontend/src/metabase-types/api/
+    click-behavior.ts at the tag v0.64.1; checked on the stand, October 2026)."""
+    behavior = {
+        "type": "link",
+        "linkType": "dashboard",
+        "targetId": dashboard_id,
+        "tabId": tab_ids[click.tab],
+        "parameterMapping": {
+            click.filter: {
+                "id": click.filter,
+                "source": {"type": "column", "id": click.column, "name": click.column},
+                "target": {"type": "parameter", "id": click.filter},
+            }
+        },
+    }
+    return {"column_settings": {column_key(click.column): {"click_behavior": behavior}}}
+
+
+def wanted_dashcard(
+    dashboard: Dashboard,
+    placement: Placement,
+    questions: Mapping[str, Question],
+    cards: Mapping[str, int],
+    dashboard_id: int,
+    tab_ids: Mapping[str, int],
+) -> dict[str, Any]:
+    """A card of a dashboard as the code says it: a question with its filter mappings and what a
+    click on it does, or a text, on its tab."""
+    place = {k: getattr(placement, k) for k in ("row", "col", "size_x", "size_y")}
+    tab = {"dashboard_tab_id": tab_ids[placement.tab]} if placement.tab is not None else {}
+    if placement.question is None:
+        text = {"virtual_card": TEXT_CARD, "text": placement.text}
+        return {
+            "card_id": None,
+            **place,
+            **tab,
+            "parameter_mappings": [],
+            "visualization_settings": text,
+            "series": [],
+        }
+    card_id = cards[placement.question]
+    settings = click_settings(placement.click, dashboard_id, tab_ids) if placement.click else {}
+    return {
+        "card_id": card_id,
+        **place,
+        **tab,
+        "parameter_mappings": mappings_of(dashboard, questions[placement.question], card_id),
+        "visualization_settings": settings,
+        "series": [],
+    }
+
+
+def ordered_tabs(dashboard: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """The tabs of a dashboard in the order that Metabase shows them."""
+    tabs = dashboard.get("tabs") or []
+    return sorted(tabs, key=lambda tab: (tab.get("position") or 0, tab["id"]))
 
 
 def filters_line(number: int) -> str:
@@ -829,8 +947,10 @@ def ensure_dashboard(
     log: Log,
 ) -> int:
     """The dashboard of a key, as the code says: its name, description and place, its cards whole
-    (dashcard_shape()), its filters, and no tab. The cards, the filters and the tabs are written
-    together, in one request, when any of them differs."""
+    (dashcard_shape()), its filters, and its tabs by name, in order, or no tab. The cards, the
+    filters and the tabs are written together, in one request, when any of them differs. A tab gets
+    its ID only when it is written, and a click to a tab names that ID: so tabs that differ are
+    written first, with no card, and the cards that they hold after them."""
     key = f"{package.key}/{dashboard.key}"
     found = located(registry, metabase, "dashboard", key)
     created = found is None
@@ -864,44 +984,71 @@ def ensure_dashboard(
             # takes it out of the trash: so it comes out first.
             metabase.call("PUT", f"/api/dashboard/{found['id']}", body)
             body = {}
+    for placement in dashboard.cards:
+        if (placement.tab is None) == bool(dashboard.tabs) or (
+            placement.tab is not None and placement.tab not in dashboard.tabs
+        ):
+            raise ContentError(f"dashboard {key}: a card is on a tab only when it has tabs")
     questions = {q.key: q for q in package.questions}
+    wanted_filters = [filter_shape(f) for f in dashboard.filters]
+    filters = found.get("parameters") or []
+    tabs = ordered_tabs(found)
+    have = Counter(dashcard_shape(d) for d in found.get("dashcards") or [])
+    tabs_right = [tab["name"] for tab in tabs] == list(dashboard.tabs)
+    if dashboard.tabs and not tabs_right:
+        metabase.call(
+            "PUT",
+            f"/api/dashboard/{found['id']}",
+            {
+                **body,
+                "dashcards": [],
+                "parameters": wanted_filters,
+                "tabs": [{"id": -(n + 1), "name": name} for n, name in enumerate(dashboard.tabs)],
+            },
+        )
+        body = {}
+        found = {**found, **metabase.call("GET", f"/api/dashboard/{found['id']}")}
+    tab_ids = {tab["name"]: tab["id"] for tab in ordered_tabs(found)}
     wanted_cards = [
-        {
-            "card_id": cards[p.question],
-            "row": p.row,
-            "col": p.col,
-            "size_x": p.size_x,
-            "size_y": p.size_y,
-            "parameter_mappings": mappings_of(dashboard, questions[p.question], cards[p.question]),
-            "visualization_settings": {},
-            "series": [],
-        }
+        wanted_dashcard(dashboard, p, questions, cards, found["id"], tab_ids)
         for p in dashboard.cards
     ]
     wanted = Counter(dashcard_shape(d) for d in wanted_cards)
-    have = Counter(dashcard_shape(d) for d in found.get("dashcards") or [])
-    wanted_filters = [filter_shape(f) for f in dashboard.filters]
-    filters = found.get("parameters") or []
-    tabs = found.get("tabs") or []
-    if have != wanted or filters != wanted_filters or tabs:
+    if have != wanted or filters != wanted_filters or not tabs_right:
         body["dashcards"] = [{"id": -(n + 1), **d} for n, d in enumerate(wanted_cards)]
         body["parameters"] = wanted_filters
-        body["tabs"] = []
+        body["tabs"] = [{"id": tab_ids[name], "name": name} for name in dashboard.tabs]
         if not created:
+            # New tabs have new IDs, which every card names: so a card counts as not as the code
+            # says only on tabs that stay.
+            cards_had = (
+                described(have, wanted, "card", "0 cards")
+                if tabs_right or not dashboard.tabs
+                else (counted(have.total(), "card") if have.total() else "0 cards")
+            )
             had = [
-                described(have, wanted, "card", "0 cards"),
+                cards_had,
                 described(shapes(filters), shapes(wanted_filters), "filter", "no filter"),
             ]
-            if tabs:
-                had.append(counted(len(tabs), "tab"))
+            if tabs or dashboard.tabs:
+                had.append(tabs_line([tab["name"] for tab in tabs], dashboard.tabs))
             listed = f"{', '.join(had[:-1])} and {had[-1]}"
-            log(
-                f"revert of an edit: dashboard {key} cards: {listed} "
-                f"-> {counted(len(wanted_cards), 'card')} and {filters_line(len(wanted_filters))}"
-            )
+            now = f"{counted(len(wanted_cards), 'card')} and {filters_line(len(wanted_filters))}"
+            if dashboard.tabs:
+                now += f" on {counted(len(dashboard.tabs), 'tab')}"
+            log(f"revert of an edit: dashboard {key} cards: {listed} -> {now}")
     if body:
         metabase.call("PUT", f"/api/dashboard/{found['id']}", body)
     return found["id"]
+
+
+def tabs_line(have: list[str], wanted: tuple[str, ...]) -> str:
+    """How many tabs a dashboard has, for the log, and, on a dashboard with tabs, whether they are
+    not as the code says."""
+    if not have:
+        return "no tab"
+    astray = " (not as the code says)" if wanted and have != list(wanted) else ""
+    return counted(len(have), "tab") + astray
 
 
 def retire_missing(metabase: Client, registry: Registry, package: Package, log: Log) -> None:
