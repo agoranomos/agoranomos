@@ -7,15 +7,13 @@ name: Stack
 # Airflow (ADR-0015): "local", the LocalExecutor that compose.yaml runs by default, and "celery",
 # the CeleryExecutor with a broker and a worker, which compose.celery.yaml adds and COMPOSE_FILE in
 # .env selects.
-# A pull request that changes the stack runs one job on amd64: the job server when it changes a file
-# of server mode, which the job changes finds, and the job local (the local variant) otherwise; the
-# job server runs the same stack tests and those of the proxy and the backups. A push to main runs
-# both jobs on amd64: the job local with the local variant, and the job server. The weekly schedule
-# runs the four combinations of local mode (two architectures and two variants, ADR-0010) and server
-# mode on amd64, and a manual run does the same and adds server mode on arm64. In a private
-# repository the minutes of Actions are counted, so a pull request does not run both jobs, and the
-# arm64 runners and the celery variant run every week and on a manual run, not for every pull
-# request or push.
+# Every run tests every combination: local mode on amd64 and arm64 (ADR-0010) with both variants,
+# and server mode on both architectures, which runs the same stack tests and those of the proxy and
+# the backups. The workflow runs on a pull request that changes the stack, on a push to main, every
+# week, which catches what changes around the repository, such as the images of the runners, and
+# by hand. The standard GitHub-hosted runners, ubuntu-24.04 and ubuntu-24.04-arm among them, are
+# free and unlimited in a public repository, as this one is (the reference of GitHub-hosted runners
+# on docs.github.com, read on 30 October 2026), so no run saves minutes on a smaller set.
 # The secrets of the stack are generated anew in every run, so the logs uploaded on failure hold
 # nothing that lives on.
 on:
@@ -55,62 +53,29 @@ on:
 permissions: {}
 
 # The event is part of the group: a push to main never replaces a weekly or manual run that waits,
-# which would skip the arm64 runners and the celery variant for that week.
+# which would skip that week's check of what changes around the repository.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # On a pull request: does it change a file of server mode? Then the job server runs instead of
-  # the job local. The list: the script, the Compose file that holds the profiles of server mode,
-  # the proxy, the script of the backups, and their stack tests.
-  changes:
-    name: Files of server mode
-    if: ${{ github.event_name == 'pull_request' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    outputs:
-      server: ${{ steps.files.outputs.server }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Look for the files of server mode in the pull request
-        id: files
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          pattern='^(agoranomos|compose\.yaml|postgres/backup\.sh|tests/stack/test_(server|backup|backup_roundtrip)\.py)$|^caddy/'
-          files=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")
-          if printf '%s\n' "$files" | grep -Eq "$pattern"; then
-            echo "server=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "server=false" >> "$GITHUB_OUTPUT"
-          fi
-
   local:
     name: Local mode (${{ matrix.arch }}, ${{ matrix.variant }})
-    needs: [changes]
-    # Every push to main runs it, and a pull request that changes no file of server mode.
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.server != 'true') }}
     strategy:
       fail-fast: false
       matrix:
-        # The weekly schedule and a manual run test both architectures and both variants; a pull
-        # request and a push to main test amd64 and the local variant.
-        arch: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["amd64", "arm64"]' || '["amd64"]') }}
-        variant: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["local", "celery"]' || '["local"]') }}
+        arch: [amd64, arm64]
+        variant: [local, celery]
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     # The first start builds the Airflow image and makes the demo ready, with a run of the transform
-    # of the model; each of the two runs of the stack tests runs the transform five times more, about
-    # seven minutes each on the two CPUs of a runner with the hooks of elementary (ADR-0028,
-    # ADR-0029). This job took 51 to 83 minutes on amd64 in October 2026 before elementary, which
-    # added about 20 minutes to the job server, which does the same and a round trip of a backup.
-    timeout-minutes: 130
+    # of the model; each of the two runs of the stack tests runs the transform five times more, with
+    # the hooks of elementary (ADR-0028, ADR-0029), on the four CPUs of a runner of a public
+    # repository. This job took 57 to 108 minutes in October 2026: in the weekly run of 26 October,
+    # 72 minutes on amd64 and 57 on arm64 with the local variant, and 88 and 63 with the celery
+    # variant; on the pushes to main of 29 October, 106 and 108 minutes on amd64 with the local
+    # variant. The celery variant took 16 minutes longer on amd64, so 150 minutes leave it room on
+    # a slow runner.
+    timeout-minutes: 150
     permissions:
       contents: read
     env:
@@ -193,19 +158,16 @@ jobs:
 
   server:
     name: Server mode (${{ matrix.arch }})
-    needs: [changes]
-    # Every push to main runs it, and a pull request that changes a file of server mode.
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.server == 'true') }}
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '["amd64", "arm64"]' || '["amd64"]') }}
+        arch: [amd64, arm64]
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     # A cold build of the Airflow and Caddy images, two runs of the stack tests with a question of
-    # 70 seconds and five runs of the transform of the model each, about seven minutes each on the
-    # two CPUs of a runner with the hooks of elementary (ADR-0028, ADR-0029), and, from the backups
-    # on, the round trip of a backup with two restores: 110 minutes on amd64 on 20 October 2026, of
-    # which each run of the stack tests took 45 to 46.
+    # 70 seconds and five runs of the transform of the model each, with the hooks of elementary
+    # (ADR-0028, ADR-0029), and, from the backups on, the round trip of a backup with two restores:
+    # 110 minutes on amd64 on 20 October 2026, of which each run of the stack tests took 45 to 46,
+    # and 69 to 108 minutes on amd64 from 26 to 29 October.
     timeout-minutes: 140
     permissions:
       contents: read
