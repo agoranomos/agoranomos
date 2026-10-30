@@ -1,7 +1,8 @@
 """Stack tests of the dashboard Advertising (metabase/advertising.py, ADR-0034): the API of Metabase
 is not versioned, so after an upgrade the dashboard must keep its tabs, every card must answer with
-the filters of the dashboard, a KPI must be the ratio that SQL gives over the mart, the linked
-filters must limit their values, and a click on a campaign must open the tab of ad groups and ads.
+the filters of the dashboard, also with a client and a campaign set, a KPI must be the ratio that
+SQL gives over the mart, the linked filters must limit their values with no join, and a click on a
+campaign must open the tab of ad groups and ads.
 
 The assertions print names, counts and statuses, never a secret.
 """
@@ -70,6 +71,27 @@ def test_the_dashboard_has_its_tabs_and_every_card_answers(metabase_url, session
         assert rows, dashcard["card"]["name"]
 
 
+def test_every_card_answers_with_a_client_and_a_campaign(metabase_url, session, board):
+    # A filter that links names the column of a question on another mart through the alias of its
+    # tag, which Metabase puts into the SQL only when the filter has a value.
+    cards = {d["card"]["name"]: d for d in board["dashcards"] if d["card_id"] is not None}
+    path = f"/api/dashboard/{board['id']}/params"
+    client = call(metabase_url, session, "GET", f"{path}/client/values")["values"][0][0]
+
+    def campaigns(data):
+        names = [c["name"] for c in data["cols"]]
+        return [row[names.index("campaign_name")] for row in data["rows"]]
+
+    # A campaign of the client with ad groups in the period: Performance Max has none.
+    [campaign, *_] = campaigns(
+        answer(metabase_url, session, board, cards["Ad groups"], client=[client])
+    )
+    for name, dashcard in cards.items():
+        data = answer(metabase_url, session, board, dashcard, client=[client], campaign=[campaign])
+        if name == "Ad groups":
+            assert set(campaigns(data)) == {campaign}
+
+
 def registry_keys():
     return [
         key
@@ -103,6 +125,11 @@ def test_a_kpi_of_the_dashboard_is_the_ratio_of_sql_over_the_mart(
 def test_the_linked_filters_offer_the_values_of_the_filters_that_limit_them(
     metabase_url, session, board
 ):
+    # Each filter that links is on one field, all of one table, so that Metabase joins no other
+    # mart for their values: a join along the foreign keys ran into the statement timeout.
+    linked = {slug: board["param_fields"][slug] for slug in ad.LINKED_FILTERS}
+    assert all(len(fields) == 1 for fields in linked.values()), linked
+    assert len({fields[0]["table_id"] for fields in linked.values()}) == 1
     path = f"/api/dashboard/{board['id']}/params"
     clients = [v[0] for v in call(metabase_url, session, "GET", f"{path}/client/values")["values"]]
     every = call(metabase_url, session, "GET", f"{path}/campaign/values")["values"]

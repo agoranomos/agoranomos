@@ -12,7 +12,7 @@ The filters at the top apply to every tab:
 
 - **Period**: the days of the statistics, in the time zone of each account. It starts as the 12 weeks before the current one.
 - **Time grouping**: how the charts over time and the KPIs group the days, by day, week, month, quarter or year. It starts as the week, which starts on Monday. It groups and filters nothing.
-- **Client**, **Platform**, **Account** and **Campaign**. The account offers only the accounts of the client and the platform that the filters name, and the campaign only the campaigns of those and of the account, as linked filters of Metabase.
+- **Client**, **Platform**, **Account** and **Campaign**. The account offers only the accounts of the client and the platform that the filters name, and the campaign only the campaigns of those and of the account, as linked filters of Metabase. Their values come from the statistics of the campaigns, `ad_stats_campaign_daily`: the clients, platforms, accounts and campaigns that have statistics on any day, in the period or not.
 
 The cards of web analytics take the period, the time grouping and the client only: a session has no account or campaign of an ad platform of its own.
 

@@ -140,13 +140,17 @@ class Filter:
     the column with its schema and table, so the SQL reads that table without an alias. The field
     is the ID that Metabase gives the column, with its base type, as Metabase 0.64.1 gives them
     back in the tag (checked on the stand, October 2026). The name is also the slug of the filter
-    of a dashboard that sets it."""
+    of a dashboard that sets it. An alias, when there is one, is the column as the SQL names it:
+    Metabase puts it into the condition in place of the column of the field, so that a question
+    can filter the rows of its own table on the field of another (replace-alias in
+    src/metabase/driver/sql/parameters/substitution.clj at the tag v0.64.1)."""
 
     name: str
     display_name: str
     widget_type: str
     field_id: int
     base_type: str
+    alias: str = ""
 
 
 @dataclass(frozen=True)
@@ -503,6 +507,8 @@ def template_tag(package: Package, question: Question, f: Filter) -> dict[str, A
         "dimension": ["field", f.field_id, {"base-type": f.base_type}],
         "widget-type": f.widget_type,
     }
+    if f.alias:
+        tag["alias"] = f.alias
     if f.widget_type == TEMPORAL_UNIT:
         del tag["widget-type"]
         tag["type"] = TEMPORAL_UNIT

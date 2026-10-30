@@ -6,7 +6,9 @@ after the first run of the transform (content.py, ADR-0018, ADR-0034).
 Its questions are native SQL on the marts, each with the filters of the dashboard that its mart
 has: the period, the time grouping of a chart over time, the client, and, on the marts of the ad
 platforms, the platform, the account and the campaign, which the client, the platform and the
-account limit as linked filters. The time grouping changes how a question groups its days, as a
+account limit as linked filters, on the fields of the statistics of the campaigns in every
+question.
+The time grouping changes how a question groups its days, as a
 template tag of the type temporal-unit, and filters nothing. A KPI is the ratio of sums that the
 marts declare for the metrics of Metabase (metrics.py), written into the SQL from the same
 declaration, so every card computes it as the metric does. The overview leads with the KPIs,
@@ -101,6 +103,17 @@ MART_FILTERS = {
     AD_CONVERSIONS: AD_FILTERS,
     WEB_SESSIONS: ("period", "client"),
 }
+# The filters that link: in every question, each is on the field of its column in the statistics
+# of the campaigns, and the SQL of a question on another mart names its own column through the
+# alias of the tag. Metabase 0.64.1 finds the values of a linked filter for each field of the
+# filter, and filters them by each field of the filters that limit it: by a field of another table
+# through a join along the foreign keys, in either direction (chain_filter.clj at the tag v0.64.1).
+# With the fields of each mart, the campaigns of one mart would join every other mart through the
+# clients, row by row, which ran into the statement timeout of metabase_reader on the demo (checked
+# on the stand, October 2026); with the fields of one mart, the values come with no join. The
+# statistics, unlike the mart ad_campaigns, offer only the campaigns that have some.
+LINKED_FILTERS = ("client", "platform", "account", "campaign")
+LINKED_MART = AD_STATS
 
 # The types that Metabase 0.64.1 gives the columns of the answers, each time that it computes their
 # metadata (read on the stand in October 2026): the contracts of the marts fix the types of the
@@ -667,23 +680,36 @@ def question_filters(
     question: Mapping[str, Any], fields: metrics.Fields
 ) -> tuple[content.Filter, ...]:
     """The filters of a question, each on the field of its column in the mart that the question
-    reads (waiting() has checked that Metabase shows it)."""
+    reads, or, for a filter that links, in the statistics of the campaigns, with the column of
+    the question as its alias on another mart (waiting() has checked that Metabase shows the
+    field)."""
     filters = []
     for name in filters_of(question):
         display_name, widget_type, column = FILTERS[name]
-        field = fields[(question["mart"], column)]
-        filters.append(content.Filter(name, display_name, widget_type, *field))
+        mart = field_mart(name, question["mart"])
+        alias = column if mart != question["mart"] else ""
+        filters.append(
+            content.Filter(name, display_name, widget_type, *fields[(mart, column)], alias=alias)
+        )
     return tuple(filters)
+
+
+def field_mart(name: str, mart: str) -> str:
+    """The mart whose field a filter of a question on a mart is on."""
+    return LINKED_MART if name in LINKED_FILTERS else mart
 
 
 def waiting(fields: metrics.Fields) -> list[str]:
     """The marts whose fields for the filters Metabase does not show yet, before the first run of
     the transform."""
-    return [
-        f"{MART_SCHEMA}.{mart}"
+    needed = {
+        (field_mart(name, mart), FILTERS[name][2])
         for mart, names in MART_FILTERS.items()
-        if any((mart, FILTERS[name][2]) not in fields for name in names)
-    ]
+        for name in names
+    }
+    return sorted(
+        {f"{MART_SCHEMA}.{mart}" for mart, column in needed if (mart, column) not in fields}
+    )
 
 
 def kpis_of(document: Mapping[str, Any]) -> dict[str, metrics.Declared]:

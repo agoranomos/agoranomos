@@ -194,11 +194,39 @@ def test_each_question_takes_the_filters_of_its_mart():
         else:
             assert {"period", "client", "platform", "account", "campaign"} <= set(names)
         for f in question.filters:
-            assert (f.field_id, f.base_type) == FIELDS[(mart, ad.FILTERS[f.name][2])]
+            column = ad.FILTERS[f.name][2]
+            if f.name in ad.LINKED_FILTERS:
+                assert (f.field_id, f.base_type) == FIELDS[(ad.LINKED_MART, column)]
+                assert f.alias == (column if mart != ad.LINKED_MART else "")
+            else:
+                assert (f.field_id, f.base_type) == FIELDS[(mart, column)]
+                assert f.alias == ""
         # The time grouping groups the days of a question over time, and nothing else.
         if "unit" in names:
             assert "GROUP BY {{unit}}" in question.query
             assert question.columns[0].name == "report_date"
+
+
+def test_each_linked_filter_is_on_one_field_of_one_mart_in_every_question():
+    # Metabase finds the values of a linked filter for each of its fields, and joins the table of
+    # each field of the filters that limit it along the foreign keys: on one mart, it joins none.
+    fields = {}
+    for question in package().questions:
+        for f in question.filters:
+            if f.name in ad.LINKED_FILTERS:
+                fields.setdefault(f.name, set()).add(f.field_id)
+    assert set(fields) == set(ad.LINKED_FILTERS)
+    assert all(len(ids) == 1 for ids in fields.values())
+    mart_of = {field_id: mart for (mart, _), (field_id, _) in FIELDS.items()}
+    assert {mart_of[i] for ids in fields.values() for i in ids} == {ad.LINKED_MART}
+    # The tag of a filter that links names the column of the question's own mart, when it reads
+    # another.
+    built = {q.key: q for q in package().questions}
+    for key, alias in (("key-events", "client_name"), ("spend", None)):
+        client = next(f for f in built[key].filters if f.name == "client")
+        tag = ct.template_tag(package(), built[key], client)
+        assert tag.get("alias") == alias, key
+        assert tag["dimension"][1] == FIELDS[(ad.LINKED_MART, "client_name")][0], key
 
 
 def test_a_kpi_of_a_question_is_the_ratio_of_its_metric():

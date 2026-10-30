@@ -35,7 +35,7 @@ Build in Metabase, through the MCP server `agoranomos-metabase`, with the accoun
 
     The skill `explain-a-metric` has the details.
 4. Look at what exists first: the dashboard **Advertising** of the collection **Agoranomos / Advertising** ([Read the advertising dashboard](../../../docs/how-to/read-the-advertising-dashboard.md)), the dashboards of the collection **Agoranomos / Demo**, and anything similar in Workspace. Reuse or copy before you build new.
-5. Build each question, run it, and check that its numbers are plausible before you add it to a dashboard. Add filters of the period, the client and the platform when the dashboard spans them, as the demo dashboards do.
+5. Build each question, run it, and check that its numbers are plausible before you add it to a dashboard. Add filters of the period, the client and the platform when the dashboard spans them, as the demo dashboards do. Link a filter to others only when each of them is on columns of one mart: for the values of a linked filter, Metabase joins the mart of each other filter along the foreign keys, through `clients` or `ad_platforms`, and two facts joined that way multiply their rows until the query times out. The dashboard **Advertising** puts its linked filters on the columns of `ad_stats_campaign_daily` in every question.
 6. Save in the collection that the level allows. Report the name and the link of each question and dashboard, and what each shows.
 
 ## Rules
