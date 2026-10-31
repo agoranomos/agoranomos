@@ -2,6 +2,10 @@
 
 The warehouse holds the advertising statistics of every platform in one model, by day at the grains of a campaign, an ad group and an ad, with the clients of the business, the conversions of each conversion action, the sessions of web analytics and the exchange rates into one reporting currency ([ADR-0024](../adr/0024-one-deployment-is-one-business.md), [ADR-0025](../adr/0025-model-advertising-statistics-once.md), [ADR-0034](../adr/0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md)). Metabase reads its marts only. Its data comes from the demo, a fictional business on four fictional platforms in the shapes of real APIs with a fictional source of exchange rates, and from the accounts of Google Ads and the rates of the ECB once a deployment connects them ([Google Ads](#google-ads), [The rates of the ECB](#the-rates-of-the-ecb)). The connectors of the other real platforms are planned.
 
+!!! note "Planned for v0.5"
+
+    [ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) to [ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md) propose to keep the data in a new schema `core` and to turn the marts into views under the same names. None of it is built, and this page describes the model as it is today.
+
 ## Layers
 
 | Schema | What it holds | Written by | Read by |
