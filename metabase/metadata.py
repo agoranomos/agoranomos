@@ -66,10 +66,14 @@ WAREHOUSE_COLUMNS = (
 # The overrides file: its largest size, its properties and the longest value of each.
 OVERRIDES_LIMIT = 256 * 1024
 LIMITS = {"display_name": 100, "description": 2000, "note": 2000}
-# The kinds of a change, by what Metabase showed before: its own default (blank, or the name that
-# it makes from the physical one), a value that the code gave earlier, or anything else, which
-# someone set outside the code.
+# The kinds of a change, by what Metabase showed before: its own default (blank, the name that it
+# makes from the physical one, or the type that its analysis gives), a value that the code gave
+# earlier, or anything else, which someone set outside the code.
 FIRST, UPDATE, REVERT = "first fill", "update from code", "revert of an edit"
+# The semantic type that the analysis of Metabase gives a column without one that has at most 30
+# distinct values (infer-is-category in src/metabase/analyze/classifiers/category.clj at the tag
+# v0.64.1). Nothing tells it from the same type set by hand, which so counts as a first fill too.
+ANALYZED_TYPE = "type/Category"
 # The words that Metabase writes in capitals when it makes a display name from a physical name (its
 # simple strategy, the default).
 METABASE_ACRONYMS = {"id", "url", "ip", "uid", "uuid", "guid"}
@@ -647,13 +651,15 @@ def humanize(name: str) -> str:
 
 def kind_of(prop: str, old: Any, name: str, earlier: set[Any]) -> str:
     """Whether a change follows the code, which gave the value that Metabase shows, fills a value
-    of Metabase's own (none, or the name that it makes from the physical one), or reverts an
-    edit made outside the code."""
+    of Metabase's own (none, the name that it makes from the physical one, or the type that its
+    analysis gives), or reverts an edit made outside the code."""
     if old is None or (isinstance(old, str) and not old.strip()):
         return FIRST
     if old in earlier:
         return UPDATE
     if prop == "display_name" and old in (name, humanize(name)):
+        return FIRST
+    if prop == "semantic_type" and old == ANALYZED_TYPE:
         return FIRST
     return REVERT
 
