@@ -660,9 +660,19 @@ def visualization_settings(
         settings["column_settings"] = columns
     dimensions = settings.get("graph.dimensions") or [None]
     chart_metrics = settings.get("graph.metrics") or [None]
-    for key, name in zip(content.AXIS_TITLES, (dimensions[0], chart_metrics[0]), strict=True):
+    # A chart of several metrics names them in its legend and gives its y axis no title: Metabase
+    # 0.64.1 would put that one title on both of its axes, and without it each axis takes the title
+    # of its own metric (checked on a stack, October 2026).
+    several = len(chart_metrics) > 1
+    named = (dimensions[0], None if several else chart_metrics[0])
+    for key, name in zip(content.AXIS_TITLES, named, strict=True):
         if name in titles:
             settings[key] = titles[name]
+    if several:
+        series = settings.setdefault("series_settings", {})
+        for name in chart_metrics:
+            if name in titles:
+                series.setdefault(name, {})["title"] = titles[name]
     if len(dimensions) == 1 and len(chart_metrics) == 1 and chart_metrics[0] is not None:
         settings["series_settings"] = {chart_metrics[0]: {"color": content.SERIES_COLOR}}
     return settings

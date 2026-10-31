@@ -254,6 +254,43 @@ def test_a_kpi_of_a_question_is_the_ratio_of_its_metric():
     assert settings['["name","cpc"]']["currency"] == CURRENCY
 
 
+def test_a_chart_of_two_metrics_names_each_and_gives_its_y_axis_no_title():
+    # One title of the y axis would show on both axes, so the conversions would read as money.
+    question = {
+        "columns": ("report_date", "spend_reporting", "conversions"),
+        "visualization_settings": {
+            "graph.dimensions": ["report_date"],
+            "graph.metrics": ["spend_reporting", "conversions"],
+            "series_settings": {"conversions": {"axis": "right"}},
+        },
+    }
+    titles = {
+        "report_date": "Report Date",
+        "spend_reporting": "Spend",
+        "conversions": "Conversions",
+    }
+    settings = ad.visualization_settings(question, titles, {}, CURRENCY)
+    assert settings["graph.x_axis.title_text"] == "Report Date"
+    assert "graph.y_axis.title_text" not in settings
+    assert settings["series_settings"] == {
+        "spend_reporting": {"title": "Spend"},
+        "conversions": {"axis": "right", "title": "Conversions"},
+    }
+
+
+def test_a_chart_of_one_metric_keeps_the_title_of_its_y_axis():
+    question = {
+        "columns": ("report_date", "conversions"),
+        "visualization_settings": {
+            "graph.dimensions": ["report_date"],
+            "graph.metrics": ["conversions"],
+        },
+    }
+    settings = ad.visualization_settings(question, {"conversions": "Conversions"}, {}, CURRENCY)
+    assert settings["graph.y_axis.title_text"] == "Conversions"
+    assert settings["series_settings"] == {"conversions": {"color": ct.SERIES_COLOR}}
+
+
 def test_a_mart_without_a_kpi_of_the_dashboard_is_an_error():
     with pytest.raises(md.MetadataError, match="declares no metric cpm, which the dashboard"):
         ad.kpis_of(export(tuple(k for k in KPIS if k[0] != "CPM")))
