@@ -10,7 +10,7 @@ The default executor is set in [ADR-0015](0015-run-localexecutor-by-default.md);
 
 ## Context and Problem Statement
 
-Agoranomos has to load data from ad platforms on a schedule, build the warehouse models after each load and refresh the dashboards once the models are ready. The steps depend on one another, they have to be retried when they fail, and a failure has to be visible. The stack must also run anywhere from a laptop to a small server, on infrastructure that the user controls.
+agoranomos has to load data from ad platforms on a schedule, build the warehouse models after each load and refresh the dashboards once the models are ready. The steps depend on one another, they have to be retried when they fail, and a failure has to be visible. The stack must also run anywhere from a laptop to a small server, on infrastructure that the user controls.
 
 Which orchestrator runs these pipelines, how does it execute tasks, and which distribution of it do we build on?
 
@@ -37,11 +37,11 @@ Chosen option: "Airflow with the CeleryExecutor and a Valkey broker, on the offi
 
 In practice this means:
 
-* **Airflow 3.3** runs as separate services: API server, scheduler, DAG processor, triggerer and workers. Agoranomos extends the official `apache/airflow` image with its own layer and pins the Python tag explicitly, for example `3.3.2-python3.13`.
+* **Airflow 3.3** runs as separate services: API server, scheduler, DAG processor, triggerer and workers. agoranomos extends the official `apache/airflow` image with its own layer and pins the Python tag explicitly, for example `3.3.2-python3.13`.
 * **CeleryExecutor** runs every task on a worker. Celery keeps task results in the Airflow metadata database ([ADR-0003](0003-two-postgres-instances.md)), so no separate result backend is needed.
 * **Valkey 9** is the Celery broker. It is licensed under the BSD 3-Clause license and speaks the Redis protocol.
 * **Authentication** uses Airflow's FAB auth manager with the Admin, Op and Viewer roles.
-* **Our own Compose files.** Agoranomos builds on the image and not on Airflow's own `docker-compose.yaml`, which is documented as not meant for production and ships default credentials.
+* **Our own Compose files.** agoranomos builds on the image and not on Airflow's own `docker-compose.yaml`, which is documented as not meant for production and ships default credentials.
 * **Astronomer's open-source projects** are used where they fit: Cosmos, which runs dbt models as Airflow tasks ([ADR-0005](0005-transform-with-dbt-core.md)), and astro-airflow-mcp, the MCP server for Airflow ([ADR-0007](0007-ai-access-via-mcp-read-only.md)). The Astro CLI and Astro Runtime are not used.
 
 The other options were not chosen for these reasons:

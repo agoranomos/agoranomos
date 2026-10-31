@@ -124,7 +124,7 @@ The source `ecb` is the first that is not a demo ([ADR-0032](../adr/0032-connect
 
 The model follows the design of Fivetran's dbt package `dbt_ad_reporting` (v2.8.1, Apache License 2.0, read on 19 October 2026, and its reports of ad groups and ads on 29 October 2026) and takes none of its code. For those who know it:
 
-| Agoranomos | `dbt_ad_reporting` |
+| agoranomos | `dbt_ad_reporting` |
 |---|---|
 | `ad_stats_campaign_daily` | `ad_reporting__campaign_report` |
 | `ad_stats_ad_group_daily` | `ad_reporting__ad_group_report` |

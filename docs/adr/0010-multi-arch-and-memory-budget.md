@@ -10,9 +10,9 @@ The memory budget is set in [ADR-0022](0022-budget-the-memory-by-variant-and-mod
 
 ## Context and Problem Statement
 
-Agoranomos runs on machines that users control: developer laptops, many of which have ARM64 processors such as Apple Silicon, and small servers. Memory is the scarcest resource, because the stack runs many services at once: two PostgreSQL instances, a broker, the Airflow services and workers, Metabase and the MCP servers. Server instances with ARM processors are usually cheaper per GB of memory than comparable x86 instances.
+agoranomos runs on machines that users control: developer laptops, many of which have ARM64 processors such as Apple Silicon, and small servers. Memory is the scarcest resource, because the stack runs many services at once: two PostgreSQL instances, a broker, the Airflow services and workers, Metabase and the MCP servers. Server instances with ARM processors are usually cheaper per GB of memory than comparable x86 instances.
 
-Which CPU architectures does Agoranomos support, and how much memory may the stack use?
+Which CPU architectures does agoranomos support, and how much memory may the stack use?
 
 ## Decision Drivers
 
@@ -32,7 +32,7 @@ Chosen option: "Images for amd64 and arm64, both tested in CI, within a memory b
 
 In practice this means:
 
-* **Two architectures.** The images that Agoranomos builds are to be published for `linux/amd64` and `linux/arm64`, and the third-party images in the default stack must be available for both.
+* **Two architectures.** The images that agoranomos builds are to be published for `linux/amd64` and `linux/arm64`, and the third-party images in the default stack must be available for both.
 * **Both in CI.** CI is to build and test on both architectures, as a build matrix.
 * **A memory budget.** The planning figures are 8 GB of RAM available to Docker as the recommended amount and 6 GB as the minimum, which is what lets the stack fit on a host with 8 GB of RAM. The other figures are 4 CPUs and 20 GB of disk, on x86-64-v2 or ARM64 hardware.
 * **Targets, not yet measurements.** All of these figures are targets, to be measured once the stack runs end to end. If the budget cannot be met, a lighter `lite` profile ([ADR-0002](0002-orchestrate-with-airflow-3.md)) is likely to be added.

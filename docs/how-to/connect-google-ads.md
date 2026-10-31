@@ -1,6 +1,6 @@
 # Connect Google Ads
 
-This guide connects the Google Ads accounts of your business to Agoranomos: the load reads their campaigns, statistics and conversions every day into the warehouse, and the model, the dashboards and the MCP servers show them beside the demo, or in its place ([ADR-0032](../adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md)). With it, you turn on the reference rates of the European Central Bank, which convert the money of the accounts into the reporting currency.
+This guide connects the Google Ads accounts of your business to agoranomos: the load reads their campaigns, statistics and conversions every day into the warehouse, and the model, the dashboards and the MCP servers show them beside the demo, or in its place ([ADR-0032](../adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md)). With it, you turn on the reference rates of the European Central Bank, which convert the money of the accounts into the reporting currency.
 
 No load has reached a real Google Ads account yet: the connector is tested against a stand-in of the API, so compare the first load with the Google Ads UI.
 
@@ -8,7 +8,7 @@ No load has reached a real Google Ads account yet: the connector is tested again
 
 - A Google Cloud project of your own, with a billing account in good standing. The Google Ads API costs nothing, but Google rejects the access levels below for projects on the free trial of Google Cloud or with a suspended billing account (a known issue as of October 2026).
 - Admin access to the Google Ads accounts, or to the manager account above them.
-- A running stack: [Run Agoranomos locally](run-locally.md) or [Deploy on a server](deploy-on-a-server.md).
+- A running stack: [Run agoranomos locally](run-locally.md) or [Deploy on a server](deploy-on-a-server.md).
 
 Since 9 September 2026 the Google Ads API needs no developer token: the access level belongs to the Google Cloud project ([Developer token](https://developers.google.com/google-ads/api/docs/api-policy/developer-token), as of October 2026).
 
@@ -78,4 +78,4 @@ A failed load names the account and gives the error of the API, and Pipeline hea
 - **`403` with `PERMISSION_DENIED`**: the service account is not a user of the account, the project has no access to production accounts yet, or the account is reached through a manager account that `GOOGLE_ADS_LOGIN_CUSTOMER_ID` does not name.
 - **A failed test of the rates after the load**: an account pays in a currency that the ECB does not publish, such as the tenge (KZT), and the marts keep their last good data until a source of its rates comes ([ADR-0032](../adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md)).
 
-Campaign names come from anyone who can edit the account: Agoranomos keeps them as data, and an AI client that reads them should treat them so too ([Talk to your data](talk-to-your-data.md)).
+Campaign names come from anyone who can edit the account: agoranomos keeps them as data, and an AI client that reads them should treat them so too ([Talk to your data](talk-to-your-data.md)).

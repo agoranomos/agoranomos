@@ -1,6 +1,6 @@
 # Back up and restore
 
-A backup of Agoranomos holds its three databases, the warehouse, Airflow and Metabase, and its extensions folder ([ADR-0020](../adr/0020-back-up-the-databases-every-day.md)). This guide takes one, schedules them, copies them to another machine, and restores them, also on a new server.
+A backup of agoranomos holds its three databases, the warehouse, Airflow and Metabase, and its extensions folder ([ADR-0020](../adr/0020-back-up-the-databases-every-day.md)). This guide takes one, schedules them, copies them to another machine, and restores them, also on a new server.
 
 ## What a backup holds
 
@@ -87,7 +87,7 @@ rclone copy --exclude "/.partial-*/**" /home/agoranomos/agoranomos/backups stora
 30 4 * * * /usr/bin/rclone copy --exclude "/.partial-*/**" /home/agoranomos/agoranomos/backups storagebox:agoranomos-backups >> /home/agoranomos/backup-copy.log 2>&1 && date -u >> /home/agoranomos/backup-copy.log
 ```
 
-The copies hold everything that the databases hold: send them only to storage that you control, or encrypt them before they leave the server, for example with the `crypt` remote of rclone ([rclone crypt](https://rclone.org/crypt/), as of October 2026), which encrypts the content and the names of the files. `rclone config` makes a remote of the type `crypt` over `storagebox:agoranomos-backups`; use it, as `<crypt remote>:`, in place of `storagebox:agoranomos-backups` in every rclone command of this guide, and `rclone copy` to it encrypts on the way out. Keep the password of the crypt remote, and its salt if you set one, in the password manager with `.env`: without them the copy cannot be read, and a restore from it is not possible. Encrypted copies elsewhere, built into Agoranomos, are planned for a later release.
+The copies hold everything that the databases hold: send them only to storage that you control, or encrypt them before they leave the server, for example with the `crypt` remote of rclone ([rclone crypt](https://rclone.org/crypt/), as of October 2026), which encrypts the content and the names of the files. `rclone config` makes a remote of the type `crypt` over `storagebox:agoranomos-backups`; use it, as `<crypt remote>:`, in place of `storagebox:agoranomos-backups` in every rclone command of this guide, and `rclone copy` to it encrypts on the way out. Keep the password of the crypt remote, and its salt if you set one, in the password manager with `.env`: without them the copy cannot be read, and a restore from it is not possible. Encrypted copies elsewhere, built into agoranomos, are planned for a later release.
 
 None of these commands deletes anything at the destination, on purpose: with `rsync --delete` or `rclone sync`, a server that is rebuilt, or a `backups/` that is lost and recreated empty, would empty the copy that the restore needs. So the copy keeps what the retention removes on the server, it grows, and a full destination makes the next copy fail, which under a timer nobody sees: look at the log of the job, `backup-copy.log` above, and at the free space of the copy.
 

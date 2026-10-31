@@ -1,6 +1,6 @@
 # Architecture decision records
 
-An architecture decision record (ADR) captures one significant decision: the context, the options that were considered, the choice that was made and its consequences. Together the records explain why Agoranomos is built the way it is. [ADR-0001](0001-record-architecture-decisions.md) describes which decisions are recorded and how.
+An architecture decision record (ADR) captures one significant decision: the context, the options that were considered, the choice that was made and its consequences. Together the records explain why agoranomos is built the way it is. [ADR-0001](0001-record-architecture-decisions.md) describes which decisions are recorded and how.
 
 ## Format
 
@@ -44,7 +44,7 @@ Superseded by [ADR-0123](0123-title-of-the-new-decision.md).
 
 ## All records
 
-Agoranomos is pre-alpha. A record states a decision, and the components it describes arrive release by release.
+agoranomos is pre-alpha. A record states a decision, and the components it describes arrive release by release.
 
 | ADR | Title | Status | Date |
 |---|---|---|---|

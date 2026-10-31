@@ -4,7 +4,7 @@ The collection **Agoranomos / Advertising** in Metabase holds the dashboard **Ad
 
 ## Open it
 
-Sign in to Metabase as [Run Agoranomos locally](run-locally.md#sign-in) says and open the collection **Agoranomos / Advertising**. `metabase-init` makes the dashboard once Metabase shows the marts, after the first run of the transform, with or without the demo, and keeps it as the code says on every start, view-only for every group but Administrators ([ADR-0018](../adr/0018-keep-the-content-of-the-package-in-metabase-as-code.md)). With the demo, `demo-init` makes it at the first start, right after the transform. Until then, the log of the start says that the dashboard waits for the marts.
+Sign in to Metabase as [Run agoranomos locally](run-locally.md#sign-in) says and open the collection **Agoranomos / Advertising**. `metabase-init` makes the dashboard once Metabase shows the marts, after the first run of the transform, with or without the demo, and keeps it as the code says on every start, view-only for every group but Administrators ([ADR-0018](../adr/0018-keep-the-content-of-the-package-in-metabase-as-code.md)). With the demo, `demo-init` makes it at the first start, right after the transform. Until then, the log of the start says that the dashboard waits for the marts.
 
 ## The filters
 

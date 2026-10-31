@@ -8,7 +8,7 @@ decision-makers: Andrei Gromov
 
 ## Context and Problem Statement
 
-Agoranomos serves two kinds of users. Engineers run the stack on their own machine and work with coding agents such as Claude Code. Business users want to ask questions from the Claude or ChatGPT apps on a phone or in a browser. Those apps connect through remote MCP connectors, which need an HTTPS endpoint. The first group needs a stack that is closed to the outside, and the second needs one that is reachable over the internet and secured for it.
+agoranomos serves two kinds of users. Engineers run the stack on their own machine and work with coding agents such as Claude Code. Business users want to ask questions from the Claude or ChatGPT apps on a phone or in a browser. Those apps connect through remote MCP connectors, which need an HTTPS endpoint. The first group needs a stack that is closed to the outside, and the second needs one that is reachable over the internet and secured for it.
 
 Do we start with local mode and add server mode later, or do we support both from the beginning?
 

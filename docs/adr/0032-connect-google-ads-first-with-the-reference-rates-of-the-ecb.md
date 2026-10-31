@@ -23,7 +23,7 @@ Which source comes first, how does a deployment connect it, which accounts does 
 * The connector fills the model that the demo fills, through the same shape macros (ADR-0025), so that the dashboards, the tests and the skills of the demo hold for real data.
 * The daily load fits the quota of the lowest access level that reads real accounts.
 * No heavy dependency next to Airflow, every package pinned, and every secret in `.env` (AGENTS.md).
-* Many of the businesses for which Agoranomos is built spend on the platform.
+* Many of the businesses for which agoranomos is built spend on the platform.
 
 ## Considered Options
 

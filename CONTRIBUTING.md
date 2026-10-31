@@ -1,8 +1,8 @@
-# Contributing to Agoranomos
+# Contributing to agoranomos
 
-Thank you for your interest in Agoranomos. This guide describes how work is done in this repository today.
+Thank you for your interest in agoranomos. This guide describes how work is done in this repository today.
 
-Agoranomos is pre-alpha. Besides the project's tooling, its documentation and the architecture decision records, the stack runs in local mode and in server mode, with its backups, and the rest is being built; the [README](README.md) has the roadmap. Contributors work on the `main` branch, while the guides of the documentation site describe the latest release.
+agoranomos is pre-alpha. Besides the project's tooling, its documentation and the architecture decision records, the stack runs in local mode and in server mode, with its backups, and the rest is being built; the [README](README.md) has the roadmap. Contributors work on the `main` branch, while the guides of the documentation site describe the latest release.
 
 By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). If you found a security vulnerability, do not open an issue: follow the [security policy](SECURITY.md).
 
@@ -69,7 +69,7 @@ If a hook changes files when you commit (the final-newline fixer or ruff, for ex
 
 ### Developer Certificate of Origin (DCO)
 
-Agoranomos is licensed under the Apache License 2.0. Instead of a contributor license agreement, it uses the [Developer Certificate of Origin](https://developercertificate.org/): a short statement that you wrote the change, or have the right to submit it under the project's license. You keep your copyright, and there is nothing to sign apart from the commits.
+agoranomos is licensed under the Apache License 2.0. Instead of a contributor license agreement, it uses the [Developer Certificate of Origin](https://developercertificate.org/): a short statement that you wrote the change, or have the right to submit it under the project's license. You keep your copyright, and there is nothing to sign apart from the commits.
 
 You agree to it by adding a `Signed-off-by` line to every commit. `git commit -s` does this with the name and email from your git configuration. A check on every pull request fails when a commit has no sign-off.
 
@@ -91,6 +91,7 @@ A change that alters what users or contributors see, such as behavior, commands,
 - The site calls no other host: a reader's browser asks only the site itself, so fonts, scripts, style sheets and images are files in `docs/` and are never loaded from a CDN. The one exception is the header, which asks api.github.com for the stars, forks and latest release of the repository: as of Zensical 0.0.68 it has no setting to turn that off. The `check-docs-site` hook fails on any other.
 - A diagram is a `mermaid` block, and the copy of Mermaid in `docs/assets/javascripts/` draws it. Left alone, the theme loads Mermaid from unpkg.com on a page with a diagram, unless a `mermaid` global exists, so `overrides/main.html` (`custom_dir` in `zensical.toml`) adds one to a page that has a diagram. To update the copy, take `dist/mermaid.min.js` and `LICENSE` from a release of the `mermaid` package on npm, unchanged (the hooks leave the file alone), and stay on the 11 line, the one that the theme asks for when it has no copy (`mermaid@11`, as of Zensical 0.0.68). Then build the site, open the architecture page and check that the diagram renders.
 - Write in plain English with American spelling. Describe what exists today in the present tense, and say plainly that something is planned when it is not built yet.
+- Write the name of the project as agoranomos, in lower case, as dbt is, also at the start of a sentence and in a title. Write a name that the code gives something in Metabase, such as the collection **Agoranomos**, as the code has it.
 - The English README is the reference. When it changes, update `README.ru.md` as well.
 
 ## Architecture decision records

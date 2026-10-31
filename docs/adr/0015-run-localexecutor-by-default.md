@@ -8,7 +8,7 @@ decision-makers: Andrei Gromov
 
 ## Context and Problem Statement
 
-[ADR-0002](0002-orchestrate-with-airflow-3.md) chose Airflow with the CeleryExecutor and a Valkey broker. Celery runs tasks in separate worker containers, which can be spread over several machines. Most deployments of Agoranomos, however, run on one machine, a laptop or a server with 8 GB, and there Celery adds a broker and a worker to the memory budget of [ADR-0010](0010-multi-arch-and-memory-budget.md), and more parts to start, upgrade and debug. The LocalExecutor runs tasks as processes of the scheduler, on the same machine, with no broker.
+[ADR-0002](0002-orchestrate-with-airflow-3.md) chose Airflow with the CeleryExecutor and a Valkey broker. Celery runs tasks in separate worker containers, which can be spread over several machines. Most deployments of agoranomos, however, run on one machine, a laptop or a server with 8 GB, and there Celery adds a broker and a worker to the memory budget of [ADR-0010](0010-multi-arch-and-memory-budget.md), and more parts to start, upgrade and debug. The LocalExecutor runs tasks as processes of the scheduler, on the same machine, with no broker.
 
 Which executor does the stack run by default, and how does a deployment that needs separate workers get them?
 

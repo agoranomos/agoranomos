@@ -8,7 +8,7 @@ decision-makers: Andrei Gromov
 
 ## Context and Problem Statement
 
-Agoranomos is open source and builds on a stack of well-known open-source projects. It needs a license for its code and a rule for how contributions are accepted. The license decides who may use the code, in which settings, and what happens when someone offers it as a service. The contribution rule decides how contributors grant their rights.
+agoranomos is open source and builds on a stack of well-known open-source projects. It needs a license for its code and a rule for how contributions are accepted. The license decides who may use the code, in which settings, and what happens when someone offers it as a service. The contribution rule decides how contributors grant their rights.
 
 Which license do we use, and how do contributors state that they may submit their work?
 
@@ -46,7 +46,7 @@ The other options were not chosen for these reasons:
 
 * Good, because a permissive license gives the project the widest reach and is compatible with the ecosystem it builds on.
 * Good, because the DCO is light: contributors add a sign-off to each commit and do not sign a legal agreement.
-* Bad, because others can offer Agoranomos as a hosted service, or build proprietary products on it, without contributing back.
+* Bad, because others can offer agoranomos as a hosted service, or build proprietary products on it, without contributing back.
 * Bad, because contributors keep their copyright, so relicensing their code on terms that Apache-2.0 does not allow needs their agreement.
 * Bad, because a contributor who forgets the sign-off gets a failing check and has to fix the commit.
 

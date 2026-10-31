@@ -1,6 +1,6 @@
-# Run Agoranomos locally
+# Run agoranomos locally
 
-This guide starts Agoranomos on your own machine in local mode: the warehouse, Airflow and Metabase, with the demo, reachable from this machine only ([ADR-0011](../adr/0011-local-and-server-modes.md)). It is for engineers who want to try the stack or work on it. To be guided through the demo step by step instead, follow the tutorial [Run Agoranomos locally with demo data](../tutorials/run-locally-with-demo-data.md).
+This guide starts agoranomos on your own machine in local mode: the warehouse, Airflow and Metabase, with the demo, reachable from this machine only ([ADR-0011](../adr/0011-local-and-server-modes.md)). It is for engineers who want to try the stack or work on it. To be guided through the demo step by step instead, follow the tutorial [Run agoranomos locally with demo data](../tutorials/run-locally-with-demo-data.md).
 
 !!! note "Pre-alpha"
 
@@ -27,7 +27,7 @@ cd agoranomos
 
 <!-- x-release-please-end -->
 
-`--branch` takes the tag of the release, so git says that the checkout is in a detached `HEAD`: that is expected. To work on Agoranomos itself, clone without `--branch`, which gives the `main` branch.
+`--branch` takes the tag of the release, so git says that the checkout is in a detached `HEAD`: that is expected. To work on agoranomos itself, clone without `--branch`, which gives the `main` branch.
 
 `up` creates `.env` with new secrets, checks the machine, builds the Airflow image, starts the stack, and waits until every service is healthy and the demo is ready. The first start takes a few minutes; later starts take the image from the cache of Docker. When it is done, it prints the addresses:
 
@@ -51,7 +51,7 @@ Keep a copy of `.env` in a password manager. It holds the keys without which the
 
 ## Add your own DAG
 
-Put a DAG file into `extensions/dags/`. Airflow shows it within about a minute, in the `extensions` bundle, paused until you unpause it. The folder is yours: releases of Agoranomos never change it ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)). A task of your DAG runs with keys of Airflow and the passwords of the warehouse roles in its environment, with the LocalExecutor also with the password of the metadata database of Airflow, and with the CeleryExecutor with the passwords of the broker and of the database of the results of Celery instead, so review what you put there as you would any code that touches your data.
+Put a DAG file into `extensions/dags/`. Airflow shows it within about a minute, in the `extensions` bundle, paused until you unpause it. The folder is yours: releases of agoranomos never change it ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)). A task of your DAG runs with keys of Airflow and the passwords of the warehouse roles in its environment, with the LocalExecutor also with the password of the metadata database of Airflow, and with the CeleryExecutor with the passwords of the broker and of the database of the results of Celery instead, so review what you put there as you would any code that touches your data.
 
 ## Stop and start again
 

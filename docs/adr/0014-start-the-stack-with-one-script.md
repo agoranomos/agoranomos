@@ -8,7 +8,7 @@ decision-makers: Andrei Gromov
 
 ## Context and Problem Statement
 
-Agoranomos promises a stack that starts with one command on a machine with Docker. Before the first start, every internal secret has to exist: the passwords of the databases, of their roles and of the message broker; the keys with which Airflow and Metabase encrypt the connections they save, and with which Airflow signs its sessions and tokens; and the passwords of the admin accounts. No secret may have a default value. The machine also needs enough memory, CPUs and disk, and the ports of the stack must be free; when they are not, the stack fails late and in ways that are hard to read. People run the stack on macOS, on Linux servers and on Windows through WSL2.
+agoranomos promises a stack that starts with one command on a machine with Docker. Before the first start, every internal secret has to exist: the passwords of the databases, of their roles and of the message broker; the keys with which Airflow and Metabase encrypt the connections they save, and with which Airflow signs its sessions and tokens; and the passwords of the admin accounts. No secret may have a default value. The machine also needs enough memory, CPUs and disk, and the ports of the stack must be free; when they are not, the stack fails late and in ways that are hard to read. People run the stack on macOS, on Linux servers and on Windows through WSL2.
 
 How do people start the stack, and where do its settings and secrets live?
 

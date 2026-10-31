@@ -10,7 +10,7 @@ decision-makers: Andrei Gromov
 
 Marketing teams and business owners need dashboards, saved metrics and a glossary on top of the final layer of the warehouse, and they should not have to write SQL to use them. The BI tool also takes part in AI access, because AI clients can ask it questions about the data.
 
-Which BI tool does Agoranomos ship, on which version, and how are its dashboards set up?
+Which BI tool does agoranomos ship, on which version, and how are its dashboards set up?
 
 ## Decision Drivers
 

@@ -8,14 +8,14 @@ decision-makers: Andrei Gromov
 
 ## Context and Problem Statement
 
-People ask Agoranomos about their data from an AI client, through MCP ([ADR-0007](0007-ai-access-via-mcp-read-only.md)), in two ways:
+People ask agoranomos about their data from an AI client, through MCP ([ADR-0007](0007-ai-access-via-mcp-read-only.md)), in two ways:
 
 * **A chat app, for business users.** The app reaches the MCP server built into Metabase over HTTPS with OAuth, in server mode ([ADR-0011](0011-local-and-server-modes.md)). The proxy closes the registration of OAuth clients, so the app connects with a client ID that `./agoranomos ai connect` registered in advance, and no secret ([ADR-0031](0031-register-and-revoke-the-oauth-clients-of-metabase-with-the-script.md)).
 * **A coding agent, for engineers.** On the machine of a local stack, the agent also starts the servers of the warehouse and of Airflow on stdio, with `./agoranomos mcp warehouse` or `./agoranomos mcp airflow` ([ADR-0030](0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md)).
 
 v0.3.0 checked the Claude apps and Claude Code, and the guide [Talk to your data](../how-to/talk-to-your-data.md) has a section for each. Any other client that speaks MCP can follow its general steps, but nothing says which clients the project checks and describes, and the documentation named others, such as ChatGPT, Cursor, VS Code, Codex and Kimi, without saying which of them work. Each client that the project supports costs a check before each release and a section of the guide, so it starts with a few and adds others as users need them.
 
-Which AI clients does Agoranomos support first?
+Which AI clients does agoranomos support first?
 
 ## Decision Drivers
 

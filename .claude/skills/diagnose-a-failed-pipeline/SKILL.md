@@ -1,6 +1,6 @@
 ---
 name: diagnose-a-failed-pipeline
-description: Finds why a pipeline of a local Agoranomos stack failed or why its data is late, through the read-only MCP server of Airflow and the logs of the stack, and proposes a fix. Use when a DAG run or a task failed, a dashboard shows old data, Pipeline health shows late accounts or failed models or tests, or the user asks why the data did not update.
+description: Finds why a pipeline of a local agoranomos stack failed or why its data is late, through the read-only MCP server of Airflow and the logs of the stack, and proposes a fix. Use when a DAG run or a task failed, a dashboard shows old data, Pipeline health shows late accounts or failed models or tests, or the user asks why the data did not update.
 ---
 
 # Diagnose a failed pipeline

@@ -1,6 +1,6 @@
 # See the demo
 
-Agoranomos comes with a demo: the history of 18 months of a fictional business with two clients, on four fictional platforms in the shapes of real APIs, with a fictional source of exchange rates, and a daily load that brings each new day. On the first start the demo data goes all the way through the stack, into the model of advertising statistics ([The data model](../reference/data-model.md)), so you can see what each part does before you connect a real ad platform.
+agoranomos comes with a demo: the history of 18 months of a fictional business with two clients, on four fictional platforms in the shapes of real APIs, with a fictional source of exchange rates, and a daily load that brings each new day. On the first start the demo data goes all the way through the stack, into the model of advertising statistics ([The data model](../reference/data-model.md)), so you can see what each part does before you connect a real ad platform.
 
 ## What happens on the first start
 

@@ -1,6 +1,6 @@
 # Rename a field or add your own definitions
 
-The names and descriptions of the tables and fields of the marts in Metabase come from the dbt project of Agoranomos, in English. Your deployment can give them names of its own, descriptions of its own, or a note of its own, such as what a conversion is in your business, in a file that releases never change ([ADR-0016](../adr/0016-keep-the-metadata-of-the-marts-as-code.md)). An edit in the Metabase UI does not last: the next start sets the metadata of the code again, and its log says so.
+The names and descriptions of the tables and fields of the marts in Metabase come from the dbt project of agoranomos, in English. Your deployment can give them names of its own, descriptions of its own, or a note of its own, such as what a conversion is in your business, in a file that releases never change ([ADR-0016](../adr/0016-keep-the-metadata-of-the-marts-as-code.md)). An edit in the Metabase UI does not last: the next start sets the metadata of the code again, and its log says so.
 
 ## Write your overrides
 

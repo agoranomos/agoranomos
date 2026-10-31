@@ -8,7 +8,7 @@ decision-makers: Andrei Gromov
 
 ## Context and Problem Statement
 
-A main way to use Agoranomos is to ask questions about marketing data in an AI client such as Claude, ChatGPT, Cursor or Claude Code. AI clients reach data and tools through MCP (Model Context Protocol) servers. The data contains text that anyone can write, such as campaign names and ad texts, and the stack holds credentials for the warehouse and for the orchestrator. Access has to be useful to business users, engineers and analytics engineers, and it has to be safe by default.
+A main way to use agoranomos is to ask questions about marketing data in an AI client such as Claude, ChatGPT, Cursor or Claude Code. AI clients reach data and tools through MCP (Model Context Protocol) servers. The data contains text that anyone can write, such as campaign names and ad texts, and the stack holds credentials for the warehouse and for the orchestrator. Access has to be useful to business users, engineers and analytics engineers, and it has to be safe by default.
 
 How do AI clients get access to the data, the pipelines and the models, and what are they allowed to do?
 

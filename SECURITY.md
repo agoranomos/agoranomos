@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Agoranomos is pre-1.0. Its first release, v0.1.0, came out on 11 October 2026, v0.2.0 on 21 October 2026, and v0.3.0, the first public release, on 28 October 2026. Until version 1.0, only the latest minor release is supported: it receives security fixes, and earlier minor releases do not. Today that is v0.3, and v0.1 and v0.2 are no longer supported.
+agoranomos is pre-1.0. Its first release, v0.1.0, came out on 11 October 2026, v0.2.0 on 21 October 2026, and v0.3.0, the first public release, on 28 October 2026. Until version 1.0, only the latest minor release is supported: it receives security fixes, and earlier minor releases do not. Today that is v0.3, and v0.1 and v0.2 are no longer supported.
 
 ## Reporting a vulnerability
 
@@ -29,4 +29,4 @@ Use test data in your report, and remove real credentials, tokens and customer d
 
 ## Scope
 
-This policy covers vulnerabilities in Agoranomos itself: its code, its default configuration and its documentation. Vulnerabilities in the third-party software that the stack runs, such as Apache Airflow, PostgreSQL or Metabase, belong to those projects, so report them there. If Agoranomos makes such a vulnerability easier to exploit, for example through an insecure default, report that to us.
+This policy covers vulnerabilities in agoranomos itself: its code, its default configuration and its documentation. Vulnerabilities in the third-party software that the stack runs, such as Apache Airflow, PostgreSQL or Metabase, belong to those projects, so report them there. If agoranomos makes such a vulnerability easier to exploit, for example through an insecure default, report that to us.

@@ -10,7 +10,7 @@ The overrides of the metadata of the marts in `extensions/metadata/`, an extensi
 
 ## Context and Problem Statement
 
-Each release of Agoranomos is to ship a base package: the Compose stack, the pipelines, the dbt models and the dashboards. The people who run it, and the AI agents they work with, add their own work on top: DAGs for their own jobs, dbt models for their own metrics and, later, data sources that the base package does not have. A release must be able to replace the base package without overwriting that work, and an AI agent must know where its changes belong. This record covers code only: the questions and dashboards that people make in Metabase are saved in Metabase's own database.
+Each release of agoranomos is to ship a base package: the Compose stack, the pipelines, the dbt models and the dashboards. The people who run it, and the AI agents they work with, add their own work on top: DAGs for their own jobs, dbt models for their own metrics and, later, data sources that the base package does not have. A release must be able to replace the base package without overwriting that work, and an AI agent must know where its changes belong. This record covers code only: the questions and dashboards that people make in Metabase are saved in Metabase's own database.
 
 Where does the code that a deployment adds live, and how does the stack load it?
 
@@ -18,7 +18,7 @@ Where does the code that a deployment adds live, and how does the stack load it?
 
 * An update of the base package never overwrites or deletes what a deployment added.
 * There is one obvious place for additions, for people and for AI agents.
-* The owners of the additions can keep them under version control, apart from the Agoranomos repository.
+* The owners of the additions can keep them under version control, apart from the agoranomos repository.
 * The stack loads additions in a defined way, so that a broken addition shows up as an error and not as a silent change of the base package.
 * Code that runs in the stack can read the folders it is loaded from, but not rewrite them.
 
@@ -42,7 +42,7 @@ In practice this means:
 
 The other options were not chosen for these reasons:
 
-* **Changing the base package in place.** Every release would conflict with the local changes, and it would be unclear which code belongs to Agoranomos and which to the deployment.
+* **Changing the base package in place.** Every release would conflict with the local changes, and it would be unclear which code belongs to agoranomos and which to the deployment.
 * **Separate packages.** They suit developers who publish reusable code, but every change needs a build and an installation step, which is too heavy for the small additions that a business makes with an AI agent.
 * **Only the user interfaces.** Airflow DAGs and dbt models are code and cannot be written there, and changes made only in a user interface have no review and no history.
 
@@ -53,7 +53,7 @@ The other options were not chosen for these reasons:
 * Good, because the folder can be versioned, reviewed and backed up on its own.
 * Bad, because the DAGs in `extensions` run on the same Airflow workers as the DAGs of the base package, with the same permissions: the workers hold the password of the Airflow metadata database, and later also the credentials of the warehouse and of the ad platforms. Whoever can write to the folder, a person or an AI agent, can run code with these permissions, outside the limits that [ADR-0007](0007-ai-access-via-mcp-read-only.md) sets for AI access through MCP. Whether the workers can do without the password of the metadata database is to be checked during Phase 1.
 * Bad, because an extension can break when a release changes something it depends on. Keeping extensions compatible is up to their owners, and release notes have to name such changes.
-* Bad, because the CI of Agoranomos does not test the extensions of a deployment. It is to test only that Airflow loads and runs a DAG from the folder.
+* Bad, because the CI of agoranomos does not test the extensions of a deployment. It is to test only that Airflow loads and runs a DAG from the folder.
 
 ## More Information
 
