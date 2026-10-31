@@ -64,7 +64,7 @@ Solid arrows show how data moves. Dotted arrows show what Airflow runs.
 dlt takes care of incremental loading, schema evolution, merging and name normalization. Every source is a dlt source that follows one shared contract:
 
 * **Date window.** Each load covers a date window in the time zone of the ad account: final data up to yesterday, plus a sliding reload window because attribution keeps maturing after the fact.
-* **Safe repeats.** Each load replaces the facts of each account in the days of its window, deleted and inserted in one transaction, the days that come back empty included, so a repeat adds no duplicate.
+* **Safe repeats.** Each load replaces the facts of each account in the days of its window, the days that come back empty included, so a repeat adds no duplicate. Each table is replaced in a transaction of its own, so a dashboard read during a load can see the campaigns of a day before its ads.
 * **Explicit retries.** How failed requests are retried is set explicitly, not left to library defaults.
 * **Loud failures.** If an account fails, the run fails or raises an alert that lists the affected accounts and the original API error.
 
