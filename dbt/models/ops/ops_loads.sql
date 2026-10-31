@@ -3,19 +3,19 @@
 -- when a model of staging fails.
 with reloads as (
     select 'demo_fx' as platform, account_id, window_end, loaded_at
-    from {{ source('raw_demo_fx', '_agoranomos_reloads') }}
+    from {{ demo_source('raw_demo_fx', '_agoranomos_reloads') }}
     union all
     select 'demo_search' as platform, account_id, window_end, loaded_at
-    from {{ source('raw_demo_search', '_agoranomos_reloads') }}
+    from {{ demo_source('raw_demo_search', '_agoranomos_reloads') }}
     union all
     select 'demo_social' as platform, account_id, window_end, loaded_at
-    from {{ source('raw_demo_social', '_agoranomos_reloads') }}
+    from {{ demo_source('raw_demo_social', '_agoranomos_reloads') }}
     union all
     select 'demo_video' as platform, account_id, window_end, loaded_at
-    from {{ source('raw_demo_video', '_agoranomos_reloads') }}
+    from {{ demo_source('raw_demo_video', '_agoranomos_reloads') }}
     union all
     select 'demo_web' as platform, account_id, window_end, loaded_at
-    from {{ source('raw_demo_web', '_agoranomos_reloads') }}
+    from {{ demo_source('raw_demo_web', '_agoranomos_reloads') }}
     union all
     -- Empty while no load has taken the rates of the ECB, whose DAG starts paused.
     select 'ecb' as platform, account_id, window_end, loaded_at

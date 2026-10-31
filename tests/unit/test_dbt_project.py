@@ -639,12 +639,33 @@ def test_each_staging_model_of_a_platform_is_one_call_of_the_shape_of_its_api():
         for model, (macro, tables, *level) in models.items():
             path = STAGING / code / f"stg_{code}__{model}.sql"
             comment, *body = path.read_text(encoding="utf-8").splitlines()
-            relations = ", ".join(f"source('{dataset}', '{table}')" for table in tables)
+            relations = ", ".join(f"demo_source('{dataset}', '{table}')" for table in tables)
             arguments = ", ".join([relations, f"'{code}'", *(f"'{name}'" for name in level)])
             seeds = [seed for seed, _ in IN_SEEDS.values()] if model in SEEDED else []
             depends = [f"-- depends_on: {{{{ ref('{seed}') }}}}" for seed in seeds]
             assert comment.startswith(f"-- {path.name}: "), path.name
             assert body == [*depends, f"{{{{ {macro}({arguments}) }}}}"], path.name
+
+
+def test_every_table_of_the_demo_can_be_missing():
+    # A deployment without the profile demo never loads these tables, and its model must build all
+    # the same: each goes through demo_source, which needs the columns of the table.
+    named = set(
+        re.findall(
+            r"^    '(raw_demo_\w+\.\w+)': \{$",
+            (DBT / "macros" / "demo_source.sql").read_text(encoding="utf-8"),
+            flags=re.MULTILINE,
+        )
+    )
+    used = set()
+    for path in (DBT / "models").rglob("*.sql"):
+        text = path.read_text(encoding="utf-8")
+        assert not re.search(r"(?<![_a-z])source\('raw_demo", text), path.name
+        used |= {
+            f"{schema}.{table}"
+            for schema, table in re.findall(r"demo_source\('(raw_demo_\w+)', '(\w+)'\)", text)
+        }
+    assert used == named
 
 
 def test_the_sources_of_a_platform_are_the_tables_that_its_load_writes():
