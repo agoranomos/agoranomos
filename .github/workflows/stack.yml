@@ -9,28 +9,17 @@ name: Stack
 # .env selects.
 # Every run tests every combination: local mode on amd64 and arm64 (ADR-0010) with both variants,
 # and server mode on both architectures, which runs the same stack tests and those of the proxy and
-# the backups. The workflow runs on a pull request that changes the stack, on a push to main, every
-# week, which catches what changes around the repository, such as the images of the runners, and
-# by hand. The standard GitHub-hosted runners, ubuntu-24.04 and ubuntu-24.04-arm among them, are
+# the backups. The workflow runs on a pull request, where the jobs start when it changes the stack,
+# on a push to main that does, every week, which catches what changes around the repository, such
+# as the images of the runners, and by hand. The job passed is a required check of main: it reports
+# on every pull request, and the jobs of the stack cannot be required, as a job that does not start
+# keeps a pull request waiting. The standard GitHub-hosted runners, ubuntu-24.04 and ubuntu-24.04-arm among them, are
 # free and unlimited in a public repository, as this one is (the reference of GitHub-hosted runners
 # on docs.github.com, read on 30 October 2026), so no run saves minutes on a smaller set.
 # The secrets of the stack are generated anew in every run, so the logs uploaded on failure hold
 # nothing that lives on.
 on:
   pull_request:
-    paths:
-      - agoranomos
-      - compose.yaml
-      - compose.celery.yaml
-      - "caddy/**"
-      - .env.example
-      - "postgres/**"
-      - "airflow/**"
-      - "dbt/**"
-      - "metabase/**"
-      - "tests/stack/**"
-      - scripts/memory_report.py
-      - .github/workflows/stack.yml
   push:
     branches: [main]
     paths:
@@ -59,8 +48,41 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: Changes of the stack
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      stack: ${{ steps.files.outputs.stack }}
+    steps:
+      - name: Look for the files of the stack
+        id: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          stack=true
+          if [ "$EVENT" = pull_request ]; then
+            stack=false
+            files='^(agoranomos|compose\.yaml|compose\.celery\.yaml|\.env\.example'
+            files="$files|scripts/memory_report\.py|\.github/workflows/stack\.yml"
+            files="$files|(ai|airflow|caddy|dbt|metabase|postgres|tests/stack)/.*)\$"
+            # In two steps, so that a failed request stops the job and does not read as no file.
+            changed=$(gh api --paginate "repos/$REPOSITORY/pulls/$NUMBER/files" --jq '.[].filename')
+            if printf '%s\n' "$changed" | grep -qE "$files"; then
+              stack=true
+            fi
+          fi
+          echo "stack=$stack" | tee -a "$GITHUB_OUTPUT"
+
   local:
     name: Local mode (${{ matrix.arch }}, ${{ matrix.variant }})
+    needs: changes
+    if: ${{ needs.changes.outputs.stack == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -164,6 +186,8 @@ jobs:
 
   server:
     name: Server mode (${{ matrix.arch }})
+    needs: changes
+    if: ${{ needs.changes.outputs.stack == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -264,3 +288,50 @@ jobs:
           name: stack-logs-server-${{ matrix.arch }}
           path: stack-logs.txt
           retention-days: 3
+
+  passed:
+    name: Stack passed
+    needs: [changes, local, server]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    # A pull request of a release waits here for the stack of main, up to the timeout of its jobs.
+    timeout-minutes: 160
+    permissions:
+      actions: read
+    steps:
+      - name: Every job passed or did not need to start
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            case "$result" in
+              success | skipped) ;;
+              *)
+                echo "::error::a job of the stack ended as $result"
+                exit 1
+                ;;
+            esac
+          done
+      # A release takes main as it is, and a release pull request changes no file of the stack, so
+      # the check of this pull request says nothing of the code that it would release. The newest
+      # run on a push to main does, and a push that changes the stack starts one.
+      - name: A release waits for the stack of main
+        if: ${{ startsWith(github.head_ref, 'release-please--') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          while :; do
+            newest=$(gh run list --repo "$REPOSITORY" --workflow stack.yml --branch main \
+              --event push --limit 1 --json status,conclusion \
+              --jq '.[0] | "\(.status) \(.conclusion)"')
+            case "$newest" in
+              "completed success") exit 0 ;;
+              completed*)
+                echo "::error::the newest run of the stack on main ended as: $newest"
+                exit 1
+                ;;
+            esac
+            echo "the newest run of the stack on main: $newest"
+            sleep 60
+          done
