@@ -95,7 +95,7 @@ Start with questions such as these:
 - "Build a dashboard of the spend and the conversions of the last 30 days by client, in Workspace."
 - In Claude Code: "Why did the last run of the transform fail?" or "What does `conversions` in `ad_stats_campaign_daily` count?"
 
-Each answer is as good as the definitions behind it, which [The data model](../reference/data-model.md) describes. Money across accounts adds up in the reporting currency, and a day is the day in the time zone of each account. Today the data is that of the demo, until the connectors of real platforms come.
+Each answer is as good as the definitions behind it, which [The data model](../reference/data-model.md) describes. Money across accounts adds up in the reporting currency, and a day is the day in the time zone of each account. The data is that of the demo until you connect a real platform: today, [Google Ads](connect-google-ads.md).
 
 ## Keep a session safe
 
