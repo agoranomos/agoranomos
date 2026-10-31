@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.2](https://github.com/agoranomos/agoranomos/compare/v0.4.1...v0.4.2) (2026-10-31)
+
+
+### Bug Fixes
+
+* **metabase:** count Metabase's own type as a fill ([#172](https://github.com/agoranomos/agoranomos/issues/172)) ([ab9ddc2](https://github.com/agoranomos/agoranomos/commit/ab9ddc221d5f16682e42f4dfa0dde46314098ff4))
+
+
+### Documentation
+
+* **adr:** propose the data architecture of v0.5 ([#173](https://github.com/agoranomos/agoranomos/issues/173)) ([043a7a5](https://github.com/agoranomos/agoranomos/commit/043a7a51959f1cebf3e241f1601fe3ea079af4ee))
+* say that a load replaces each table on its own ([#175](https://github.com/agoranomos/agoranomos/issues/175)) ([648159c](https://github.com/agoranomos/agoranomos/commit/648159ca61d7e7b8114624d11ec4b4d62bd4dd90))
+
 ## [0.4.1](https://github.com/agoranomos/agoranomos/compare/v0.4.0...v0.4.1) (2026-10-31)
 
 
