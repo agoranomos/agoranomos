@@ -1065,7 +1065,9 @@ def test_the_plan_leaves_other_tables_inactive_ones_and_nested_fields_alone(tmp_
             md.UPDATE,
         ),  # the code gave it, though Metabase would too
         ("display_name", "Leads", {"Cost"}, md.REVERT),
-        ("semantic_type", "type/Category", set(), md.REVERT),
+        ("semantic_type", "type/Category", set(), md.FIRST),  # the analysis of Metabase gave it
+        ("semantic_type", "type/Category", {"type/Category"}, md.UPDATE),
+        ("semantic_type", "type/Quantity", set(), md.REVERT),
     ],
 )
 def test_the_kind_of_a_change_depends_on_what_metabase_showed(prop, old, earlier, kind):
