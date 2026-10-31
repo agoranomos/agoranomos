@@ -8,7 +8,7 @@
 <p align="center">
   <b>Open-source marketing BI out of the box.</b><br>
   The goal: ad platforms → a PostgreSQL warehouse of your own → Metabase dashboards → questions in Claude, ChatGPT or Gemini through MCP.<br>
-  Today: one command, <code>./agoranomos up</code>, starts the stack and two demo dashboards on your machine. Your data stays yours.
+  Today: one command, <code>./agoranomos up</code>, starts the stack and its dashboards on your machine, with demo data. Your data stays yours.
 </p>
 
 <p align="center">
@@ -33,10 +33,10 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-dashboard-dark.png">
-    <img alt="The demo dashboard Ad spend (demo) in Metabase: the spend of the last seven days, in total and by campaign, and the spend of every day" src="docs/assets/readme/demo-dashboard.png" width="100%">
+    <img alt="The dashboard Advertising in Metabase on the demo data: its tabs and filters, the spend, the conversions and the other KPIs of the last 12 weeks, and the spend and the conversions over time" src="docs/assets/readme/demo-dashboard.png" width="100%">
   </picture>
 </p>
-<p align="center"><sub>The demo dashboard, which the first start builds from a demo source through dlt, dbt and Metabase. No accounts or keys needed.</sub></p>
+<p align="center"><sub>The dashboard Advertising on the demo data, which the first start builds from a demo source through dlt, dbt and Metabase. No accounts or keys needed.</sub></p>
 
 ## Why agoranomos
 

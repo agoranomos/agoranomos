@@ -8,7 +8,7 @@
 <p align="center">
   <b>BI-система для маркетинга с открытым исходным кодом, которая работает «из коробки».</b><br>
   Цель: рекламные площадки → ваше собственное хранилище PostgreSQL → дашборды Metabase → вопросы в Claude, ChatGPT или Gemini через MCP.<br>
-  Сегодня: одна команда, <code>./agoranomos up</code>, запускает стек и два демо-дашборда на вашей машине. Ваши данные остаются вашими.
+  Сегодня: одна команда, <code>./agoranomos up</code>, запускает стек и его дашборды на вашей машине, с демо-данными. Ваши данные остаются вашими.
 </p>
 
 <p align="center">
@@ -33,10 +33,10 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-dashboard-dark.png">
-    <img alt="Демо-дашборд Ad spend (demo) в Metabase: расходы за последние семь дней, всего и по кампаниям, и расходы по дням" src="docs/assets/readme/demo-dashboard.png" width="100%">
+    <img alt="Дашборд Advertising в Metabase на демо-данных: вкладки и фильтры, расходы, конверсии и другие KPI за последние 12 недель, а также расходы и конверсии по времени" src="docs/assets/readme/demo-dashboard.png" width="100%">
   </picture>
 </p>
-<p align="center"><sub>Демо-дашборд, который первый запуск строит из демо-источника через dlt, dbt и Metabase. Ни аккаунты, ни ключи не нужны.</sub></p>
+<p align="center"><sub>Дашборд Advertising на демо-данных, который первый запуск строит из демо-источника через dlt, dbt и Metabase. Ни аккаунты, ни ключи не нужны.</sub></p>
 
 ## Зачем agoranomos
 
