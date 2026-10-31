@@ -12,7 +12,7 @@ dependencies = []
 dev = [
     "prek==0.5.7",
     "pytest==9.1.1",
-    "ruff==0.17.2",
+    "ruff==0.17.3",
     "zensical==0.0.73",
 ]
 
