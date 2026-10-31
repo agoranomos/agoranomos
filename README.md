@@ -53,7 +53,7 @@ agoranomos is meant to close these gaps: it keeps the history in a warehouse you
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/pipeline-dark.svg">
-    <img alt="The pipeline: demo data, dlt, the PostgreSQL warehouse with raw, staging and marts built by dbt, Metabase and the MCP servers run today, and Airflow runs the load and the dbt build. The Claude apps and Claude Code reach the data through the MCP servers: the one built into Metabase and, in local mode, the read-only servers of the warehouse and of Airflow. The Metabase refresh, ad platform connectors, the MCP server of dbt and the AI clients ChatGPT, Gemini and Kimi are planned. Metabase and the AI clients, which people work with, are framed in blue" src="docs/assets/readme/pipeline-light.svg" width="100%">
+    <img alt="The pipeline: demo data, dlt, the PostgreSQL warehouse with raw, staging and marts built by dbt, Metabase and the MCP servers run today, and Airflow runs the load and the dbt build. The connector of Google Ads is in place, with no load on a real account yet. The Claude apps and Claude Code reach the data through the MCP servers: the one built into Metabase and, in local mode, the read-only servers of the warehouse and of Airflow. The Metabase refresh, the connectors of more ad platforms, the MCP server of dbt and the AI clients ChatGPT, Gemini and Kimi are planned. Metabase and the AI clients, which people work with, are framed in blue" src="docs/assets/readme/pipeline-light.svg" width="100%">
   </picture>
 </p>
 
