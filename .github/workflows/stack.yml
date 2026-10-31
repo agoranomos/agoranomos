@@ -53,10 +53,12 @@ on:
 permissions: {}
 
 # The event is part of the group: a push to main never replaces a weekly or manual run that waits,
-# which would skip that week's check of what changes around the repository.
+# which would skip that week's check of what changes around the repository. A newer push to main
+# stops the run of an older one, as it tests what the older one holds, so a green main takes one
+# run after several merges.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 jobs:
   local:
