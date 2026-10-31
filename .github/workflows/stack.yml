@@ -26,6 +26,7 @@ on:
       - agoranomos
       - compose.yaml
       - compose.celery.yaml
+      - "ai/**"
       - "caddy/**"
       - .env.example
       - "postgres/**"
