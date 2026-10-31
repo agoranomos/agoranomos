@@ -76,6 +76,17 @@ nav = [
     { "ADR-0032: Connect Google Ads first, with the reference rates of the European Central Bank" = "adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md" },
     { "ADR-0033: Support Claude, ChatGPT and Gemini first among AI clients" = "adr/0033-support-claude-chatgpt-and-gemini-first.md" },
     { "ADR-0034: Define a basic data set of the marts and the dashboards, and the modules of an extended one" = "adr/0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md" },
+    { "ADR-0035: Keep four layers of data, and erase the raw layer once the core has accepted a load" = "adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md" },
+    { "ADR-0036: Model the core as narrow facts by grain, with dimensions that keep their versions" = "adr/0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md" },
+    { "ADR-0037: Serve the marts as views over the core" = "adr/0037-serve-the-marts-as-views-over-the-core.md" },
+    { "ADR-0038: Load with COPY into the raw layer, and write the core by whole days of an account" = "adr/0038-load-by-copy-and-write-the-core-by-whole-days.md" },
+    { "ADR-0039: Run one dbt build in the watcher mode of Cosmos, with a DAG of maintenance" = "adr/0039-run-one-dbt-build-in-the-watcher-mode.md" },
+    { "ADR-0040: Size the stack by profiles, and derive the settings of PostgreSQL from its memory limit" = "adr/0040-size-the-stack-by-profiles-and-derive-the-settings-of-postgresql.md" },
+    { "ADR-0041: Run an agency as one deployment" = "adr/0041-run-an-agency-as-one-deployment.md" },
+    { "ADR-0042: Take the exchange rates from the Bank of Italy and the National Bank of Kazakhstan" = "adr/0042-take-the-rates-from-the-bank-of-italy-and-the-national-bank-of-kazakhstan.md" },
+    { "ADR-0043: Define the metrics in the warehouse, and give agents tools over the marts" = "adr/0043-define-the-metrics-in-the-warehouse-and-give-agents-tools-over-the-marts.md" },
+    { "ADR-0044: Keep the core for good, change it by migrations, and back it up before each one" = "adr/0044-keep-the-core-for-good-and-change-it-by-migrations.md" },
+    { "ADR-0045: Send alerts from Airflow through Apprise" = "adr/0045-send-alerts-from-airflow-through-apprise.md" },
   ] },
 ]
 
