@@ -53,9 +53,11 @@ def collection_names(metabase_url, session) -> set[str]:
 def test_before_the_backup_leave_a_mark_in_each_database(
     env, airflow_url, token, metabase_url, session
 ):
-    mark = random_words.token_hex(8)
+    # A letter first: hexadecimal digits with one e, such as 49860e7683364428, are a number to the
+    # API of Airflow, which then returns Infinity for the Variable.
+    mark = f"m{random_words.token_hex(8)}"
     create = "CREATE TABLE public.agoranomos_roundtrip (mark text)"
-    insert = f"INSERT INTO public.agoranomos_roundtrip VALUES ('{mark}')"  # noqa: S608 (hexadecimal)
+    insert = f"INSERT INTO public.agoranomos_roundtrip VALUES ('{mark}')"  # noqa: S608 (a letter and hexadecimal)
     warehouse_output(env, f"{create}; {insert}")
     status, _ = api(
         airflow_url, token, "POST", "/api/v2/variables", {"key": VARIABLE, "value": mark}
@@ -93,7 +95,7 @@ def test_a_restore_of_metabase_into_the_running_stack_goes_back_to_the_backup(
         "POST", f"{metabase_url}/api/collection", {"name": f"Round trip {later}"}, headers=session
     )
     assert status == 200
-    insert = f"INSERT INTO public.agoranomos_roundtrip VALUES ('{later}')"  # noqa: S608 (hexadecimal)
+    insert = f"INSERT INTO public.agoranomos_roundtrip VALUES ('{later}')"  # noqa: S608 (a letter and hexadecimal)
     warehouse_output(env, insert)
     result = subprocess.run(
         [str(REPO_ROOT / "agoranomos"), "restore", saved["backup"], "--only", "metabase", "--yes"],

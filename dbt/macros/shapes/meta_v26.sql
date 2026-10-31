@@ -74,7 +74,7 @@ select
     j.conversions,
     j.conversion_value
 from joined as j
-join {{ insights }} as i on i._dlt_id = j.parent_id
+join (select * from {{ insights }}) as i on i._dlt_id = j.parent_id
 {% endmacro %}
 
 {% macro meta_accounts(relation, platform) %}

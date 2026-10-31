@@ -1,2 +1,2 @@
 -- stg_demo_social__campaign_stats.sql: the statistics of the campaigns of demo_social by day.
-{{ meta_stats(source('raw_demo_social', 'insights_campaign'), 'demo_social') }}
+{{ meta_stats(demo_source('raw_demo_social', 'insights_campaign'), 'demo_social') }}
