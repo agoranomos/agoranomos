@@ -1,4 +1,4 @@
-"""The transform of Agoranomos: the settings of the model, and then dbt builds the model of
+"""The transform of agoranomos: the settings of the model, and then dbt builds the model of
 advertising statistics.
 
 agoranomos_demo_transform first loads the settings of the model of the deployment, the files of

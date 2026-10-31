@@ -1,5 +1,5 @@
-"""The Ops collection of Agoranomos: a dashboard about the pipeline itself, which metabase-init
-keeps in the collection Agoranomos / Ops as the code says, on every start, with or without the demo
+"""The Ops collection of agoranomos: a dashboard about the pipeline itself, which metabase-init
+keeps in the collection agoranomos / Ops as the code says, on every start, with or without the demo
 (content.py, ADR-0018, ADR-0029).
 
 Its questions are native SQL on the views of the schema ops that the transform builds
@@ -21,7 +21,7 @@ import content
 OPS_KEY = "ops"
 OPS_NAME = "Ops"
 OPS_DESCRIPTION = (
-    "The pipeline of Agoranomos itself: the loads of each account, the runs of the transform with "
+    "The pipeline of agoranomos itself: the loads of each account, the runs of the transform with "
     "their models and tests, and the size of the warehouse."
 )
 PIPELINE = "pipeline"

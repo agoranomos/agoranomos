@@ -1,7 +1,7 @@
-"""The content that Agoranomos ships in Metabase, kept as the code says, and view-only for
+"""The content that agoranomos ships in Metabase, kept as the code says, and view-only for
 everyone but admins (ADR-0018).
 
-The content lives in a collection Agoranomos at the root of Metabase, with a sub-collection for
+The content lives in a collection agoranomos at the root of Metabase, with a sub-collection for
 each package of it, such as Demo. The jobs find their collections, questions and dashboards by the
 entity IDs that Metabase gave them when the jobs created them, which they keep in a registry file
 on a volume of their own, by the key of each item in the code; never by name, so that a renamed
@@ -18,7 +18,7 @@ the dashboard. What differs is put back, what is in the trash comes back, what M
 has is created again, an item that the code no longer ships goes to the trash, and one line of the
 log says each change and what it replaced. Metabase keeps the replaced version in the history of
 revisions of the item. Every group but Administrators gets
-at most View on the collection Agoranomos and on every sub-collection of the registry.
+at most View on the collection agoranomos and on every sub-collection of the registry.
 
 It uses the standard library only, and the client that the jobs pass in; a failed request raises
 the error of that client.
@@ -45,9 +45,9 @@ MODELS = ("collection", "card", "dashboard", "group")
 # are not content of the package.
 ACCESS_PREFIX = "access/"
 ROOT_KEY = "agoranomos"
-ROOT_NAME = "Agoranomos"
+ROOT_NAME = "agoranomos"
 ROOT_DESCRIPTION = (
-    "The content that Agoranomos ships: view-only, and put back as the code says on every start. "
+    "The content that agoranomos ships: view-only, and put back as the code says on every start. "
     "A copy of a question or a dashboard in another collection can be changed."
 )
 ADMIN_GROUP_TYPE = "admin"
@@ -1074,7 +1074,7 @@ def retire_missing(metabase: Client, registry: Registry, package: Package, log: 
 def ensure_package(
     metabase: Client, registry: Registry, package: Package, database_id: int, log: Log
 ) -> dict[str, int]:
-    """Make a package of the content as the code says, under Agoranomos, and return the IDs of its
+    """Make a package of the content as the code says, under agoranomos, and return the IDs of its
     questions, dashboards and metrics by key."""
     root = ensure_collection(metabase, registry, ROOT_KEY, ROOT_NAME, ROOT_DESCRIPTION, None, log)
     collection = ensure_collection(
@@ -1096,7 +1096,7 @@ def ensure_package(
 
 
 def lock_down(metabase: Client, registry: Registry, log: Log) -> None:
-    """Give every group but Administrators at most View on Agoranomos and on every collection in
+    """Give every group but Administrators at most View on agoranomos and on every collection in
     it, at any depth, and on each collection of the registry: Curate becomes View, and No access
     stays (ADR-0018). Personal collections and those in the trash are left out."""
     collections = {}

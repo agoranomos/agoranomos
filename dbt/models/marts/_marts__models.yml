@@ -15,7 +15,7 @@ models:
       meta:
         metabase:
           display_name: Ad Statistics by Campaign and Day
-          # The KPIs of the mart, which metabase-init keeps as metrics of Metabase in Agoranomos /
+          # The KPIs of the mart, which metabase-init keeps as metrics of Metabase in agoranomos /
           # Metrics, named <KPI> (<metric_level>), such as CTR (Campaigns), and described by
           # metric_scope and then the description of the KPI, and as terms of its glossary, one
           # for each KPI (ADR-0034, docs/reference/describe-the-marts.md#metrics). Each is the sum

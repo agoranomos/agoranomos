@@ -1,4 +1,4 @@
-"""The daily load of the demo of Agoranomos: each day, the days of the fictional platforms and of
+"""The daily load of the demo of agoranomos: each day, the days of the fictional platforms and of
 the source of rates that are new since the last load, and the recent days whose numbers still
 change.
 

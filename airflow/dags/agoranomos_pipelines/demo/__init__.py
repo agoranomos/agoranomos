@@ -1,4 +1,4 @@
-"""The demo generator of Agoranomos: a fictional business on four fictional platforms and a
+"""The demo generator of agoranomos: a fictional business on four fictional platforms and a
 source of exchange rates, in the shapes of the APIs that the platforms mimic (ADR-0025).
 
 The generator fakes the transport, not the data: each platform yields the records that the API it

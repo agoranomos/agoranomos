@@ -1,6 +1,6 @@
-"""The dashboard Advertising of Agoranomos: one dashboard with the tabs Overview, Platforms,
+"""The dashboard Advertising of agoranomos: one dashboard with the tabs Overview, Platforms,
 Campaigns, Ad groups and ads, and Conversions, which metabase-init keeps in the collection
-Agoranomos / Advertising as the code says, on every start, with or without the demo, and demo-init
+agoranomos / Advertising as the code says, on every start, with or without the demo, and demo-init
 after the first run of the transform (content.py, ADR-0018, ADR-0034).
 
 Its questions are native SQL on the marts, each with the filters of the dashboard that its mart
@@ -789,7 +789,7 @@ def ensure(
     database_id: int,
     log: content.Log,
 ) -> dict[str, int]:
-    """The dashboard Advertising in Agoranomos / Advertising, as the code says; the IDs of its
+    """The dashboard Advertising in agoranomos / Advertising, as the code says; the IDs of its
     questions and its dashboard by key, none while it waits for the marts."""
     _, fields = metrics.shown_marts(metadata.metadata_of(metabase, database_id))
     absent = waiting(fields)

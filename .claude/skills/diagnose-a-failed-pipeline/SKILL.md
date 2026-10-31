@@ -36,7 +36,7 @@ The docstring at the top of each file of `airflow/dags/` says what its DAG does.
     - A critical test in `staging` stops the models that read the model it checks, and the marts keep the data of the last good run.
     - A test records the number of rows that it found, never the rows. To see them, run its SQL through `agoranomos-warehouse`. That works only on `marts` and `staging`: `ai_reader` reads nothing else.
     - The demo leaves one day of one account out on purpose, so `int_ad_stats__unioned_has_no_missing_day` warns on every run of the demo. That is not a failure.
-- **A load.** Each load replaces a window of recent days of each account and records it in `_agoranomos_reloads` of its schema. A repeat is safe. The view `ops.ops_loads` and the dashboard Pipeline health show the last load of each account. `ai_reader` cannot read `ops`, so ask the user to look at the collection **Agoranomos / Ops** in Metabase.
+- **A load.** Each load replaces a window of recent days of each account and records it in `_agoranomos_reloads` of its schema. A repeat is safe. The view `ops.ops_loads` and the dashboard Pipeline health show the last load of each account. `ai_reader` cannot read `ops`, so ask the user to look at the collection **agoranomos / Ops** in Metabase.
 - **The transform did not run.** It waits for every platform. Look for the load that failed or did not run in `agoranomos_demo_daily`, whose first task, `due`, skips a run when every account has the load of its day already.
 - **A task killed without an error.** It may have reached the memory limit of its container. Read [System requirements](../../../docs/reference/system-requirements.md#memory-limits).
 

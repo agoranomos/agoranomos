@@ -1,4 +1,4 @@
-# The dbt project of Agoranomos (ADR-0005): the model of advertising statistics (ADR-0025), from the
+# The dbt project of agoranomos (ADR-0005): the model of advertising statistics (ADR-0025), from the
 # raw data of each platform through staging and the intermediate models to the marts. Airflow runs
 # it through Cosmos, in the DAG agoranomos_demo_transform, as the transformer role. The project is
 # mounted read-only: Cosmos runs dbt in a temporary folder that links to the project, where dbt

@@ -508,7 +508,7 @@ def test_an_override_in_another_language_is_kept_and_logged_as_written(tmp_path,
     overrides = "[marts.ad_stats_campaign_daily.columns.spend]\ndisplay_name = 'Расход'\n"
     env = {
         "METABASE_URL": metabase.url,
-        "METABASE_SITE_NAME": "Agoranomos",
+        "METABASE_SITE_NAME": "agoranomos",
         "METABASE_ADMIN_EMAIL": "admin@example.com",
         "METABASE_ADMIN_PASSWORD": SECRETS["the admin password"],
         "WAREHOUSE_HOST": "warehouse-db",

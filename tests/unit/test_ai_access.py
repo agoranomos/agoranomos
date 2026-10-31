@@ -125,13 +125,13 @@ def test_metabase_init_stops_on_a_problem_before_it_reaches_metabase(capsys):
 # The permissions of the levels.
 
 WAREHOUSE, OTHER = "1", "2"
-DATABASES = {WAREHOUSE: "Agoranomos warehouse", OTHER: "Other database"}
+DATABASES = {WAREHOUSE: "agoranomos warehouse", OTHER: "Other database"}
 ALL_USERS, ADMINS, BUILDERS, EXPLORERS, MARKETING = "1", "2", "5", "6", "7"
 NAMES = {
     ALL_USERS: "All Users",
     ADMINS: "Administrators",
-    BUILDERS: "Agoranomos: Builders",
-    EXPLORERS: "Agoranomos: Explorers",
+    BUILDERS: "agoranomos: Builders",
+    EXPLORERS: "agoranomos: Explorers",
     MARKETING: "Marketing",
 }
 
@@ -189,7 +189,7 @@ def test_all_users_get_the_default_on_the_warehouse_and_at_most_it_elsewhere():
         ALL_USERS: {WAREHOUSE: {"create-queries": "no"}, OTHER: {"create-queries": "no"}}
     }
     assert lines == [
-        'set: group "All Users" on database "Agoranomos warehouse": create queries query builder '
+        'set: group "All Users" on database "agoranomos warehouse": create queries query builder '
         "and native -> no",
         'set: group "All Users" on database "Other database": create queries query builder and '
         "native -> no",
@@ -221,7 +221,7 @@ def test_the_data_plan_is_empty_when_the_graph_has_what_the_levels_say():
 ROOT, AGORANOMOS, TEAM, WORKSPACE, DRAFTS, REPORTS = "root", "3", "6", "10", "11", "12"
 COLLECTIONS = {
     ROOT: "Our analytics",
-    AGORANOMOS: "Agoranomos",
+    AGORANOMOS: "agoranomos",
     TEAM: "Team stuff",
     WORKSPACE: "Workspace",
     DRAFTS: "Drafts",
@@ -329,20 +329,20 @@ def test_the_groups_above_the_default_up_to_the_ceiling_are_created(tmp_path):
     )
     log = []
     found = ai_access.ensure_groups(metabase, registry(tmp_path), "build", "answers", log.append)
-    assert made == ["Agoranomos: Explorers", "Agoranomos: Builders"]
+    assert made == ["agoranomos: Explorers", "agoranomos: Builders"]
     assert found == {
-        "11": ("explore", "Agoranomos: Explorers"),
-        "12": ("build", "Agoranomos: Builders"),
+        "11": ("explore", "agoranomos: Explorers"),
+        "12": ("build", "agoranomos: Builders"),
     }
     assert log == [
-        'created: group "Agoranomos: Explorers"',
-        'created: group "Agoranomos: Builders"',
+        'created: group "agoranomos: Explorers"',
+        'created: group "agoranomos: Builders"',
     ]
     # The registry knows them now: a second run creates nothing.
     groups = [
         *GROUPS,
-        {"id": 11, "name": "Agoranomos: Explorers", "entity_id": "1" * 21},
-        {"id": 12, "name": "Agoranomos: Builders", "entity_id": "2" * 21},
+        {"id": 11, "name": "agoranomos: Explorers", "entity_id": "1" * 21},
+        {"id": 12, "name": "agoranomos: Builders", "entity_id": "2" * 21},
     ]
     again = FakeMetabase({("GET", "/api/permissions/group"): groups})
     loaded = content.Registry(tmp_path / "registry.json")
@@ -367,10 +367,10 @@ def test_a_group_with_the_name_of_a_group_of_the_setup_is_adopted(tmp_path):
 def test_a_group_of_the_setup_that_is_no_longer_needed_stays_with_its_level(tmp_path):
     store = registry(tmp_path)
     store.set("access/group/build", "group", "c" * 21)
-    groups = [*GROUPS, {"id": 9, "name": "Agoranomos: Builders", "entity_id": "c" * 21}]
+    groups = [*GROUPS, {"id": 9, "name": "agoranomos: Builders", "entity_id": "c" * 21}]
     metabase = FakeMetabase({("GET", "/api/permissions/group"): groups})
     found = ai_access.ensure_groups(metabase, store, "explore", "explore", [].append)
-    assert found == {"9": ("build", "Agoranomos: Builders")}
+    assert found == {"9": ("build", "agoranomos: Builders")}
 
 
 def test_the_registry_forgets_a_group_that_is_gone_and_not_needed(tmp_path):
@@ -467,7 +467,7 @@ def test_the_dry_run_names_the_groups_and_collections_to_create_and_creates_none
     assert spaces == {}
     assert log == [
         'would adopt: group "agoranomos: explorers", which has the name of a group of the setup',
-        'would create: group "Agoranomos: Builders"',
+        'would create: group "agoranomos: Builders"',
         'would create: collection access/workspace "Workspace"',
         'would create: collection access/reports "Reports"',
     ]
@@ -525,14 +525,14 @@ def test_the_groups_of_the_setup_are_those_the_registry_knows_from_the_lowest_le
     store.set("access/group/answers", "group", "e" * 21)
     groups = [
         *GROUPS,
-        {"id": 9, "name": "Agoranomos: Builders", "entity_id": "c" * 21, "member_count": 2},
-        {"id": 8, "name": "Agoranomos: Explorers", "entity_id": "d" * 21, "member_count": 1},
+        {"id": 9, "name": "agoranomos: Builders", "entity_id": "c" * 21, "member_count": 2},
+        {"id": 8, "name": "agoranomos: Explorers", "entity_id": "d" * 21, "member_count": 1},
     ]
     metabase = FakeMetabase({("GET", "/api/permissions/group"): groups})
     found = ai_access.setup_groups(metabase, store)
     assert [g["id"] for g in found] == [8, 9]
     assert ai_access.members_line(found) == (
-        '"Agoranomos: Explorers" 1 member, "Agoranomos: Builders" 2 members'
+        '"agoranomos: Explorers" 1 member, "agoranomos: Builders" 2 members'
     )
     assert ai_access.members_line([]) == "no group of the setup yet"
 
@@ -572,7 +572,7 @@ def warned(answers, env=None, store=None):
             ("GET", "/api/user"): {"data": [{"id": 3, "email": "ann@example.com"}]},
             ("GET", "/api/permissions/group"): [
                 *GROUPS,
-                {"id": 9, "name": "Agoranomos: Builders", "entity_id": "c" * 21, "member_count": 1},
+                {"id": 9, "name": "agoranomos: Builders", "entity_id": "c" * 21, "member_count": 1},
             ],
             ("GET", "/api/permissions/group/9"): {"members": [{"user_id": 3}]},
             ("GET", "/api/card?f=all"): [],
@@ -661,10 +661,10 @@ def test_a_start_warns_about_sql_questions_of_members_but_not_those_of_the_packa
 def test_a_start_warns_about_a_group_of_the_setup_without_members_above_off(tmp_path):
     store = registry(tmp_path)
     store.set("access/group/explore", "group", "d" * 21)
-    empty = [*GROUPS, {"id": 8, "name": "Agoranomos: Explorers", "entity_id": "d" * 21}]
+    empty = [*GROUPS, {"id": 8, "name": "agoranomos: Explorers", "entity_id": "d" * 21}]
     answers = {("GET", "/api/permissions/group"): empty, ("GET", "/api/permissions/group/8"): {}}
     assert warned(answers, store=store) == [
-        'the group "Agoranomos: Explorers" has no members: an admin puts people into it in '
+        'the group "agoranomos: Explorers" has no members: an admin puts people into it in '
         "Admin > People > Groups"
     ]
     assert warned(answers, env=FRESH, store=store) == []

@@ -1,10 +1,10 @@
 # Read the advertising dashboard
 
-The collection **Agoranomos / Advertising** in Metabase holds the dashboard **Advertising**: the spend, the results and the KPIs of every ad platform of the deployment, on five tabs, for the period, the client, the platform, the account and the campaign of its filters ([ADR-0034](../adr/0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md)).
+The collection **agoranomos / Advertising** in Metabase holds the dashboard **Advertising**: the spend, the results and the KPIs of every ad platform of the deployment, on five tabs, for the period, the client, the platform, the account and the campaign of its filters ([ADR-0034](../adr/0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md)).
 
 ## Open it
 
-Sign in to Metabase as [Run agoranomos locally](run-locally.md#sign-in) says and open the collection **Agoranomos / Advertising**. `metabase-init` makes the dashboard once Metabase shows the marts, after the first run of the transform, with or without the demo, and keeps it as the code says on every start, view-only for every group but Administrators ([ADR-0018](../adr/0018-keep-the-content-of-the-package-in-metabase-as-code.md)). With the demo, `demo-init` makes it at the first start, right after the transform. Until then, the log of the start says that the dashboard waits for the marts.
+Sign in to Metabase as [Run agoranomos locally](run-locally.md#sign-in) says and open the collection **agoranomos / Advertising**. `metabase-init` makes the dashboard once Metabase shows the marts, after the first run of the transform, with or without the demo, and keeps it as the code says on every start, view-only for every group but Administrators ([ADR-0018](../adr/0018-keep-the-content-of-the-package-in-metabase-as-code.md)). With the demo, `demo-init` makes it at the first start, right after the transform. Until then, the log of the start says that the dashboard waits for the marts.
 
 ## The filters
 
@@ -31,7 +31,7 @@ A click on a campaign, in the table of the campaigns or of the top campaigns, op
 ## How the numbers are computed
 
 - **Money** is in the reporting currency, `AGORANOMOS_REPORTING_CURRENCY` of `.env`.
-- **A KPI is a ratio of sums**, over the rows that the filters select: CTR is the sum of the clicks divided by the sum of the impressions, never an average of the rates of the rows. Each card computes it from the same declaration in dbt as the metric of Metabase of the same name, such as `CTR (Campaigns)` in the collection **Agoranomos / Metrics** ([Describe the marts](../reference/describe-the-marts.md#metrics)).
+- **A KPI is a ratio of sums**, over the rows that the filters select: CTR is the sum of the clicks divided by the sum of the impressions, never an average of the rates of the rows. Each card computes it from the same declaration in dbt as the metric of Metabase of the same name, such as `CTR (Campaigns)` in the collection **agoranomos / Metrics** ([Describe the marts](../reference/describe-the-marts.md#metrics)).
 - **The conversions** are those of the primary conversion actions, as each platform counts them. Each platform credits its own ads and dates a conversion by the click, so a sum across platforms can count one conversion more than once, and the last days still rise for a while. **The key events** of web analytics date each by its event and credit it to one source, so the two counts differ.
 
 [The data model](../reference/data-model.md) describes the marts that the dashboard reads.

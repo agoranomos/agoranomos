@@ -84,6 +84,13 @@ repos:
 
   - repo: local
     hooks:
+      - id: name-in-lower-case
+        name: The name of the project is in lower case
+        # Agoranomos demo stays: the jobs look for the collection of v0.1 under that name.
+        entry: \bAgoranomos\b(?! demo)
+        language: pygrep
+        types: [text]
+        exclude: ^(CHANGELOG\.md|\.pre-commit-config\.yaml|docs/assets/javascripts/.+)$
       - id: check-docs-nav
         name: Documentation navigation matches the pages
         entry: python scripts/check_docs_nav.py

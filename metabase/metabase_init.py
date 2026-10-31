@@ -9,14 +9,14 @@ that must not change in the Metabase UI, such as the switches of the AI features
 variables in compose.yaml instead. On a new Metabase it also turns the public links off, once. Then
 it applies the metadata of the marts (metadata.py): the names, descriptions and types that dbt and
 the overrides of the deployment give the tables and fields of the marts, with one line for each
-change, and keeps the KPIs that the marts declare as metrics in the collection Agoranomos / Metrics
+change, and keeps the KPIs that the marts declare as metrics in the collection agoranomos / Metrics
 and as terms of the glossary (metrics.py, ADR-0034). While Metabase starts its weeks on its default,
 Sunday, the job starts them on Monday, as ISO 8601 does. It keeps the dashboard Advertising, with
-its tabs, in the collection Agoranomos / Advertising (advertising.py, ADR-0034), once Metabase shows
+its tabs, in the collection agoranomos / Advertising (advertising.py, ADR-0034), once Metabase shows
 the marts. Last, it keeps the Ops collection, a dashboard about the pipeline itself, in the
-collection Agoranomos as the code says (ops.py, ADR-0029), and gives every group but
+collection agoranomos as the code says (ops.py, ADR-0029), and gives every group but
 Administrators at most View on the collections of the content of the package that the registry of
-the content records, the collection Agoranomos and its packages such as Demo, Advertising and Ops
+the content records, the collection agoranomos and its packages such as Demo, Advertising and Ops
 (content.py, ADR-0018), on every start, with one line for each change. Run with the argument diff,
 as ./agoranomos metadata diff does, it prints the plan of the metadata and applies nothing.
 
@@ -48,7 +48,7 @@ import metadata
 import metrics
 import ops
 
-WAREHOUSE_NAME = "Agoranomos warehouse"
+WAREHOUSE_NAME = "agoranomos warehouse"
 # How long the job waits for a sync that adds a table of the marts to Metabase, in seconds.
 METADATA_SYNC_TIMEOUT = 120.0
 # How often the job tries to turn the public links off, and the pause between two attempts in
@@ -300,7 +300,7 @@ def ensure_admin(metabase: Metabase, config: Config) -> bool:
                 "user": {
                     "email": config.admin_email,
                     "password": config.admin_password,
-                    "first_name": "Agoranomos",
+                    "first_name": "agoranomos",
                     "last_name": "Admin",
                 },
                 "prefs": {"site_name": config.site_name, "site_locale": "en"},

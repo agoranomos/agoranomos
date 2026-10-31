@@ -381,7 +381,7 @@ def warn_of_the_sunset(now: datetime) -> None:
     """A warning in the log from WARN_DAYS before the sunset of the version of the API."""
     if now.date() >= SUNSET - timedelta(days=WARN_DAYS):
         log.warning(
-            "Google is to sunset the Google Ads API %s in %s: update Agoranomos before then, or "
+            "Google is to sunset the Google Ads API %s in %s: update agoranomos before then, or "
             "the loads of google_ads stop",
             API_VERSION,
             SUNSET.strftime("%B %Y"),

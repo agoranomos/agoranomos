@@ -6,7 +6,7 @@ change no setting of Metabase. They read, they run one SELECT through it, they r
 again, which the stack does on every start anyway, they sign in once more and read the login
 history, and they try three changes of the LLM providers that Metabase must refuse, and that would
 change nothing if it took them. With the demo, they also let All Users curate the collection
-Agoranomos, which the run of metabase-init that follows puts back to View.
+agoranomos, which the run of metabase-init that follows puts back to View.
 """
 
 import time
@@ -17,7 +17,7 @@ from metabase_content import get, group_ids, item, put, run_job
 from services import AI_ON, DEMO
 from stack_helpers import compose, http_json, leaked, psql, secrets
 
-WAREHOUSE_NAME = "Agoranomos warehouse"
+WAREHOUSE_NAME = "agoranomos warehouse"
 
 # The AI entry points of Metabase 0.63 and 0.64, which are on by default and which compose.yaml
 # switches off: each one is a setting, and the environment variable that sets it.
@@ -335,7 +335,7 @@ def test_metabase_init_can_run_again(metabase_url, session):
 
 @pytest.mark.skipif(not DEMO, reason="no content of the package: the demo is off")
 def test_metabase_init_gives_all_users_view_again_on_agoranomos(env, metabase_url, session):
-    # All Users raised to Curate on the collection Agoranomos, as an admin could: the next run of
+    # All Users raised to Curate on the collection agoranomos, as an admin could: the next run of
     # metabase-init, which every start runs, lowers it to View and says so.
     root_id = str(item(metabase_url, session, "agoranomos")["id"])
     _, all_users = group_ids(metabase_url, session)
@@ -348,7 +348,7 @@ def test_metabase_init_gives_all_users_view_again_on_agoranomos(env, metabase_ur
     graph = get(metabase_url, session, "/api/collection/graph")
     assert graph["groups"][all_users][root_id] == "read"
     assert changes == [
-        'metabase-init: lowered: group "All Users" on collection "Agoranomos": curate -> view'
+        'metabase-init: lowered: group "All Users" on collection "agoranomos": curate -> view'
     ], changes
 
 
@@ -361,7 +361,7 @@ def stored_details(env, in_clear):
         "metabase",
         env["METABASE_DB_PASSWORD"],
         "metabase",
-        "SELECT details FROM metabase_database WHERE name = 'Agoranomos warehouse'",
+        "SELECT details FROM metabase_database WHERE name = 'agoranomos warehouse'",
     )
     return result.returncode, bool(result.stdout.strip()), leaked(in_clear, result.stdout)
 

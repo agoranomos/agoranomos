@@ -1,4 +1,4 @@
-# The Agoranomos stack. Start it with ./agoranomos up (docs/reference/command-line.md).
+# The agoranomos stack. Start it with ./agoranomos up (docs/reference/command-line.md).
 # Settings and secrets come from .env, which ./agoranomos init creates from .env.example; without it,
 # docker compose stops and asks for ./agoranomos init. .env also sets COMPOSE_PROFILES: core is the whole
 # stack in local mode (ADR-0011), demo adds the demo-init job, ai the container of the MCP servers of
@@ -21,7 +21,7 @@ x-logging: &logging
 # What every Airflow container shares. Anchors do not cross files, so compose.celery.yaml extends services
 # of this file where it needs the same settings.
 x-airflow: &airflow
-  # The image of Agoranomos (ADR-0002): the official image with dlt, Cosmos and dbt added. airflow-init
+  # The image of agoranomos (ADR-0002): the official image with dlt, Cosmos and dbt added. airflow-init
   # builds it from airflow/Dockerfile on every start, from the cache of Docker after the first time, so
   # it always matches the checkout, and the other services run it; it is never pulled from or pushed to
   # a registry. Only one service builds it. With a build in every service, Compose runs one build per
@@ -280,7 +280,7 @@ services:
             "--username",
             "admin",
             "--firstname",
-            "Agoranomos",
+            "agoranomos",
             "--lastname",
             "Admin",
             "--email",
@@ -318,7 +318,7 @@ services:
                 password = os.environ["AIRFLOW_AI_PASSWORD"]
                 if ai_user is None:
                     ai_user = security.add_user(
-                        "ai", "Agoranomos", "AI", "ai@agoranomos.invalid", viewer, password
+                        "ai", "agoranomos", "AI", "ai@agoranomos.invalid", viewer, password
                     )
                     if not ai_user:
                         raise SystemExit("could not create the Airflow user ai")
@@ -622,7 +622,7 @@ services:
     environment:
       PYTHONDONTWRITEBYTECODE: "1"
       METABASE_URL: http://metabase:3000
-      METABASE_SITE_NAME: Agoranomos
+      METABASE_SITE_NAME: agoranomos
       METABASE_ADMIN_EMAIL: ${AGORANOMOS_ADMIN_EMAIL:-admin@example.com}
       METABASE_ADMIN_PASSWORD: ${METABASE_ADMIN_PASSWORD:?run ./agoranomos init}
       WAREHOUSE_HOST: warehouse-db
@@ -665,7 +665,7 @@ services:
 
   # Makes the demo ready on every start (the demo profile, which .env turns on by default): it runs the
   # demo pipeline once, then syncs the warehouse in Metabase and puts the demo collection, its questions
-  # and its dashboard in the collection Agoranomos as the code says (ADR-0018). It holds the passwords of
+  # and its dashboard in the collection agoranomos as the code says (ADR-0018). It holds the passwords of
   # both admins, which no Airflow task gets.
   # COMPOSE_PROFILES=core in .env turns the demo off.
   demo-init:
