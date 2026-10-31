@@ -53,7 +53,7 @@ Agoranomos создаётся, чтобы закрыть эти пробелы: 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/pipeline-ru-dark.svg">
-    <img alt="Конвейер: демо-данные, dlt, хранилище PostgreSQL со слоями raw, staging и marts, которые строит dbt, Metabase и MCP-серверы работают уже сейчас, а Airflow запускает загрузку и сборку dbt. Приложения Claude и Claude Code получают данные через MCP-серверы: встроенный в Metabase, а в локальном режиме еще серверы хранилища и Airflow с доступом только на чтение. Обновление Metabase, коннекторы площадок, MCP-сервер dbt и AI-клиенты ChatGPT, Gemini и Kimi в плане. Metabase и AI-клиенты, с которыми работают пользователи, обведены синей рамкой" src="docs/assets/readme/pipeline-ru-light.svg" width="100%">
+    <img alt="Конвейер: демо-данные, dlt, хранилище PostgreSQL со слоями raw, staging и marts, которые строит dbt, Metabase и MCP-серверы работают уже сейчас, а Airflow запускает загрузку и сборку dbt. Коннектор Google Ads готов, но реальный кабинет через него еще не загружали. Приложения Claude и Claude Code получают данные через MCP-серверы: встроенный в Metabase, а в локальном режиме еще серверы хранилища и Airflow с доступом только на чтение. Обновление Metabase, коннекторы других площадок, MCP-сервер dbt и AI-клиенты ChatGPT, Gemini и Kimi в плане. Metabase и AI-клиенты, с которыми работают пользователи, обведены синей рамкой" src="docs/assets/readme/pipeline-ru-light.svg" width="100%">
   </picture>
 </p>
 
