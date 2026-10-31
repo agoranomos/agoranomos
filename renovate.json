@@ -22,6 +22,12 @@
   "minimumReleaseAge": "3 days",
   "packageRules": [
     {
+      "description": "The tools of development, which no image of the stack holds. Renovate merges a pull request of one itself once the required checks pass, after the three-day wait of minimumReleaseAge. A new major version waits for the maintainer, and uv, which the workflow of the stack names, goes through the stack tests first.",
+      "matchDepNames": ["ruff", "astral-sh/ruff-pre-commit", "prek", "zensical", "astral-sh/uv"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
       "description": "Update ruff in pyproject.toml and the ruff-pre-commit hook in one pull request.",
       "matchDepNames": ["ruff", "astral-sh/ruff-pre-commit"],
       "groupName": "ruff"
