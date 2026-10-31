@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Back up the databases every day with pg_dump, into a folder of the host
 
+Superseded in part by [ADR-0044](0044-keep-the-core-for-good-and-change-it-by-migrations.md): the 3 monthly copies of "How long" become 12, and `./agoranomos up` takes the backup before a migration of the core. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 The state of a deployment is in three databases: the warehouse, the metadata database of Airflow and the application database of Metabase ([ADR-0003](0003-two-postgres-instances.md)), and in its extensions folder ([ADR-0013](0013-keep-extensions-apart-from-the-base-package.md)). The keys that decrypt the connections that Airflow and Metabase save are in `.env` ([ADR-0014](0014-start-the-stack-with-one-script.md)). An upgrade of Metabase to a new major version migrates its database one way, so the way back is a backup made before. Server mode needs backups on a schedule ([ADR-0011](0011-local-and-server-modes.md)), and every mode needs one before an upgrade.

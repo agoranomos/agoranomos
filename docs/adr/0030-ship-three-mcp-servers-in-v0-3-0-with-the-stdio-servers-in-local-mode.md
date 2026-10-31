@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Ship three MCP servers in v0.3.0, with the stdio servers in local mode only
 
+Superseded in part by [ADR-0043](0043-define-the-metrics-in-the-warehouse-and-give-agents-tools-over-the-marts.md): the role `ai_reader` reads `marts` only, and no longer `staging`. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 [ADR-0007](0007-ai-access-via-mcp-read-only.md) chose four MCP servers for AI clients: the built-in server of Metabase, astro-airflow-mcp, MCP Toolbox for Databases and dbt-mcp. The last three run in one container, `ai`, which an AI client reaches with `docker exec` over stdio. v0.3.0 is to ship the AI layer, with the levels of AI access in Metabase of [ADR-0017](0017-set-ai-access-in-metabase-by-levels.md).

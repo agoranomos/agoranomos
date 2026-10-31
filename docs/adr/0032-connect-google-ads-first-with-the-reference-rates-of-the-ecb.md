@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Connect Google Ads first, with the reference rates of the European Central Bank
 
+Superseded in part by [ADR-0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md): an account whose load fails goes to quarantine, and the run goes on; by [ADR-0036](0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md): the conversions by action below the campaign leave the basic set; and by [ADR-0038](0038-load-by-copy-and-write-the-core-by-whole-days.md): the schema `raw_google_ads_staging` goes with `append`. And by [ADR-0042](0042-take-the-rates-from-the-bank-of-italy-and-the-national-bank-of-kazakhstan.md): the rates come from the Bank of Italy and the National Bank of Kazakhstan in place of the ECB. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 Phase 4 of the roadmap brings the connectors of real platforms, one source in each minor release, starting with v0.4.0. Until now only the demo runs. [ADR-0025](0025-model-advertising-statistics-once.md) gave it four fictional platforms in the shapes of the APIs of Google Ads (v25), Meta (v26), TikTok (v1.3) and GA4 (v1beta), and a fictional source of the reference rates of the euro; each shape has macros in `dbt/macros/shapes/` that the demo and the connector of its platform are to share. ADR-0025 also left two things to the first real connector: ad groups and ads, each from a report of its own, and a source of exchange rates, without which a deployment reports in USD or EUR only.

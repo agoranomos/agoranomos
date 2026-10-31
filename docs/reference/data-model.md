@@ -4,7 +4,7 @@ The warehouse holds the advertising statistics of every platform in one model, b
 
 !!! note "Planned for v0.5"
 
-    [ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) to [ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md) propose to keep the data in a new schema `core` and to turn the marts into views under the same names. None of it is built, and this page describes the model as it is today.
+    [ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) to [ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md) decide to keep the data in a new schema `core` and to turn the marts into views under the same names. None of it is built, and this page describes the model as it is today.
 
 ## Layers
 
