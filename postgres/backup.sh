@@ -55,7 +55,7 @@ check_settings() {
     [01][0-9]:[0-5][0-9] | 2[0-3]:[0-5][0-9]) ;;
     *) fail "BACKUP_TIME must be a time of day as HH:MM, from 00:00 to 23:59" ;;
   esac
-  for keep in "${BACKUP_KEEP_DAILY:-7}" "${BACKUP_KEEP_WEEKLY:-4}" "${BACKUP_KEEP_MONTHLY:-3}"; do
+  for keep in "${BACKUP_KEEP_DAILY:-7}" "${BACKUP_KEEP_WEEKLY:-4}" "${BACKUP_KEEP_MONTHLY:-12}"; do
     case "$keep" in
       '' | *[!0-9]*) fail "BACKUP_KEEP_DAILY, BACKUP_KEEP_WEEKLY and BACKUP_KEEP_MONTHLY must be whole numbers" ;;
     esac
@@ -206,7 +206,8 @@ expired() {
 
 # Remove the scheduled backups that the retention no longer keeps. Only a folder whose manifest
 # says scheduled can go: a backup by hand, and a folder whose manifest is missing or cannot be
-# read, stay until a person deletes them. Only under the lock.
+# read, stay until a person deletes them. Only under the lock. The defaults, 7 days, 4 weeks and
+# 12 months (ADR-0044), are those of .env.example and compose.yaml.
 prune() {
   names=""
   for path in "$BACKUP_ROOT"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z; do
@@ -216,7 +217,7 @@ prune() {
 $names"
   done
   printf '%s' "$names" |
-    expired "${BACKUP_KEEP_DAILY:-7}" "${BACKUP_KEEP_WEEKLY:-4}" "${BACKUP_KEEP_MONTHLY:-3}" |
+    expired "${BACKUP_KEEP_DAILY:-7}" "${BACKUP_KEEP_WEEKLY:-4}" "${BACKUP_KEEP_MONTHLY:-12}" |
     while IFS= read -r old; do
       [ -n "$old" ] || continue
       if rm -rf -- "${BACKUP_ROOT:?}/$old"; then

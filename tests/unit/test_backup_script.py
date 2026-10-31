@@ -470,15 +470,16 @@ def kept_by_reference(names: list[str], daily: int, weekly: int, monthly: int) -
 
 
 @pytest.mark.parametrize("shell", SHELLS)
-@pytest.mark.parametrize("keep", [(7, 4, 3), (1, 0, 0), (2, 1, 1), (30, 10, 12)])
+@pytest.mark.parametrize("keep", [(7, 4, 12), (1, 0, 0), (2, 1, 1), (30, 10, 3)])
 def test_the_retention_keeps_the_newest_backup_of_each_day_week_and_month(shell, keep):
+    # Fourteen months of backups: more than the 12 months of the default (ADR-0044) keep.
     start = datetime(2026, 3, 1, 3, 0, tzinfo=UTC)
     names = [
         (start + timedelta(days=offset, minutes=offset % 3)).strftime("%Y%m%dT%H%M%SZ")
-        for offset in range(230)
+        for offset in range(420)
         if offset % 11 != 5  # a day now and then without a backup
     ]
-    names.append("20261016T140000Z")  # a second backup on the newest day
+    names.append("20270424T140000Z")  # a second backup on the newest day
     expected = sorted(set(names) - kept_by_reference(names, *keep), reverse=True)
     program = shell_function("expired") + '\nexpired "$1" "$2" "$3"'
     result = subprocess.run(
@@ -490,6 +491,44 @@ def test_the_retention_keeps_the_newest_backup_of_each_day_week_and_month(shell,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.split() == expected
+
+
+def test_the_script_compose_and_env_example_agree_on_the_defaults_of_the_retention():
+    # 7 days, 4 weeks and 12 months (ADR-0044). Compose hands the service the values of .env, with
+    # these defaults for a setting that .env lacks, and the script has the same for a run outside
+    # Compose: the three must say one thing.
+    example = dict(
+        re.findall(
+            r"^(BACKUP_KEEP_\w+)=(\d+)$",
+            (REPO_ROOT / ".env.example").read_text(encoding="utf-8"),
+            re.M,
+        )
+    )
+    assert example == {
+        "BACKUP_KEEP_DAILY": "7",
+        "BACKUP_KEEP_WEEKLY": "4",
+        "BACKUP_KEEP_MONTHLY": "12",
+    }
+    for name in ("postgres/backup.sh", "compose.yaml"):
+        text = (REPO_ROOT / name).read_text(encoding="utf-8")
+        for setting, value in example.items():
+            defaults = set(re.findall(rf"\$\{{{setting}:-(\d+)\}}", text))
+            assert defaults == {value}, f"{setting} in {name}: {defaults}"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_without_the_settings_the_retention_keeps_7_days_4_weeks_and_12_months(shell, backups):
+    # The newest backup of each of the last 7 days, 4 weeks and 12 months, as ADR-0044 sets them.
+    # NOW is a Sunday, 11 October 2026: the 7 days, 3 more Sundays, and the last day of each of the
+    # 11 months before October: 21 backups out of the 399 days before it.
+    old = [old_backup(backups, NOW - days * DAY, "scheduled") for days in range(1, 400)]
+    result = run(shell, backups, "scheduled")
+    assert result.returncode == 0, result.stderr
+    kept = kept_by_reference([*old, NAME], 7, 4, 12)
+    assert len(kept) == 21
+    assert backup_names(backups) == sorted(kept)
+    assert "20251130T030012Z" in kept  # November 2025, the twelfth month
+    assert "20251031T030012Z" not in kept  # October 2025, the thirteenth
 
 
 @pytest.mark.parametrize("shell", SHELLS)
