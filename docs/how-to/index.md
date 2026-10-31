@@ -8,7 +8,7 @@ How-to guides are short recipes for people who want to get a specific job done w
 - [Deploy on a server](deploy-on-a-server.md): put Metabase on the internet over HTTPS, with Airflow behind an SSH tunnel and daily backups.
 - [Back up and restore](back-up-and-restore.md): take, schedule and copy backups, and restore them, also on a new server.
 - [See the demo](see-the-demo.md): what the demo shows, how it stays up to date, and how to turn it off.
-- [Connect Google Ads](connect-google-ads.md): load the Google Ads accounts of your business every day, with the reference rates of the ECB, as a service account of your own Google Cloud project. Not released yet: it comes with v0.4.0.
+- [Connect Google Ads](connect-google-ads.md): load the Google Ads accounts of your business every day, with the reference rates of the ECB, as a service account of your own Google Cloud project. No load has reached a real account yet.
 - [Read the advertising dashboard](read-the-advertising-dashboard.md): what the tabs and the filters of the dashboard Advertising show, and how its numbers are computed.
 - [Talk to your data](talk-to-your-data.md): connect Claude Code, the Claude apps or another AI client to your data through MCP, choose what it may do, and turn it off.
 - [Watch the pipeline](watch-the-pipeline.md): what the dashboard of the Ops collection shows about the loads, the runs of the transform and the warehouse, and where its data comes from.

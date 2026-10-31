@@ -2,7 +2,7 @@
 
 This guide connects the Google Ads accounts of your business to Agoranomos: the load reads their campaigns, statistics and conversions every day into the warehouse, and the model, the dashboards and the MCP servers show them beside the demo, or in its place ([ADR-0032](../adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md)). With it, you turn on the reference rates of the European Central Bank, which convert the money of the accounts into the reporting currency.
 
-The connector is not released yet: it comes with v0.4.0, and this guide describes the main branch.
+No load has reached a real Google Ads account yet: the connector is tested against a stand-in of the API, so compare the first load with the Google Ads UI.
 
 ## What you need
 
