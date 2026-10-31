@@ -1,4 +1,4 @@
-"""The demo of Agoranomos, made ready by the one-shot demo-init service on every start of the demo
+"""The demo of agoranomos, made ready by the one-shot demo-init service on every start of the demo
 profile.
 
 It runs the demo pipeline once: agoranomos_demo_history, which loads the history of the fictional
@@ -7,13 +7,13 @@ the five assets of the history start. Then it unpauses agoranomos_demo_daily, wh
 days every day, if that DAG has never run. Then it makes the demo visible in Metabase: it syncs the
 schema of the warehouse, applies the metadata of the marts (metadata.py), as metabase-init does,
 and puts the demo, its questions and its two dashboards, Advertising overview and Web analytics,
-in the collection Agoranomos / Demo as the code says (content.py, ADR-0018): an edit is reverted
+in the collection agoranomos / Demo as the code says (content.py, ADR-0018): an edit is reverted
 and logged, an item in the trash comes back, and every group but Administrators gets at most View
 on them. The questions get the titles of their columns and axes from the display names of the
 metadata, money in the reporting currency of the metadata, and the colors of the project; each
 has the filters of its dashboard, the period, the client and, for the advertising, the platform,
 which the filters of the dashboard set. The demo collection of v0.1, the one whose dashboard the
-account of demo-init made, moves into Agoranomos as Demo once, after every item in it that the
+account of demo-init made, moves into agoranomos as Demo once, after every item in it that the
 demo does not ship has gone to the root, and its dashboard and questions become those of the
 advertising.
 
@@ -70,11 +70,11 @@ DAILY_DAG = "agoranomos_demo_daily"
 # start no run.
 TRANSFORM_ASSETS = 5
 # The demo as a package of the content (content.py): its key in the registry, and its name, the
-# name of its collection in Agoranomos.
+# name of its collection in agoranomos.
 DEMO_KEY = "demo"
 DEMO_NAME = "Demo"
 DEMO_DESCRIPTION = (
-    "The demo of Agoranomos: a fictional business, as the demo data of this release shows it."
+    "The demo of agoranomos: a fictional business, as the demo data of this release shows it."
 )
 # The two dashboards of the demo, by their keys in the package: their names and descriptions.
 ADVERTISING = "advertising"
@@ -90,7 +90,7 @@ DASHBOARDS = {
         "The sessions of web analytics of the demo, from marts.web_sessions_daily.",
     ),
 }
-# The names of the demo of v0.1, which the jobs look for once, to move it into Agoranomos: its
+# The names of the demo of v0.1, which the jobs look for once, to move it into agoranomos: its
 # collection at the root, its dashboard, and its questions, with the key of each in the package,
 # which puts them right as the code says. Written out, so that they stay as v0.1 named them when
 # the questions of the code change.
@@ -1082,7 +1082,7 @@ def collection_line(old: Mapping[str, Any]) -> str:
 
 
 def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: content.Log) -> bool:
-    """Move the demo collection of v0.1 into Agoranomos as Demo, once, and record it with its
+    """Move the demo collection of v0.1 into agoranomos as Demo, once, and record it with its
     dashboard and questions, so that the next steps put them back as the code says (ADR-0018).
 
     Nothing is done when Metabase has the demo of the registry, also in the trash: a registry whose
@@ -1097,11 +1097,11 @@ def adopt_earlier_demo(metabase: Metabase, registry: content.Registry, log: cont
 
     Before the move, every other item of the collection, whoever made it, goes to the root, also
     from the trash, where it stays, with one line for each by its model and its ID, so that only
-    the content of the package enters Agoranomos. Then the collection is locked where it is, at the
+    the content of the package enters agoranomos. Then the collection is locked where it is, at the
     root, so that no account but an admin can add an item to it, and listed once more: an item
     that reached it before the lock stops the job, and the collection stays at the root,
     view-only, for the next start, which takes that item out. Only then does the registry learn
-    the demo, and the collection moves into Agoranomos as Demo: a job that stops before the
+    the demo, and the collection moves into agoranomos as Demo: a job that stops before the
     registry leaves the collection to be checked again, and one that stops after it leaves the
     move to the next start, which puts the collection in its place. True if it moved one."""
     entry = registry.get(DEMO_KEY)

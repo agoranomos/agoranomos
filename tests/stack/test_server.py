@@ -26,7 +26,7 @@ from stack_helpers import (
 
 pytestmark = pytest.mark.skipif(not SERVER, reason="server mode is off: .env selects no server")
 
-WAREHOUSE_NAME = "Agoranomos warehouse"
+WAREHOUSE_NAME = "agoranomos warehouse"
 
 
 def test_server_mode_runs_the_network_of_the_proxy_with_ipv6(env):

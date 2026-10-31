@@ -407,7 +407,7 @@ def registered(metabase: FakeMetabase, key: str) -> dict[str, Any]:
 def demo_items(
     metabase: FakeMetabase,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
-    """The collection Agoranomos and its sub-collection Demo, as the registry finds them, and the
+    """The collection agoranomos and its sub-collection Demo, as the registry finds them, and the
     questions and the dashboards of Demo by name, those in the trash left out."""
     content = metabase.content_state
     root, demo = registered(metabase, "agoranomos"), registered(metabase, "demo")
@@ -451,7 +451,7 @@ def done_line(metabase: FakeMetabase, ran: str = "ran now") -> str:
     )
     return (
         f"demo-init: the demo pipeline {ran}, and the dashboards {named} are in the collection "
-        "Agoranomos / Demo"
+        "agoranomos / Demo"
     )
 
 
@@ -498,7 +498,7 @@ def an_earlier_demo(metabase: FakeMetabase) -> tuple[dict, dict[str, dict], dict
     """The content of v0.1 in Metabase: the collection Agoranomos demo at the root, with its three
     questions and its dashboard, which shows them, all with the queries and settings of v0.1."""
     content = metabase.content_state
-    old = content.add_collection(di.COLLECTION_V01, "The demo of Agoranomos: one ad account.")
+    old = content.add_collection(di.COLLECTION_V01, "The demo of agoranomos: one ad account.")
     cards = {}
     for name, (description, sql, settings, display, _) in V01_QUESTIONS.items():
         query = {"database": 2, "type": "native", "native": {"query": sql}}
@@ -565,7 +565,7 @@ def test_a_first_start_runs_the_pipeline_and_creates_the_demo(airflow, metabase,
     # line for each item of the content that it created.
     assert lines[0] == DAILY_LINE
     assert "demo-init: first fill: marts.ad_conversions_campaign_daily display_name: " in lines[1]
-    assert 'demo-init: created: collection agoranomos "Agoranomos"' in lines
+    assert 'demo-init: created: collection agoranomos "agoranomos"' in lines
     assert f'demo-init: created: dashboard demo/advertising "{ADVERTISING}"' in lines
     assert f'demo-init: created: dashboard demo/web-analytics "{WEB}"' in lines
     assert not leaked(out.out + out.err)
@@ -574,7 +574,7 @@ def test_a_first_start_runs_the_pipeline_and_creates_the_demo(airflow, metabase,
 def test_a_first_start_makes_the_demo_in_agoranomos(airflow, metabase):
     assert di.main(env_for(airflow, metabase)) == 0
     root, demo, cards, boards = demo_items(metabase)
-    assert (root["name"], root["location"]) == ("Agoranomos", "/")
+    assert (root["name"], root["location"]) == ("agoranomos", "/")
     assert (demo["name"], demo["location"]) == ("Demo", f"/{root['id']}/")
     assert set(cards) == {q["name"] for q in di.QUESTIONS}
     assert set(boards) == {ADVERTISING, WEB}
@@ -1211,7 +1211,7 @@ def test_a_mart_that_a_person_hid_in_metabase_counts_as_synced(airflow, metabase
 
 def test_a_collection_of_the_old_name_that_is_not_at_the_root_does_not_move(airflow, metabase):
     # One inside another collection, one that is personal, and one in the trash: none is the demo
-    # of an earlier release, and none changes. Nor does a collection named Agoranomos or Demo that
+    # of an earlier release, and none changes. Nor does a collection named agoranomos or Demo that
     # a person made: the jobs never take a collection by its name for theirs.
     content = metabase.content_state
     marketing = content.add_collection("Marketing")
@@ -1219,7 +1219,7 @@ def test_a_collection_of_the_old_name_that_is_not_at_the_root_does_not_move(airf
         content.add_collection(di.COLLECTION_V01, parent_id=marketing["id"]),
         content.add_collection(di.COLLECTION_V01),
         content.add_collection(di.COLLECTION_V01),
-        content.add_collection("Agoranomos"),
+        content.add_collection("agoranomos"),
         content.add_collection("Demo"),
     ]
     others[1]["personal_owner_id"] = 1
@@ -1392,7 +1392,7 @@ def test_the_collection_of_v0_1_moves_into_agoranomos(airflow, metabase, capsys)
     ) in out
     assert (
         f"demo-init: moved: collection {di.COLLECTION_V01!r} of an earlier release into "
-        "Agoranomos as Demo"
+        "agoranomos as Demo"
     ) in out
     assert (
         'demo-init: lowered: group "All Users" on collection "Agoranomos demo": curate -> view'
@@ -1474,7 +1474,7 @@ def test_what_the_demo_does_not_ship_leaves_the_collection_of_v0_1_for_the_root(
     # Before the move, every item of the collection of v0.1 that the demo does not adopt goes to the
     # root: what another account made, a question of a name of v0.1 included, a model, a dashboard,
     # a sub-collection, and a question saved into the dashboard of v0.1. A question of a dashboard
-    # that goes moves with it. Only the content of the package enters Agoranomos.
+    # that goes moves with it. Only the content of the package enters agoranomos.
     content = metabase.content_state
     old, cards, board = an_earlier_demo(metabase)
     theirs_board = content.add_dashboard(
@@ -1713,9 +1713,9 @@ def test_what_reaches_a_new_demo_before_its_lock_stops_the_job_and_goes_to_the_t
 def test_a_collection_planted_in_a_new_agoranomos_during_the_move_stops_the_job(
     airflow, metabase, capsys
 ):
-    # The upgrade from v0.1: an account of All Users makes a collection inside Agoranomos right
+    # The upgrade from v0.1: an account of All Users makes a collection inside agoranomos right
     # after Metabase made it, before its lock. The job stops in one line; the demo of v0.1, which
-    # the registry knows by then, goes into the Agoranomos of the next start.
+    # the registry knows by then, goes into the agoranomos of the next start.
     content = metabase.content_state
     old, _, _ = an_earlier_demo(metabase)
     handle = content.handle
@@ -1723,7 +1723,7 @@ def test_a_collection_planted_in_a_new_agoranomos_during_the_move_stops_the_job(
 
     def watching(method, path, query, body):
         answer = handle(method, path, query, body)
-        if (method, path) == ("POST", "/api/collection") and body.get("name") == "Agoranomos":
+        if (method, path) == ("POST", "/api/collection") and body.get("name") == "agoranomos":
             planted.setdefault(
                 "notes", content.add_collection("Official notes", parent_id=answer[1]["id"])
             )
@@ -1973,7 +1973,7 @@ def test_a_demo_of_v0_1_that_a_restore_brings_back_moves_again(airflow, metabase
     assert {c["id"] for c in cards.values()} <= {c["id"] for c in now_cards.values()}
     out = capsys.readouterr().out.splitlines()
     assert any(line.startswith("demo-init: moved: collection ") for line in out)
-    assert 'demo-init: created again: collection agoranomos "Agoranomos"' in out
+    assert 'demo-init: created again: collection agoranomos "agoranomos"' in out
 
 
 def test_a_registry_that_is_no_registry_stops_demo_init_before_it_writes(airflow, metabase, capsys):

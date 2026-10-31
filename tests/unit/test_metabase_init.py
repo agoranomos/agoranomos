@@ -20,7 +20,7 @@ from metabase_stand_in import FakeClock, FakeMetabase, free_port, metadata_env, 
 from metabase_stand_in import leaked as leaked_in
 
 ENV = {
-    "METABASE_SITE_NAME": "Agoranomos",
+    "METABASE_SITE_NAME": "agoranomos",
     "METABASE_ADMIN_EMAIL": "admin@example.com",
     "METABASE_ADMIN_PASSWORD": "Secret-password-1",
     "WAREHOUSE_HOST": "warehouse-db",
@@ -85,7 +85,7 @@ def test_first_start_creates_the_admin_and_the_warehouse_connection(metabase):
     assert mi.main(env_for(metabase)) == 0
     assert metabase.admin == {"email": "admin@example.com", "password": "Secret-password-1"}
     [warehouse] = metabase.databases
-    assert warehouse["name"] == "Agoranomos warehouse"
+    assert warehouse["name"] == "agoranomos warehouse"
     assert warehouse["engine"] == "postgres"
     assert warehouse["details"]["user"] == "metabase_reader"
     assert warehouse["details"]["schema-filters-type"] == "inclusion"
@@ -691,7 +691,7 @@ def test_a_connection_with_another_address_is_not_the_warehouse(metabase, other)
     assert mi.main(env_for(metabase)) == 0
     assert [d["id"] for d in metabase.databases] == [5, 2]
     assert metabase.databases[0]["details"]["password"] == "old-password"  # not touched
-    assert metabase.databases[1]["name"] == "Agoranomos warehouse"
+    assert metabase.databases[1]["name"] == "agoranomos warehouse"
 
 
 def test_connections_of_other_engines_and_without_details_are_left_alone(metabase):
@@ -701,7 +701,7 @@ def test_connections_of_other_engines_and_without_details_are_left_alone(metabas
     metabase.databases = [sample, odd, mysql]
     assert mi.main(env_for(metabase)) == 0
     assert [d["id"] for d in metabase.databases] == [1, 10, 11, 4]
-    assert metabase.databases[3]["name"] == "Agoranomos warehouse"
+    assert metabase.databases[3]["name"] == "agoranomos warehouse"
     assert metabase.databases[2]["details"]["password"] == "old-password"
 
 
@@ -709,7 +709,7 @@ def test_the_name_comes_before_the_address(metabase, capsys):
     # The connection with the name is the job's, even when it points elsewhere, and a connection
     # of the person that points at the warehouse is not taken for it.
     metabase.databases = [
-        connection(3, "Agoranomos warehouse", host="an-old-host"),
+        connection(3, "agoranomos warehouse", host="an-old-host"),
         connection(2, "Mine"),
     ]
     assert mi.main(env_for(metabase)) == 0
@@ -742,8 +742,8 @@ def test_two_connections_at_the_address_use_the_lowest_id_and_say_so(metabase, c
 
 def test_two_connections_with_the_name_use_the_lowest_id_too(metabase, capsys):
     metabase.databases = [
-        connection(4, "Agoranomos warehouse"),
-        connection(2, "Agoranomos warehouse"),
+        connection(4, "agoranomos warehouse"),
+        connection(2, "agoranomos warehouse"),
     ]
     assert mi.main(env_for(metabase)) == 0
     output = capsys.readouterr()
@@ -838,10 +838,10 @@ def a_registry(tmp_path: Path, **items: dict[str, Any]) -> Path:
 
 
 def test_metabase_init_locks_the_content_of_the_registry_on_every_start(tmp_path, metabase, capsys):
-    # A registry of an earlier start, with the collection Agoranomos and its Demo, which All Users
+    # A registry of an earlier start, with the collection agoranomos and its Demo, which All Users
     # may curate, and a group of the deployment that may curate the demo as well.
     content = metabase.content_state
-    root = content.add_collection("Agoranomos")
+    root = content.add_collection("agoranomos")
     demo = content.add_collection("Demo", parent_id=root["id"])
     content.groups.append({"id": 7, "name": "Analysts", "magic_group_type": None})
     content.graph["7"] = {str(demo["id"]): "write"}
@@ -860,10 +860,10 @@ def test_metabase_init_locks_the_content_of_the_registry_on_every_start(tmp_path
         lowered = [line for line in lines if line.startswith("metabase-init: lowered: ")]
         if start == 1:
             # Metrics, which the start makes first, and the content of the registry with it; Ops,
-            # which it makes next in Agoranomos, then has the View of its parent.
+            # which it makes next in agoranomos, then has the View of its parent.
             assert lowered == [
                 'metabase-init: lowered: group "All Users" on collection "Metrics": curate -> view',
-                'metabase-init: lowered: group "All Users" on collection "Agoranomos": curate -> '
+                'metabase-init: lowered: group "All Users" on collection "agoranomos": curate -> '
                 "view",
                 'metabase-init: lowered: group "All Users" on collection "Demo": curate -> view',
                 'metabase-init: lowered: group "Analysts" on collection "Demo": curate -> view',
@@ -876,10 +876,10 @@ def test_metabase_init_locks_the_content_of_the_registry_on_every_start(tmp_path
 
 
 def test_metabase_init_locks_every_collection_inside_agoranomos(tmp_path, metabase, capsys):
-    # A collection that an admin made inside Agoranomos, which the registry does not know, opened
-    # to All Users: the next start lowers it as well (ADR-0018: Agoranomos and its sub-collections).
+    # A collection that an admin made inside agoranomos, which the registry does not know, opened
+    # to All Users: the next start lowers it as well (ADR-0018: agoranomos and its sub-collections).
     content = metabase.content_state
-    root = content.add_collection("Agoranomos")
+    root = content.add_collection("agoranomos")
     content.graph["1"][str(root["id"])] = "read"
     inner = content.add_collection("Inner", parent_id=root["id"])
     content.graph["1"][str(inner["id"])] = "write"
@@ -895,13 +895,13 @@ def test_metabase_init_locks_every_collection_inside_agoranomos(tmp_path, metaba
 
 
 def test_a_collection_named_agoranomos_that_no_job_made_stays_as_it_is(metabase):
-    # The first start of a stack, with no registry: metabase-init makes Agoranomos for the Ops
+    # The first start of a stack, with no registry: metabase-init makes agoranomos for the Ops
     # collection, and leaves a collection of the same name that a person made alone, as the jobs
     # find their content by the entity IDs of the registry, never by name.
-    theirs = metabase.content_state.add_collection("Agoranomos")
+    theirs = metabase.content_state.add_collection("agoranomos")
     assert mi.main(env_for(metabase)) == 0
     assert metabase.content_state.graph["1"][str(theirs["id"])] == "write"
-    named = [c for c in metabase.content_state.collections.values() if c["name"] == "Agoranomos"]
+    named = [c for c in metabase.content_state.collections.values() if c["name"] == "agoranomos"]
     assert len(named) == 2
 
 
@@ -921,7 +921,7 @@ def test_a_registry_that_is_no_registry_stops_metabase_init_before_it_writes(
 
 
 def test_a_refused_change_of_the_permissions_is_one_line_with_no_secret(tmp_path, metabase, capsys):
-    root = metabase.content_state.add_collection("Agoranomos")
+    root = metabase.content_state.add_collection("agoranomos")
     registry = a_registry(
         tmp_path, agoranomos={"model": "collection", "entity_id": root["entity_id"]}
     )
@@ -1207,7 +1207,7 @@ def test_rows_of_the_warehouse_of_another_shape_end_in_one_line(metabase, capsys
 
 
 def ops_items(metabase: FakeMetabase) -> tuple[dict[str, Any], dict[str, Any], list, list]:
-    """The collections Agoranomos and Ops, as the registry finds them, and the questions and the
+    """The collections agoranomos and Ops, as the registry finds them, and the questions and the
     dashboards in Ops, those in the trash left out."""
     entries = json.loads(Path(metabase.files["CONTENT_REGISTRY"]).read_text(encoding="utf-8"))
     state = metabase.content_state
@@ -1232,7 +1232,7 @@ def test_every_start_keeps_the_ops_collection_in_agoranomos_view_only(metabase, 
     # start finds it as the code says and writes nothing.
     assert mi.main(env_for(metabase)) == 0
     root, collection, cards, boards = ops_items(metabase)
-    assert (root["name"], root["location"]) == ("Agoranomos", "/")
+    assert (root["name"], root["location"]) == ("agoranomos", "/")
     assert (collection["name"], collection["location"]) == ("Ops", f"/{root['id']}/")
     assert sorted(c["name"] for c in cards) == sorted(q["name"] for q in ops.QUESTIONS)
     assert all(c["dataset_query"]["database"] == metabase.databases[0]["id"] for c in cards)

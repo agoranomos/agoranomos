@@ -14,7 +14,7 @@ Build in Metabase, through the MCP server `agoranomos-metabase`, with the accoun
     - `answers`: you find and run saved questions and dashboards, and build nothing new. Say so, and stop.
     - `explore`: you build queries on the marts with the query builder, and save them only in the person's own collection.
     - `build`: you also create and change questions, dashboards, metrics and documents in the collection **Workspace**, the shared drafts.
-- The collection **Agoranomos** holds the content of the package and stays view-only. To change one of its dashboards, copy it into Workspace and change the copy. **Reports** is for finished work, which only admins curate.
+- The collection **agoranomos** holds the content of the package and stays view-only. To change one of its dashboards, copy it into Workspace and change the copy. **Reports** is for finished work, which only admins curate.
 - This release writes no SQL through Metabase. Build every question with the query builder. A call that Metabase refuses for lack of permission is the limit: report it, and do not look for another way.
 - A save refused with `insufficient_scope`, or as if the token had expired, while reading works, means that the token lacks `agent:content:write`, which the first consent page does not offer. Ask the user to run `/mcp`, choose `agoranomos-metabase`, Re-authenticate and tick `agent:content:write`, if their level allows saving ([Which scopes to tick](../../../docs/how-to/talk-to-your-data.md#which-scopes-to-tick)).
 
@@ -34,7 +34,7 @@ Build in Metabase, through the MCP server `agoranomos-metabase`, with the accoun
     - `report_date` as the day in the time zone of the account.
 
     The skill `explain-a-metric` has the details.
-4. Look at what exists first: the dashboard **Advertising** of the collection **Agoranomos / Advertising** ([Read the advertising dashboard](../../../docs/how-to/read-the-advertising-dashboard.md)), the dashboards of the collection **Agoranomos / Demo**, and anything similar in Workspace. Reuse or copy before you build new.
+4. Look at what exists first: the dashboard **Advertising** of the collection **agoranomos / Advertising** ([Read the advertising dashboard](../../../docs/how-to/read-the-advertising-dashboard.md)), the dashboards of the collection **agoranomos / Demo**, and anything similar in Workspace. Reuse or copy before you build new.
 5. Build each question, run it, and check that its numbers are plausible before you add it to a dashboard. Add filters of the period, the client and the platform when the dashboard spans them, as the demo dashboards do. Link a filter to others only when each of them is on columns of one mart: for the values of a linked filter, Metabase joins the mart of each other filter along the foreign keys, through `clients` or `ad_platforms`, and two facts joined that way multiply their rows until the query times out. The dashboard **Advertising** puts its linked filters on the columns of `ad_stats_campaign_daily` in every question.
 6. Save in the collection that the level allows. Report the name and the link of each question and dashboard, and what each shows.
 

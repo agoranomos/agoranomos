@@ -1324,7 +1324,7 @@ def test_the_stop_for_too_little_memory_names_what_the_variant_needs(cli, compos
     set_env(cli, COMPOSE_FILE=compose_file)
     result = cli.run("preflight", FAKE_MEMTOTAL=str(5000 * MIB))
     assert result.returncode == 1
-    assert f"Docker has 5000 MB of memory, and Agoranomos needs {needed}. In Docker Desktop" in (
+    assert f"Docker has 5000 MB of memory, and agoranomos needs {needed}. In Docker Desktop" in (
         result.stderr
     )
 
@@ -5059,12 +5059,12 @@ def test_ai_shows_the_groups_of_the_setup_while_metabase_runs(cli, tmp_path):
     result = cli.run(
         "ai",
         FAKE_PS_FILE=ps_file(tmp_path, METABASE_UP),
-        FAKE_RUN_OUTPUT='Groups of the setup: "Agoranomos: Builders" 2 members.',
+        FAKE_RUN_OUTPUT='Groups of the setup: "agoranomos: Builders" 2 members.',
     )
     assert result.returncode == 0, result.stderr
     assert AI_GROUPS in cli.docker_calls()
     assert (
-        result.stdout.splitlines()[-1] == 'Groups of the setup: "Agoranomos: Builders" 2 members.'
+        result.stdout.splitlines()[-1] == 'Groups of the setup: "agoranomos: Builders" 2 members.'
     )
 
 
@@ -5135,18 +5135,18 @@ def test_up_shows_the_warnings_of_metabase_init_and_the_groups_of_the_setup(cli,
         FAKE_INSPECT="2026-10-21T15:00:00.123456789Z",
         FAKE_LOGS="\n".join(
             [
-                'metabase-init: created: group "Agoranomos: Builders"',
-                'metabase-init: warning: the group "Agoranomos: Builders" has no members',
-                'metabase-init: groups of the setup: "Agoranomos: Builders" 0 members',
+                'metabase-init: created: group "agoranomos: Builders"',
+                'metabase-init: warning: the group "agoranomos: Builders" has no members',
+                'metabase-init: groups of the setup: "agoranomos: Builders" 0 members',
             ]
         ),
         **QUICK,
     )
     assert result.returncode == 0, result.stderr
-    assert 'warning: the group "Agoranomos: Builders" has no members' in result.stderr
+    assert 'warning: the group "agoranomos: Builders" has no members' in result.stderr
     assert result.stdout.splitlines()[-1] == (
         "AI access in Metabase: up to build, and explore for every account. Its MCP server is "
-        'on, and SQL that a client writes is off. Groups of the setup: "Agoranomos: Builders" '
+        'on, and SQL that a client writes is off. Groups of the setup: "agoranomos: Builders" '
         "0 members. ./agoranomos ai shows the levels."
     )
     logs = [call for call in cli.docker_calls() if call.startswith("compose logs")]

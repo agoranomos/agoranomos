@@ -1,4 +1,4 @@
-"""The history of the demo of Agoranomos: 18 months of a fictional business on four fictional
+"""The history of the demo of agoranomos: 18 months of a fictional business on four fictional
 platforms and a source of rates.
 
 agoranomos_demo_history loads, as the loader role, the demo data of a business with two clients:

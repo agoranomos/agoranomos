@@ -73,7 +73,7 @@ def metabase():
     state.set_up("admin@example.com", "Secret-password-1")
     state.mart_known = True
     state.databases = [
-        {"id": 1, "name": "Agoranomos warehouse", "details": {"host": "warehouse-db"}}
+        {"id": 1, "name": "agoranomos warehouse", "details": {"host": "warehouse-db"}}
     ]
     server = serve(state, "X-Metabase-Session")
     client = mi.Metabase(state.url)
@@ -198,7 +198,7 @@ def test_the_metrics_and_their_terms_come_once_and_an_edit_goes_back(metabase, t
     assert ids["ad_stats_campaign_daily.ctr"] == ctr["id"]
     # Each creation is one line, in order; the lock-down of the collections says its own.
     assert [line for line in found if line.startswith("created: ")] == [
-        'created: collection agoranomos "Agoranomos"',
+        'created: collection agoranomos "agoranomos"',
         'created: collection metrics "Metrics"',
         'created: metric metrics/ad_stats_campaign_daily.ctr "CTR (Campaigns)"',
         'created: metric metrics/ad_stats_campaign_daily.cpm "CPM (Campaigns)"',

@@ -19,7 +19,7 @@ In server mode, only the server of Metabase runs, over HTTPS. The server of dbt 
 3. Give each person who connects a Metabase account that is not an admin. An AI client works as the account that connects it, so an admin connects with a second account.
     1. In Metabase, an admin opens Admin > People and clicks Invite someone.
     2. agoranomos sets up no email server, so Metabase shows a temporary password, which the admin passes on.
-    3. To let a person build in the collection Workspace above the default level, the admin adds them to the group `Agoranomos: Builders`.
+    3. To let a person build in the collection Workspace above the default level, the admin adds them to the group `agoranomos: Builders`.
 
 ## Connect Claude Code, in local mode
 

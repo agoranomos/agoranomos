@@ -56,7 +56,7 @@ It takes about half an hour, most of it the first start.
 
 ## Look at the advertising
 
-1. In the sidebar on the left, under **Collections**, open **Agoranomos**, then **Demo**, and the dashboard **Advertising overview (demo)**.
+1. In the sidebar on the left, under **Collections**, open **agoranomos**, then **Demo**, and the dashboard **Advertising overview (demo)**.
 
     The first row shows the **Spend**, **Conversions**, **Cost per conversion** and **Return on ad spend** of the previous 30 days, for both clients on the three ad platforms: **Demo Search**, **Demo Social** and **Demo Video**. Below them are the spend of each day on each platform, the spend of each client, the results of each platform, the campaigns with the most spend and the conversions of each conversion action. Money is in US dollars, the reporting currency of the stack unless you set another.
 
@@ -85,7 +85,7 @@ It takes about half an hour, most of it the first start.
 
 ## Check the health of the pipeline
 
-1. Back in Metabase, open the collection **Agoranomos**, then **Ops**, and the dashboard **Pipeline health**.
+1. Back in Metabase, open the collection **agoranomos**, then **Ops**, and the dashboard **Pipeline health**.
 2. Read its first row:
     - **Late accounts** shows 0: every account was loaded in the last 36 hours.
     - **Failed models** shows 0: every model and seed of the last run of the transform was built.

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Agoranomos command line: set up, check and run the Docker Compose stack (ADR-0014).
+# agoranomos command line: set up, check and run the Docker Compose stack (ADR-0014).
 # Usage: ./agoranomos <command> [options]; ./agoranomos help lists the commands.
 # It needs only Docker and the standard tools of macOS, Linux and WSL2, so it stays POSIX sh.
 set -eu
@@ -786,7 +786,7 @@ cmd_init() {
   if [ "$server_asked" -eq 1 ] && ! valid_domain "$server_domain"; then
     die "not a domain name: $server_domain. Write the name alone, such as bi.example.com: without https://, a port or a path, and not an IP address, which gets no certificate"
   fi
-  [ -f "$ENV_EXAMPLE" ] || die "$ENV_EXAMPLE is missing: run ./agoranomos from an Agoranomos checkout"
+  [ -f "$ENV_EXAMPLE" ] || die "$ENV_EXAMPLE is missing: run ./agoranomos from an agoranomos checkout"
   env_created=0
   if [ ! -f "$ENV_FILE" ]; then
     (umask 077 && cp "$ENV_EXAMPLE" "$ENV_FILE")
@@ -1129,7 +1129,7 @@ EOF
   case "$arch" in
     aarch64 | arm64) ;;
     x86_64 | amd64) check_x86_64_v2 ;;
-    *) problem "the CPU architecture $arch is not supported: Agoranomos runs on arm64 and on x86-64 with x86-64-v2" ;;
+    *) problem "the CPU architecture $arch is not supported: agoranomos runs on arm64 and on x86-64 with x86-64-v2" ;;
   esac
   # Where to raise them: Docker Desktop on macOS, Linux and Windows with Hyper-V sets the memory and
   # the CPUs of its VM itself; on Windows with WSL2 it leaves them to WSL, which reads .wslconfig in
@@ -1154,12 +1154,12 @@ EOF
   esac
   mem_mb=$((mem_total / 1048576))
   if [ "$mem_mb" -lt "$MIN_MEMORY_MB" ]; then
-    resource_problem "Docker has $mem_mb MB of memory, and Agoranomos needs $memory_needed. $raise_memory"
+    resource_problem "Docker has $mem_mb MB of memory, and agoranomos needs $memory_needed. $raise_memory"
   elif [ "$mem_mb" -lt "$recommended_mb" ]; then
     warn "Docker has $mem_mb MB of memory; $recommended is recommended. $raise_memory"
   fi
   if [ "$ncpu" -lt "$MIN_CPUS" ]; then
-    resource_problem "Docker has $ncpu CPU, and Agoranomos needs $MIN_CPUS ($RECOMMENDED_CPUS recommended). $raise_cpus"
+    resource_problem "Docker has $ncpu CPU, and agoranomos needs $MIN_CPUS ($RECOMMENDED_CPUS recommended). $raise_cpus"
   elif [ "$ncpu" -lt "$RECOMMENDED_CPUS" ]; then
     warn "Docker has $ncpu CPUs; $RECOMMENDED_CPUS are recommended. $raise_cpus"
   fi
@@ -1169,7 +1169,7 @@ EOF
     if [ -z "$free_gb" ]; then
       warn "could not read the free disk space for Docker ($docker_root)"
     elif [ "$free_gb" -lt "$MIN_DISK_GB" ]; then
-      resource_problem "$free_gb GB of disk is free for Docker ($docker_root), and Agoranomos needs $MIN_DISK_GB GB ($RECOMMENDED_DISK_GB GB recommended). Free up disk space on the file system of $docker_root."
+      resource_problem "$free_gb GB of disk is free for Docker ($docker_root), and agoranomos needs $MIN_DISK_GB GB ($RECOMMENDED_DISK_GB GB recommended). Free up disk space on the file system of $docker_root."
     elif [ "$free_gb" -lt "$RECOMMENDED_DISK_GB" ]; then
       warn "$free_gb GB of disk is free for Docker ($docker_root); $RECOMMENDED_DISK_GB GB is recommended. Free up disk space on the file system of $docker_root."
     fi

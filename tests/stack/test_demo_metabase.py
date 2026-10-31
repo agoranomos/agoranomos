@@ -1,4 +1,4 @@
-"""The demo in Metabase, made by demo-init: the collection Agoranomos / Demo, its questions and its
+"""The demo in Metabase, made by demo-init: the collection agoranomos / Demo, its questions and its
 two dashboards, found through the registry of the content, each once, with the numbers of the marts
 for the filters of the dashboards, view-only for every group but Administrators (ADR-0018);
 demo-init runs again without a change, puts an edit back, never takes a collection of the same name
@@ -129,7 +129,7 @@ def test_the_demo_is_in_agoranomos_as_demo(metabase_url, session):
     entries = registry()
     root = item(metabase_url, session, "agoranomos", entries)
     demo = item(metabase_url, session, "demo", entries)
-    assert (root["name"], root["location"]) == ("Agoranomos", "/")
+    assert (root["name"], root["location"]) == ("agoranomos", "/")
     assert (demo["name"], demo["location"]) == ("Demo", f"/{root['id']}/")
     questions = {key: item(metabase_url, session, f"demo/{key}", entries) for key in QUESTIONS}
     assert {key: q["name"] for key, q in questions.items()} == QUESTIONS
@@ -353,8 +353,8 @@ def test_a_description_written_into_the_columns_of_a_question_is_reverted(
 
 
 def test_another_account_cannot_put_anything_into_the_package(metabase_url, session):
-    # Agoranomos and Demo are view-only for every group but Administrators: a second account, in
-    # All Users only, can make neither a collection in Agoranomos nor a question in Demo.
+    # agoranomos and Demo are view-only for every group but Administrators: a second account, in
+    # All Users only, can make neither a collection in agoranomos nor a question in Demo.
     entries = registry()
     root = item(metabase_url, session, "agoranomos", entries)
     demo = item(metabase_url, session, "demo", entries)
@@ -363,7 +363,7 @@ def test_another_account_cannot_put_anything_into_the_package(metabase_url, sess
     question = {"name": "Mine", "display": "table", "visualization_settings": {}}
     with another_account(metabase_url, session) as theirs:
         tries = {
-            "a collection in Agoranomos": (
+            "a collection in agoranomos": (
                 "/api/collection",
                 {"name": "Official notes", "parent_id": root["id"]},
             ),
@@ -382,7 +382,7 @@ def test_another_account_cannot_put_anything_into_the_package(metabase_url, sess
 def test_a_collection_that_an_admin_opens_inside_agoranomos_is_locked_by_the_next_start(
     env, metabase_url, session
 ):
-    # An admin makes a collection inside Agoranomos and lets All Users curate it: the next run of
+    # An admin makes a collection inside agoranomos and lets All Users curate it: the next run of
     # metabase-init, which every start runs, lowers it to View and says so.
     root = item(metabase_url, session, "agoranomos")
     inner = post(
@@ -406,7 +406,7 @@ def test_a_collection_that_an_admin_opens_inside_agoranomos_is_locked_by_the_nex
 
 
 def test_a_collection_with_the_same_name_is_not_taken_for_the_package(env, metabase_url, session):
-    decoy = post(metabase_url, session, "/api/collection", {"name": "Agoranomos"})
+    decoy = post(metabase_url, session, "/api/collection", {"name": "agoranomos"})
     try:
         code, changes, found, _ = run_job("demo-init", secrets(env))
         assert not found, f"the output of demo-init holds the values of {found}"
@@ -414,7 +414,7 @@ def test_a_collection_with_the_same_name_is_not_taken_for_the_package(env, metab
         assert changes == [], changes
         assert item(metabase_url, session, "agoranomos")["id"] != decoy["id"]
         kept = get(metabase_url, session, f"/api/collection/{decoy['id']}")
-        assert (kept["name"], kept["location"], kept["archived"]) == ("Agoranomos", "/", False)
+        assert (kept["name"], kept["location"], kept["archived"]) == ("agoranomos", "/", False)
     finally:
         put(metabase_url, session, f"/api/collection/{decoy['id']}", {"archived": True})
 
@@ -517,7 +517,7 @@ def test_the_collection_of_v0_1_moves_into_agoranomos(env, metabase_url, session
         assert not found, f"the output of demo-init holds the values of {found}"
         assert code == 0, f"demo-init exited with {code}"
         assert (
-            "demo-init: moved: collection 'Agoranomos demo' of an earlier release into Agoranomos "
+            "demo-init: moved: collection 'Agoranomos demo' of an earlier release into agoranomos "
             "as Demo"
         ) in changes, changes
         assert (

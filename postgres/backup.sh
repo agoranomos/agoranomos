@@ -1,5 +1,5 @@
 #!/bin/sh
-# The backups of Agoranomos (ADR-0020). The backup service runs this script on the image of
+# The backups of agoranomos (ADR-0020). The backup service runs this script on the image of
 # PostgreSQL, so that pg_dump and pg_restore have the version of the servers, as the user of the
 # checkout (AGORANOMOS_UID), so that the backups belong to that user:
 #

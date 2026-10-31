@@ -31,7 +31,7 @@ SESSIONS = ("session-from-setup", "session-from-login")
 SAMPLE = {"id": 1, "name": "Sample Database", "engine": "sqlite", "details": {"db": "sample"}}
 WAREHOUSE = {
     "id": 2,
-    "name": "Agoranomos warehouse",
+    "name": "agoranomos warehouse",
     "engine": "postgres",
     "details": {
         "host": "warehouse-db",

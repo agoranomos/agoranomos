@@ -13,7 +13,7 @@ prints one line for each change:
   most that on every other database, View on the root collection, at most View on every other
   collection, and on Workspace Curate from build up and No access below it.
 - Each level above the default, up to the ceiling, has a group of the setup, such as
-  "Agoranomos: Builders", which an admin puts people into. A group gets the permissions of its
+  "agoranomos: Builders", which an admin puts people into. A group gets the permissions of its
   level, kept between the default and the ceiling when they change.
 - Two collections, Workspace for shared drafts and Reports for finished work, which everyone views
   and only admins curate. The registry of the content finds them, and the groups, by their entity
@@ -67,9 +67,9 @@ CURATES_WORKSPACE = "build"
 
 # The groups of the setup, by their level. answers has none: it is the lowest default.
 GROUPS = {
-    "explore": "Agoranomos: Explorers",
-    "build": "Agoranomos: Builders",
-    "build-sql": "Agoranomos: SQL builders",
+    "explore": "agoranomos: Explorers",
+    "build": "agoranomos: Builders",
+    "build-sql": "agoranomos: SQL builders",
 }
 # The collections of AI access, by their key in the registry after content.ACCESS_PREFIX.
 WORKSPACE, REPORTS = "workspace", "reports"

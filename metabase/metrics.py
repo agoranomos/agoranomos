@@ -1,5 +1,5 @@
-"""The metrics of Agoranomos in Metabase: the KPIs that the marts declare in dbt, under config:
-meta: metabase: metrics:, which metabase-init and demo-init keep in the collection Agoranomos /
+"""The metrics of agoranomos in Metabase: the KPIs that the marts declare in dbt, under config:
+meta: metabase: metrics:, which metabase-init and demo-init keep in the collection agoranomos /
 Metrics as metrics of Metabase, and as terms of its glossary (ADR-0034, content.py).
 
 Each metric is a ratio of sums over its mart: the sum of the column numerator divided by the sum of
@@ -31,7 +31,7 @@ METRICS_KEY = "metrics"
 METRICS_NAME = "Metrics"
 METRICS_DESCRIPTION = (
     "The KPIs of the marts as metrics of Metabase, each a ratio of sums over the rows that a "
-    "question selects, as the dbt project of Agoranomos defines them."
+    "question selects, as the dbt project of agoranomos defines them."
 )
 MART_SCHEMA = "marts"
 FORMATS = ("percent", "currency", "number")
@@ -274,7 +274,7 @@ def ensure(
     database_id: int,
     log: Log,
 ) -> dict[str, int]:
-    """The metrics of the marts in Agoranomos / Metrics and their terms in the glossary, as the
+    """The metrics of the marts in agoranomos / Metrics and their terms in the glossary, as the
     export of the dbt project declares them; the IDs of the metrics by key."""
     metrics = declared(metadata.read_export(export_path))
     terms = glossary(metrics)

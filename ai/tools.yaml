@@ -22,7 +22,7 @@ name: list_tables
 type: postgres-sql
 source: warehouse
 description: >-
-  Lists the tables and views of the Agoranomos warehouse that this server can read: the marts, which
+  Lists the tables and views of the agoranomos warehouse that this server can read: the marts, which
   hold the reporting data, and the staging views and seeds below them, each with the description
   that the dbt project gives it.
 statement: |
@@ -40,7 +40,7 @@ name: describe_table
 type: postgres-sql
 source: warehouse
 description: >-
-  Lists the columns of one table or view of the Agoranomos warehouse, as list_tables names it: the
+  Lists the columns of one table or view of the agoranomos warehouse, as list_tables names it: the
   name, the data type, whether it may be null, and the description that the dbt project gives it.
 parameters:
   - name: schema_name
@@ -66,6 +66,6 @@ name: execute_sql
 type: postgres-execute-sql
 source: warehouse
 description: >-
-  Runs one SQL statement on the Agoranomos warehouse, in PostgreSQL 18, and returns its rows. It can
+  Runs one SQL statement on the agoranomos warehouse, in PostgreSQL 18, and returns its rows. It can
   read the tables and views that list_tables shows and nothing else: the session is read-only, and a
   statement that runs longer than a minute is canceled.

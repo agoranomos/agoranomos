@@ -64,7 +64,7 @@ def test_a_first_start_creates_the_content_and_records_it(metabase, registry):
     content = state.content_state
     [root] = [c for c in content.collections.values() if c["location"] == "/"]
     [demo] = [c for c in content.collections.values() if c["location"] == f"/{root['id']}/"]
-    assert (root["name"], demo["name"]) == ("Agoranomos", "Demo")
+    assert (root["name"], demo["name"]) == ("agoranomos", "Demo")
     assert content.cards[ids["spend"]]["collection_id"] == demo["id"]
     dashcards = content.dashboards[ids["dashboard"]]["dashcards"]
     assert [d["card_id"] for d in dashcards] == [ids["spend"]]
@@ -515,9 +515,9 @@ def test_an_item_that_metabase_lost_is_created_again(metabase, registry):
 
 def test_a_collection_with_the_same_name_is_not_taken_for_the_package(metabase, registry):
     state, client = metabase
-    decoy = state.content_state.add_collection("Agoranomos")
+    decoy = state.content_state.add_collection("agoranomos")
     ct.ensure_package(client, registry, PACKAGE, 2, lambda line: None)
-    roots = [c for c in state.content_state.collections.values() if c["name"] == "Agoranomos"]
+    roots = [c for c in state.content_state.collections.values() if c["name"] == "agoranomos"]
     assert len(roots) == 2
     assert registry.get("agoranomos")["entity_id"] != decoy["entity_id"]
     assert state.content_state.graph["1"][str(decoy["id"])] == "write", (
@@ -537,7 +537,7 @@ def test_every_group_but_administrators_gets_at_most_view(metabase, registry):
         assert content.graph["1"][str(collection["id"])] == "read"
         assert content.graph["2"][str(collection["id"])] == "write"
         assert content.graph["7"][str(collection["id"])] == "none"
-    assert 'lowered: group "All Users" on collection "Agoranomos": curate -> view' in log
+    assert 'lowered: group "All Users" on collection "agoranomos": curate -> view' in log
 
 
 def test_a_graph_that_changed_meanwhile_is_read_again(metabase, registry):
@@ -577,7 +577,7 @@ def test_a_new_collection_is_locked_before_the_registry_knows_it(metabase, tmp_p
         folder.chmod(0o700)
     [root] = state.content_state.collections.values()
     assert state.content_state.graph["1"][str(root["id"])] == "read"
-    assert 'lowered: group "All Users" on collection "Agoranomos": curate -> view' in log
+    assert 'lowered: group "All Users" on collection "agoranomos": curate -> view' in log
 
 
 def planted(state, collection_name: str, plant) -> dict:
@@ -606,11 +606,11 @@ def a_question_in_the_trash(content, collection: dict) -> dict:
 
 
 # What an account of All Users can plant in a collection that the jobs have just made, before
-# its lock: a sub-collection inside Agoranomos, a question in Demo, and a question that it puts in
+# its lock: a sub-collection inside agoranomos, a question in Demo, and a question that it puts in
 # the trash there at once.
 PLANTED = {
-    "a sub-collection in Agoranomos": (
-        "Agoranomos",
+    "a sub-collection in agoranomos": (
+        "agoranomos",
         lambda content, made: content.add_collection("Official notes", parent_id=made["id"]),
         "collection",
     ),
@@ -634,7 +634,7 @@ def test_what_reaches_a_new_collection_before_its_lock_puts_it_in_the_trash(
         ct.ensure_package(client, registry, PACKAGE, 2, lambda line: None)
     [made] = [c for c in state.content_state.collections.values() if c["name"] == name]
     assert made["archived"], "the collection that holds what was planted is in the trash"
-    key = "agoranomos" if name == "Agoranomos" else "demo"
+    key = "agoranomos" if name == "agoranomos" else "demo"
     assert registry.get(key) is None
     assert str(raised.value) == (
         f"the new collection {key} got a {word} {found['item']['id']} before its lock, which the "
@@ -653,7 +653,7 @@ def test_what_reaches_a_new_collection_before_its_lock_puts_it_in_the_trash(
 
 
 def test_every_collection_inside_agoranomos_gets_at_most_view(metabase, registry):
-    # A collection that an admin made inside Agoranomos, and one inside that, opened to a group:
+    # A collection that an admin made inside agoranomos, and one inside that, opened to a group:
     # each start lowers them as well, whatever the registry knows. A collection outside stays.
     state, client = metabase
     content = state.content_state
@@ -695,7 +695,7 @@ def test_a_name_in_a_line_of_the_log_cannot_forge_another_line(metabase, registr
 
 # Where an admin can take a collection of the package, and what the next start says.
 MOVED = {
-    "Agoranomos into another collection": (
+    "agoranomos into another collection": (
         "agoranomos",
         lambda content, root, demo, other: root.update(location=f"/{other['id']}/"),
         lambda root, other: (

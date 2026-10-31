@@ -31,7 +31,7 @@ pytestmark = pytest.mark.usefixtures("daily_load_paused")
 
 EXPORT = "/opt/agoranomos/metadata/metadata.json"
 MART = ("marts", "ad_stats_campaign_daily")
-WAREHOUSE_NAME = "Agoranomos warehouse"
+WAREHOUSE_NAME = "agoranomos warehouse"
 EDIT = "Edited by a stack test"
 OVERRIDE = """# Written by tests/stack/test_metabase_metadata.py, which removes it.
 [marts.ad_stats_campaign_daily.columns.conversions]

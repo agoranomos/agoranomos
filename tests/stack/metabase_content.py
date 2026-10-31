@@ -17,7 +17,7 @@ from stack_helpers import Secret, SecretHeaders, compose, http_json, leaked
 # The registry of the content, on the volume metabase-content, where compose.yaml mounts it in
 # metabase-init and demo-init.
 REGISTRY = "/var/tmp/agoranomos-content.json"  # noqa: S108 (a path in the container of a job)
-WAREHOUSE_NAME = "Agoranomos warehouse"
+WAREHOUSE_NAME = "agoranomos warehouse"
 # The lines of demo-init and metabase-init that say what they changed in the content.
 # The words that start a line of a change: of the content of the package, and of the permissions
 # of the levels of AI access (ai_access.py).

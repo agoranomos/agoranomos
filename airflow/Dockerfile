@@ -1,4 +1,4 @@
-# The Airflow image of Agoranomos: the official image, with dlt and Cosmos in Airflow's own environment,
+# The Airflow image of agoranomos: the official image, with dlt and Cosmos in Airflow's own environment,
 # dbt in a virtual environment of its own (ADR-0002, ADR-0005), and the plugins of airflow/plugins.
 # ./agoranomos up builds it from this folder, and it is never pushed to a registry.
 FROM apache/airflow:3.3.2-python3.13@sha256:e9982ad3f49a60418622e1baf80c34b0daf3fa5091a336cb5ee61f0cdd189371
@@ -64,7 +64,7 @@ RUN install -d -o 65534 -g 65534 -m 0755 /opt/agoranomos/metadata /opt/agoranomo
 RUN install -d -m 0755 /opt/agoranomos/plugins
 USER ${AIRFLOW_UID}
 
-# The plugins of Agoranomos: agoranomos_oom.py makes each task process the first that the kernel
+# The plugins of agoranomos: agoranomos_oom.py makes each task process the first that the kernel
 # stops when its container reaches its memory limit, before the scheduler or the worker, and
 # serve-logs and the health check of the scheduler the next, on a host whose kernel restricts
 # ptrace with Yama (the docstring of the plugin says why). Airflow
