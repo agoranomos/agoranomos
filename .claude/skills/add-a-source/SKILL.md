@@ -1,6 +1,6 @@
 ---
 name: add-a-source
-description: Adds a new data source, an ad platform or a source of web analytics, to the base package of Agoranomos, through every layer from the raw schema to the marts, with its descriptions and tests, following a demo platform as the example. Use when a contributor asks to add a platform, a connector or a source to the model, or to change the API shape of one.
+description: Adds a new data source, an ad platform or a source of web analytics, to the base package of agoranomos, through every layer from the raw schema to the marts, with its descriptions and tests, following a demo platform as the example. Use when a contributor asks to add a platform, a connector or a source to the model, or to change the API shape of one.
 ---
 
 # Add a source

@@ -8,7 +8,7 @@ decision-makers: Andrei Gromov
 
 ## Context and Problem Statement
 
-Agoranomos combines many components, and some choices about them are hard to reverse or shape what users and contributors can rely on: which components make up the stack, the contracts of the data models, what is allowed by default (above all for AI access), the license, and how releases are made. The reasons behind such choices are easily lost. Newcomers cannot tell a deliberate choice from an accident, settled questions get reopened without their original context, and changes of direction happen silently.
+agoranomos combines many components, and some choices about them are hard to reverse or shape what users and contributors can rely on: which components make up the stack, the contracts of the data models, what is allowed by default (above all for AI access), the license, and how releases are made. The reasons behind such choices are easily lost. Newcomers cannot tell a deliberate choice from an accident, settled questions get reopened without their original context, and changes of direction happen silently.
 
 How do we record significant decisions so that they stay easy to find, open to review and honest about their trade-offs?
 

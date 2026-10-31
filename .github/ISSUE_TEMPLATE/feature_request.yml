@@ -17,7 +17,7 @@ body:
     id: proposal
     attributes:
       label: Proposed solution
-      description: What would you like Agoranomos to do?
+      description: What would you like agoranomos to do?
   - type: textarea
     id: alternatives
     attributes:

@@ -8,7 +8,7 @@ decision-makers: Andrei Gromov
 
 ## Context and Problem Statement
 
-Agoranomos keeps data in PostgreSQL in three places: the analytical warehouse, which dlt loads, dbt transforms and Metabase reads; the metadata database of Airflow; and the application database of Metabase. The warehouse is queried heavily and can grow large. The other two databases are small and transactional, but the Airflow scheduler needs its database to answer quickly at all times.
+agoranomos keeps data in PostgreSQL in three places: the analytical warehouse, which dlt loads, dbt transforms and Metabase reads; the metadata database of Airflow; and the application database of Metabase. The warehouse is queried heavily and can grow large. The other two databases are small and transactional, but the Airflow scheduler needs its database to answer quickly at all times.
 
 How many PostgreSQL instances does the stack run, and which databases share an instance?
 

@@ -8,7 +8,7 @@ decision-makers: Andrei Gromov
 
 ## Context and Problem Statement
 
-The data of a deployment stays on its own machines, and Metabase holds the questions and the answers. Metabase 0.64.1 can reach the internet in several ways. The stack already turns some of them off: the check for updates and the anonymous statistics (`MB_CHECK_FOR_UPDATES`, `MB_ANON_TRACKING_ENABLED`), the email about a sign-in from a new device with its geocoding of the address, and the keys of LLM providers. Others are for features that an admin sets up: email over SMTP, Slack, webhooks, connections to other databases, Google Sign-In, map tiles for subscriptions. Agoranomos sets up none of them.
+The data of a deployment stays on its own machines, and Metabase holds the questions and the answers. Metabase 0.64.1 can reach the internet in several ways. The stack already turns some of them off: the check for updates and the anonymous statistics (`MB_CHECK_FOR_UPDATES`, `MB_ANON_TRACKING_ENABLED`), the email about a sign-in from a new device with its geocoding of the address, and the keys of LLM providers. Others are for features that an admin sets up: email over SMTP, Slack, webhooks, connections to other databases, Google Sign-In, map tiles for subscriptions. agoranomos sets up none of them.
 
 Two endpoints of Metabase 0.63 and 0.64 need no sign-in and forward what they receive to servers of Metabase, whatever the settings say: `POST /api/analytics-proxy` to `sp.metabase.com`, which does not read the setting of the anonymous statistics, and `POST /api/product-feedback` to `prod-feedback.metabase.com`. Metabase 0.64 can also limit where its connections to databases go: `MB_WAREHOUSE_ALLOWED_NETWORKS`, `allow-all` by default on a self-hosted Metabase, `allow-private` to refuse the loopback and link-local addresses, such as the metadata service of a cloud at `169.254.169.254`.
 
@@ -36,7 +36,7 @@ In practice this means:
 
 * **The relays are closed.** In server mode the proxy answers 404 to every path that begins with `/api/analytics-proxy` or `/api/product-feedback` ([ADR-0019](0019-open-only-metabase-in-server-mode.md)). In local mode Metabase is on `127.0.0.1` only, so they are reachable from the machine itself.
 * **Connections to databases.** `compose.yaml` sets `MB_WAREHOUSE_ALLOWED_NETWORKS=allow-private` in both modes: a connection of Metabase to a database, also an SSH tunnel of one or the URL of its authentication provider, may go to a private network, where the warehouse is, or to a public address on the internet, but not to a loopback or link-local address, such as the metadata service of a cloud at `169.254.169.254`, or to another address that is neither private nor public, such as the documentation range `192.0.2.0/24` (checked on Metabase 0.64.1, as of October 2026).
-* **Agoranomos sets up no email server, no Slack and no webhook** for Metabase, and its LLM providers stay off.
+* **agoranomos sets up no email server, no Slack and no webhook** for Metabase, and its LLM providers stay off.
 * **Isolation stays an option** for a later record: Metabase on internal networks only, with the proxy and the tunnel through Caddy.
 
 The other options were not chosen for these reasons:

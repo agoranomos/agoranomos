@@ -99,17 +99,17 @@
       "enabled": false
     },
     {
-      "description": "The Airflow image of Agoranomos is built from airflow/Dockerfile and has no registry to look up.",
+      "description": "The Airflow image of agoranomos is built from airflow/Dockerfile and has no registry to look up.",
       "matchPackageNames": ["agoranomos-airflow"],
       "enabled": false
     },
     {
-      "description": "The Caddy image of Agoranomos is built from caddy/Dockerfile and has no registry to look up.",
+      "description": "The Caddy image of agoranomos is built from caddy/Dockerfile and has no registry to look up.",
       "matchPackageNames": ["agoranomos-caddy"],
       "enabled": false
     },
     {
-      "description": "The image of the container ai of Agoranomos is built from ai/Dockerfile and has no registry to look up.",
+      "description": "The image of the container ai of agoranomos is built from ai/Dockerfile and has no registry to look up.",
       "matchPackageNames": ["agoranomos-ai"],
       "enabled": false
     }

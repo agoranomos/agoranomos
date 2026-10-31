@@ -1,6 +1,6 @@
-# Run Agoranomos locally with demo data
+# Run agoranomos locally with demo data
 
-In this tutorial you start Agoranomos on your own machine with its demo, and follow the numbers of a dashboard back to the pipeline that made them. The demo is a fictional business with two clients, which advertises on three fictional ad platforms and measures its sites with a fictional web analytics platform, so you need no account on an ad platform and no API key. At the end the stack runs on your machine, and you know where to look for each part of it.
+In this tutorial you start agoranomos on your own machine with its demo, and follow the numbers of a dashboard back to the pipeline that made them. The demo is a fictional business with two clients, which advertises on three fictional ad platforms and measures its sites with a fictional web analytics platform, so you need no account on an ad platform and no API key. At the end the stack runs on your machine, and you know where to look for each part of it.
 
 It takes about half an hour, most of it the first start.
 
@@ -10,7 +10,7 @@ It takes about half an hour, most of it the first start.
 
 ## What you need
 
-- Docker with at least 6 GB of memory, 2 CPUs and 10 GB of free disk: Docker Desktop on macOS, Docker Desktop with WSL2 on Windows, or Docker Engine with the Compose plugin on Linux. [System requirements](../reference/system-requirements.md) has the details. On Windows, first read what [Run Agoranomos locally](../how-to/run-locally.md#before-you-begin) says about WSL2.
+- Docker with at least 6 GB of memory, 2 CPUs and 10 GB of free disk: Docker Desktop on macOS, Docker Desktop with WSL2 on Windows, or Docker Engine with the Compose plugin on Linux. [System requirements](../reference/system-requirements.md) has the details. On Windows, first read what [Run agoranomos locally](../how-to/run-locally.md#before-you-begin) says about WSL2.
 - git, a terminal and a web browser on the same machine.
 - Access to the internet for the first start.
 
@@ -119,7 +119,7 @@ To go further:
 - [See the demo](../how-to/see-the-demo.md) explains what each start does with the demo, how to keep a variant of a dashboard of your own, and how to turn the demo off.
 - [Watch the pipeline](../how-to/watch-the-pipeline.md) explains each card of **Pipeline health** and where its data comes from.
 - [The data model](../reference/data-model.md) describes the marts that the dashboards read, and their columns.
-- [Run Agoranomos locally](../how-to/run-locally.md) covers updates, your own DAGs, memory and the separate worker of Airflow.
+- [Run agoranomos locally](../how-to/run-locally.md) covers updates, your own DAGs, memory and the separate worker of Airflow.
 - [Architecture](../explanation/architecture.md) explains how the parts fit together.
 
 Connectors to real ad platforms are planned and not built yet: until they come, the demo is the data that the stack shows.

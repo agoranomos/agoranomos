@@ -8,7 +8,7 @@ decision-makers: Andrei Gromov
 
 ## Context and Problem Statement
 
-Agoranomos is a Python project: pipelines, sources, tests and tooling. It builds on several Python ecosystems, and each limits the versions it supports. It is developed in the open, with contributions from several people, and it ships container images, so reproducibility and supply-chain safety matter. The project needs one Python version, a way to install and lock dependencies and tools, checks that run on every change, and conventions for changes and releases.
+agoranomos is a Python project: pipelines, sources, tests and tooling. It builds on several Python ecosystems, and each limits the versions it supports. It is developed in the open, with contributions from several people, and it ships container images, so reproducibility and supply-chain safety matter. The project needs one Python version, a way to install and lock dependencies and tools, checks that run on every change, and conventions for changes and releases.
 
 Which Python version and tools do we use, and how are changes checked, merged and released?
 

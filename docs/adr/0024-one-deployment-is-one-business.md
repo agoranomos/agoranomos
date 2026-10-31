@@ -8,7 +8,7 @@ decision-makers: Andrei Gromov
 
 ## Context and Problem Statement
 
-Agoranomos is to model the advertising statistics of a business: its ad accounts on several platforms and its web analytics, and later its CRM ([ADR-0025](0025-model-advertising-statistics-once.md)). A business often runs more than one brand, shop or legal entity, each with ad accounts of its own, and people ask for the numbers of each. An agency or a freelancer serves several businesses. What one deployment holds decides what a sum over the marts means, and what the permissions of Metabase and the planned AI access have to separate.
+agoranomos is to model the advertising statistics of a business: its ad accounts on several platforms and its web analytics, and later its CRM ([ADR-0025](0025-model-advertising-statistics-once.md)). A business often runs more than one brand, shop or legal entity, each with ad accounts of its own, and people ask for the numbers of each. An agency or a freelancer serves several businesses. What one deployment holds decides what a sum over the marts means, and what the permissions of Metabase and the planned AI access have to separate.
 
 Whose data does one deployment hold, and how does the model know which ad account belongs to which brand?
 
@@ -55,7 +55,7 @@ The other options were not chosen for these reasons:
 * Good, because every sum of the marts is a sum of one business, and the permissions of Metabase and of AI access stay at the level of schemas.
 * Good, because a business sees its numbers by client on every platform, and the dashboards of the package can group by client.
 * Good, because the mapping is reviewed and versioned with the rest of the extensions folder, and a release never changes it.
-* Bad, because an agency with many small businesses runs many deployments, each with its own memory ([ADR-0022](0022-budget-the-memory-by-variant-and-mode.md)), and a report across its businesses needs a layer above the deployments, which Agoranomos does not have.
+* Bad, because an agency with many small businesses runs many deployments, each with its own memory ([ADR-0022](0022-budget-the-memory-by-variant-and-mode.md)), and a report across its businesses needs a layer above the deployments, which agoranomos does not have.
 * Bad, because the extensions folder gets one more extension point, and a person who adds an ad account has to name its client there, or the account counts as Unassigned.
 * Bad, because a change of the file reaches the marts only at the next run of the transform.
 

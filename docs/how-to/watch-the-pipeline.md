@@ -4,7 +4,7 @@ The collection **Agoranomos / Ops** in Metabase holds the dashboard **Pipeline h
 
 ## Open it
 
-Sign in to Metabase as [Run Agoranomos locally](run-locally.md#sign-in) says and open the collection **Agoranomos / Ops**. `metabase-init` makes it on the first start, with or without the demo, and keeps it as the code says on every start, view-only for every group but Administrators, as it does for the demo ([ADR-0018](../adr/0018-keep-the-content-of-the-package-in-metabase-as-code.md)). Until the first run of the transform has built the views that it reads, its questions show an error of PostgreSQL that the relation does not exist; with the demo, the first start runs the transform.
+Sign in to Metabase as [Run agoranomos locally](run-locally.md#sign-in) says and open the collection **Agoranomos / Ops**. `metabase-init` makes it on the first start, with or without the demo, and keeps it as the code says on every start, view-only for every group but Administrators, as it does for the demo ([ADR-0018](../adr/0018-keep-the-content-of-the-package-in-metabase-as-code.md)). Until the first run of the transform has built the views that it reads, its questions show an error of PostgreSQL that the relation does not exist; with the demo, the first start runs the transform.
 
 ## What it shows
 

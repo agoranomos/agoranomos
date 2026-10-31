@@ -1,5 +1,5 @@
 [project]
-site_name = "Agoranomos"
+site_name = "agoranomos"
 site_description = "Open-source marketing BI out of the box, with AI access via MCP."
 site_author = "Andrei Gromov"
 # The address of the published site: GitHub Pages, with the domain of the project (ADR-0009). The
@@ -11,18 +11,18 @@ site_url = "https://agoranomos.dev/"
 # the page), so this is the one request the site makes to another host.
 repo_url = "https://github.com/agoranomos/agoranomos"
 repo_name = "agoranomos/agoranomos"
-copyright = "Copyright &copy; 2026 Andrei Gromov and Agoranomos contributors. Apache-2.0."
+copyright = "Copyright &copy; 2026 Andrei Gromov and agoranomos contributors. Apache-2.0."
 # The brand style of the site: colors, the self-hosted fonts and the logo (see [project.theme]).
 extra_css = ["stylesheets/brand.css"]
 nav = [
   { "Home" = "index.md" },
   { "Tutorials" = [
     "tutorials/index.md",
-    { "Run Agoranomos locally with demo data" = "tutorials/run-locally-with-demo-data.md" },
+    { "Run agoranomos locally with demo data" = "tutorials/run-locally-with-demo-data.md" },
   ] },
   { "How-to guides" = [
     "how-to/index.md",
-    { "Run Agoranomos locally" = "how-to/run-locally.md" },
+    { "Run agoranomos locally" = "how-to/run-locally.md" },
     { "Deploy on a server" = "how-to/deploy-on-a-server.md" },
     { "Back up and restore" = "how-to/back-up-and-restore.md" },
     { "See the demo" = "how-to/see-the-demo.md" },

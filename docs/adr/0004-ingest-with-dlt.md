@@ -8,7 +8,7 @@ decision-makers: Andrei Gromov
 
 ## Context and Problem Statement
 
-Agoranomos loads data from ad platform APIs, web analytics, CRM systems and files. These sources differ in pagination, rate limits and report formats, and their schemas change over time. Their numbers are not final when they first appear, because attribution keeps maturing for some time after the fact. Ad accounts also live in different time zones. Loading has to be incremental, safe to repeat and honest about failures.
+agoranomos loads data from ad platform APIs, web analytics, CRM systems and files. These sources differ in pagination, rate limits and report formats, and their schemas change over time. Their numbers are not final when they first appear, because attribution keeps maturing for some time after the fact. Ad accounts also live in different time zones. Loading has to be incremental, safe to repeat and honest about failures.
 
 How do we load data from these sources into PostgreSQL?
 

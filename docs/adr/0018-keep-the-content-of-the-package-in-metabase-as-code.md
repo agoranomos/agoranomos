@@ -8,13 +8,13 @@ decision-makers: Andrei Gromov
 
 ## Context and Problem Statement
 
-Agoranomos ships content in Metabase. Today it is the demo: a collection with its questions and its dashboard, which the one-shot `demo-init` job creates from code. More is planned, such as the Ops collection of dashboards about the stack in v0.2.0. `demo-init` finds it by name on every start and keeps the edits that people made: it adds only the titles of columns that a question lacks, and creates again a question, dashboard or collection that was deleted or renamed ([See the demo](../how-to/see-the-demo.md)). So a release that improves the demo does not reach a deployment that has it already.
+agoranomos ships content in Metabase. Today it is the demo: a collection with its questions and its dashboard, which the one-shot `demo-init` job creates from code. More is planned, such as the Ops collection of dashboards about the stack in v0.2.0. `demo-init` finds it by name on every start and keeps the edits that people made: it adds only the titles of columns that a question lacks, and creates again a question, dashboard or collection that was deleted or renamed ([See the demo](../how-to/see-the-demo.md)). So a release that improves the demo does not reach a deployment that has it already.
 
-Agoranomos sets no permissions in Metabase today, so the defaults of Metabase apply: on a new instance, All Users may curate the root collection, and a collection created there gives the same to All Users. Every account may then rename, change, move and trash the dashboard of the demo. The planned AI access runs as the person who authorized the client ([ADR-0017](0017-set-ai-access-in-metabase-by-levels.md)), so the AI client of every account could do the same, and text in the data could steer it to.
+agoranomos sets no permissions in Metabase today, so the defaults of Metabase apply: on a new instance, All Users may curate the root collection, and a collection created there gives the same to All Users. Every account may then rename, change, move and trash the dashboard of the demo. The planned AI access runs as the person who authorized the client ([ADR-0017](0017-set-ai-access-in-metabase-by-levels.md)), so the AI client of every account could do the same, and text in the data could steer it to.
 
 [ADR-0013](0013-keep-extensions-apart-from-the-base-package.md) keeps the code of a deployment apart from the base package, and [ADR-0016](0016-keep-the-metadata-of-the-marts-as-code.md) keeps the metadata of the marts as code: an edit in the Metabase UI is reverted at the next start, and the log says so.
 
-Who may change the content that Agoranomos ships in Metabase, and how does it stay as the code says?
+Who may change the content that agoranomos ships in Metabase, and how does it stay as the code says?
 
 ## Decision Drivers
 

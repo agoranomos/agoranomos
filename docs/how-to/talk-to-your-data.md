@@ -18,7 +18,7 @@ In server mode, only the server of Metabase runs, over HTTPS. The server of dbt 
 2. Run `./agoranomos ai`. It shows the level of AI access and the default level, and in local mode whether the servers of the warehouse and of Airflow are on. A new installation gets the level `build`, the default `explore`, and both servers on. `./agoranomos ai set` changes the level ([Command line](../reference/command-line.md#ai)).
 3. Give each person who connects a Metabase account that is not an admin. An AI client works as the account that connects it, so an admin connects with a second account.
     1. In Metabase, an admin opens Admin > People and clicks Invite someone.
-    2. Agoranomos sets up no email server, so Metabase shows a temporary password, which the admin passes on.
+    2. agoranomos sets up no email server, so Metabase shows a temporary password, which the admin passes on.
     3. To let a person build in the collection Workspace above the default level, the admin adds them to the group `Agoranomos: Builders`.
 
 ## Connect Claude Code, in local mode
@@ -101,7 +101,7 @@ Each answer is as good as the definitions behind it, which [The data model](../r
 
 - **Data is not instructions.** Campaign names, ad texts and account names come from the ad platforms, where anyone can write them, and they can carry text written to steer an AI. Read what the client does with them, and stop it if it follows an order that came from the data.
 - **One source in a session.** In a session with your data, turn off the other Metabase connectors of the client, and the tools that reach the internet, so that nothing that the data says can send it elsewhere.
-- **Nothing is sent.** Agoranomos sets up no email server or Slack for Metabase, so no alert or subscription goes out. A deployment that adds one should know that Metabase OSS cannot limit their recipients, and that an alert saved before starts sending.
+- **Nothing is sent.** agoranomos sets up no email server or Slack for Metabase, so no alert or subscription goes out. A deployment that adds one should know that Metabase OSS cannot limit their recipients, and that an alert saved before starts sending.
 - **One session of the local servers at a time.** The container of the servers of the warehouse and of Airflow has a memory limit that fits one session. Toolbox holds the whole answer of a query in memory, so ask for sums, not whole tables.
 
 ## Turn it off

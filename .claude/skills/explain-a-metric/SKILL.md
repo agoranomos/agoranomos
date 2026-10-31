@@ -1,6 +1,6 @@
 ---
 name: explain-a-metric
-description: Explains how a metric or a column of the Agoranomos marts is defined and computed, from the dbt project and the data model, and checks it against the warehouse through the read-only MCP server of the warehouse. Use when the user asks what a metric means, how spend, conversions, clicks or a ratio such as CTR, CPC, CPA or ROAS is counted, why two numbers differ, or which column to use.
+description: Explains how a metric or a column of the agoranomos marts is defined and computed, from the dbt project and the data model, and checks it against the warehouse through the read-only MCP server of the warehouse. Use when the user asks what a metric means, how spend, conversions, clicks or a ratio such as CTR, CPC, CPA or ROAS is counted, why two numbers differ, or which column to use.
 ---
 
 # Explain a metric
