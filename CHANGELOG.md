@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.4.0](https://github.com/agoranomos/agoranomos/compare/v0.3.3...v0.4.0) (2026-10-30)
+
+
+### Features
+
+* load the Google Ads accounts of the deployment ([#143](https://github.com/agoranomos/agoranomos/issues/143)) ([f044c00](https://github.com/agoranomos/agoranomos/commit/f044c00d73bc1dc566e442be3e029129c25ad9a3))
+* load the reference rates of the ECB ([#142](https://github.com/agoranomos/agoranomos/issues/142)) ([5e7e9cb](https://github.com/agoranomos/agoranomos/commit/5e7e9cbb173cd0052addd974c484928e903ba867))
+* **metabase:** add the dashboard Advertising ([#151](https://github.com/agoranomos/agoranomos/issues/151)) ([02224e1](https://github.com/agoranomos/agoranomos/commit/02224e17853ed7665e7335a84ff51511eed7c766))
+* **metabase:** give the marts their foreign keys ([#150](https://github.com/agoranomos/agoranomos/issues/150)) ([fcf06fa](https://github.com/agoranomos/agoranomos/commit/fcf06fa20862e478537d57fafe96f8d7497a1c03))
+* **metabase:** keep the KPIs as metrics of Metabase ([#149](https://github.com/agoranomos/agoranomos/issues/149)) ([606e8c5](https://github.com/agoranomos/agoranomos/commit/606e8c5ccb82c25473e81bfcdd630ce55671b2d5))
+* model the ad groups and the ads ([#148](https://github.com/agoranomos/agoranomos/issues/148)) ([671bfce](https://github.com/agoranomos/agoranomos/commit/671bfce6a369718cd7d6f62e7ecb80ba2067dac4))
+
+
+### Bug Fixes
+
+* **dbt:** reduce the campaign days before the join ([#153](https://github.com/agoranomos/agoranomos/issues/153)) ([43d9d72](https://github.com/agoranomos/agoranomos/commit/43d9d7222c0ebf26790f8be3dc61a629d40fc7ec))
+
+
+### Documentation
+
+* **adr:** accept ADR-0032, ADR-0033 and ADR-0034 ([#147](https://github.com/agoranomos/agoranomos/issues/147)) ([eeaf39b](https://github.com/agoranomos/agoranomos/commit/eeaf39b38deba5b6999806b1f2f9119ecf45ff1f))
+* **adr:** propose ADR-0034, the data sets of the marts ([#145](https://github.com/agoranomos/agoranomos/issues/145)) ([12798f4](https://github.com/agoranomos/agoranomos/commit/12798f40af16bad695b90655ac795941eb64530a))
+
 ## [0.3.3](https://github.com/agoranomos/agoranomos/compare/v0.3.2...v0.3.3) (2026-10-29)
 
 

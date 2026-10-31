@@ -4,7 +4,7 @@ This guide starts Agoranomos on your own machine in local mode: the warehouse, A
 
 !!! note "Pre-alpha"
 
-    This guide installs v0.3.3, the latest release. <!-- x-release-please-version -->
+    This guide installs v0.4.0, the latest release. <!-- x-release-please-version -->
     Each release has its notes on [the releases](https://github.com/agoranomos/agoranomos/releases), and the `main` branch holds what comes next.
 
 ## Before you begin
@@ -20,7 +20,7 @@ This guide starts Agoranomos on your own machine in local mode: the warehouse, A
 <!-- x-release-please-start-version -->
 
 ```bash
-git clone --branch v0.3.3 https://github.com/agoranomos/agoranomos.git
+git clone --branch v0.4.0 https://github.com/agoranomos/agoranomos.git
 cd agoranomos
 ./agoranomos up
 ```
