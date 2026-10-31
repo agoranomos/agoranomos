@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.1](https://github.com/agoranomos/agoranomos/compare/v0.4.0...v0.4.1) (2026-10-31)
+
+
+### Bug Fixes
+
+* **dbt:** build the model without the demo ([#156](https://github.com/agoranomos/agoranomos/issues/156)) ([5e4e79c](https://github.com/agoranomos/agoranomos/commit/5e4e79c42033992b2e70b884c3f2f39263167b57))
+* **metabase:** name both axes of a chart ([#164](https://github.com/agoranomos/agoranomos/issues/164)) ([9601fa1](https://github.com/agoranomos/agoranomos/commit/9601fa110274fa6f62923237dedc1fb9e5e70fcb))
+* write the name in lower case in the stack ([#163](https://github.com/agoranomos/agoranomos/issues/163)) ([10f663b](https://github.com/agoranomos/agoranomos/commit/10f663b1afb81daab38c996100f09f13a6bcce4b))
+
+
+### Documentation
+
+* bring the guides up to v0.4.0 ([#159](https://github.com/agoranomos/agoranomos/issues/159)) ([579a0da](https://github.com/agoranomos/agoranomos/commit/579a0da8386d43a734b30909c4fafa2d23491886))
+* show Google Ads in the pipeline picture ([#161](https://github.com/agoranomos/agoranomos/issues/161)) ([236e884](https://github.com/agoranomos/agoranomos/commit/236e884f63f56d086ddd874a95b400d41774f486))
+* show the dashboard Advertising in the README ([#165](https://github.com/agoranomos/agoranomos/issues/165)) ([3c1bd13](https://github.com/agoranomos/agoranomos/commit/3c1bd13b7b332e01ee0cf2a035baed49bc654a36))
+* write the name in lower case ([#160](https://github.com/agoranomos/agoranomos/issues/160)) ([d0ab89e](https://github.com/agoranomos/agoranomos/commit/d0ab89ec0fd10f689c8abc4750e1a7053bc27332))
+
 ## [0.4.0](https://github.com/agoranomos/agoranomos/compare/v0.3.3...v0.4.0) (2026-10-30)
 
 
