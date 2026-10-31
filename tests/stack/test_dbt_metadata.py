@@ -590,6 +590,7 @@ def fresh_build(airflow_url, token):
 
 
 @needs_the_demo
+@pytest.mark.transform
 def test_the_comments_of_the_warehouse_are_the_descriptions_of_dbt(env, nodes, fresh_build):
     # Every relation of a model has exactly the columns that dbt declares, and each of them, like
     # the relation, carries its description as its comment.
@@ -602,6 +603,7 @@ def test_the_comments_of_the_warehouse_are_the_descriptions_of_dbt(env, nodes, f
 
 
 @needs_the_demo
+@pytest.mark.transform
 def test_the_key_of_the_mart_is_a_primary_key_after_a_rebuild(env, fresh_build):
     definition = warehouse_output(env, PRIMARY_KEY)
     expected = "PRIMARY KEY (report_date, platform, account_id, campaign_id)"

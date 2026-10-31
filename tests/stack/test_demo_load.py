@@ -39,6 +39,7 @@ pytestmark = [
         not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
     ),
     pytest.mark.usefixtures("daily_load_paused"),
+    pytest.mark.transform,
 ]
 
 HISTORY = "agoranomos_demo_history"

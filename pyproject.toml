@@ -39,3 +39,6 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF", "S", "PT", "AIR"]
 testpaths = ["tests/unit"]
 pythonpath = ["scripts", "metabase", "airflow/dags"]
 addopts = ["-ra", "--strict-markers", "--strict-config"]
+markers = [
+    "transform: a stack test that loads or transforms the demo, or reads what such a run left in its module, which takes minutes",
+]

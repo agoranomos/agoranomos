@@ -134,7 +134,13 @@ jobs:
         env:
           TITLE: Local mode (${{ matrix.arch }}, ${{ matrix.variant }}), the stack tests
         run: uv run python scripts/memory_report.py --title "$TITLE" --output "$GITHUB_STEP_SUMMARY" -- uv run pytest tests/stack -v
+      # A pull request takes the tests of the mark transform in the run above only: they load and
+      # transform the demo, which is 41 of the 45 minutes of a run on amd64, and none of them failed
+      # here alone in the 186 runs up to 31 October 2026, while the comparison of the containers did,
+      # and a test of another file. A push to main and the weekly run take every test again.
       - name: Start again (nothing changes)
+        env:
+          MARKS: ${{ github.event_name == 'pull_request' && 'not transform' || '' }}
         run: |
           sha256sum .env > env.sha256
           docker compose ps --quiet --status running | sort > containers-before.txt
@@ -142,7 +148,7 @@ jobs:
           sha256sum --check env.sha256
           docker compose ps --quiet --status running | sort > containers-after.txt
           diff containers-before.txt containers-after.txt
-          uv run pytest tests/stack -v
+          uv run pytest tests/stack -v -m "$MARKS"
       - name: Collect the logs
         if: ${{ failure() }}
         run: |
@@ -211,7 +217,13 @@ jobs:
         env:
           TITLE: Server mode (${{ matrix.arch }}), the stack tests
         run: uv run python scripts/memory_report.py --title "$TITLE" --output "$GITHUB_STEP_SUMMARY" -- uv run pytest tests/stack -v
+      # A pull request takes the tests of the mark transform in the run above only: they load and
+      # transform the demo, which is 41 of the 45 minutes of a run on amd64, and none of them failed
+      # here alone in the 186 runs up to 31 October 2026, while the comparison of the containers did,
+      # and a test of another file. A push to main and the weekly run take every test again.
       - name: Start again (nothing changes)
+        env:
+          MARKS: ${{ github.event_name == 'pull_request' && 'not transform' || '' }}
         run: |
           sha256sum .env > env.sha256
           docker compose ps --quiet --status running | sort > containers-before.txt
@@ -219,7 +231,7 @@ jobs:
           sha256sum --check env.sha256
           docker compose ps --quiet --status running | sort > containers-after.txt
           diff containers-before.txt containers-after.txt
-          uv run pytest tests/stack -v
+          uv run pytest tests/stack -v -m "$MARKS"
       # The round trip of a backup (ADR-0020): a refused restore of a damaged backup; a mark in
       # each database and a backup; a restore of Metabase into the running stack, then the tests of
       # the site again; the volumes of the stack removed, a restore on empty volumes, and the marks
