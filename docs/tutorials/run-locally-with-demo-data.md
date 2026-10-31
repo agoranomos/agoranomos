@@ -122,4 +122,4 @@ To go further:
 - [Run Agoranomos locally](../how-to/run-locally.md) covers updates, your own DAGs, memory and the separate worker of Airflow.
 - [Architecture](../explanation/architecture.md) explains how the parts fit together.
 
-The first connector to a real ad platform is that of Google Ads ([Connect Google Ads](../how-to/connect-google-ads.md)), and the others are planned. Until you connect an account, the demo is the data that the stack shows.
+Connectors to real ad platforms are planned and not built yet: until they come, the demo is the data that the stack shows.
