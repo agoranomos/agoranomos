@@ -31,7 +31,7 @@ Then check that everything works:
 ```bash
 uv run prek run --all-files     # every check on the whole repository, as CI runs it
 uv run zensical build --strict  # builds the documentation; a broken link or anchor fails it
-uv run pytest                   # the unit tests
+uv run pytest -n auto           # the unit tests, in parallel
 ```
 
 The checks are configured in `.pre-commit-config.yaml` and run by [prek](https://prek.j178.dev/). They cover file hygiene (large files, case conflicts, merge conflict markers, JSON, TOML and YAML syntax, private keys, final newlines, line endings and trailing whitespace), linting and formatting with ruff, shell scripts with ShellCheck, spelling with typos, secrets with gitleaks, GitHub Actions workflows, issue forms, the Renovate configuration and the release-please configuration (checked against its schema, which the hook downloads), and the documentation navigation, which must match the pages.

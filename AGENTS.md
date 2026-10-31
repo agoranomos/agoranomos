@@ -34,7 +34,7 @@ agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 - `pyproject.toml`, `uv.lock`, `.python-version`: the development tooling (Python 3.13, ruff, prek, Zensical and pytest). The root is a uv project that is never built or installed.
 - `.pre-commit-config.yaml`: the git hooks and static checks, run by prek. `_typos.toml` is the word list of the spell checker, and `.editorconfig` and `.gitattributes` fix indentation and line endings (LF).
 - `scripts/`: the scripts of the repository's own checks. `check_docs_nav.py` compares the documentation navigation with the pages, and the `check-docs-nav` hook runs it. `check_docs_lists.py` checks that the list items of the pages are indented by multiples of four spaces, and the `check-docs-lists` hook runs it. `check_docs_site.py` builds the site in a temporary folder and checks that no page, style sheet or SVG file fetches anything from another host and that a page with a diagram has the Mermaid script, and the `check-docs-site` hook runs it. `memory_report.py` measures the memory of each service of the running stack ([docs/reference/system-requirements.md](docs/reference/system-requirements.md)); CI runs it around the stack tests.
-- `tests/unit/`: the unit tests, run by `uv run pytest`.
+- `tests/unit/`: the unit tests, run by `uv run pytest -n auto`, in one process for each CPU.
 - `tests/stack/`: the stack tests, run with `uv run pytest tests/stack` against a running stack.
 - `.github/`: the workflows (`workflows/`: CI, the stack tests, the pull request checks, the daily Renovate run, the release workflow and `docs.yml`, which the release workflow calls to publish the documentation site of each release on GitHub Pages at <https://agoranomos.dev>), the issue forms, the pull request template and `CODEOWNERS`.
 - `renovate.json`: the [Renovate](https://docs.renovatebot.com/) configuration for keeping the pinned versions current ([ADR-0012](docs/adr/0012-python-and-tooling.md)).
@@ -50,7 +50,7 @@ uv run prek run --all-files      # all static checks, as CI runs them
 uv run prek run gitleaks-history --all-files --hook-stage manual   # scan the full git history for secrets
 uv run zensical serve            # preview the documentation at http://localhost:8000
 uv run zensical build --strict   # build the documentation; broken links and anchors fail
-uv run pytest                    # the unit tests in tests/unit
+uv run pytest -n auto            # the unit tests in tests/unit, in parallel
 ./agoranomos up                  # set up .env, check the machine, start the stack
 ./agoranomos credentials         # where to sign in; never prints a password
 uv run pytest tests/stack        # the stack tests, against a running stack
