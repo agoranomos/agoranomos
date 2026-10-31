@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Give AI clients least-privilege access through MCP
 
+Superseded in part by [ADR-0043](0043-define-the-metrics-in-the-warehouse-and-give-agents-tools-over-the-marts.md): the role `ai_reader` reads `marts` only, and no longer `staging`. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 A main way to use agoranomos is to ask questions about marketing data in an AI client such as Claude, ChatGPT, Cursor or Claude Code. AI clients reach data and tools through MCP (Model Context Protocol) servers. The data contains text that anyone can write, such as campaign names and ad texts, and the stack holds credentials for the warehouse and for the orchestrator. Access has to be useful to business users, engineers and analytics engineers, and it has to be safe by default.

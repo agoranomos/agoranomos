@@ -1,6 +1,6 @@
 ---
 status: proposed
-date: 2026-10-31
+date: 2026-11-01
 decision-makers: Andrei Gromov
 ---
 
@@ -28,14 +28,15 @@ Does an agency run one deployment, or one for each of its clients?
 
 ## Decision Outcome
 
-Chosen option: "An agency is one business", on one condition: a stated way to tell the clients in the data, which an open piece of research has to give. Until it does, this record stays `proposed` and ADR-0024 stands.
+Chosen option: "An agency is one business", on one condition: a way to tell the clients in the data that a real agency confirms. The research of 1 November 2026 gives a rule for each platform (More Information), from documentation alone, and the maintainer decided on that day to keep one business for each deployment until a long-running deployment of an agency checks the rule and the entity of a client in its data. Until then this record stays `proposed` and ADR-0024 stands.
 
 In practice this means:
 
 * **One deployment.** The accounts of all the clients of an agency are in one warehouse, one Metabase and one set of AI access. The clients are those of `extensions/model/clients.toml`, and the profile of an agency is in [ADR-0040](0040-size-the-stack-by-profiles-and-derive-the-settings-of-postgresql.md).
 * **Who reads.** Only the staff of the agency. No client gets a login to this deployment.
 * **The reporting currency.** One for a deployment. One for each client is a second pair of columns in v0.9 ([ADR-0037](0037-serve-the-marts-as-views-over-the-core.md)).
-* **The condition.** Today a person maps each account to a client by hand, in a file, and an account that no file names belongs to `unassigned`. A rule on the names of accounts was rejected in ADR-0024, because anyone with access to an account can rename it. The research has to say what a deployment can read for this from the platforms, such as the structure of manager accounts, labels or business portfolios, how far an agent can propose the mapping for a person to confirm, and what happens to a new account of a known client.
+* **The condition.** Today a person maps each account to a client by hand, in a file, and an account that no file names belongs to `unassigned`. A rule on the names of accounts was rejected in ADR-0024, because anyone with access to an account can rename it. The rule below reads the client from the structures of the platforms instead, and it has to hold on a real agency before this record is accepted.
+* **The rule, as proposed.** For each platform, in this order: the entity of the client, then a label, then the file. Google: the sub-manager at the first level under the root manager of the agency, else a label of an account of that manager. Meta: the business portfolio that owns the ad account. TikTok: the partner Business Center that shares the account. Microsoft: `ParentCustomerId`. LinkedIn: the organization in `reference`. Yandex and VK: the account is the client. A proposal goes into `clients.toml` as waiting for a person to confirm, and a confirmed entity gives its client to every account of its own, a new one too. The same client on two platforms has no shared identifier, so an agent proposes the match by a normalized name or a domain, and a person confirms.
 
 The other option was not chosen for these reasons:
 
@@ -52,8 +53,10 @@ The other option was not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** not built, and held by its condition. Today a deployment is one business, and an agency can use the same `clients.toml` with no change of code.
+* **Implementation status, as of November 2026:** not built, and held by its condition. Today a deployment is one business, and an agency runs one deployment for each client, as ADR-0024 says.
 * The facts behind this record: `clients.toml` and the `client_id` of the marts already group accounts into clients ([ADR-0024](0024-one-deployment-is-one-business.md)). Metabase OSS has no sandboxes, which are a paid feature ([Paid features](https://www.metabase.com/docs/latest/paid-features)).
-* Not checked yet: how to tell the clients in the data of an agency, which is the condition of this record, and the access of Meta for accounts that an agency does not own. Its own accounts are covered by standard access, others need App Review, and each deployment would go through it alone, so its terms have to be read and an application tried before the connector takes a shape.
+* The facts behind the rule, read on 1 November 2026: Google's `customer_client` with `level`, `manager` and `applied_labels` ([account hierarchy](https://developers.google.com/google-ads/api/docs/account-management/get-account-hierarchy), [account labels](https://support.google.com/google-ads/answer/7531799)); Meta's `business` of an ad account and the edges `client_ad_accounts` and `clients` of a business ([Business](https://developers.facebook.com/docs/marketing-api/reference/business/)); TikTok's partners and shared assets of a Business Center ([partners](https://business-api.tiktok.com/portal/docs/get-the-partners-of-a-bc/v1.3), [assets of a partner](https://business-api.tiktok.com/portal/docs/get-the-assets-of-a-partner/v1.3)); Microsoft's `ParentCustomerId` ([AdvertiserAccount](https://learn.microsoft.com/en-us/advertising/customer-management-service/advertiseraccount)); LinkedIn's `reference` ([ad accounts](https://learn.microsoft.com/en-us/linkedin/marketing/integrations/ads/account-structure/create-and-manage-accounts)); Yandex's [AgencyClients.get](https://yandex.com/dev/direct/doc/en/agencyclients/get); VK's [AgencyClients](https://ads.vk.ru/en/doc/api/resource/AgencyClients). Supermetrics, Funnel and Fivetran count accounts and leave the grouping to the agency.
+* The access of Meta, read on 1 November 2026: an app of the business's own portfolio, with an admin system user, reads the accounts of the portfolio and those shared with it by partner access with no App Review and no Business Verification ([authorization](https://developers.facebook.com/docs/marketing-api/overview/authorization/), [App Review](https://developers.facebook.com/docs/resp-plat-initiatives/individual-processes/app-review/), [system users](https://developers.facebook.com/docs/marketing-api/system-users/install-apps-and-generate-tokens)). The maintainer took that scheme for the connector of Meta on 1 November 2026: an app of the deployment, as with the key of Google Ads. Its tier is called "for development only" with a rate limit for each ad account far above a daily load, and Meta does not say whether a system user that reads partner accounts counts as managing other businesses' accounts.
+* Not checked yet: the rule on a real agency, which only a long-running deployment of one can show.
 * Related decisions: at acceptance this record replaces the sentence "An agency or a freelancer runs one deployment for each business that it serves" of [ADR-0024](0024-one-deployment-is-one-business.md), and the rest of that record stays. The hosted version that it plans is not touched.
-* Revisit this record when an agency needs to show a client its own data, or when the research is done.
+* Revisit this record when a long-running deployment of an agency has checked the rule, or when an agency needs to show a client its own data.

@@ -72,23 +72,23 @@ agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0022](0022-budget-the-memory-by-variant-and-mode.md) | Budget the memory by variant and mode | accepted | 2026-10-09 |
 | [0023](0023-give-the-network-of-the-stack-ipv6.md) | Give the network of the stack IPv6, so that Metabase sees the address of each client | accepted | 2026-10-11 |
 | [0024](0024-one-deployment-is-one-business.md) | One deployment is one business, and clients group its ad accounts | accepted | 2026-10-12 |
-| [0025](0025-model-advertising-statistics-once.md) | Model advertising statistics once, at the grain of a campaign and a day | accepted | 2026-10-12 |
+| [0025](0025-model-advertising-statistics-once.md) | Model advertising statistics once, at the grain of a campaign and a day | superseded | 2026-10-12 |
 | [0027](0027-load-the-dbt-project-into-cosmos-from-a-manifest.md) | Load the dbt project into Cosmos from a manifest | accepted | 2026-10-12 |
-| [0028](0028-build-each-node-of-dbt-with-its-tests-in-one-task.md) | Build each node of dbt with its tests in one task | accepted | 2026-10-19 |
+| [0028](0028-build-each-node-of-dbt-with-its-tests-in-one-task.md) | Build each node of dbt with its tests in one task | superseded | 2026-10-19 |
 | [0029](0029-record-the-runs-of-dbt-with-elementary-and-show-them-in-ops.md) | Record the runs of dbt with elementary in the schema ops, and show them in the Ops collection | accepted | 2026-10-20 |
 | [0030](0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md) | Ship three MCP servers in v0.3.0, with the stdio servers in local mode only | accepted | 2026-10-21 |
 | [0031](0031-register-and-revoke-the-oauth-clients-of-metabase-with-the-script.md) | Register and revoke the OAuth clients of Metabase with the script, and close the rest at the proxy | accepted | 2026-10-21 |
 | [0032](0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md) | Connect Google Ads first, with the reference rates of the European Central Bank | accepted | 2026-10-29 |
 | [0033](0033-support-claude-chatgpt-and-gemini-first.md) | Support Claude, ChatGPT and Gemini first among AI clients | accepted | 2026-10-29 |
 | [0034](0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md) | Define a basic data set of the marts and the dashboards, and the modules of an extended one | accepted | 2026-10-29 |
-| [0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) | Keep four layers of data, and erase the raw layer once the core has accepted a load | proposed | 2026-10-31 |
-| [0036](0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md) | Model the core as narrow facts by grain, with dimensions that keep their versions | proposed | 2026-10-31 |
-| [0037](0037-serve-the-marts-as-views-over-the-core.md) | Serve the marts as views over the core | proposed | 2026-10-31 |
-| [0038](0038-load-by-copy-and-write-the-core-by-whole-days.md) | Load with COPY into the raw layer, and write the core by whole days of an account | proposed | 2026-10-31 |
-| [0039](0039-run-one-dbt-build-in-the-watcher-mode.md) | Run one dbt build in the watcher mode of Cosmos, with a DAG of maintenance | proposed | 2026-10-31 |
-| [0040](0040-size-the-stack-by-profiles-and-derive-the-settings-of-postgresql.md) | Size the stack by profiles, and derive the settings of PostgreSQL from its memory limit | proposed | 2026-10-31 |
+| [0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) | Keep four layers of data, and erase the raw layer once the core has accepted a load | accepted | 2026-10-31 |
+| [0036](0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md) | Model the core as narrow facts by grain, with dimensions that keep their versions | accepted | 2026-10-31 |
+| [0037](0037-serve-the-marts-as-views-over-the-core.md) | Serve the marts as views over the core | accepted | 2026-10-31 |
+| [0038](0038-load-by-copy-and-write-the-core-by-whole-days.md) | Load with COPY into the raw layer, and write the core by whole days of an account | accepted | 2026-10-31 |
+| [0039](0039-run-one-dbt-build-in-the-watcher-mode.md) | Run one dbt build in the watcher mode of Cosmos, with a DAG of maintenance | accepted | 2026-10-31 |
+| [0040](0040-size-the-stack-by-profiles-and-derive-the-settings-of-postgresql.md) | Size the stack by profiles, and derive the settings of PostgreSQL from its memory limit | accepted | 2026-10-31 |
 | [0041](0041-run-an-agency-as-one-deployment.md) | Run an agency as one deployment | proposed | 2026-10-31 |
-| [0042](0042-take-the-rates-from-the-bank-of-italy-and-the-national-bank-of-kazakhstan.md) | Take the exchange rates from the Bank of Italy and the National Bank of Kazakhstan | proposed | 2026-10-31 |
-| [0043](0043-define-the-metrics-in-the-warehouse-and-give-agents-tools-over-the-marts.md) | Define the metrics in the warehouse, and give agents tools over the marts | proposed | 2026-10-31 |
-| [0044](0044-keep-the-core-for-good-and-change-it-by-migrations.md) | Keep the core for good, change it by migrations, and back it up before each one | proposed | 2026-10-31 |
-| [0045](0045-send-alerts-from-airflow-through-apprise.md) | Send alerts from Airflow through Apprise | proposed | 2026-10-31 |
+| [0042](0042-take-the-rates-from-the-bank-of-italy-and-the-national-bank-of-kazakhstan.md) | Take the exchange rates from the Bank of Italy and the National Bank of Kazakhstan | accepted | 2026-10-31 |
+| [0043](0043-define-the-metrics-in-the-warehouse-and-give-agents-tools-over-the-marts.md) | Define the metrics in the warehouse, and give agents tools over the marts | accepted | 2026-10-31 |
+| [0044](0044-keep-the-core-for-good-and-change-it-by-migrations.md) | Keep the core for good, change it by migrations, and back it up before each one | accepted | 2026-10-31 |
+| [0045](0045-send-alerts-from-airflow-through-apprise.md) | Send alerts from Airflow through Apprise | accepted | 2026-10-31 |

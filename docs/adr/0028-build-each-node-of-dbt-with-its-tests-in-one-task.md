@@ -1,10 +1,12 @@
 ---
-status: accepted
+status: superseded
 date: 2026-10-19
 decision-makers: Andrei Gromov
 ---
 
 # Build each node of dbt with its tests in one task
+
+Superseded by [ADR-0039](0039-run-one-dbt-build-in-the-watcher-mode.md).
 
 ## Context and Problem Statement
 

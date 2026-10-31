@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Ingest data with dlt
 
+Superseded in part by [ADR-0038](0038-load-by-copy-and-write-the-core-by-whole-days.md): the sentences "Data is final up to yesterday" of "Final data and a sliding window" and "Rows are merged on natural keys" of "Safe repeats". The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 agoranomos loads data from ad platform APIs, web analytics, CRM systems and files. These sources differ in pagination, rate limits and report formats, and their schemas change over time. Their numbers are not final when they first appear, because attribution keeps maturing for some time after the fact. Ad accounts also live in different time zones. Loading has to be incremental, safe to repeat and honest about failures.

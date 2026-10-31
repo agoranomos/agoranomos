@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Define a basic data set of the marts and the dashboards, and the modules of an extended one
 
+Superseded in part by [ADR-0036](0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md) and [ADR-0037](0037-serve-the-marts-as-views-over-the-core.md): the facts of ad groups and ads carry the metric of the platform, and the conversions of the primary actions at those levels come with a module. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 [ADR-0025](0025-model-advertising-statistics-once.md) modeled advertising statistics at the grain of a campaign and a day, and left ad groups and ads to the first real connector. [ADR-0032](0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md) brings that connector, Google Ads, with the rates of the ECB, and Phase 4 adds one platform in each minor release. The marts, the dashboards and the MCP servers now need a stated scope: which data every deployment gets, which it may turn on, at which grains of time, and how the dashboards of Metabase present them.

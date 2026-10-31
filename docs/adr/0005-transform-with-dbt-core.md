@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Transform data with dbt Core
 
+Superseded in part by [ADR-0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md), which adds the schema `core` to "Layers", and by [ADR-0039](0039-run-one-dbt-build-in-the-watcher-mode.md): the sentence "each model is retried and observed in Airflow" of "Cosmos". The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 Data arrives in the warehouse as raw tables, one schema per source. It has to become one tested and documented model of advertising statistics that dashboards and AI clients can rely on, and the orchestrator has to rebuild that model after every load.

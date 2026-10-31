@@ -1,10 +1,12 @@
 ---
-status: accepted
+status: superseded
 date: 2026-10-12
 decision-makers: Andrei Gromov
 ---
 
 # Model advertising statistics once, at the grain of a campaign and a day
+
+Superseded by [ADR-0036](0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md) and [ADR-0037](0037-serve-the-marts-as-views-over-the-core.md).
 
 ## Context and Problem Statement
 

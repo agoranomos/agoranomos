@@ -117,7 +117,7 @@ Decision records: [ADR-0003: Run two PostgreSQL instances](../adr/0003-two-postg
 
 ### Planned: a permanent core
 
-[ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) to [ADR-0045](../adr/0045-send-alerts-from-airflow-through-apprise.md) propose the data architecture of v0.5, and none of it is built. As proposed, the raw layer keeps only the loads that the warehouse has not accepted, a new schema `core` keeps narrow facts by month and dimensions with their versions for good, and the marts become views under the names and with the columns of today. A load passes checks before it reaches the core, an account that fails them waits in quarantine while the others go on, and dbt runs as one build. Until that lands, this page describes the layers of today.
+[ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) to [ADR-0045](../adr/0045-send-alerts-from-airflow-through-apprise.md) decide the data architecture of v0.5, one of them still proposed, and none of it is built. The raw layer keeps only the loads that the warehouse has not accepted, a new schema `core` keeps narrow facts by month and dimensions with their versions for good, and the marts become views under the names and with the columns of today. A load passes checks before it reaches the core, an account that fails them waits in quarantine while the others go on, and dbt runs as one build. Until that lands, this page describes the layers of today.
 
 ## Orchestrate: Apache Airflow
 
