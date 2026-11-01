@@ -78,7 +78,7 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** planned for v0.5; none of it is built. The trigger on any asset is planned for v0.4.x.
+* **Implementation status, as of November 2026:** planned for v0.5; the trigger on any asset is in place, and the rest is not built. The transform starts on the asset of the rates of the ECB, on that of Google Ads, and on the five assets of the demo as one condition (`airflow/dags/agoranomos_pipelines/assets.py`): as five conditions, one load of the demo would start a run after its first platform, which would read tables whose days the other loads still replace, and one more run after them. The five become conditions of their own with the pinning of [ADR-0038](0038-load-by-copy-and-write-the-core-by-whole-days.md).
 * The facts behind this record:
     * `ExecutionMode.WATCHER` is stable since Cosmos 1.15.0, and runs one `dbt build` for the whole project, with tasks marked by the events of dbt ([watcher mode](https://astronomer.github.io/astronomer-cosmos/guides/run_dbt/airflow-worker/watcher-execution-mode.html)). The benchmark is on that page, and the numbers of the demo are from October 2026.
     * Run on 31 October 2026: a daily `dbt build` recreates each view with a new oid; `--exclude config.materialized:view` removes their tests too; with the override of eight lines, the oid stays, the tests run, `--vars rebuild_views` rebuilds, and the descriptions stay. A partition through a function `SECURITY DEFINER` was created by a role without ownership, through `PARTITION OF` in that check; `ANALYZE ONLY` works with `MAINTAIN` on the parent, and `VACUUM` of a partition needs `MAINTAIN` on the partition itself.

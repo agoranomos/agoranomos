@@ -59,6 +59,22 @@ vars:
   test_sample_row_count: 0
   disable_dbt_artifacts_autoupload: true
 
+# The tests of the base package. A test with the severity error, the default, stops the models that
+# read its node (TestBehavior.BUILD of Cosmos, ADR-0028), and carries the tag critical (ADR-0038),
+# for a run of the blocking tests by hand: dbt build --select tag:critical (CONTRIBUTING.md). Every
+# test of the staging models and of the marts blocks, so their directories give the tag here: dbt
+# gives a generic test the configs of the directory of its YAML file. Tags add up and none can be
+# taken back, so where a directory holds a warning, the intermediate models, each test that blocks
+# carries the tag in its YAML; so do the tests of the seeds, whose YAML lies at the root of seeds,
+# and the singular test that blocks, in its config; the four singular tests that warn carry none.
+# tests/unit/test_dbt_project.py checks that the tag and the severity agree.
+data_tests:
+  agoranomos:
+    staging:
+      +tags: [critical]
+    marts:
+      +tags: [critical]
+
 seeds:
   agoranomos:
     # The lists that the model checks against: the platforms, the conversion actions, the

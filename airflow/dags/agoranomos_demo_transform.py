@@ -11,8 +11,10 @@ Ops collection. A failed critical test stops the models that read it, and the ma
 Before them, one task builds the tables of elementary in the schema ops, into which the hooks of
 elementary in every task of dbt write the results of its models and tests (ADR-0029). The DAG runs
 when each of the five platforms of the demo has loaded since its last run, each load updating the
-asset of its main table, and after each load of Google Ads (ADR-0032). A repeat is safe: the
-settings are loaded again, and dbt rebuilds the models. The DAG starts paused. With the demo
+asset of its main table, after each load of the rates of the ECB, and after each load of Google Ads
+(ADR-0032, ADR-0039), one run at a time: a run takes the events of the loads that ended while the
+run before it ran. A repeat is safe: the settings are loaded again, and dbt rebuilds the models. The
+DAG starts paused. With the demo
 profile, the one-shot demo-init job unpauses it and runs agoranomos_demo_history on the first
 start; without it, unpause this DAG in the Airflow UI before you trigger a load. The DAG keeps the
 word demo in its id for now, as the Ops collection and the demo name it; a change of its own is to

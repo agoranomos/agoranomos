@@ -8,7 +8,11 @@ models:
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
-        data_tests: [not_null, unique]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
+          - unique:
+              config: {tags: [critical]}
       - name: platform_name
         description: '{{ doc("platform_name") }}'
       - name: kind
@@ -27,10 +31,16 @@ models:
     columns:
       - name: client_id
         description: '{{ doc("client_id") }}'
-        data_tests: [not_null, unique]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
+          - unique:
+              config: {tags: [critical]}
       - name: client_name
         description: '{{ doc("client_name") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: origin
         description: '{{ doc("origin") }}'
       - name: is_default
@@ -47,6 +57,7 @@ models:
       - unique_combination:
           arguments:
             columns: [platform, account_id]
+          config: {tags: [critical]}
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
@@ -55,23 +66,30 @@ models:
               arguments:
                 to: ref('int_ad_platforms__unioned')
                 field: platform
+              config: {tags: [critical]}
       - name: account_id
         description: '{{ doc("account_id") }}'
       - name: account_name
         description: '{{ doc("account_name") }}'
       - name: currency
         description: '{{ doc("currency") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: time_zone
         description: '{{ doc("time_zone") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: manager_account_id
         description: '{{ doc("manager_account_id") }}'
       - name: account_status
         description: '{{ doc("account_status") }}'
       - name: client_id
         description: '{{ doc("client_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: client_name
         description: '{{ doc("client_name") }}'
   - name: int_ad_campaigns__unioned
@@ -85,6 +103,7 @@ models:
       - unique_combination:
           arguments:
             columns: [platform, account_id, campaign_id]
+          config: {tags: [critical]}
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
@@ -94,7 +113,9 @@ models:
         description: '{{ doc("campaign_id") }}'
       - name: campaign_name
         description: '{{ doc("campaign_name") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: campaign_status
         description: '{{ doc("campaign_status") }}'
       - name: campaign_type
@@ -113,6 +134,7 @@ models:
       - unique_combination:
           arguments:
             columns: [platform, account_id, campaign_id, valid_from]
+          config: {tags: [critical]}
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
@@ -140,6 +162,7 @@ models:
       - unique_combination:
           arguments:
             columns: [platform, conversion_action_id]
+          config: {tags: [critical]}
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
@@ -153,9 +176,12 @@ models:
           - accepted_values:
               arguments:
                 values: ["purchase", "lead", "sign_up", "add_to_cart", "app_install", "other"]
+              config: {tags: [critical]}
       - name: is_primary
         description: '{{ doc("is_primary") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
   - name: int_ad_conversions__unioned
     description: >-
       The conversions of every ad platform by conversion action, one row for each campaign, day and
@@ -168,16 +194,19 @@ models:
       - unique_combination:
           arguments:
             columns: [report_date, platform, account_id, campaign_id, conversion_action_id]
+          config: {tags: [critical]}
       - relationships_composite:
           arguments:
             columns: [platform, account_id, campaign_id]
             to: ref('int_ad_campaigns__unioned')
             to_columns: [platform, account_id, campaign_id]
+          config: {tags: [critical]}
       - relationships_composite:
           arguments:
             columns: [report_date, currency]
             to: ref('int_fx_rates__filled')
             to_columns: [rate_date, currency]
+          config: {tags: [critical]}
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
@@ -201,12 +230,16 @@ models:
         description: '{{ doc("conversion_category") }}'
       - name: is_primary
         description: '{{ doc("is_primary") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: attribution_setting
         description: '{{ doc("attribution_setting") }}'
       - name: currency
         description: '{{ doc("currency") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: conversions
         description: '{{ doc("conversions") }}'
       - name: conversion_value
@@ -225,21 +258,25 @@ models:
       - unique_combination:
           arguments:
             columns: [report_date, platform, account_id, campaign_id]
+          config: {tags: [critical]}
       - relationships_composite:
           arguments:
             columns: [platform, account_id]
             to: ref('int_ad_accounts__unioned')
             to_columns: [platform, account_id]
+          config: {tags: [critical]}
       - relationships_composite:
           arguments:
             columns: [platform, account_id, campaign_id]
             to: ref('int_ad_campaigns__unioned')
             to_columns: [platform, account_id, campaign_id]
+          config: {tags: [critical]}
       - relationships_composite:
           arguments:
             columns: [report_date, currency]
             to: ref('int_fx_rates__filled')
             to_columns: [rate_date, currency]
+          config: {tags: [critical]}
       # A name of its own, which the log of the task of the tests prints with its warning.
       - gap:
           name: int_ad_stats__unioned_has_no_missing_day
@@ -251,36 +288,52 @@ models:
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: platform
         description: '{{ doc("platform") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: client_id
         description: '{{ doc("client_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: client_name
         description: '{{ doc("client_name") }}'
       - name: account_id
         description: '{{ doc("account_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: account_name
         description: '{{ doc("account_name") }}'
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: campaign_name
         description: '{{ doc("campaign_name") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: currency
         description: '{{ doc("currency") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: impressions
         description: '{{ doc("impressions") }}'
       - name: clicks
         description: '{{ doc("clicks") }}'
       - name: spend
         description: '{{ doc("spend") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: conversions
         description: '{{ doc("conversions") }}'
       - name: conversion_value
@@ -303,6 +356,7 @@ models:
       - unique_combination:
           arguments:
             columns: [rate_date, currency]
+          config: {tags: [critical]}
     columns:
       - name: rate_date
         description: '{{ doc("rate_date") }}'
@@ -312,10 +366,14 @@ models:
         description: '{{ doc("reporting_currency") }}'
       - name: rate
         description: '{{ doc("rate") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: rate_source
         description: '{{ doc("rate_source") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: is_carried_forward
         description: '{{ doc("is_carried_forward") }}'
   - name: int_web_sessions__unioned
@@ -332,11 +390,13 @@ models:
       - unique_combination:
           arguments:
             columns: [report_date, property_id, session_source, session_medium, session_campaign_name, session_campaign_id]
+          config: {tags: [critical]}
       - relationships_composite:
           arguments:
             columns: [report_date, currency]
             to: ref('int_fx_rates__filled')
             to_columns: [rate_date, currency]
+          config: {tags: [critical]}
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
@@ -344,7 +404,9 @@ models:
         description: '{{ doc("platform") }}'
       - name: client_id
         description: '{{ doc("client_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: client_name
         description: '{{ doc("client_name") }}'
       - name: property_id
@@ -367,7 +429,9 @@ models:
         description: '{{ doc("ad_account_id") }}'
       - name: currency
         description: '{{ doc("currency") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: sessions
         description: '{{ doc("sessions") }}'
       - name: engaged_sessions
@@ -387,11 +451,13 @@ models:
       - unique_combination:
           arguments:
             columns: [platform, account_id, ad_group_id]
+          config: {tags: [critical]}
       - relationships_composite:
           arguments:
             columns: [platform, account_id, campaign_id]
             to: ref('int_ad_campaigns__unioned')
             to_columns: [platform, account_id, campaign_id]
+          config: {tags: [critical]}
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
@@ -399,12 +465,16 @@ models:
         description: '{{ doc("account_id") }}'
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: ad_group_id
         description: '{{ doc("ad_group_id") }}'
       - name: ad_group_name
         description: '{{ doc("ad_group_name") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: ad_group_status
         description: '{{ doc("ad_group_status") }}'
       - name: ad_group_type
@@ -420,11 +490,13 @@ models:
       - unique_combination:
           arguments:
             columns: [platform, account_id, ad_group_id, ad_id]
+          config: {tags: [critical]}
       - relationships_composite:
           arguments:
             columns: [platform, account_id, ad_group_id]
             to: ref('int_ad_groups__unioned')
             to_columns: [platform, account_id, ad_group_id]
+          config: {tags: [critical]}
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
@@ -432,14 +504,18 @@ models:
         description: '{{ doc("account_id") }}'
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: ad_group_id
         description: '{{ doc("ad_group_id") }}'
       - name: ad_id
         description: '{{ doc("ad_id") }}'
       - name: ad_name
         description: '{{ doc("ad_name") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: ad_status
         description: '{{ doc("ad_status") }}'
       - name: ad_type
@@ -460,65 +536,90 @@ models:
       - unique_combination:
           arguments:
             columns: [report_date, platform, account_id, ad_group_id]
+          config: {tags: [critical]}
       - relationships_composite:
           arguments:
             columns: [platform, account_id]
             to: ref('int_ad_accounts__unioned')
             to_columns: [platform, account_id]
+          config: {tags: [critical]}
       - relationships_composite:
           arguments:
             columns: [platform, account_id, campaign_id]
             to: ref('int_ad_campaigns__unioned')
             to_columns: [platform, account_id, campaign_id]
+          config: {tags: [critical]}
       - relationships_composite:
           arguments:
             columns: [platform, account_id, ad_group_id]
             to: ref('int_ad_groups__unioned')
             to_columns: [platform, account_id, ad_group_id]
+          config: {tags: [critical]}
       - relationships_composite:
           arguments:
             columns: [report_date, currency]
             to: ref('int_fx_rates__filled')
             to_columns: [rate_date, currency]
+          config: {tags: [critical]}
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: platform
         description: '{{ doc("platform") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: client_id
         description: '{{ doc("client_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: client_name
         description: '{{ doc("client_name") }}'
       - name: account_id
         description: '{{ doc("account_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: account_name
         description: '{{ doc("account_name") }}'
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: campaign_name
         description: '{{ doc("campaign_name") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: ad_group_id
         description: '{{ doc("ad_group_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: ad_group_name
         description: '{{ doc("ad_group_name") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: currency
         description: '{{ doc("currency") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: impressions
         description: '{{ doc("impressions") }}'
       - name: clicks
         description: '{{ doc("clicks") }}'
       - name: spend
         description: '{{ doc("spend") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: conversions
         description: '{{ doc("conversions") }}'
       - name: conversion_value
@@ -538,71 +639,100 @@ models:
       - unique_combination:
           arguments:
             columns: [report_date, platform, account_id, ad_group_id, ad_id]
+          config: {tags: [critical]}
       - relationships_composite:
           arguments:
             columns: [platform, account_id]
             to: ref('int_ad_accounts__unioned')
             to_columns: [platform, account_id]
+          config: {tags: [critical]}
       - relationships_composite:
           arguments:
             columns: [platform, account_id, campaign_id]
             to: ref('int_ad_campaigns__unioned')
             to_columns: [platform, account_id, campaign_id]
+          config: {tags: [critical]}
       - relationships_composite:
           arguments:
             columns: [platform, account_id, ad_group_id, ad_id]
             to: ref('int_ads__unioned')
             to_columns: [platform, account_id, ad_group_id, ad_id]
+          config: {tags: [critical]}
       - relationships_composite:
           arguments:
             columns: [report_date, currency]
             to: ref('int_fx_rates__filled')
             to_columns: [rate_date, currency]
+          config: {tags: [critical]}
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: platform
         description: '{{ doc("platform") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: client_id
         description: '{{ doc("client_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: client_name
         description: '{{ doc("client_name") }}'
       - name: account_id
         description: '{{ doc("account_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: account_name
         description: '{{ doc("account_name") }}'
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: campaign_name
         description: '{{ doc("campaign_name") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: ad_group_id
         description: '{{ doc("ad_group_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: ad_group_name
         description: '{{ doc("ad_group_name") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: ad_id
         description: '{{ doc("ad_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: ad_name
         description: '{{ doc("ad_name") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: currency
         description: '{{ doc("currency") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: impressions
         description: '{{ doc("impressions") }}'
       - name: clicks
         description: '{{ doc("clicks") }}'
       - name: spend
         description: '{{ doc("spend") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
       - name: conversions
         description: '{{ doc("conversions") }}'
       - name: conversion_value
