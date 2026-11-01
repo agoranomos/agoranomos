@@ -82,6 +82,19 @@ def session(env, metabase_url):
     return SecretHeaders({"X-Metabase-Session": Secret(body["id"])})
 
 
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Skip the tests of the mark demo while .env does not list the demo profile (pyproject.toml):
+    they read the data of the fictional platforms or the content of the demo in Metabase, which the
+    first start makes with the profile. The job of CI without the demo leaves them out with
+    -m "not demo"."""
+    if DEMO:
+        return
+    skip = pytest.mark.skip(reason="the demo is off: COMPOSE_PROFILES in .env does not list demo")
+    for item in items:
+        if item.get_closest_marker("demo"):
+            item.add_marker(skip)
+
+
 def pytest_assertrepr_compare(op: str, left: object, right: object) -> list[str] | None:
     """Explain a failed comparison that holds a Secret or a NamesOnly dict without showing a value.
 

@@ -1,5 +1,4 @@
 import pytest
-from services import DEMO
 from stack_helpers import (
     WAREHOUSE_ROLES,
     compose,
@@ -652,16 +651,9 @@ BACKUP_TARGETS = [
     for database in databases
 ]
 # The cases of the tests that use a table of BACKUP_TABLES. The table of the warehouse is a table of
-# the demo, so without the demo profile that case has none to use and is skipped.
+# the demo, so that case carries the mark demo: without the profile it has none to use.
 BACKUP_TABLE_TARGETS = [
-    pytest.param(
-        service,
-        database,
-        marks=pytest.mark.skipif(
-            database == "warehouse" and not DEMO,
-            reason="the demo is off: the table of the warehouse comes with the demo profile",
-        ),
-    )
+    pytest.param(service, database, marks=[pytest.mark.demo] if database == "warehouse" else [])
     for service, database in BACKUP_TARGETS
 ]
 # A table that another role owns in each of those databases, with its owner: tables that a fresh

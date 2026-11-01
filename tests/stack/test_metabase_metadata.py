@@ -20,12 +20,11 @@ import demo_init
 import metadata
 import pytest
 from metabase_content import item, registry, run_job
-from services import DEMO
 from stack_helpers import REPO_ROOT, compose, http_json, leaked, read_env, secrets
 
-needs_the_demo = pytest.mark.skipif(
-    not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
-)
+# The tests of the metadata that Metabase shows and of the questions of the demo: with the demo the
+# first start runs the transform and demo-init, so Metabase shows the marts and the content.
+needs_the_demo = pytest.mark.demo
 # The daily load of the demo stays paused while these tests run (conftest.py).
 pytestmark = pytest.mark.usefixtures("daily_load_paused")
 

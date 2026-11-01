@@ -42,4 +42,5 @@ pythonpath = ["scripts", "metabase", "airflow/dags"]
 addopts = ["-ra", "--strict-markers", "--strict-config"]
 markers = [
     "transform: a stack test that loads or transforms the demo, or reads what such a run left in its module, which takes minutes",
+    "demo: a stack test that needs the profile demo, the data of the fictional platforms or the content of the demo in Metabase, which .env lists by default; it skips without it, and the job of CI without the demo leaves it out with -m \"not demo\"",
 ]
