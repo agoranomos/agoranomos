@@ -60,6 +60,17 @@ WAREHOUSE_TRANSFORMER_PASSWORD BACKUP_DB_PASSWORD VALKEY_PASSWORD CELERY_RESULTS
 AI_READER_PASSWORD AIRFLOW_AI_PASSWORD AIRFLOW_FERNET_KEY AIRFLOW_JWT_SECRET AIRFLOW_API_SECRET_KEY AIRFLOW_ADMIN_PASSWORD
 METABASE_ENCRYPTION_KEY METABASE_SESSION_KEY METABASE_ADMIN_PASSWORD"
 
+# The memory limit of warehouse-db when .env does not set WAREHOUSE_DB_MEMORY: the default of
+# compose.yaml and of .env.example, from which the settings of PostgreSQL below follow (ADR-0040).
+WAREHOUSE_DB_MEMORY_DEFAULT=384m
+# The settings of PostgreSQL that follow that limit, as PostgreSQL names them, and shm_size, the
+# /dev/shm of the container: each is a setting WAREHOUSE_DB_<NAME> of .env, which wins over the
+# formula of warehouse_db_formula, and a variable of the command of the service in compose.yaml.
+WAREHOUSE_DB_SETTINGS="shared_buffers effective_cache_size work_mem maintenance_work_mem
+autovacuum_work_mem max_parallel_workers_per_gather autovacuum_max_workers max_wal_size
+checkpoint_timeout autovacuum_vacuum_cost_limit max_locks_per_transaction max_connections
+random_page_cost shm_size"
+
 say() { printf '%s\n' "$*"; }
 warn() { printf '%s %s\n' "$(paint amber 'warning:' 2)" "$*" >&2; }
 error_line() { printf '%s %s\n' "$(paint ember 'error:' 2)" "$*" >&2; }
@@ -211,6 +222,15 @@ compose() {
     # The checks and the guard of the network read this setting from .env, so Compose does too.
     AGORANOMOS_IPV6=$(setting AGORANOMOS_IPV6 false)
     export COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_FILE AGORANOMOS_IMAGES AGORANOMOS_IPV6
+    # The settings of PostgreSQL of warehouse-db, from its memory limit or from .env (ADR-0040),
+    # which the command of the service and its shm_size read. The loop reads a here-document, not
+    # a pipe, so that the exports reach this shell. A value of .env has one line (env_get), so each
+    # line is one setting: the key up to the first =, and the value after it, whatever it holds.
+    while IFS='=' read -r warehouse_db_key warehouse_db_value; do
+      export "$warehouse_db_key=$warehouse_db_value"
+    done << EOF
+$(warehouse_db_settings)
+EOF
     docker compose "$@"
   )
 }
@@ -265,6 +285,76 @@ memory_bytes() {
 setting() {
   setting_value=$(env_get "$1")
   printf '%s' "${setting_value:-$2}"
+}
+
+# Print the memory limit of warehouse-db in MiB, from WAREHOUSE_DB_MEMORY in .env, or from its
+# default when the setting is empty or is not a memory size, which preflight stops on before up.
+warehouse_db_limit_mib() {
+  limit_bytes=$(memory_bytes "$(setting WAREHOUSE_DB_MEMORY "$WAREHOUSE_DB_MEMORY_DEFAULT")")
+  [ -n "$limit_bytes" ] || limit_bytes=$(memory_bytes "$WAREHOUSE_DB_MEMORY_DEFAULT")
+  printf '%s' $((limit_bytes / 1048576))
+}
+
+# Print $1 kept between $2 and $3.
+clamp() {
+  if [ "$1" -lt "$2" ]; then
+    printf '%s' "$2"
+  elif [ "$1" -gt "$3" ]; then
+    printf '%s' "$3"
+  else
+    printf '%s' "$1"
+  fi
+}
+
+# Print the value of the setting $1 of WAREHOUSE_DB_SETTINGS by the formula of ADR-0040 for a
+# memory limit of $2 MiB. The sizes are in the MB of PostgreSQL, which are MiB, and shm_size in the
+# m of Compose, the same; the two that the record leaves to a profile, checkpoint_timeout and
+# autovacuum_vacuum_cost_limit, take the thresholds of 8 and 16 GiB.
+warehouse_db_formula() {
+  limit_mib=$2
+  case "$1" in
+    shared_buffers)
+      # A quarter of the limit, at least 128 MB.
+      buffers_mib=$((limit_mib / 4))
+      [ "$buffers_mib" -ge 128 ] || buffers_mib=128
+      printf '%sMB' "$buffers_mib"
+      ;;
+    effective_cache_size) printf '%sMB' $((limit_mib * 2 / 3)) ;;
+    work_mem) printf '%sMB' "$(clamp $((limit_mib / 192)) 4 32)" ;;
+    maintenance_work_mem) printf '%sMB' "$(clamp $((limit_mib / 12)) 64 512)" ;;
+    autovacuum_work_mem) printf '%sMB' $(($(clamp $((limit_mib / 12)) 64 512) / 2)) ;;
+    max_parallel_workers_per_gather)
+      if [ "$limit_mib" -lt 1024 ]; then printf 0; elif [ "$limit_mib" -lt 16384 ]; then printf 1; else printf 2; fi
+      ;;
+    autovacuum_max_workers) if [ "$limit_mib" -lt 1024 ]; then printf 2; else printf 3; fi ;;
+    max_wal_size)
+      if [ "$limit_mib" -lt 1024 ]; then printf 1GB; elif [ "$limit_mib" -lt 16384 ]; then printf 4GB; else printf 8GB; fi
+      ;;
+    checkpoint_timeout) if [ "$limit_mib" -lt 8192 ]; then printf 15min; else printf 30min; fi ;;
+    autovacuum_vacuum_cost_limit) if [ "$limit_mib" -lt 16384 ]; then printf 1000; else printf 1500; fi ;;
+    max_locks_per_transaction) printf 128 ;;
+    max_connections) printf 100 ;;
+    random_page_cost) printf 1.1 ;;
+    shm_size) printf '%sm' "$(clamp $((limit_mib / 6)) 64 1024)" ;;
+    *) die "warehouse_db_formula knows no setting $1" ;;
+  esac
+}
+
+# Print the settings of PostgreSQL of warehouse-db (ADR-0040), one WAREHOUSE_DB_<NAME>=value a
+# line, in the order of WAREHOUSE_DB_SETTINGS: the value of .env when it sets one, and the formula
+# for the memory limit otherwise. compose exports them for the command of the service.
+warehouse_db_settings() {
+  warehouse_mib=$(warehouse_db_limit_mib)
+  for warehouse_name in $WAREHOUSE_DB_SETTINGS; do
+    warehouse_key="WAREHOUSE_DB_$(printf '%s' "$warehouse_name" | tr '[:lower:]' '[:upper:]')"
+    printf '%s=%s\n' "$warehouse_key" \
+      "$(setting "$warehouse_key" "$(warehouse_db_formula "$warehouse_name" "$warehouse_mib")")"
+  done
+}
+
+# Print what .env gives the setting $1 of WAREHOUSE_DB_SETTINGS: its value, or the formula.
+warehouse_db_setting() {
+  warehouse_db_settings | sed -n "s/^WAREHOUSE_DB_$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')=//p"
 }
 
 # Set a setting in .env: replace the first line that sets it and drop the later ones, or add a line at
@@ -1202,6 +1292,23 @@ EOF
 $memory_settings
 EOF
   fi
+  # A setting of PostgreSQL of warehouse-db that .env sets (ADR-0040) goes to the server as it is,
+  # and the server does not start on a value that it cannot read: so the shape is checked here, a
+  # number, with a unit after it where the setting takes one, such as 512MB or 30min, and for
+  # WAREHOUSE_DB_SHM_SIZE a memory size as Compose reads it. PostgreSQL checks the rest. The
+  # message names the setting, never a value.
+  for warehouse_name in $WAREHOUSE_DB_SETTINGS; do
+    warehouse_key="WAREHOUSE_DB_$(printf '%s' "$warehouse_name" | tr '[:lower:]' '[:upper:]')"
+    warehouse_value=$(env_get "$warehouse_key")
+    [ -n "$warehouse_value" ] || continue
+    if [ "$warehouse_name" = shm_size ]; then
+      if [ -z "$(memory_bytes "$warehouse_value")" ]; then
+        problem "$warehouse_key in .env is not a memory size: write a number with m or g, such as 512m or 1g, or leave it empty for the formula; a number alone would be bytes"
+      fi
+    elif ! printf '%s\n' "$warehouse_value" | grep -Eq '^-?[0-9]+(\.[0-9]+)?[A-Za-z]*$'; then
+      problem "$warehouse_key in .env is not a value that PostgreSQL reads: write a number, with a unit such as MB, GB or min where the setting takes one, or leave it empty for the formula"
+    fi
+  done
   # Compose trims the blanks after the = before it looks for a comment, so in "KEY= # note" the value
   # is "# note", not empty: a comment after an empty value becomes the value, a secret or the session
   # key of Metabase among them, and env_get reads it the same way. A # right after the =, as in
@@ -1584,7 +1691,31 @@ cmd_status() {
   [ "$#" -eq 0 ] || die "status takes no options"
   status_table=$(compose ps --all --format 'table {{.Service}}\t{{.State}}\t{{.Status}}')
   [ -z "$status_table" ] || printf '%s\n' "$status_table"
+  warehouse_db_status
   backup_status
+}
+
+# What status says about the warehouse (ADR-0040): the memory limit of warehouse-db and the
+# shared_buffers that .env gives it, by the formula or as a value, which up passes to the server.
+# While the service runs, by the table that status printed, the server says what it has, and a
+# warning names a difference: a change of .env reaches the server at the next up, which starts it
+# again. The value of .env reaches the SQL as a variable of psql, in quotes that psql makes, never
+# as text of the query.
+warehouse_db_status() {
+  warehouse_limit=$(setting WAREHOUSE_DB_MEMORY "$WAREHOUSE_DB_MEMORY_DEFAULT")
+  warehouse_buffers=$(warehouse_db_setting shared_buffers)
+  say "warehouse-db: memory limit $warehouse_limit, shared_buffers $warehouse_buffers (ADR-0040)."
+  printf '%s\n' "$status_table" |
+    awk '$1 == "warehouse-db" && $2 == "running" { found = 1 } END { exit !found }' || return 0
+  server_answer=$(printf '%s\n' "SELECT current_setting('shared_buffers'), pg_size_bytes(current_setting('shared_buffers')) <> pg_size_bytes(:'wanted')" |
+    compose exec -T warehouse-db psql --username=postgres --dbname=warehouse --no-psqlrc --quiet \
+      --tuples-only --no-align --field-separator="$FIELD_SEPARATOR" --set=ON_ERROR_STOP=1 \
+      --set=wanted="$warehouse_buffers" 2> /dev/null) || return 0
+  case "$server_answer" in
+    *"$FIELD_SEPARATOR"t)
+      warn "the running warehouse-db has shared_buffers ${server_answer%"$FIELD_SEPARATOR"*}, not the $warehouse_buffers that .env gives now: ./agoranomos up starts it with the settings of .env"
+      ;;
+  esac
 }
 
 # Take a backup now (ADR-0020): in the running backup service when .env has the ops profile and the

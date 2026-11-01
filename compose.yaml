@@ -137,6 +137,12 @@ services:
     environment:
       POSTGRES_PASSWORD: ${WAREHOUSE_POSTGRES_PASSWORD:?run ./agoranomos init}
       POSTGRES_DB: warehouse
+    # The settings of PostgreSQL follow the memory limit (ADR-0040): ./agoranomos computes them from
+    # WAREHOUSE_DB_MEMORY, or takes a value that .env sets, and exports these variables for every
+    # call of Compose. The defaults here are the values of the default limit of 384 MiB, for a docker
+    # compose that runs without the script, and a unit test keeps them in step with the formulas.
+    # /dev/shm holds the shared memory of parallel queries, which the 64 MB of Docker ran out of.
+    shm_size: ${WAREHOUSE_DB_SHM_SIZE:-64m}
     # pg_stat_statements must be loaded at start-up, so it is on from the first start: the Ops collection
     # reads it later.
     command:
@@ -147,6 +153,32 @@ services:
       - pg_stat_statements.track=top
       - -c
       - track_io_timing=on
+      - -c
+      - shared_buffers=${WAREHOUSE_DB_SHARED_BUFFERS:-128MB}
+      - -c
+      - effective_cache_size=${WAREHOUSE_DB_EFFECTIVE_CACHE_SIZE:-256MB}
+      - -c
+      - work_mem=${WAREHOUSE_DB_WORK_MEM:-4MB}
+      - -c
+      - maintenance_work_mem=${WAREHOUSE_DB_MAINTENANCE_WORK_MEM:-64MB}
+      - -c
+      - autovacuum_work_mem=${WAREHOUSE_DB_AUTOVACUUM_WORK_MEM:-32MB}
+      - -c
+      - max_parallel_workers_per_gather=${WAREHOUSE_DB_MAX_PARALLEL_WORKERS_PER_GATHER:-0}
+      - -c
+      - autovacuum_max_workers=${WAREHOUSE_DB_AUTOVACUUM_MAX_WORKERS:-2}
+      - -c
+      - max_wal_size=${WAREHOUSE_DB_MAX_WAL_SIZE:-1GB}
+      - -c
+      - checkpoint_timeout=${WAREHOUSE_DB_CHECKPOINT_TIMEOUT:-15min}
+      - -c
+      - autovacuum_vacuum_cost_limit=${WAREHOUSE_DB_AUTOVACUUM_VACUUM_COST_LIMIT:-1000}
+      - -c
+      - max_locks_per_transaction=${WAREHOUSE_DB_MAX_LOCKS_PER_TRANSACTION:-128}
+      - -c
+      - max_connections=${WAREHOUSE_DB_MAX_CONNECTIONS:-100}
+      - -c
+      - random_page_cost=${WAREHOUSE_DB_RANDOM_PAGE_COST:-1.1}
     volumes:
       # PostgreSQL 18 images keep their data under /var/lib/postgresql/18/docker (ADR-0003).
       - warehouse-data:/var/lib/postgresql

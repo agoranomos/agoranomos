@@ -6,6 +6,7 @@ where /bin/sh is dash, and on macOS /bin/sh is bash in POSIX mode: both are cove
 """
 
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -677,3 +678,235 @@ def test_folder_path_reads_a_folder_as_compose_does(shell, tmp_path, value, path
 )
 def test_is_folder_path_tells_a_path_from_the_name_of_a_volume(shell, tmp_path, value, is_path):
     assert answers(shell, tmp_path, "is_folder_path", value) is is_path
+
+
+# The settings of PostgreSQL of warehouse-db that follow its memory limit, and shm_size, the
+# /dev/shm of its container, for the four limits of the table of ADR-0040: the values of that
+# table, in the MB of PostgreSQL, which are MiB (its 4 GB is 4096MB and its 10.7 GB 10922MB), and
+# in the m of Compose for shm_size. checkpoint_timeout and autovacuum_vacuum_cost_limit, which the
+# record leaves to a profile, take the thresholds of 8 GiB and of 16 GiB.
+WAREHOUSE_DB_SETTINGS = {
+    "384m": {
+        "SHARED_BUFFERS": "128MB",
+        "EFFECTIVE_CACHE_SIZE": "256MB",
+        "WORK_MEM": "4MB",
+        "MAINTENANCE_WORK_MEM": "64MB",
+        "AUTOVACUUM_WORK_MEM": "32MB",
+        "MAX_PARALLEL_WORKERS_PER_GATHER": "0",
+        "AUTOVACUUM_MAX_WORKERS": "2",
+        "MAX_WAL_SIZE": "1GB",
+        "CHECKPOINT_TIMEOUT": "15min",
+        "AUTOVACUUM_VACUUM_COST_LIMIT": "1000",
+        "MAX_LOCKS_PER_TRANSACTION": "128",
+        "MAX_CONNECTIONS": "100",
+        "RANDOM_PAGE_COST": "1.1",
+        "SHM_SIZE": "64m",
+    },
+    "1.5g": {
+        "SHARED_BUFFERS": "384MB",
+        "EFFECTIVE_CACHE_SIZE": "1024MB",
+        "WORK_MEM": "8MB",
+        "MAINTENANCE_WORK_MEM": "128MB",
+        "AUTOVACUUM_WORK_MEM": "64MB",
+        "MAX_PARALLEL_WORKERS_PER_GATHER": "1",
+        "AUTOVACUUM_MAX_WORKERS": "3",
+        "MAX_WAL_SIZE": "4GB",
+        "CHECKPOINT_TIMEOUT": "15min",
+        "AUTOVACUUM_VACUUM_COST_LIMIT": "1000",
+        "MAX_LOCKS_PER_TRANSACTION": "128",
+        "MAX_CONNECTIONS": "100",
+        "RANDOM_PAGE_COST": "1.1",
+        "SHM_SIZE": "256m",
+    },
+    "3g": {
+        "SHARED_BUFFERS": "768MB",
+        "EFFECTIVE_CACHE_SIZE": "2048MB",
+        "WORK_MEM": "16MB",
+        "MAINTENANCE_WORK_MEM": "256MB",
+        "AUTOVACUUM_WORK_MEM": "128MB",
+        "MAX_PARALLEL_WORKERS_PER_GATHER": "1",
+        "AUTOVACUUM_MAX_WORKERS": "3",
+        "MAX_WAL_SIZE": "4GB",
+        "CHECKPOINT_TIMEOUT": "15min",
+        "AUTOVACUUM_VACUUM_COST_LIMIT": "1000",
+        "MAX_LOCKS_PER_TRANSACTION": "128",
+        "MAX_CONNECTIONS": "100",
+        "RANDOM_PAGE_COST": "1.1",
+        "SHM_SIZE": "512m",
+    },
+    "16g": {
+        "SHARED_BUFFERS": "4096MB",
+        "EFFECTIVE_CACHE_SIZE": "10922MB",
+        "WORK_MEM": "32MB",
+        "MAINTENANCE_WORK_MEM": "512MB",
+        "AUTOVACUUM_WORK_MEM": "256MB",
+        "MAX_PARALLEL_WORKERS_PER_GATHER": "2",
+        "AUTOVACUUM_MAX_WORKERS": "3",
+        "MAX_WAL_SIZE": "8GB",
+        "CHECKPOINT_TIMEOUT": "30min",
+        "AUTOVACUUM_VACUUM_COST_LIMIT": "1500",
+        "MAX_LOCKS_PER_TRANSACTION": "128",
+        "MAX_CONNECTIONS": "100",
+        "RANDOM_PAGE_COST": "1.1",
+        "SHM_SIZE": "1024m",
+    },
+}
+# The limit of the default of the stack, that of one business.
+DEFAULT_LIMIT = "384m"
+
+
+def mib(size: str) -> int:
+    """A size in MiB: the MB of PostgreSQL, or the m of Compose."""
+    match = re.fullmatch(r"(\d+)(MB|m)", size)
+    assert match, f"{size!r} is not a size in MB or m"
+    return int(match.group(1))
+
+
+def warehouse_db_settings(shell, tmp_path, env_text: str | None) -> dict[str, str]:
+    """What warehouse_db_settings prints for this .env, by the name of each setting without
+    WAREHOUSE_DB_, in the order of the script; None is a checkout without .env."""
+    if env_text is not None:
+        (tmp_path / ".env").write_text(env_text, encoding="utf-8")
+    result = run_with_script_functions(shell, "warehouse_db_settings", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    settings = {}
+    for line in result.stdout.splitlines():
+        key, value = line.split("=", 1)
+        assert key.startswith("WAREHOUSE_DB_"), key
+        settings[key.removeprefix("WAREHOUSE_DB_")] = value
+    return settings
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("limit", sorted(WAREHOUSE_DB_SETTINGS))
+def test_the_settings_of_warehouse_db_follow_its_limit_as_adr_0040_says(shell, tmp_path, limit):
+    settings = warehouse_db_settings(shell, tmp_path, f"WAREHOUSE_DB_MEMORY={limit}\n")
+    assert settings == WAREHOUSE_DB_SETTINGS[limit]
+    # In the order of the command of compose.yaml, shm_size last.
+    assert list(settings) == list(WAREHOUSE_DB_SETTINGS[limit])
+
+
+@pytest.mark.parametrize("limit", sorted(WAREHOUSE_DB_SETTINGS))
+def test_the_worst_case_of_the_settings_fits_the_limit(limit):
+    # The sum of ADR-0040, with the active queries of the profile of the limit: the eight of one
+    # business below 1 GiB, the 20 of an agency and of the limit of one server from there. The
+    # shared memory is shared_buffers and about 26 MiB of the rest (the buffers of the WAL, the
+    # locks of max_locks_per_transaction and the other segments). Each active query has a backend
+    # of 2 MiB that holds up to twice work_mem, for a hash, and so does each of its parallel
+    # workers. One build of an index takes maintenance_work_mem, and each worker of autovacuum
+    # autovacuum_work_mem. The page cache takes what is left of the limit, and the kernel gives it
+    # back before it stops a process. For 384 MiB: 128 + 26 + 8 x (2 + 2 x 4) + 64 + 2 x 32, about
+    # 360 MiB, as the record says.
+    settings = WAREHOUSE_DB_SETTINGS[limit]
+    limit_mib = int(float(limit[:-1]) * (1024 if limit.endswith("g") else 1))
+    active = 8 if limit_mib < 1024 else 20
+    processes = 1 + int(settings["MAX_PARALLEL_WORKERS_PER_GATHER"])
+    worst = (
+        mib(settings["SHARED_BUFFERS"])
+        + 26
+        + active * processes * (2 + 2 * mib(settings["WORK_MEM"]))
+        + mib(settings["MAINTENANCE_WORK_MEM"])
+        + int(settings["AUTOVACUUM_MAX_WORKERS"]) * mib(settings["AUTOVACUUM_WORK_MEM"])
+    )
+    assert worst <= limit_mib, f"the worst case of {limit} is {worst} MiB"
+    if limit == DEFAULT_LIMIT:
+        assert worst == 362
+    # The shared memory of the parallel queries, in /dev/shm, is counted in the limit too.
+    assert mib(settings["SHM_SIZE"]) <= limit_mib // 4
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_value_of_env_wins_over_the_formula_and_an_empty_one_takes_it(shell, tmp_path):
+    settings = warehouse_db_settings(
+        shell,
+        tmp_path,
+        "WAREHOUSE_DB_MEMORY=3g\n"
+        "WAREHOUSE_DB_WORK_MEM=64MB\n"
+        "WAREHOUSE_DB_SHM_SIZE=\n"
+        "WAREHOUSE_DB_MAX_CONNECTIONS=200 # for more clients\n"
+        "WAREHOUSE_DB_CHECKPOINT_TIMEOUT='1h'\n",
+    )
+    assert settings == {
+        **WAREHOUSE_DB_SETTINGS["3g"],
+        "WORK_MEM": "64MB",
+        "MAX_CONNECTIONS": "200",
+        "CHECKPOINT_TIMEOUT": "1h",
+    }
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    "env_text",
+    [None, "OTHER=1\n", "WAREHOUSE_DB_MEMORY=\n", "WAREHOUSE_DB_MEMORY=lots\n"],
+    ids=["no .env", "no limit", "empty limit", "not a size"],
+)
+def test_without_a_limit_the_settings_are_those_of_the_default_limit(shell, tmp_path, env_text):
+    # preflight stops on a limit that is not a size before up; the other commands still call
+    # Compose, with the settings of the default.
+    assert warehouse_db_settings(shell, tmp_path, env_text) == WAREHOUSE_DB_SETTINGS[DEFAULT_LIMIT]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("limit", "mib_of_limit"),
+    [("1023m", 1023), ("1g", 1024), ("1024m", 1024), ("8191m", 8191), ("8g", 8192)],
+)
+def test_the_thresholds_of_the_formulas_are_whole_gib(shell, tmp_path, limit, mib_of_limit):
+    settings = warehouse_db_settings(shell, tmp_path, f"WAREHOUSE_DB_MEMORY={limit}\n")
+    below_one_gib = mib_of_limit < 1024
+    assert settings["MAX_PARALLEL_WORKERS_PER_GATHER"] == ("0" if below_one_gib else "1")
+    assert settings["AUTOVACUUM_MAX_WORKERS"] == ("2" if below_one_gib else "3")
+    assert settings["MAX_WAL_SIZE"] == ("1GB" if below_one_gib else "4GB")
+    assert settings["CHECKPOINT_TIMEOUT"] == ("15min" if mib_of_limit < 8192 else "30min")
+    assert settings["AUTOVACUUM_VACUUM_COST_LIMIT"] == "1000"
+    assert mib(settings["SHARED_BUFFERS"]) == max(mib_of_limit // 4, 128)
+    assert mib(settings["EFFECTIVE_CACHE_SIZE"]) == mib_of_limit * 2 // 3
+
+
+def test_the_defaults_of_compose_yaml_are_the_settings_of_the_default_limit(tmp_path):
+    # A docker compose that runs without the script, and the stack tests that render the
+    # configuration, get the values of the default limit, and the command of the service passes
+    # every setting that the script computes.
+    compose = (REPO_ROOT / "compose.yaml").read_text(encoding="utf-8")
+    service = compose.split("\n  warehouse-db:\n", 1)[1].split("\n  platform-db:\n", 1)[0]
+    defaults = dict(re.findall(r"\$\{(WAREHOUSE_DB_[A-Z_]+):-([^}]+)\}", service))
+    assert defaults.pop("WAREHOUSE_DB_MEMORY") == DEFAULT_LIMIT
+    settings = warehouse_db_settings("/bin/sh", tmp_path, f"WAREHOUSE_DB_MEMORY={DEFAULT_LIMIT}\n")
+    assert defaults == {f"WAREHOUSE_DB_{name}": value for name, value in settings.items()}
+    for name, value in settings.items():
+        key = f"WAREHOUSE_DB_{name}"
+        if name == "SHM_SIZE":
+            assert f"\n    shm_size: ${{{key}:-{value}}}\n" in service
+        else:
+            assert f"\n      - -c\n      - {name.lower()}=${{{key}:-{value}}}\n" in service
+    # The script and .env.example know the same default limit.
+    assert re.search(r"^WAREHOUSE_DB_MEMORY_DEFAULT=(.+)$", SCRIPT, re.M).group(1) == DEFAULT_LIMIT
+    example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+    assert f"\nWAREHOUSE_DB_MEMORY={DEFAULT_LIMIT}\n" in example
+    # platform-db keeps the settings of its image: ADR-0040 is about the warehouse.
+    platform = compose.split("\n  platform-db:\n", 1)[1].split("\n  db-init:\n", 1)[0]
+    assert "WAREHOUSE_DB_" not in platform
+    assert "shm_size" not in platform
+
+
+def test_env_example_lists_each_setting_commented_out_with_the_value_of_the_default_limit(
+    tmp_path,
+):
+    # One line of explanation above each, and no line that sets one: a value there would reach
+    # every .env that init makes, and the formula would never run.
+    lines = (REPO_ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
+    commented = {}
+    for number, line in enumerate(lines):
+        if match := re.fullmatch(r"# (WAREHOUSE_DB_[A-Z_]+)=(.*)", line):
+            commented[match.group(1)] = match.group(2)
+            above = lines[number - 1]
+            assert above.startswith("# "), line
+            assert not re.match(r"# [A-Z_]+=", above), line
+    settings = warehouse_db_settings("/bin/sh", tmp_path, f"WAREHOUSE_DB_MEMORY={DEFAULT_LIMIT}\n")
+    assert commented == {f"WAREHOUSE_DB_{name}": value for name, value in settings.items()}
+    set_lines = [line for line in lines if re.match(r"WAREHOUSE_DB_[A-Z_]+=", line)]
+    assert set_lines == [f"WAREHOUSE_DB_MEMORY={DEFAULT_LIMIT}"]
+    # The reference describes each of them.
+    page = (REPO_ROOT / "docs/reference/configuration.md").read_text(encoding="utf-8")
+    missing = [key for key in commented if f"`{key}`" not in page]
+    assert not missing, f"add these settings to docs/reference/configuration.md: {missing}"

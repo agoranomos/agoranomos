@@ -4,7 +4,8 @@ The cli fixture copies the script and .env.example into a temporary checkout who
 space, and puts stand-ins for docker, ss, netstat, lsof and df first on PATH. The stand-ins answer
 from FAKE_* environment variables, which a test passes to Cli.run, and the docker stand-in logs
 every call, the COMPOSE_* settings that every docker compose call got, and the AGORANOMOS_IMAGES
-that it got (the log with the suffix .images) and the AGORANOMOS_IPV6 (suffix .ipv6). FAKE_RUN_FAIL
+that it got (the log with the suffix .images), the AGORANOMOS_IPV6 (suffix .ipv6) and the
+WAREHOUSE_DB_* settings of PostgreSQL (suffix .warehouse, one line a call, sorted). FAKE_RUN_FAIL
 and FAKE_EXEC_FAIL name a word of a call of run or exec that fails, such as verify, db-init or
 pg_restore, FAKE_COMPOSE_FAIL one of any other call, such as stop, and FAKE_HANG makes a call of
 run or exec last half a minute, for a test that interrupts the script. FAKE_READ_STDIN makes a call
@@ -84,6 +85,8 @@ case "$1" in
         "${COMPOSE_FILE-unset}" >> "$FAKE_LOG.settings"
       printf '%s\n' "${AGORANOMOS_IMAGES-unset}" >> "$FAKE_LOG.images"
       printf '%s\n' "${AGORANOMOS_IPV6-unset}" >> "$FAKE_LOG.ipv6"
+      env | sed -n 's/^WAREHOUSE_DB_//p' | sort | tr '\n' ' ' >> "$FAKE_LOG.warehouse"
+      printf '\n' >> "$FAKE_LOG.warehouse"
     fi
     case "$1" in
       version)

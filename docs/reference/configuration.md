@@ -157,7 +157,7 @@ Every service has a memory limit, also for swap, so that the stack stays within 
 
 | Setting | Default | Service |
 |---|---|---|
-| `WAREHOUSE_DB_MEMORY` | `384m` | `warehouse-db`, the warehouse |
+| `WAREHOUSE_DB_MEMORY` | `384m` | `warehouse-db`, the warehouse; the settings of PostgreSQL follow it ([below](#the-settings-of-postgresql-of-the-warehouse)) |
 | `PLATFORM_DB_MEMORY` | `512m` | `platform-db`, the databases of Airflow and Metabase |
 | `AIRFLOW_APISERVER_MEMORY` | `512m` | `airflow-apiserver` |
 | `AIRFLOW_DAG_PROCESSOR_MEMORY` | `512m` | `airflow-dag-processor`, which renders the transform DAG from the manifest of dbt each time that it parses it (below) |
@@ -171,6 +171,33 @@ Every service has a memory limit, also for swap, so that the stack stays within 
 | `BROKER_MEMORY` | `256m` | Only with CeleryExecutor: `broker` |
 
 When a service needs more, raise its limit in `.env` and run `./agoranomos up`, which starts it again with the new limit. A one-shot job has no setting here: [System requirements](system-requirements.md#when-a-service-reaches-its-limit) says how one that reaches its limit shows, and what to do. The tasks of heavier pipelines need more than the demo, and so do more tasks at the same time: with LocalExecutor, up to `AIRFLOW_PARALLELISM` tasks run in the scheduler at once, so raise `AIRFLOW_TASKS_MEMORY` with it. Each limit that you raise needs memory on the machine as well: [System requirements](system-requirements.md#memory-limits) says how the defaults add up. When a service reaches its limit, the kernel stops one of its processes ([System requirements](system-requirements.md#when-a-service-reaches-its-limit)).
+
+## The settings of PostgreSQL of the warehouse
+
+`WAREHOUSE_DB_MEMORY` sets more than the limit of a container: `./agoranomos` computes the settings of PostgreSQL of `warehouse-db` from it, and the size of the `/dev/shm` of the container, and passes them to the server through the `command` of the service in `compose.yaml` on every call of Docker Compose ([ADR-0040](../adr/0040-size-the-stack-by-profiles-and-derive-the-settings-of-postgresql.md)). The limit of a container holds the shared memory of PostgreSQL, the private memory of each of its processes and the page cache of the files of the database at once, so the settings of the image, made for a host with more memory than the limit, do not fit it: with them, a limit of 3 GiB kept `shared_buffers` at 128 MB and `effective_cache_size` at 4 GB, and the 64 MB of `/dev/shm` that Docker gives a container ran out under parallel queries, which failed with `could not resize shared memory segment`. With the formulas, one number sets the database: raise the limit, and the cache and the memory of each query follow.
+
+| Setting | Formula | 384 MiB | 1.5 GiB | 3 GiB | 16 GiB |
+|---|---|---:|---:|---:|---:|
+| `shared_buffers` | A quarter of the limit, at least 128 MB | 128 MB | 384 MB | 768 MB | 4 GB |
+| `effective_cache_size` | Two thirds of the limit | 256 MB | 1 GB | 2 GB | 10.7 GB |
+| `work_mem` | The limit / 192, from 4 to 32 MB | 4 MB | 8 MB | 16 MB | 32 MB |
+| `maintenance_work_mem` | The limit / 12, from 64 to 512 MB | 64 MB | 128 MB | 256 MB | 512 MB |
+| `autovacuum_work_mem` | Half of `maintenance_work_mem` | 32 MB | 64 MB | 128 MB | 256 MB |
+| `max_parallel_workers_per_gather` | 0 below 1 GiB, 1 below 16 GiB, then 2 | 0 | 1 | 1 | 2 |
+| `autovacuum_max_workers` | 2 below 1 GiB, then 3 | 2 | 3 | 3 | 3 |
+| `max_wal_size` | 1 GB below 1 GiB, 4 GB below 16 GiB, then 8 GB | 1 GB | 4 GB | 4 GB | 8 GB |
+| `checkpoint_timeout` | 15 minutes below 8 GiB, then 30 | 15 min | 15 min | 15 min | 30 min |
+| `autovacuum_vacuum_cost_limit` | 1,000 below 16 GiB, then 1,500 | 1,000 | 1,000 | 1,000 | 1,500 |
+| `max_locks_per_transaction` | Always 128, for a warehouse of many partitions | 128 | 128 | 128 | 128 |
+| `max_connections` | Always 100 | 100 | 100 | 100 | 100 |
+| `random_page_cost` | Always 1.1, the cost of a random read on an SSD | 1.1 | 1.1 | 1.1 | 1.1 |
+| `shm_size` of the container | The limit / 6, from 64 MB to 1 GB | 64 MB | 256 MB | 512 MB | 1 GB |
+
+The sizes are in the MB and GB of PostgreSQL, which are MiB and GiB, and `./agoranomos` passes them in MB: `4096MB` for the 4 GB of the table, `10922MB` for the 10.7 GB. A unit test checks that the formulas give the values of the table and that the worst case of each limit fits it ([System requirements](system-requirements.md#memory-limits)), and a stack test asks the running server with `SHOW`. The settings that do not depend on the limit stay as they are: `jit` is off for the database `warehouse`, which `db-init` sets with `ALTER DATABASE` on every start ([System requirements](system-requirements.md#memory-limits)), and `io_method` is `worker`, the default of PostgreSQL 18, as the seccomp profile of Docker blocks `io_uring`. `platform-db`, the databases of Airflow and Metabase, keeps the settings of its image.
+
+A value in `.env` wins over the formula. Each setting has a setting of `.env`, `WAREHOUSE_DB_` and its name in capitals: `WAREHOUSE_DB_SHARED_BUFFERS`, `WAREHOUSE_DB_EFFECTIVE_CACHE_SIZE`, `WAREHOUSE_DB_WORK_MEM`, `WAREHOUSE_DB_MAINTENANCE_WORK_MEM`, `WAREHOUSE_DB_AUTOVACUUM_WORK_MEM`, `WAREHOUSE_DB_MAX_PARALLEL_WORKERS_PER_GATHER`, `WAREHOUSE_DB_AUTOVACUUM_MAX_WORKERS`, `WAREHOUSE_DB_MAX_WAL_SIZE`, `WAREHOUSE_DB_CHECKPOINT_TIMEOUT`, `WAREHOUSE_DB_AUTOVACUUM_VACUUM_COST_LIMIT`, `WAREHOUSE_DB_MAX_LOCKS_PER_TRANSACTION`, `WAREHOUSE_DB_MAX_CONNECTIONS`, `WAREHOUSE_DB_RANDOM_PAGE_COST` and `WAREHOUSE_DB_SHM_SIZE`. `.env.example` lists them commented out, each with one line that says what it does and the value of the default limit, and `./agoranomos init` adds none of them to `.env`. A size takes the units of PostgreSQL, such as `512MB` or `4GB`, a time its units too, such as `30min`, and `WAREHOUSE_DB_SHM_SIZE` the units of the memory limits, such as `256m` or `1g`. An empty setting takes the formula. `preflight` stops on a value of another shape than a number with a unit after it, and on a `WAREHOUSE_DB_SHM_SIZE` that is not a memory size; PostgreSQL checks the rest, and when it refuses a value the service does not start, and `./agoranomos logs warehouse-db` names the setting. A value that you set has a worst case of its own to count: the formula no longer keeps it within the limit.
+
+A change of the limit or of a value reaches the server at the next `./agoranomos up`, which starts the service again, as these settings need a restart. `./agoranomos status` shows the limit and the `shared_buffers` that `.env` gives, and warns while the running server has another `shared_buffers` ([Command line](command-line.md#status)). A `docker compose` that runs without `./agoranomos`, such as `docker compose restart warehouse-db`, keeps the container as it is; `docker compose up` without the script would start the service with the defaults of `compose.yaml`, which are the values of the default limit, and with the values of `.env`, which Compose reads itself: start the stack with `./agoranomos up`.
 
 ## Settings fixed in `compose.yaml`
 
