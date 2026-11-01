@@ -9,7 +9,9 @@ from decimal import Decimal
 import pytest
 from stack_helpers import http_json, warehouse_output
 
-pytestmark = pytest.mark.usefixtures("daily_load_paused")
+# The metrics come at a start after the first run of the transform, and their ratios need rows in
+# the marts, those of the demo here: over empty marts they are null.
+pytestmark = [pytest.mark.demo, pytest.mark.usefixtures("daily_load_paused")]
 
 # The marts of the KPIs by the level that names their metrics, such as CTR (Campaigns).
 LEVELS = {

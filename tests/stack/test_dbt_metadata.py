@@ -17,7 +17,6 @@ from typing import Any
 import pytest
 from agoranomos_pipelines.demo import platforms
 from airflow_api import is_busy, trigger, unpause, wait_for_dag, wait_for_run
-from services import DEMO
 from stack_helpers import compose, wait_for, warehouse_output
 
 # The daily load of the demo stays paused while these tests run (conftest.py).
@@ -100,10 +99,6 @@ PRIMARY_KEY = (
 # The one expression of the reporting currency in the YAML (docs/reference/describe-the-marts.md),
 # which dbt keeps unrendered in the arguments of a test.
 REPORTING = "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
-
-needs_the_demo = pytest.mark.skipif(
-    not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
-)
 
 
 def run_dbt_ls() -> list[dict[str, Any]]:
@@ -567,8 +562,11 @@ def test_the_checks_find_what_they_look_for():
 @pytest.fixture(scope="module")
 def fresh_build(airflow_url, token):
     """A run of the transform that succeeded now: dbt writes the comments when it builds a model,
-    so the warehouse then holds those of the checkout. The mart exists before the run, so the run
-    also rebuilds it by the swap of tables, with its primary key."""
+    so the warehouse then holds those of the checkout. With the demo the mart exists before the
+    run, so the run also rebuilds it by the swap of tables, with its primary key. Without the demo
+    no run comes with the start, and the first of these runs builds the empty model: the job of CI
+    without the demo runs these tests, and then the stack again, before the other stack tests,
+    which then find the marts (stack.yml), and the run after rebuilds the model."""
     for dag_id in (LOAD, TRANSFORM):
         wait_for_dag(airflow_url, token, dag_id)
     wait_for(
@@ -589,7 +587,6 @@ def fresh_build(airflow_url, token):
     return run
 
 
-@needs_the_demo
 @pytest.mark.transform
 def test_the_comments_of_the_warehouse_are_the_descriptions_of_dbt(env, nodes, fresh_build):
     # Every relation of a model has exactly the columns that dbt declares, and each of them, like
@@ -602,7 +599,6 @@ def test_the_comments_of_the_warehouse_are_the_descriptions_of_dbt(env, nodes, f
     assert not problems, problems
 
 
-@needs_the_demo
 @pytest.mark.transform
 def test_the_key_of_the_mart_is_a_primary_key_after_a_rebuild(env, fresh_build):
     definition = warehouse_output(env, PRIMARY_KEY)

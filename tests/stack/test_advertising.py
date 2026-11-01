@@ -13,13 +13,10 @@ from decimal import Decimal
 import advertising as ad
 import pytest
 from metabase_content import call, item, registry
-from services import DEMO
 from stack_helpers import warehouse_output
 
 pytestmark = [
-    pytest.mark.skipif(
-        not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
-    ),
+    pytest.mark.demo,
     pytest.mark.usefixtures("daily_load_paused"),
 ]
 TOLERANCE = Decimal("0.000001")

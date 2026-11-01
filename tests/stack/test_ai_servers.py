@@ -13,7 +13,7 @@ import subprocess
 from typing import Any
 
 import pytest
-from services import AI_SERVERS, DEMO
+from services import AI_SERVERS
 from stack_helpers import REPO_ROOT, SecretHeaders, compose, http_json, warehouse_output
 
 pytestmark = pytest.mark.skipif(not AI_SERVERS, reason=".env does not list the ai profile")
@@ -128,7 +128,8 @@ def test_the_warehouse_server_lists_marts_and_staging_and_nothing_else(warehouse
     assert schemas == {"marts", "staging"}
 
 
-@pytest.mark.skipif(not DEMO, reason="the demo profile is off: the marts are empty")
+# The count means something once the mart holds the rows of the demo.
+@pytest.mark.demo
 def test_the_warehouse_server_reads_a_mart_and_describes_it(warehouse_server, env):
     count = f"SELECT count(*) AS n FROM {MART}"  # noqa: S608 (a constant of this file)
     [row] = warehouse_server.rows("execute_sql", {"sql": count})

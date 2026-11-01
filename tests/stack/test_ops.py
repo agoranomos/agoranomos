@@ -11,13 +11,10 @@ import pytest
 from agoranomos_pipelines.demo import platforms
 from airflow_api import dag_runs, task_instances
 from metabase_content import item, registry
-from services import DEMO
 from stack_helpers import http_json, warehouse, warehouse_output
 
 pytestmark = [
-    pytest.mark.skipif(
-        not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
-    ),
+    pytest.mark.demo,
     pytest.mark.usefixtures("daily_load_paused"),
 ]
 

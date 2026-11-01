@@ -31,13 +31,10 @@ from airflow_api import (
     wait_for_dag,
     wait_for_run,
 )
-from services import DEMO
 from stack_helpers import leaked, secrets, wait_for, warehouse_output
 
 pytestmark = [
-    pytest.mark.skipif(
-        not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
-    ),
+    pytest.mark.demo,
     pytest.mark.usefixtures("daily_load_paused"),
     pytest.mark.transform,
 ]

@@ -14,7 +14,7 @@ import time
 import pytest
 from ai_switches import ALLOWED_ON, readings, switches_on
 from metabase_content import get, group_ids, item, put, run_job
-from services import AI_ON, DEMO
+from services import AI_ON
 from stack_helpers import compose, http_json, leaked, psql, secrets
 
 WAREHOUSE_NAME = "agoranomos warehouse"
@@ -333,7 +333,6 @@ def test_metabase_init_can_run_again(metabase_url, session):
     assert names.count(WAREHOUSE_NAME) == 1, names
 
 
-@pytest.mark.skipif(not DEMO, reason="no content of the package: the demo is off")
 def test_metabase_init_gives_all_users_view_again_on_agoranomos(env, metabase_url, session):
     # All Users raised to Curate on the collection agoranomos, as an admin could: the next run of
     # metabase-init, which every start runs, lowers it to View and says so.
@@ -386,12 +385,7 @@ def test_the_connection_details_are_encrypted_in_the_application_database(env):
         "metabase",
         "metadata-export",
         "metabase-init",
-        pytest.param(
-            "demo-init",
-            marks=pytest.mark.skipif(
-                not DEMO, reason="the demo is off: COMPOSE_PROFILES in .env does not list demo"
-            ),
-        ),
+        pytest.param("demo-init", marks=pytest.mark.demo),
     ],
 )
 def test_no_secret_is_in_the_logs(env, service):
