@@ -1171,3 +1171,79 @@ def test_every_union_of_the_platforms_reads_google_ads_and_the_loads_show_it():
         assert f"from {{{{ ref('{staged}') }}}}" in text, model
     loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
     assert "{{ relation_or_empty(source('raw_google_ads', '_agoranomos_reloads'), {" in loads
+
+
+PROJECT_FILE = DBT / "dbt_project.yml"
+# The directories of models whose tests take the tag critical from dbt_project.yml, by the
+# directory of their YAML file, as dbt gives the fqn of a generic test (dbt-core 1.12.6).
+TAGGED_DIRECTORIES = ("staging", "marts")
+TESTS_LINE = re.compile(r"^( +)data_tests:(?: \[(.*)\])?$")
+TEST_ITEM = re.compile(r"^( +)- (\w+):?$")
+
+
+def generic_tests(text: str) -> list[tuple[str, bool, bool]]:
+    """The generic tests of a YAML file, in order: the name of each, whether its config tags it
+    critical, and whether it is a warning. A list on the line of data_tests holds tests without a
+    config; below it, each item is one test, with its body until the next line that is no deeper,
+    and a comment between the items belongs to none."""
+    lines = text.splitlines()
+    found = []
+    i = 0
+    while i < len(lines):
+        match = TESTS_LINE.match(lines[i])
+        i += 1
+        if not match:
+            continue
+        indent = len(match.group(1))
+        if match.group(2) is not None:
+            found += [(name.strip(), False, False) for name in match.group(2).split(",")]
+            continue
+        while i < len(lines):
+            line = lines[i]
+            depth = len(line) - len(line.lstrip(" "))
+            if line.lstrip().startswith("#") and depth >= indent + 2:
+                i += 1
+                continue
+            item = TEST_ITEM.match(line)
+            if not item or depth != indent + 2:
+                break
+            i += 1
+            body = []
+            while i < len(lines) and len(lines[i]) - len(lines[i].lstrip(" ")) > indent + 2:
+                body.append(lines[i])
+                i += 1
+            joined = "\n".join(body)
+            found.append((item.group(2), "tags: [critical]" in joined, "severity: warn" in joined))
+    return found
+
+
+def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
+    # ADR-0038: the tag critical marks the tests that block, every test with the severity error,
+    # for a run of them by hand, dbt build --select tag:critical (CONTRIBUTING.md). Tags add up
+    # and none can be taken back, so a directory gives the tag only where every test of it blocks:
+    # the staging models and the marts. The intermediate models hold a warning, and the YAML of
+    # the seeds lies at the root of seeds, so each of their tests that blocks carries the tag in
+    # its own config, as does the singular test that blocks.
+    project = PROJECT_FILE.read_text(encoding="utf-8")
+    assert "\ndata_tests:\n  agoranomos:\n" in project
+    for directory in TAGGED_DIRECTORIES:
+        assert f"\n    {directory}:\n      +tags: [critical]\n" in project, directory
+    assert project.count("+tags: [critical]") == len(TAGGED_DIRECTORIES)
+    counted = 0
+    for path in [*sorted((DBT / "models").rglob("*.yml")), SEEDS / "_seeds.yml"]:
+        relative = path.relative_to(DBT)
+        by_directory = relative.parts[0] == "models" and relative.parts[1] in TAGGED_DIRECTORIES
+        tests = generic_tests(path.read_text(encoding="utf-8"))
+        counted += len(tests)
+        for name, tagged, warns in tests:
+            assert not (by_directory and tagged), (str(relative), name, "tagged twice")
+            assert (by_directory or tagged) is (not warns), (str(relative), name)
+    # The tests of the base package, as of November 2026: a parser that found fewer would pass a
+    # test that lost its tag.
+    assert counted == 570, counted
+    for path in sorted((DBT / "tests").glob("*.sql")):
+        text = path.read_text(encoding="utf-8")
+        tagged = "{{ config(tags=['critical']) }}" in text
+        warns = "{{ config(severity='warn') }}" in text
+        assert tagged is (not warns), path.name
+        assert text.count("config(") == 1, path.name

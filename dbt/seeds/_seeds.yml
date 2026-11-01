@@ -10,7 +10,11 @@ seeds:
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
-        data_tests: [not_null, unique]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
+          - unique:
+              config: {tags: [critical]}
       - name: platform_name
         description: '{{ doc("platform_name") }}'
       - name: kind
@@ -19,6 +23,7 @@ seeds:
           - accepted_values:
               arguments:
                 values: ["ads", "web_analytics", "exchange_rates"]
+              config: {tags: [critical]}
       - name: mimics
         description: '{{ doc("mimics") }}'
       - name: is_demo
@@ -53,7 +58,11 @@ seeds:
     columns:
       - name: currency_code
         description: The three-letter code of the currency, such as USD.
-        data_tests: [not_null, unique]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
+          - unique:
+              config: {tags: [critical]}
       - name: currency_name
         description: The name of the currency in List One, such as US Dollar.
       - name: minor_unit
@@ -69,6 +78,10 @@ seeds:
     columns:
       - name: time_zone
         description: The name of the time zone, such as Europe/Berlin or Etc/GMT+8.
-        data_tests: [not_null, unique]
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
+          - unique:
+              config: {tags: [critical]}
       - name: is_link
         description: Whether the name is another name of a zone, a link of the database, such as US/Eastern.
