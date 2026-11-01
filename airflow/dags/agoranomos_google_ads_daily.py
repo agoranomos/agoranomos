@@ -11,7 +11,10 @@ asset of its statistics, and the transform runs after it.
 The DAG starts paused: a deployment unpauses it once its key and its accounts are in place, and
 the DAG of the rates of the ECB with it ([Connect Google Ads](docs/how-to/connect-google-ads.md)).
 A load without a key, or without an account of google_ads in clients.toml, fails with a line that
-says so. A repeat is safe: each load replaces the days that it covers.
+says so. An error of the API on one account does not stop the others: the load takes them, records
+the failed account in its journal, and the task fails at the end, without a retry, with one line
+that lists the accounts and their errors (ADR-0035); the next load takes the days that they missed.
+A repeat is safe: each load replaces the days that it covers.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from datetime import UTC, datetime, timedelta
 
 from agoranomos_pipelines.assets import RAW_GOOGLE_ADS
 from airflow.sdk import CronTriggerTimetable, dag, get_current_context, task
+from airflow.sdk.exceptions import AirflowFailException
 from airflow.sdk.log import mask_secret
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
@@ -37,7 +41,12 @@ def load_google_ads() -> None:
     mask_secret(loads.credentials()["password"])
     mask_secret(google_ads.key_info()["private_key"])
     # The moment of the load is the run's, so a retry loads as of the same moment.
-    google_ads.load(get_current_context()["dag_run"].run_after)
+    try:
+        google_ads.load(get_current_context()["dag_run"].run_after)
+    except google_ads.AccountsFailed as failed:
+        # The load took the other accounts, so a retry would repeat it for nothing, and the next
+        # load takes the days that the failed accounts missed. The line lists them (ADR-0004).
+        raise AirflowFailException(str(failed)) from None
 
 
 @dag(

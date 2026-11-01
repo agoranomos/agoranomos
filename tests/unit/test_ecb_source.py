@@ -217,7 +217,9 @@ def test_a_load_records_its_window_in_the_same_run(ecb):
         "window_end": date(2026, 10, 28),
     }
     assert record["now"] == NOW
+    assert record["status"] == "loaded"
     assert hints["_agoranomos_reloads"]["write_disposition"] == "append"
+    assert set(hints["_agoranomos_reloads"]["columns"]) == {*record, "error"}
 
 
 def test_a_window_without_a_rate_still_replaces_its_days(ecb):

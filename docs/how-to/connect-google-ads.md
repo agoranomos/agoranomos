@@ -71,11 +71,18 @@ After the transform, the Ops collection of Metabase shows the loads of `ecb` and
 
 ## When the load fails
 
-A failed load names the account and gives the error of the API, and Pipeline health shows the account as late:
+A mistake in the settings stops the load before it asks Google anything, with a line that says what to fix:
 
 - **`GOOGLE_ADS_SERVICE_ACCOUNT_KEY in .env is empty`**, or is not a key: put the key into `.env` as step 4 says, and run `./agoranomos up`.
 - **`names no account of the platform google_ads`**: name the accounts in `extensions/model/clients.toml`.
+
+An error of the API on one account does not stop the others ([ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md)). The load reads each account whole before it writes anything, so an account whose request fails leaves nothing in the warehouse: its earlier days stay as they were, and its name, currency and time zone stay in the model. The load takes the other accounts, and the task fails at the end with one line that counts the accounts and lists each failed account with the error of the API, such as `1 of 3 Google Ads accounts failed, the other 2 are loaded: Google Ads account 1234567890: 403 …` ([ADR-0004](../adr/0004-ingest-with-dlt.md)). Airflow does not retry that failure, as the other accounts are loaded; the next daily load takes the days that the failed account missed, from the day after the last that a load took, or its whole history if no load took it yet. The journal `_agoranomos_reloads` of `raw_google_ads` has a row for the account with `status = 'failed'`, the text of the error in `error` and the moment of the attempt in `now`, and no day and no `loaded_at`, as nothing was loaded, beside the rows of the loaded accounts with `status = 'loaded'`, their windows and their `loaded_at`; so Pipeline health keeps the last load that was, and shows the account as late ([Watch the pipeline](watch-the-pipeline.md)). Every daily load fails on the account until you fix its access or take it out of `clients.toml`:
+
 - **`403` with `PERMISSION_DENIED`**: the service account is not a user of the account, the project has no access to production accounts yet, or the account is reached through a manager account that `GOOGLE_ADS_LOGIN_CUSTOMER_ID` does not name.
+- **`the API returned no customer`**: the ID in `clients.toml` is not that of an account that the service account reaches.
+
+One failure comes after the load:
+
 - **A failed test of the rates after the load**: an account pays in a currency that the ECB does not publish, such as the tenge (KZT), and the marts keep their last good data until a source of its rates comes ([ADR-0032](../adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md)).
 
 Campaign names come from anyone who can edit the account: agoranomos keeps them as data, and an AI client that reads them should treat them so too ([Talk to your data](talk-to-your-data.md)).

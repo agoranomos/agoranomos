@@ -319,7 +319,8 @@ def test_loader_owns_the_tables_of_the_history(env, history_run):
 
 
 # The columns of _agoranomos_reloads and the types that PostgreSQL reports for them: dlt writes
-# its type text as varchar and its timestamp with a time zone.
+# its type text as varchar and its timestamp with a time zone. The hints of the journal, which every
+# source shares, make the columns of the status and of the error also where no row fills them.
 RELOAD_COLUMNS = {
     "account_id": "character varying",
     "as_of": "date",
@@ -327,25 +328,28 @@ RELOAD_COLUMNS = {
     "window_end": "date",
     "now": "timestamp with time zone",
     "loaded_at": "timestamp with time zone",
+    "status": "character varying",
+    "error": "character varying",
 }
 
 
 def test_each_load_of_the_history_records_the_window_of_each_account(env, history_run):
     # What a later load reads to know how far each account has been loaded: the window of each
-    # account, and the day of the load in the time zone of the account.
+    # account, and the day of the load in the time zone of the account, with the status loaded: a
+    # load of the demo fails whole or not at all.
     now = moment(history_run)
     for code in platforms.LOAD_ORDER:
         platform = platforms.PLATFORMS[code]
         windows = platform.module.windows(now)
         text = warehouse_output(
             env,
-            "SELECT account_id, as_of, window_start, window_end "  # noqa: S608 (names of the demo)
+            "SELECT account_id, as_of, window_start, window_end, status "  # noqa: S608 (names of the demo)
             f"FROM {platform.dataset}._agoranomos_reloads "
             f"WHERE now = TIMESTAMPTZ '{now.isoformat()}'",
         )
         wanted = [
             f"{a.account_id}|{common.local_today(now, a.time_zone)}|"
-            f"{windows[a.account_id][0]}|{windows[a.account_id][1]}"
+            f"{windows[a.account_id][0]}|{windows[a.account_id][1]}|loaded"
             for a in sorted(platform.module.accounts(), key=lambda a: a.account_id)
         ]
         # Sorted here, not by the collation of the warehouse.

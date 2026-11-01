@@ -21,8 +21,15 @@ takes the last 36 months, as Google Ads keeps data by day for 37 only (ADR-0034)
 in each request. All end yesterday in the time zone of the account. A request counts as one
 operation of the daily quota, whatever its rows, so a daily load costs ten operations for each
 account, and the first about 230. The days of each account are replaced, empty or not, and the load
-records the window of each account in _agoranomos_reloads in the same run. What the API returns is
-data: a campaign name can carry any text, and nothing here acts on it."""
+records the window of each account in _agoranomos_reloads in the same run.
+
+A load reads each account whole before dlt sees any of it: an error of the API on one account, such
+as the 403 of an account that the service account may not read, is caught at the account, which
+leaves nothing in the load, as a window replaces whole days and a part of one would lose the rest.
+The load takes the other accounts, records the failed account in _agoranomos_reloads with the status
+failed and the text of the error, keeps its row of customers as the last load saw it, and fails at
+the end with one line that lists the accounts and their errors (ADR-0004, ADR-0035). What the API
+returns is data: a campaign name can carry any text, and nothing here acts on it."""
 
 from __future__ import annotations
 
@@ -32,14 +39,17 @@ import json
 import logging
 import os
 import re
+import shutil
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import dlt
+from dlt.destinations.exceptions import DatabaseUndefinedRelation
 from dlt.sources.helpers.requests import Client, HTTPError
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
@@ -47,6 +57,8 @@ from google.oauth2 import service_account
 from agoranomos_pipelines.loads import (
     DATE,
     DLT_SETTINGS,
+    FAILED,
+    LOADED,
     MERGE,
     RELOAD_HINTS,
     RELOADS,
@@ -201,8 +213,16 @@ HINTS = {
 
 
 class GoogleAdsError(RuntimeError):
-    """A mistake in the settings of the source, or an answer of the API that stops the load: one
-    line that names the account and gives the error of the API."""
+    """A mistake in the settings of the source, which stops the load before any request, or an
+    answer of the API that stops the load of one account: one line that names the account and
+    gives the error of the API."""
+
+
+class AccountsFailed(GoogleAdsError):
+    """The load took the other accounts, and these failed: one line that counts them and lists each
+    account with the error of the API, as the contract of the sources asks (ADR-0004). A retry of
+    the task would repeat the whole load and gain nothing: the next load takes the days that the
+    failed accounts missed."""
 
 
 def accounts(extensions: Path = EXTENSIONS) -> list[str]:
@@ -339,29 +359,119 @@ class Api:
             yield from batch.get("results", ())
 
 
+def checked(account_ids: Iterable[str]) -> list[str]:
+    """The IDs of the accounts of a scope, sorted: at least one, each ten digits. A scope goes into
+    the SQL of dlt as it is, so nothing else may."""
+    found = sorted(account_ids)
+    if not found or not all(ACCOUNT_ID.fullmatch(account_id) for account_id in found):
+        raise ValueError("a scope of google_ads takes one account ID of ten digits or more")
+    return found
+
+
 def scope(windows: dict[str, tuple[date, date]]) -> str:
     """The rows of a fact table that a load replaces, as the SQL condition of dlt's destination
-    scope: those of each account in its window. The IDs are checked digits, the days dates."""
-    if not all(ACCOUNT_ID.fullmatch(account_id) for account_id in windows):
-        raise ValueError("the scope of google_ads takes account IDs of ten digits only")
+    scope: those of each account that the load read, in its window. The days are dates."""
     return " OR ".join(
         f"(customer__id = '{account_id}' AND segments__date BETWEEN "
-        f"'{first.isoformat()}' AND '{last.isoformat()}')"
-        for account_id, (first, last) in sorted(windows.items())
+        f"'{windows[account_id][0].isoformat()}' AND '{windows[account_id][1].isoformat()}')"
+        for account_id in checked(windows)
     )
 
 
-def entities(api: Api, table: str, wanted: list[str]) -> Iterator[dict]:
-    """The rows of a table of entities, campaigns, ad groups or ads, of each account."""
-    for account_id in wanted:
-        yield from api.search(account_id, query(table))
+def accounts_scope(account_ids: Iterable[str]) -> str:
+    """The rows of a table of entities whose versions a load may retire, as the SQL condition of
+    dlt's destination scope: those of the accounts that the load read, so that the entities of an
+    account whose load failed keep their versions (dlt 1.31.0: the scope bounds what scd2
+    retires)."""
+    return "customer__id IN (" + ", ".join(f"'{a}'" for a in checked(account_ids)) + ")"
 
 
-def facts(api: Api, table: str, windows: dict[str, tuple[date, date]]) -> Iterator[dict]:
-    """The rows of a fact table of each account in its window."""
-    for account_id, (first, last) in sorted(windows.items()):
-        for days in chunks(first, last):
-            yield from api.search(account_id, query(table, days))
+@dataclass
+class Read:
+    """Everything that a load read of one account, before dlt sees any of it: its row of
+    customers, the window of its facts, and the rows of its campaigns, ad groups and ads and of
+    its facts, in a file for each table."""
+
+    customer: dict
+    window: tuple[date, date]
+    files: dict[str, Path]
+
+
+def read_account(
+    api: Api, account_id: str, now: datetime, last_end: date | None, staging: Path
+) -> Read:
+    """Read an account whole: its customer, which gives its time zone and so its window, then its
+    campaigns, ad groups and ads and the facts of its window, each table into a file in the folder
+    of the account under staging, on disk, so that the load holds one answer in memory at a time,
+    as a load that fed dlt did (ADR-0038). An error of the API on any request raises GoogleAdsError
+    and leaves nothing of the account: a window replaces whole days, and a part of one would lose
+    the rest (ADR-0035)."""
+    rows = [
+        row
+        for row in api.search(account_id, query("customers"))
+        if row["customer"]["id"] == account_id
+    ]
+    if not rows:
+        raise GoogleAdsError(f"Google Ads account {account_id}: the API returned no customer")
+    customer = rows[0]
+    first, last = window(yesterday(now, customer["customer"]["timeZone"]), last_end)
+    # The ID is checked digits.
+    folder = staging / account_id
+    folder.mkdir()
+    files = {}
+    try:
+        for table in (*ENTITIES, *FACTS):
+            path = folder / f"{table}.jsonl"
+            with path.open("w", encoding="utf-8") as file:
+                for days in chunks(first, last) if table in FACTS else [None]:
+                    for row in api.search(account_id, query(table, days)):
+                        file.write(json.dumps(row) + "\n")
+            files[table] = path
+    except GoogleAdsError:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+    return Read(customer, (first, last), files)
+
+
+def staged_rows(read: dict[str, Read], table: str) -> Iterator[dict]:
+    """The rows of a table of each account read, from its file, as the API gave them."""
+    for account in read.values():
+        with account.files[table].open(encoding="utf-8") as file:
+            for line in file:
+                yield json.loads(line)
+
+
+def kept_customers(pipeline, account_ids: list[str]) -> list[dict]:
+    """The rows of customers of the accounts that this load could not read, as the last load that
+    could left them, so that each load replaces the table with every account that a load has seen:
+    an account whose load failed keeps its name, currency and time zone in the model, which its
+    facts join. None before the first load. dlt names the column of a key with __ as it names a
+    nested path (dlt 1.31.0), so a row goes back as the table holds it."""
+    if not account_ids:
+        return []
+    names = list(columns("customers"))
+    # Names of the code, a name that dlt quotes, and IDs of checked digits.
+    wanted = ", ".join(f"'{account_id}'" for account_id in checked(account_ids))
+    try:
+        with pipeline.sql_client() as client:
+            table = client.make_qualified_table_name("customers")
+            rows = client.execute_sql(
+                f"SELECT {', '.join(names)} FROM {table} WHERE customer__id IN ({wanted})"  # noqa: S608
+            )
+    except DatabaseUndefinedRelation:
+        return []
+    return [dict(zip(names, row, strict=True)) for row in rows or ()]
+
+
+def failure_line(failed: dict[str, GoogleAdsError], loaded: int) -> str:
+    """The line with which the task fails after a load with failed accounts: how many failed and
+    how many loaded, and the original error of each account (ADR-0004)."""
+    if loaded:
+        rest = f"the other {loaded} {'is' if loaded == 1 else 'are'} loaded"
+    else:
+        rest = "none is loaded"
+    errors = "; ".join(str(error) for error in failed.values())
+    return f"{len(failed)} of {len(failed) + loaded} Google Ads accounts failed, {rest}: {errors}"
 
 
 @contextmanager
@@ -389,51 +499,75 @@ def warn_of_the_sunset(now: datetime) -> None:
 
 
 def load(now: datetime, extensions: Path = EXTENSIONS) -> dict[str, int]:
-    """Load the accounts of the deployment as of now, record the window of each account in
-    _agoranomos_reloads, and return the rows of each table that dlt reports."""
+    """Load the accounts of the deployment as of now, each read whole before dlt sees any of it,
+    record each account in _agoranomos_reloads, loaded with its window or failed with its error,
+    and return the rows of each table that dlt reports. When an account failed, the load takes the
+    other accounts and raises AccountsFailed at the end; when every account failed, it writes the
+    journal alone."""
     warn_of_the_sunset(now)
     wanted = accounts(extensions)
     api = Api(sign_in(), login_customer_id())
-    customers = [row for account_id in wanted for row in api.search(account_id, query("customers"))]
-    zones = {row["customer"]["id"]: row["customer"]["timeZone"] for row in customers}
-    missing = [account_id for account_id in wanted if account_id not in zones]
-    if missing:
-        raise GoogleAdsError(f"Google Ads account {missing[0]}: the API returned no customer")
     os.environ.update(DLT_SETTINGS)
-    with open_pipeline() as pipeline:
+    with open_pipeline() as pipeline, tempfile.TemporaryDirectory(prefix="google-ads-") as staging:
         last = recorded(pipeline) if has_loads(pipeline) else {}
-        windows = {
-            account_id: window(
-                yesterday(now, zones[account_id]),
-                last[account_id][1] if account_id in last else None,
-            )
-            for account_id in wanted
-        }
-        resources = [dlt.resource(customers, name="customers", **own(HINTS["customers"]))]
-        for table in ENTITIES:
-            hints = own(HINTS[table])
-            hints["write_disposition"] = {
-                **hints["write_disposition"],
-                "boundary_timestamp": now.isoformat(),
-            }
-            resources.append(dlt.resource(entities(api, table, wanted), name=table, **hints))
-        for table in FACTS:
-            hints = own(HINTS[table])
-            hints["write_disposition"] = {**MERGE, "destination_scope": scope(windows)}
-            resources.append(
-                dlt.resource(or_marker(facts(api, table, windows)), name=table, **hints)
-            )
+        read: dict[str, Read] = {}
+        failed: dict[str, GoogleAdsError] = {}
+        for account_id in wanted:
+            last_end = last[account_id][1] if account_id in last else None
+            try:
+                read[account_id] = read_account(api, account_id, now, last_end, Path(staging))
+            except GoogleAdsError as error:
+                log.error("%s; the load goes on with the other accounts", error)
+                failed[account_id] = error
+        resources = []
+        if read:
+            customers = [account.customer for account in read.values()]
+            customers += kept_customers(pipeline, sorted(failed))
+            resources.append(dlt.resource(customers, name="customers", **own(HINTS["customers"])))
+            for table in ENTITIES:
+                hints = own(HINTS[table])
+                hints["write_disposition"] = {
+                    **hints["write_disposition"],
+                    "boundary_timestamp": now.isoformat(),
+                    "destination_scope": accounts_scope(read),
+                }
+                resources.append(dlt.resource(staged_rows(read, table), name=table, **hints))
+            windows = {account_id: account.window for account_id, account in read.items()}
+            for table in FACTS:
+                hints = own(HINTS[table])
+                hints["write_disposition"] = {**MERGE, "destination_scope": scope(windows)}
+                resources.append(
+                    dlt.resource(or_marker(staged_rows(read, table)), name=table, **hints)
+                )
+        loaded_at = datetime.now(UTC)
         record = [
             {
                 "account_id": account_id,
-                "as_of": yesterday(now, zones[account_id]) + timedelta(days=1),
-                "window_start": first,
-                "window_end": end,
+                "as_of": account.window[1] + timedelta(days=1),
+                "window_start": account.window[0],
+                "window_end": account.window[1],
                 "now": now,
-                "loaded_at": datetime.now(UTC),
+                "loaded_at": loaded_at,
+                "status": LOADED,
+                "error": None,
             }
-            for account_id, (first, end) in sorted(windows.items())
+            for account_id, account in read.items()
+        ] + [
+            # Nothing was loaded: no day and no loaded_at, so that recorded() and ops_loads pass
+            # the row over, as they do for an account that no load took; now keeps the attempt.
+            {
+                "account_id": account_id,
+                "as_of": None,
+                "window_start": None,
+                "window_end": None,
+                "now": now,
+                "loaded_at": None,
+                "status": FAILED,
+                "error": str(error),
+            }
+            for account_id, error in failed.items()
         ]
+        record.sort(key=lambda row: row["account_id"])
         # In the same run as the facts, so that a load that fails records no window.
         resources.append(dlt.resource(record, name=RELOADS, **own(RELOAD_HINTS)))
         pipeline.run(resources)
@@ -445,4 +579,6 @@ def load(now: datetime, extensions: Path = EXTENSIONS) -> dict[str, int]:
     for table, rows in sorted(counts.items()):
         log.info("Loaded %d rows into %s.%s, as of %s", rows, DATASET, table, now.isoformat())
     log.info("%d requests to the Google Ads API for %d accounts", api.requests, len(wanted))
+    if failed:
+        raise AccountsFailed(failure_line(failed, len(read)))
     return counts

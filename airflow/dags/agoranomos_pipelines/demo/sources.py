@@ -37,6 +37,7 @@ from agoranomos_pipelines.demo.world import Account
 from agoranomos_pipelines.loads import (
     DATE,
     DLT_SETTINGS,
+    LOADED,
     MERGE,
     RELOAD_HINTS,
     RELOADS,
@@ -231,7 +232,8 @@ def reloads(
     code: str, now: datetime, first: Callable[[Account], date] | None = None
 ) -> list[dict[str, object]]:
     """The rows of _agoranomos_reloads of a load at now: the window of each account, and the day
-    of now in the time zone of the account."""
+    of now in the time zone of the account. A load of the demo fails whole or not at all, so every
+    row is one of a loaded account."""
     platform = PLATFORMS[code]
     zones = {account.account_id: account.time_zone for account in platform.module.accounts()}
     loaded_at = datetime.now(UTC)
@@ -243,6 +245,7 @@ def reloads(
             "window_end": end,
             "now": now,
             "loaded_at": loaded_at,
+            "status": LOADED,
         }
         for account_id, (start, end) in sorted(platform.module.windows(now, first).items())
     ]

@@ -31,6 +31,7 @@ from dlt.sources.helpers.requests import Client
 
 from agoranomos_pipelines.loads import (
     DLT_SETTINGS,
+    LOADED,
     MERGE,
     RELOAD_HINTS,
     RELOADS,
@@ -126,7 +127,8 @@ def scope(first: date, last: date) -> str:
 
 
 def reloads(now: datetime, first: date, last: date) -> list[dict[str, object]]:
-    """The row of _agoranomos_reloads of a load at now."""
+    """The row of _agoranomos_reloads of a load at now: a load of the rates fails whole or not at
+    all, so the row is always one of a loaded account."""
     return [
         {
             "account_id": ACCOUNT,
@@ -135,6 +137,7 @@ def reloads(now: datetime, first: date, last: date) -> list[dict[str, object]]:
             "window_end": last,
             "now": now,
             "loaded_at": datetime.now(UTC),
+            "status": LOADED,
         }
     ]
 
