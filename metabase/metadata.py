@@ -41,8 +41,14 @@ CLEARABLE = frozenset({"semantic_type"})
 # The semantic types of a key of a mart, and of a column that points at one: the field of the second
 # gets its target too, as fk_target_field_id in PUT /api/field/:id (Metabase 0.64.1).
 PRIMARY_KEY, FOREIGN_KEY = "type/PK", "type/FK"
-# The version of the JSON that export() writes and load() reads.
-FORMAT = 1
+# How a filter offers the values of a field, has_field_values in PUT /api/field/:id (Metabase
+# 0.64.1): a list that the daily scan keeps, a search box that asks the warehouse, or a plain input.
+FIELD_VALUES = ("list", "search", "none")
+# The version of the JSON that export() writes, and those that load() reads: format 1 has no
+# has_field_values, so the export of an earlier release, which stays as the previous export until
+# the next change of the project, still says what the code gave the other properties.
+FORMAT = 2
+READABLE_FORMATS = (1, FORMAT)
 # Where the export runs: the dbt of the Airflow image, the project, a folder of the tmpfs for the
 # target and the logs of dbt, and the file in the metadata-export volume.
 DBT = "/opt/airflow/dbt_venv/bin/dbt"
@@ -74,6 +80,10 @@ FIRST, UPDATE, REVERT = "first fill", "update from code", "revert of an edit"
 # distinct values (infer-is-category in src/metabase/analyze/classifiers/category.clj at the tag
 # v0.64.1). Nothing tells it from the same type set by hand, which so counts as a first fill too.
 ANALYZED_TYPE = "type/Category"
+# The base types of the marts whose fields a sync of Metabase makes auto-list, which its API shows
+# as list (can-be-list? in src/metabase/sync/util.clj at the tag v0.64.1): not a date, a time or a
+# decimal.
+LISTED_TYPES = ("type/Text", "type/BigInteger", "type/Boolean")
 # The words that Metabase writes in capitals when it makes a display name from a physical name (its
 # simple strategy, the default).
 METABASE_ACRONYMS = {"id", "url", "ip", "uid", "uuid", "guid"}
@@ -122,6 +132,7 @@ class Column:
     currency: str | None
     semantic_type_declared: bool = True
     fk_target: str | None = None
+    has_field_values: str | None = None
 
 
 @dataclass(frozen=True)
@@ -401,7 +412,7 @@ def read_export(path: str | Path) -> dict[str, Any]:
         raise MetadataError(
             f"the metadata export {path} is not JSON: run ./agoranomos up"
         ) from None
-    if not isinstance(document, dict) or document.get("format") != FORMAT:
+    if not isinstance(document, dict) or document.get("format") not in READABLE_FORMATS:
         raise MetadataError(
             f"the metadata export {path} is not of format {FORMAT}: run ./agoranomos up"
         )
@@ -425,6 +436,12 @@ def base_tables(document: Mapping[str, Any]) -> Tables:
                     f"{model['schema']}.{model['name']}.{column['name']}: a foreign key has both "
                     "fk_target_table and fk_target_field"
                 )
+            field_values = text_or_none(meta.get("has_field_values"))
+            if field_values not in (None, *FIELD_VALUES):
+                raise MetadataError(
+                    f"{model['schema']}.{model['name']}.{column['name']}: has_field_values is one "
+                    f"of {', '.join(FIELD_VALUES)}"
+                )
             columns.append(
                 Column(
                     name=column["name"],
@@ -434,6 +451,7 @@ def base_tables(document: Mapping[str, Any]) -> Tables:
                     currency=text_or_none(meta.get("currency")),
                     semantic_type_declared="semantic_type" in meta,
                     fk_target=f"{target[0]}.{target[1]}" if all(target) else None,
+                    has_field_values=field_values,
                 )
             )
         tables[(model["schema"], model["name"])] = Table(
@@ -649,10 +667,20 @@ def humanize(name: str) -> str:
     return " ".join(words)
 
 
-def kind_of(prop: str, old: Any, name: str, earlier: set[Any]) -> str:
+def field_values_of_metabase(base_type: str | None) -> set[str]:
+    """What Metabase shows as has_field_values of a field that nobody set: list for one that a sync
+    made auto-list, and, for one that is not or that a scan found too many values in, search for a
+    text and none for anything else (infer-has-field-values in src/metabase/lib/field.cljc at the
+    tag v0.64.1). Its API shows nothing else of it, so nothing tells these from the same value set
+    by hand, which so counts as a first fill too."""
+    listed = {"list"} if base_type in LISTED_TYPES else set()
+    return listed | {"search" if base_type == "type/Text" else "none"}
+
+
+def kind_of(prop: str, old: Any, name: str, earlier: set[Any], base_type: str | None = None) -> str:
     """Whether a change follows the code, which gave the value that Metabase shows, fills a value
-    of Metabase's own (none, the name that it makes from the physical one, or the type that its
-    analysis gives), or reverts an edit made outside the code."""
+    of Metabase's own (none, the name that it makes from the physical one, or what its analysis
+    gives a field of the base type), or reverts an edit made outside the code."""
     if old is None or (isinstance(old, str) and not old.strip()):
         return FIRST
     if old in earlier:
@@ -660,6 +688,8 @@ def kind_of(prop: str, old: Any, name: str, earlier: set[Any]) -> str:
     if prop == "display_name" and old in (name, humanize(name)):
         return FIRST
     if prop == "semantic_type" and old == ANALYZED_TYPE:
+        return FIRST
+    if prop == "has_field_values" and old in field_values_of_metabase(base_type):
         return FIRST
     return REVERT
 
@@ -709,9 +739,9 @@ def changes_of(
         old = current.get(prop)
         if old != new and (new is not None or prop in CLEARABLE):
             body[prop] = new
-            changes.append(
-                Change(kind_of(prop, old, name, earlier.get(prop, set())), path, prop, old, new)
-            )
+            before = earlier.get(prop, set())
+            kind = kind_of(prop, old, name, before, current.get("base_type"))
+            changes.append(Change(kind, path, prop, old, new))
     return body, changes
 
 
@@ -771,6 +801,7 @@ def make_plan(metadata: Metadata, database: Mapping[str, Any]) -> Plan:
                     "semantic_type",
                     "currency",
                     "fk_target",
+                    "has_field_values",
                 )
             }
             settings = shown_field.get("settings") or {}
@@ -786,6 +817,7 @@ def make_plan(metadata: Metadata, database: Mapping[str, Any]) -> Plan:
                 "semantic_type": column.semantic_type,
                 "currency": column.currency,
                 "fk_target": column.fk_target,
+                "has_field_values": column.has_field_values,
             }
             if column.fk_target is not None and column.fk_target not in field_ids:
                 # A foreign key with no target would let Metabase join nothing: the field keeps

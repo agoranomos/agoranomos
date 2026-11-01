@@ -4547,6 +4547,27 @@ def test_preflight_stops_on_a_reporting_currency_without_rates(cli, value, outco
 
 @pytest.mark.parametrize(
     ("value", "outcome"),
+    [
+        ("12:00", "pass"),
+        ("00:00", "pass"),
+        ("23:00", "pass"),
+        ("", "pass"),
+        ("11:37", "stop"),
+        ("24:00", "stop"),
+        ("noon", "stop"),
+    ],
+)
+def test_preflight_stops_on_a_time_of_the_scan_that_metabase_cannot_keep(cli, value, outcome):
+    # ADR-0037: Metabase 0.64.1 starts a daily scan at the start of an hour. Empty is the default,
+    # 12:00.
+    cli.run("init")
+    set_env(cli, METABASE_SCAN_TIME=value)
+    result = cli.run("preflight")
+    check_limit(result, outcome, "METABASE_SCAN_TIME")
+
+
+@pytest.mark.parametrize(
+    ("value", "outcome"),
     [("", "pass"), ("1234567890", "pass"), ("123-456-7890", "stop"), ("123456789", "stop")],
 )
 def test_preflight_stops_on_a_manager_account_of_google_ads_that_is_not_ten_digits(

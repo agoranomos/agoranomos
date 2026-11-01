@@ -46,6 +46,8 @@ KEYS = (
 # of the packages of dbt/packages.yml, by the package in their unique ID.
 LAYERS = ("staging", "marts", "ops")
 MARTS = "marts"
+# The values of has_field_values that the marts may declare (ADR-0037).
+FIELD_VALUES = {"list", "search", "none"}
 PACKAGES = {"elementary", "dbt_utils"}
 # The semantic types that Metabase shows as money: type/Currency and the types under it.
 CURRENCY_TYPES = {
@@ -207,8 +209,9 @@ def ragged_descriptions(nodes: list[dict[str, Any]]) -> list[str]:
 
 
 def missing_metabase_metadata(nodes: list[dict[str, Any]]) -> list[str]:
-    """What the marts and their columns lack for Metabase: a display name everywhere, and the key
-    semantic_type on every column, with a type of Metabase or null."""
+    """What the marts and their columns lack for Metabase: a display name everywhere, the key
+    semantic_type on every column, with a type of Metabase or null, and has_field_values on every
+    column, with a value that Metabase takes."""
     problems = []
     for node in models(nodes, (MARTS,)):
         if not str(metabase_meta(node).get("display_name") or "").strip():
@@ -223,6 +226,8 @@ def missing_metabase_metadata(nodes: list[dict[str, Any]]) -> list[str]:
                 declared["semantic_type"]
             ).startswith("type/"):
                 problems.append(f"{where}: semantic_type is not a type of Metabase")
+            if declared.get("has_field_values") not in FIELD_VALUES:
+                problems.append(f"{where}: has_field_values")
     return problems
 
 
@@ -376,7 +381,7 @@ def test_no_description_starts_or_ends_with_white_space(nodes):
     assert not problems, problems
 
 
-def test_every_mart_and_its_columns_have_a_display_name_and_a_semantic_type(nodes):
+def test_every_mart_and_its_columns_have_the_names_and_types_of_metabase(nodes):
     problems = missing_metabase_metadata(nodes)
     assert not problems, problems
 
@@ -437,6 +442,7 @@ def test_the_checks_find_what_they_look_for():
                 "cost_reporting",
                 display_name="Cost in Reporting Currency",
                 semantic_type="type/Currency",
+                has_field_values="none",
                 currency="EUR",
             ),
         },
@@ -505,10 +511,15 @@ def test_the_checks_find_what_they_look_for():
     assert ragged_descriptions(planted) == ["mart"]
     assert missing_metabase_metadata(planted) == [
         "mart: display_name",
+        "mart.spend: has_field_values",
         "mart.cost: semantic_type",
+        "mart.cost: has_field_values",
         "mart.clicks: semantic_type",
+        "mart.clicks: has_field_values",
+        "mart.budget: has_field_values",
         "mart.reach: display_name",
         "mart.reach: semantic_type is not a type of Metabase",
+        "mart.reach: has_field_values",
     ]
     assert different_descriptions(planted) == ["clicks"]
     found = [

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import ast
 import json
+import math
+import re
 import socket
 import subprocess
 import sys
@@ -16,9 +18,17 @@ from typing import Any
 import metabase_init as mi
 import ops
 import pytest
-from metabase_stand_in import FakeClock, FakeMetabase, free_port, metadata_env, serve
+from metabase_stand_in import (
+    USER_SCHEDULES,
+    FakeClock,
+    FakeMetabase,
+    free_port,
+    metadata_env,
+    serve,
+)
 from metabase_stand_in import leaked as leaked_in
 
+REPO = Path(__file__).resolve().parents[2]
 ENV = {
     "METABASE_SITE_NAME": "agoranomos",
     "METABASE_ADMIN_EMAIL": "admin@example.com",
@@ -33,6 +43,7 @@ ENV = {
     "METADATA_OVERRIDES": "/nonexistent/overrides.toml",
     # The registry of the content of the package: env_for points it at a file of the fixture too.
     "CONTENT_REGISTRY": "/nonexistent/content.json",
+    "METABASE_SCAN_TIME": "12:00",
 }
 
 # What metabase-init must never print: the values that these tests pass in, and the tokens that the
@@ -933,6 +944,235 @@ def test_a_refused_change_of_the_permissions_is_one_line_with_no_secret(tmp_path
         "metabase."
     ]
     assert leaked(output.out + output.err) == []
+
+
+# --- The scan, the sync and the cache ----------------------------------------------------------
+
+SCAN_CRON = "0 0 12 * * ? *"
+CACHE_LINE = '{"type": "ttl", "multiplier": 10, "min_duration_ms": 1000}'
+SCAN_LINE = 'warehouse scan of field values: "0 0 8 * * ? *" -> "0 0 12 * * ? *"'
+
+
+def warehouse_of(metabase: FakeMetabase) -> dict[str, Any]:
+    [warehouse] = [d for d in metabase.databases if d["name"] == "agoranomos warehouse"]
+    return warehouse
+
+
+def setting_lines(capsys) -> list[str]:
+    """The lines of the log about the scan, the sync and the cache."""
+    lines = capsys.readouterr().out.splitlines()
+    settings = re.compile(r": (warehouse (scan of field values|sync)|metabase cache): ")
+    return [line.removeprefix("metabase-init: ") for line in lines if settings.search(line)]
+
+
+def test_the_first_start_sets_the_scan_after_the_load_and_keeps_the_hourly_sync(metabase, capsys):
+    assert mi.main(env_for(metabase)) == 0
+    warehouse = warehouse_of(metabase)
+    assert warehouse["cache_field_values_schedule"] == SCAN_CRON
+    assert warehouse["metadata_sync_schedule"] == "0 17 * * * ? *"
+    assert warehouse["details"][USER_SCHEDULES] is True
+    assert (warehouse["is_full_sync"], warehouse["is_on_demand"]) == (True, False)
+    assert warehouse["details"]["schema-filters-patterns"] == "marts"
+    assert f"first fill: {SCAN_LINE}" in setting_lines(capsys)
+
+
+def test_the_first_start_sets_the_policy_of_the_cache(metabase, capsys):
+    assert mi.main(env_for(metabase)) == 0
+    assert metabase.cache_policy == {"type": "ttl", "multiplier": 10, "min_duration_ms": 1000}
+    assert f"first fill: metabase cache: none -> {CACHE_LINE}" in setting_lines(capsys)
+
+
+def test_a_start_that_finds_them_as_the_code_says_changes_nothing(metabase, capsys):
+    assert mi.main(env_for(metabase)) == 0
+    capsys.readouterr()
+    metabase.bodies.clear()
+    assert mi.main(env_for(metabase)) == 0
+    assert setting_lines(capsys) == []
+    assert ("PUT", "/api/cache") not in [(method, path) for method, path, _ in metabase.bodies]
+    # The one write of the connection is that of its details, on every start.
+    writes = [body for method, path, body in metabase.bodies if path == "/api/database/1"]
+    assert [sorted(body) for body in writes] == [["details", "engine"]]
+
+
+def test_the_time_of_the_scan_comes_from_the_setting(metabase, capsys):
+    assert mi.main(env_for(metabase, METABASE_SCAN_TIME="03:00")) == 0
+    assert warehouse_of(metabase)["cache_field_values_schedule"] == "0 0 3 * * ? *"
+
+
+def test_a_schedule_goes_with_the_details_of_the_connection_and_its_password(metabase, capsys):
+    # The answer of Metabase masks the password: the job sends its own, and never the mask.
+    assert mi.main(env_for(metabase)) == 0
+    bodies = [body for _, path, body in metabase.bodies if path == "/api/database/1"]
+    [schedule] = [body for body in bodies if "schedules" in body]
+    assert schedule["schedules"] == {
+        "cache_field_values": {"schedule_type": "daily", "schedule_hour": 12}
+    }
+    assert schedule["details"]["password"] == ENV["WAREHOUSE_PASSWORD"]
+
+
+def test_an_edit_of_the_scan_goes_back_with_a_line(metabase, capsys):
+    assert mi.main(env_for(metabase)) == 0
+    warehouse_of(metabase)["cache_field_values_schedule"] = "0 0 3 * * ? *"
+    capsys.readouterr()
+    assert mi.main(env_for(metabase)) == 0
+    assert warehouse_of(metabase)["cache_field_values_schedule"] == SCAN_CRON
+    assert setting_lines(capsys) == [
+        'revert of an edit: warehouse scan of field values: "0 0 3 * * ? *" -> "0 0 12 * * ? *"'
+    ]
+
+
+@pytest.mark.parametrize(
+    "choice",
+    [
+        pytest.param({"is_full_sync": False, "is_on_demand": True}, id="for-a-new-filter"),
+        pytest.param({"is_full_sync": False, "is_on_demand": False}, id="never"),
+    ],
+)
+def test_a_scan_that_someone_turned_off_comes_back_with_a_line(metabase, capsys, choice):
+    assert mi.main(env_for(metabase)) == 0
+    warehouse_of(metabase).update(choice, cache_field_values_schedule=None)
+    capsys.readouterr()
+    assert mi.main(env_for(metabase)) == 0
+    warehouse = warehouse_of(metabase)
+    assert (warehouse["is_full_sync"], warehouse["is_on_demand"]) == (True, False)
+    assert warehouse["cache_field_values_schedule"] == SCAN_CRON
+    assert setting_lines(capsys) == [
+        'revert of an edit: warehouse scan of field values: none -> "0 0 12 * * ? *"'
+    ]
+
+
+def test_the_switch_of_the_schedules_that_someone_turned_off_comes_back_with_a_line(
+    metabase, capsys
+):
+    # Metabase then draws new schedules: the scan goes back, and the sync stays hourly.
+    assert mi.main(env_for(metabase)) == 0
+    warehouse = warehouse_of(metabase)
+    warehouse["details"][USER_SCHEDULES] = False
+    warehouse.update(
+        metadata_sync_schedule="0 46 * * * ? *", cache_field_values_schedule="0 0 4 * * ? *"
+    )
+    capsys.readouterr()
+    assert mi.main(env_for(metabase)) == 0
+    warehouse = warehouse_of(metabase)
+    assert warehouse["details"][USER_SCHEDULES] is True
+    assert warehouse["cache_field_values_schedule"] == SCAN_CRON
+    assert warehouse["metadata_sync_schedule"] == "0 46 * * * ? *"
+    assert setting_lines(capsys) == [
+        'revert of an edit: warehouse scan of field values: "0 0 4 * * ? *" -> "0 0 12 * * ? *"'
+    ]
+
+
+def test_a_sync_that_someone_made_daily_is_hourly_again_with_a_line(metabase, capsys):
+    assert mi.main(env_for(metabase)) == 0
+    warehouse_of(metabase)["metadata_sync_schedule"] = "0 0 3 * * ? *"
+    capsys.readouterr()
+    assert mi.main(env_for(metabase)) == 0
+    assert warehouse_of(metabase)["metadata_sync_schedule"] == "0 50 * * * ? *"
+    assert warehouse_of(metabase)["cache_field_values_schedule"] == SCAN_CRON
+    assert setting_lines(capsys) == [
+        'revert of an edit: warehouse sync: "0 0 3 * * ? *" -> "0 50 * * * ? *"'
+    ]
+
+
+@pytest.mark.parametrize(
+    ("schedule", "kept"),
+    [
+        ("0 17 * * * ? *", True),
+        ("0 0 * * * ? *", True),
+        ("0 0 3 * * ? *", False),
+        ("0 0 3 ? * 2 *", False),
+        ("0 0/5 * * * ? *", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_a_schedule_is_hourly_when_it_runs_each_hour_at_one_minute(schedule, kept):
+    assert mi.hourly(schedule) is kept
+
+
+def test_an_edit_of_the_policy_of_the_cache_goes_back_with_a_line(metabase, capsys):
+    assert mi.main(env_for(metabase)) == 0
+    metabase.cache_policy = {"type": "nocache"}
+    capsys.readouterr()
+    assert mi.main(env_for(metabase)) == 0
+    assert metabase.cache_policy == {"type": "ttl", "multiplier": 10, "min_duration_ms": 1000}
+    assert setting_lines(capsys) == [
+        f'revert of an edit: metabase cache: {{"type": "nocache"}} -> {CACHE_LINE}'
+    ]
+
+
+@pytest.mark.parametrize(
+    "value", ["11:37", "12", "24:00", "noon", "12:00:00", " 12:00", "12:00 UTC"]
+)
+def test_a_time_of_the_scan_that_metabase_cannot_keep_stops_the_job_before_it_writes(
+    metabase, capsys, value
+):
+    assert mi.main(env_for(metabase, METABASE_SCAN_TIME=value)) == 1
+    assert capsys.readouterr().err.splitlines() == [
+        "metabase-init: METABASE_SCAN_TIME must be a whole hour as HH:00, such as 12:00: Metabase "
+        "starts a daily scan at the start of an hour"
+    ]
+    assert metabase.calls == []
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        pytest.param("GET", "/api/database/1", id="read-the-connection"),
+        pytest.param("PUT", "/api/cache", id="write-the-policy"),
+        pytest.param("GET", "/api/cache", id="read-the-policy"),
+    ],
+)
+def test_a_failed_step_of_the_settings_is_one_line_with_no_secret(metabase, capsys, method, path):
+    metabase.failures[(method, path)] = 500
+    assert mi.main(env_for(metabase)) == 1
+    output = capsys.readouterr()
+    assert output.err.splitlines() == [
+        f"metabase-init: {method} {path} failed with HTTP 500. See ./agoranomos logs metabase."
+    ]
+    assert leaked(output.out + output.err) == []
+
+
+def test_an_answer_of_the_cache_of_an_unexpected_shape_is_one_line(metabase, capsys):
+    metabase.pages[("GET", "/api/cache")] = (200, b'{"data": [{"strategy": {}}]}')
+    assert mi.main(env_for(metabase)) == 1
+    assert capsys.readouterr().err.splitlines() == [
+        "metabase-init: an answer of Metabase had an unexpected shape (KeyError in "
+        "ensure_cache_policy.<genexpr>). See ./agoranomos logs metabase."
+    ]
+
+
+def scan_of_the_template() -> str:
+    text = (REPO / ".env.example").read_text(encoding="utf-8")
+    [value] = re.findall(r"^METABASE_SCAN_TIME=(\S+)$", text, flags=re.MULTILINE)
+    return value
+
+
+def test_the_scan_comes_at_least_an_hour_after_the_nightly_load():
+    # The first whole hour that does: Metabase 0.64.1 starts a daily scan at the start of an hour.
+    text = (REPO / "airflow" / "dags" / "agoranomos_google_ads_daily.py").read_text("utf-8")
+    [(minute, hour)] = re.findall(
+        r'^SCHEDULE = CronTriggerTimetable\("(\d+) (\d+) \* \* \*", timezone="UTC"\)$',
+        text,
+        flags=re.MULTILINE,
+    )
+    load = int(hour) * 60 + int(minute)
+    scan = scan_of_the_template()
+    assert int(scan[:2]) * 60 == math.ceil((load + 60) / 60) * 60
+    assert mi.SCAN_TIME.fullmatch(scan)
+
+
+def test_compose_gives_the_job_the_time_of_the_template_and_metabase_its_limits():
+    text = (REPO / "compose.yaml").read_text(encoding="utf-8")
+    default = f"METABASE_SCAN_TIME: ${{METABASE_SCAN_TIME:-{scan_of_the_template()}}}"
+    assert default in text
+    # The timeout of a query of Metabase, as the statement_timeout of its role, and the wait for a
+    # connection of the pool, as ADR-0037 says.
+    assert 'MB_DB_QUERY_TIMEOUT_MINUTES: "5"' in text
+    assert "ALTER ROLE metabase_reader SET statement_timeout = '5min';" in (
+        REPO / "postgres" / "warehouse.sql"
+    ).read_text(encoding="utf-8")
+    assert 'MB_JDBC_DATA_WAREHOUSE_CONNECTION_POOL_CHECKOUT_TIMEOUT_MS: "30000"' in text
 
 
 def test_every_start_applies_the_metadata_of_the_marts(metabase, capsys):

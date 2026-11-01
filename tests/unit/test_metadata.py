@@ -345,12 +345,40 @@ def test_the_base_is_the_marts_of_the_export(tmp_path):
         pytest.param(
             {"export": None}, "is missing: see ./agoranomos logs metadata-export", id="missing"
         ),
-        pytest.param({"export": {"format": 2}}, "is not of format 1", id="format"),
+        pytest.param({"export": {"format": 3}}, "is not of format 2", id="format"),
     ],
 )
 def test_an_export_that_cannot_be_used_is_one_line(tmp_path, files, message):
     with pytest.raises(md.MetadataError, match=message):
         loaded(tmp_path, **files)
+
+
+def format_1(export: dict[str, Any]) -> dict[str, Any]:
+    """An export as a release before has_field_values wrote it."""
+    old = copy.deepcopy(export)
+    old["format"] = 1
+    for model in old["models"]:
+        for column in model["columns"]:
+            column["meta"].get("metabase", {}).pop("has_field_values", None)
+    return old
+
+
+def test_an_export_of_the_format_before_still_reads(tmp_path, metabase):
+    # Its columns declare nothing for the filters, so the fields keep what Metabase shows.
+    marts = loaded(tmp_path, export=format_1(EXPORT))
+    assert {c.has_field_values for c in marts.effective[MART].columns} == {None}
+    lines = md.apply(client(metabase), 2, marts, md.waiter(120, "see the logs"))
+    assert not any("has_field_values" in line for line in lines), lines
+    assert not any("has_field_values" in body for _, body in puts(metabase))
+
+
+def test_the_previous_export_of_the_format_before_says_what_the_code_gave_before(tmp_path):
+    # The first start of the release finds the export of the release before as the previous one:
+    # an update of a release stays an update, and no revert of an edit.
+    previous = format_1(EXPORT)
+    previous["models"][0]["description"] = "The description of the release before."
+    marts = loaded(tmp_path, previous=previous)
+    assert marts.earlier[1][MART].description == "The description of the release before."
 
 
 def test_an_export_that_is_not_json_is_named(tmp_path):
@@ -516,6 +544,7 @@ def test_an_override_in_another_language_is_kept_and_logged_as_written(tmp_path,
         "WAREHOUSE_DB": "warehouse",
         "WAREHOUSE_USER": "metabase_reader",
         "WAREHOUSE_PASSWORD": "reader-password",
+        "METABASE_SCAN_TIME": "12:00",
         # No registry of the content yet, as before the first start of demo-init.
         "CONTENT_REGISTRY": str(tmp_path / "content.json"),
         **metadata_env(tmp_path, overrides=overrides),
@@ -648,6 +677,23 @@ def test_what_the_code_said_before_comes_from_the_previous_export(tmp_path):
     assert loaded(first).earlier == (md.base_tables(EXPORT),)
 
 
+def test_each_column_declares_how_a_filter_offers_its_values(tmp_path):
+    columns = {c.name: c for c in loaded(tmp_path).effective[MART].columns}
+    assert columns["currency"].has_field_values == "list"
+    assert columns["campaign_name"].has_field_values == "search"
+    assert columns["campaign_id"].has_field_values == "none"
+
+
+def test_a_value_of_has_field_values_that_metabase_refuses_stops_the_job(tmp_path):
+    export = copy.deepcopy(EXPORT)
+    export["models"][0]["columns"][0]["meta"]["metabase"]["has_field_values"] = "auto-list"
+    with pytest.raises(md.MetadataError) as raised:
+        loaded(tmp_path, export=export)
+    assert str(raised.value) == (
+        "marts.ad_stats_campaign_daily.report_date: has_field_values is one of list, search, none"
+    )
+
+
 # --- The plan and its application -----------------------------------------------------------
 
 
@@ -680,6 +726,13 @@ def test_the_first_apply_fills_every_declared_property(tmp_path, metabase):
     assert fields["spend"]["semantic_type"] == "type/Currency"
     assert fields["spend"]["settings"] == {"currency": "USD"}
     assert fields["report_date"]["semantic_type"] is None
+    assert fields["campaign_name"]["has_field_values"] == "search"
+    assert fields["account_id"]["has_field_values"] == "none"
+    assert fields["currency"]["has_field_values"] == "list"
+    assert (
+        'first fill: marts.ad_stats_campaign_daily.campaign_name has_field_values: "list" -> '
+        '"search"'
+    ) in lines
     assert lines[0] == (
         'first fill: marts.ad_stats_campaign_daily display_name: "Ad Stats Campaign Daily" -> "Ad '
         'Statistics by Campaign and Day"'
@@ -779,6 +832,54 @@ def test_a_semantic_type_that_the_code_declares_none_is_cleared(tmp_path, metaba
     ) in lines
     assert metabase.field("report_date")["semantic_type"] is None
     assert md.apply(client(metabase), 2, marts, md.waiter(120, "x")) == []
+
+
+@pytest.mark.parametrize(
+    ("column", "edit", "kind"),
+    [
+        # Metabase never shows these by itself: none for a text, and list for a date or a decimal.
+        pytest.param("campaign_name", "none", md.REVERT, id="none-on-a-text"),
+        pytest.param("report_date", "list", md.REVERT, id="list-on-a-date"),
+        pytest.param("spend", "search", md.REVERT, id="search-on-a-decimal"),
+        # Metabase shows these for a field that nobody set, so that they cannot be told apart.
+        pytest.param("campaign_id", "search", md.FIRST, id="search-on-a-text"),
+        pytest.param("campaign_id", "list", md.FIRST, id="list-on-a-text"),
+        pytest.param("impressions", "list", md.FIRST, id="list-on-a-whole-number"),
+    ],
+)
+def test_a_value_of_a_field_that_someone_changed_goes_back_with_a_line(
+    tmp_path, metabase, column, edit, kind
+):
+    marts = loaded(tmp_path)
+    md.apply(client(metabase), 2, marts, md.waiter(120, "x"))
+    wanted = metabase.field(column)["has_field_values"]
+    metabase.field(column)["has_field_values"] = edit
+    lines = md.apply(client(metabase), 2, marts, md.waiter(120, "x"))
+    assert lines == [
+        f'{kind}: marts.ad_stats_campaign_daily.{column} has_field_values: "{edit}" -> "{wanted}"'
+    ]
+    assert metabase.field(column)["has_field_values"] == wanted
+
+
+def test_a_new_value_of_a_field_in_a_release_is_an_update(tmp_path, metabase):
+    previous = copy.deepcopy(EXPORT)
+    [name] = [c for c in previous["models"][0]["columns"] if c["name"] == "campaign_name"]
+    name["meta"]["metabase"]["has_field_values"] = "none"
+    metabase.field("campaign_name")["has_field_values"] = "none"
+    lines = md.apply(client(metabase), 2, loaded(tmp_path, previous=previous), md.waiter(120, "x"))
+    assert (
+        'update from code: marts.ad_stats_campaign_daily.campaign_name has_field_values: "none" -> '
+        '"search"'
+    ) in lines
+
+
+def test_a_column_that_does_not_declare_its_values_keeps_those_of_metabase(tmp_path, metabase):
+    export = copy.deepcopy(EXPORT)
+    del export["models"][0]["columns"][0]["meta"]["metabase"]["has_field_values"]
+    metabase.field("report_date")["has_field_values"] = "search"
+    lines = md.apply(client(metabase), 2, loaded(tmp_path, export=export), md.waiter(120, "x"))
+    assert metabase.field("report_date")["has_field_values"] == "search"
+    assert not any("report_date has_field_values" in line for line in lines), lines
 
 
 def test_a_column_that_does_not_declare_a_semantic_type_keeps_the_one_of_metabase(
@@ -1012,7 +1113,13 @@ def test_a_list_of_the_warehouse_that_fails_is_one_line_and_no_answer(tmp_path, 
 
 def test_the_plan_leaves_other_tables_inactive_ones_and_nested_fields_alone(tmp_path):
     marts = loaded(tmp_path)
-    field = {"name": "spend", "display_name": "Spend", "description": None, "parent_id": None}
+    field = {
+        "name": "spend",
+        "display_name": "Spend",
+        "description": None,
+        "has_field_values": "none",
+        "parent_id": None,
+    }
     database = {
         "tables": [
             {
@@ -1072,6 +1179,24 @@ def test_the_plan_leaves_other_tables_inactive_ones_and_nested_fields_alone(tmp_
 )
 def test_the_kind_of_a_change_depends_on_what_metabase_showed(prop, old, earlier, kind):
     assert md.kind_of(prop, old, "spend", earlier) == kind
+
+
+@pytest.mark.parametrize(
+    ("base_type", "own"),
+    [
+        ("type/Text", {"list", "search"}),
+        ("type/BigInteger", {"list", "none"}),
+        ("type/Boolean", {"list", "none"}),
+        ("type/Decimal", {"none"}),
+        ("type/Date", {"none"}),
+        ("type/DateTimeWithLocalTZ", {"none"}),
+    ],
+)
+def test_the_values_of_a_field_that_metabase_shows_by_itself_count_as_its_own(base_type, own):
+    for value in md.FIELD_VALUES:
+        kind = md.FIRST if value in own else md.REVERT
+        assert md.kind_of("has_field_values", value, "x", set(), base_type) == kind, value
+        assert md.kind_of("has_field_values", value, "x", {value}, base_type) == md.UPDATE, value
 
 
 def test_a_value_in_a_line_stays_on_one_line_and_is_cut():

@@ -531,6 +531,13 @@ services:
       # A new Metabase gets no Sample Database and no Examples collection, which have nothing to do
       # with marketing data.
       MB_LOAD_SAMPLE_CONTENT: "false"
+      # A query of Metabase ends after 5 minutes, as the statement_timeout of metabase_reader does
+      # (postgres/warehouse.sql), which stays as a second fuse, and not after its default of 20
+      # (ADR-0037). A query that finds all 15 connections of the pool to the warehouse in use waits
+      # 30 seconds for one and then fails, so that an overloaded warehouse gives a person an error
+      # and not a card that loads for ever: the default of 0 waits with no limit.
+      MB_DB_QUERY_TIMEOUT_MINUTES: "5"
+      MB_JDBC_DATA_WAREHOUSE_CONNECTION_POOL_CHECKOUT_TIMEOUT_MS: "30000"
       # Metabase 0.63 and 0.64 turn their AI entry points on by default: the built-in MCP server (with the
       # OAuth client registration that goes with it), the Agent API and Metabot. The level of AI access
       # in .env decides the MCP server (ADR-0017): METABASE_MCP turns it on, with the master switch of
@@ -657,6 +664,8 @@ services:
       METABASE_SITE_NAME: agoranomos
       METABASE_ADMIN_EMAIL: ${AGORANOMOS_ADMIN_EMAIL:-admin@example.com}
       METABASE_ADMIN_PASSWORD: ${METABASE_ADMIN_PASSWORD:?run ./agoranomos init}
+      # The hour of the daily scan of the values of the filters (ADR-0037).
+      METABASE_SCAN_TIME: ${METABASE_SCAN_TIME:-12:00}
       WAREHOUSE_HOST: warehouse-db
       WAREHOUSE_PORT: "5432"
       WAREHOUSE_DB: warehouse

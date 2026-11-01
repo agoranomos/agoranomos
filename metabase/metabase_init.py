@@ -11,14 +11,17 @@ it applies the metadata of the marts (metadata.py): the names, descriptions and 
 the overrides of the deployment give the tables and fields of the marts, with one line for each
 change, and keeps the KPIs that the marts declare as metrics in the collection agoranomos / Metrics
 and as terms of the glossary (metrics.py, ADR-0034). While Metabase starts its weeks on its default,
-Sunday, the job starts them on Monday, as ISO 8601 does. It keeps the dashboard Advertising, with
-its tabs, in the collection agoranomos / Advertising (advertising.py, ADR-0034), once Metabase shows
-the marts. Last, it keeps the Ops collection, a dashboard about the pipeline itself, in the
-collection agoranomos as the code says (ops.py, ADR-0029), and gives every group but
-Administrators at most View on the collections of the content of the package that the registry of
-the content records, the collection agoranomos and its packages such as Demo, Advertising and Ops
-(content.py, ADR-0018), on every start, with one line for each change. Run with the argument diff,
-as ./agoranomos metadata diff does, it prints the plan of the metadata and applies nothing.
+Sunday, the job starts them on Monday, as ISO 8601 does. It keeps the daily scan of the values of
+the filters at METABASE_SCAN_TIME, after the nightly load, the sync hourly, and the policy of the
+cache of the whole instance Adaptive, with one line for each change (ADR-0037). It keeps the
+dashboard Advertising, with its tabs, in the collection agoranomos / Advertising (advertising.py,
+ADR-0034), once Metabase shows the marts. Last, it keeps the Ops collection, a dashboard about the
+pipeline itself, in the collection agoranomos as the code says (ops.py, ADR-0029), and gives every
+group but Administrators at most View on the collections of the content of the package that the
+registry of the content records, the collection agoranomos and its packages such as Demo,
+Advertising and Ops (content.py, ADR-0018), on every start, with one line for each change. Run with
+the argument diff, as ./agoranomos metadata diff does, it prints the plan of the metadata and
+applies nothing.
 
 Every secret comes from the environment and goes only into the body of a request. The messages of
 this script name a step and an HTTP status, or the class of an error (and, for an answer of an
@@ -32,6 +35,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import re
 import sys
 import time
 import traceback
@@ -75,7 +79,13 @@ ENV_NAMES = {
     "metadata_export": "METADATA_EXPORT",
     "metadata_overrides": "METADATA_OVERRIDES",
     "content_registry": "CONTENT_REGISTRY",
+    "scan_time": "METABASE_SCAN_TIME",
 }
+
+# A time of the scan of the values of the filters: Metabase 0.64.1 makes the schedule of a daily
+# scan from an hour alone, and drops a minute (schedule-map->cron-string in
+# src/metabase/util/cron.clj at the tag v0.64.1, and a call to it).
+SCAN_TIME = re.compile(r"([01][0-9]|2[0-3]):00")
 
 # The hints that end a message. A step that fails gets the one for its status, or LOGS_HINT.
 LOGS_HINT = "See ./agoranomos logs metabase."
@@ -158,10 +168,17 @@ class Config:
     metadata_export: str
     metadata_overrides: str
     content_registry: str
+    scan_time: str
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
-        return cls(**read_settings(env, ENV_NAMES, urls=("url",)))
+        values = read_settings(env, ENV_NAMES, urls=("url",))
+        if not SCAN_TIME.fullmatch(values["scan_time"]):
+            raise SetupError(
+                f"{ENV_NAMES['scan_time']} must be a whole hour as HH:00, such as 12:00: Metabase "
+                "starts a daily scan at the start of an hour"
+            )
+        return cls(**values)
 
 
 class WarehouseAddress(Protocol):
@@ -575,6 +592,87 @@ def ensure_week_start(metabase: Metabase, log: Callable[[str], None]) -> None:
         log(f"set: the first day of the week of Metabase, {WEEK_START}")
 
 
+# The switch of the connection of "Choose when syncs and scans happen" in Metabase: without it,
+# Metabase replaces a schedule that it gets with random ones (infer-db-schedules in
+# src/metabase/warehouses/models/database.clj at the tag v0.64.1, and a call to it).
+USER_SCHEDULES = "let-user-control-scheduling"
+# The minute of the hourly sync of a connection whose sync someone changed to anything else: one
+# of the two defaults of Metabase.
+SYNC_MINUTE = 50
+
+
+def hourly(schedule: Any) -> bool:
+    """Whether a schedule of Metabase, a cron string of Quartz, runs each hour at a minute of its
+    own: seconds, minutes, hours, and the rest."""
+    parts = schedule.split() if isinstance(schedule, str) else []
+    return len(parts) == 7 and parts[1].isdigit() and parts[2] == "*"
+
+
+def ensure_schedules(
+    metabase: Metabase, database_id: int, config: Config, log: Callable[[str], None]
+) -> None:
+    """Keep the daily scan of the values of the filters at METABASE_SCAN_TIME, after the nightly
+    load, and the sync hourly, at the minute that Metabase drew, as ADR-0037 says.
+
+    Metabase keeps no record of who set a schedule. While the switch of the schedules was never
+    set, the scan runs at the hour that Metabase drew, and setting it is a first fill. After that,
+    a scan that differs is an edit in Metabase, or a new value of METABASE_SCAN_TIME, which the
+    line does not tell apart. It shows what it replaced. An edit can also set the scan to none: a
+    choice of Metabase to scan only for a new filter, or never."""
+    path = f"/api/database/{database_id}"
+    database = metabase.call("GET", path)
+    details = database.get("details") or {}
+    hour = int(config.scan_time[:2])
+    scan = f"0 0 {hour} * * ? *"
+    shown = database.get("cache_field_values_schedule")
+    sync = database.get("metadata_sync_schedule")
+    schedules: dict[str, dict[str, Any]] = {}
+    changes = []
+    if details.get(USER_SCHEDULES) is not True or shown != scan:
+        schedules["cache_field_values"] = {"schedule_type": "daily", "schedule_hour": hour}
+        kind = metadata.FIRST if USER_SCHEDULES not in details else metadata.REVERT
+        changes.append(metadata.Change(kind, "warehouse", "scan of field values", shown, scan))
+    if not hourly(sync):
+        schedules["metadata_sync"] = {"schedule_type": "hourly", "schedule_minute": SYNC_MINUTE}
+        hourly_sync = f"0 {SYNC_MINUTE} * * * ? *"
+        changes.append(metadata.Change(metadata.REVERT, "warehouse", "sync", sync, hourly_sync))
+    if not schedules:
+        return
+    metabase.call(
+        "PUT",
+        path,
+        {
+            # The details whole, with the password of the job in place of the mask of the answer.
+            "details": {**details, **warehouse_details(config), USER_SCHEDULES: True},
+            # A schedule of the scan holds only with these two: "Regularly, on a schedule".
+            "is_full_sync": True,
+            "is_on_demand": False,
+            "schedules": schedules,
+        },
+        hints={400: WAREHOUSE_HINT},
+    )
+    for change in changes:
+        log(metadata.describe(change))
+
+
+# The policy of the cache of the whole instance, the one level of Metabase OSS (ADR-0037): Adaptive,
+# which the API of Metabase 0.64.1 calls ttl, in whole numbers. A saved question that takes over one
+# second stays in the cache for ten times what it takes on average.
+CACHE_POLICY = {"type": "ttl", "multiplier": 10, "min_duration_ms": 1000}
+
+
+def ensure_cache_policy(metabase: Metabase, log: Callable[[str], None]) -> None:
+    """Keep CACHE_POLICY. Metabase answers an empty list while it has no policy, and setting one
+    then is a first fill; any other policy is an edit in Metabase."""
+    policies = items_of(metabase.call("GET", "/api/cache"))
+    shown = next((p["strategy"] for p in policies if p["model"] == "root"), None)
+    if shown != CACHE_POLICY:
+        body = {"model": "root", "model_id": 0, "strategy": CACHE_POLICY}
+        metabase.call("PUT", "/api/cache", body)
+        kind = metadata.FIRST if shown is None else metadata.REVERT
+        log(metadata.describe(metadata.Change(kind, "metabase", "cache", shown, CACHE_POLICY)))
+
+
 def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> int:
     environment = os.environ if env is None else env
     arguments = list(argv)
@@ -614,6 +712,8 @@ def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> in
         log = logged("metabase-init")
         metadata.apply(metabase, database_id, marts, wait, log=log)
         ensure_week_start(metabase, log)
+        ensure_schedules(metabase, database_id, config, log)
+        ensure_cache_policy(metabase, log)
         # The KPIs of the marts, as metrics and terms of the glossary (ADR-0034).
         metrics.ensure(metabase, registry, config.metadata_export, database_id, log)
         # The dashboard Advertising, with or without the demo, once Metabase shows the marts.
