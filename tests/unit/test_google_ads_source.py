@@ -446,12 +446,29 @@ def test_an_error_of_the_api_on_one_account_does_not_stop_its_neighbor(ads):
     )
     record = {row["account_id"]: row for row in rows["_agoranomos_reloads"]}
     assert (record["1111111111"]["status"], record["1111111111"]["error"]) == ("loaded", None)
-    failed = record["2222222222"]
-    assert (failed["status"], failed["error"]) == ("failed", ERROR)
-    # It loaded no day, so the next load takes its days from the last that a load took.
-    assert (failed["as_of"], failed["window_start"], failed["window_end"]) == (None, None, None)
-    assert failed["now"] == NOW
-    assert failed["loaded_at"] == record["1111111111"]["loaded_at"]
+    assert (record["2222222222"]["status"], record["2222222222"]["error"]) == ("failed", ERROR)
+
+
+def test_a_failed_account_has_no_day_and_no_moment_of_a_load_in_the_journal(ads):
+    # ops_loads takes max(window_end) as the last day loaded and max(loaded_at) as the last load of
+    # an account, and recorded() max(window_end): a failed attempt leaves all of them as they were,
+    # so the account shows as late and the next load takes its days; now keeps the attempt.
+    module, state, made, extensions = ads
+    state["failing"] = {"2222222222"}
+    with pytest.raises(module.AccountsFailed):
+        module.load(NOW, extensions)
+    [(rows, _)] = made["pipelines"][0].runs
+    [failed] = [row for row in rows["_agoranomos_reloads"] if row["status"] == "failed"]
+    assert failed == {
+        "account_id": "2222222222",
+        "as_of": None,
+        "window_start": None,
+        "window_end": None,
+        "now": NOW,
+        "loaded_at": None,
+        "status": "failed",
+        "error": ERROR,
+    }
 
 
 def test_an_error_in_the_middle_of_an_account_leaves_nothing_of_it_in_the_load(ads):

@@ -33,9 +33,11 @@ TEXT, DATE, TIMESTAMP = {"data_type": "text"}, {"data_type": "date"}, {"data_typ
 # account (as_of), the first and last day of the window that the load replaced, and the moment of
 # the load. An account whose request to its API failed, which the load of Google Ads catches at the
 # account and goes on without (ADR-0035), has the status failed, the text of the error as the
-# source gives it, which names no secret, and no day: it loaded none, so the next load takes its
-# days from the last that a load took. The rows of the loads before the status existed have none,
-# and all of them loaded. dlt writes a timestamp as a timestamp with time zone in PostgreSQL.
+# source gives it, which names no secret, the moment of the attempt (now), and no day and no
+# loaded_at: it loaded nothing, so the next load takes its days from the last that a load took, and
+# the Ops collection shows the last load that was. The rows of the loads before the status existed
+# have none, and all of them loaded. dlt writes a timestamp as a timestamp with time zone in
+# PostgreSQL.
 RELOADS = "_agoranomos_reloads"
 RELOAD_HINTS = {
     "write_disposition": "append",

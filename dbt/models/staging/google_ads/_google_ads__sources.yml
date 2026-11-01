@@ -17,9 +17,10 @@ sources:
           The journal of the loads of Google Ads: one row for each account in each load. An account
           that the load took has the status loaded, the day of the load in the time zone of the
           account (as_of), the first and last day that the load replaced (window_start,
-          window_end), and the moment of the load. An account whose request to the API failed has
-          the status failed, the text of the error, and no day. The rows of the loads before the
-          status existed have none, and all of them loaded.
+          window_end), and the moment of the load (loaded_at). An account whose request to the API
+          failed has the status failed, the text of the error, the moment of the attempt (now), and
+          no day and no loaded_at, as nothing was loaded. The rows of the loads before the status
+          existed have none, and all of them loaded.
       - name: customers
         description: >-
           Each account as its customer resource gives it: its ID, name, currency, time zone,

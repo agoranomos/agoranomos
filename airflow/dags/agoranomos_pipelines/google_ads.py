@@ -389,23 +389,23 @@ def accounts_scope(account_ids: Iterable[str]) -> str:
 @dataclass
 class Read:
     """Everything that a load read of one account, before dlt sees any of it: its row of
-    customers, the window of its facts, the rows of its campaigns, ad groups and ads by table, and
-    the rows of its facts by table, each in a file of its own."""
+    customers, the window of its facts, and the rows of its campaigns, ad groups and ads and of
+    its facts, in a file for each table."""
 
     customer: dict
     window: tuple[date, date]
-    entities: dict[str, list[dict]]
-    facts: dict[str, Path]
+    files: dict[str, Path]
 
 
 def read_account(
     api: Api, account_id: str, now: datetime, last_end: date | None, staging: Path
 ) -> Read:
-    """Read an account whole: its customer, which gives its time zone and so its window, its
-    campaigns, ad groups and ads, and the facts of its window, in a file for each table in the
-    folder of the account under staging, so that the load holds one answer in memory at a time. An
-    error of the API on any request raises GoogleAdsError and leaves nothing of the account: a
-    window replaces whole days, and a part of one would lose the rest (ADR-0035)."""
+    """Read an account whole: its customer, which gives its time zone and so its window, then its
+    campaigns, ad groups and ads and the facts of its window, each table into a file in the folder
+    of the account under staging, on disk, so that the load holds one answer in memory at a time,
+    as a load that fed dlt did (ADR-0038). An error of the API on any request raises GoogleAdsError
+    and leaves nothing of the account: a window replaces whole days, and a part of one would lose
+    the rest (ADR-0035)."""
     rows = [
         row
         for row in api.search(account_id, query("customers"))
@@ -415,29 +415,28 @@ def read_account(
         raise GoogleAdsError(f"Google Ads account {account_id}: the API returned no customer")
     customer = rows[0]
     first, last = window(yesterday(now, customer["customer"]["timeZone"]), last_end)
-    entities = {table: list(api.search(account_id, query(table))) for table in ENTITIES}
     # The ID is checked digits.
     folder = staging / account_id
     folder.mkdir()
-    facts = {}
+    files = {}
     try:
-        for table in FACTS:
+        for table in (*ENTITIES, *FACTS):
             path = folder / f"{table}.jsonl"
             with path.open("w", encoding="utf-8") as file:
-                for days in chunks(first, last):
+                for days in chunks(first, last) if table in FACTS else [None]:
                     for row in api.search(account_id, query(table, days)):
                         file.write(json.dumps(row) + "\n")
-            facts[table] = path
+            files[table] = path
     except GoogleAdsError:
         shutil.rmtree(folder, ignore_errors=True)
         raise
-    return Read(customer, (first, last), entities, facts)
+    return Read(customer, (first, last), files)
 
 
 def staged_rows(read: dict[str, Read], table: str) -> Iterator[dict]:
-    """The rows of a fact table of each account read, from its file, as the API gave them."""
+    """The rows of a table of each account read, from its file, as the API gave them."""
     for account in read.values():
-        with account.facts[table].open(encoding="utf-8") as file:
+        with account.files[table].open(encoding="utf-8") as file:
             for line in file:
                 yield json.loads(line)
 
@@ -532,8 +531,7 @@ def load(now: datetime, extensions: Path = EXTENSIONS) -> dict[str, int]:
                     "boundary_timestamp": now.isoformat(),
                     "destination_scope": accounts_scope(read),
                 }
-                rows = [row for account in read.values() for row in account.entities[table]]
-                resources.append(dlt.resource(rows, name=table, **hints))
+                resources.append(dlt.resource(staged_rows(read, table), name=table, **hints))
             windows = {account_id: account.window for account_id, account in read.items()}
             for table in FACTS:
                 hints = own(HINTS[table])
@@ -555,13 +553,15 @@ def load(now: datetime, extensions: Path = EXTENSIONS) -> dict[str, int]:
             }
             for account_id, account in read.items()
         ] + [
+            # Nothing was loaded: no day and no loaded_at, so that recorded() and ops_loads pass
+            # the row over, as they do for an account that no load took; now keeps the attempt.
             {
                 "account_id": account_id,
                 "as_of": None,
                 "window_start": None,
                 "window_end": None,
                 "now": now,
-                "loaded_at": loaded_at,
+                "loaded_at": None,
                 "status": FAILED,
                 "error": str(error),
             }
