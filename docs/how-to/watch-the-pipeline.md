@@ -20,7 +20,7 @@ A test records its status and the number of rows that it found, never the rows: 
 
 ## Where the data comes from
 
-- **The loads.** Each load of a platform records the window of each account that it replaced in `_agoranomos_reloads` of its schema, in the same run as its rows; the view `ops.ops_loads` keeps the last of each account.
+- **The loads.** Each load of a platform records the window of each account that it replaced in `_agoranomos_reloads` of its schema, in the same run as its rows; the view `ops.ops_loads` keeps the last of each account. A load of Google Ads also records an account whose request to the API failed, with `status = 'failed'` and the error, and no window, so the account shows as late ([Connect Google Ads](connect-google-ads.md#when-the-load-fails)).
 - **The runs of dbt.** The package elementary records the result of each model, seed and test in its tables in the schema `ops`, from the hooks that it adds to every run of dbt, with the run of Airflow that the task gives dbt. The first task of dbt of each run of the transform, `elementary`, builds those tables. The views `ops.ops_transform_nodes` and `ops.ops_transform_tests` read them, without the SQL of a model and the settings of a run, which the tables also keep.
 - **The tables.** The view `ops.ops_warehouse_tables` reads the catalog of PostgreSQL when the question runs.
 

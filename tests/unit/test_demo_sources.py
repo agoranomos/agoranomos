@@ -370,6 +370,7 @@ def test_every_load_records_the_window_and_the_day_of_each_account(sources):
         window = (week(account), common.last_final_day(late, account.time_zone))
         assert (row["window_start"], row["window_end"]) == window
         assert row["now"] == late
+        assert row["status"] == "loaded"
     assert {r["as_of"] for r in recorded.values()} == {date(2026, 10, 12), date(2026, 10, 13)}
     assert module.RELOADS not in counts
 

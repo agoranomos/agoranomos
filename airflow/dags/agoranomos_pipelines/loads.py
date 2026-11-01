@@ -1,8 +1,8 @@
 """What the dlt sources of the agoranomos bundle share: the connection of the loader role, the
-settings of dlt for each load, the hints of the record of the windows that each load replaces
-(_agoranomos_reloads), and how a load reads that record (ADR-0004). The sources of the demo
-(demo/sources.py), of the rates of the ECB (ecb.py) and of Google Ads (google_ads.py) load through
-them."""
+settings of dlt for each load, the hints of the journal of each load (_agoranomos_reloads), which
+records the window that the load replaced for each account, or that the account failed, and how a
+load reads that journal (ADR-0004). The sources of the demo (demo/sources.py), of the rates of the
+ECB (ecb.py) and of Google Ads (google_ads.py) load through them."""
 
 from __future__ import annotations
 
@@ -28,10 +28,14 @@ DLT_SETTINGS = {
 }
 TEXT, DATE, TIMESTAMP = {"data_type": "text"}, {"data_type": "date"}, {"data_type": "timestamp"}
 
-# Each load also appends the window of each account that it replaced, in the same run as the
-# facts: the day of the load in the time zone of the account (as_of), the first and last day of
-# the window, and the moment of the load. dlt writes a timestamp as a timestamp with time zone in
-# PostgreSQL.
+# Each load also appends a row for each account to its journal, in the same run as the facts. An
+# account that the load took has the status loaded: the day of the load in the time zone of the
+# account (as_of), the first and last day of the window that the load replaced, and the moment of
+# the load. An account whose request to its API failed, which the load of Google Ads catches at the
+# account and goes on without (ADR-0035), has the status failed, the text of the error as the
+# source gives it, which names no secret, and no day: it loaded none, so the next load takes its
+# days from the last that a load took. The rows of the loads before the status existed have none,
+# and all of them loaded. dlt writes a timestamp as a timestamp with time zone in PostgreSQL.
 RELOADS = "_agoranomos_reloads"
 RELOAD_HINTS = {
     "write_disposition": "append",
@@ -42,8 +46,11 @@ RELOAD_HINTS = {
         "window_end": DATE,
         "now": TIMESTAMP,
         "loaded_at": TIMESTAMP,
+        "status": TEXT,
+        "error": TEXT,
     },
 }
+LOADED, FAILED = "loaded", "failed"
 
 
 def own(hints: dict) -> dict:
@@ -94,7 +101,8 @@ def has_loads(pipeline) -> bool:
 def recorded(pipeline) -> dict[str, tuple[date, date]]:
     """The day of the newest load (as_of) and the last day loaded (window_end) of each account, as
     the loads of the dataset of a pipeline recorded them in _agoranomos_reloads; none before the
-    first load."""
+    first load. A row of a failed account has no day, so max() passes it over, and an account whose
+    loads all failed has no record, as one that no load took yet."""
     try:
         with pipeline.sql_client() as client:
             table = client.make_qualified_table_name(RELOADS)
@@ -104,4 +112,4 @@ def recorded(pipeline) -> dict[str, tuple[date, date]]:
             )
     except DatabaseUndefinedRelation:
         return {}
-    return {account_id: (as_of, end) for account_id, as_of, end in rows or ()}
+    return {account_id: (as_of, end) for account_id, as_of, end in rows or () if end is not None}
