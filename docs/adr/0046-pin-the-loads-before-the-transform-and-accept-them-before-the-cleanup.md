@@ -15,6 +15,8 @@ decision-makers: Andrei Gromov
 * ADR-0035 deletes the rows and then marks the load accepted, and ADR-0038 gives an emptied table a `TRUNCATE`. A failure between the first two left a pinned load with no rows, and the next run read its window as empty days and deleted them from the core. A `TRUNCATE` after a separate check lost 400 of 6,720 rows of a load in progress, which still ended whole in `_dlt_loads`.
 * ADR-0039 runs "the tests of the sources" first. Such a test stops the first `up`, when a table of L0 does not exist yet, and it reads past the pin: the rows of a killed load stopped a run.
 
+Two more follow from the same checks. `DETACH CONCURRENTLY` cannot run in a function or a procedure (SQLSTATE 25001), so a role without ownership cannot reach it through `SECURITY DEFINER`, while [ADR-0039](0039-run-one-dbt-build-in-the-watcher-mode.md) detaches and drops the partitions of journals. And [ADR-0044](0044-keep-the-core-for-good-and-change-it-by-migrations.md) cleans `core.loads` by partition, while a pin needs a key that its `on conflict` can use, with no date in it.
+
 An accepted record keeps its decision, so these changes need a record of their own. Where is a load pinned, which load does L1 read, in what order is a load accepted and erased, and where do the checks of L0 run?
 
 ## Decision Drivers
@@ -57,7 +59,7 @@ Chosen options: "One task before the tasks of dbt", "the newest load for each ac
 
 * **The pin.** One task before the tasks of dbt in the DAG of the transform runs `dbt run-operation` on a macro that pins the finished loads. Only a run of the DAG pins: dbt by hand reads what is pinned and pins nothing. The task stays once the watcher mode comes, so that the rule is one.
 * **What L1 reads.** For each account and day of a window, the load with the largest `_dlt_load_id`, compared as a number, among the pinned and the accepted, and rows of L0 only from the pinned. So a short window of a newer load keeps the other days of an older one, and an older load that ends after a newer one was accepted does not replace its days. A row of the journal with a failed account has no window, and L1 passes over it.
-* **`core.loads`.** One row for each load and account, as one load can be accepted for some accounts and wait in quarantine for others, with the status `pinned` or `accepted`.
+* **`core.loads`.** One row for each load and account, as one load can be accepted for some accounts and wait in quarantine for others, with the status `pinned` or `accepted` and the `load_sk` that the facts refer to ([ADR-0036](0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md)). It has no partitions, as its key holds no date and it holds a few hundred thousand rows at the limit: the DAG of maintenance deletes the rows past 13 months.
 * **The acceptance and the cleanup.** After a run that succeeded, in this order, each step repeatable:
     1. `transformer` marks as accepted what this run or an earlier one pinned, by load and account, with no account in quarantine and no stopped source. A load pinned later stays pinned, as no run has read it.
     1. `loader` deletes the rows of what is accepted, by load and account.
@@ -65,6 +67,8 @@ Chosen options: "One task before the tasks of dbt", "the newest load for each ac
 * **Unfinished loads.** `loader` removes the rows of a load older than a cut, with no row in `_dlt_loads` or in `core.loads`. The cut is no shorter than the `dagrun_timeout` of a load.
 * **The checks of L0.** No test on a raw table. The order inside a run stays as ADR-0039 gives it, without the tests of the sources: the checks of the data live on the views of L1, which is G1 of ADR-0035.
 * **The stop of a source.** ADR-0035 stops a source with more than half of its accounts in quarantine. A filter in SQL does it, as a test at `error` above a fact that all sources share stops the healthy ones too. A test at `warn`, the view of the quarantine and the alerts of [ADR-0045](0045-send-alerts-from-airflow-through-apprise.md) tell a person.
+
+* **The partitions of journals.** `core.drop_partition`, `SECURITY DEFINER` and for journals only, drops a month with a plain `DROP TABLE` and a `lock_timeout` of 2 seconds. A refusal costs a retry of the DAG. Journals have no foreign key, so the drop touches no dimension that a dashboard reads.
 
 The other options were not chosen for these reasons:
 
@@ -86,6 +90,7 @@ The other options were not chosen for these reasons:
 * Bad, because a red run holds back the acceptance and the cleanup of the healthy sources too, until a run succeeds.
 * Bad, because a new column in a raw table still waits for the open transaction of a model, and fails after the `lock_timeout`: "no lock to wait on" of ADR-0038 holds for rows. The retries of the DAGs of the loads cover it.
 * Bad, because the `LOCK TABLE` of the cleanup waits for a file of a load in progress, up to the `lock_timeout`.
+* Bad, because the `DROP TABLE` of a journal takes ACCESS EXCLUSIVE on its parent, so a write to the journal may wait up to 2 seconds.
 * Neutral: the DAG of the transform has one task more.
 
 ### Confirmation
@@ -95,9 +100,9 @@ A stack test puts a load of the demo between two tasks of dbt, and not only insi
 ## More Information
 
 * **Implementation status, as of November 2026:** planned for v0.5, with the pinning and the cleanup of ADR-0038, ADR-0035 and ADR-0039.
-* The facts behind this record: the runs of 1 November 2026, with dlt 1.31.0, dbt-core 1.12.6, dbt-postgres 1.11.0 and PostgreSQL 18.6, are in "More Information" of ADR-0035, ADR-0038 and ADR-0039. The numbers in the context above are from those runs. `DbtRunOperationLocalOperator` exists in Cosmos 1.15.1. A load id is a time in seconds as text, with fractions of different lengths, so it compares as a number.
+* The facts behind this record: the runs of 1 November 2026, with dlt 1.31.0, dbt-core 1.12.6, dbt-postgres 1.11.0 and PostgreSQL 18.6, are in "More Information" of ADR-0035, ADR-0036, ADR-0038 and ADR-0039. The numbers in the context above are from those runs. `DbtRunOperationLocalOperator` exists in Cosmos 1.15.1. A load id is a time in seconds as text, with fractions of different lengths, so it compares as a number.
 * Not checked yet, and to be checked with the code:
     * A task before the group of the watcher mode: the stand ran a task after it, and dbt by hand for the pin.
     * The view of L1 with its bound on the accepted loads, to the accounts in `pinned` and the windows that overlap theirs: the stand had no such bound, and over 13 months the view would unroll hundreds of thousands of days.
-* Related decisions: at acceptance this record replaces, in ADR-0038, "in `on-run-start`" and "the newest for each account" of "Pinning", and "a table that a cleanup has emptied gets a `TRUNCATE`"; in ADR-0035, the order of "The way of a load"; and in ADR-0039, "the tests of the sources" in the order of "The transform". The rest of those records stands.
+* Related decisions: at acceptance this record replaces, in ADR-0038, "in `on-run-start`" and "the newest for each account" of "Pinning", and "a table that a cleanup has emptied gets a `TRUNCATE`"; in ADR-0035, the order of "The way of a load"; in ADR-0039, "the tests of the sources" in the order of "The transform" and "detaches and" in "The DAG of maintenance"; and in ADR-0044, "By partition" for `core.loads`. The rest of those records stands.
 * Revisit this record when a release of Cosmos or dbt gives a pin that holds across the calls of one run, or when a load needs to be accepted in part of a window.
