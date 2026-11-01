@@ -1,8 +1,9 @@
 """What the dlt sources of the agoranomos bundle share: the connection of the loader role, the
-settings of dlt for each load, the hints of the journal of each load (_agoranomos_reloads), which
-records the window that the load replaced for each account, or that the account failed, and how a
-load reads that journal (ADR-0004). The sources of the demo (demo/sources.py), of the rates of the
-ECB (ecb.py) and of Google Ads (google_ads.py) load through them."""
+format of the files and the settings of dlt for each load, the hints of the journal of each load
+(_agoranomos_reloads), which records the window that the load replaced for each account, or that the
+account failed, how a load reads that journal, and how it counts its rows (ADR-0004). The sources of
+the demo (demo/sources.py), of the rates of the ECB (ecb.py), of Google Ads (google_ads.py) and of
+the settings of the model (settings/source.py) load through them."""
 
 from __future__ import annotations
 
@@ -15,17 +16,27 @@ import dlt
 from dlt.destinations.exceptions import DatabaseUndefinedRelation
 
 MERGE = {"disposition": "merge", "strategy": "delete-insert"}
+# The format of the files of every load, as an argument of each run: dlt writes the rows of a table
+# into a CSV file, and PostgreSQL reads it with COPY ... FROM STDIN, row by row, instead of parsing
+# statements of up to 16 MiB of SQL, the default insert_values, for which the kernel killed backends
+# of warehouse-db in October 2026 (ADR-0038). The state of dlt alone still goes as an INSERT. The
+# writer of csv puts an empty string, a None and a key that a row lacks alike, and COPY reads all
+# three as NULL, in a nullable column, so a table of raw holds no empty string (dlt 1.31.0,
+# PostgresCsvCopyJob, FORCE_NULL).
+FILE_FORMAT = "csv"
 # The settings of dlt 1.31.0 that every load sets, as environment variables of its configuration:
 DLT_SETTINGS = {
     # dlt leaves the rows of the last load in the staging dataset unless it is told to empty it.
     "LOAD__TRUNCATE_STAGING_DATASET": "true",
-    # dlt inserts a file of rows into PostgreSQL as statements of up to 16 MiB of SQL, up to 20
-    # files at once, and PostgreSQL takes many times the text of a statement to parse it: the
-    # history of the demo took warehouse-db past its memory limit. Files of at most 5,000 rows,
-    # two at a time, keep each statement to a few MiB and the load within the limit.
-    "NORMALIZE__DATA_WRITER__FILE_MAX_ITEMS": "5000",
+    # Two jobs at a time, a COPY of a file or a merge of a table, each on a backend of warehouse-db,
+    # and not the 20 of dlt.
     "LOAD__WORKERS": "2",
 }
+# Money is text in raw, or whole micros as text, never the type decimal of dlt, numeric(38,9) in
+# PostgreSQL, which silently loses the tenth place (ADR-0038). A number of the API that a hint makes
+# text keeps its digits: dlt writes it with str(), and staging casts the text exactly, where a cast
+# from double precision keeps 15 significant digits. A table that an earlier release made keeps its
+# double precision, which dlt does not change and COPY fills from the same text.
 TEXT, DATE, TIMESTAMP = {"data_type": "text"}, {"data_type": "date"}, {"data_type": "timestamp"}
 
 # Each load also appends a row for each account to its journal, in the same run as the facts. An
@@ -75,6 +86,21 @@ def or_marker(rows: Iterable[dict[str, object]]) -> Iterator[object]:
         yield row
     if empty:
         yield dlt.mark.materialize_table_schema()
+
+
+def row_counts(pipeline) -> dict[str, int]:
+    """The rows of each table in the last run of a pipeline, as dlt extracted them, without the
+    tables whose names start with an underscore: those of dlt and the journal. The counts of its
+    normalize step are of no use with csv: its writer adds up the keys of each row (dlt 1.31.0,
+    and 1.32.0, CsvWriter.write_data), so they say how many values a file holds. A list in a row,
+    a child table of dlt, counts here as the row that holds it."""
+    counts: dict[str, int] = {}
+    for steps in pipeline.last_trace.last_extract_info.metrics.values():
+        for step in steps:
+            for table, metrics in step["table_metrics"].items():
+                if not table.startswith("_"):
+                    counts[table] = counts.get(table, 0) + metrics.items_count
+    return counts
 
 
 def credentials() -> dict[str, object]:

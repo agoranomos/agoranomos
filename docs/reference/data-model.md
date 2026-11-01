@@ -10,7 +10,7 @@ The warehouse holds the advertising statistics of every platform in one model, b
 
 | Schema | What it holds | Written by | Read by |
 |---|---|---|---|
-| `raw_<platform>` | The responses of each platform as dlt loads them: nested objects become columns joined by `__`, and lists become child tables | `loader` | `transformer` |
+| `raw_<platform>` | The responses of each platform as dlt loads them with `COPY`: nested objects become columns joined by `__`, lists become child tables, and an empty string becomes NULL | `loader` | `transformer` |
 | `raw_<platform>_staging` | The rows of a load on their way into `raw_<platform>` | `loader` | nobody else |
 | `raw_settings` | The settings of the model of the deployment and the clients of the demo, loaded at the start of each run of the transform | `loader` | `transformer` |
 | `staging` | A view for each table of each platform and of the settings, in the names of the model (`stg_<platform>__<table>`, `stg_settings__<table>`); the steps that the platforms share (`int_<entity>__<verb>`), views as well, but for the statistics of ad groups and of ads, which are tables, so that each of their tests reads a table rather than computes them again; and the seeds of the base package (`seed_…`) | `transformer` | nobody else |
@@ -73,7 +73,7 @@ conversion_category = "lead"
 
 ## Currencies
 
-Money is `numeric(18,6)`, and no amount is rounded to cents in the marts. A fact has its money in the currency of its account (`spend`, `conversion_value`, beside `currency`) and in the reporting currency (`spend_reporting`, `conversion_value_reporting`, beside `reporting_currency`); the sessions have `total_revenue` and `total_revenue_reporting` in the same way. An amount in the reporting currency is the amount of the account times the rate of its day, to six places. Add up money across accounts only in the columns that end in `_reporting`: Metabase shows them as money, and the others as plain numbers. The reporting currency is the setting `AGORANOMOS_REPORTING_CURRENCY` ([Configuration](configuration.md)): `EUR` or a currency of the reference rates of the ECB, and `USD` or `EUR` with the rates of the demo alone.
+Money is `numeric(18,6)`, and no amount is rounded to cents in the marts. In the raw tables it is text, as whole micros or in units, so that a load keeps every digit that the platform gave: staging casts it, and the type `decimal` of dlt, which loses the tenth decimal place without a word, reaches no column ([ADR-0038](../adr/0038-load-by-copy-and-write-the-core-by-whole-days.md)). A fact has its money in the currency of its account (`spend`, `conversion_value`, beside `currency`) and in the reporting currency (`spend_reporting`, `conversion_value_reporting`, beside `reporting_currency`); the sessions have `total_revenue` and `total_revenue_reporting` in the same way. An amount in the reporting currency is the amount of the account times the rate of its day, to six places. Add up money across accounts only in the columns that end in `_reporting`: Metabase shows them as money, and the others as plain numbers. The reporting currency is the setting `AGORANOMOS_REPORTING_CURRENCY` ([Configuration](configuration.md)): `EUR` or a currency of the reference rates of the ECB, and `USD` or `EUR` with the rates of the demo alone.
 
 The rate of a day is the reference rate of the euro published on that day, or the last one before it on a day without a publication, such as a weekend; `fx_rates_daily.is_carried_forward` says which. A rate between two currencies goes through the euro: one unit of a currency is worth `rate(EUR → reporting) / rate(EUR → currency)` units of the reporting currency, to eight places. The reporting currency has the rate 1 on every day, and another currency has a rate from the first day that the source published one. The rates of the demo are fictional. The source `ecb` loads the reference rates of the European Central Bank, 29 currencies as of October 2026, when the DAG `agoranomos_ecb_daily` is unpaused ([The rates of the ECB](#the-rates-of-the-ecb)). Once it has rates, the model takes them alone, and those of the demo serve only a deployment without them ([ADR-0032](../adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md)).
 
@@ -84,6 +84,8 @@ The rate of a day is the reference rate of the euro published on that day, or th
 ## Names of campaigns
 
 Every row of a campaign carries its current name, so that a group by name does not split a renamed campaign. `ad_campaign_names` keeps the names that each campaign had, as the loads saw them; `web_sessions_daily.session_campaign_name` keeps the name that the links carried on the day. Link a session to its ad campaign by the campaign ID in `utm_id`: `web_sessions_daily.ad_platform` and `ad_account_id` name the campaign whose ID the links carried, when exactly one campaign of the data has it.
+
+A name that a platform leaves empty is no name. A load writes it as NULL, and staging reads an empty name of an earlier load as NULL too (the macro `to_name`), so the two count alike: an ad without a name takes its ID, and a campaign or an ad group without one fails its test, as every platform requires a name there.
 
 ## Quality
 

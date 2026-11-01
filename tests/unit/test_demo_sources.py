@@ -49,6 +49,7 @@ class StandInClient:
 class StandInPipeline:
     def __init__(self, options, loads, reloads):
         self.options, self.loads, self.queries, self.runs = options, loads, [], []
+        self.formats = []
         # The rows of SELECT account_id, max(as_of), max(window_end) ... GROUP BY account_id.
         self.reloads = reloads
         self.last_trace = None
@@ -56,13 +57,25 @@ class StandInPipeline:
     def sql_client(self):
         return StandInClient(self)
 
-    def run(self, resources):
+    def run(self, resources, loader_file_format=None):
+        self.formats.append(loader_file_format)
         rows = {r.name: list(r.data) for r in resources}
         self.runs.append((rows, {r.name: r.hints for r in resources}))
         counts = {name: sum(1 for row in found if row != MARKER) for name, found in rows.items()}
         counts["_dlt_pipeline_state"] = 1
         self.last_trace = types.SimpleNamespace(
-            last_normalize_info=types.SimpleNamespace(row_counts=counts)
+            last_extract_info=types.SimpleNamespace(
+                metrics={
+                    "1": [
+                        {
+                            "table_metrics": {
+                                name: types.SimpleNamespace(items_count=rows)
+                                for name, rows in counts.items()
+                            }
+                        }
+                    ]
+                }
+            )
         )
 
 
@@ -106,7 +119,6 @@ def sources(monkeypatch):
     # The settings of dlt that a load sets go when the test ends.
     for name in (
         "LOAD__TRUNCATE_STAGING_DATASET",
-        "NORMALIZE__DATA_WRITER__FILE_MAX_ITEMS",
         "LOAD__WORKERS",
     ):
         monkeypatch.setenv(name, "unset")
@@ -304,14 +316,46 @@ def test_a_load_empties_the_staging_dataset_and_signs_in_as_loader(sources):
     module.load("demo_fx", NOW)
 
     assert os.environ["LOAD__TRUNCATE_STAGING_DATASET"] == "true"
-    # Files of at most 5,000 rows, two at a time, so that the statements of dlt keep warehouse-db
-    # within its memory.
-    assert os.environ["NORMALIZE__DATA_WRITER__FILE_MAX_ITEMS"] == "5000"
+    # Two jobs at a time, and no limit on the size of a file, as COPY reads it row by row.
     assert os.environ["LOAD__WORKERS"] == "2"
+    assert "NORMALIZE__DATA_WRITER__FILE_MAX_ITEMS" not in os.environ
     credentials = module.credentials()
     assert credentials["username"] == "loader"
     assert credentials["database"] == "warehouse"
     assert "loader-password" not in repr(pipelines[0].options["pipelines_dir"])
+
+
+def test_every_run_of_a_load_goes_by_copy(sources):
+    module, pipelines, _ = sources
+    # The history makes more than one run: the names of the campaigns, and then the rows.
+    module.load_history("demo_search", NOW)
+
+    assert len(pipelines[-1].formats) > 1
+    assert set(pipelines[-1].formats) == {"csv"}
+
+
+def test_the_money_of_demo_search_is_text(sources):
+    module, _, _ = sources
+
+    money = {
+        (table, name)
+        for (code, table), hints in module.TABLE_HINTS.items()
+        for name, hint in hints["columns"].items()
+        if code == "demo_search"
+        and name.endswith("conversions_value")
+        and hint == {"data_type": "text"}
+    }
+    assert money == {
+        *(
+            (t, "metrics__conversions_value")
+            for t in ("campaign_stats", "ad_group_stats", "ad_stats")
+        ),
+        *(
+            (t, name)
+            for t in ("campaign_conversions", "ad_group_conversions", "ad_conversions")
+            for name in ("metrics__conversions_value", "metrics__all_conversions_value")
+        ),
+    }
 
 
 def test_a_load_logs_counts_and_tables_and_no_secret(sources, caplog):

@@ -27,7 +27,7 @@ select
     campaign_id,
     ad_group_id,
     ad_id,
-    coalesce(nullif(observed_name, ''), ad_id) as ad_name,
+    coalesce(observed_name, ad_id) as ad_name,
     ad_status,
     ad_type
 from newest

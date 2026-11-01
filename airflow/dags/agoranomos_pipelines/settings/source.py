@@ -14,7 +14,7 @@ from pathlib import Path
 
 import dlt
 
-from agoranomos_pipelines.loads import credentials
+from agoranomos_pipelines.loads import FILE_FORMAT, credentials, row_counts
 from agoranomos_pipelines.settings.files import load_settings
 
 # The folder of the settings of the deployment, extensions/model, which compose.yaml mounts
@@ -73,8 +73,8 @@ def load(extensions: Path = EXTENSIONS, demo_clients: Path | None = DEMO_CLIENTS
             destination=dlt.destinations.postgres(credentials=credentials()),
             dataset_name=DATASET,
         )
-        pipeline.run(resources)
-        counts = dict(pipeline.last_trace.last_normalize_info.row_counts)
+        pipeline.run(resources, loader_file_format=FILE_FORMAT)
+        counts = row_counts(pipeline)
     found = {table: counts.get(table, 0) for table in COLUMNS}
     for table, rows in found.items():
         log.info("Loaded %d rows into %s.%s", rows, DATASET, table)

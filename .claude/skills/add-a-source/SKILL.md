@@ -10,7 +10,8 @@ A source goes through every layer of the model ([ADR-0025](../../../docs/adr/002
 ## Decide first
 
 - **The shape.** Each API shape has one macro in `dbt/macros/shapes/`, which the demo and the connector of that platform share: `google_ads_v25`, `meta_v26`, `tiktok_v1_3`, `ga4_v1beta` and `euro_rates`. A source of a shape that exists calls its macros. A new shape gets a new macro file, which follows the rules of ADR-0025:
-    - money as `numeric(18,6)`, in the currency of the account;
+    - money as `numeric(18,6)`, in the currency of the account, through the macros of `dbt/macros/numbers.sql`;
+    - a name of a platform through `to_name` of `dbt/macros/names.sql`, as an empty one is none;
     - `report_date` in the time zone of the account;
     - clicks to the site;
     - conversions as the platform counts them.
@@ -27,6 +28,8 @@ A source goes through every layer of the model ([ADR-0025](../../../docs/adr/002
     - `assets.py` holds the asset of the main table, and `LOADED` there, the condition that starts the transform, takes the asset of a new source ([ADR-0039](../../../docs/adr/0039-run-one-dbt-build-in-the-watcher-mode.md)).
 
     Every load also records the window of each account that it replaced in `_agoranomos_reloads`, in the same run. Give every table and column hint the reason that the code around it gives.
+
+    Each `pipeline.run` takes `loader_file_format=FILE_FORMAT` and `row_counts` of `loads.py`, so that the rows go by `COPY`. An empty string reaches the table as NULL. Money stays text, with a hint where the API writes it as a number, and never a `Decimal` of Python, which dlt would keep to nine places ([ADR-0038](../../../docs/adr/0038-load-by-copy-and-write-the-core-by-whole-days.md)).
 3. **Staging.** Add a folder `dbt/models/staging/<platform>/` with three kinds of files:
     - `_<platform>__sources.yml`: every raw table with a description, and `freshness: null`;
     - `_<platform>__models.yml`: every model and column with a description, and the critical tests;

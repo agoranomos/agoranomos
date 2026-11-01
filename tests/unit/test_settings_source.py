@@ -25,15 +25,28 @@ CLIENTS = '[clients.acme]\nname = "Acme Outdoor"\n'
 class StandInPipeline:
     def __init__(self, options):
         self.options, self.runs, self.last_trace = options, [], None
+        self.formats = []
 
-    def run(self, resources):
+    def run(self, resources, loader_file_format=None):
+        self.formats.append(loader_file_format)
         rows = {r.name: list(r.data) for r in resources}
         self.runs.append((rows, {r.name: r.hints for r in resources}))
         counts = {name: sum(1 for row in found if row != MARKER) for name, found in rows.items()}
         counts = {name: count for name, count in counts.items() if count}
         counts["_dlt_pipeline_state"] = 1
         self.last_trace = types.SimpleNamespace(
-            last_normalize_info=types.SimpleNamespace(row_counts=counts)
+            last_extract_info=types.SimpleNamespace(
+                metrics={
+                    "1": [
+                        {
+                            "table_metrics": {
+                                name: types.SimpleNamespace(items_count=rows)
+                                for name, rows in counts.items()
+                            }
+                        }
+                    ]
+                }
+            )
         )
 
 
@@ -85,6 +98,7 @@ def test_each_table_is_replaced_with_the_hints_of_its_columns(source, tmp_path):
     module.load(tmp_path, module.DEMO_CLIENTS)
     [pipeline] = pipelines
     [(rows, hints)] = pipeline.runs
+    assert pipeline.formats == ["csv"]
     assert list(hints) == ["clients", "account_clients", "conversion_actions"]
     for table, hint in hints.items():
         assert hint["write_disposition"] == "replace", table

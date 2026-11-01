@@ -50,16 +50,29 @@ class StandInClient:
 class StandInPipeline:
     def __init__(self, options, state):
         self.options, self.state, self.runs, self.last_trace = options, state, [], None
+        self.formats = []
 
     def sql_client(self):
         return StandInClient(self)
 
-    def run(self, resources):
+    def run(self, resources, loader_file_format=None):
+        self.formats.append(loader_file_format)
         rows = {r.name: list(r.data) for r in resources}
         self.runs.append((rows, {r.name: r.hints for r in resources}))
         counts = {name: sum(1 for row in found if row != MARKER) for name, found in rows.items()}
         self.last_trace = types.SimpleNamespace(
-            last_normalize_info=types.SimpleNamespace(row_counts=counts)
+            last_extract_info=types.SimpleNamespace(
+                metrics={
+                    "1": [
+                        {
+                            "table_metrics": {
+                                name: types.SimpleNamespace(items_count=rows)
+                                for name, rows in counts.items()
+                            }
+                        }
+                    ]
+                }
+            )
         )
 
 
@@ -117,7 +130,6 @@ def ecb(monkeypatch):
     # The settings of dlt that a load sets go when the test ends.
     for name in (
         "LOAD__TRUNCATE_STAGING_DATASET",
-        "NORMALIZE__DATA_WRITER__FILE_MAX_ITEMS",
         "LOAD__WORKERS",
     ):
         monkeypatch.setenv(name, "unset")
@@ -181,6 +193,7 @@ def test_a_load_keeps_the_rows_as_the_csv_names_them_and_replaces_its_days(ecb):
     assert pipeline.options["dataset_name"] == "raw_ecb"
     assert pipeline.options["pipeline_name"] == "agoranomos_ecb"
     [(rows, hints)] = pipeline.runs
+    assert pipeline.formats == ["csv"]
     assert rows["rates_daily"][0] == {
         "KEY": "EXR.D.USD.EUR.SP00.A",
         "FREQ": "D",

@@ -5,7 +5,7 @@
 select
     '{{ platform }}' as platform,
     split_part(name, '/', 2) as property_id,
-    display_name as property_name,
+    {{ to_name('display_name') }} as property_name,
     time_zone,
     currency_code as currency
 from {{ relation }}
@@ -16,11 +16,11 @@ select
     to_date(cast("date" as text), 'YYYYMMDD') as report_date,
     '{{ platform }}' as platform,
     split_part(property, '/', 2) as property_id,
-    session_source,
-    session_medium,
-    session_campaign_name,
-    session_campaign_id,
-    session_default_channel_group,
+    {{ to_name('session_source') }} as session_source,
+    {{ to_name('session_medium') }} as session_medium,
+    {{ to_name('session_campaign_name') }} as session_campaign_name,
+    {{ to_name('session_campaign_id') }} as session_campaign_id,
+    {{ to_name('session_default_channel_group') }} as session_default_channel_group,
     {{ to_count('sessions') }} as sessions,
     {{ to_count('engaged_sessions') }} as engaged_sessions,
     {{ to_number('key_events') }} as key_events,

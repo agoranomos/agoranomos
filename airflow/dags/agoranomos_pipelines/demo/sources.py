@@ -37,6 +37,7 @@ from agoranomos_pipelines.demo.world import Account
 from agoranomos_pipelines.loads import (
     DATE,
     DLT_SETTINGS,
+    FILE_FORMAT,
     LOADED,
     MERGE,
     RELOAD_HINTS,
@@ -47,6 +48,7 @@ from agoranomos_pipelines.loads import (
     or_marker,
     own,
     recorded,
+    row_counts,
 )
 
 log = logging.getLogger(__name__)
@@ -55,6 +57,10 @@ SCD2 = {"disposition": "merge", "strategy": "scd2"}
 # The IDs of the tables of the ad groups and of the ads of demo_search.
 SEARCH_AD_GROUP = {"customer__id": TEXT, "campaign__id": TEXT, "ad_group__id": TEXT}
 SEARCH_AD = {**SEARCH_AD_GROUP, "ad_group_ad__ad__id": TEXT, "ad_group_ad__ad__name": TEXT}
+# The money of the reports of demo_search, which the API writes as a JSON number: text, as in the
+# table of the connector of Google Ads.
+SEARCH_STATS_MONEY = {"metrics__conversions_value": TEXT}
+SEARCH_ACTIONS_MONEY = {**SEARCH_STATS_MONEY, "metrics__all_conversions_value": TEXT}
 
 # The hints of each table, by the names that dlt gives the columns: the fields of the API in
 # snake_case, nested objects joined by __ (dlt 1.31.0, the naming convention snake_case).
@@ -69,11 +75,21 @@ TABLE_HINTS: dict[tuple[str, str], dict] = {
     },
     ("demo_search", "campaign_stats"): {
         "write_disposition": MERGE,
-        "columns": {"customer__id": TEXT, "campaign__id": TEXT, "segments__date": DATE},
+        "columns": {
+            "customer__id": TEXT,
+            "campaign__id": TEXT,
+            "segments__date": DATE,
+            **SEARCH_STATS_MONEY,
+        },
     },
     ("demo_search", "campaign_conversions"): {
         "write_disposition": MERGE,
-        "columns": {"customer__id": TEXT, "campaign__id": TEXT, "segments__date": DATE},
+        "columns": {
+            "customer__id": TEXT,
+            "campaign__id": TEXT,
+            "segments__date": DATE,
+            **SEARCH_ACTIONS_MONEY,
+        },
     },
     ("demo_search", "ad_groups"): {
         "write_disposition": SCD2,
@@ -81,21 +97,21 @@ TABLE_HINTS: dict[tuple[str, str], dict] = {
     },
     ("demo_search", "ad_group_stats"): {
         "write_disposition": MERGE,
-        "columns": {**SEARCH_AD_GROUP, "segments__date": DATE},
+        "columns": {**SEARCH_AD_GROUP, "segments__date": DATE, **SEARCH_STATS_MONEY},
     },
     ("demo_search", "ad_group_conversions"): {
         "write_disposition": MERGE,
-        "columns": {**SEARCH_AD_GROUP, "segments__date": DATE},
+        "columns": {**SEARCH_AD_GROUP, "segments__date": DATE, **SEARCH_ACTIONS_MONEY},
     },
     # A type of ad that Google gives no name has no field name, so its column is hinted.
     ("demo_search", "ads"): {"write_disposition": SCD2, "columns": SEARCH_AD},
     ("demo_search", "ad_stats"): {
         "write_disposition": MERGE,
-        "columns": {**SEARCH_AD, "segments__date": DATE},
+        "columns": {**SEARCH_AD, "segments__date": DATE, **SEARCH_STATS_MONEY},
     },
     ("demo_search", "ad_conversions"): {
         "write_disposition": MERGE,
-        "columns": {**SEARCH_AD, "segments__date": DATE},
+        "columns": {**SEARCH_AD, "segments__date": DATE, **SEARCH_ACTIONS_MONEY},
     },
     ("demo_social", "ad_accounts"): {
         "write_disposition": "replace",
@@ -338,9 +354,8 @@ def due(now: datetime) -> bool:
 def counted(counts: dict[str, int], pipeline) -> None:
     """Add the rows of the tables of the platform that the last run loaded: not those of dlt, nor
     the record of the windows."""
-    for table, rows in pipeline.last_trace.last_normalize_info.row_counts.items():
-        if not table.startswith("_"):
-            counts[table] = counts.get(table, 0) + rows
+    for table, rows in row_counts(pipeline).items():
+        counts[table] = counts.get(table, 0) + rows
 
 
 def load(
@@ -361,12 +376,15 @@ def load(
     with open_pipeline(code) as pipeline:
         if replay_names and not has_loads(pipeline):
             for moment in platform.module.name_versions(now):
-                pipeline.run(build(code, moment, entities_only=True, boundary=moment))
+                pipeline.run(
+                    build(code, moment, entities_only=True, boundary=moment),
+                    loader_file_format=FILE_FORMAT,
+                )
                 counted(counts, pipeline)
         resources = build(code, now, first=first, skip=skip, boundary=now)
         # In the same run as the facts, so that a load that fails records no window.
         resources.append(dlt.resource(reloads(code, now, first), name=RELOADS, **own(RELOAD_HINTS)))
-        pipeline.run(resources)
+        pipeline.run(resources, loader_file_format=FILE_FORMAT)
         counted(counts, pipeline)
     for table, rows in sorted(counts.items()):
         log.info(

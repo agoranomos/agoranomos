@@ -232,13 +232,16 @@ def test_the_names_of_campaigns_have_their_versions(env, history_run):
 
 
 # The columns of raw that staging reads, with the types that the hints of the resources give and
-# that dlt 1.31.0 writes: the day of each fact table, the money of Google as a string of micros, and
-# the windows of the actions of Meta in its child tables, as dlt names them. dlt writes its type
-# text as varchar, which PostgreSQL reports as character varying. The unit tests load with a
-# stand-in of dlt, so only a load with dlt itself shows that each hint reaches its column.
+# that dlt 1.31.0 writes: the day of each fact table, the money of Google as a string of micros or
+# of units, and the windows of the actions of Meta in its child tables, as dlt names them. dlt
+# writes its type text as varchar, which PostgreSQL reports as character varying. The unit tests
+# load with a stand-in of dlt, so only a load with dlt itself shows that each hint reaches its
+# column.
 RAW_COLUMNS = (
     "raw_demo_fx.rates_daily.rate_date:date",
+    "raw_demo_search.campaign_conversions.metrics__all_conversions_value:character varying",
     "raw_demo_search.campaign_conversions.segments__date:date",
+    "raw_demo_search.campaign_stats.metrics__conversions_value:character varying",
     "raw_demo_search.campaign_stats.metrics__cost_micros:character varying",
     "raw_demo_search.campaign_stats.segments__date:date",
     "raw_demo_social.insights_campaign.date_start:date",
@@ -261,6 +264,31 @@ def test_the_raw_tables_have_the_columns_that_staging_reads(env, history_run):
         f"WHERE table_schema || '.' || table_name || '.' || column_name IN ({names})",
     )
     assert sorted(text.splitlines()) == sorted(RAW_COLUMNS)
+
+
+def test_no_column_of_the_raw_tables_is_the_decimal_of_dlt(env, history_run):
+    # The type decimal of dlt is numeric(38,9), which silently loses the tenth place: money in raw
+    # is text (ADR-0038). dlt gives a column that type only for a Decimal of Python, so this test
+    # would see a source that starts to yield one.
+    found = warehouse_output(
+        env,
+        "SELECT table_schema || '.' || table_name || '.' || column_name "
+        "FROM information_schema.columns "
+        "WHERE table_schema LIKE 'raw\\_%' AND data_type = 'numeric'",
+    )
+    assert found == ""
+
+
+def test_a_load_leaves_no_empty_string_in_the_journal(env, history_run):
+    # The rows of the demo have no error: it reaches the table as NULL through the COPY of dlt,
+    # as the days of a failed account of Google Ads do.
+    for code in platforms.LOAD_ORDER:
+        dataset = platforms.PLATFORMS[code].dataset
+        found = warehouse_output(
+            env,
+            f"SELECT count(*) FILTER (WHERE error IS NOT NULL) FROM {dataset}._agoranomos_reloads",  # noqa: S608 (names of the demo)
+        )
+        assert int(found) == 0, code
 
 
 def test_a_row_that_the_platform_no_longer_sends_is_gone_after_the_next_load(
@@ -382,6 +410,21 @@ def test_each_load_of_the_history_updates_its_asset_and_logs_no_secret(
         assert said, f"the log of {instance['task_id']} does not say what it loaded"
         found = leaked(values, task_log(airflow_url, token, instance))
         assert not found, f"the log of {instance['task_id']} holds the values of {found}"
+
+
+def test_the_log_of_a_load_counts_the_rows(env, airflow_url, token, history_run):
+    # dlt says how many values a CSV file holds where it should say how many rows (dlt 1.31.0), so
+    # the line of a load takes the rows of the extraction of dlt.
+    now = moment(history_run)
+    module = platforms.PLATFORMS["demo_fx"].module
+    rows = sum(1 for _ in module.records(now, None, platforms.gap(now))["rates_daily"])
+    instances = task_instances(airflow_url, token, history_run)
+    [instance] = [i for i in instances if i["task_id"] == "load_demo_fx"]
+    lines = [
+        json.loads(entry).get("event") or "" for entry in task_log(airflow_url, token, instance)
+    ]
+    wanted = f"Loaded {rows} rows into raw_demo_fx.rates_daily"
+    assert any(wanted in line for line in lines), wanted
 
 
 def run_daily(airflow_url, token):
