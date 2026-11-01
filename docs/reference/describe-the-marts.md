@@ -1,6 +1,6 @@
 # Describe the marts
 
-Every model, seed and column of the dbt project, and every table of its sources, has a description. Every mart also has a display name for Metabase, and each of its columns a display name and a semantic type. People read the descriptions in SQL clients and in Metabase, and AI clients take their context from them through the MCP servers of Metabase and of the warehouse ([ADR-0007](../adr/0007-ai-access-via-mcp-read-only.md)), so they follow the rules on this page. Tests check them ([How the rules are checked](#how-the-rules-are-checked)).
+Every model, seed and column of the dbt project, and every table of its sources, has a description. Every mart also has a display name for Metabase, and each of its columns a display name, a semantic type and the way that a filter offers its values. People read the descriptions in SQL clients and in Metabase, and AI clients take their context from them through the MCP servers of Metabase and of the warehouse ([ADR-0007](../adr/0007-ai-access-via-mcp-read-only.md)), so they follow the rules on this page. Tests check them ([How the rules are checked](#how-the-rules-are-checked)).
 
 Metabase gets them on every start: the one-shot job `metadata-export` exports them from dbt, and `metabase-init` applies them, with the overrides of a deployment, as `demo-init` does for the marts of the demo once the demo pipeline has built them ([A deployment's own words](#a-deployments-own-words)).
 
@@ -44,6 +44,7 @@ The marts declare them under `config: meta: metabase:`, with the key names of [d
 |---|---|---|
 | `display_name` | Every mart and every column of a mart | The name that Metabase shows. |
 | `semantic_type` | Every column of a mart | The semantic type of the field in Metabase, such as `type/Category`, or `null` for none. |
+| `has_field_values` | Every column of a mart | How a filter offers the values of the field: `list`, `search` or `none` ([The values of a field](#the-values-of-a-field)). |
 | `currency` | A column whose semantic type is money | The ISO 4217 code of its currency, such as `USD`. |
 | `fk_target_table`, `fk_target_field` | A column whose semantic type is `type/FK` | The mart, as `schema.table`, and the column that the foreign key points at ([Foreign keys](#foreign-keys)). |
 
@@ -89,6 +90,30 @@ The jobs that apply the metadata never send a display name of `null`, which the 
           semantic_type: type/Currency
           currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
 ```
+
+## The values of a field
+
+`has_field_values` says how a filter of Metabase offers the values of a field. Left to itself, Metabase 0.64.1 makes a list of nearly every field that is not a date or a decimal: 138 of the 176 fields of the marts of the demo, identifiers and counts of impressions included. Each list that someone used in the last 14 days costs a scan of the whole table a day, so the code says which fields are lists ([ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md)):
+
+| Kind of column | `has_field_values` | What a filter does | In the demo |
+|---|---|---|---|
+| The platform, a status, the type of a thing, a currency, or another code from a short list, and a yes or no | `list` | Offers the values, which the daily scan keeps ([Configuration](configuration.md#the-scan-the-sync-and-the-cache-of-metabase)) | `platform_name`, `campaign_status`, `campaign_type`, `currency`, `session_medium`, `is_primary` |
+| The name of something, and other text that anyone can write | `search` | Takes what a person types, and asks the warehouse for the values that match it | `client_name`, `account_name`, `campaign_name`, `session_source` |
+| An identifier, a date or a time, and a measure | `none` | Takes what a person types, and offers nothing | `campaign_id`, `report_date`, `impressions`, `spend` |
+
+```yaml
+      - name: campaign_name
+        data_type: text
+        description: '{{ doc("campaign_name") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Campaign Name
+              semantic_type: type/Category
+              has_field_values: search
+```
+
+`metabase-init` and `demo-init` apply it as they apply a semantic type, and a value that someone changes in Metabase goes back at the next start ([Configuration](configuration.md#the-metadata-of-the-marts)). A column may declare only the three values above, and any other stops the job before it writes anything. The export of the metadata has the format 2 since this key: an export of format 1, of an earlier release, still reads, and its columns declare nothing here.
 
 ## Foreign keys
 
@@ -164,12 +189,12 @@ Metabase copies the comment of a table or column into its description when it sy
 
 ## A deployment's own words
 
-A deployment can override the display name and the description of a table or a field of the marts, and add a note of its own to a description, in `extensions/metadata/overrides.toml`: [Rename a field or add your own definitions](../how-to/rename-a-field.md) shows how, and [Configuration](configuration.md#the-metadata-of-the-marts) lists the properties and the limits. Overrides reach Metabase only. The semantic types and the currency stay those of the release.
+A deployment can override the display name and the description of a table or a field of the marts, and add a note of its own to a description, in `extensions/metadata/overrides.toml`: [Rename a field or add your own definitions](../how-to/rename-a-field.md) shows how, and [Configuration](configuration.md#the-metadata-of-the-marts) lists the properties and the limits. Overrides reach Metabase only. The semantic types, the currency and the values of fields stay those of the release.
 
 ## How the rules are checked
 
-- `tests/unit/test_dbt_project.py` reads the files: `persist_docs` is on, every description over several lines is `>-`, every seed and each of its columns has a description, every mart has its contract, its key and a test of its key, every `client_id` and `platform` of a mart is a foreign key of the key of one column that it names, and no other column is a key in Metabase, no primary key has a name, in whatever order its keys are written, and the columns of the staging and intermediate models take the doc blocks of their names.
-- `tests/stack/test_dbt_metadata.py` asks dbt itself, with `dbt ls` in the Airflow image, which resolves the doc blocks and the configs as dbt does: every model, seed, column and source table has a description, every mart has a display name and each of its columns a display name and a semantic type, columns of one name have one description, money has its tests of one currency and no NULL, the names follow the style, and every mart has its contract. It also checks the warehouse after a build: each table and view that dbt builds in `staging` and `marts` has exactly the columns that dbt declares, it and each of them carry the description as their comment, and the key of the mart is a primary key in PostgreSQL.
-- `tests/stack/test_metabase_metadata.py` checks Metabase after a start: every table and field of the marts shows the display name, the description and the semantic type of the code, also a semantic type of none, the currency of money, and the target of a foreign key; an edit in the Metabase UI is reverted at the next start, and a field that someone hid stays hidden.
+- `tests/unit/test_dbt_project.py` reads the files: `persist_docs` is on, every description over several lines is `>-`, every seed and each of its columns has a description, every mart has its contract, its key and a test of its key, every `client_id` and `platform` of a mart is a foreign key of the key of one column that it names, and no other column is a key in Metabase, every column of a mart has the `has_field_values` of its kind, no primary key has a name, in whatever order its keys are written, and the columns of the staging and intermediate models take the doc blocks of their names.
+- `tests/stack/test_dbt_metadata.py` asks dbt itself, with `dbt ls` in the Airflow image, which resolves the doc blocks and the configs as dbt does: every model, seed, column and source table has a description, every mart has a display name and each of its columns a display name, a semantic type and `has_field_values`, columns of one name have one description, money has its tests of one currency and no NULL, the names follow the style, and every mart has its contract. It also checks the warehouse after a build: each table and view that dbt builds in `staging` and `marts` has exactly the columns that dbt declares, it and each of them carry the description as their comment, and the key of the mart is a primary key in PostgreSQL.
+- `tests/stack/test_metabase_metadata.py` checks Metabase after a start: every table and field of the marts shows the display name, the description and the semantic type of the code, also a semantic type of none, the values of a field, the currency of money, and the target of a foreign key; an edit in the Metabase UI is reverted at the next start, and a field that someone hid stays hidden.
 
 CI runs the first on every pull request, and the other two on every pull request that changes the stack, such as `dbt/` or `metabase/`.

@@ -1148,6 +1148,12 @@ EOF
     '' | [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
     *) problem "GOOGLE_ADS_LOGIN_CUSTOMER_ID in .env must be the ten digits of a manager account of Google Ads, without hyphens, or empty" ;;
   esac
+  # The daily scan of Metabase (ADR-0037): a whole hour, as Metabase starts a daily scan at the
+  # start of an hour. metabase-init checks it too, for a start through plain docker compose.
+  case "$(setting METABASE_SCAN_TIME 12:00)" in
+    [01][0-9]:00 | 2[0-3]:00) ;;
+    *) problem "METABASE_SCAN_TIME in .env must be a whole hour as HH:00, such as 12:00: Metabase starts a daily scan at the start of an hour" ;;
+  esac
   # AI access in Metabase (ADR-0017): a level that this release offers, and the switches that follow
   # it, before Compose starts Metabase with them.
   message=$(ai_problem)

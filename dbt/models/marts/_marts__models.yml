@@ -92,7 +92,12 @@ models:
         data_type: date
         description: '{{ doc("report_date") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Report Date, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Report Date
+              semantic_type: null
+              has_field_values: none
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
@@ -102,12 +107,18 @@ models:
             metabase:
               display_name: Platform Code
               semantic_type: type/FK
+              has_field_values: list
               fk_target_table: marts.ad_platforms
               fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
-        config: {meta: {metabase: {display_name: Platform, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform
+              semantic_type: type/Category
+              has_field_values: list
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
@@ -117,57 +128,113 @@ models:
             metabase:
               display_name: Client ID
               semantic_type: type/FK
+              has_field_values: none
               fk_target_table: marts.clients
               fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
-        config: {meta: {metabase: {display_name: Client, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client
+              semantic_type: type/Category
+              has_field_values: search
       - name: account_id
         data_type: text
         description: '{{ doc("account_id") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Account ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: account_name
         data_type: text
         description: '{{ doc("account_name") }}'
-        config: {meta: {metabase: {display_name: Account Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: campaign_id
         data_type: text
         description: '{{ doc("campaign_id") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Campaign ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: campaign_name
         data_type: text
         description: '{{ doc("campaign_name") }}'
-        config: {meta: {metabase: {display_name: Campaign Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: currency
         data_type: text
         description: '{{ doc("currency") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Currency, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Currency
+              semantic_type: type/Category
+              has_field_values: list
       - name: impressions
         data_type: bigint
         description: '{{ doc("impressions") }}'
-        config: {meta: {metabase: {display_name: Impressions, semantic_type: type/Quantity}}}
+        config:
+          meta:
+            metabase:
+              display_name: Impressions
+              semantic_type: type/Quantity
+              has_field_values: none
       - name: clicks
         data_type: bigint
         description: '{{ doc("clicks") }}'
-        config: {meta: {metabase: {display_name: Clicks, semantic_type: type/Quantity}}}
+        config:
+          meta:
+            metabase:
+              display_name: Clicks
+              semantic_type: type/Quantity
+              has_field_values: none
       - name: spend
         data_type: numeric(18,6)
         description: '{{ doc("spend") }}'
         # Two currencies in the table: a plain number (docs/reference/describe-the-marts.md).
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Spend, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Spend
+              semantic_type: null
+              has_field_values: none
       - name: conversions
         data_type: numeric(18,6)
         description: '{{ doc("conversions") }}'
-        config: {meta: {metabase: {display_name: Conversions, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Conversions
+              semantic_type: null
+              has_field_values: none
       - name: conversion_value
         data_type: numeric(18,6)
         description: '{{ doc("conversion_value") }}'
-        config: {meta: {metabase: {display_name: Conversion Value, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Conversion Value
+              semantic_type: null
+              has_field_values: none
       - name: reporting_currency
         data_type: text
         description: '{{ doc("reporting_currency") }}'
@@ -180,7 +247,12 @@ models:
               name: ad_stats_campaign_daily_has_one_reporting_currency
               arguments:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
-        config: {meta: {metabase: {display_name: Reporting Currency, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Reporting Currency
+              semantic_type: type/Category
+              has_field_values: list
       - name: spend_reporting
         data_type: numeric(18,6)
         description: '{{ doc("spend_reporting") }}'
@@ -190,6 +262,7 @@ models:
             metabase:
               display_name: Spend in Reporting Currency
               semantic_type: type/Currency
+              has_field_values: none
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
       - name: conversion_value_reporting
         data_type: numeric(18,6)
@@ -199,6 +272,7 @@ models:
             metabase:
               display_name: Conversion Value in Reporting Currency
               semantic_type: type/Currency
+              has_field_values: none
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
   - name: ad_conversions_campaign_daily
     description: >-
@@ -229,7 +303,12 @@ models:
         data_type: date
         description: '{{ doc("report_date") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Report Date, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Report Date
+              semantic_type: null
+              has_field_values: none
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
@@ -238,12 +317,18 @@ models:
             metabase:
               display_name: Platform Code
               semantic_type: type/FK
+              has_field_values: list
               fk_target_table: marts.ad_platforms
               fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
-        config: {meta: {metabase: {display_name: Platform, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform
+              semantic_type: type/Category
+              has_field_values: list
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
@@ -252,36 +337,72 @@ models:
             metabase:
               display_name: Client ID
               semantic_type: type/FK
+              has_field_values: none
               fk_target_table: marts.clients
               fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
-        config: {meta: {metabase: {display_name: Client, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client
+              semantic_type: type/Category
+              has_field_values: search
       - name: account_id
         data_type: text
         description: '{{ doc("account_id") }}'
-        config: {meta: {metabase: {display_name: Account ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: account_name
         data_type: text
         description: '{{ doc("account_name") }}'
-        config: {meta: {metabase: {display_name: Account Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: campaign_id
         data_type: text
         description: '{{ doc("campaign_id") }}'
-        config: {meta: {metabase: {display_name: Campaign ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: campaign_name
         data_type: text
         description: '{{ doc("campaign_name") }}'
-        config: {meta: {metabase: {display_name: Campaign Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: conversion_action_id
         data_type: text
         description: '{{ doc("conversion_action_id") }}'
-        config: {meta: {metabase: {display_name: Conversion Action ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Conversion Action ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: conversion_action_name
         data_type: text
         description: '{{ doc("conversion_action_name") }}'
-        config: {meta: {metabase: {display_name: Conversion Action, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Conversion Action
+              semantic_type: type/Category
+              has_field_values: search
       - name: conversion_category
         data_type: text
         description: '{{ doc("conversion_category") }}'
@@ -289,28 +410,58 @@ models:
           - accepted_values:
               arguments:
                 values: ["purchase", "lead", "sign_up", "add_to_cart", "app_install", "other"]
-        config: {meta: {metabase: {display_name: Conversion Category, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Conversion Category
+              semantic_type: type/Category
+              has_field_values: list
       - name: is_primary
         data_type: boolean
         description: '{{ doc("is_primary") }}'
-        config: {meta: {metabase: {display_name: Is Primary, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Is Primary
+              semantic_type: type/Category
+              has_field_values: list
       - name: attribution_setting
         data_type: text
         description: '{{ doc("attribution_setting") }}'
-        config: {meta: {metabase: {display_name: Attribution Setting, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Attribution Setting
+              semantic_type: type/Category
+              has_field_values: list
       - name: currency
         data_type: text
         description: '{{ doc("currency") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Currency, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Currency
+              semantic_type: type/Category
+              has_field_values: list
       - name: conversions
         data_type: numeric(18,6)
         description: '{{ doc("conversions") }}'
-        config: {meta: {metabase: {display_name: Conversions, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Conversions
+              semantic_type: null
+              has_field_values: none
       - name: conversion_value
         data_type: numeric(18,6)
         description: '{{ doc("conversion_value") }}'
-        config: {meta: {metabase: {display_name: Conversion Value, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Conversion Value
+              semantic_type: null
+              has_field_values: none
       - name: reporting_currency
         data_type: text
         description: '{{ doc("reporting_currency") }}'
@@ -320,7 +471,12 @@ models:
               name: ad_conversions_campaign_daily_has_one_reporting_currency
               arguments:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
-        config: {meta: {metabase: {display_name: Reporting Currency, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Reporting Currency
+              semantic_type: type/Category
+              has_field_values: list
       - name: conversion_value_reporting
         data_type: numeric(18,6)
         description: '{{ doc("conversion_value_reporting") }}'
@@ -329,6 +485,7 @@ models:
             metabase:
               display_name: Conversion Value in Reporting Currency
               semantic_type: type/Currency
+              has_field_values: none
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
   - name: web_sessions_daily
     description: >-
@@ -357,7 +514,12 @@ models:
       - name: report_date
         data_type: date
         description: '{{ doc("report_date") }}'
-        config: {meta: {metabase: {display_name: Report Date, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Report Date
+              semantic_type: null
+              has_field_values: none
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
@@ -366,12 +528,18 @@ models:
             metabase:
               display_name: Platform Code
               semantic_type: type/FK
+              has_field_values: list
               fk_target_table: marts.ad_platforms
               fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
-        config: {meta: {metabase: {display_name: Platform, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform
+              semantic_type: type/Category
+              has_field_values: list
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
@@ -380,68 +548,144 @@ models:
             metabase:
               display_name: Client ID
               semantic_type: type/FK
+              has_field_values: none
               fk_target_table: marts.clients
               fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
-        config: {meta: {metabase: {display_name: Client, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client
+              semantic_type: type/Category
+              has_field_values: search
       - name: property_id
         data_type: text
         description: '{{ doc("property_id") }}'
-        config: {meta: {metabase: {display_name: Property ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Property ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: property_name
         data_type: text
         description: '{{ doc("property_name") }}'
-        config: {meta: {metabase: {display_name: Property, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Property
+              semantic_type: type/Category
+              has_field_values: search
       - name: session_source
         data_type: text
         description: '{{ doc("session_source") }}'
-        config: {meta: {metabase: {display_name: Session Source, semantic_type: type/Source}}}
+        config:
+          meta:
+            metabase:
+              display_name: Session Source
+              semantic_type: type/Source
+              has_field_values: search
       - name: session_medium
         data_type: text
         description: '{{ doc("session_medium") }}'
-        config: {meta: {metabase: {display_name: Session Medium, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Session Medium
+              semantic_type: type/Category
+              has_field_values: list
       - name: session_campaign_id
         data_type: text
         description: '{{ doc("session_campaign_id") }}'
-        config: {meta: {metabase: {display_name: Session Campaign ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Session Campaign ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: session_campaign_name
         data_type: text
         description: '{{ doc("session_campaign_name") }}'
-        config: {meta: {metabase: {display_name: Session Campaign Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Session Campaign Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: session_default_channel_group
         data_type: text
         description: '{{ doc("session_default_channel_group") }}'
-        config: {meta: {metabase: {display_name: Channel Group, semantic_type: type/Source}}}
+        config:
+          meta:
+            metabase:
+              display_name: Channel Group
+              semantic_type: type/Source
+              has_field_values: list
       - name: ad_platform
         data_type: text
         description: '{{ doc("ad_platform") }}'
-        config: {meta: {metabase: {display_name: Ad Platform Code, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad Platform Code
+              semantic_type: type/Category
+              has_field_values: list
       - name: ad_account_id
         data_type: text
         description: '{{ doc("ad_account_id") }}'
-        config: {meta: {metabase: {display_name: Ad Account ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad Account ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: currency
         data_type: text
         description: '{{ doc("currency") }}'
-        config: {meta: {metabase: {display_name: Currency, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Currency
+              semantic_type: type/Category
+              has_field_values: list
       - name: sessions
         data_type: bigint
         description: '{{ doc("sessions") }}'
-        config: {meta: {metabase: {display_name: Sessions, semantic_type: type/Quantity}}}
+        config:
+          meta:
+            metabase:
+              display_name: Sessions
+              semantic_type: type/Quantity
+              has_field_values: none
       - name: engaged_sessions
         data_type: bigint
         description: '{{ doc("engaged_sessions") }}'
-        config: {meta: {metabase: {display_name: Engaged Sessions, semantic_type: type/Quantity}}}
+        config:
+          meta:
+            metabase:
+              display_name: Engaged Sessions
+              semantic_type: type/Quantity
+              has_field_values: none
       - name: key_events
         data_type: numeric(18,6)
         description: '{{ doc("key_events") }}'
-        config: {meta: {metabase: {display_name: Key Events, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Key Events
+              semantic_type: null
+              has_field_values: none
       - name: total_revenue
         data_type: numeric(18,6)
         description: '{{ doc("total_revenue") }}'
-        config: {meta: {metabase: {display_name: Total Revenue, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Total Revenue
+              semantic_type: null
+              has_field_values: none
       - name: reporting_currency
         data_type: text
         description: '{{ doc("reporting_currency") }}'
@@ -451,7 +695,12 @@ models:
               name: web_sessions_daily_has_one_reporting_currency
               arguments:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
-        config: {meta: {metabase: {display_name: Reporting Currency, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Reporting Currency
+              semantic_type: type/Category
+              has_field_values: list
       - name: total_revenue_reporting
         data_type: numeric(18,6)
         description: '{{ doc("total_revenue_reporting") }}'
@@ -460,6 +709,7 @@ models:
             metabase:
               display_name: Total Revenue in Reporting Currency
               semantic_type: type/Currency
+              has_field_values: none
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
   - name: ad_platforms
     description: >-
@@ -484,23 +734,48 @@ models:
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
-        config: {meta: {metabase: {display_name: Platform Code, semantic_type: type/PK}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform Code
+              semantic_type: type/PK
+              has_field_values: list
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
-        config: {meta: {metabase: {display_name: Platform, semantic_type: type/Name}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform
+              semantic_type: type/Name
+              has_field_values: list
       - name: kind
         data_type: text
         description: '{{ doc("kind") }}'
-        config: {meta: {metabase: {display_name: Kind, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Kind
+              semantic_type: type/Category
+              has_field_values: list
       - name: mimics
         data_type: text
         description: '{{ doc("mimics") }}'
-        config: {meta: {metabase: {display_name: Mimics, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Mimics
+              semantic_type: type/Category
+              has_field_values: list
       - name: is_demo
         data_type: boolean
         description: '{{ doc("is_demo") }}'
-        config: {meta: {metabase: {display_name: Is Demo, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Is Demo
+              semantic_type: type/Category
+              has_field_values: list
   - name: ad_accounts
     description: >-
       The ad accounts of every ad platform, one row each, with their client, currency and time
@@ -530,20 +805,36 @@ models:
             metabase:
               display_name: Platform Code
               semantic_type: type/FK
+              has_field_values: list
               fk_target_table: marts.ad_platforms
               fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
-        config: {meta: {metabase: {display_name: Platform, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform
+              semantic_type: type/Category
+              has_field_values: list
       - name: account_id
         data_type: text
         description: '{{ doc("account_id") }}'
-        config: {meta: {metabase: {display_name: Account ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: account_name
         data_type: text
         description: '{{ doc("account_name") }}'
-        config: {meta: {metabase: {display_name: Account Name, semantic_type: type/Name}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account Name
+              semantic_type: type/Name
+              has_field_values: search
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
@@ -552,36 +843,72 @@ models:
             metabase:
               display_name: Client ID
               semantic_type: type/FK
+              has_field_values: none
               fk_target_table: marts.clients
               fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
-        config: {meta: {metabase: {display_name: Client, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client
+              semantic_type: type/Category
+              has_field_values: search
       - name: currency
         data_type: text
         description: '{{ doc("currency") }}'
-        config: {meta: {metabase: {display_name: Currency, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Currency
+              semantic_type: type/Category
+              has_field_values: list
       - name: time_zone
         data_type: text
         description: '{{ doc("time_zone") }}'
-        config: {meta: {metabase: {display_name: Time Zone, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Time Zone
+              semantic_type: type/Category
+              has_field_values: list
       - name: manager_account_id
         data_type: text
         description: '{{ doc("manager_account_id") }}'
-        config: {meta: {metabase: {display_name: Manager Account ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Manager Account ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: account_status
         data_type: text
         description: '{{ doc("account_status") }}'
-        config: {meta: {metabase: {display_name: Account Status, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account Status
+              semantic_type: type/Category
+              has_field_values: list
       - name: first_report_date
         data_type: date
         description: '{{ doc("first_report_date") }}'
-        config: {meta: {metabase: {display_name: First Report Date, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: First Report Date
+              semantic_type: null
+              has_field_values: none
       - name: last_report_date
         data_type: date
         description: '{{ doc("last_report_date") }}'
-        config: {meta: {metabase: {display_name: Last Report Date, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Last Report Date
+              semantic_type: null
+              has_field_values: none
   - name: clients
     description: >-
       The clients of the business, such as brands, shops or legal entities, one row each: those
@@ -605,15 +932,30 @@ models:
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
-        config: {meta: {metabase: {display_name: Client ID, semantic_type: type/PK}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client ID
+              semantic_type: type/PK
+              has_field_values: none
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
-        config: {meta: {metabase: {display_name: Client, semantic_type: type/Name}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client
+              semantic_type: type/Name
+              has_field_values: search
       - name: is_default
         data_type: boolean
         description: '{{ doc("is_default") }}'
-        config: {meta: {metabase: {display_name: Is Default, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Is Default
+              semantic_type: type/Category
+              has_field_values: list
   - name: ad_campaigns
     description: >-
       The campaigns of every ad platform, one row each, as their newest version has them,
@@ -644,12 +986,18 @@ models:
             metabase:
               display_name: Platform Code
               semantic_type: type/FK
+              has_field_values: list
               fk_target_table: marts.ad_platforms
               fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
-        config: {meta: {metabase: {display_name: Platform, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform
+              semantic_type: type/Category
+              has_field_values: list
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
@@ -658,48 +1006,99 @@ models:
             metabase:
               display_name: Client ID
               semantic_type: type/FK
+              has_field_values: none
               fk_target_table: marts.clients
               fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
-        config: {meta: {metabase: {display_name: Client, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client
+              semantic_type: type/Category
+              has_field_values: search
       - name: account_id
         data_type: text
         description: '{{ doc("account_id") }}'
-        config: {meta: {metabase: {display_name: Account ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: account_name
         data_type: text
         description: '{{ doc("account_name") }}'
-        config: {meta: {metabase: {display_name: Account Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: campaign_id
         data_type: text
         description: '{{ doc("campaign_id") }}'
-        config: {meta: {metabase: {display_name: Campaign ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: campaign_name
         data_type: text
         description: '{{ doc("campaign_name") }}'
-        config: {meta: {metabase: {display_name: Campaign Name, semantic_type: type/Name}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign Name
+              semantic_type: type/Name
+              has_field_values: search
       - name: campaign_status
         data_type: text
         description: '{{ doc("campaign_status") }}'
-        config: {meta: {metabase: {display_name: Campaign Status, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign Status
+              semantic_type: type/Category
+              has_field_values: list
       - name: campaign_type
         data_type: text
         description: '{{ doc("campaign_type") }}'
-        config: {meta: {metabase: {display_name: Campaign Type, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign Type
+              semantic_type: type/Category
+              has_field_values: list
       - name: first_report_date
         data_type: date
         description: '{{ doc("first_report_date") }}'
-        config: {meta: {metabase: {display_name: First Report Date, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: First Report Date
+              semantic_type: null
+              has_field_values: none
       - name: last_report_date
         data_type: date
         description: '{{ doc("last_report_date") }}'
-        config: {meta: {metabase: {display_name: Last Report Date, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Last Report Date
+              semantic_type: null
+              has_field_values: none
       - name: name_count
         data_type: bigint
         description: '{{ doc("name_count") }}'
-        config: {meta: {metabase: {display_name: Name Count, semantic_type: type/Quantity}}}
+        config:
+          meta:
+            metabase:
+              display_name: Name Count
+              semantic_type: type/Quantity
+              has_field_values: none
   - name: ad_campaign_names
     description: >-
       The names that the campaigns of every ad platform had, as the loads saw them: one row for
@@ -730,32 +1129,63 @@ models:
             metabase:
               display_name: Platform Code
               semantic_type: type/FK
+              has_field_values: list
               fk_target_table: marts.ad_platforms
               fk_target_field: platform
       - name: account_id
         data_type: text
         description: '{{ doc("account_id") }}'
-        config: {meta: {metabase: {display_name: Account ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: campaign_id
         data_type: text
         description: '{{ doc("campaign_id") }}'
-        config: {meta: {metabase: {display_name: Campaign ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: observed_name
         data_type: text
         description: '{{ doc("observed_name") }}'
-        config: {meta: {metabase: {display_name: Observed Name, semantic_type: type/Name}}}
+        config:
+          meta:
+            metabase:
+              display_name: Observed Name
+              semantic_type: type/Name
+              has_field_values: search
       - name: valid_from
         data_type: timestamp with time zone
         description: '{{ doc("valid_from") }}'
-        config: {meta: {metabase: {display_name: Valid From, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Valid From
+              semantic_type: null
+              has_field_values: none
       - name: valid_to
         data_type: timestamp with time zone
         description: '{{ doc("valid_to") }}'
-        config: {meta: {metabase: {display_name: Valid Until, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Valid Until
+              semantic_type: null
+              has_field_values: none
       - name: is_current
         data_type: boolean
         description: '{{ doc("is_current") }}'
-        config: {meta: {metabase: {display_name: Is Current, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Is Current
+              semantic_type: type/Category
+              has_field_values: list
   - name: fx_rates_daily
     description: >-
       The exchange rates into the reporting currency, one row for each day and each currency of
@@ -782,11 +1212,21 @@ models:
       - name: rate_date
         data_type: date
         description: '{{ doc("rate_date") }}'
-        config: {meta: {metabase: {display_name: Rate Date, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Rate Date
+              semantic_type: null
+              has_field_values: none
       - name: currency
         data_type: text
         description: '{{ doc("currency") }}'
-        config: {meta: {metabase: {display_name: Currency, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Currency
+              semantic_type: type/Category
+              has_field_values: list
       - name: reporting_currency
         data_type: text
         description: '{{ doc("reporting_currency") }}'
@@ -796,19 +1236,39 @@ models:
               name: fx_rates_daily_has_one_reporting_currency
               arguments:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
-        config: {meta: {metabase: {display_name: Reporting Currency, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Reporting Currency
+              semantic_type: type/Category
+              has_field_values: list
       - name: rate_into_reporting_currency
         data_type: numeric(18,8)
         description: '{{ doc("rate_into_reporting_currency") }}'
-        config: {meta: {metabase: {display_name: Rate in Reporting Currency, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Rate in Reporting Currency
+              semantic_type: null
+              has_field_values: none
       - name: rate_source
         data_type: text
         description: '{{ doc("rate_source") }}'
-        config: {meta: {metabase: {display_name: Rate Source, semantic_type: type/Source}}}
+        config:
+          meta:
+            metabase:
+              display_name: Rate Source
+              semantic_type: type/Source
+              has_field_values: list
       - name: is_carried_forward
         data_type: boolean
         description: '{{ doc("is_carried_forward") }}'
-        config: {meta: {metabase: {display_name: Is Carried Forward, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Is Carried Forward
+              semantic_type: type/Category
+              has_field_values: list
   - name: ad_stats_ad_group_daily
     description: >-
       Advertising statistics by day and ad group on every platform. One row is one ad group of one
@@ -847,7 +1307,12 @@ models:
         data_type: date
         description: '{{ doc("report_date") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Report Date, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Report Date
+              semantic_type: null
+              has_field_values: none
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
@@ -857,12 +1322,18 @@ models:
             metabase:
               display_name: Platform Code
               semantic_type: type/FK
+              has_field_values: list
               fk_target_table: marts.ad_platforms
               fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
-        config: {meta: {metabase: {display_name: Platform, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform
+              semantic_type: type/Category
+              has_field_values: list
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
@@ -872,66 +1343,132 @@ models:
             metabase:
               display_name: Client ID
               semantic_type: type/FK
+              has_field_values: none
               fk_target_table: marts.clients
               fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
-        config: {meta: {metabase: {display_name: Client, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client
+              semantic_type: type/Category
+              has_field_values: search
       - name: account_id
         data_type: text
         description: '{{ doc("account_id") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Account ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: account_name
         data_type: text
         description: '{{ doc("account_name") }}'
-        config: {meta: {metabase: {display_name: Account Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: campaign_id
         data_type: text
         description: '{{ doc("campaign_id") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Campaign ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: campaign_name
         data_type: text
         description: '{{ doc("campaign_name") }}'
-        config: {meta: {metabase: {display_name: Campaign Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: ad_group_id
         data_type: text
         description: '{{ doc("ad_group_id") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Ad Group ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad Group ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: ad_group_name
         data_type: text
         description: '{{ doc("ad_group_name") }}'
-        config: {meta: {metabase: {display_name: Ad Group Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad Group Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: currency
         data_type: text
         description: '{{ doc("currency") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Currency, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Currency
+              semantic_type: type/Category
+              has_field_values: list
       - name: impressions
         data_type: bigint
         description: '{{ doc("impressions") }}'
-        config: {meta: {metabase: {display_name: Impressions, semantic_type: type/Quantity}}}
+        config:
+          meta:
+            metabase:
+              display_name: Impressions
+              semantic_type: type/Quantity
+              has_field_values: none
       - name: clicks
         data_type: bigint
         description: '{{ doc("clicks") }}'
-        config: {meta: {metabase: {display_name: Clicks, semantic_type: type/Quantity}}}
+        config:
+          meta:
+            metabase:
+              display_name: Clicks
+              semantic_type: type/Quantity
+              has_field_values: none
       - name: spend
         data_type: numeric(18,6)
         description: '{{ doc("spend") }}'
         # Two currencies in the table: a plain number (docs/reference/describe-the-marts.md).
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Spend, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Spend
+              semantic_type: null
+              has_field_values: none
       - name: conversions
         data_type: numeric(18,6)
         description: '{{ doc("conversions") }}'
-        config: {meta: {metabase: {display_name: Conversions, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Conversions
+              semantic_type: null
+              has_field_values: none
       - name: conversion_value
         data_type: numeric(18,6)
         description: '{{ doc("conversion_value") }}'
-        config: {meta: {metabase: {display_name: Conversion Value, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Conversion Value
+              semantic_type: null
+              has_field_values: none
       - name: reporting_currency
         data_type: text
         description: '{{ doc("reporting_currency") }}'
@@ -944,7 +1481,12 @@ models:
               name: ad_stats_ad_group_daily_has_one_reporting_currency
               arguments:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
-        config: {meta: {metabase: {display_name: Reporting Currency, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Reporting Currency
+              semantic_type: type/Category
+              has_field_values: list
       - name: spend_reporting
         data_type: numeric(18,6)
         description: '{{ doc("spend_reporting") }}'
@@ -954,6 +1496,7 @@ models:
             metabase:
               display_name: Spend in Reporting Currency
               semantic_type: type/Currency
+              has_field_values: none
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
       - name: conversion_value_reporting
         data_type: numeric(18,6)
@@ -963,6 +1506,7 @@ models:
             metabase:
               display_name: Conversion Value in Reporting Currency
               semantic_type: type/Currency
+              has_field_values: none
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
   - name: ad_stats_ad_daily
     description: >-
@@ -1002,7 +1546,12 @@ models:
         data_type: date
         description: '{{ doc("report_date") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Report Date, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Report Date
+              semantic_type: null
+              has_field_values: none
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
@@ -1012,12 +1561,18 @@ models:
             metabase:
               display_name: Platform Code
               semantic_type: type/FK
+              has_field_values: list
               fk_target_table: marts.ad_platforms
               fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
-        config: {meta: {metabase: {display_name: Platform, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform
+              semantic_type: type/Category
+              has_field_values: list
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
@@ -1027,75 +1582,151 @@ models:
             metabase:
               display_name: Client ID
               semantic_type: type/FK
+              has_field_values: none
               fk_target_table: marts.clients
               fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
-        config: {meta: {metabase: {display_name: Client, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client
+              semantic_type: type/Category
+              has_field_values: search
       - name: account_id
         data_type: text
         description: '{{ doc("account_id") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Account ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: account_name
         data_type: text
         description: '{{ doc("account_name") }}'
-        config: {meta: {metabase: {display_name: Account Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: campaign_id
         data_type: text
         description: '{{ doc("campaign_id") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Campaign ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: campaign_name
         data_type: text
         description: '{{ doc("campaign_name") }}'
-        config: {meta: {metabase: {display_name: Campaign Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: ad_group_id
         data_type: text
         description: '{{ doc("ad_group_id") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Ad Group ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad Group ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: ad_group_name
         data_type: text
         description: '{{ doc("ad_group_name") }}'
-        config: {meta: {metabase: {display_name: Ad Group Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad Group Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: ad_id
         data_type: text
         description: '{{ doc("ad_id") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Ad ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: ad_name
         data_type: text
         description: '{{ doc("ad_name") }}'
-        config: {meta: {metabase: {display_name: Ad Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: currency
         data_type: text
         description: '{{ doc("currency") }}'
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Currency, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Currency
+              semantic_type: type/Category
+              has_field_values: list
       - name: impressions
         data_type: bigint
         description: '{{ doc("impressions") }}'
-        config: {meta: {metabase: {display_name: Impressions, semantic_type: type/Quantity}}}
+        config:
+          meta:
+            metabase:
+              display_name: Impressions
+              semantic_type: type/Quantity
+              has_field_values: none
       - name: clicks
         data_type: bigint
         description: '{{ doc("clicks") }}'
-        config: {meta: {metabase: {display_name: Clicks, semantic_type: type/Quantity}}}
+        config:
+          meta:
+            metabase:
+              display_name: Clicks
+              semantic_type: type/Quantity
+              has_field_values: none
       - name: spend
         data_type: numeric(18,6)
         description: '{{ doc("spend") }}'
         # Two currencies in the table: a plain number (docs/reference/describe-the-marts.md).
         data_tests: [not_null]
-        config: {meta: {metabase: {display_name: Spend, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Spend
+              semantic_type: null
+              has_field_values: none
       - name: conversions
         data_type: numeric(18,6)
         description: '{{ doc("conversions") }}'
-        config: {meta: {metabase: {display_name: Conversions, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Conversions
+              semantic_type: null
+              has_field_values: none
       - name: conversion_value
         data_type: numeric(18,6)
         description: '{{ doc("conversion_value") }}'
-        config: {meta: {metabase: {display_name: Conversion Value, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Conversion Value
+              semantic_type: null
+              has_field_values: none
       - name: reporting_currency
         data_type: text
         description: '{{ doc("reporting_currency") }}'
@@ -1108,7 +1739,12 @@ models:
               name: ad_stats_ad_daily_has_one_reporting_currency
               arguments:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
-        config: {meta: {metabase: {display_name: Reporting Currency, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Reporting Currency
+              semantic_type: type/Category
+              has_field_values: list
       - name: spend_reporting
         data_type: numeric(18,6)
         description: '{{ doc("spend_reporting") }}'
@@ -1118,6 +1754,7 @@ models:
             metabase:
               display_name: Spend in Reporting Currency
               semantic_type: type/Currency
+              has_field_values: none
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
       - name: conversion_value_reporting
         data_type: numeric(18,6)
@@ -1127,6 +1764,7 @@ models:
             metabase:
               display_name: Conversion Value in Reporting Currency
               semantic_type: type/Currency
+              has_field_values: none
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
   - name: ad_groups
     description: >-
@@ -1157,12 +1795,18 @@ models:
             metabase:
               display_name: Platform Code
               semantic_type: type/FK
+              has_field_values: list
               fk_target_table: marts.ad_platforms
               fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
-        config: {meta: {metabase: {display_name: Platform, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform
+              semantic_type: type/Category
+              has_field_values: list
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
@@ -1171,52 +1815,108 @@ models:
             metabase:
               display_name: Client ID
               semantic_type: type/FK
+              has_field_values: none
               fk_target_table: marts.clients
               fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
-        config: {meta: {metabase: {display_name: Client, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client
+              semantic_type: type/Category
+              has_field_values: search
       - name: account_id
         data_type: text
         description: '{{ doc("account_id") }}'
-        config: {meta: {metabase: {display_name: Account ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: account_name
         data_type: text
         description: '{{ doc("account_name") }}'
-        config: {meta: {metabase: {display_name: Account Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: campaign_id
         data_type: text
         description: '{{ doc("campaign_id") }}'
-        config: {meta: {metabase: {display_name: Campaign ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: campaign_name
         data_type: text
         description: '{{ doc("campaign_name") }}'
-        config: {meta: {metabase: {display_name: Campaign Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: ad_group_id
         data_type: text
         description: '{{ doc("ad_group_id") }}'
-        config: {meta: {metabase: {display_name: Ad Group ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad Group ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: ad_group_name
         data_type: text
         description: '{{ doc("ad_group_name") }}'
-        config: {meta: {metabase: {display_name: Ad Group Name, semantic_type: type/Name}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad Group Name
+              semantic_type: type/Name
+              has_field_values: search
       - name: ad_group_status
         data_type: text
         description: '{{ doc("ad_group_status") }}'
-        config: {meta: {metabase: {display_name: Ad Group Status, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad Group Status
+              semantic_type: type/Category
+              has_field_values: list
       - name: ad_group_type
         data_type: text
         description: '{{ doc("ad_group_type") }}'
-        config: {meta: {metabase: {display_name: Ad Group Type, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad Group Type
+              semantic_type: type/Category
+              has_field_values: list
       - name: first_report_date
         data_type: date
         description: '{{ doc("first_report_date") }}'
-        config: {meta: {metabase: {display_name: First Report Date, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: First Report Date
+              semantic_type: null
+              has_field_values: none
       - name: last_report_date
         data_type: date
         description: '{{ doc("last_report_date") }}'
-        config: {meta: {metabase: {display_name: Last Report Date, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Last Report Date
+              semantic_type: null
+              has_field_values: none
   - name: ads
     description: >-
       The ads of every ad platform, one row each, as their newest version has them, whether the
@@ -1246,12 +1946,18 @@ models:
             metabase:
               display_name: Platform Code
               semantic_type: type/FK
+              has_field_values: list
               fk_target_table: marts.ad_platforms
               fk_target_field: platform
       - name: platform_name
         data_type: text
         description: '{{ doc("platform_name") }}'
-        config: {meta: {metabase: {display_name: Platform, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Platform
+              semantic_type: type/Category
+              has_field_values: list
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
@@ -1260,57 +1966,123 @@ models:
             metabase:
               display_name: Client ID
               semantic_type: type/FK
+              has_field_values: none
               fk_target_table: marts.clients
               fk_target_field: client_id
       - name: client_name
         data_type: text
         description: '{{ doc("client_name") }}'
-        config: {meta: {metabase: {display_name: Client, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Client
+              semantic_type: type/Category
+              has_field_values: search
       - name: account_id
         data_type: text
         description: '{{ doc("account_id") }}'
-        config: {meta: {metabase: {display_name: Account ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: account_name
         data_type: text
         description: '{{ doc("account_name") }}'
-        config: {meta: {metabase: {display_name: Account Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Account Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: campaign_id
         data_type: text
         description: '{{ doc("campaign_id") }}'
-        config: {meta: {metabase: {display_name: Campaign ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: campaign_name
         data_type: text
         description: '{{ doc("campaign_name") }}'
-        config: {meta: {metabase: {display_name: Campaign Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Campaign Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: ad_group_id
         data_type: text
         description: '{{ doc("ad_group_id") }}'
-        config: {meta: {metabase: {display_name: Ad Group ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad Group ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: ad_group_name
         data_type: text
         description: '{{ doc("ad_group_name") }}'
-        config: {meta: {metabase: {display_name: Ad Group Name, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad Group Name
+              semantic_type: type/Category
+              has_field_values: search
       - name: ad_id
         data_type: text
         description: '{{ doc("ad_id") }}'
-        config: {meta: {metabase: {display_name: Ad ID, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad ID
+              semantic_type: type/Category
+              has_field_values: none
       - name: ad_name
         data_type: text
         description: '{{ doc("ad_name") }}'
-        config: {meta: {metabase: {display_name: Ad Name, semantic_type: type/Name}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad Name
+              semantic_type: type/Name
+              has_field_values: search
       - name: ad_status
         data_type: text
         description: '{{ doc("ad_status") }}'
-        config: {meta: {metabase: {display_name: Ad Status, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad Status
+              semantic_type: type/Category
+              has_field_values: list
       - name: ad_type
         data_type: text
         description: '{{ doc("ad_type") }}'
-        config: {meta: {metabase: {display_name: Ad Type, semantic_type: type/Category}}}
+        config:
+          meta:
+            metabase:
+              display_name: Ad Type
+              semantic_type: type/Category
+              has_field_values: list
       - name: first_report_date
         data_type: date
         description: '{{ doc("first_report_date") }}'
-        config: {meta: {metabase: {display_name: First Report Date, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: First Report Date
+              semantic_type: null
+              has_field_values: none
       - name: last_report_date
         data_type: date
         description: '{{ doc("last_report_date") }}'
-        config: {meta: {metabase: {display_name: Last Report Date, semantic_type: null}}}
+        config:
+          meta:
+            metabase:
+              display_name: Last Report Date
+              semantic_type: null
+              has_field_values: none

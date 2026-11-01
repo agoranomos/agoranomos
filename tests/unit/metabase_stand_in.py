@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from metadata import WAREHOUSE_COLUMNS, humanize
+from metadata import FORMAT, WAREHOUSE_COLUMNS, humanize
 
 SETUP_TOKEN = "setup-token-1"
 # The session that POST /api/setup gives, and the one that a sign-in gives.
@@ -29,6 +29,21 @@ SESSIONS = ("session-from-setup", "session-from-login")
 # The connections of a Metabase that demo-init finds, as GET /api/database lists them: Metabase
 # masks the password.
 SAMPLE = {"id": 1, "name": "Sample Database", "engine": "sqlite", "details": {"db": "sample"}}
+# The schedules of a new connection, which Metabase draws at random: a sync each hour and a scan of
+# the values of fields each day.
+SCHEDULES = {
+    "metadata_sync_schedule": "0 17 * * * ? *",
+    "cache_field_values_schedule": "0 0 8 * * ? *",
+    "is_full_sync": True,
+    "is_on_demand": False,
+}
+# What Metabase draws instead of a schedule that it gets while it does not leave the schedules to
+# the person.
+REDRAWN = {
+    "metadata_sync_schedule": "0 46 * * * ? *",
+    "cache_field_values_schedule": "0 0 4 * * ? *",
+}
+USER_SCHEDULES = "let-user-control-scheduling"
 WAREHOUSE = {
     "id": 2,
     "name": "agoranomos warehouse",
@@ -40,6 +55,7 @@ WAREHOUSE = {
         "user": "metabase_reader",
         "password": "**MetabasePass**",
     },
+    **SCHEDULES,
 }
 MART_COLUMNS = (
     "report_date",
@@ -86,6 +102,23 @@ DEMO_COLUMNS = {
         "key_events",
         "total_revenue_reporting",
     ),
+}
+# What the columns of the marts declare for the filters of Metabase: the rest are none.
+FIELD_VALUES = {
+    "campaign_name": "search",
+    "client_name": "search",
+    "conversion_action_name": "search",
+    "session_campaign_name": "search",
+    "session_source": "search",
+    "ad_platform": "list",
+    "conversion_category": "list",
+    "currency": "list",
+    "is_primary": "list",
+    "platform": "list",
+    "platform_name": "list",
+    "reporting_currency": "list",
+    "session_default_channel_group": "list",
+    "session_medium": "list",
 }
 # The base types that Metabase gives the fields of the marts from the types of their columns.
 INTEGERS = {"impressions", "clicks", "sessions", "engaged_sessions"}
@@ -142,14 +175,19 @@ class FakeClock:
 
 def column(name: str, display_name: str, semantic_type: str | None, **more: str) -> dict:
     """A column of the export, as metadata.py export writes it."""
-    meta = {"display_name": display_name, "semantic_type": semantic_type, **more}
+    meta = {
+        "display_name": display_name,
+        "semantic_type": semantic_type,
+        "has_field_values": FIELD_VALUES.get(name, "none"),
+        **more,
+    }
     return {"name": name, "description": f"The {name} of a row.", "meta": {"metabase": meta}}
 
 
 # The export of the dbt project of the demo, in short: the mart with its names and types, the
 # staging model, and the source. DEMO_EXPORT below adds what the questions of the demo read.
 EXPORT = {
-    "format": 1,
+    "format": FORMAT,
     "models": [
         {
             "schema": "marts",
@@ -689,7 +727,10 @@ class FakeMetabase:
     after the table itself, as Metabase makes the row of a new table before its fields. A person
     can hide the mart (mart_hidden), or a field (its visibility_type): the metadata of the database
     then leaves it out unless the request passes include_hidden=true, and a sync does not show it
-    again. key_marts adds marts of its own, such as the target of a foreign key. PUT /api/table/:id
+    again. key_marts adds marts of its own, such as the target of a foreign key. A connection keeps
+    the schedules of its sync and of its scan, which PUT /api/database/:id changes as Metabase
+    0.64.1 does (the method schedules below), and the instance keeps one policy of the cache at
+    most (cache_policy). PUT /api/table/:id
     and PUT /api/field/:id set what their body says, a field's settings are replaced whole, and a
     field that stops being a foreign key loses its target, as Metabase does. bodies keeps what each
     write sent. The content, its collections, questions and dashboards, and the permissions of the
@@ -735,6 +776,8 @@ class FakeMetabase:
         self.next_id = 100
         # The settings that the jobs write, with their default values in Metabase 0.64.1.
         self.settings: dict[str, Any] = {"enable-public-sharing": True}
+        # The policy of the whole instance, which /api/cache keeps: Metabase has none at first.
+        self.cache_policy: dict[str, Any] | None = None
         # The terms of the glossary, as GET /api/glossary of Metabase 0.64.1 lists them.
         self.glossary: list[dict[str, Any]] = []
 
@@ -814,6 +857,11 @@ class FakeMetabase:
                     "description": None,
                     "base_type": base_type(column),
                     "semantic_type": None,
+                    # Metabase 0.64.1 shows the auto-list of a new field as list, and none for a
+                    # date or a decimal, which a sync does not make one.
+                    "has_field_values": "none"
+                    if base_type(column) in ("type/Date", "type/Decimal")
+                    else "list",
                     "fk_target_field_id": None,
                     "settings": None,
                     "visibility_type": "normal",
@@ -929,13 +977,15 @@ class FakeMetabase:
                 return 200, self.listed()
             return 200, {"data": self.listed(), "total": len(self.databases)}
         if (method, path) == ("POST", "/api/database"):
-            database = {"id": len(self.databases) + 1, **body}
+            database = {"id": len(self.databases) + 1, **SCHEDULES, **body}
             self.databases.append(database)
             return 200, database
         if segments[:3] == ["", "api", "database"] and len(segments) >= 4:
             return self.database(method, int(segments[3]), segments[4:], query, body)
         if (method, path) == ("POST", "/api/dataset"):
             return self.dataset(body)
+        if path == "/api/cache":
+            return self.cache(method, body)
         if segments[:3] in (["", "api", "table"], ["", "api", "field"]) and method == "PUT":
             return self.metadata_write(segments[2], int(segments[3]), body)
         if (method, path) == ("GET", "/api/user/current"):
@@ -979,10 +1029,13 @@ class FakeMetabase:
         query: dict[str, list[str]],
         body: Any,
     ) -> tuple[int, Any]:
+        if not rest and method == "GET":
+            found = [d for d in self.listed() if d["id"] == database_id]
+            return (200, found[0]) if found else (404, "Not found")
         if not rest and method == "PUT":
             for database in self.databases:
                 if database["id"] == database_id:
-                    database.update(body)
+                    self.schedules(database, body)
                     return 200, database
         if rest == ["metadata"] and method == "GET":
             self.queries.append(query)
@@ -997,6 +1050,40 @@ class FakeMetabase:
                 self.synced_at = self.now() + delay
             return 200, {"status": "ok"}
         return 404, "Not found"
+
+    @staticmethod
+    def schedules(database: dict[str, Any], body: Any) -> None:
+        """PUT /api/database/:id as Metabase 0.64.1 answers it: a body with no is_on_demand sets it
+        to false, a daily schedule keeps its hour and drops a minute, the scan of a connection that
+        is not on a full sync has no schedule, and a schedule that comes while the switch of the
+        schedules is off makes Metabase draw both again, as does a switch that goes off."""
+        was_on = database["details"].get(USER_SCHEDULES)
+        database.update({k: v for k, v in body.items() if k != "schedules"})
+        database["is_on_demand"] = bool(body.get("is_on_demand"))
+        wanted = body.get("schedules") or {}
+        if "metadata_sync" in wanted:
+            minute = wanted["metadata_sync"]["schedule_minute"]
+            database["metadata_sync_schedule"] = f"0 {minute} * * * ? *"
+        if "cache_field_values" in wanted:
+            hour = wanted["cache_field_values"]["schedule_hour"]
+            database["cache_field_values_schedule"] = f"0 0 {hour} * * ? *"
+        switch = database["details"].get(USER_SCHEDULES)
+        if (wanted and not switch) or (was_on and switch is False):
+            database.update(REDRAWN)
+        if switch and not database["is_full_sync"]:
+            database["cache_field_values_schedule"] = None
+
+    def cache(self, method: str, body: Any) -> tuple[int, Any]:
+        """/api/cache of Metabase 0.64.1, for the whole instance, the one level of Metabase OSS: PUT
+        takes a closed map and refuses any other key with 400."""
+        if method == "GET":
+            policy = self.cache_policy
+            found = [{"model": "root", "model_id": 0, "strategy": policy}] if policy else []
+            return 200, {"data": copy.deepcopy(found)}
+        if method == "PUT" and set(body) == {"model", "model_id", "strategy"}:
+            self.cache_policy = copy.deepcopy(body["strategy"])
+            return 200, {"id": 1}
+        return 400, {"errors": {"body": "invalid"}}
 
     def dataset(self, body: Any) -> tuple[int, Any]:
         """A native query through a connection: the stand-in knows the one that lists the columns

@@ -742,6 +742,7 @@ def test_ai_connect_prints_nothing_but_the_client_id(capsys, monkeypatch):
     # The job has every setting of metabase-init, which it needs to read, and no account.
     env = {
         **dict.fromkeys(mi.ENV_NAMES.values(), "1"),
+        "METABASE_SCAN_TIME": "12:00",
         **FRESH,
         "METABASE_AI_LEVEL": "build",
         "METABASE_MCP": "true",

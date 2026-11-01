@@ -294,6 +294,53 @@ def test_metabase_gives_no_column_of_a_mart_another_type_by_its_name():
     assert checked, "no column of the marts has a name that Metabase types"
 
 
+# The columns of the marts that a filter offers as a list, each with a short list of values: the
+# platform, the status, the state and the type of a thing, a currency, and other codes. A boolean
+# is one too. The names are searched: ADR-0037.
+LISTED_COLUMNS = {
+    "ad_platform",
+    "attribution_setting",
+    "conversion_category",
+    "currency",
+    "kind",
+    "mimics",
+    "platform",
+    "platform_name",
+    "rate_source",
+    "reporting_currency",
+    "session_default_channel_group",
+    "session_medium",
+    "time_zone",
+}
+SEARCHED_COLUMNS = {"observed_name", "session_source"}
+
+
+def field_values(data_type: str, column: str) -> str:
+    """How a filter offers the values of a column of a mart (ADR-0037)."""
+    if data_type == "boolean" or column in LISTED_COLUMNS or column.endswith(("_status", "_type")):
+        return "list"
+    if column in SEARCHED_COLUMNS or column.endswith("_name"):
+        return "search"
+    return "none"
+
+
+def test_every_column_of_a_mart_declares_how_a_filter_offers_its_values():
+    # Metabase makes nearly every field a list by itself and reads the whole table for each of them
+    # in its daily scan: list for short lists, search for names, none for identifiers, dates and
+    # measures.
+    text = (DBT / "models" / "marts" / "_marts__models.yml").read_text(encoding="utf-8")
+    found = {"list": 0, "search": 0, "none": 0}
+    for mart, block in blocks(text, 2).items():
+        for column, lines in blocks(block, 6).items():
+            data_type = re.search(r"^        data_type: (\w+)", lines, flags=re.MULTILINE)
+            declared = re.search(r"has_field_values: (\w+)", lines)
+            assert declared, (mart, column)
+            value = field_values(data_type.group(1), column)
+            assert declared.group(1) == value, (mart, column)
+            found[value] += 1
+    assert all(found.values()), found
+
+
 def test_every_mart_has_a_contract_and_its_key():
     text = (DBT / "models" / "marts" / "_marts__models.yml").read_text(encoding="utf-8")
     blocks = re.split(r"^  - name: ", text, flags=re.MULTILINE)[1:]

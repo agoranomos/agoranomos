@@ -1,6 +1,7 @@
 """The metadata of the marts in Metabase (ADR-0016): the export that metadata-export writes, and
-the names, descriptions and types that metabase-init and demo-init apply, with the overrides of the
-deployment.
+the names, descriptions, types and values of fields that metabase-init and demo-init apply, with
+the overrides of the deployment, and what metabase-init keeps with them (ADR-0037): the scan, the
+sync, the cache and the limits of a query.
 
 The tests change the metadata of the stack that they run against, as a person could, and put it
 back: an edit through the API, which the next run of metabase-init reverts, a hidden field, and a
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import demo_init
+import metabase_init
 import metadata
 import pytest
 from metabase_content import item, registry, run_job
@@ -156,6 +158,7 @@ def test_metabase_shows_the_effective_metadata_of_the_marts(metabase_url, sessio
                 "display_name": column.display_name,
                 "description": column.description,
                 "semantic_type": column.semantic_type,
+                "has_field_values": column.has_field_values,
             }
             current = {**field, "currency": (field.get("settings") or {}).get("currency")}
             if column.currency is not None:
@@ -216,6 +219,27 @@ def test_an_edit_in_metabase_is_reverted_by_the_next_start_and_logged(
 
 
 @needs_the_demo
+def test_an_edit_of_the_values_of_a_field_goes_back_at_the_next_start_with_a_line(
+    env, metabase_url, session, marts
+):
+    # Metabase never shows none for a text by itself, so the line can say that someone set it.
+    [name] = [c for c in marts.effective[MART].columns if c.name == "campaign_name"]
+    assert name.has_field_values == "search"
+    field = field_of(metabase_url, session, "campaign_name")
+    put_field(metabase_url, session, field["id"], {"has_field_values": "none"})
+    try:
+        code, changes, found = run_metabase_init(secrets(env))
+        assert not found, f"the output of metabase-init holds the values of {found}"
+        assert code == 0, f"metabase-init exited with {code}"
+        assert changes == [
+            "metabase-init: revert of an edit: "
+            'marts.ad_stats_campaign_daily.campaign_name has_field_values: "none" -> "search"'
+        ]
+    finally:
+        put_field(metabase_url, session, field["id"], {"has_field_values": "search"})
+
+
+@needs_the_demo
 def test_a_hidden_field_gets_its_metadata_and_stays_hidden(env, metabase_url, session, marts):
     [spend] = [c for c in marts.effective[MART].columns if c.name == "spend_reporting"]
     field = field_of(metabase_url, session, "spend_reporting")
@@ -263,6 +287,92 @@ def test_an_override_shows_after_the_next_start_and_its_removal_brings_the_base_
     assert code == 0, f"metabase-init exited with {code} after the file was removed"
     field = field_of(metabase_url, session, "conversions")
     assert (field["display_name"], field["description"]) == (base.display_name, base.description)
+
+
+def warehouse_of(metabase_url: str, session: dict[str, str]) -> dict[str, Any]:
+    """The connection of the warehouse, as GET /api/database/:id shows it."""
+    status, databases = http_json("GET", f"{metabase_url}/api/database", headers=session)
+    assert status == 200, f"GET /api/database answered HTTP {status}"
+    [listed] = [d for d in databases["data"] if d.get("name") == WAREHOUSE_NAME]
+    path = f"/api/database/{listed['id']}"
+    status, warehouse = http_json("GET", f"{metabase_url}{path}", headers=session)
+    assert status == 200, f"GET {path} answered HTTP {status}"
+    return warehouse
+
+
+def scan_of(env: dict[str, str]) -> str:
+    """The schedule of the scan that the setting gives, as Metabase writes it."""
+    return f"0 0 {int((env.get('METABASE_SCAN_TIME') or '12:00')[:2])} * * ? *"
+
+
+def cache_policy(metabase_url: str, session: dict[str, str]) -> list[dict[str, Any]]:
+    status, answer = http_json("GET", f"{metabase_url}/api/cache", headers=session)
+    assert status == 200, f"GET /api/cache answered HTTP {status}"
+    return answer["data"]
+
+
+def test_metabase_keeps_the_scan_after_the_nightly_load_and_the_sync_hourly(
+    env, metabase_url, session
+):
+    warehouse = warehouse_of(metabase_url, session)
+    assert warehouse["cache_field_values_schedule"] == scan_of(env)
+    assert metabase_init.hourly(warehouse["metadata_sync_schedule"])
+    assert warehouse["details"]["let-user-control-scheduling"] is True
+    assert (warehouse["is_full_sync"], warehouse["is_on_demand"]) == (True, False)
+
+
+def test_metabase_keeps_the_policy_of_the_cache_for_the_whole_instance(metabase_url, session):
+    # The answer of Metabase 0.64.1, which keeps what PUT /api/cache took, in the same words.
+    assert cache_policy(metabase_url, session) == [
+        {"model": "root", "model_id": 0, "strategy": metabase_init.CACHE_POLICY}
+    ]
+
+
+def test_metabase_runs_with_the_limits_of_a_query():
+    names = (
+        "$MB_DB_QUERY_TIMEOUT_MINUTES $MB_JDBC_DATA_WAREHOUSE_CONNECTION_POOL_CHECKOUT_TIMEOUT_MS"
+    )
+    result = compose("exec", "-T", "metabase", "sh", "-c", f'echo "{names}"', check=False)
+    assert (result.returncode, result.stdout.strip()) == (0, "5 30000")
+
+
+def test_an_edit_of_the_scan_goes_back_at_the_next_start_with_a_line(env, metabase_url, session):
+    warehouse = warehouse_of(metabase_url, session)
+    path = f"{metabase_url}/api/database/{warehouse['id']}"
+    edit = {"schedules": {"cache_field_values": {"schedule_type": "daily", "schedule_hour": 3}}}
+    status, _ = http_json("PUT", path, edit, headers=session)
+    assert status == 200, f"PUT /api/database/{warehouse['id']} answered HTTP {status}"
+    try:
+        code, changes, found = run_metabase_init(secrets(env))
+        assert not found, f"the output of metabase-init holds the values of {found}"
+        assert code == 0, f"metabase-init exited with {code}"
+        assert changes == [
+            'metabase-init: revert of an edit: warehouse scan of field values: "0 0 3 * * ? *" -> '
+            f'"{scan_of(env)}"'
+        ]
+    finally:
+        if warehouse_of(metabase_url, session)["cache_field_values_schedule"] != scan_of(env):
+            run_metabase_init(secrets(env))
+    assert warehouse_of(metabase_url, session)["cache_field_values_schedule"] == scan_of(env)
+
+
+def test_an_edit_of_the_policy_of_the_cache_goes_back_at_the_next_start_with_a_line(
+    env, metabase_url, session
+):
+    edit = {"model": "root", "model_id": 0, "strategy": {"type": "nocache"}}
+    status, _ = http_json("PUT", f"{metabase_url}/api/cache", edit, headers=session)
+    assert status == 200, f"PUT /api/cache answered HTTP {status}"
+    try:
+        code, changes, found = run_metabase_init(secrets(env))
+        assert not found, f"the output of metabase-init holds the values of {found}"
+        assert code == 0, f"metabase-init exited with {code}"
+        assert changes == [
+            'metabase-init: revert of an edit: metabase cache: {"type": "nocache"} -> '
+            f"{json.dumps(metabase_init.CACHE_POLICY)}"
+        ]
+    finally:
+        back = {**edit, "strategy": metabase_init.CACHE_POLICY}
+        http_json("PUT", f"{metabase_url}/api/cache", back, headers=session)
 
 
 def test_metadata_export_renders_the_currency_of_the_setting(env, marts):
