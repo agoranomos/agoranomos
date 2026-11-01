@@ -1247,3 +1247,15 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
         warns = "{{ config(severity='warn') }}" in text
         assert tagged is (not warns), path.name
         assert text.count("config(") == 1, path.name
+
+
+def test_each_name_of_a_shape_goes_through_to_name():
+    # A load writes an empty name as NULL, and a row of an earlier release can keep it: to_name
+    # makes them one (ADR-0038), and keeps the type of the column, which nullif would change.
+    macro = (DBT / "macros" / "names.sql").read_text(encoding="utf-8")
+    assert "case when {{ expression }} <> '' then {{ expression }} end" in macro
+    name = re.compile(r" as (observed_name|loaded_\w+_name|account_name|property_name)\b")
+    for path in sorted((DBT / "macros" / "shapes").glob("*.sql")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if name.search(line):
+                assert "to_name(" in line, (path.name, line)

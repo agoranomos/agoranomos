@@ -5,5 +5,5 @@
     'ad_group_ad__ad__resource_name': 'text', 'ad_group_ad__ad__id': 'text',
     'ad_group_ad__ad__name': 'text', 'metrics__impressions': 'text', 'metrics__clicks': 'text',
     'metrics__cost_micros': 'text', 'metrics__conversions': 'double precision',
-    'metrics__conversions_value': 'double precision', 'segments__date': 'date',
+    'metrics__conversions_value': 'text', 'segments__date': 'date',
 }), 'google_ads', 'ad') }}

@@ -4,7 +4,7 @@
     'ad_group__resource_name': 'text', 'ad_group__id': 'text', 'ad_group__name': 'text',
     'segments__date': 'date', 'segments__conversion_action': 'text',
     'segments__conversion_action_name': 'text', 'segments__conversion_action_category': 'text',
-    'metrics__conversions': 'double precision', 'metrics__conversions_value': 'double precision',
+    'metrics__conversions': 'double precision', 'metrics__conversions_value': 'text',
     'metrics__all_conversions': 'double precision',
-    'metrics__all_conversions_value': 'double precision',
+    'metrics__all_conversions_value': 'text',
 }), 'google_ads', 'ad_group') }}

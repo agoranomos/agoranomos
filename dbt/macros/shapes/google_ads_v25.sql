@@ -7,14 +7,14 @@
     and the campaign, with the name of the level that the row carried when it was loaded. -#}
 {% macro google_ads_level(level) %}
     {%- if level == 'campaign' %}
-    campaign__name as loaded_campaign_name,
+    {{ to_name('campaign__name') }} as loaded_campaign_name,
     {%- elif level == 'ad_group' %}
     ad_group__id as ad_group_id,
-    ad_group__name as loaded_ad_group_name,
+    {{ to_name('ad_group__name') }} as loaded_ad_group_name,
     {%- elif level == 'ad' %}
     ad_group__id as ad_group_id,
     ad_group_ad__ad__id as ad_id,
-    ad_group_ad__ad__name as loaded_ad_name,
+    {{ to_name('ad_group_ad__ad__name') }} as loaded_ad_name,
     {%- else %}
     {{ exceptions.raise_compiler_error('a level is campaign, ad_group or ad, not ' ~ level) }}
     {%- endif %}
@@ -50,11 +50,11 @@ select
     ad_group_ad__ad__id as ad_id,
     {%- endif %}
     split_part(segments__conversion_action, '/', 4) as conversion_action_id,
-    segments__conversion_action_name as conversion_action_name,
+    {{ to_name('segments__conversion_action_name') }} as conversion_action_name,
     lower(segments__conversion_action_category) as platform_category,
     cast(null as text) as attribution_setting,
     cast(metrics__all_conversions as numeric(18,6)) as conversions,
-    cast(metrics__all_conversions_value as numeric(18,6)) as conversion_value
+    {{ to_number('metrics__all_conversions_value') }} as conversion_value
 from {{ relation }}
 {% endmacro %}
 
@@ -63,7 +63,7 @@ from {{ relation }}
 select
     '{{ platform }}' as platform,
     customer_client__id as account_id,
-    customer_client__descriptive_name as account_name,
+    {{ to_name('customer_client__descriptive_name') }} as account_name,
     customer_client__currency_code as currency,
     customer_client__time_zone as time_zone,
     split_part(customer_client__resource_name, '/', 2) as manager_account_id,
@@ -79,7 +79,7 @@ where not customer_client__manager
 select
     '{{ platform }}' as platform,
     customer__id as account_id,
-    customer__descriptive_name as account_name,
+    {{ to_name('customer__descriptive_name') }} as account_name,
     customer__currency_code as currency,
     customer__time_zone as time_zone,
     cast(null as text) as manager_account_id,
@@ -94,7 +94,7 @@ select
     '{{ platform }}' as platform,
     customer__id as account_id,
     campaign__id as campaign_id,
-    campaign__name as observed_name,
+    {{ to_name('campaign__name') }} as observed_name,
     campaign__status as campaign_status,
     campaign__advertising_channel_type as campaign_type,
     _dlt_valid_from as valid_from,
@@ -109,7 +109,7 @@ select
     customer__id as account_id,
     campaign__id as campaign_id,
     ad_group__id as ad_group_id,
-    ad_group__name as observed_name,
+    {{ to_name('ad_group__name') }} as observed_name,
     ad_group__status as ad_group_status,
     ad_group__type as ad_group_type,
     _dlt_valid_from as valid_from,
@@ -126,7 +126,7 @@ select
     campaign__id as campaign_id,
     ad_group__id as ad_group_id,
     ad_group_ad__ad__id as ad_id,
-    ad_group_ad__ad__name as observed_name,
+    {{ to_name('ad_group_ad__ad__name') }} as observed_name,
     ad_group_ad__status as ad_status,
     ad_group_ad__ad__type as ad_type,
     _dlt_valid_from as valid_from,

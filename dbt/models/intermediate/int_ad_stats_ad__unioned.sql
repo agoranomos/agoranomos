@@ -64,7 +64,7 @@ select
     k.ad_group_id,
     g.ad_group_name,
     k.ad_id,
-    coalesce(d.ad_name, nullif(s.loaded_ad_name, ''), k.ad_id) as ad_name,
+    coalesce(d.ad_name, s.loaded_ad_name, k.ad_id) as ad_name,
     a.currency,
     coalesce(s.impressions, 0) as impressions,
     coalesce(s.clicks, 0) as clicks,

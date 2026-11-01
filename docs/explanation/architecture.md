@@ -65,6 +65,7 @@ dlt takes care of incremental loading, schema evolution, merging and name normal
 
 * **Date window.** Each load covers a date window in the time zone of the ad account: final data up to yesterday, plus a sliding reload window because attribution keeps maturing after the fact.
 * **Safe repeats.** Each load replaces the facts of each account in the days of its window, the days that come back empty included, so a repeat adds no duplicate. Each table is replaced in a transaction of its own, so a dashboard read during a load can see the campaigns of a day before its ads.
+* **Loads by COPY.** dlt writes the rows of each table into a CSV file in a temporary folder, and PostgreSQL reads each file with `COPY ... FROM STDIN` in a transaction of its own, two at a time ([ADR-0038](../adr/0038-load-by-copy-and-write-the-core-by-whole-days.md)). A table that a load replaces whole, and the record of the loads, take the rows directly. A table whose days a load replaces, or whose versions it keeps, takes them in `raw_<source>_staging`, and dlt moves them over, table by table, once the file of the table is in. The last step of a run records the load in `_dlt_loads`, and dlt empties the staging schema. An empty string and a missing value both reach the table as NULL, and money stays text, which staging casts.
 * **Explicit retries.** How failed requests are retried is set explicitly, not left to library defaults.
 * **Loud failures.** If an account fails, the run fails or raises an alert that lists the affected accounts and the original API error.
 

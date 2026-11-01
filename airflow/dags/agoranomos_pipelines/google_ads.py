@@ -58,6 +58,7 @@ from agoranomos_pipelines.loads import (
     DATE,
     DLT_SETTINGS,
     FAILED,
+    FILE_FORMAT,
     LOADED,
     MERGE,
     RELOAD_HINTS,
@@ -68,6 +69,7 @@ from agoranomos_pipelines.loads import (
     or_marker,
     own,
     recorded,
+    row_counts,
 )
 from agoranomos_pipelines.settings.files import load_settings
 
@@ -185,9 +187,7 @@ SCD2 = {"disposition": "merge", "strategy": "scd2"}
 # The columns of a field of each query: the names that dlt gives the fields, with their types.
 COLUMNS = {
     "metrics.conversions": DOUBLE,
-    "metrics.conversions_value": DOUBLE,
     "metrics.all_conversions": DOUBLE,
-    "metrics.all_conversions_value": DOUBLE,
     "segments.date": DATE,
     "customer.manager": {"data_type": "bool"},
 }
@@ -204,7 +204,8 @@ def columns(table: str) -> dict[str, dict]:
 
 # The hints of each table, by the names that dlt gives the fields: every field of its query, so
 # that dlt makes each column even when no row of a load has it, with the INT64 numbers as text, as
-# the REST interface writes them, and the other numbers as the API gives them.
+# the REST interface writes them, the money as text too, and the other numbers as the API gives
+# them.
 HINTS = {
     "customers": {"write_disposition": "replace", "columns": columns("customers")},
     **{table: {"write_disposition": SCD2, "columns": columns(table)} for table in ENTITIES},
@@ -570,12 +571,8 @@ def load(now: datetime, extensions: Path = EXTENSIONS) -> dict[str, int]:
         record.sort(key=lambda row: row["account_id"])
         # In the same run as the facts, so that a load that fails records no window.
         resources.append(dlt.resource(record, name=RELOADS, **own(RELOAD_HINTS)))
-        pipeline.run(resources)
-        counts = {
-            table: rows
-            for table, rows in pipeline.last_trace.last_normalize_info.row_counts.items()
-            if not table.startswith("_")
-        }
+        pipeline.run(resources, loader_file_format=FILE_FORMAT)
+        counts = row_counts(pipeline)
     for table, rows in sorted(counts.items()):
         log.info("Loaded %d rows into %s.%s, as of %s", rows, DATASET, table, now.isoformat())
     log.info("%d requests to the Google Ads API for %d accounts", api.requests, len(wanted))

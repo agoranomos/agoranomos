@@ -9,14 +9,14 @@
     it was loaded; prefix names the table of the insights. -#}
 {% macro meta_level(level, prefix='') %}
     {%- if level == 'campaign' %}
-    {{ prefix }}campaign_name as loaded_campaign_name,
+    {{ to_name(prefix ~ 'campaign_name') }} as loaded_campaign_name,
     {%- elif level == 'ad_group' %}
     {{ prefix }}adset_id as ad_group_id,
-    {{ prefix }}adset_name as loaded_ad_group_name,
+    {{ to_name(prefix ~ 'adset_name') }} as loaded_ad_group_name,
     {%- elif level == 'ad' %}
     {{ prefix }}adset_id as ad_group_id,
     {{ prefix }}ad_id,
-    {{ prefix }}ad_name as loaded_ad_name,
+    {{ to_name(prefix ~ 'ad_name') }} as loaded_ad_name,
     {%- else %}
     {{ exceptions.raise_compiler_error('a level is campaign, ad_group or ad, not ' ~ level) }}
     {%- endif %}
@@ -81,7 +81,7 @@ join (select * from {{ insights }}) as i on i._dlt_id = j.parent_id
 select
     '{{ platform }}' as platform,
     account_id,
-    name as account_name,
+    {{ to_name('name') }} as account_name,
     currency,
     timezone_name as time_zone,
     cast(null as text) as manager_account_id,
@@ -94,7 +94,7 @@ select
     '{{ platform }}' as platform,
     account_id,
     id as campaign_id,
-    name as observed_name,
+    {{ to_name('name') }} as observed_name,
     status as campaign_status,
     objective as campaign_type,
     _dlt_valid_from as valid_from,
@@ -110,7 +110,7 @@ select
     account_id,
     campaign_id,
     id as ad_group_id,
-    name as observed_name,
+    {{ to_name('name') }} as observed_name,
     status as ad_group_status,
     optimization_goal as ad_group_type,
     _dlt_valid_from as valid_from,
@@ -126,7 +126,7 @@ select
     campaign_id,
     adset_id as ad_group_id,
     id as ad_id,
-    name as observed_name,
+    {{ to_name('name') }} as observed_name,
     status as ad_status,
     cast(null as text) as ad_type,
     _dlt_valid_from as valid_from,

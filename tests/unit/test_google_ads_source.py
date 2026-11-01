@@ -74,16 +74,29 @@ class StandInClient:
 class StandInPipeline:
     def __init__(self, options, state):
         self.options, self.state, self.runs, self.last_trace = options, state, [], None
+        self.formats = []
 
     def sql_client(self):
         return StandInClient(self)
 
-    def run(self, resources):
+    def run(self, resources, loader_file_format=None):
+        self.formats.append(loader_file_format)
         rows = {r.name: list(r.data) for r in resources}
         self.runs.append((rows, {r.name: r.hints for r in resources}))
         counts = {name: sum(1 for row in found if row != MARKER) for name, found in rows.items()}
         self.last_trace = types.SimpleNamespace(
-            last_normalize_info=types.SimpleNamespace(row_counts=counts)
+            last_extract_info=types.SimpleNamespace(
+                metrics={
+                    "1": [
+                        {
+                            "table_metrics": {
+                                name: types.SimpleNamespace(items_count=rows)
+                                for name, rows in counts.items()
+                            }
+                        }
+                    ]
+                }
+            )
         )
 
 
@@ -210,7 +223,6 @@ def ads(monkeypatch, tmp_path):
     # The settings of dlt that a load sets go when the test ends.
     for name in (
         "LOAD__TRUNCATE_STAGING_DATASET",
-        "NORMALIZE__DATA_WRITER__FILE_MAX_ITEMS",
         "LOAD__WORKERS",
     ):
         monkeypatch.setenv(name, "unset")
@@ -369,6 +381,7 @@ def test_a_load_keeps_the_rows_as_the_api_gives_them_and_replaces_the_days_of_ea
     [pipeline] = made["pipelines"]
     assert pipeline.options["dataset_name"] == "raw_google_ads"
     [(rows, hints)] = pipeline.runs
+    assert pipeline.formats == ["csv"]
     assert rows["campaign_stats"][0]["metrics"] == {"impressions": "10", "costMicros": "1500000"}
     assert hints["campaign_stats"]["write_disposition"] == {
         "disposition": "merge",
@@ -392,10 +405,16 @@ def test_a_load_keeps_the_rows_as_the_api_gives_them_and_replaces_the_days_of_ea
         }
     assert hints["customers"]["write_disposition"] == "replace"
     # Every field of each query has a hint of its own, so that dlt makes every column, as text
-    # unless it is a date, a DOUBLE or a flag.
+    # unless it is a date, a count that can have a fraction, or a flag. Money is text, whether the
+    # API writes it as a string of micros or as a JSON number (ADR-0038).
     assert hints["ad_stats"]["columns"]["ad_group_ad__ad__name"]["data_type"] == "text"
     assert hints["ad_stats"]["columns"]["segments__date"]["data_type"] == "date"
+    assert hints["ad_stats"]["columns"]["metrics__cost_micros"]["data_type"] == "text"
+    assert hints["ad_stats"]["columns"]["metrics__conversions_value"]["data_type"] == "text"
     assert hints["ad_conversions"]["columns"]["metrics__all_conversions"]["data_type"] == "double"
+    assert hints["ad_conversions"]["columns"]["metrics__all_conversions_value"]["data_type"] == (
+        "text"
+    )
     assert hints["customers"]["columns"]["customer__manager"]["data_type"] == "bool"
     for table in module.FIELDS:
         fields = module.FIELDS[table].split(", ")

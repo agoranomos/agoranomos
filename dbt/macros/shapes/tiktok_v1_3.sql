@@ -9,20 +9,20 @@
     {%- if level == 'campaign' %}
     dimensions__campaign_id as campaign_id,
     {%- if names %}
-    metrics__campaign_name as loaded_campaign_name,
+    {{ to_name('metrics__campaign_name') }} as loaded_campaign_name,
     {%- endif %}
     {%- elif level == 'ad_group' %}
     metrics__campaign_id as campaign_id,
     dimensions__adgroup_id as ad_group_id,
     {%- if names %}
-    metrics__adgroup_name as loaded_ad_group_name,
+    {{ to_name('metrics__adgroup_name') }} as loaded_ad_group_name,
     {%- endif %}
     {%- elif level == 'ad' %}
     metrics__campaign_id as campaign_id,
     metrics__adgroup_id as ad_group_id,
     dimensions__ad_id as ad_id,
     {%- if names %}
-    metrics__ad_name as loaded_ad_name,
+    {{ to_name('metrics__ad_name') }} as loaded_ad_name,
     {%- endif %}
     {%- else %}
     {{ exceptions.raise_compiler_error('a level is campaign, ad_group or ad, not ' ~ level) }}
@@ -94,7 +94,7 @@ where conversions > 0 or conversion_value > 0
 select
     '{{ platform }}' as platform,
     advertiser_id as account_id,
-    name as account_name,
+    {{ to_name('name') }} as account_name,
     currency,
     timezone as time_zone,
     cast(null as text) as manager_account_id,
@@ -107,7 +107,7 @@ select
     '{{ platform }}' as platform,
     advertiser_id as account_id,
     campaign_id,
-    campaign_name as observed_name,
+    {{ to_name('campaign_name') }} as observed_name,
     operation_status as campaign_status,
     objective_type as campaign_type,
     _dlt_valid_from as valid_from,
@@ -122,7 +122,7 @@ select
     advertiser_id as account_id,
     campaign_id,
     adgroup_id as ad_group_id,
-    adgroup_name as observed_name,
+    {{ to_name('adgroup_name') }} as observed_name,
     operation_status as ad_group_status,
     optimization_goal as ad_group_type,
     _dlt_valid_from as valid_from,
@@ -138,7 +138,7 @@ select
     campaign_id,
     adgroup_id as ad_group_id,
     ad_id,
-    ad_name as observed_name,
+    {{ to_name('ad_name') }} as observed_name,
     operation_status as ad_status,
     ad_format as ad_type,
     _dlt_valid_from as valid_from,

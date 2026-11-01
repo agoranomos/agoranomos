@@ -31,6 +31,7 @@ from dlt.sources.helpers.requests import Client
 
 from agoranomos_pipelines.loads import (
     DLT_SETTINGS,
+    FILE_FORMAT,
     LOADED,
     MERGE,
     RELOAD_HINTS,
@@ -41,6 +42,7 @@ from agoranomos_pipelines.loads import (
     or_marker,
     own,
     recorded,
+    row_counts,
 )
 
 log = logging.getLogger(__name__)
@@ -188,8 +190,8 @@ def load(now: datetime) -> int:
             # In the same run as the rates, so that a load that fails records no window.
             dlt.resource(reloads(now, first, last), name=RELOADS, **own(RELOAD_HINTS)),
         ]
-        pipeline.run(resources)
-        loaded = pipeline.last_trace.last_normalize_info.row_counts.get(TABLE, 0)
+        pipeline.run(resources, loader_file_format=FILE_FORMAT)
+        loaded = row_counts(pipeline).get(TABLE, 0)
     log.info(
         "Loaded %d rows into %s.%s, the days from %s to %s",
         loaded,

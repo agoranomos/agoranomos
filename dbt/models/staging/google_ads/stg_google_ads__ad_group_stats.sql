@@ -3,6 +3,6 @@
     'customer__id': 'text', 'campaign__resource_name': 'text', 'campaign__id': 'text',
     'ad_group__resource_name': 'text', 'ad_group__id': 'text', 'ad_group__name': 'text',
     'metrics__impressions': 'text', 'metrics__clicks': 'text', 'metrics__cost_micros': 'text',
-    'metrics__conversions': 'double precision', 'metrics__conversions_value': 'double precision',
+    'metrics__conversions': 'double precision', 'metrics__conversions_value': 'text',
     'segments__date': 'date',
 }), 'google_ads', 'ad_group') }}
