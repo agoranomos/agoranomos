@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.3](https://github.com/agoranomos/agoranomos/compare/v0.4.2...v0.4.3) (2026-11-01)
+
+
+### Bug Fixes
+
+* **airflow:** start the transform on any loaded asset ([#242](https://github.com/agoranomos/agoranomos/issues/242)) ([08d9bf1](https://github.com/agoranomos/agoranomos/commit/08d9bf123af6a531f095208dcce3329da15c6e30))
+* **backup:** keep twelve monthly backups by default ([#239](https://github.com/agoranomos/agoranomos/issues/239)) ([dcb66c9](https://github.com/agoranomos/agoranomos/commit/dcb66c9f7506b6b1c85b923096b7afa3564b4d0d))
+* **google-ads:** load the other accounts when one fails ([#240](https://github.com/agoranomos/agoranomos/issues/240)) ([8a6aeb4](https://github.com/agoranomos/agoranomos/commit/8a6aeb4cce2df90a51e73f61bb52e8b7197e1e1e))
+* **stack:** derive the settings of PostgreSQL from the memory limit ([#243](https://github.com/agoranomos/agoranomos/issues/243)) ([a5e37a7](https://github.com/agoranomos/agoranomos/commit/a5e37a7d323447381c73144cc653f1d54afee95a))
+
+
+### Documentation
+
+* **adr:** record the check of the watcher mode ([#246](https://github.com/agoranomos/agoranomos/issues/246)) ([5badf59](https://github.com/agoranomos/agoranomos/commit/5badf594bdb8f8b46e2c3c1b98fdea458c0758cb))
+
 ## [0.4.2](https://github.com/agoranomos/agoranomos/compare/v0.4.1...v0.4.2) (2026-10-31)
 
 
