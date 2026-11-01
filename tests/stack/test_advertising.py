@@ -57,6 +57,16 @@ def answer(metabase_url, session, board, dashcard, **values):
     return found["data"]
 
 
+def clients_in_the_marts(env, metabase_url, session, board):
+    """The clients that the filter offers and that the marts hold. A filter that is a list offers
+    what the last scan of Metabase saw, so a scan in the minutes when a test of
+    test_demo_transform.py has clients of its own in the marts leaves them in the list until the
+    next scan, which is how a daily scan works and says nothing of the filters."""
+    path = f"/api/dashboard/{board['id']}/params/client/values"
+    held = set(warehouse_output(env, "SELECT client_name FROM marts.clients").splitlines())
+    return [v[0] for v in call(metabase_url, session, "GET", path)["values"] if v[0] in held]
+
+
 def test_the_dashboard_has_its_tabs_and_every_card_answers(metabase_url, session, board):
     assert [tab["name"] for tab in sorted(board["tabs"], key=lambda t: t["position"])] == list(
         ad.TABS
@@ -68,12 +78,11 @@ def test_the_dashboard_has_its_tabs_and_every_card_answers(metabase_url, session
         assert rows, dashcard["card"]["name"]
 
 
-def test_every_card_answers_with_a_client_and_a_campaign(metabase_url, session, board):
+def test_every_card_answers_with_a_client_and_a_campaign(env, metabase_url, session, board):
     # A filter that links names the column of a question on another mart through the alias of its
     # tag, which Metabase puts into the SQL only when the filter has a value.
     cards = {d["card"]["name"]: d for d in board["dashcards"] if d["card_id"] is not None}
-    path = f"/api/dashboard/{board['id']}/params"
-    client = call(metabase_url, session, "GET", f"{path}/client/values")["values"][0][0]
+    client = clients_in_the_marts(env, metabase_url, session, board)[0]
 
     def campaigns(data):
         names = [c["name"] for c in data["cols"]]
@@ -120,7 +129,7 @@ def test_a_kpi_of_the_dashboard_is_the_ratio_of_sql_over_the_mart(
 
 
 def test_the_linked_filters_offer_the_values_of_the_filters_that_limit_them(
-    metabase_url, session, board
+    env, metabase_url, session, board
 ):
     # Each filter that links is on one field, all of one table, so that Metabase joins no other
     # mart for their values: a join along the foreign keys ran into the statement timeout.
@@ -128,7 +137,7 @@ def test_the_linked_filters_offer_the_values_of_the_filters_that_limit_them(
     assert all(len(fields) == 1 for fields in linked.values()), linked
     assert len({fields[0]["table_id"] for fields in linked.values()}) == 1
     path = f"/api/dashboard/{board['id']}/params"
-    clients = [v[0] for v in call(metabase_url, session, "GET", f"{path}/client/values")["values"]]
+    clients = clients_in_the_marts(env, metabase_url, session, board)
     every = call(metabase_url, session, "GET", f"{path}/campaign/values")["values"]
     assert len(clients) >= 2
     counted = 0
