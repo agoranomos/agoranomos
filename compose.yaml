@@ -846,7 +846,7 @@ services:
       BACKUP_TIME: ${BACKUP_TIME:-03:00}
       BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-7}
       BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-4}
-      BACKUP_KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-3}
+      BACKUP_KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-12}
       # The images of the checkout, for the manifest of each backup: ./agoranomos passes them on.
       AGORANOMOS_IMAGES: ${AGORANOMOS_IMAGES:-}
     volumes:
