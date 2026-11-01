@@ -139,7 +139,7 @@ git diff <the commit that you came from> HEAD -- airflow/Dockerfile | grep '^[-+
 
 ## `status`
 
-Shows the state and health of every service, including the one-shot setup jobs. It then says when the last good backup was, lists the backups by hand with their size and age, and warns when the last run failed, when the `backup` service is unhealthy, which means that it has no good backup in the last 26 hours, or, with the `ops` profile, when the last good backup is older than that. Without the `ops` profile it says how old the last good backup is and does not warn, as backups by hand come when you take them. It also prints the free space of the disk of the backups folder, which by default is the disk that holds the data of Docker.
+Shows the state and health of every service, including the one-shot setup jobs. Under the table it shows the memory limit of `warehouse-db` and the `shared_buffers` that follow it, or that `.env` sets ([Configuration](configuration.md#the-settings-of-postgresql-of-the-warehouse)), and, while the service runs, warns when the server has another `shared_buffers` than `.env` gives now, which the next `./agoranomos up` applies. It then says when the last good backup was, lists the backups by hand with their size and age, and warns when the last run failed, when the `backup` service is unhealthy, which means that it has no good backup in the last 26 hours, or, with the `ops` profile, when the last good backup is older than that. Without the `ops` profile it says how old the last good backup is and does not warn, as backups by hand come when you take them. It also prints the free space of the disk of the backups folder, which by default is the disk that holds the data of Docker.
 
 ## `logs`
 

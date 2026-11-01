@@ -90,7 +90,7 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** the settings from the limit, with `shm_size` and `max_locks_per_transaction`, are planned for v0.4.x, as they survive v0.5. The profile of the agency is planned for v0.5.
+* **Implementation status, as of November 2026:** the settings from the limit, with `shm_size` and `max_locks_per_transaction`, are in `./agoranomos` since v0.4.x ([Configuration](../reference/configuration.md#the-settings-of-postgresql-of-the-warehouse)); the two values that this record leaves to a profile take a threshold of the limit, `checkpoint_timeout` 30 minutes from 8 GiB and `autovacuum_vacuum_cost_limit` 1,500 from 16 GiB. The profile of the agency is planned for v0.5.
 * The facts behind this record, measured on 31 October 2026 on the shape of the core, with PostgreSQL 18.6, no swap and `jit` off, with clients in a container of their own. The data is synthetic, each variant had one run, and the scenario is lighter than a mix of queries on ads alone:
 
     | Limit | Clients | Cores | Transactions a second | Latency | Write and vacuum of a window | Peak without cache | Failures |

@@ -5470,3 +5470,124 @@ def test_up_above_off_goes_on_when_the_clients_cannot_be_read(cli, tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert "could not read the OAuth clients from the database of Metabase" in result.stderr
+
+
+# The settings of PostgreSQL of warehouse-db for a limit of 3 GiB, as the fake docker logs them
+# for each call of Compose: sorted, as the script exports them (ADR-0040).
+WAREHOUSE_3G = (
+    "AUTOVACUUM_MAX_WORKERS=3 AUTOVACUUM_VACUUM_COST_LIMIT=1000 AUTOVACUUM_WORK_MEM=128MB "
+    "CHECKPOINT_TIMEOUT=15min EFFECTIVE_CACHE_SIZE=2048MB MAINTENANCE_WORK_MEM=256MB "
+    "MAX_CONNECTIONS=100 MAX_LOCKS_PER_TRANSACTION=128 MAX_PARALLEL_WORKERS_PER_GATHER=1 "
+    "MAX_WAL_SIZE=4GB RANDOM_PAGE_COST=1.1 SHARED_BUFFERS=768MB SHM_SIZE=512m WORK_MEM=16MB"
+)
+
+
+def warehouse_settings_of_compose_calls(tmp_path):
+    """What each call of Compose got of the WAREHOUSE_DB_* settings, one line a call."""
+    return (tmp_path / "docker.log.warehouse").read_text(encoding="utf-8").splitlines()
+
+
+def test_every_compose_call_gets_the_settings_of_postgresql_of_the_warehouse(cli, tmp_path):
+    # From the limit of .env, with a value of .env before the formula, and whatever the shell of
+    # the person exports under the same names: the command of the service reads them.
+    cli.run("init")
+    set_env(cli, WAREHOUSE_DB_MEMORY="3g")
+    assert cli.run("status", WAREHOUSE_DB_SHARED_BUFFERS="from the shell").returncode == 0
+    calls = warehouse_settings_of_compose_calls(tmp_path)
+    assert calls
+    assert set(calls) == {WAREHOUSE_3G + " "}
+    add_env(cli, WAREHOUSE_DB_WORK_MEM="64MB", WAREHOUSE_DB_SHM_SIZE="")
+    assert cli.run("down").returncode == 0
+    assert warehouse_settings_of_compose_calls(tmp_path)[-1] == (
+        WAREHOUSE_3G.replace("WORK_MEM=16MB", "WORK_MEM=64MB") + " "
+    )
+
+
+def test_status_shows_the_memory_limit_and_the_shared_buffers_of_the_warehouse(cli, tmp_path):
+    cli.run("init")
+    result = cli.run("status", FAKE_PS_FILE=ps_file(tmp_path, STATUS_TABLE))
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[2] == "warehouse-db: memory limit 384m, shared_buffers 128MB (ADR-0040)."
+    set_env(cli, WAREHOUSE_DB_MEMORY="3g")
+    assert "warehouse-db: memory limit 3g, shared_buffers 768MB" in cli.run("status").stdout
+    add_env(cli, WAREHOUSE_DB_SHARED_BUFFERS="1GB")
+    assert "warehouse-db: memory limit 3g, shared_buffers 1GB" in cli.run("status").stdout
+
+
+@pytest.mark.parametrize(
+    ("answer", "warns"),
+    [
+        ("4GB\x1ft", True),
+        ("128MB\x1ff", False),
+        # The server did not answer: nothing to compare.
+        ("", False),
+    ],
+    ids=["other", "same", "no answer"],
+)
+def test_status_warns_while_the_running_warehouse_has_other_shared_buffers_than_env(
+    cli, tmp_path, answer, warns
+):
+    # A change of .env reaches the server at the next up: until then status says what it runs
+    # with, by the table of the services that it printed. The server compares the sizes, which it
+    # shows in the biggest unit that divides them.
+    cli.run("init")
+    running = ps_file(tmp_path, STATUS_TABLE)
+    result = cli.run("status", FAKE_PS_FILE=running, FAKE_PSQL_OUTPUT=answer)
+    assert result.returncode == 0, result.stderr
+    warning = "the running warehouse-db has shared_buffers 4GB, not the 128MB that .env gives now"
+    assert (warning in result.stderr) is warns
+    psql_calls = [call for call in compose_calls(cli) if " psql " in call]
+    assert len(psql_calls) == 1
+    assert " exec -T warehouse-db psql " in psql_calls[0]
+    assert "--set=wanted=128MB" in psql_calls[0]
+    assert "--set=ON_ERROR_STOP=1" in psql_calls[0]
+
+
+def test_status_asks_the_warehouse_nothing_while_it_does_not_run(cli, tmp_path):
+    cli.run("init")
+    stopped = ps_file(
+        tmp_path, "SERVICE   STATE     STATUS\nwarehouse-db   exited   Exited (0) 2 hours ago\n"
+    )
+    result = cli.run("status", FAKE_PS_FILE=stopped, FAKE_PSQL_OUTPUT="4GB\x1ft")
+    assert result.returncode == 0, result.stderr
+    assert "warehouse-db: memory limit 384m, shared_buffers 128MB" in result.stdout
+    assert "running warehouse-db" not in result.stderr
+    assert not [call for call in compose_calls(cli) if " psql " in call]
+
+
+@pytest.mark.parametrize(
+    ("setting", "value", "outcome"),
+    [
+        ("WAREHOUSE_DB_SHARED_BUFFERS", "1GB", "pass"),
+        ("WAREHOUSE_DB_SHARED_BUFFERS", "1.5GB", "pass"),
+        ("WAREHOUSE_DB_SHARED_BUFFERS", "'1GB'", "pass"),
+        ("WAREHOUSE_DB_SHARED_BUFFERS", "", "pass"),
+        ("WAREHOUSE_DB_SHARED_BUFFERS", "lots", "stop"),
+        ("WAREHOUSE_DB_SHARED_BUFFERS", "1 GB", "stop"),
+        ("WAREHOUSE_DB_SHARED_BUFFERS", "1GB;", "stop"),
+        ("WAREHOUSE_DB_CHECKPOINT_TIMEOUT", "30min", "pass"),
+        ("WAREHOUSE_DB_AUTOVACUUM_WORK_MEM", "-1", "pass"),
+        ("WAREHOUSE_DB_RANDOM_PAGE_COST", "1.1", "pass"),
+        ("WAREHOUSE_DB_RANDOM_PAGE_COST", "1.", "stop"),
+        ("WAREHOUSE_DB_MAX_CONNECTIONS", "200", "pass"),
+        ("WAREHOUSE_DB_SHM_SIZE", "256m", "pass"),
+        ("WAREHOUSE_DB_SHM_SIZE", "1g", "pass"),
+        ("WAREHOUSE_DB_SHM_SIZE", "256MB", "pass"),
+        ("WAREHOUSE_DB_SHM_SIZE", "256", "stop"),
+        ("WAREHOUSE_DB_SHM_SIZE", "lots", "stop"),
+    ],
+    ids=repr,
+)
+def test_preflight_checks_the_shape_of_a_setting_of_postgresql_of_the_warehouse(
+    cli, setting, value, outcome
+):
+    # The server does not start on a value that it cannot read, so preflight stops on one that is
+    # not a number with a unit, and on a /dev/shm that is not a memory size of Compose. The message
+    # names the setting, never the value.
+    cli.run("init")
+    add_env(cli, **{setting: value})
+    result = cli.run("preflight")
+    check_limit(result, outcome, setting)
+    if outcome == "stop":
+        assert value not in result.stderr
