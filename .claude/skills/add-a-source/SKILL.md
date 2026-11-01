@@ -24,7 +24,7 @@ A source goes through every layer of the model ([ADR-0025](../../../docs/adr/002
 2. **The load.** A dlt source loads, as `loader`, into `raw_<platform>` ([ADR-0004](../../../docs/adr/0004-ingest-with-dlt.md)). The demo's loads are in `airflow/dags/agoranomos_pipelines/demo/`:
     - `sources.py` holds the table hints;
     - `platforms.py` holds the fact tables and the reload window;
-    - `assets.py` holds the asset of the main table, on which the transform waits.
+    - `assets.py` holds the asset of the main table, and `LOADED` there, the condition that starts the transform, takes the asset of a new source ([ADR-0039](../../../docs/adr/0039-run-one-dbt-build-in-the-watcher-mode.md)).
 
     Every load also records the window of each account that it replaced in `_agoranomos_reloads`, in the same run. Give every table and column hint the reason that the code around it gives.
 3. **Staging.** Add a folder `dbt/models/staging/<platform>/` with three kinds of files:

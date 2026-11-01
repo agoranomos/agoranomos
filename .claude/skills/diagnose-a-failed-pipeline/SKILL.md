@@ -10,7 +10,7 @@ Find the run and the task that failed, read why from its log, and propose a fix.
 ## What runs
 
 - `agoranomos_demo_history` loads the history of the demo once, on the first start, and `agoranomos_demo_daily` loads the new days at 09:17 UTC. Both load as the role `loader`, with dlt, into `raw_demo_<platform>`, and each load updates the asset of its main table.
-- `agoranomos_demo_transform` runs once each of the five platforms has loaded since its last run. Its first task, `load_settings`, loads the files of `extensions/model/`. Then the task `elementary`, and then one task for each model, seed and test of dbt, run as `dbt build` through Cosmos ([ADR-0028](../../../docs/adr/0028-build-each-node-of-dbt-with-its-tests-in-one-task.md)).
+- `agoranomos_demo_transform` runs once each of the five platforms has loaded since its last run, and after each load of the rates of the ECB or of Google Ads ([What starts the transform](../../../docs/how-to/watch-the-pipeline.md#what-starts-the-transform)). Its first task, `load_settings`, loads the files of `extensions/model/`. Then the task `elementary`, and then one task for each model, seed and test of dbt, run as `dbt build` through Cosmos ([ADR-0028](../../../docs/adr/0028-build-each-node-of-dbt-with-its-tests-in-one-task.md)).
 - `agoranomos_selfcheck` only checks that the scheduler and the executor work.
 - The DAGs of the bundle `extensions` are the deployment's own, in `extensions/dags/`.
 

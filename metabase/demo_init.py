@@ -67,7 +67,9 @@ TRANSFORM_DAG = "agoranomos_demo_transform"
 DAILY_DAG = "agoranomos_demo_daily"
 # The transform runs when each platform of the demo has loaded since its last run: it waits for
 # one asset of each (airflow/dags/agoranomos_pipelines/assets.py), and the events of some of them
-# start no run.
+# start no run. An event of the rates of the ECB or of Google Ads starts a run on its own, and the
+# job counts the events of the demo alone: the two DAGs start paused, and a run that one of them
+# starts counts as a run once Airflow has created it, within a loop of the scheduler.
 TRANSFORM_ASSETS = 5
 # The demo as a package of the content (content.py): its key in the registry, and its name, the
 # name of its collection in agoranomos.

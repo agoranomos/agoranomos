@@ -4,8 +4,9 @@ agoranomos_ecb_daily runs at 06:47 UTC, after midnight in Frankfurt, and loads w
 loader role, the rates of the ECB into raw_ecb: on the first run, those of the last 37 months, and
 then the days from the day after the last that a load took, or from 7 days back when that is
 earlier, to yesterday in Frankfurt (agoranomos_pipelines/ecb.py). The first task, due, skips the
-run when a load has taken the day already. The transform takes the rates at its next run; where the
-ECB and the demo both have a rate for a day, it takes the rate of the ECB.
+run when a load has taken the day already. Each load updates the asset of the rates, and the
+transform runs after it (ADR-0039); where the ECB and the demo both have a rate for a day, it takes
+the rate of the ECB.
 
 The DAG starts paused: the demo keeps its own rates and asks the ECB nothing, so a deployment with
 the demo alone, and the stack tests, need no network. A deployment with a real source unpauses it,
