@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.4.4](https://github.com/agoranomos/agoranomos/compare/v0.4.3...v0.4.4) (2026-11-02)
+
+
+### Bug Fixes
+
+* **metabase:** set the values of fields, the scan and the cache from the code ([#245](https://github.com/agoranomos/agoranomos/issues/245)) ([da6211a](https://github.com/agoranomos/agoranomos/commit/da6211aafdd0dd3fa8e5794e725a8d478359adaa))
+
+
+### Performance Improvements
+
+* **dlt:** load the raw tables with COPY ([#247](https://github.com/agoranomos/agoranomos/issues/247)) ([b37eda4](https://github.com/agoranomos/agoranomos/commit/b37eda493b62e49c4b8b34214092230bd72e1fa4))
+
+
+### Documentation
+
+* **adr:** propose to pin the loads before the transform ([#251](https://github.com/agoranomos/agoranomos/issues/251)) ([781695d](https://github.com/agoranomos/agoranomos/commit/781695d6322a1bd3160e7d1d0b45c9783a18ff30))
+* **adr:** record the check of partitions ([9adad7f](https://github.com/agoranomos/agoranomos/commit/9adad7f50a51c16c721b3c56169045afbcc8e66c)), closes [#189](https://github.com/agoranomos/agoranomos/issues/189)
+* **adr:** record the check of partitions under readers ([#252](https://github.com/agoranomos/agoranomos/issues/252)) ([9adad7f](https://github.com/agoranomos/agoranomos/commit/9adad7f50a51c16c721b3c56169045afbcc8e66c))
+* **adr:** record the check of retention ([ae8b07a](https://github.com/agoranomos/agoranomos/commit/ae8b07a9aa6120a0d34212a3d716e3372c5971de))
+* **adr:** record the check of the pinning of loads ([#250](https://github.com/agoranomos/agoranomos/issues/250)) ([4d42988](https://github.com/agoranomos/agoranomos/commit/4d429884b0e9233c27a634e52687947419dc0902))
+* **adr:** record the check of the retention of service data ([#253](https://github.com/agoranomos/agoranomos/issues/253)) ([ae8b07a](https://github.com/agoranomos/agoranomos/commit/ae8b07a9aa6120a0d34212a3d716e3372c5971de))
+
 ## [0.4.3](https://github.com/agoranomos/agoranomos/compare/v0.4.2...v0.4.3) (2026-11-01)
 
 
