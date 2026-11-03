@@ -2137,7 +2137,8 @@ restore_signaled() {
 # Put databases back as a backup has them (ADR-0020). Nothing changes until the backup has passed
 # its check in the backup service, the images of its databases match those of the checkout, and
 # the person has said yes; then it removes what a mode left behind, stops every service but the
-# databases, runs db-init, restores each database as its superuser inside its container, through
+# databases, runs db-init without the migrations of the core, restores each database as its
+# superuser inside its container, through
 # the socket, where the image trusts it, and starts the stack. The dump goes into the /tmp of the
 # container first, so that pg_restore reads a file. From the stop on, a failure or an interrupt
 # says which databases are back, that the services are stopped, and what to do (restore_exit).
@@ -2295,7 +2296,15 @@ Check out the release that took it and restore there, or pass --force if you kno
   restore_phase=stopped
   compose up --detach --wait warehouse-db platform-db < /dev/null ||
     die "the databases did not start: see ./agoranomos logs warehouse-db and ./agoranomos logs platform-db"
-  compose run --rm --no-deps -T db-init < /dev/null || die "db-init failed: the lines above say why"
+  # The roles and schemas that pg_restore needs, migrator among them, without the migrations of the
+  # core (ADR-0044): the db-init of start_stack below applies them, or stops on a warehouse that a
+  # newer release migrated, once the databases are as the restore leaves them. Here they would meet
+  # the warehouse that pg_restore --clean --create is to replace whole: a checkout of the release
+  # before stops on the migration that the backup taken by up before it does not hold, and a
+  # restore that failed halfway can leave the table of the migrations without its rows. When the
+  # warehouse stays, as with --only metabase, the db-init of start_stack does what every start does.
+  compose run --rm --no-deps -T -e DB_INIT_MIGRATIONS=skip db-init < /dev/null ||
+    die "db-init failed: the lines above say why"
   restore_phase=restoring
   for database in $databases; do
     service=$(database_service "$database")

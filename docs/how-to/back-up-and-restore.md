@@ -44,7 +44,7 @@ The tables of the schema `core` change only through migrations, which `db-init` 
 
 The backup is one by hand, so no retention removes it. Its `manifest.json` has two more fields: `note`, which says that `up` took it before the migrations, and `migrations`, which names them, separated by blanks. `./agoranomos status` lists it with them, as in `20261103T101500Z: 2312 KiB, 0 days old, taken by up before the migrations of the core 0002_add_the_facts`. Every `up` that finds migrations waiting takes one, so an `up` that fails after its backup and runs again leaves one more: delete those that you do not need, as above.
 
-Take a backup by hand before you update the checkout all the same, as [above](#take-a-backup-now): it is the way back to the release that you come from, whose images its manifest records and `restore` compares with the checkout. The backup of `up` records the images of the container that takes it: those of the release that you come from in the running `backup` service, and those of the release that you update to in a container of its own, as in local mode, so a `restore` of Airflow or Metabase with the earlier release stops on it when the update changed their images.
+Take a backup by hand before you update the checkout all the same, as [above](#take-a-backup-now): it is the way back to the release that you come from, whose images its manifest records and `restore` compares with the checkout. The backup of `up` records the images of the container that takes it: those of the release that you come from in the running `backup` service, and those of the release that you update to in a container of its own, as in local mode, so a `restore` of Airflow or Metabase with the earlier release stops on it when the update changed their images. Both restore with the checkout of the release that you come from, as the `db-init` that `restore` runs before `pg_restore` leaves the migrations alone: [Go back from an upgrade](#go-back-from-an-upgrade) says which databases to restore.
 
 ## Back up every day
 
@@ -145,7 +145,7 @@ git checkout <commit>   # only if the checkout is at another commit
 
 Before it asks or changes anything, `restore` runs the checks of `preflight`, without `--force`: on a machine where `up` needs `--force`, because Docker has less memory or disk than the minimum, `restore` stops too, and its own `--force` is about the images only. On Linux it also stops when the backups folder belongs to another user than `AGORANOMOS_UID`, and on `AGORANOMOS_UID=0`. It then checks the backup: every file against its SHA-256, and each dump that it restores read to its end. While a backup runs, the check waits for it, up to 10 minutes, and while the check runs, a scheduled backup that comes due fails and is tried again an hour later. It compares the images, and stops when they differ, unless `--force`, which restores a backup of other versions after it has printed the differences: use it only when you know that the versions of the checkout read it. On a terminal it then asks you to type `yes`, on standard error; elsewhere it needs `--yes`, which replaces the question in a script. A refused restore, whether the check, the images or your answer refuses it, changes nothing.
 
-Only after the answer does it change anything: it stops and removes a `proxy` or `backup` container that a mode left behind, as `up` does, stops every service but the databases, runs `db-init`, restores each database as it was at the backup, runs `ANALYZE`, and starts the stack. It works on a running stack and on one that is down. While it runs, the site is down, as the proxy and the `backup` service are among the services that it stops: about 40 seconds for the demo data on a Mac, measured on 11 October 2026. Everything saved after the backup is lost.
+Only after the answer does it change anything: it stops and removes a `proxy` or `backup` container that a mode left behind, as `up` does, stops every service but the databases, runs `db-init` without the migrations of the core, restores each database as it was at the backup, runs `ANALYZE`, and starts the stack, whose `db-init` applies the migrations that the restored warehouse lacks ([The migrations of the core](../reference/configuration.md#the-migrations-of-the-core)). It works on a running stack and on one that is down. While it runs, the site is down, as the proxy and the `backup` service are among the services that it stops: about 40 seconds for the demo data on a Mac, measured on 11 October 2026. Everything saved after the backup is lost.
 
 To restore some databases only, name them in one `--only`, separated by commas and each once:
 
@@ -174,6 +174,14 @@ git checkout <the commit that you came from>
 ```
 
 If `restore` stops because the images of the backup differ from those of the checkout, the checkout is not at the commit that you came from ([Configuration](../reference/configuration.md#back-up-metabase-before-an-upgrade)).
+
+An update that brought migrations of the core changed the warehouse one way too, and the `db-init` of the release that you go back to stops on a migration that it does not have, at the start at the end of the restore. So restore the warehouse with the others, `--only warehouse,metabase` or the whole backup, and you lose what the warehouse loaded since the backup. While the checkout is still at the new release, this prints the migrations that the update brought, and nothing when it brought none:
+
+```bash
+git diff --name-only --diff-filter=A <the commit that you came from> HEAD -- postgres/migrations
+```
+
+The backup that `up` took before those migrations holds the databases of the moment before them, and restores with the checkout that you came from too. When a container of its own took it, as in local mode, its manifest records the images of the new release, so `restore` stops on Airflow or Metabase when the update changed their images: restore those from the backup that you took by hand before the update ([above](#the-backup-before-a-migration-of-the-core)).
 
 ## Restore on a new server
 

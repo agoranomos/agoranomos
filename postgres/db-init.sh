@@ -3,7 +3,9 @@
 # the migrations of the core that the warehouse has not applied yet, and delete the old results of
 # Celery.
 # The db-init service runs this script on every start: every statement in the SQL files is safe to
-# repeat, and each migration runs once (migrate below).
+# repeat, and each migration runs once (migrate below). ./agoranomos restore runs it before it
+# restores the databases with DB_INIT_MIGRATIONS=skip, which leaves the migrations to the start
+# that follows.
 # The passwords of the roles reach the SQL files through the environment (\getenv in the files), never
 # through the arguments of psql, which other users of a Linux host can read. The password of the role
 # that psql signs in as reaches it in PGPASSWORD, which is in its environment too.
@@ -29,6 +31,18 @@ fail() {
   exit 1
 }
 
+# Whether this run applies the migrations of the core, from DB_INIT_MIGRATIONS in its environment:
+# apply, the default, or skip, with which ./agoranomos restore runs db-init before pg_restore
+# replaces the warehouse whole. The roles and schemas that pg_restore needs, migrator among them,
+# come either way; the db-init of the start after the restore applies the migrations, or stops on
+# a warehouse that a newer release migrated. compose.yaml does not pass the setting, so every other
+# start applies them. Any other value stops db-init before it changes anything.
+DB_INIT_MIGRATIONS=${DB_INIT_MIGRATIONS:-apply}
+case "$DB_INIT_MIGRATIONS" in
+  apply | skip) ;;
+  *) fail "DB_INIT_MIGRATIONS is apply or skip, not $DB_INIT_MIGRATIONS: db-init changed nothing" ;;
+esac
+
 # Apply the migrations of the core that the warehouse lacks, in the order of their numbers, each in a
 # transaction of its own with its row in core.schema_migrations (migrate.sql). The files are checked
 # first: four digits, an underscore, a name of lower-case letters, digits and underscores, and .sql,
@@ -36,8 +50,13 @@ fail() {
 # be in the folder under the same name and with the same checksum, the SHA-256 of the bytes of the
 # file: an applied migration never changes, so db-init stops and applies nothing when one did, or
 # when the warehouse has one that this checkout lacks, as after a newer release. The first migration
-# creates the table, so a warehouse without it has applied none.
+# creates the table, so a warehouse without it has applied none. With DB_INIT_MIGRATIONS=skip it
+# neither reads nor applies anything, and says so.
 migrate() {
+  if [ "${DB_INIT_MIGRATIONS:-apply}" = skip ]; then
+    echo "db-init: left the migrations of the core to the next start (DB_INIT_MIGRATIONS=skip)"
+    return 0
+  fi
   count=0
   for file in "$MIGRATIONS"/*; do
     [ -e "$file" ] || continue

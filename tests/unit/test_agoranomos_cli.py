@@ -3542,6 +3542,11 @@ def calls_in_order(cli, *starts):
     return [next(i for i, call in enumerate(calls) if call.startswith(start)) for start in starts]
 
 
+# The db-init that restore runs before pg_restore: without the migrations of the core, which the
+# db-init of the start at its end applies (ADR-0044).
+RESTORE_DB_INIT = "compose run --rm --no-deps -T -e DB_INIT_MIGRATIONS=skip db-init"
+
+
 def test_restore_replaces_each_database_inside_its_container_and_starts_the_stack(cli, tmp_path):
     ready_to_restore(cli)
     result = cli.run(
@@ -3564,7 +3569,7 @@ def test_restore_replaces_each_database_inside_its_container_and_starts_the_stac
         f"compose run --rm --no-deps -T backup verify {BACKUP} warehouse airflow metabase",
         "compose stop ",
         "compose up --detach --wait warehouse-db platform-db",
-        "compose run --rm --no-deps -T db-init",
+        RESTORE_DB_INIT,
         "compose exec -T warehouse-db pg_restore",
         "compose exec -T warehouse-db vacuumdb --username=postgres --analyze-only --quiet "
         "--dbname=warehouse",
@@ -3896,7 +3901,7 @@ def test_a_failed_copy_after_another_database_is_back_says_to_finish_before_up(c
         (
             {"FAKE_COMPOSE_FAIL": "--wait"},
             "the databases did not start",
-            ("compose run --rm --no-deps -T db-init",),
+            (RESTORE_DB_INIT,),
         ),
         ({"FAKE_RUN_FAIL": "db-init"}, "db-init failed", ("compose exec",)),
     ],
@@ -4484,9 +4489,7 @@ def test_restore_changes_nothing_when_docker_cannot_make_the_ipv6_network(cli, t
     assert result.returncode == 1
     assert "Docker could not make a test network with IPv6" in result.stderr
     assert not any(
-        call.startswith(
-            ("compose stop", "compose up", "compose down", "compose run --rm --no-deps -T db-init")
-        )
+        call.startswith(("compose stop", "compose up", "compose down", RESTORE_DB_INIT))
         for call in cli.docker_calls()
     )
 
@@ -5951,6 +5954,37 @@ def test_restore_takes_no_backup_before_the_migrations_that_it_leaves_to_db_init
     assert result.returncode == 0, result.stderr
     assert not any("before-migrations" in call for call in cli.docker_calls())
     assert not any("relkind" in sql for sql in psql_sql(cli))
+
+
+@pytest.mark.parametrize("only", [None, "warehouse", "metabase", "airflow,metabase"])
+def test_restore_leaves_the_migrations_of_the_core_to_the_start_after_the_restore(
+    cli, tmp_path, only
+):
+    # The db-init before pg_restore sets up the roles and schemas and skips the migrations: with
+    # the checkout of the release before, they would stop on the migration that the backup of up
+    # does not hold, in the warehouse that pg_restore is to replace. The db-init of the start at
+    # the end, in docker compose up, applies them, as on every start, whichever databases come back.
+    ready_to_restore(cli)
+    add_migrations(cli, *MIGRATIONS)
+    options = [] if only is None else ["--only", only]
+    result = cli.run(
+        "restore", BACKUP, *options, "--yes", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    calls = cli.docker_calls()
+    runs = [call for call in calls if call.startswith("compose run") and call.endswith(" db-init")]
+    assert runs == [RESTORE_DB_INIT]
+    order = calls_in_order(cli, RESTORE_DB_INIT, "compose exec -T", STACK_START)
+    assert order == sorted(order)
+    assert [call for call in calls if "DB_INIT_MIGRATIONS" in call] == [RESTORE_DB_INIT]
+
+
+def test_up_never_skips_the_migrations_of_the_core(cli, tmp_path):
+    cli.run("init")
+    add_migrations(cli, *MIGRATIONS)
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
+    assert result.returncode == 0, result.stderr
+    assert not any("DB_INIT_MIGRATIONS" in call for call in cli.docker_calls())
 
 
 def test_status_names_the_migrations_before_which_up_took_a_backup(cli):
