@@ -11,9 +11,10 @@ asset of its statistics, and the transform runs after it.
 The DAG starts paused: a deployment unpauses it once its key and its accounts are in place, and
 the DAG of the rates of the ECB with it ([Connect Google Ads](docs/how-to/connect-google-ads.md)).
 A load without a key, or without an account of google_ads in clients.toml, fails with a line that
-says so. An error of the API on one account does not stop the others: the load takes them, records
-the failed account in its journal, and the task fails at the end, without a retry, with one line
-that lists the accounts and their errors (ADR-0035); the next load takes the days that they missed.
+says so. An error of the API on one account, or an answer that breaks off, does not stop the
+others: the load takes them, records the failed account in its journal, and the task fails at the
+end, without a retry, with one line that lists the accounts and their errors (ADR-0035); the next
+load takes the days that they missed.
 A repeat is safe: each load replaces the days that it covers.
 """
 

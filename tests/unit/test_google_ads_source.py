@@ -2,9 +2,9 @@
 
 dlt and google-auth are in the Airflow image and not in the development environment, so the module
 is imported with stand-ins that load nothing and ask Google nothing: the client of the API answers
-each query from the rows of a test and records each request, the credentials sign in at once, and
-the pipeline records the resources of each run and answers from what the test says the dataset
-holds."""
+each query from the rows of a test, as the bytes of an answer of searchStream in small pieces, and
+records each request, the credentials sign in at once, and the pipeline records the resources of
+each run and answers from what the test says the dataset holds."""
 
 import base64
 import importlib
@@ -123,10 +123,69 @@ def resource(data, name, **hints):
     return Resource(data, name, **hints)
 
 
-class HTTPError(Exception):
+class RequestException(Exception):
+    pass
+
+
+class HTTPError(RequestException):
     def __init__(self, response):
         super().__init__("error")
         self.response = response
+
+
+class ChunkedEncodingError(RequestException):
+    pass
+
+
+class StandInResponse:
+    """An answer as requests gives it with stream=True: its bytes in pieces of size, and then,
+    when broken_off, the ChunkedEncodingError with which requests stops on a connection that breaks
+    (requests 2.34.2, iter_content). read counts the pieces handed out."""
+
+    def __init__(self, body: bytes, size: int = 101, broken_off: bool = False):
+        self.body, self.size, self.broken_off = body, size, broken_off
+        self.read, self.closed, self.chunk_sizes = 0, False, []
+
+    def iter_content(self, chunk_size):
+        self.chunk_sizes.append(chunk_size)
+        for start in range(0, len(self.body), self.size):
+            self.read += 1
+            yield self.body[start : start + self.size]
+        if self.broken_off:
+            raise ChunkedEncodingError("Connection broken: IncompleteRead(4096 bytes read)")
+
+    def close(self):
+        self.closed = True
+
+
+def dumps(batches: list[dict]) -> str:
+    """An answer as the REST interface writes it: pretty-printed, as the system parameter
+    prettyPrint of the APIs of Google is true by default, in UTF-8."""
+    return json.dumps(batches, indent=2, ensure_ascii=False)
+
+
+# An error in an answer, as Google writes an error over HTTP and JSON (AIP-193).
+INTERNAL = {"error": {"code": 500, "message": "Internal error encountered.", "status": "INTERNAL"}}
+
+
+def broken(batches: list[dict], kind: str) -> StandInResponse:
+    """An answer of searchStream that breaks: cut in the middle, where the connection closes
+    (cut), or where it breaks (connection), after the first batch when there are two, which then
+    holds its rows twice, so that more rows came before the break than the whole answer has; with
+    an error after its first batch (error); or with a comma missing in its first row (not_json)."""
+    body = json.dumps(batches, indent=2).encode()
+    if kind == "cut":
+        return StandInResponse(body[: len(body) // 2])
+    if kind == "connection" and len(batches) > 1:
+        first = {**batches[0], "results": batches[0]["results"] * 2}
+        body = json.dumps([first, *batches[1:]], indent=2).encode()
+        return StandInResponse(body[: body.rfind(b'"fieldMask"')], broken_off=True)
+    if kind == "connection":
+        return StandInResponse(body[: len(body) // 2], broken_off=True)
+    if kind == "error":
+        return StandInResponse(json.dumps([batches[0], INTERNAL, *batches[1:]]).encode())
+    assert kind == "not_json"
+    return StandInResponse(body.replace(b'",\n', b'"\n', 1))
 
 
 def answer(
@@ -168,28 +227,59 @@ def answer(
         "metrics": {"impressions": "10", "costMicros": "1500000"},
         "segments": {"date": day},
     }
-    return [{"results": [row]}, {"results": []}]
+    # A last batch without rows, with the resources that the query took.
+    mask = "customer.id,campaign.resourceName,campaign.id,campaign.name,segments.date"
+    return [
+        {"results": [row], "fieldMask": mask, "requestId": "rQ1"},
+        {"fieldMask": mask, "requestId": "rQ1", "queryResourceConsumption": "120"},
+    ]
 
 
 @pytest.fixture
 def ads(monkeypatch, tmp_path):
-    """The module with stand-ins, and what it made and was asked: the pipelines and the requests
-    to the API. state["loads"] is how many complete loads the dataset holds (None: none yet),
-    state["reloads"] what its journal gives, state["customers"] the rows of its table customers,
-    state["failing"] the accounts whose every request fails, state["failing_at"] the text of the
-    GAQL at which the request of an account fails."""
-    state = {"loads": None, "reloads": [], "customers": [], "failing": set(), "failing_at": {}}
-    made = {"pipelines": [], "requests": [], "clients": [], "refreshes": 0}
+    """The module with stand-ins, and what it made and was asked: the pipelines, the requests to
+    the API and their answers. state["loads"] is how many complete loads the dataset holds (None:
+    none yet), state["reloads"] what its journal gives, state["customers"] the rows of its table
+    customers, state["failing"] the accounts whose every request fails, state["failing_at"] the
+    text of the GAQL at which the request of an account fails, and state["broken_at"] the text of
+    the GAQL and the kind of broken() of the answer that breaks for an account, and how many of its
+    answers break, if not every one. made["waits"] holds the waits before each retry."""
+    state = {
+        "loads": None,
+        "reloads": [],
+        "customers": [],
+        "failing": set(),
+        "failing_at": {},
+        "broken_at": {},
+    }
+    made = {
+        "pipelines": [],
+        "requests": [],
+        "responses": [],
+        "clients": [],
+        "refreshes": 0,
+        "breaks": {},
+        "waits": [],
+    }
 
     class Client:
         def __init__(self, **settings):
             made["clients"].append(settings)
 
-        def post(self, url, json, headers):
+        def post(self, url, json, headers, stream):
             made["requests"].append((url, json["query"], headers))
+            assert stream is True
             account_id = url.split("/customers/")[1].split("/")[0]
             batches = answer(account_id, json["query"], state["failing"], state["failing_at"])
-            return types.SimpleNamespace(json=lambda: batches)
+            at, kind, *times = state["broken_at"].get(account_id, (None, None))
+            breaks = made["breaks"].get(account_id, 0)
+            if at is not None and at in json["query"] and (not times or breaks < times[0]):
+                made["breaks"][account_id] = breaks + 1
+                response = broken(batches, kind)
+            else:
+                response = StandInResponse(dumps(batches).encode())
+            made["responses"].append(response)
+            return response
 
     class Credentials:
         @classmethod
@@ -228,6 +318,7 @@ def ads(monkeypatch, tmp_path):
     modules["dlt.destinations.exceptions"].DatabaseUndefinedRelation = UndefinedRelation
     modules["dlt.sources.helpers.requests"].Client = Client
     modules["dlt.sources.helpers.requests"].HTTPError = HTTPError
+    modules["dlt.sources.helpers.requests"].RequestException = RequestException
     modules["google.auth.transport.requests"].Request = lambda: "request"
     modules["google.oauth2.service_account"].Credentials = Credentials
     modules["google.oauth2"].service_account = modules["google.oauth2.service_account"]
@@ -250,6 +341,7 @@ def ads(monkeypatch, tmp_path):
     for name in names:
         sys.modules.pop(name, None)
     module = importlib.import_module("agoranomos_pipelines.google_ads")
+    monkeypatch.setattr(module, "sleep", made["waits"].append)
     yield module, state, made, extensions
     for name in names:
         sys.modules.pop(name, None)
@@ -648,3 +740,284 @@ def test_a_scope_takes_checked_account_ids_only(ads):
     assert module.accounts_scope(["2222222222", "1111111111"]) == (
         "customer__id IN ('1111111111', '2222222222')"
     )
+
+
+# A recorded answer of searchStream to a query of the statistics of campaigns, in the shape of the
+# REST interface of v26 (Search and SearchStream in the REST guide of the Google Ads API, and the
+# reference of SearchGoogleAdsStreamResponse, read on 3 November 2026): a JSON array of batches,
+# each with its rows in results, its fieldMask and its requestId, and queryResourceConsumption in
+# the last batch, which has no rows. The names of the campaigns hold what a reader of JSON must
+# keep apart: quotes, a backslash, brackets in a string, a line break, Cyrillic and an emoji in
+# UTF-8, and the same emoji as escapes.
+RECORDED = r"""[{
+  "results": [
+    {
+      "campaign": {
+        "resourceName": "customers/1111111111/campaigns/7",
+        "name": "Brand \"boots\" [EU] {2026}",
+        "id": "7"
+      },
+      "metrics": {
+        "clicks": "3",
+        "conversions": 1.5
+      },
+      "segments": {
+        "date": "2026-10-01"
+      }
+    },
+    {
+      "campaign": {
+        "resourceName": "customers/1111111111/campaigns/8",
+        "name": "Ботинки \\ зима\n🚀 🚀",
+        "id": "8"
+      },
+      "metrics": {
+        "clicks": "0",
+        "conversions": 0
+      },
+      "segments": {
+        "date": "2026-10-01"
+      }
+    }
+  ],
+  "fieldMask": "campaign.id,campaign.name,metrics.clicks,metrics.conversions,segments.date",
+  "requestId": "e3Kx7xSdLwYuT1tJm0gAQw"
+}
+,
+{
+  "results": [
+    {
+      "campaign": {
+        "resourceName": "customers/1111111111/campaigns/9",
+        "name": "}], {\"results\": [",
+        "id": "9"
+      },
+      "metrics": {
+        "clicks": "12",
+        "conversions": 2.3333333333333335
+      },
+      "segments": {
+        "date": "2026-10-02"
+      }
+    }
+  ],
+  "fieldMask": "campaign.id,campaign.name,metrics.clicks,metrics.conversions,segments.date",
+  "requestId": "e3Kx7xSdLwYuT1tJm0gAQw"
+}
+,
+{
+  "fieldMask": "campaign.id,campaign.name,metrics.clicks,metrics.conversions,segments.date",
+  "requestId": "e3Kx7xSdLwYuT1tJm0gAQw",
+  "queryResourceConsumption": "240"
+}
+]
+"""
+BODY = RECORDED.encode()
+STATS = (
+    "SELECT campaign.id, campaign.name, metrics.clicks, metrics.conversions, segments.date "
+    "FROM campaign WHERE segments.date BETWEEN '2026-10-01' AND '2026-10-02'"
+)
+
+
+def api_answering(module, response: StandInResponse):
+    """An Api of the module whose client gives response to any request."""
+    api = module.Api(module.sign_in(), None)
+    api.client = types.SimpleNamespace(post=lambda url, json, headers, stream: response)
+    return api
+
+
+@pytest.mark.parametrize("size", [1, 2, 3, 5, 7, 64, 4096, len(BODY)])
+def test_an_answer_in_batches_gives_its_rows_in_any_pieces(ads, size):
+    # Pieces of one byte cut every escape, string, number and UTF-8 character of the answer.
+    module, _, _, _ = ads
+    response = StandInResponse(BODY, size=size)
+    rows = list(api_answering(module, response).search("1111111111", STATS))
+    assert rows == [row for batch in json.loads(RECORDED) for row in batch.get("results", [])]
+    assert [row["campaign"]["name"] for row in rows] == [
+        'Brand "boots" [EU] {2026}',
+        "Ботинки \\ зима\n🚀 🚀",
+        '}], {"results": [',
+    ]
+    assert [row["metrics"] for row in rows] == [
+        {"clicks": "3", "conversions": 1.5},
+        {"clicks": "0", "conversions": 0},
+        {"clicks": "12", "conversions": 2.3333333333333335},
+    ]
+    assert response.closed
+
+
+def test_the_rows_of_an_answer_come_as_it_arrives(ads):
+    # ADR-0038: a row reaches its file before the rest of the answer is read, so that a task holds
+    # a row and a piece of the answer, and the answer is read 64 KiB at a time.
+    module, _, _, _ = ads
+    response = StandInResponse(BODY, size=50)
+    rows = api_answering(module, response).search("1111111111", STATS)
+    assert next(rows)["campaign"]["id"] == "7"
+    assert response.read < len(BODY) / 50 / 2
+    assert [row["campaign"]["id"] for row in rows] == ["8", "9"]
+    assert response.read == -(-len(BODY) // 50)
+    assert response.chunk_sizes == [64 * 1024]
+    assert response.closed
+
+
+@pytest.mark.parametrize(
+    ("body", "broken_off", "message"),
+    [
+        (BODY[: len(BODY) // 2], False, "a broken answer: the answer ends before its array does"),
+        (BODY[: len(BODY) // 2], True, "the answer broke off: Connection broken: IncompleteRead"),
+        (b"", False, "a broken answer: the answer ends before its array does"),
+        (
+            BODY.replace(b'"id": "7"', b'"id" "7"'),
+            False,
+            "a broken answer: the answer is not JSON: Expecting ':' delimiter",
+        ),
+        (
+            BODY.replace(b"\n,\n", b"\n," + json.dumps(INTERNAL).encode() + b",\n", 1),
+            False,
+            'an error in the answer: {"error": {"code": 500, "message": "Internal error',
+        ),
+        (
+            BODY.replace("Ботинки".encode(), b"\xff\xfe", 1),
+            False,
+            "a broken answer: 'utf-8' codec can't decode byte 0xff",
+        ),
+        (BODY + b"]", False, "a broken answer: the answer goes on after its array"),
+        (b'{"results": []}', False, "a broken answer: the answer has '{' where JSON has one of ["),
+        (b'[{"results": [7]}]', False, "a broken answer: a row of the answer is not an object"),
+    ],
+)
+def test_an_answer_that_breaks_raises_the_error_of_its_account(ads, body, broken_off, message):
+    # An error of the API in the middle of an answer, an answer cut short or not JSON, and a
+    # connection that breaks in it are loud: the request fails with a line that says which. Only
+    # the connection that breaks raises AnswerBrokeOff, which read_account asks again.
+    module, _, _, _ = ads
+    response = StandInResponse(body, size=64, broken_off=broken_off)
+    with pytest.raises(module.GoogleAdsError) as raised:
+        list(api_answering(module, response).search("1111111111", STATS))
+    assert str(raised.value).startswith(f"Google Ads account 1111111111: {message}")
+    assert isinstance(raised.value, module.AnswerBrokeOff) is broken_off
+    assert response.closed
+
+
+def test_a_value_longer_than_any_row_breaks_the_answer(ads, monkeypatch):
+    # Not even a broken answer makes a task hold the rest of it; rows shorter than the limit pass.
+    module, _, _, _ = ads
+    monkeypatch.setattr(module, "LONGEST", 1000)
+    body = BODY.replace(b"Brand", b"x" * 2000, 1)
+    with pytest.raises(module.GoogleAdsError, match="longer than 1,000 characters"):
+        list(api_answering(module, StandInResponse(body)).search("1111111111", STATS))
+    rows = api_answering(module, StandInResponse(BODY)).search("1111111111", STATS)
+    assert len(list(rows)) == 3
+
+
+def test_an_answer_that_breaks_leaves_no_file_of_its_account(ads, tmp_path):
+    # The answers of its customer, its entities and the statistics of its campaigns and ad groups
+    # were written to their files before the statistics of its ads broke.
+    module, state, made, _ = ads
+    state["broken_at"] = {"2222222222": ("FROM ad_group_ad WHERE", "cut")}
+    api = module.Api(module.sign_in(), None)
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    with pytest.raises(module.GoogleAdsError, match="the answer ends before its array does"):
+        module.read_account(api, "2222222222", NOW, date(2026, 10, 27), staging)
+    assert requested(made) == ["2222222222"] * (1 + 4 + 4 + 1)
+    assert list(staging.iterdir()) == []
+    assert all(response.closed for response in made["responses"])
+
+
+@pytest.mark.parametrize(
+    ("kind", "message"),
+    [
+        ("cut", "a broken answer: the answer ends before its array does"),
+        ("connection", "the answer broke off: Connection broken"),
+        ("error", 'an error in the answer: {"error": {"code": 500'),
+        ("not_json", "a broken answer: the answer is not JSON: Expecting ',' delimiter"),
+    ],
+)
+def test_an_answer_that_breaks_in_the_middle_of_an_account_leaves_nothing_of_it(ads, kind, message):
+    # As an error of the API before the answer (ADR-0035): the load takes the other account and
+    # records this one as failed, with the line of its error, and none of its rows reaches dlt. A
+    # broken answer fails at once; one that breaks off at every attempt fails after the third, with
+    # the error of the last, after waits of 2 and 4 seconds.
+    module, state, made, extensions = ads
+    state.update(
+        loads=1,
+        reloads=[
+            ("1111111111", date(2026, 10, 28), date(2026, 10, 26)),
+            ("2222222222", date(2026, 10, 28), date(2026, 10, 27)),
+        ],
+        broken_at={"2222222222": ("FROM ad_group_ad WHERE", kind)},
+    )
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load(NOW, extensions)
+    line = f"Google Ads account 2222222222: {message}"
+    assert str(raised.value).startswith(
+        f"1 of 2 Google Ads accounts failed, the other 1 is loaded: {line}"
+    )
+    [(rows, _)] = made["pipelines"][0].runs
+    for table in (*module.ENTITIES, *module.FACTS):
+        assert {row["customer"]["id"] for row in rows[table]} == {"1111111111"}, table
+    record = {row["account_id"]: row for row in rows["_agoranomos_reloads"]}
+    assert record["2222222222"]["status"] == "failed"
+    assert record["2222222222"]["error"].startswith(line)
+    assert record["2222222222"]["window_end"] is None
+    assert all(response.closed for response in made["responses"])
+    attempts = 3 if kind == "connection" else 1
+    assert requested(made).count("2222222222") == 1 + 4 + 4 + attempts
+    assert made["waits"] == ([2, 4] if kind == "connection" else [])
+    assert record["2222222222"]["error"].endswith(
+        "(attempt 3 of 3)" if kind == "connection" else ""
+    )
+
+
+def test_an_answer_that_breaks_off_once_is_asked_again_and_gives_its_rows_once(ads, tmp_path):
+    # A blip of the network in the middle of an answer: the file of the table goes back to where
+    # the answer began, and the second answer gives its rows, once. Each attempt is a request of
+    # its own, and an operation of the quota.
+    module, state, made, _ = ads
+    state["broken_at"] = {"2222222222": ("FROM ad_group_ad WHERE", "connection", 1)}
+    api = module.Api(module.sign_in(), None)
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    read = module.read_account(api, "2222222222", NOW, date(2026, 10, 27), staging)
+    assert requested(made) == ["2222222222"] * (1 + 4 + 4 + 2 + 1)
+    assert api.requests == 12
+    assert made["waits"] == [2]
+    # The broken answer gave two rows before the connection broke, more than the whole one has.
+    [cut] = [response for response in made["responses"] if response.broken_off]
+    assert cut.body.count(b'"segments"') == 2
+    for table in module.FACTS:
+        lines = read.files[table].read_text(encoding="utf-8").splitlines()
+        assert [json.loads(line)["customer"]["id"] for line in lines] == ["2222222222"], table
+
+
+def test_the_request_of_the_customer_is_asked_again_too(ads, tmp_path):
+    module, state, made, _ = ads
+    state["broken_at"] = {"2222222222": ("FROM customer", "connection", 2)}
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    read = module.read_account(
+        module.Api(module.sign_in(), None), "2222222222", NOW, date(2026, 10, 27), staging
+    )
+    assert read.customer["customer"]["timeZone"] == "Europe/Berlin"
+    assert requested(made) == ["2222222222"] * (3 + 4 + 6)
+    assert made["waits"] == [2, 4]
+
+
+def test_a_load_whose_answer_breaks_off_once_loads_the_account_with_its_rows_once(ads):
+    module, state, made, extensions = ads
+    state.update(
+        loads=1,
+        reloads=[
+            ("1111111111", date(2026, 10, 28), date(2026, 10, 26)),
+            ("2222222222", date(2026, 10, 28), date(2026, 10, 27)),
+        ],
+        broken_at={"2222222222": ("FROM ad_group_ad WHERE", "connection", 1)},
+    )
+    counts = module.load(NOW, extensions)
+    [(rows, _)] = made["pipelines"][0].runs
+    for table in module.FACTS:
+        assert [row["customer"]["id"] for row in rows[table]] == ["1111111111", "2222222222"]
+        assert counts[table] == 2, table
+    record = {row["account_id"]: row for row in rows["_agoranomos_reloads"]}
+    assert {row["status"] for row in record.values()} == {"loaded"}
