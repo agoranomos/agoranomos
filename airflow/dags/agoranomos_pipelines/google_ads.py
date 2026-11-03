@@ -27,18 +27,22 @@ request counts as one operation of the daily quota, whatever its rows, so a dail
 operations for each account, and the first about 230. The days of each account are replaced, empty
 or not, and the load records the window of each account in _agoranomos_reloads in the same run.
 
-A load reads each account whole before dlt sees any of it: an error of the API on one account, such
-as the 403 of an account that the service account may not read, is caught at the account, which
-leaves nothing in the load, as a window replaces whole days and a part of one would lose the rest.
-The load takes the other accounts, records the failed account in _agoranomos_reloads with the status
-failed and the text of the error, keeps its row of customers as the last load saw it, and fails at
-the end with one line that lists the accounts and their errors (ADR-0004, ADR-0035). What the API
-returns is data: a campaign name can carry any text, and nothing here acts on it."""
+A load reads each account whole before dlt sees any of it, into a file for each table on disk, and
+reads each answer of the API as it arrives, a row at a time, so that a task holds a row and a piece
+of an answer and not a month of rows (ADR-0038). An error of the API on one account, such as the
+403 of an account that the service account may not read, or an answer that breaks off or is not
+JSON, is caught at the account, which leaves nothing in the load, as a window replaces whole days
+and a part of one would lose the rest. The load takes the other accounts, records the failed
+account in _agoranomos_reloads with the status failed and the text of the error, keeps its row of
+customers as the last load saw it, and fails at the end with one line that lists the accounts and
+their errors (ADR-0004, ADR-0035). What the API returns is data: a campaign name can carry any
+text, and nothing here acts on it."""
 
 from __future__ import annotations
 
 import base64
 import binascii
+import codecs
 import json
 import logging
 import os
@@ -54,7 +58,7 @@ from zoneinfo import ZoneInfo
 
 import dlt
 from dlt.destinations.exceptions import DatabaseUndefinedRelation
-from dlt.sources.helpers.requests import Client, HTTPError
+from dlt.sources.helpers.requests import Client, HTTPError, RequestException
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 
@@ -105,6 +109,26 @@ ONE_REQUEST_DAYS = 92
 # tries over about a minute on a timeout, a broken connection, 429 or a 5xx, after the time that a
 # Retry-After asks for.
 CLIENT = {"request_timeout": 120, "request_max_attempts": 5, "request_backoff_factor": 2}
+# An answer of searchStream over REST is a JSON array of batches, each a
+# SearchGoogleAdsStreamResponse: its rows in results, with fieldMask and requestId, and
+# queryResourceConsumption in the last batch (Search and SearchStream in the REST guide,
+# https://developers.google.com/google-ads/api/rest/common/search, and the reference of
+# SearchGoogleAdsStreamResponse of v26, read on 3 November 2026). Google gives no size of a batch,
+# so a load reads an answer as it arrives, CHUNK bytes at a time, and parses it a row at a time.
+# A value of an answer longer than LONGEST characters, which no row comes near, is taken for a
+# broken answer, so that not even a broken one makes a task hold the rest of it.
+CHUNK = 64 * 1024
+LONGEST = 8 * 1024 * 1024
+# The reader of an answer is the json module of the standard library, which parses one value at
+# a time, and these patterns, which find where a value ends when a piece cuts it: white space; a
+# string; a number, true, false or null, up to the next delimiter; and the text up to the next
+# bracket outside a string, which is characters other than quotes and brackets, and whole
+# strings. Each quantifier is possessive, so that a scan never steps back.
+DECODER = json.JSONDecoder()
+SPACE = re.compile(r"[ \t\n\r]*+")
+STRING = re.compile(r'"(?:[^"\\]++|\\.)*+"', re.DOTALL)
+SCALAR = re.compile(r'[^ \t\n\r,:\[\]{}"]*+')
+PLAIN = re.compile(r'(?:[^"\[\]{}]++|"(?:[^"\\]++|\\.)*+")*+', re.DOTALL)
 
 # The queries of each table, in GAQL. The fields are those of the shape of demo_search, so that
 # the same macros read both.
@@ -339,6 +363,159 @@ def query(table: str, days: tuple[date, date] | None = None) -> str:
     return text
 
 
+class BrokenAnswer(ValueError):
+    """An answer of searchStream that is not a whole JSON array of batches: cut short, not JSON,
+    or with more after its end."""
+
+
+class ErrorInAnswer(Exception):
+    """An element of an answer of searchStream with an error, as Google writes an error over HTTP
+    and JSON, {"error": {"code": ..., "message": ..., "status": ..., "details": [...]}} (AIP-193).
+    Google does not document how an error that comes after the first rows shows in an answer over
+    REST, so the reader stops on such an element wherever it comes."""
+
+
+class Answer:
+    """An answer of searchStream as it arrives, in pieces of text, read a row at a time. The text
+    holds what is left of the last piece from at, where the value being read starts."""
+
+    def __init__(self, pieces: Iterable[str]):
+        self.pieces = iter(pieces)
+        self.text, self.at = "", 0
+
+    def more(self) -> None:
+        """Take the next piece of the answer after what is left unread."""
+        piece = next(self.pieces, None)
+        if piece is None:
+            raise BrokenAnswer("the answer ends before its array does")
+        self.text, self.at = self.text[self.at :] + piece, 0
+        if len(self.text) > LONGEST:
+            raise BrokenAnswer(f"a value of the answer is longer than {LONGEST:,} characters")
+
+    def char(self) -> str:
+        """The next character of the answer that is not white space, left unread."""
+        while True:
+            self.at = SPACE.match(self.text, self.at).end()
+            if self.at < len(self.text):
+                return self.text[self.at]
+            self.more()
+
+    def take(self, wanted: str) -> str:
+        """Read the next character that is not white space, which must be one of wanted."""
+        char = self.char()
+        if char not in wanted:
+            raise BrokenAnswer(f"the answer has {char!r} where JSON has one of {' '.join(wanted)}")
+        self.at += 1
+        return char
+
+    def until(self, pattern: re.Pattern) -> int:
+        """The end of what pattern matches at the next character, once a character follows it."""
+        while True:
+            found = pattern.match(self.text, self.at)
+            if found and found.end() < len(self.text):
+                return found.end()
+            self.more()
+
+    def bracketed(self) -> int:
+        """The end of the object or array that starts at the next character: the bracket that
+        closes it, counted outside strings."""
+        depth, offset = 0, 0
+        while True:
+            end = PLAIN.match(self.text, self.at + offset).end()
+            offset = end - self.at
+            if end == len(self.text) or self.text[end] == '"':
+                # The piece ends, or ends a string short: read on from there.
+                self.more()
+                continue
+            depth += 1 if self.text[end] in "[{" else -1
+            offset += 1
+            if depth == 0:
+                return self.at + offset
+
+    def value(self) -> object:
+        """Read the next JSON value of the answer. An object or an array that the piece holds
+        whole is parsed where it lies, and one that the end of the piece cuts, or that is not
+        JSON, is found by its brackets first."""
+        char = self.char()
+        if char in "[{":
+            try:
+                found, self.at = DECODER.raw_decode(self.text, self.at)
+            except json.JSONDecodeError:
+                pass
+            else:
+                return found
+        end = self.bracketed() if char in "[{" else self.until(STRING if char == '"' else SCALAR)
+        text, self.at = self.text[self.at : end], end
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as error:
+            raise BrokenAnswer(f"the answer is not JSON: {error.msg}") from None
+
+    def rows(self) -> Iterator[dict]:
+        """The rows of each batch of the answer as they come, and then nothing to its end but
+        white space."""
+        self.take("[")
+        if self.char() == "]":
+            self.at += 1
+        else:
+            while True:
+                yield from self.batch()
+                if self.take(",]") == "]":
+                    break
+        while True:
+            self.at = SPACE.match(self.text, self.at).end()
+            if self.at < len(self.text):
+                raise BrokenAnswer("the answer goes on after its array")
+            piece = next(self.pieces, None)
+            if piece is None:
+                return
+            self.text, self.at = piece, 0
+
+    def batch(self) -> Iterator[dict]:
+        """The rows of the batch that starts at the next character: an object whose results are
+        the rows, and whose other members, such as fieldMask and requestId, are passed over."""
+        self.take("{")
+        if self.char() == "}":
+            self.at += 1
+            return
+        while True:
+            name = self.value()
+            if not isinstance(name, str):
+                raise BrokenAnswer("the answer has a name of a member that is not a string")
+            self.take(":")
+            if name == "results":
+                yield from self.results()
+            elif name == "error":
+                raise ErrorInAnswer(json.dumps({"error": self.value()}))
+            else:
+                self.value()
+            if self.take(",}") == "}":
+                return
+
+    def results(self) -> Iterator[dict]:
+        """The rows of the array of results that starts at the next character."""
+        self.take("[")
+        if self.char() == "]":
+            self.at += 1
+            return
+        while True:
+            row = self.value()
+            if not isinstance(row, dict):
+                raise BrokenAnswer("a row of the answer is not an object")
+            yield row
+            if self.take(",]") == "]":
+                return
+
+
+def pieces(response) -> Iterator[str]:
+    """The text of an answer as it arrives, CHUNK bytes at a time, as UTF-8, which JSON between
+    systems is (RFC 8259)."""
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    for chunk in response.iter_content(CHUNK):
+        yield decoder.decode(chunk)
+    yield decoder.decode(b"", final=True)
+
+
 class Api:
     """The REST interface of the Google Ads API, as the service account, with explicit retries."""
 
@@ -348,7 +525,11 @@ class Api:
         self.requests = 0
 
     def search(self, account_id: str, gaql: str) -> Iterator[dict]:
-        """The results of a query of an account, as the API gives them."""
+        """The rows of a query of an account, as the API gives them, one at a time as the answer
+        arrives. dlt retries a request until its answer starts. An answer that the API refuses, an
+        error in the middle of one, an answer that breaks off or is not JSON, and a connection that
+        breaks in it raise GoogleAdsError, with no retry, as the rows read before would come
+        twice."""
         if not self.signed.valid:
             self.signed.refresh(Request())
         headers = {"Authorization": f"Bearer {self.signed.token}"}
@@ -360,6 +541,7 @@ class Api:
                 URL.format(version=API_VERSION, account=account_id),
                 json={"query": gaql},
                 headers=headers,
+                stream=True,
             )
         except HTTPError as error:
             # The original error of the API, as the contract of the sources asks (ADR-0004): its
@@ -369,8 +551,22 @@ class Api:
                 (answer.status_code, answer.text[:2000]) if answer is not None else ("", "")
             )
             raise GoogleAdsError(f"Google Ads account {account_id}: {status} {body}") from None
-        for batch in response.json():
-            yield from batch.get("results", ())
+        try:
+            yield from Answer(pieces(response)).rows()
+        except ErrorInAnswer as error:
+            raise GoogleAdsError(
+                f"Google Ads account {account_id}: an error in the answer: {str(error)[:2000]}"
+            ) from None
+        except (BrokenAnswer, UnicodeDecodeError) as error:
+            raise GoogleAdsError(
+                f"Google Ads account {account_id}: a broken answer: {error}"
+            ) from None
+        except RequestException as error:
+            raise GoogleAdsError(
+                f"Google Ads account {account_id}: the answer broke off: {error}"
+            ) from None
+        finally:
+            response.close()
 
 
 def checked(account_ids: Iterable[str]) -> list[str]:
@@ -416,10 +612,11 @@ def read_account(
 ) -> Read:
     """Read an account whole: its customer, which gives its time zone and so its window, then its
     campaigns, ad groups, ads and conversion actions and the facts of its window, each table into a
-    file in the folder of the account under staging, on disk, so that the load holds one answer in
-    memory at a time, as a load that fed dlt did (ADR-0038). An error of the API on any request
-    raises GoogleAdsError and leaves nothing of the account: a window replaces whole days, and a
-    part of one would lose the rest (ADR-0035)."""
+    file in the folder of the account under staging, on disk, a row at a time as each answer
+    arrives, so that the load holds a row of an answer in memory and not the answer (ADR-0038).
+    An error of the API on any request, or an answer that breaks off, raises GoogleAdsError and
+    leaves nothing of the account: a window replaces whole days, and a part of one would lose the
+    rest (ADR-0035)."""
     rows = [
         row
         for row in api.search(account_id, query("customers"))

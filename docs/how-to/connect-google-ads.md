@@ -90,6 +90,12 @@ An error of the API on one account does not stop the others ([ADR-0035](../adr/0
 - **`403` with `PERMISSION_DENIED`**: the service account is not a user of the account, the project has no access to production accounts yet, or the account is reached through a manager account that `GOOGLE_ADS_LOGIN_CUSTOMER_ID` does not name.
 - **`the API returned no customer`**: the ID in `clients.toml` is not that of an account that the service account reaches.
 
+The load reads each answer of the API as it arrives, a row at a time, into a file on the disk of the container that runs the tasks, so a month of a large account does not have to fit in the memory of the task. A request that breaks after its answer has started fails the account in the same way, and the next daily load takes its days again: dlt retries a request until its answer starts, and not after, as the rows that came would come twice. The line then says what broke:
+
+- **`the answer broke off`**: the connection broke in the middle of the answer.
+- **`a broken answer`**: the answer is not a whole JSON array, as when it ends too early.
+- **`an error in the answer`**: the API put an error into an answer that it had started, such as `INTERNAL`.
+
 One failure comes after the load:
 
 - **A failed test of the rates after the load**: an account pays in a currency that the ECB does not publish, such as the tenge (KZT), and the marts keep their last good data until a source of its rates comes ([ADR-0032](../adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md)).
