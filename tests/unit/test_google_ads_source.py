@@ -881,13 +881,14 @@ def test_an_answer_that_breaks_raises_the_error_of_its_account(ads, body, broken
 
 
 def test_a_value_longer_than_any_row_breaks_the_answer(ads, monkeypatch):
-    # Not even a broken answer makes a task hold the rest of it.
+    # Not even a broken answer makes a task hold the rest of it; rows shorter than the limit pass.
     module, _, _, _ = ads
     monkeypatch.setattr(module, "LONGEST", 1000)
     body = BODY.replace(b"Brand", b"x" * 2000, 1)
     with pytest.raises(module.GoogleAdsError, match="longer than 1,000 characters"):
         list(api_answering(module, StandInResponse(body)).search("1111111111", STATS))
-    assert len(list(api_answering(module, StandInResponse(BODY)).search("1", STATS))) == 3
+    rows = api_answering(module, StandInResponse(BODY)).search("1111111111", STATS)
+    assert len(list(rows)) == 3
 
 
 def test_an_answer_that_breaks_leaves_no_file_of_its_account(ads, tmp_path):
