@@ -27,6 +27,7 @@ from stack_helpers import (
     http_json,
     read_env,
     totals,
+    warehouse,
     warehouse_output,
 )
 
@@ -40,6 +41,57 @@ VARIABLE = "agoranomos_roundtrip"
 ENV_FILE = REPO_ROOT / ".env"
 BACKUPS = REPO_ROOT / (
     (read_env(ENV_FILE).get("AGORANOMOS_BACKUP_DIR") if ENV_FILE.exists() else None) or "./backups"
+)
+
+
+# The schema core as the catalog of PostgreSQL holds it, without the IDs of its objects, one line
+# each, sorted: each relation, partitions, sequences and indexes among them, with its kind, owner,
+# rights, bounds and description; the descriptions of the columns; each trigger, constraint and
+# function with its definition, owner, rights and settings; and the rights on the schema. A dump and
+# a restore keep all of it (ADR-0044): the owner migrator, the rights of transformer and loader, the
+# partitions, the foreign keys and the trigger of the freeze.
+CORE_CATALOG = """
+SELECT string_agg(line, E'\\n' ORDER BY line) FROM (
+  SELECT concat_ws('|', 'relation', c.relname, c.relkind, c.relispartition,
+    pg_get_userbyid(c.relowner), c.relacl, pg_get_expr(c.relpartbound, c.oid),
+    md5(coalesce(obj_description(c.oid, 'pg_class'), ''))) AS line
+  FROM pg_class c WHERE c.relnamespace = 'core'::regnamespace
+  UNION ALL
+  SELECT concat_ws('|', 'columns', md5(string_agg(
+    c.relname || '.' || a.attname || ':' || coalesce(col_description(c.oid, a.attnum), ''),
+    ',' ORDER BY c.relname, a.attnum)))
+  FROM pg_class c JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0
+  WHERE c.relnamespace = 'core'::regnamespace AND c.relkind IN ('r', 'p')
+  UNION ALL
+  SELECT concat_ws('|', 'trigger', t.tgrelid::regclass, pg_get_triggerdef(t.oid), t.tgenabled,
+    md5(coalesce(obj_description(t.oid, 'pg_trigger'), '')))
+  FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+  WHERE c.relnamespace = 'core'::regnamespace AND NOT t.tgisinternal
+  UNION ALL
+  SELECT concat_ws('|', 'constraint', c.conrelid::regclass, c.conname, pg_get_constraintdef(c.oid))
+  FROM pg_constraint c WHERE c.connamespace = 'core'::regnamespace
+  UNION ALL
+  SELECT concat_ws('|', 'function', p.oid::regprocedure, pg_get_userbyid(p.proowner), p.prosecdef,
+    p.proacl, p.proconfig, md5(p.prosrc), md5(coalesce(obj_description(p.oid, 'pg_proc'), '')))
+  FROM pg_proc p WHERE p.pronamespace = 'core'::regnamespace
+  UNION ALL
+  SELECT concat_ws('|', 'schema', pg_get_userbyid(n.nspowner), n.nspacl)
+  FROM pg_namespace n WHERE n.nspname = 'core'
+) AS catalog
+"""
+# A row of a fact in a month long before every window, which the trigger of the freeze keeps from
+# a delete, in a transaction that the error ends: the partition and the account -1 go with it.
+FROZEN_DELETE = (
+    "BEGIN; "
+    "SELECT core.ensure_partition('core.ad_stats_campaign_daily', date '2001-01-01'); "
+    "INSERT INTO core.dim_account "
+    "(account_sk, platform, account_id, client_id, is_active, is_stub) "
+    "VALUES (-1, 'test', 'frozen', 'unassigned', true, false); "
+    "INSERT INTO core.ad_stats_campaign_daily "
+    "(account_sk, campaign_id, report_date, impressions, clicks, spend, currency, load_sk) "
+    "VALUES (-1, 1, date '2001-01-15', 1, 1, 1, 'USD', 1); "
+    "DELETE FROM core.ad_stats_campaign_daily WHERE account_sk = -1; "
+    "ROLLBACK"
 )
 
 
@@ -82,7 +134,10 @@ def test_before_the_backup_leave_a_mark_in_each_database(
         if DEMO
         else {}
     )
-    MARKS.write_text(json.dumps({"mark": mark, "backup": backup, "mart": mart}), encoding="utf-8")
+    core = warehouse_output(env, CORE_CATALOG)
+    MARKS.write_text(
+        json.dumps({"mark": mark, "backup": backup, "mart": mart, "core": core}), encoding="utf-8"
+    )
 
 
 @pytest.mark.skipif(STEP != "live", reason="only in the restore into the running stack")
@@ -140,3 +195,20 @@ def test_after_the_restore_each_mark_is_back_and_the_admin_signs_in(
     assert status == 200
     assert variable["value"] == saved["mark"]
     assert f"Round trip {saved['mark']}" in collection_names(metabase_url, session)
+
+
+@pytest.mark.skipif(STEP != "after", reason="only in the second step of the round trip")
+def test_after_the_restore_the_core_has_its_owner_rights_partitions_and_freeze(env):
+    saved = json.loads(MARKS.read_text(encoding="utf-8"))
+    assert warehouse_output(env, CORE_CATALOG) == saved["core"]
+    # The restored trigger still refuses a delete in a frozen month, and the restored function
+    # still makes a partition as transformer.
+    result = warehouse(env, FROZEN_DELETE, "transformer")
+    assert result.returncode != 0
+    assert "is in a frozen month, which ended before the window of restatements" in result.stderr
+    left = warehouse_output(
+        env,
+        "SELECT to_regclass('core.ad_stats_campaign_daily_2001_01') IS NULL "
+        "AND NOT EXISTS (SELECT FROM core.dim_account WHERE account_sk = -1)",
+    )
+    assert left == "t"
