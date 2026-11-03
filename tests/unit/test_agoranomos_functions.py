@@ -42,9 +42,9 @@ def shell_function(name: str) -> str:
 
 
 def run_program(shell, program, *args, **kwargs):
-    """Run program in shell as sh -c program sh args runs it, with $0 sh and args from $1. The program
-    goes into a file that the shell sources, not into the argument of -c: Linux takes at most 128 KiB
-    in one argument (MAX_ARG_STRLEN), which the whole script passes."""
+    """Run program in shell as sh -c program sh args runs it, with $0 sh and args from $1. The
+    program goes into a file that the shell sources, not into the argument of -c: Linux takes at
+    most 128 KiB in one argument (MAX_ARG_STRLEN), which the whole script passes."""
     with tempfile.TemporaryDirectory() as folder:
         path = Path(folder) / "program.sh"
         path.write_text(program, encoding="utf-8")
