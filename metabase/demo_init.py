@@ -108,8 +108,12 @@ AD_STATS = "ad_stats_campaign_daily"
 CONVERSIONS = "ad_conversions_campaign_daily"
 SESSIONS = "web_sessions_daily"
 # The one deadline of the job, in seconds from its start, shared by the waits for the DAGs, the
-# history, the transform and the sync. ./agoranomos up waits 900 seconds for the whole stack.
-DEADLINE = 600.0
+# history, the transform and the sync. The first transform of the demo is the long part: on 3
+# November 2026 it took 10.4 to 11.3 minutes after a history of 68 seconds on a laptop with an Intel
+# Core i5-3230M, 2 cores and 4 threads, which the 600 seconds of earlier releases did not cover, and
+# a machine of the minimum of 2 CPUs takes longer. ./agoranomos up waits for demo-init alone longer
+# than that, once the rest of the stack is ready (AGORANOMOS_DEMO_WAIT_TIMEOUT).
+DEADLINE = 1800.0
 # How long to wait between two looks at Airflow or Metabase, in seconds.
 POLL_INTERVAL = 5.0
 # The clock and the pause of the waits; the tests replace both with a fake clock.

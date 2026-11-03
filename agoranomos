@@ -1365,8 +1365,14 @@ EOF
 # the wait goes on until the rest is ready, and then sets demo_failed=1 for cmd_up. A backup
 # service that is unhealthy (no good backup in the last 26 hours), restarting or exited does not
 # stop it either: the stack works without a fresh backup, so the wait warns and goes on.
-# AGORANOMOS_WAIT_TIMEOUT and AGORANOMOS_WAIT_INTERVAL, in seconds, are hooks for the tests: how long
-# to wait at most (default 900) and how long to sleep between two looks (default 5).
+# demo-init alone may take longer than the rest: its first run of the transform takes minutes, and
+# more than ten on a slow machine (DEADLINE in metabase/demo_init.py, 30 minutes). So when it is all
+# that the wait waits for, the wait says so once, and gives it up to AGORANOMOS_DEMO_WAIT_TIMEOUT
+# seconds from the start of the wait (default 2400), while any other service that is not ready
+# still stops the wait at AGORANOMOS_WAIT_TIMEOUT.
+# AGORANOMOS_WAIT_TIMEOUT, AGORANOMOS_DEMO_WAIT_TIMEOUT and AGORANOMOS_WAIT_INTERVAL, in seconds, are
+# hooks for the tests: how long to wait at most (default 900), how long for demo-init alone (default
+# 2400) and how long to sleep between two looks (default 5).
 # The line that names a service that failed while up waited, and the command that shows its logs.
 # Exit code 137 is SIGKILL, which is what the kernel sends at a memory limit: the log of the
 # service then ends without an error of its own, so the line says what the code means.
@@ -1380,8 +1386,10 @@ failed_service() {
 wait_healthy() {
   demo_failed=0
   timeout=${AGORANOMOS_WAIT_TIMEOUT:-900}
+  demo_timeout=${AGORANOMOS_DEMO_WAIT_TIMEOUT:-2400}
   interval=${AGORANOMOS_WAIT_INTERVAL:-5}
   started=$(date +%s)
+  demo_said=0
   say "Waiting until every service is healthy (at most $timeout seconds)..."
   active=$(compose config --services) ||
     die "docker compose config failed; the error above names the cause"
@@ -1454,9 +1462,21 @@ EOF
       fi
       return 0
     fi
-    if [ $(($(date +%s) - started)) -ge "$timeout" ]; then
+    # demo-init alone, with no comma for a second service: its own, longer limit.
+    limit=$timeout
+    case "$pending" in
+      *,*) ;;
+      " demo-init ("*)
+        limit=$demo_timeout
+        if [ "$demo_said" -eq 0 ]; then
+          say "Every service is ready but demo-init, which runs the demo pipeline: its first transform takes minutes, and up to half an hour on a slow machine. Waiting for it (at most $demo_timeout seconds from the start of the wait)..."
+          demo_said=1
+        fi
+        ;;
+    esac
+    if [ $(($(date +%s) - started)) -ge "$limit" ]; then
       [ -z "$failed" ] || warn "$(failed_service demo-init)"
-      die "still waiting after $timeout seconds for:$pending (see ./agoranomos status)"
+      die "still waiting after $limit seconds for:$pending (see ./agoranomos status)"
     fi
     sleep "$interval"
   done

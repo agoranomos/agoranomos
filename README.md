@@ -79,7 +79,7 @@ cd agoranomos
 ./agoranomos up
 ```
 
-`up` creates `.env` with new secrets, checks the machine, builds the Airflow image, starts the stack and waits until every service is healthy and the demo is ready. The first start takes a few minutes. Then:
+`up` creates `.env` with new secrets, checks the machine, builds the Airflow image, starts the stack and waits until every service is healthy and the demo is ready. The first start takes a few minutes, and up to half an hour on a slow machine, where the first transform of the demo takes most of it. Then:
 
 | Service | Address | What to open |
 |---|---|---|

@@ -29,7 +29,7 @@ cd agoranomos
 
 `--branch` takes the tag of the release, so git says that the checkout is in a detached `HEAD`: that is expected. To work on agoranomos itself, clone without `--branch`, which gives the `main` branch.
 
-`up` creates `.env` with new secrets, checks the machine, builds the Airflow image, starts the stack, and waits until every service is healthy and the demo is ready. The first start takes a few minutes; later starts take the image from the cache of Docker. When it is done, it prints the addresses:
+`up` creates `.env` with new secrets, checks the machine, builds the Airflow image, starts the stack, and waits until every service is healthy and the demo is ready. The first start takes a few minutes, and up to half an hour on a slow machine, where the first transform of the demo takes most of it; later starts take the image from the cache of Docker. When it is done, it prints the addresses:
 
 - Airflow: <http://127.0.0.1:8080>
 - Metabase: <http://127.0.0.1:3000>

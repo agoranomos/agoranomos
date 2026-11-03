@@ -953,9 +953,9 @@ def test_a_step_that_runs_out_of_time_names_itself(
 
 
 def test_the_whole_job_has_one_deadline(airflow, metabase, clock, capsys):
-    # The DAGs take 595 of the 600 seconds to load, and a history takes 10: with one deadline for
-    # the whole job, the history runs out of time, five seconds after it starts.
-    airflow.loaded_at = 595
+    # The DAGs take all but 5 seconds of the deadline to load, and a history takes 10: with one
+    # deadline for the whole job, the history runs out of time, five seconds after it starts.
+    airflow.loaded_at = di.DEADLINE - 5
     assert di.main(env_for(airflow, metabase)) == 1
     line = one_line(capsys)
     assert f"the DAG {di.LOAD_DAG} did not finish" in line
