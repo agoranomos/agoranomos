@@ -105,10 +105,30 @@ The other options were not chosen for these reasons:
     * A core with 123 monthly partitions: 30 clients over three facts with no date reached `out of shared memory` with `max_locks_per_transaction` of 64 and `max_connections` of 40, and ran with no error at 128 and 100, for 8 MB of shared memory.
     * The density of the limit is 30 campaigns, 150 ad groups and 400 ads for each account a day, with 3 actions on a campaign, over 200 accounts. One agency's warehouse, counted with aggregate queries in October 2026, holds about 1,500 rows of ads a day on three platforms and 20 to 25 active accounts a day, with a strongly skewed distribution: the working profile is ten times that.
     * The patch of the documentation of PostgreSQL on cgroup limits says to keep the sum under the limit ([v4](https://www.postgresql.org/message-id/attachment/205413/v4-0001-doc-Document-Linux-cgroup-memory-limits.patch)), and Docker blocks `io_uring` in its default [seccomp profile](https://docs.docker.com/engine/security/seccomp/). Andres Freund measured the memory of a connection ([blog](https://blog.anarazel.de/2020/10/07/measuring-the-memory-overhead-of-a-postgres-connection/)).
+* Measured on 1 and 3 November 2026 with real dbt at the density of the limit, as [ADR-0036](0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md) describes: the three facts with their journals, G1, the dimensions, the snapshots, the tests by window and elementary in one `dbt build`, with eight readers of `pgbench` in a container of their own. The settings are those of this record for each limit, with `jit` off, and with `max_wal_size` of 1 GB instead of 4 GB on 4 months of data, for want of disk. Memory is the peak of samples five times a second: the container without the inactive cache, as `docker stats` counts it, and the private memory of the processes of PostgreSQL; the column dbt is the largest RSS of its process on the Mac.
+
+    | Data | Limit | Window | Readers | `dbt build` | Container without cache | Private, all processes | Largest process | dbt |
+    |---|---:|---:|---:|---:|---:|---:|---:|---:|
+    | 4 months | 4 GiB | 90 days | 8 | 221–252 s | 1.5–2.1 GiB | 360–394 MiB | 258–316 MiB | 192–203 MiB |
+    | 4 months | 4 GiB | 90 days | 0 | 150–198 s | 1.4–1.6 GiB | 317–329 MiB | 269–292 MiB | 193–194 MiB |
+    | 4 months | 4 GiB | 28 days | 8 | 64–86 s | 1.5 GiB | 363–393 MiB | 276–287 MiB | 191–194 MiB |
+    | 4 months | 2 GiB | 90 days | 8 | 244 s | 1.3 GiB | 294 MiB | 210 MiB | 195 MiB |
+    | 4 months | 1 GiB | 90 days | 8 | 259 s | 553 MiB | 206 MiB | 104 MiB | 193 MiB |
+    | 4 months | 4 GiB, `jit` on for `transformer` | 90 days | 8 | 252–269 s | 2.0–2.4 GiB | 508–512 MiB | 402–406 MiB | 192 MiB |
+    | 24 months | 6 GiB | 90 days | 8 | 487 s | 2.2 GiB | 462 MiB | 336 MiB | 197 MiB |
+    | 24 months | 4 GiB | 90 days | 8 | 402–736 s | 1.9–2.5 GiB | 415–458 MiB | 295–341 MiB | 178–191 MiB |
+    | 24 months | 4 GiB | 90 days | 0 | 315–323 s | 2.1–2.5 GiB | 329–338 MiB | 273–292 MiB | 185–190 MiB |
+    | 24 months | 1 GiB | 90 days | 8 | 465 s | 654 MiB | 235 MiB | 106 MiB | 194 MiB |
+
+    * No run had an `oom_kill`. The largest process was the query of G1, a dozen hash nodes in one statement, each with up to twice `work_mem`, and not the write of a fact.
+    * The limit set the speed of the readers more than that of the write: under the write of 90 days on 4 months they did 15 to 22 transactions a second at 4 GiB, 13 at 2 GiB and 10 at 1 GiB, against about 30 alone.
+    * `jit` on for `transformer` made the window no faster, and its private memory a third larger.
+    * dbt, one process for 108 nodes, is the memory of a task: in the Airflow image of the stack it held 147 to 157 MiB of RSS, and 141 to 217 MiB by `docker stats`. It does not grow with the data, which stays in the database.
+    * On 24 months a window of 90 days took 309 s on partitions compacted just before and 402 to 736 s on the partitions that earlier windows had rewritten, where the write of the fact of ads read 2.7 GiB from the disk. A limit of 6 GiB did not make it faster.
+    * The data of the limit in this record leaves out the WAL and the free space of a window. A window of 90 days wrote 9.3 to 12.0 GiB of WAL, of which `max_wal_size` keeps up to 4 GB on the disk of the stand, and 8.1 to 9.1 GiB of temporary files, up to 2.6 GiB at once, and its partitions kept about 1.3 GB of free space until the next window.
 * Not checked yet, and to be checked with the code:
-    * The write of real dbt at the density of the limit: the measurements repeat its queries by hand.
-    * The full 36 months at the limit, 147 million rows.
-    * The memory of tasks and of the database under a real `dbt build` with elementary, which the measurement left out, with conversions by action, journals and Metabase.
+    * The full 36 months at the limit, 147 million rows: 24 months, with 58.4 million rows of ads, were measured.
+    * The memory of the database under a real `dbt build` with conversions by action and Metabase beside it: the measurement above had the three facts of statistics, their journals, elementary and readers of `pgbench`.
     * Metabase with 20 clients, whose 3 GiB is an estimate.
     * A cloud disk: all the times come from the NVMe of a Mac, so a run on a Hetzner server has to repeat them.
 * Open at review: the peak of 225 MiB of the settings of the image is one measurement, and the final limit of each service stays with the formula of [System requirements](../reference/system-requirements.md), from a new peak of `memory_report.py` on the new schema.
