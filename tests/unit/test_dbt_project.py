@@ -1101,7 +1101,8 @@ def test_the_rates_take_the_ecb_alone_once_it_has_any_and_the_loads_show_it_befo
 
 GOOGLE_ADS = STAGING / "google_ads"
 # The staging models of Google Ads, each one call of a macro of the shape that demo_search mimics,
-# over a table of raw_google_ads, through relation_or_empty, as the DAG starts paused (ADR-0032).
+# over a table of raw_google_ads, through relation_or_empty, as the DAG starts paused (ADR-0032);
+# the demo has no conversion actions of its own, which the connector alone reads.
 GOOGLE_ADS_MODELS = {
     "campaign_stats": ("google_ads_stats", "campaign_stats"),
     "campaign_conversions": ("google_ads_conversions", "campaign_conversions"),
@@ -1113,7 +1114,10 @@ GOOGLE_ADS_MODELS = {
     "ads": ("google_ads_ads", "ads"),
     "ad_stats": ("google_ads_stats", "ad_stats", "ad"),
     "ad_conversions": ("google_ads_conversions", "ad_conversions", "ad"),
+    "conversion_actions": ("google_ads_conversion_actions", "conversion_actions"),
 }
+# The tables of entities of Google Ads, whose versions dlt keeps (scd2).
+GOOGLE_ADS_VERSIONED = ("campaigns", "ad_groups", "ads", "conversion_actions")
 
 
 def test_each_staging_model_of_google_ads_is_one_call_of_the_shape_that_the_demo_shares():
@@ -1133,6 +1137,7 @@ def test_each_staging_model_of_google_ads_is_one_call_of_the_shape_that_the_demo
         )
     macros = (DBT / "macros" / "shapes" / "google_ads_v25.sql").read_text(encoding="utf-8")
     assert "{% macro google_ads_customers(relation, platform) %}" in macros
+    assert "{% macro google_ads_conversion_actions(relation, platform) %}" in macros
 
 
 def test_the_columns_of_the_empty_tables_of_google_ads_are_the_fields_of_its_queries():
@@ -1150,18 +1155,17 @@ def test_the_columns_of_the_empty_tables_of_google_ads_are_the_fields_of_its_que
         text = (GOOGLE_ADS / f"stg_google_ads__{model}.sql").read_text(encoding="utf-8")
         columns = set(re.findall(r"'(\w+)': '[\w ]+'", text))
         hinted = {field.strip().replace(".", "__") for field in fields[table].split(",")}
-        scd2 = (
-            {"_dlt_valid_from", "_dlt_valid_to"}
-            if table in ("campaigns", "ad_groups", "ads")
-            else set()
-        )
+        scd2 = {"_dlt_valid_from", "_dlt_valid_to"} if table in GOOGLE_ADS_VERSIONED else set()
         assert columns == hinted | scd2, (model, sorted(columns ^ (hinted | scd2)))
 
 
 def test_the_staging_of_google_ads_has_the_tests_of_the_staging_of_demo_search():
-    # The same macros give the same columns, and the same critical tests guard both.
+    # The same macros give the same columns, and the same critical tests guard both. The
+    # conversion actions, which the demo does not have, come last.
     demo = (STAGING / "demo_search" / "_demo_search__models.yml").read_text(encoding="utf-8")
-    ads = (GOOGLE_ADS / "_google_ads__models.yml").read_text(encoding="utf-8")
+    text = (GOOGLE_ADS / "_google_ads__models.yml").read_text(encoding="utf-8")
+    ads, actions = text.split("  - name: stg_google_ads__conversion_actions\n")
+    assert "  - name: stg_" not in actions
 
     def tests(text):
         return [
@@ -1197,6 +1201,7 @@ def test_the_sources_of_google_ads_are_the_tables_that_its_load_writes():
         "ads",
         "ad_stats",
         "ad_conversions",
+        "conversion_actions",
     }
 
 
@@ -1216,6 +1221,9 @@ def test_every_union_of_the_platforms_reads_google_ads_and_the_loads_show_it():
     for model, staged in unions.items():
         text = (INTERMEDIATE / f"{model}.sql").read_text(encoding="utf-8")
         assert f"from {{{{ ref('{staged}') }}}}" in text, model
+    # And the conversion actions that the accounts list, which say which of them are primary.
+    resolved = (INTERMEDIATE / "int_conversion_actions__resolved.sql").read_text(encoding="utf-8")
+    assert "from {{ ref('stg_google_ads__conversion_actions') }}" in resolved
     loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
     assert "{{ relation_or_empty(source('raw_google_ads', '_agoranomos_reloads'), {" in loads
 
@@ -1287,7 +1295,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 570, counted
+    assert counted == 575, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text

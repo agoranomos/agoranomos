@@ -11,17 +11,21 @@ each account, and keeps each result as the API gives it, which dlt writes in sna
 objects joined by __: the shape that demo_search mimics, which the macros of
 dbt/macros/shapes/google_ads_v25.sql read (none of their fields changed in v26).
 
-A load first reads each account (customer), then its campaigns, its ad groups and its ads, whose
-versions dlt keeps (scd2), and then the statistics and the conversions by conversion action of each
-of the three levels, by day, in a request of their own, as segments.conversion_action cannot be
-selected with metrics.cost_micros (ADR-0034). A Performance Max campaign has no ad groups. The days
-of each account run from the day after the last that a load took, or from 90 days back when that is
-earlier, as conversions keep coming for up to 90 days after a click; the first load of an account
-takes the last 36 months, as Google Ads keeps data by day for 37 only (ADR-0034), a calendar month
-in each request. All end yesterday in the time zone of the account. A request counts as one
-operation of the daily quota, whatever its rows, so a daily load costs ten operations for each
-account, and the first about 230. The days of each account are replaced, empty or not, and the load
-records the window of each account in _agoranomos_reloads in the same run.
+A load first reads each account (customer), then its campaigns, its ad groups, its ads and its
+conversion actions, whose versions dlt keeps (scd2), and then the statistics and the conversions by
+conversion action of each of the three levels, by day, in a request of their own, as
+segments.conversion_action cannot be selected with metrics.cost_micros (ADR-0034). A Performance
+Max campaign has no ad groups. A conversion action carries include_in_conversions_metric, whether
+Google counts it in metrics.conversions, which the model takes for whether the action is primary
+where extensions/model/conversion_actions.toml does not name it, and primary_for_goal, which the
+guide of conversion goals of Google names in its place, so that a real account can show whether
+the two differ. The days of each account run from the day after the last that a load took, or from
+90 days back when that is earlier, as conversions keep coming for up to 90 days after a click; the
+first load of an account takes the last 36 months, as Google Ads keeps data by day for 37 only
+(ADR-0034), a calendar month in each request. All end yesterday in the time zone of the account. A
+request counts as one operation of the daily quota, whatever its rows, so a daily load costs eleven
+operations for each account, and the first about 230. The days of each account are replaced, empty
+or not, and the load records the window of each account in _agoranomos_reloads in the same run.
 
 A load reads each account whole before dlt sees any of it: an error of the API on one account, such
 as the 403 of an account that the service account may not read, is caught at the account, which
@@ -159,6 +163,11 @@ FIELDS = {
         "metrics.conversions, metrics.conversions_value, metrics.all_conversions, "
         "metrics.all_conversions_value"
     ),
+    "conversion_actions": (
+        "customer.id, conversion_action.resource_name, conversion_action.id, "
+        "conversion_action.name, conversion_action.status, conversion_action.category, "
+        "conversion_action.include_in_conversions_metric, conversion_action.primary_for_goal"
+    ),
 }
 RESOURCES = {
     "customers": "customer",
@@ -171,9 +180,10 @@ RESOURCES = {
     "ads": "ad_group_ad",
     "ad_stats": "ad_group_ad",
     "ad_conversions": "ad_group_ad",
+    "conversion_actions": "conversion_action",
 }
 # The tables whose versions dlt keeps, and the fact tables, whose days each load replaces.
-ENTITIES = ("campaigns", "ad_groups", "ads")
+ENTITIES = ("campaigns", "ad_groups", "ads", "conversion_actions")
 FACTS = (
     "campaign_stats",
     "campaign_conversions",
@@ -183,13 +193,16 @@ FACTS = (
     "ad_conversions",
 )
 DOUBLE = {"data_type": "double"}
+BOOL = {"data_type": "bool"}
 SCD2 = {"disposition": "merge", "strategy": "scd2"}
 # The columns of a field of each query: the names that dlt gives the fields, with their types.
 COLUMNS = {
     "metrics.conversions": DOUBLE,
     "metrics.all_conversions": DOUBLE,
     "segments.date": DATE,
-    "customer.manager": {"data_type": "bool"},
+    "customer.manager": BOOL,
+    "conversion_action.include_in_conversions_metric": BOOL,
+    "conversion_action.primary_for_goal": BOOL,
 }
 
 
@@ -390,8 +403,8 @@ def accounts_scope(account_ids: Iterable[str]) -> str:
 @dataclass
 class Read:
     """Everything that a load read of one account, before dlt sees any of it: its row of
-    customers, the window of its facts, and the rows of its campaigns, ad groups and ads and of
-    its facts, in a file for each table."""
+    customers, the window of its facts, and the rows of its campaigns, ad groups, ads and
+    conversion actions and of its facts, in a file for each table."""
 
     customer: dict
     window: tuple[date, date]
@@ -402,11 +415,11 @@ def read_account(
     api: Api, account_id: str, now: datetime, last_end: date | None, staging: Path
 ) -> Read:
     """Read an account whole: its customer, which gives its time zone and so its window, then its
-    campaigns, ad groups and ads and the facts of its window, each table into a file in the folder
-    of the account under staging, on disk, so that the load holds one answer in memory at a time,
-    as a load that fed dlt did (ADR-0038). An error of the API on any request raises GoogleAdsError
-    and leaves nothing of the account: a window replaces whole days, and a part of one would lose
-    the rest (ADR-0035)."""
+    campaigns, ad groups, ads and conversion actions and the facts of its window, each table into a
+    file in the folder of the account under staging, on disk, so that the load holds one answer in
+    memory at a time, as a load that fed dlt did (ADR-0038). An error of the API on any request
+    raises GoogleAdsError and leaves nothing of the account: a window replaces whole days, and a
+    part of one would lose the rest (ADR-0035)."""
     rows = [
         row
         for row in api.search(account_id, query("customers"))

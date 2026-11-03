@@ -1,5 +1,7 @@
 """Tests of the load of the settings of the model (airflow/dags/agoranomos_pipelines/settings/
-source.py), and of what the staging of the settings in dbt reads of it.
+source.py), of what the staging of the settings in dbt reads of it, and of the order in which the
+model takes an entry of conversion_actions.toml, what a Google Ads account says of an action and
+the seed.
 
 dlt is in the Airflow image and not in the development environment, so the module is imported
 with a stand-in for dlt that loads nothing: it records the resources that the module makes, with
@@ -191,6 +193,65 @@ def test_a_load_logs_counts_and_tables_and_no_secret_or_setting(source, tmp_path
     assert "Loaded 0 rows into raw_settings.conversion_actions" in caplog.text
     assert "loader-password" not in caplog.text
     assert "Acme" not in caplog.text
+
+
+# An action of Google Ads that the file names, as an account names its conversion actions: the ID,
+# without the customer of its resource name.
+GOOGLE_ACTION = (
+    '[[actions]]\nplatform = "google_ads"\nconversion_action_id = "77"\nis_primary = false\n'
+)
+
+
+def test_an_action_of_google_ads_in_the_file_loads_as_an_override(source, tmp_path):
+    # The account says which of its actions count, and an entry of the file says otherwise for
+    # one: the load takes it as it takes an entry of any platform.
+    module, pipelines = source
+    write(tmp_path, "conversion_actions.toml", GOOGLE_ACTION)
+    counts = module.load(tmp_path, module.DEMO_CLIENTS)
+    rows, _ = pipelines[-1].runs[-1]
+    assert rows["conversion_actions"] == [
+        {
+            "platform": "google_ads",
+            "conversion_action_id": "77",
+            "is_primary": False,
+            "conversion_category": None,
+            "origin": "extensions",
+        }
+    ]
+    assert counts["conversion_actions"] == 1
+
+
+RESOLVED = REPO / "dbt" / "models" / "intermediate" / "int_conversion_actions__resolved.sql"
+
+
+def test_the_file_overrides_the_flag_of_google_ads_which_overrides_the_seed():
+    # Whether an action is primary: the settings of the deployment first, then, for an action of
+    # Google Ads, include_in_conversions_metric of the newest version of the action in the
+    # accounts, the flag with which metrics.conversions counts it, then the seed, then not.
+    text = RESOLVED.read_text(encoding="utf-8")
+    assert (
+        "    coalesce(\n"
+        "        x.is_primary,\n"
+        "        case when a.platform = 'google_ads' then l.include_in_conversions_metric end,\n"
+        "        s.is_primary,\n"
+        "        false\n"
+        "    ) as is_primary\n"
+    ) in text
+    assert "left join {{ ref('stg_settings__conversion_actions') }} as x\n" in text
+    assert "left join {{ ref('seed_conversion_actions') }} as s\n" in text
+    # The newest version of each action of each account; an action that two accounts list counts
+    # when one of them counts it, and one that an account lists without the flag does not.
+    assert "    from {{ ref('stg_google_ads__conversion_actions') }}\n" in text
+    newest = "partition by platform, account_id, conversion_action_id order by valid_from desc"
+    assert newest in text
+    assert "    where recency = 1\n" in text
+    assert (
+        "coalesce(bool_or(include_in_conversions_metric), false) as include_in_conversions_metric"
+    ) in text
+    # An action that the accounts list counts, as one with conversions does.
+    assert "    select platform, conversion_action_id from listed\n" in text
+    seed = (REPO / "dbt" / "seeds" / "seed_conversion_actions.csv").read_text(encoding="utf-8")
+    assert "\ngoogle_ads," not in seed, "the account says which actions of Google Ads count"
 
 
 # The staging of the settings in dbt: one view of each table, with the columns that the load

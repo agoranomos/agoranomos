@@ -33,7 +33,8 @@ seeds:
       The conversion actions that the base package knows, one row for each platform and action:
       their names, their categories, and whether each is primary, that is, counts in the
       conversions of a campaign. A deployment overrides a row in
-      extensions/model/conversion_actions.toml; an action that neither names is not primary.
+      extensions/model/conversion_actions.toml. It has no action of Google Ads, whose account says
+      which of its actions count; any other action that neither names is not primary.
     config:
       # Text, as the IDs of some platforms are numbers and those of others are not.
       column_types: {conversion_action_id: text, is_primary: boolean}

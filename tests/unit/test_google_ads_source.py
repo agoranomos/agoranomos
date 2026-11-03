@@ -42,6 +42,17 @@ account_id = "act_1"
 client = "acme"
 """
 ZONES = {"1111111111": "America/Los_Angeles", "2222222222": "Europe/Berlin"}
+# A conversion action as the REST interface of v26 writes one, without its resource name: a purchase
+# that Google counts in metrics.conversions and that is not primary for its goal, so that a test
+# can tell the two flags apart.
+ACTION = {
+    "id": "77",
+    "name": "Purchase",
+    "status": "ENABLED",
+    "category": "PURCHASE",
+    "includeInConversionsMetric": True,
+    "primaryForGoal": False,
+}
 
 
 class UndefinedRelation(Exception):
@@ -145,6 +156,11 @@ def answer(
         ad = {"resourceName": f"customers/{account_id}/adGroupAds/8~9", "ad": {"id": "9"}}
         row = {"customer": {"id": account_id}, "campaign": campaign, "adGroup": group}
         return [{"results": [{**row, "adGroupAd": ad}]}]
+    if gaql.endswith("FROM conversion_action"):
+        # The INT64 ID as a string, and the flags as JSON booleans: both are optional bool fields
+        # in v26, so a flag that is false is written too.
+        action = {"resourceName": f"customers/{account_id}/conversionActions/77", **ACTION}
+        return [{"results": [{"customer": {"id": account_id}, "conversionAction": action}]}]
     day = gaql.split("BETWEEN '")[1][:10]
     row = {
         "customer": {"id": account_id},
@@ -338,9 +354,9 @@ def test_a_load_asks_v26_for_each_account_as_the_service_account(ads, monkeypatc
         f"https://googleads.googleapis.com/v26/customers/{account_id}/googleAds:searchStream"
         for account_id in ZONES
     }
-    # A customer of each account, its campaigns, ad groups and ads, and the statistics and the
-    # conversions of each of the three levels.
-    assert len(made["requests"]) == 20
+    # A customer of each account, its campaigns, ad groups, ads and conversion actions, and the
+    # statistics and the conversions of each of the three levels.
+    assert len(made["requests"]) == 22
     assert all(
         headers == {"Authorization": "Bearer access-token", "login-customer-id": "9999999999"}
         for _, _, headers in made["requests"]
@@ -352,15 +368,16 @@ def test_a_load_asks_v26_for_each_account_as_the_service_account(ads, monkeypatc
         "campaign",
         "ad_group",
         "ad_group_ad",
+        "conversion_action",
         *("campaign", "campaign", "ad_group", "ad_group", "ad_group_ad", "ad_group_ad"),
     ]
-    assert queries[4].endswith(
+    assert queries[5].endswith(
         "FROM campaign WHERE segments.date BETWEEN '2026-07-30' AND '2026-10-27'"
     )
-    for conversions in queries[5::2]:
+    for conversions in queries[6::2]:
         assert "segments.conversion_action, " in conversions
         assert "metrics.cost_micros" not in conversions
-    for stats in queries[4::2]:
+    for stats in queries[5::2]:
         assert "metrics.cost_micros" in stats
     assert made["clients"] == [
         {"request_timeout": 120, "request_max_attempts": 5, "request_backoff_factor": 2}
@@ -377,7 +394,7 @@ def test_a_load_keeps_the_rows_as_the_api_gives_them_and_replaces_the_days_of_ea
         **{table: 2 for table in module.ENTITIES},
         **{table: 74 for table in module.FACTS},
     }
-    assert len(made["requests"]) == 2 * (1 + 3 + 6 * 37)
+    assert len(made["requests"]) == 2 * (1 + 4 + 6 * 37)
     [pipeline] = made["pipelines"]
     assert pipeline.options["dataset_name"] == "raw_google_ads"
     [(rows, hints)] = pipeline.runs
@@ -396,7 +413,7 @@ def test_a_load_keeps_the_rows_as_the_api_gives_them_and_replaces_the_days_of_ea
         assert hints[table]["write_disposition"] == hints["campaign_stats"]["write_disposition"]
     # dlt 1.31.0 retires the versions that a load lacks within its destination scope only, so the
     # entities of an account that a load could not read keep their versions.
-    for table in ("campaigns", "ad_groups", "ads"):
+    for table in ("campaigns", "ad_groups", "ads", "conversion_actions"):
         assert hints[table]["write_disposition"] == {
             "disposition": "merge",
             "strategy": "scd2",
@@ -416,10 +433,37 @@ def test_a_load_keeps_the_rows_as_the_api_gives_them_and_replaces_the_days_of_ea
         "text"
     )
     assert hints["customers"]["columns"]["customer__manager"]["data_type"] == "bool"
+    assert module.ENTITIES == ("campaigns", "ad_groups", "ads", "conversion_actions")
     for table in module.FIELDS:
         fields = module.FIELDS[table].split(", ")
         assert len(hints[table]["columns"]) == len(fields), table
         assert all(hint["name"] == name for name, hint in hints[table]["columns"].items())
+
+
+def test_a_load_keeps_the_conversion_actions_with_the_flag_of_the_conversions_of_google(ads):
+    # include_in_conversions_metric says whether metrics.conversions of v26 counts the action, and
+    # the model takes it for whether the action is primary where conversion_actions.toml does not
+    # name it; primary_for_goal, which the guide of conversion goals of Google names in its place,
+    # comes beside it, so that a real account can show whether the two differ.
+    module, _, made, extensions = ads
+    module.load(NOW, extensions)
+    [(rows, hints)] = made["pipelines"][0].runs
+    [gaql] = {gaql for _, gaql, _ in made["requests"] if " FROM conversion_action" in gaql}
+    assert gaql == (
+        "SELECT customer.id, conversion_action.resource_name, conversion_action.id, "
+        "conversion_action.name, conversion_action.status, conversion_action.category, "
+        "conversion_action.include_in_conversions_metric, conversion_action.primary_for_goal "
+        "FROM conversion_action"
+    )
+    actions = rows["conversion_actions"]
+    assert [row["customer"]["id"] for row in actions] == ["1111111111", "2222222222"]
+    assert [row["conversionAction"]["includeInConversionsMetric"] for row in actions] == [True] * 2
+    assert [row["conversionAction"]["primaryForGoal"] for row in actions] == [False] * 2
+    columns = hints["conversion_actions"]["columns"]
+    for flag in ("include_in_conversions_metric", "primary_for_goal"):
+        assert columns[f"conversion_action__{flag}"]["data_type"] == "bool", flag
+    for name in ("customer__id", "conversion_action__id", "conversion_action__category"):
+        assert columns[name]["data_type"] == "text", name
 
 
 def test_a_load_records_the_window_of_each_account_on_its_own_day(ads):
@@ -452,7 +496,7 @@ def test_an_error_of_the_api_on_one_account_does_not_stop_its_neighbor(ads):
     assert str(raised.value) == f"1 of 2 Google Ads accounts failed, the other 1 is loaded: {ERROR}"
     # One request to the failed account, its customer, and the whole load of its neighbor.
     assert requested(made).count("2222222222") == 1
-    assert requested(made).count("1111111111") == 1 + 3 + 6 * 37
+    assert requested(made).count("1111111111") == 1 + 4 + 6 * 37
     [pipeline] = made["pipelines"]
     [(rows, hints)] = pipeline.runs
     for table in ("customers", *module.ENTITIES, *module.FACTS):
@@ -460,9 +504,10 @@ def test_an_error_of_the_api_on_one_account_does_not_stop_its_neighbor(ads):
     assert hints["campaign_stats"]["write_disposition"]["destination_scope"] == (
         "(customer__id = '1111111111' AND segments__date BETWEEN '2023-10-01' AND '2026-10-27')"
     )
-    assert hints["campaigns"]["write_disposition"]["destination_scope"] == (
-        "customer__id IN ('1111111111')"
-    )
+    for table in module.ENTITIES:
+        assert hints[table]["write_disposition"]["destination_scope"] == (
+            "customer__id IN ('1111111111')"
+        ), table
     record = {row["account_id"]: row for row in rows["_agoranomos_reloads"]}
     assert (record["1111111111"]["status"], record["1111111111"]["error"]) == ("loaded", None)
     assert (record["2222222222"]["status"], record["2222222222"]["error"]) == ("failed", ERROR)
@@ -517,8 +562,8 @@ def test_an_error_in_the_middle_of_an_account_leaves_nothing_of_it_in_the_load(a
     )
     with pytest.raises(module.AccountsFailed, match=f"the other 1 is loaded: {ERROR[:35]}"):
         module.load(NOW, extensions)
-    assert requested(made).count("2222222222") == 1 + 3 + 4 + 1
-    assert requested(made).count("1111111111") == 1 + 3 + 6
+    assert requested(made).count("2222222222") == 1 + 4 + 4 + 1
+    assert requested(made).count("1111111111") == 1 + 4 + 6
     [(rows, hints)] = made["pipelines"][0].runs
     for table in (*module.ENTITIES, *module.FACTS):
         assert {row["customer"]["id"] for row in rows[table]} == {"1111111111"}, table

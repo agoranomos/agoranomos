@@ -12,7 +12,7 @@ Answer from the definition in the code, then show it in the data. Say where each
 - [The data model](../../../docs/reference/data-model.md): the marts, their keys, and the rules for clients, conversions, currencies, days and time zones, and the names of campaigns.
 - `dbt/models/marts/_marts__models.yml`: the description of each mart and column. A column that more than one model has takes its text from the doc block of its name in `dbt/models/_docs.md`.
 - The SQL of the chain, from the mart back to the source. A mart reads an `int_<entity>__<verb>` model of `dbt/models/intermediate/`, which unions the `stg_<platform>__<table>` views of `dbt/models/staging/`. Each view calls the macro of its API shape in `dbt/macros/shapes/`, where the rules of a platform are: which field of the API becomes the column, and how it is cast and converted.
-- `dbt/seeds/seed_conversion_actions.csv` and `extensions/model/conversion_actions.toml` decide which conversion actions are primary.
+- `extensions/model/conversion_actions.toml`, then, for Google Ads, the flag `include_in_conversions_metric` of each action of the account (`stg_google_ads__conversion_actions`), then `dbt/seeds/seed_conversion_actions.csv` decide which conversion actions are primary, in `int_conversion_actions__resolved`.
 - `extensions/metadata/overrides.toml`, when it exists, holds the deployment's own names and definitions of the fields in Metabase ([Rename a field](../../../docs/how-to/rename-a-field.md)).
 
 ## Facts that most answers need

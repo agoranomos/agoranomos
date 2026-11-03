@@ -71,3 +71,9 @@ sources:
         description: >-
           The conversions of each ad by day and conversion action, in the form of
           ad_group_conversions. Each load replaces the days of each account that it covers.
+      - name: conversion_actions
+        description: >-
+          The conversion actions of each account, with their status, their category, whether
+          Google counts each in metrics.conversions (include_in_conversions_metric) and whether
+          each is primary for its goal (primary_for_goal), one row for each version that the loads
+          saw: dlt keeps the versions (scd2), from _dlt_valid_from until _dlt_valid_to.

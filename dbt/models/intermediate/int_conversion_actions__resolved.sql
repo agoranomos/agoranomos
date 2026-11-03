@@ -1,6 +1,6 @@
 -- Every conversion action of the data or of the seed, with its name, its category and whether it
--- is primary: the settings of the deployment first, then the seed of the base package, then what
--- the platform says (ADR-0025).
+-- is primary: the settings of the deployment first, then, for Google Ads, what the account says
+-- of the action, then the seed of the base package, then what the platform says (ADR-0025).
 with found as (
     select platform, conversion_action_id, conversion_action_name, platform_category
     from {{ ref('stg_demo_search__campaign_conversions') }}
@@ -25,8 +25,36 @@ observed as (
     group by platform, conversion_action_id
 ),
 
+-- The newest version of each conversion action of each Google Ads account, whether current or
+-- retired, as dlt keeps them.
+listed_versions as (
+    select
+        *,
+        row_number() over (
+            partition by platform, account_id, conversion_action_id order by valid_from desc
+        ) as recency
+    from {{ ref('stg_google_ads__conversion_actions') }}
+),
+
+-- Whether Google counts each action in its metric of conversions (include_in_conversions_metric):
+-- an action that a manager account owns can be listed by more than one account, and counts when
+-- one of them counts it; an action that an account lists without the flag does not count.
+listed as (
+    select
+        platform,
+        conversion_action_id,
+        max(conversion_action_name) as conversion_action_name,
+        max(platform_category) as platform_category,
+        coalesce(bool_or(include_in_conversions_metric), false) as include_in_conversions_metric
+    from listed_versions
+    where recency = 1
+    group by platform, conversion_action_id
+),
+
 actions as (
     select platform, conversion_action_id from observed
+    union
+    select platform, conversion_action_id from listed
     union
     select platform, conversion_action_id from {{ ref('seed_conversion_actions') }}
 )
@@ -34,12 +62,16 @@ actions as (
 select
     a.platform,
     a.conversion_action_id,
-    coalesce(s.conversion_action_name, o.conversion_action_name, a.conversion_action_id)
-        as conversion_action_name,
+    coalesce(
+        s.conversion_action_name,
+        l.conversion_action_name,
+        o.conversion_action_name,
+        a.conversion_action_id
+    ) as conversion_action_name,
     coalesce(
         x.conversion_category,
         s.conversion_category,
-        case o.platform_category
+        case coalesce(o.platform_category, l.platform_category)
             when 'purchase' then 'purchase'
             when 'submit_lead_form' then 'lead'
             when 'phone_call_lead' then 'lead'
@@ -49,10 +81,17 @@ select
         end,
         'other'
     ) as conversion_category,
-    coalesce(x.is_primary, s.is_primary, false) as is_primary
+    coalesce(
+        x.is_primary,
+        case when a.platform = 'google_ads' then l.include_in_conversions_metric end,
+        s.is_primary,
+        false
+    ) as is_primary
 from actions as a
 left join observed as o
     on o.platform = a.platform and o.conversion_action_id = a.conversion_action_id
+left join listed as l
+    on l.platform = a.platform and l.conversion_action_id = a.conversion_action_id
 left join {{ ref('seed_conversion_actions') }} as s
     on s.platform = a.platform and s.conversion_action_id = a.conversion_action_id
 left join {{ ref('stg_settings__conversion_actions') }} as x
