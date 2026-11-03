@@ -10,6 +10,8 @@ import json
 import os
 import re
 import subprocess
+import tempfile
+from pathlib import Path
 
 import pytest
 from stack_helpers import REPO_ROOT, NamesOnly, containers, docker, warehouse_output
@@ -46,18 +48,23 @@ VALUE = re.compile(r"-?[0-9]+(\.[0-9]+)?[A-Za-z]*")
 def computed() -> dict[str, str]:
     """What ./agoranomos gives each setting for the .env of the checkout, by the name that
     PostgreSQL uses, and shm_size: its function warehouse_db_settings, run with the definitions of
-    the script and none of its commands, from the checkout, where the script finds .env."""
+    the script and none of its commands, from the checkout, where the script finds .env. The
+    program goes into a file that the shell sources, as Linux takes at most 128 KiB in the argument
+    of sh -c (MAX_ARG_STRLEN), which the script passes."""
     script, _, _ = (REPO_ROOT / "agoranomos").read_text(encoding="utf-8").rpartition('\nmain "$@"')
     assert script
-    result = subprocess.run(
-        ["/bin/sh", "-c", f"{script}\nwarehouse_db_settings\n", "sh"],
-        cwd=REPO_ROOT,
-        env={"PATH": os.environ["PATH"]},
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=True,
-    )
+    with tempfile.TemporaryDirectory() as folder:
+        program = Path(folder) / "program.sh"
+        program.write_text(f"{script}\nwarehouse_db_settings\n", encoding="utf-8")
+        result = subprocess.run(
+            ["/bin/sh", "-c", f'. "{program}"', "sh"],
+            cwd=REPO_ROOT,
+            env={"PATH": os.environ["PATH"]},
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
     settings = {}
     for line in result.stdout.splitlines():
         key, value = line.split("=", 1)
