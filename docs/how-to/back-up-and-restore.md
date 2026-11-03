@@ -1,6 +1,6 @@
 # Back up and restore
 
-A backup of agoranomos holds its three databases, the warehouse, Airflow and Metabase, and its extensions folder ([ADR-0020](../adr/0020-back-up-the-databases-every-day.md)). This guide takes one, schedules them, copies them to another machine, and restores them, also on a new server.
+A backup of agoranomos holds its three databases, the warehouse, Airflow and Metabase, and its extensions folder ([ADR-0020](../adr/0020-back-up-the-databases-every-day.md)). This guide takes one, schedules them, copies them to another machine, and restores them, also on a new server. It also says which backup `./agoranomos up` takes by itself before a migration of the core, and what to do before the update to v0.5.
 
 ## What a backup holds
 
@@ -32,6 +32,19 @@ A backup that you take this way stays until you delete it: the retention removes
 ```bash
 rm -r backups/20261011T030012Z
 ```
+
+## The backup before a migration of the core
+
+The tables of the schema `core` change only through migrations, which `db-init` applies once each when the stack starts ([The migrations of the core](../reference/configuration.md#the-migrations-of-the-core)), and nothing but a backup leads back from an applied one ([ADR-0044](../adr/0044-keep-the-core-for-good-and-change-it-by-migrations.md)). So `./agoranomos up` takes a backup by itself before `db-init` applies a migration:
+
+1. Before the rest of the stack, it starts the two databases, or finds them running, and compares the migrations of the checkout with those that `core.schema_migrations` of the warehouse lists. A warehouse of v0.4.x has no such table, so every migration waits for it.
+1. When none waits, it goes on and starts the stack: an `up` with nothing to apply takes one query longer.
+1. When some wait and the warehouse holds data, a table in a schema that is not one of PostgreSQL, it says `Migrations of the core wait: <names>. Taking a backup before db-init applies them (ADR-0044)...`, and takes a backup as `./agoranomos backup` does: in the `backup` service when it runs, and in a container of its own otherwise, such as in local mode. A new warehouse, on the first start, holds no data, and gets no backup.
+1. When the backup fails, or the warehouse cannot say which migrations it has applied, `up` stops before `db-init` runs, so no migration is applied without a backup, and says why. The databases run, and the rest of the stack is as it was. Fix the cause, such as a full disk or a backups folder that belongs to another user, and run `./agoranomos up` again, which takes the backup again before it applies the migrations.
+
+The backup is one by hand, so no retention removes it. Its `manifest.json` has two more fields: `note`, which says that `up` took it before the migrations, and `migrations`, which names them, separated by blanks. `./agoranomos status` lists it with them, as in `20261103T101500Z: 2312 KiB, 0 days old, taken by up before the migrations of the core 0002_add_the_facts`. Every `up` that finds migrations waiting takes one, so an `up` that fails after its backup and runs again leaves one more: delete those that you do not need, as above.
+
+Take a backup by hand before you update the checkout all the same, as [above](#take-a-backup-now): it is the way back to the release that you come from, whose images its manifest records and `restore` compares with the checkout. The backup of `up` records the images of the container that takes it: those of the release that you come from in the running `backup` service, and those of the release that you update to in a container of its own, as in local mode, so a `restore` of Airflow or Metabase with the earlier release stops on it when the update changed their images.
 
 ## Back up every day
 
@@ -92,6 +105,32 @@ The copies hold everything that the databases hold: send them only to storage th
 None of these commands deletes anything at the destination, on purpose: with `rsync --delete` or `rclone sync`, a server that is rebuilt, or a `backups/` that is lost and recreated empty, would empty the copy that the restore needs. So the copy keeps what the retention removes on the server, it grows, and a full destination makes the next copy fail, which under a timer nobody sees: look at the log of the job, `backup-copy.log` above, and at the free space of the copy.
 
 You delete old copies by hand, as `agoranomos-copy` or root on the other machine, which owns them. There, `find /srv/agoranomos-backups -maxdepth 1 -name '20*' -mtime +400` lists the backups that are older than 400 days, which is longer than the 12 months that the server keeps by default, and `rm -r /srv/agoranomos-backups/20260901T030012Z` deletes one. With rclone, `rclone lsd storagebox:agoranomos-backups` lists them with their times, and `rclone purge --dry-run storagebox:agoranomos-backups/20260901T030012Z` shows what a purge of one would remove; run it again without `--dry-run` to remove it. The path must end in the name of a backup: if you leave the name out, `rclone purge` removes the whole copy. A copy job that has stopped makes every backup look old, so check that new copies arrive before you delete any, and keep the backup before an upgrade for as long as you may go back to it.
+
+### A checklist for the copy
+
+A person, or an AI agent that works for one, can follow these steps to copy the backups off the server and know that the copy is good. Each step ends in a check. Nothing in them deletes a backup, on the server or at the destination, and nothing reads a dump or `.env`: an agent leaves `.env` to the person. The commands take the names of this guide: the user `agoranomos`, the checkout in its home folder, and `backups/`.
+
+1. **The last good backup.** On the server, in the checkout, as the user of the stack, run `./agoranomos status`. Its line `Backups: the last good backup is <name>, <hours> hours old, in <folder>.` names the backup and the backups folder. Check: there is one, with the `ops` profile it is less than 26 hours old, and `status` warns about no failed run. Otherwise take one with `./agoranomos backup`, which prints its name, and read why the schedule failed in `./agoranomos logs backup`.
+1. **What a backup does not hold.** Note the commit of the checkout, which `git rev-parse HEAD` prints. Check with the person that their password manager holds the `.env` of this deployment, saved after its last change, and the commit: a restore needs both, and no backup holds them. An agent does not print `.env` and does not copy it.
+1. **The copy.** Copy every complete backup and `latest.json`, and leave out the folders that start with `.partial-`, which are being written: to another server or a storage box as above, by hand or with the cron job, or from the server to the machine of the person, in a folder of the copies that only its owner can open, by a command that runs on that machine:
+
+    ```bash
+    mkdir -p -m 700 ~/agoranomos-backups
+    rsync -a --exclude='.partial-*' agoranomos@<server>:agoranomos/backups/ ~/agoranomos-backups/
+    ```
+
+    Check: the command exits with 0, and prints nothing but what it was asked to print.
+
+1. **The check of the copy.** Where the copy is, check every backup that it holds against its `SHA256SUMS`. On Linux, in the folder of the copies:
+
+    ```bash
+    for backup in 20*Z; do (cd "$backup" && sha256sum --check --quiet --strict SHA256SUMS) || echo "damaged: $backup"; done
+    ```
+
+    On macOS, put `shasum -a 256` in place of `sha256sum`. Check: the loop prints no line `damaged:`. A copy in rclone storage is no folder to run the loop in: copy the newest backup back into an empty folder, as step 4 of [Restore on a new server](#restore-on-a-new-server) does, and run the loop there; with a crypt remote, this also shows that the password and the salt in the password manager are right.
+
+1. **The newest backup.** Check that the copy holds the folder of the backup of step 1, and that it passed step 4.
+1. **The report.** Say where the copy is, how many backups it holds, that each passed its check, the name and the age of the newest, and the commit of step 2. A copy that fails a step is no copy: say which step, and what it printed.
 
 ## Restore
 
@@ -156,6 +195,24 @@ If `restore` stops because the images of the backup differ from those of the che
 Sign in to Metabase with the password of the old deployment, which is in the `.env` that you copied.
 
 The setup jobs find the content of the package in Metabase by a registry on a volume of their own, `metabase-content`, which a backup does not hold ([Configuration](../reference/configuration.md#the-content-of-the-package)). After a restore onto a new machine, the first start with the demo creates the collection **agoranomos** and its content again, and the restored collection **agoranomos** stays as it was, view-only, next to it. The last line of `./agoranomos logs demo-init` names the ID of the dashboard of the new one, which the address of the dashboard in Metabase shows too. Move the restored one to the trash in Metabase, from the menu of the collection, after you copied anything that you added to it. Above the level `off` of AI access, the first start also makes the collections **Workspace** and **Reports** again ([AI access in Metabase](../reference/configuration.md#ai-access-in-metabase)), and the restored ones stay next to them, where the groups of the setup and All Users may only view. Move what you keep from the restored Workspace and Reports into the new ones, and then the restored two to the trash.
+
+## Before the update to v0.5
+
+v0.5, which is planned, changes the warehouse more than any release before it ([ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md), [ADR-0044](../adr/0044-keep-the-core-for-good-and-change-it-by-migrations.md)): its first `up` applies the migrations of the core, which make the tables of the schema `core`, and from v0.5 on the raw layer is to keep only the loads that the warehouse has not accepted yet, so that data older than the window of an API is to exist only in the core and in the backups. Before you update a deployment of v0.4.x, take a backup that leads back to it, and put it outside the server:
+
+1. While the stack of v0.4.x runs, note the commit of the checkout, which `git rev-parse HEAD` prints, in the password manager with `.env`.
+1. Take a backup with `./agoranomos backup`, and note the name that it prints. Its manifest records the images of v0.4.x.
+1. Copy the backups to another machine, and check the copy, as [A checklist for the copy](#a-checklist-for-the-copy) says.
+1. Update the checkout, as [Update to a new release](run-locally.md#update-to-a-new-release) or, on a server, [Update](deploy-on-a-server.md#update) says, and run `./agoranomos up`. A warehouse of v0.4.x has applied no migration of the core, so every migration of v0.5 waits for it, and `up` takes a second backup before `db-init` applies them ([above](#the-backup-before-a-migration-of-the-core)). When it cannot take it, it stops before `db-init` and says why: fix that, and run `up` again.
+1. Check: `./agoranomos status` says `none waiting` on its line `Migrations of the core:`, and lists the backup that `up` took among the backups by hand, as `taken by up before the migrations of the core` with their names.
+1. Copy the backups again, as in step 3, so that the backup of `up` is outside the server too, and save a new copy of `.env`, to which `init` may have added settings.
+
+To go back to v0.4.x, check out the commit of step 1 and restore the backup of step 2, as [Restore](#restore) says. It puts back the three databases as they were before the update, the warehouse without the schema `core`, and what the stack saved after that backup is lost:
+
+```bash
+git checkout <the commit of step 1>
+./agoranomos restore <the backup of step 2>
+```
 
 ## Limits
 
