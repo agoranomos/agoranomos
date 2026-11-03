@@ -2977,6 +2977,53 @@ def test_up_keeps_waiting_for_a_service_that_is_not_ready_yet(cli, tmp_path, lin
     assert "failed" not in result.stderr
 
 
+def test_up_waits_longer_for_demo_init_alone_and_says_so_once(cli, tmp_path):
+    # Its first transform takes more than ten minutes on a slow machine: once every other service is
+    # ready, demo-init has a limit of its own, and up says once why it waits.
+    result = cli.run(
+        "up",
+        FAKE_PS_FILE=ps_file(tmp_path, ps_with("demo-init|running||0")),
+        AGORANOMOS_WAIT_TIMEOUT="1",
+        AGORANOMOS_DEMO_WAIT_TIMEOUT="2",
+        AGORANOMOS_WAIT_INTERVAL="0.2",
+    )
+    assert result.returncode == 1
+    assert "still waiting after 2 seconds for: demo-init (running) (see ./agoranomos status)" in (
+        result.stderr
+    )
+    assert result.stdout.count("Every service is ready but demo-init") == 1
+    assert "at most 2 seconds from the start of the wait" in result.stdout
+
+
+def test_up_waits_no_longer_for_demo_init_beside_another_service(cli, tmp_path):
+    ps = ps_with("demo-init|running||0").replace(
+        "platform-db|running|healthy|0", "platform-db|running|starting|0"
+    )
+    result = cli.run(
+        "up",
+        FAKE_PS_FILE=ps_file(tmp_path, ps),
+        AGORANOMOS_WAIT_TIMEOUT="1",
+        AGORANOMOS_DEMO_WAIT_TIMEOUT="30",
+        AGORANOMOS_WAIT_INTERVAL="0.2",
+    )
+    assert result.returncode == 1
+    assert "still waiting after 1 seconds for:" in result.stderr
+    assert "platform-db (running, starting)" in result.stderr
+    assert "demo-init (running)" in result.stderr
+    assert "Every service is ready but demo-init" not in result.stdout
+
+
+def test_up_waits_for_demo_init_alone_by_default_up_to_forty_minutes(cli):
+    # demo-init gives up after 30 minutes from its own start, which comes minutes after the wait
+    # starts: up waits longer.
+    text = (REPO_ROOT / "agoranomos").read_text(encoding="utf-8")
+    assert "demo_timeout=${AGORANOMOS_DEMO_WAIT_TIMEOUT:-2400}" in text
+    job = (REPO_ROOT / "metabase/demo_init.py").read_text(encoding="utf-8")
+    deadline = re.search(r"^DEADLINE = ([0-9.]+)$", job, re.M)
+    assert deadline is not None
+    assert float(deadline.group(1)) + 300 <= 2400
+
+
 def test_up_says_what_every_service_it_waits_for_is_doing(cli, tmp_path):
     # name (state), or name (state, health) when the service has a health check; comma between.
     ps = "db-init|running||0\nwarehouse-db|created||0\nplatform-db|running|starting|0\n"
