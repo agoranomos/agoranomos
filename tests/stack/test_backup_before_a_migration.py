@@ -9,8 +9,9 @@ An applied migration can never leave a warehouse: db-init stops on an applied mi
 checkout lacks. So the test puts the exact state back in a finally, whatever happened: it deletes
 the row of the migration from core.schema_migrations, as the superuser of the warehouse, and then
 the file. The migration creates nothing, so the warehouse is then as it was. If the test is killed
-between its up and its finally, the next ./agoranomos up stops in db-init on the migration: delete
-its row by hand with DELETE FROM core.schema_migrations WHERE name = '<NAME below>', and its file.
+between its up and its finally, the row and the file stay: delete the row first, as the superuser of
+the warehouse, with DELETE FROM core.schema_migrations WHERE name = '<NAME below>', and then the
+file, since db-init stops on an applied migration whose file is gone.
 The backup stays in the backups folder, as every backup by hand of the stack tests does. The test
 prints names and numbers of migrations, never what a dump holds besides them."""
 
