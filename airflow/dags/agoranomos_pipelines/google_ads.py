@@ -30,9 +30,10 @@ or not, and the load records the window of each account in _agoranomos_reloads i
 A load reads each account whole before dlt sees any of it, into a file for each table on disk, and
 reads each answer of the API as it arrives, a row at a time, so that a task holds a row and a piece
 of an answer and not a month of rows (ADR-0038). An error of the API on one account, such as the
-403 of an account that the service account may not read, or an answer that breaks off or is not
-JSON, is caught at the account, which leaves nothing in the load, as a window replaces whole days
-and a part of one would lose the rest. The load takes the other accounts, records the failed
+403 of an account that the service account may not read, or an answer that is not whole JSON,
+is caught at the account, which leaves nothing in the load, as a window replaces whole days and a
+part of one would lose the rest; an answer whose connection breaks after it has started is asked
+again first, up to three times in all. The load takes the other accounts, records the failed
 account in _agoranomos_reloads with the status failed and the text of the error, keeps its row of
 customers as the last load saw it, and fails at the end with one line that lists the accounts and
 their errors (ADR-0004, ADR-0035). What the API returns is data: a campaign name can carry any
@@ -49,11 +50,13 @@ import os
 import re
 import shutil
 import tempfile
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from time import sleep
+from typing import TextIO
 from zoneinfo import ZoneInfo
 
 import dlt
@@ -109,6 +112,12 @@ ONE_REQUEST_DAYS = 92
 # tries over about a minute on a timeout, a broken connection, 429 or a 5xx, after the time that a
 # Retry-After asks for.
 CLIENT = {"request_timeout": 120, "request_max_attempts": 5, "request_backoff_factor": 2}
+# dlt asks a request again until its answer starts. An answer whose connection breaks after that,
+# in the middle of its rows, read_account asks again itself, once it has cut the file of its table
+# back to where the answer began, so that no row comes twice: up to ATTEMPTS requests in all, after
+# a wait that doubles from the backoff factor of CLIENT, 2 and then 4 seconds, as dlt waits (dlt
+# 1.32.0, wait_exponential of tenacity 9.1.4).
+ATTEMPTS = 3
 # An answer of searchStream over REST is a JSON array of batches, each a
 # SearchGoogleAdsStreamResponse: its rows in results, with fieldMask and requestId, and
 # queryResourceConsumption in the last batch (Search and SearchStream in the REST guide,
@@ -254,6 +263,13 @@ class GoogleAdsError(RuntimeError):
     """A mistake in the settings of the source, which stops the load before any request, or an
     answer of the API that stops the load of one account: one line that names the account and
     gives the error of the API."""
+
+
+class AnswerBrokeOff(GoogleAdsError):
+    """An answer whose connection broke after it had started, as requests reports it while the
+    rows come: the one error that read_account asks again, as the next answer may well come whole.
+    An answer that the API refuses, which dlt has asked again already, an error in an answer and an
+    answer that is not whole JSON fail the account at once."""
 
 
 class AccountsFailed(GoogleAdsError):
@@ -527,9 +543,9 @@ class Api:
     def search(self, account_id: str, gaql: str) -> Iterator[dict]:
         """The rows of a query of an account, as the API gives them, one at a time as the answer
         arrives. dlt retries a request until its answer starts. An answer that the API refuses, an
-        error in the middle of one, an answer that breaks off or is not JSON, and a connection that
-        breaks in it raise GoogleAdsError, with no retry, as the rows read before would come
-        twice."""
+        error in the middle of one, and an answer that is not whole JSON raise GoogleAdsError; a
+        connection that breaks in an answer raises AnswerBrokeOff, which read_account asks again.
+        Each call is a request, and counts as an operation of the daily quota."""
         if not self.signed.valid:
             self.signed.refresh(Request())
         headers = {"Authorization": f"Bearer {self.signed.token}"}
@@ -562,7 +578,7 @@ class Api:
                 f"Google Ads account {account_id}: a broken answer: {error}"
             ) from None
         except RequestException as error:
-            raise GoogleAdsError(
+            raise AnswerBrokeOff(
                 f"Google Ads account {account_id}: the answer broke off: {error}"
             ) from None
         finally:
@@ -607,6 +623,43 @@ class Read:
     files: dict[str, Path]
 
 
+def retried[T](ask: Callable[[], T], undo: Callable[[], None] = lambda: None) -> T:
+    """What ask returns, asked again when its answer breaks off, up to ATTEMPTS times in all, each
+    time after undo has taken back what the broken answer gave and after a wait that doubles. The
+    error of the last attempt is that of the account (ADR-0004)."""
+    for attempt in range(1, ATTEMPTS):
+        try:
+            return ask()
+        except AnswerBrokeOff as error:
+            wait = CLIENT["request_backoff_factor"] * 2 ** (attempt - 1)
+            log.warning(
+                "%s; asking again in %d s, attempt %d of %d", error, wait, attempt + 1, ATTEMPTS
+            )
+            undo()
+            sleep(wait)
+    try:
+        return ask()
+    except AnswerBrokeOff as error:
+        raise AnswerBrokeOff(f"{error} (attempt {ATTEMPTS} of {ATTEMPTS})") from None
+
+
+def written(api: Api, account_id: str, gaql: str, file: TextIO) -> None:
+    """Write the rows of a query of an account to file, a line each, as they come. An answer that
+    breaks off is asked again, after the file is cut back to where the answer began, so that no
+    row comes twice."""
+    start = file.tell()
+
+    def write() -> None:
+        for row in api.search(account_id, gaql):
+            file.write(json.dumps(row) + "\n")
+
+    def undo() -> None:
+        file.seek(start)
+        file.truncate()
+
+    retried(write, undo)
+
+
 def read_account(
     api: Api, account_id: str, now: datetime, last_end: date | None, staging: Path
 ) -> Read:
@@ -614,14 +667,17 @@ def read_account(
     campaigns, ad groups, ads and conversion actions and the facts of its window, each table into a
     file in the folder of the account under staging, on disk, a row at a time as each answer
     arrives, so that the load holds a row of an answer in memory and not the answer (ADR-0038).
-    An error of the API on any request, or an answer that breaks off, raises GoogleAdsError and
-    leaves nothing of the account: a window replaces whole days, and a part of one would lose the
-    rest (ADR-0035)."""
-    rows = [
-        row
-        for row in api.search(account_id, query("customers"))
-        if row["customer"]["id"] == account_id
-    ]
+    An answer that breaks off is asked again (retried). An error of the API on any request, an
+    answer that is not whole JSON, or one that breaks off at each attempt, raises GoogleAdsError
+    and leaves nothing of the account: a window replaces whole days, and a part of one would lose
+    the rest (ADR-0035)."""
+    rows = retried(
+        lambda: [
+            row
+            for row in api.search(account_id, query("customers"))
+            if row["customer"]["id"] == account_id
+        ]
+    )
     if not rows:
         raise GoogleAdsError(f"Google Ads account {account_id}: the API returned no customer")
     customer = rows[0]
@@ -635,8 +691,7 @@ def read_account(
             path = folder / f"{table}.jsonl"
             with path.open("w", encoding="utf-8") as file:
                 for days in chunks(first, last) if table in FACTS else [None]:
-                    for row in api.search(account_id, query(table, days)):
-                        file.write(json.dumps(row) + "\n")
+                    written(api, account_id, query(table, days), file)
             files[table] = path
     except GoogleAdsError:
         shutil.rmtree(folder, ignore_errors=True)
