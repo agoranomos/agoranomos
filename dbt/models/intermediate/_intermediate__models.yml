@@ -150,12 +150,15 @@ models:
         description: '{{ doc("valid_to") }}'
   - name: int_conversion_actions__resolved
     description: >-
-      The conversion actions of the data and of the seed of conversion actions, one row for each
-      platform and action: the name of the seed, else that of the platform; the category of the
-      settings of the deployment, else of the seed, else the one that the category of the platform
-      maps to, else other; and whether it is primary, as the settings of the deployment, else the
-      seed, say, else not. platform and conversion_action_id are its key. It reads the staging
-      models of the conversions of each platform, seed_conversion_actions and
+      The conversion actions of the data, of the Google Ads accounts and of the seed of conversion
+      actions, one row for each platform and action: the name of the seed, else the one that the
+      account gives, else that of the data; the category of the settings of the deployment, else of
+      the seed, else the one that the category of the platform maps to, else other; and whether it
+      is primary, as the settings of the deployment say, else, for Google Ads, the flag
+      include_in_conversions_metric of the newest version of the action in the accounts, with which
+      Google counts it in its metric of conversions, else the seed, else not. platform and
+      conversion_action_id are its key. It reads the staging models of the conversions of each
+      platform, stg_google_ads__conversion_actions, seed_conversion_actions and
       stg_settings__conversion_actions. Its tests guard the marts: when one of them fails, dbt does
       not rebuild the models that read this one.
     data_tests:

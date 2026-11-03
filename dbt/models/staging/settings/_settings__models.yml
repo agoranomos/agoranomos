@@ -47,9 +47,9 @@ models:
     description: >-
       The conversion actions that the deployment names in extensions/model/conversion_actions.toml,
       one row each: whether each is primary, and its category, or none where the file names none.
-      They override the seed of conversion actions in the model. platform and conversion_action_id
-      are its key. Its tests guard the marts: when one of them fails, dbt does not rebuild the
-      models that read this one.
+      They override the seed of conversion actions, and what a Google Ads account says of its
+      actions, in the model. platform and conversion_action_id are its key. Its tests guard the
+      marts: when one of them fails, dbt does not rebuild the models that read this one.
     data_tests:
       - unique_combination:
           arguments:

@@ -17,7 +17,7 @@ Since 9 September 2026 the Google Ads API needs no developer token: the access l
 1. In the Google Cloud console, turn on the Google Ads API in the project. That gives the project Test access, which reaches test accounts only.
 2. On the overview page of the Google Ads API in the console, apply for Explorer access. It reads production accounts, up to 2,880 operations a day, and Google grants it after an automated review in most cases. Basic access, 15,000 operations a day, needs the brand verification of the project first ([Access levels](https://developers.google.com/google-ads/api/docs/api-policy/access-levels), as of October 2026).
 
-A daily load costs ten operations for each account: its customer, its campaigns, ad groups and ads, and the statistics and the conversions of each of the three levels. The first load of an account costs about 230, as it takes 36 months, one calendar month in each request. Explorer access carries the daily load of about 280 accounts, and the first loads of about 12 a day. Google revokes the access of a project that has made no call for 90 days, which a daily load prevents.
+A daily load costs eleven operations for each account: its customer, its campaigns, ad groups, ads and conversion actions, and the statistics and the conversions of each of the three levels. The first load of an account costs about 230, as it takes 36 months, one calendar month in each request. Explorer access carries the daily load of about 260 accounts, and the first loads of about 12 a day. Google revokes the access of a project that has made no call for 90 days, which a daily load prevents.
 
 ## 2. Create the service account and its key
 
@@ -59,7 +59,16 @@ account_id = "1234567890"
 client = "acme"
 ```
 
-Name the conversion actions that count as conversions in `extensions/model/conversion_actions.toml`, with `is_primary = true`. Until you do, `ad_stats_campaign_daily`, `ad_stats_ad_group_daily` and `ad_stats_ad_daily` count no conversions of Google Ads, while `ad_conversions_campaign_daily` has every conversion of every action ([The data model](../reference/data-model.md)). The ID of an action is the last part of its resource name, such as `77` of `customers/1234567890/conversionActions/77`, which the column `conversion_action_id` of `ad_conversions_campaign_daily` shows after the first load.
+The conversions match the account with no setting: `ad_stats_campaign_daily`, `ad_stats_ad_group_daily` and `ad_stats_ad_daily` count the conversion actions that the account counts in its conversions, those whose `include_in_conversions_metric` Google sets to true, and `ad_conversions_campaign_daily` has every conversion of every action, with `is_primary` beside it ([The data model](../reference/data-model.md#google-ads)). `extensions/model/conversion_actions.toml` is for a choice of your own: an entry with `is_primary = true` counts an action that the account does not count, and one with `is_primary = false` leaves out one that it counts. The ID of an action is the last part of its resource name, such as `77` of `customers/1234567890/conversionActions/77`, which the column `conversion_action_id` of `ad_conversions_campaign_daily` shows after the first load:
+
+```toml
+[[actions]]
+platform = "google_ads"
+conversion_action_id = "77"
+is_primary = false
+```
+
+A campaign with conversion goals of its own, chosen for the campaign or a custom goal, counts in Google Ads the primary actions of those goals ([About conversion goals](https://support.google.com/google-ads/answer/10995103), as of November 2026), while the model counts the same actions in every campaign of the account, so the conversions of such a campaign can differ from the account.
 
 ## 5. Start the loads
 

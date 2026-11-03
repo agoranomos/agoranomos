@@ -297,7 +297,7 @@ The model of advertising statistics reads two settings files of the deployment, 
 | File | What it holds |
 |---|---|
 | `clients.toml` | The clients of the business, `[clients.<id>]` with a `name`, and the ad accounts of each, `[[accounts]]` with `platform`, `account_id` and `client` ([ADR-0024](../adr/0024-one-deployment-is-one-business.md)). An account that the file does not name belongs to the client `unassigned`. |
-| `conversion_actions.toml` | Which conversion actions count in the `conversions` of a campaign: `[[actions]]` with `platform`, `conversion_action_id`, `is_primary` and, optionally, `conversion_category`; an entry sets whether the action is primary, and its category when it names one, in place of the row of the base package for the same action ([ADR-0025](../adr/0025-model-advertising-statistics-once.md)). |
+| `conversion_actions.toml` | Which conversion actions count in the `conversions` of a campaign: `[[actions]]` with `platform`, `conversion_action_id`, `is_primary` and, optionally, `conversion_category`; an entry sets whether the action is primary, and its category when it names one, in place of the row of the base package, or of what a Google Ads account says, for the same action ([ADR-0025](../adr/0025-model-advertising-statistics-once.md)). |
 
 The first task of each run of `agoranomos_demo_transform`, `load_settings`, reads both files, with the clients of the demo from a file of the same form in the base package, checks them and loads them as the `loader` role into `raw_settings`, in place of what was there; the dbt run that follows uses them. So a change takes effect at the next run of the transform, which you can trigger in Airflow, and needs no `./agoranomos up`. The Airflow services mount the folder read-only.
 

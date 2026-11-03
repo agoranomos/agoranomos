@@ -118,7 +118,19 @@ The category that the ad platform gives the conversion action, in lower case, su
 {% enddocs %}
 
 {% docs is_primary %}
-Whether the conversion action counts in the conversions of a campaign. The seed of conversion actions of the base package says it, and a deployment can override it in extensions/model/conversion_actions.toml; an action that neither names does not count.
+Whether the conversion action counts in the conversions of a campaign, an ad group or an ad. For an action of Google Ads it is what the account says of the action, include_in_conversions_metric, with which Google counts it in its own metric of conversions; for an action of another platform the seed of conversion actions of the base package says it. A deployment can override either in extensions/model/conversion_actions.toml, and an action that none of them names does not count. A campaign of Google Ads with conversion goals of its own counts the primary actions of those goals in the account, which can differ from these.
+{% enddocs %}
+
+{% docs conversion_action_status %}
+The status of the conversion action in a version of it, as the ad platform writes it, such as ENABLED, HIDDEN or REMOVED for Google.
+{% enddocs %}
+
+{% docs include_in_conversions_metric %}
+Whether Google Ads counts the conversion action in its metric of conversions, in a version of the action: metrics.conversions of the API includes only the actions with this flag. The model takes it for whether an action of Google Ads is primary (is_primary), where the settings of the deployment do not name the action. Google made the flag read-only in August 2022, and its guide of conversion goals calls it deprecated in favor of primary_for_goal.
+{% enddocs %}
+
+{% docs primary_for_goal %}
+Whether the conversion action is primary for its conversion goal, in a version of the action, as the Google Ads account says: Google counts a primary action in bidding and in the conversions of a campaign that uses its goal, and a secondary one only in all conversions, unless a custom goal uses it. The guide of conversion goals of Google names it in place of include_in_conversions_metric, which the model reads instead.
 {% enddocs %}
 
 {% docs attribution_setting %}
@@ -186,11 +198,11 @@ The type of the ad as the ad platform gives it: the type of Google, such as RESP
 {% enddocs %}
 
 {% docs valid_from %}
-The moment from which the row held, as the loads saw it: for a version of a campaign, an ad group or an ad, its values, as a change of any of its fields, such as its name or its status, starts a new version; for a name of a campaign, as in ad_campaign_names, the name. It is the moment of the load that first saw it, or, for the versions that the first load of the demo replays, 00:00 UTC of the day on which a name changed, or of the first day of the history for the first of them.
+The moment from which the row held, as the loads saw it: for a version of a campaign, an ad group, an ad or a conversion action, its values, as a change of any of its fields, such as its name or its status, starts a new version; for a name of a campaign, as in ad_campaign_names, the name. It is the moment of the load that first saw it, or, for the versions that the first load of the demo replays, 00:00 UTC of the day on which a name changed, or of the first day of the history for the first of them.
 {% enddocs %}
 
 {% docs valid_to %}
-The moment until which the row held: that of the load that saw the campaign, the ad group or the ad change, or no longer saw it; none while the row holds, as for the current version or name of a campaign.
+The moment until which the row held: that of the load that saw the campaign, the ad group, the ad or the conversion action change, or no longer saw it; none while the row holds, as for the current version or name of a campaign.
 {% enddocs %}
 
 {% docs is_current %}
