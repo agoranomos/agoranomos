@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Run one dbt build in the watcher mode of Cosmos, with a DAG of maintenance
 
+Superseded in part by [ADR-0046](0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md): "the tests of the sources" in the order of "The transform", as no test reads a raw table, and "detaches and" in "The DAG of maintenance", as a month of a journal is dropped with no detach. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 [ADR-0028](0028-build-each-node-of-dbt-with-its-tests-in-one-task.md) builds each node with its tests in one Airflow task. Today that is 84 tasks, each a dbt process of its own (`LOCAL`, `SUBPROCESS`, `TestBehavior.BUILD`), two at a time, and 160 seconds for 657 nodes of the demo: about 4 seconds of a slot for each task, nearly all of it orchestration. The transform also starts only on the assets of the demo or of Google Ads: the rates do not start it.

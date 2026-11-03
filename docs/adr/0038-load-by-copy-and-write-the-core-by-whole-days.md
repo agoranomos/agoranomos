@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Load with COPY into the raw layer, and write the core by whole days of an account
 
+Superseded in part by [ADR-0046](0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md): "in `on-run-start`" and "the newest for each account" of "Pinning", as a task before the tasks of dbt now pins and L1 takes the newest load for each account and day, and "a table that a cleanup has emptied gets a `TRUNCATE`", which now comes under a lock. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 [ADR-0004](0004-ingest-with-dlt.md) merges rows on natural keys into raw tables that stay for good, and calls data final up to yesterday. In the code, the keys are not set, so a delete of a window walks a table by a chain of `OR`; the load goes by `INSERT ... VALUES`, whose backends the kernel killed 29 times in one morning of October 2026 on a test stack, under the limit of 384 MiB of `warehouse-db`, until files of 5,000 rows and two workers stopped it; and nothing connects a load to the run of dbt that reads it.
