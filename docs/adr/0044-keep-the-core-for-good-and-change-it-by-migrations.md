@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Keep the core for good, change it by migrations, and back it up before each one
 
+Superseded in part by [ADR-0046](0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md): "By partition" for `core.loads` in "Retention", as that table has no partitions and its rows past 13 months are deleted. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 [ADR-0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) erases the raw layer, so data older than the window of an API exists only in the core. The maintainer asks that a new release changes the schema with no reload of the history, that a deployment runs for years with only updates from its user, and that a person can rely on a dashboard for three years back.

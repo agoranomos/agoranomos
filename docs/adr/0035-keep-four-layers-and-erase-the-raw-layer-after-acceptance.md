@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Keep four layers of data, and erase the raw layer once the core has accepted a load
 
+Superseded in part by [ADR-0046](0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md): the order of the steps of "The way of a load", as a load is now marked accepted before its rows are deleted. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 Today the raw tables of dlt stay for good, the staging models are views, and each mart is a table that dbt rebuilds whole on every run ([ADR-0004](0004-ingest-with-dlt.md), [ADR-0005](0005-transform-with-dbt-core.md), [ADR-0025](0025-model-advertising-statistics-once.md)). That fits the demo, a warehouse of 211 MB, of which the raw tables take 117 MB. It does not fit the limit of one server, about 147 million rows of statistics over 36 months ([ADR-0040](0040-size-the-stack-by-profiles-and-derive-the-settings-of-postgresql.md)): a full rebuild on every run is out of the question at that size, a delete of `merge` without keys walks a whole table, and a failed test of dbt only stops what lies below a table that it has already written.
