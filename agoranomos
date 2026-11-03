@@ -1718,6 +1718,7 @@ cmd_status() {
   status_table=$(compose ps --all --format 'table {{.Service}}\t{{.State}}\t{{.Status}}')
   [ -z "$status_table" ] || printf '%s\n' "$status_table"
   warehouse_db_status
+  migrations_status
   backup_status
 }
 
@@ -1742,6 +1743,103 @@ warehouse_db_status() {
       warn "the running warehouse-db has shared_buffers ${server_answer%"$FIELD_SEPARATOR"*}, not the $warehouse_buffers that .env gives now: ./agoranomos up starts it with the settings of .env"
       ;;
   esac
+}
+
+# The migrations of the core in this checkout (ADR-0044), the files of postgres/migrations that
+# db-init applies, by their names without .sql, such as 0001_create_schema_migrations: one to a
+# line, in the order of their numbers.
+migration_files() {
+  for migration_file in "$ROOT"/postgres/migrations/[0-9][0-9][0-9][0-9]_*.sql; do
+    [ -f "$migration_file" ] || continue
+    migration_file=${migration_file##*/}
+    printf '%s\n' "${migration_file%.sql}"
+  done
+}
+
+# The SQL of the migrations that the warehouse has applied, which status runs as postgres: a row
+# for each, its name as migration_files prints it and when it was applied, in UTC, in the order of
+# their numbers. A warehouse that has applied none has no table yet, as the first migration makes
+# it, and then gives no row.
+migrations_sql() {
+  cat << 'SQL'
+SELECT to_regclass('core.schema_migrations') IS NOT NULL AS listed \gset
+\if :listed
+SELECT to_char(version, 'FM0000') || '_' || name,
+  to_char(applied_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI "UTC"')
+FROM core.schema_migrations ORDER BY version;
+\endif
+SQL
+}
+
+# What status says of the migrations of the core, from those of this checkout ($1, as
+# migration_files prints them) and the rows of migrations_sql ($2): how many the warehouse has
+# applied and the last of them, and those that wait for the next ./agoranomos up, which applies
+# them in db-init. An applied migration that this checkout lacks, as after a newer release, makes
+# db-init stop, so it gets a warning. A line that is not a row of migrations_sql counts for
+# nothing.
+migrations_summary() {
+  applied_count=0 applied_last="" applied_names="" lacking=""
+  while IFS=$FIELD_SEPARATOR read -r applied_name applied_at; do
+    case "$applied_name" in
+      [0-9][0-9][0-9][0-9]_*) ;;
+      *) continue ;;
+    esac
+    applied_count=$((applied_count + 1))
+    applied_last="$applied_name on $applied_at"
+    applied_names="$applied_names $applied_name "
+    case "
+$1
+" in
+      *"
+$applied_name
+"*) ;;
+      *) lacking="${lacking:+$lacking, }$applied_name" ;;
+    esac
+  done << EOF
+$2
+EOF
+  waiting_count=0 waiting=""
+  while IFS= read -r migration; do
+    [ -n "$migration" ] || continue
+    case "$applied_names" in *" $migration "*) continue ;; esac
+    waiting_count=$((waiting_count + 1))
+    waiting="${waiting:+$waiting, }$migration"
+  done << EOF
+$1
+EOF
+  if [ "$applied_count" -eq 0 ]; then
+    applied_text="none applied"
+  else
+    applied_text="$applied_count applied, the last $applied_last"
+  fi
+  if [ "$waiting_count" -eq 0 ]; then
+    waiting_text="none waiting"
+  else
+    waiting_text="$waiting_count waiting, which ./agoranomos up applies: $waiting"
+  fi
+  say "Migrations of the core: $applied_text; $waiting_text (ADR-0044)."
+  [ -z "$lacking" ] ||
+    warn "the warehouse has applied migrations of the core that this checkout does not have: $lacking. A newer release applied them, or a file of postgres/migrations was renamed or removed, and db-init stops at the next start until the checkout has them as they were: ./agoranomos logs db-init says more"
+}
+
+# What status says of the migrations of the core (ADR-0044): while warehouse-db runs, by the table
+# that status printed, which of the migrations of this checkout the warehouse has applied, and which
+# wait; otherwise how many this checkout has.
+migrations_status() {
+  checkout_migrations=$(migration_files)
+  checkout_count=$(printf '%s\n' "$checkout_migrations" | awk 'NF { count++ } END { print count + 0 }')
+  if ! printf '%s\n' "$status_table" |
+    awk '$1 == "warehouse-db" && $2 == "running" { found = 1 } END { exit !found }'; then
+    say "Migrations of the core: $checkout_count in this checkout; status shows which of them are applied while warehouse-db runs (ADR-0044)."
+    return 0
+  fi
+  if ! applied_rows=$(migrations_sql |
+    compose exec -T warehouse-db psql --username=postgres --dbname=warehouse --no-psqlrc --quiet \
+      --tuples-only --no-align --field-separator="$FIELD_SEPARATOR" --set=ON_ERROR_STOP=1 2> /dev/null); then
+    say "Migrations of the core: $checkout_count in this checkout; warehouse-db did not say which of them are applied (ADR-0044)."
+    return 0
+  fi
+  migrations_summary "$checkout_migrations" "$applied_rows"
 }
 
 # Take a backup now (ADR-0020): in the running backup service when .env has the ops profile and the

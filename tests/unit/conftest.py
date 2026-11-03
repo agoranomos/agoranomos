@@ -14,7 +14,9 @@ docker compose does for a command in a container. FAKE_NETWORK_IPV6 and FAKE_NET
 docker network inspect prints for the IPv6 setting and the label dev.agoranomos.ipv6 of the network
 default of the stack: true or false, and without FAKE_NETWORK_IPV6 the network does not exist.
 FAKE_NETWORK_CREATE_FAIL is the error of a docker network create that fails, FAKE_NETWORK_RM_FAIL
-makes docker network rm fail. Cli.stub replaces a stand-in, or adds a tool, for one test.
+makes docker network rm fail. FAKE_PSQL_OUTPUT is what psql in a container prints, and
+FAKE_MIGRATIONS_OUTPUT and FAKE_MIGRATIONS_EXIT what it prints, and its exit status, for the SQL of
+the migrations of the core. Cli.stub replaces a stand-in, or adds a tool, for one test.
 """
 
 from __future__ import annotations
@@ -192,11 +194,20 @@ case "$1" in
         fi
         # psql in platform-db reads its SQL from standard input, and prints FAKE_PSQL_OUTPUT, or
         # by default the counts of a delete of OAuth clients that found none: 0 clients and 0
-        # tokens, separated by the unit separator.
+        # tokens, separated by the unit separator. The SQL that names core.schema_migrations, with
+        # which status asks the warehouse for the migrations of the core that it has applied, gets
+        # FAKE_MIGRATIONS_OUTPUT instead, by default nothing, as from a warehouse that has applied
+        # none, and FAKE_MIGRATIONS_EXIT is its exit status.
         if [ "$1" = exec ]; then
           case " $* " in
             *" psql "*)
-              [ -n "${FAKE_READ_STDIN:-}" ] || cat > /dev/null
+              if [ -n "${FAKE_READ_STDIN:-}" ]; then sql=$received; else sql=$(cat); fi
+              case "$sql" in
+                *core.schema_migrations*)
+                  [ -z "${FAKE_MIGRATIONS_OUTPUT:-}" ] || printf '%s\n' "$FAKE_MIGRATIONS_OUTPUT"
+                  exit "${FAKE_MIGRATIONS_EXIT:-0}"
+                  ;;
+              esac
               if [ -n "${FAKE_PSQL_OUTPUT+set}" ]; then
                 [ -z "$FAKE_PSQL_OUTPUT" ] || printf '%s\n' "$FAKE_PSQL_OUTPUT"
               else

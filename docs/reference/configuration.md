@@ -337,6 +337,21 @@ On every start, the setup job `db-init` sets each role of the warehouse (`loader
 
 `AIRFLOW_DB_PASSWORD`, `VALKEY_PASSWORD` and `CELERY_RESULTS_DB_PASSWORD` are written into connection URLs. If you choose them yourself instead of letting `init` generate them, use letters and digits only: a character such as `@`, `/` or `:` breaks the URL.
 
+The warehouse has one more role, `migrator`, which owns the schema `core` and has no password: on every start `db-init` sets it to `NOLOGIN`, with none of the attributes above and no password, gives it no privilege, and becomes it only to apply the migrations of the core ([The migrations of the core](#the-migrations-of-the-core)).
+
+## The migrations of the core
+
+The tables of the schema `core` ([The schema core](data-model.md#the-schema-core)) come from numbered SQL files in `postgres/migrations`, which `db-init` applies once each ([ADR-0038](../adr/0038-load-by-copy-and-write-the-core-by-whole-days.md), [ADR-0044](../adr/0044-keep-the-core-for-good-and-change-it-by-migrations.md)). A file is named `NNNN_name.sql`: four digits, from `0001` with no gap and no duplicate, an underscore, and a name of lower-case letters, digits and underscores. On every start, after it has set up the roles and the schemas, `db-init`:
+
+1. checks the names and the numbers of the files;
+1. reads the migrations that the warehouse has applied from `core.schema_migrations`, which the first migration creates, so that a warehouse without that table, such as one of v0.4.x, has applied none;
+1. checks that each of them is still in `postgres/migrations` under the same name and with the same SHA-256 of its bytes;
+1. applies the others in the order of their numbers, each in a transaction of its own, as the role `migrator`, with a lock timeout of one minute, and with its row in `core.schema_migrations`: the migration and its row commit together or not at all (`postgres/migrate.sql`).
+
+`db-init` logs each migration that it applies, or that none waits, so a second start applies nothing. It stops before it applies anything, and `./agoranomos up` fails, when a file has a wrong name or number, when a migration that the warehouse has applied has changed, also in its line endings only, or when the warehouse has applied a migration that the checkout lacks, as after a newer release or the rename of a file; `./agoranomos logs db-init` names the file. A migration that fails stops it too, and leaves nothing of itself behind. So an applied migration never changes, and a change of the core is a new migration. The checkouts of macOS, Linux and WSL2 give a file the same bytes, as `.gitattributes` gives every text file LF line endings. A warehouse that a newer release has migrated goes on with a checkout of that release, or goes back with a backup made before the migration ([Back up and restore](../how-to/back-up-and-restore.md)). `./agoranomos up` does not take that backup by itself yet, which [ADR-0044](../adr/0044-keep-the-core-for-good-and-change-it-by-migrations.md) plans for v0.5: `./agoranomos backup` takes one before an `up` that brings a migration.
+
+[`./agoranomos status`](command-line.md#status) shows how many migrations the warehouse has applied, the last of them with its time, and those that wait for the next `./agoranomos up`.
+
 ## Back up Metabase before an upgrade
 
 A release that moves Metabase to a new major version, such as from 0.63 to 0.64, migrates the application database of Metabase, the `metabase` database of `platform-db`, at the first `./agoranomos up`. Do not count on undoing the migration: as of October 2026, Metabase 0.63.19 refuses to start on a database that 0.64.1 has migrated, and after the `migrate down` command of 0.64.1 it fails on a migration of its own. The way back is a backup made before the upgrade. A large application database can take a while to migrate, because 0.64 changes the primary key of the `query_execution` table, which logs the queries that Metabase runs, and splits that table into partitions.

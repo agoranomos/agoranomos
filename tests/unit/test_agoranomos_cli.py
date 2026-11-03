@@ -5606,10 +5606,12 @@ def test_status_warns_while_the_running_warehouse_has_other_shared_buffers_than_
     warning = "the running warehouse-db has shared_buffers 4GB, not the 128MB that .env gives now"
     assert (warning in result.stderr) is warns
     psql_calls = [call for call in compose_calls(cli) if " psql " in call]
-    assert len(psql_calls) == 1
-    assert " exec -T warehouse-db psql " in psql_calls[0]
-    assert "--set=wanted=128MB" in psql_calls[0]
-    assert "--set=ON_ERROR_STOP=1" in psql_calls[0]
+    # One for shared_buffers, and one for the migrations of the core.
+    assert len(psql_calls) == 2
+    [buffers_call] = [call for call in psql_calls if "--set=wanted=" in call]
+    assert " exec -T warehouse-db psql " in buffers_call
+    assert "--set=wanted=128MB" in buffers_call
+    assert "--set=ON_ERROR_STOP=1" in buffers_call
 
 
 def test_status_asks_the_warehouse_nothing_while_it_does_not_run(cli, tmp_path):
@@ -5622,6 +5624,123 @@ def test_status_asks_the_warehouse_nothing_while_it_does_not_run(cli, tmp_path):
     assert "warehouse-db: memory limit 384m, shared_buffers 128MB" in result.stdout
     assert "running warehouse-db" not in result.stderr
     assert not [call for call in compose_calls(cli) if " psql " in call]
+
+
+def add_migrations(cli, *names):
+    """Put migrations of the core into postgres/migrations of the checkout of the test."""
+    folder = cli.root / "postgres" / "migrations"
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (folder / f"{name}.sql").write_text("SELECT 1;\n", encoding="utf-8")
+
+
+# The migrations of the core of a checkout, in the tests below, and the rows of migrations_sql for
+# the first two of them: a name and when the warehouse applied it, separated by the unit separator.
+MIGRATIONS = ("0001_create_schema_migrations", "0002_add_the_facts", "0003_add_a_column")
+APPLIED_TWO = (
+    "0001_create_schema_migrations\x1f2026-11-03 10:15 UTC\n"
+    "0002_add_the_facts\x1f2026-11-04 09:00 UTC"
+)
+
+
+@pytest.mark.parametrize(
+    ("rows", "line"),
+    [
+        (
+            "",
+            "Migrations of the core: none applied; 3 waiting, which ./agoranomos up applies: "
+            "0001_create_schema_migrations, 0002_add_the_facts, 0003_add_a_column (ADR-0044).",
+        ),
+        (
+            APPLIED_TWO,
+            "Migrations of the core: 2 applied, the last 0002_add_the_facts on 2026-11-04 09:00 "
+            "UTC; 1 waiting, which ./agoranomos up applies: 0003_add_a_column (ADR-0044).",
+        ),
+        (
+            APPLIED_TWO + "\n0003_add_a_column\x1f2026-11-05 08:30 UTC",
+            "Migrations of the core: 3 applied, the last 0003_add_a_column on 2026-11-05 08:30 "
+            "UTC; none waiting (ADR-0044).",
+        ),
+    ],
+    ids=["none applied", "one waiting", "all applied"],
+)
+def test_status_shows_the_migrations_of_the_core_applied_and_waiting(cli, tmp_path, rows, line):
+    # ADR-0044: up applies the migrations of the core in db-init, and status says where the
+    # warehouse stands, from core.schema_migrations, while warehouse-db runs.
+    cli.run("init")
+    add_migrations(cli, *MIGRATIONS)
+    result = cli.run(
+        "status", FAKE_PS_FILE=ps_file(tmp_path, STATUS_TABLE), FAKE_MIGRATIONS_OUTPUT=rows
+    )
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    # After the line of the settings of the warehouse, before those of the backups.
+    assert lines[3] == line
+    assert lines[2].startswith("warehouse-db: memory limit")
+    assert result.stderr == ""
+    [call] = [
+        call for call in compose_calls(cli) if " psql " in call and "--set=wanted" not in call
+    ]
+    assert call.startswith(
+        "compose exec -T warehouse-db psql --username=postgres --dbname=warehouse"
+    )
+    assert "--set=ON_ERROR_STOP=1" in call
+
+
+def test_status_warns_about_an_applied_migration_that_the_checkout_lacks(cli, tmp_path):
+    # As after a newer release, or a file renamed: db-init stops on it at the next start.
+    cli.run("init")
+    add_migrations(cli, MIGRATIONS[0])
+    result = cli.run(
+        "status", FAKE_PS_FILE=ps_file(tmp_path, STATUS_TABLE), FAKE_MIGRATIONS_OUTPUT=APPLIED_TWO
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Migrations of the core: 2 applied, the last 0002_add_the_facts" in result.stdout
+    assert (
+        "the warehouse has applied migrations of the core that this checkout does not have: "
+        "0002_add_the_facts. A newer release applied them"
+    ) in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("table", "fake", "line"),
+    [
+        (
+            "SERVICE   STATE     STATUS\nwarehouse-db   exited   Exited (0) 2 hours ago\n",
+            {},
+            "Migrations of the core: 3 in this checkout; status shows which of them are applied "
+            "while warehouse-db runs (ADR-0044).",
+        ),
+        (
+            STATUS_TABLE,
+            {"FAKE_MIGRATIONS_EXIT": "2"},
+            "Migrations of the core: 3 in this checkout; warehouse-db did not say which of them "
+            "are applied (ADR-0044).",
+        ),
+    ],
+    ids=["stopped", "no answer"],
+)
+def test_status_counts_the_migrations_of_the_checkout_when_the_warehouse_cannot_say(
+    cli, tmp_path, table, fake, line
+):
+    cli.run("init")
+    add_migrations(cli, *MIGRATIONS)
+    result = cli.run("status", FAKE_PS_FILE=ps_file(tmp_path, table), **fake)
+    assert result.returncode == 0, result.stderr
+    assert line in result.stdout.splitlines()
+    assert result.stderr == ""
+
+
+def test_status_takes_only_the_migrations_and_counts_none_without_the_folder(cli, tmp_path):
+    cli.run("init")
+    stopped = ps_file(tmp_path, "SERVICE   STATE     STATUS\n")
+    result = cli.run("status", FAKE_PS_FILE=stopped)
+    assert "Migrations of the core: 0 in this checkout;" in result.stdout
+    add_migrations(cli, *MIGRATIONS)
+    (cli.root / "postgres" / "migrations" / "README.md").write_text("notes\n", encoding="utf-8")
+    (cli.root / "postgres" / "migrations" / "0004_draft.sql.orig").write_text("", encoding="utf-8")
+    result = cli.run("status", FAKE_PS_FILE=stopped)
+    assert "Migrations of the core: 3 in this checkout;" in result.stdout
 
 
 @pytest.mark.parametrize(

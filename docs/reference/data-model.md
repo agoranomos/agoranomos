@@ -4,7 +4,7 @@ The warehouse holds the advertising statistics of every platform in one model, b
 
 !!! note "Planned for v0.5"
 
-    [ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) to [ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md) decide to keep the data in a new schema `core` and to turn the marts into views under the same names. None of it is built, and this page describes the model as it is today.
+    [ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) to [ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md) decide to keep the data in a new schema `core` and to turn the marts into views under the same names. The schema `core` exists, with the table of its migrations and nothing else yet ([The schema core](#the-schema-core)); the rest is not built, and this page describes the model as it is today.
 
 ## Layers
 
@@ -16,6 +16,7 @@ The warehouse holds the advertising statistics of every platform in one model, b
 | `staging` | A view for each table of each platform and of the settings, in the names of the model (`stg_<platform>__<table>`, `stg_settings__<table>`); the steps that the platforms share (`int_<entity>__<verb>`), views as well, but for the statistics of ad groups and of ads, which are tables, so that each of their tests reads a table rather than computes them again; and the seeds of the base package (`seed_…`) | `transformer` | nobody else |
 | `marts` | The tables of the model, rebuilt in full on each run of the transform | `transformer` | `metabase_reader` |
 | `ops` | The tables in which elementary records each run of dbt and its tests, and the four views of the Ops collection over them ([The schema ops](#the-schema-ops)) | `transformer` | `metabase_reader`, the four views only |
+| `core` | The table of its migrations, `schema_migrations`, and nothing else yet: the layer that is to keep the data for good from v0.5 on ([The schema core](#the-schema-core)) | `migrator`, through the migrations that `db-init` applies | nobody else yet |
 
 The staging views of a platform are calls of one macro for each shape of an API (`dbt/macros/shapes/`), so that the demo platform `demo_search` and the connector of Google Ads share one. A macro of statistics or conversions takes the level of its report: a campaign, an ad group or an ad. dbt replaces a view or a table by dropping the old one with every view that depends on it, so build nothing of your own on a relation of `staging` or `marts`: put a question of your own in Metabase, whose SQL PostgreSQL does not track. Between two tasks of one run, and after a run that a test stopped, a view of `staging` can be missing; the marts keep their data.
 
@@ -103,6 +104,23 @@ The schema `ops` holds the tables of the package elementary, in which its hooks 
 | `ops_warehouse_tables` | Each table of the warehouse | The rows that the last ANALYZE estimated and the bytes that the table takes with its indexes, when the view is read |
 
 A task of the transform runs dbt for one node, so one run of the transform is many runs of dbt, which share `airflow_run_id`. dbt rebuilds the views on each run; elementary keeps the rows of its tables, and nothing removes old rows yet.
+
+## The schema core
+
+!!! note "Filled in v0.5"
+
+    The schema `core` is to keep the data for good: narrow facts by grain, dimensions with versions, the rates by day, and the journals of the loads and of the restatements ([ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md), [ADR-0036](../adr/0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md), [ADR-0038](../adr/0038-load-by-copy-and-write-the-core-by-whole-days.md)). Today it holds only the table of its migrations, and the tasks of v0.5 add the rest, each table in a migration.
+
+The role `migrator` owns the schema and every table that a migration creates in it. It cannot sign in and has no password: `db-init` applies each migration as the superuser of the warehouse with `SET ROLE migrator`, so `transformer`, which is to write into the tables of the core, can drop neither them nor the schema, which only their owner can ([ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md)). `transformer` may enter the schema and create the tables of its snapshots there, which are its own. `metabase_reader` and `ai_reader` get no right on it, as the views of v0.5 are to read it with the rights of their owner. Each table of the core is described in the migration that creates it, as dbt describes only what it owns (`persist_docs` needs ownership).
+
+| Column of `core.schema_migrations` | What it holds |
+|---|---|
+| `version` | The number of the migration, the `NNNN` of its file, from 1 |
+| `name` | The name of the migration, the part of its file name between the number and `.sql` |
+| `checksum` | The SHA-256 of the file as it was applied, in hexadecimal |
+| `applied_at` | When the transaction that applied the migration started |
+
+[Configuration](configuration.md#the-migrations-of-the-core) says how `db-init` applies the migrations, and [`./agoranomos status`](command-line.md#status) shows those that the warehouse has applied and those that wait.
 
 ## The demo platforms
 
