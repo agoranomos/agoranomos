@@ -10,6 +10,7 @@ import re
 import shutil
 import stat
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -40,12 +41,24 @@ def shell_function(name: str) -> str:
     raise AssertionError(f"./agoranomos defines no function {name}")
 
 
+def run_program(shell, program, *args, **kwargs):
+    """Run program in shell as sh -c program sh args runs it, with $0 sh and args from $1. The program
+    goes into a file that the shell sources, not into the argument of -c: Linux takes at most 128 KiB
+    in one argument (MAX_ARG_STRLEN), which the whole script passes."""
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "program.sh"
+        path.write_text(program, encoding="utf-8")
+        return subprocess.run([shell, "-c", f'. "{path}"', "sh", *args], **kwargs)
+
+
 def run_env_functions(shell, body, *args, env_file, path=None):
     """Run body, with the functions that env_set needs and ENV_FILE set, in a shell with set -eu."""
     names = ("say", "warn", "error_line", "die", "paint", "sgr", "env_get", "env_set")
     program = "set -eu\n" + "\n".join(shell_function(name) for name in names) + "\n" + body
-    return subprocess.run(
-        [shell, "-c", program, "sh", *args],
+    return run_program(
+        shell,
+        program,
+        *args,
         env={"PATH": path or os.environ["PATH"], "ENV_FILE": str(env_file)},
         capture_output=True,
         text=True,
@@ -236,8 +249,9 @@ def test_problem_and_resource_problem_work_outside_preflight(shell, tmp_path):
     script, _, _ = SCRIPT.rpartition('\nmain "$@"')
     assert script != SCRIPT
     program = f'{script}\nproblem "one"\nresource_problem "two"\nprintf "%s" "$problems"\n'
-    result = subprocess.run(
-        [shell, "-c", program, "sh"],
+    result = run_program(
+        shell,
+        program,
         cwd=tmp_path,
         env={"PATH": os.environ["PATH"]},
         capture_output=True,
@@ -255,8 +269,10 @@ def run_with_script_functions(shell, body, *args, cwd):
     """Run body in a shell that has every function of the script and has not run any command."""
     script, _, _ = SCRIPT.rpartition('\nmain "$@"')
     assert script != SCRIPT
-    return subprocess.run(
-        [shell, "-c", f"{script}\n{body}\n", "sh", *args],
+    return run_program(
+        shell,
+        f"{script}\n{body}\n",
+        *args,
         cwd=cwd,
         env={"PATH": os.environ["PATH"]},
         capture_output=True,
@@ -646,8 +662,10 @@ def test_a_database_belongs_to_a_service_and_depends_on_the_images_that_read_it(
 )
 def test_folder_path_reads_a_folder_as_compose_does(shell, tmp_path, value, path):
     script, _, _ = SCRIPT.rpartition('\nmain "$@"')
-    result = subprocess.run(
-        [shell, "-c", f'{script}\nfolder_path "$1"\n', "sh", value],
+    result = run_program(
+        shell,
+        f'{script}\nfolder_path "$1"\n',
+        value,
         cwd=tmp_path,
         env={"PATH": os.environ["PATH"], "HOME": "/home/someone/"},
         capture_output=True,
