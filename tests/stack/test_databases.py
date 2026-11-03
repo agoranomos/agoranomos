@@ -448,7 +448,10 @@ def test_the_table_of_the_migrations_belongs_to_migrator_and_is_described(env):
     # The tables of the core describe themselves in their migrations, as dbt does not describe
     # them (ADR-0038).
     table = "'core.schema_migrations'::regclass"
-    owner = f"SELECT pg_get_userbyid(relowner) || ':' || relkind FROM pg_class WHERE oid = {table}"  # noqa: S608 (a constant)
+    owner = (
+        "SELECT pg_get_userbyid(relowner) || ':' || relkind::text "  # noqa: S608 (a constant)
+        f"FROM pg_class WHERE oid = {table}"
+    )
     assert warehouse_output(env, owner) == "migrator:r"
     described = (
         "SELECT count(*) FILTER (WHERE col_description(attrelid, attnum) <> '') || ':' || "  # noqa: S608 (a constant)
