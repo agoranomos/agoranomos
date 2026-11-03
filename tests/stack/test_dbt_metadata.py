@@ -587,13 +587,15 @@ def fresh_build(airflow_url, token):
                 or is_busy(airflow_url, token, TRANSFORM, assets=len(platforms.PLATFORMS))
             )
         ),
-        600,
+        # As long as the other waits of tests/stack for a transform: on a laptop with an Intel Core
+        # i5-3230M one run of the transform of the demo took 10.4 to 11.3 minutes.
+        900,
         interval=5,
         message="the runs of the demo DAGs that earlier tests started did not end",
     )
     unpause(airflow_url, token, TRANSFORM)
     run = trigger(airflow_url, token, TRANSFORM)
-    run = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=600)
+    run = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=900)
     assert run["state"] == "success", run["state"]
     return run
 
