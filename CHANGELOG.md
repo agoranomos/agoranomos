@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.5](https://github.com/agoranomos/agoranomos/compare/v0.4.4...v0.4.5) (2026-11-03)
+
+
+### Bug Fixes
+
+* **dbt:** name the sources that the marts hold ([#266](https://github.com/agoranomos/agoranomos/issues/266)) ([a01abfb](https://github.com/agoranomos/agoranomos/commit/a01abfb5ead84662075d91488ab07836a5bd0906))
+* **google-ads:** read the answers of the API as a stream ([#263](https://github.com/agoranomos/agoranomos/issues/263)) ([05fb679](https://github.com/agoranomos/agoranomos/commit/05fb679d083ed6df04c916b0976bb0709c6cf9c6))
+* **stack:** wait for the demo on a slow machine ([#262](https://github.com/agoranomos/agoranomos/issues/262)) ([207e4fd](https://github.com/agoranomos/agoranomos/commit/207e4fd6934e41818489672df3b462088363f4d0))
+
+
+### Documentation
+
+* **adr:** mark the v0.4.x part of ADR-0038 in place ([#265](https://github.com/agoranomos/agoranomos/issues/265)) ([32a9c78](https://github.com/agoranomos/agoranomos/commit/32a9c7845ce6a502c6bb5a55132666baaa8818c3))
+* **adr:** record the check of a dbt build at the limit ([#261](https://github.com/agoranomos/agoranomos/issues/261)) ([72d7d42](https://github.com/agoranomos/agoranomos/commit/72d7d429cc73bb11f4bda11793bf63a0d216e997))
+
 ## [0.4.4](https://github.com/agoranomos/agoranomos/compare/v0.4.3...v0.4.4) (2026-11-03)
 
 

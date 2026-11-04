@@ -6,8 +6,8 @@ models:
       account_id and campaign_id together are its key. Money is in the currency of the account
       (currency) and in the reporting currency (reporting_currency); add up money across accounts
       with the columns that end in _reporting. Conversions are those of the primary conversion
-      actions; ad_conversions_campaign_daily has them by action. Today it holds the fictional
-      platforms of the demo; the sources of real ad platforms are planned.
+      actions; ad_conversions_campaign_daily has them by action. Its platforms are those of
+      ad_platforms with the kind ads.
     config:
       # The table that dbt builds has exactly these columns, with these types, or the build fails.
       contract:
@@ -283,8 +283,8 @@ models:
       and says whether it counts in the conversions of the campaign (is_primary): the rows of the
       primary actions add up to the conversions of ad_stats_campaign_daily. Money is in the currency
       of the account (currency) and in the reporting currency (reporting_currency); add up money
-      across accounts with the columns that end in _reporting. Today it holds the fictional
-      platforms of the demo; the sources of real ad platforms are planned.
+      across accounts with the columns that end in _reporting. Its platforms are those of
+      ad_platforms with the kind ads.
     config:
       contract:
         enforced: true
@@ -715,8 +715,9 @@ models:
     description: >-
       The platforms of the model, one row each: the ad platforms, the web analytics and the
       sources of exchange rates whose data the marts hold, with the kind of data that each gives.
-      platform is its key; the marts that name a platform take its name from here. Today it lists
-      the fictional platforms of the demo; the platforms of the connectors are planned.
+      platform is its key; the marts that name a platform take its name from here. It lists the
+      sources of the connectors, Google Ads and the European Central Bank, and the fictional
+      platforms of the demo, which is_demo marks.
     config:
       contract:
         enforced: true
@@ -781,8 +782,8 @@ models:
       The ad accounts of every ad platform, one row each, with their client, currency and time
       zone, and the first and last days that their statistics in ad_stats_campaign_daily cover.
       platform and account_id together are its key. The client of an account is the one that the
-      settings of the deployment name for it, else the one of the demo, else Unassigned. Today it
-      holds the accounts of the demo; the sources of real ad platforms are planned.
+      settings of the deployment name for it, else the one of the demo, else Unassigned. Its
+      platforms are those of ad_platforms with the kind ads.
     config:
       contract:
         enforced: true
@@ -962,8 +963,7 @@ models:
       whether the platform still lists them or not: the current name, status and type, the first
       and last days that their statistics in ad_stats_campaign_daily cover, and how many names
       each had, which ad_campaign_names lists. platform, account_id and campaign_id together are
-      its key. Today it holds the campaigns of the demo; the sources of real ad platforms are
-      planned.
+      its key. Its platforms are those of ad_platforms with the kind ads.
     config:
       contract:
         enforced: true
@@ -1105,8 +1105,8 @@ models:
       each campaign and each period in which it kept one name, from valid_from until valid_to,
       and is_current on the name that it has now. Versions of a campaign that differ in another
       field only, such as the status, are one period. platform, account_id, campaign_id and
-      valid_from together are its key. Today it holds the campaigns of the demo; the sources of
-      real ad platforms are planned.
+      valid_from together are its key. Its platforms are those of ad_platforms with the kind
+      ads.
     config:
       contract:
         enforced: true
@@ -1193,8 +1193,9 @@ models:
       day, through the reference rates of the euro, each the last one published on or before the
       day. rate_date, currency and reporting_currency together are its key. The reporting
       currency has the rate 1 on every day; another currency has rows from the first day on which
-      the source published a rate for it. Today the rates come from the fictional source of the
-      demo, which covers USD and EUR; a source of real rates is planned.
+      the source published a rate for it. The rates are those of the European Central Bank once
+      its load has run; the fictional source of the demo, which covers USD and EUR, gives them
+      only while the warehouse has none of the bank. rate_source names the source of each row.
     config:
       contract:
         enforced: true
