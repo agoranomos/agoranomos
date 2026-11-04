@@ -320,13 +320,17 @@ def test_migrator_owns_core_and_has_no_other_power():
     assert text.index("ALTER ROLE migrator") < text.index(created)
 
 
-def test_transformer_may_enter_core_and_create_its_snapshots_there_and_no_other_role_may():
+def test_transformer_may_enter_core_and_create_its_snapshots_there_and_loader_may_enter_it():
     # ADR-0035: transformer gets USAGE and CREATE on core, for the tables of its snapshots, which
-    # are its own; the tables of migrator get their grants in the migrations that create them.
-    # metabase_reader and ai_reader read views that run with the rights of their owner.
+    # are its own, and loader USAGE, to read core.loads, from which a load starts the window of an
+    # account (ADR-0038); the tables of migrator get their grants in the migrations that create
+    # them. metabase_reader and ai_reader read views that run with the rights of their owner.
     text = normalized("warehouse.sql")
     on_core = re.findall(r"\b(?:GRANT|REVOKE)\b[^;]*\bcore\b[^;]*;", text, re.IGNORECASE)
-    assert on_core == ["GRANT USAGE, CREATE ON SCHEMA core TO transformer;"]
+    assert on_core == [
+        "GRANT USAGE, CREATE ON SCHEMA core TO transformer;",
+        "GRANT USAGE ON SCHEMA core TO loader;",
+    ]
     assert not re.search(r"DEFAULT PRIVILEGES[^;]*\bcore\b", text, re.IGNORECASE)
 
 

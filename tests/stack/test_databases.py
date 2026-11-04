@@ -199,10 +199,10 @@ def test_role_passwords_stay_out_of_pg_stat_statements(env):
 # staging, marts and ops, metabase_reader reads marts and, in ops, the views that dbt grants it
 # (ADR-0029). The fictional platforms of the demo each have a raw schema and a staging schema of
 # their own; the settings of the model have a raw schema only, as dlt replaces its tables in place.
-# migrator owns core, and transformer may enter it and create the tables of its snapshots there
-# (ADR-0035).
+# migrator owns core, transformer may enter it and create the tables of its snapshots there, and
+# loader may enter it to read core.loads (ADR-0035, ADR-0038).
 SCHEMA_PRIVILEGES = {
-    ("loader", "core"): (False, False),
+    ("loader", "core"): (True, False),
     ("transformer", "core"): (True, True),
     ("metabase_reader", "core"): (False, False),
     ("loader", "staging"): (False, False),
