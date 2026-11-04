@@ -270,7 +270,8 @@ def test_the_tasks_of_the_maintenance_do_not_wait_for_each_other():
         if isinstance(node, ast.FunctionDef) and node.name == "agoranomos_maintenance"
     ]
     assert [ast.unparse(statement) for statement in function.body] == [
-        "BashOperator(task_id='clean_airflow_logs', bash_command=maintenance.clean_logs_command())",
+        "BashOperator(task_id='clean_airflow_logs', "
+        "bash_command=maintenance.clean_logs_command(), do_xcom_push=False)",
         "clean_ops()",
     ]
 

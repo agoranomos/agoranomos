@@ -10,10 +10,12 @@ no operator (ADR-0039). Today it runs the retention of ADR-0044:
 agoranomos_maintenance runs at 04:23 UTC, away from the default time of the daily backup and before
 the loads of the day. It is unpaused when Airflow first sees it, unlike the other DAGs of the base
 package, so that it runs by itself, and at once, for the last time of its schedule; a pause that a
-person makes stays. Its tasks do not wait for each other and run one at a time: a task that fails
-leaves the others to run and the run failed, and a repeat is safe. The database of Airflow is not
-cleaned here, as a task has no access to it: airflow-init cleans it on each start (compose.yaml).
-The code of the tasks is in agoranomos_pipelines/maintenance.py.
+person makes stays. On the first start of a stack that run can come before the API server of
+Airflow answers, and its first task then fails and is tried again five minutes later. Its tasks do
+not wait for each other and run one at a time: a task that fails leaves the others to run and the
+run failed, and a repeat is safe. The database of Airflow is not cleaned here, as a task has no
+access to it: airflow-init cleans it on each start (compose.yaml). The code of the tasks is in
+agoranomos_pipelines/maintenance.py.
 """
 
 from __future__ import annotations
@@ -59,7 +61,12 @@ def clean_ops() -> None:
     doc_md=__doc__,
 )
 def agoranomos_maintenance():
-    BashOperator(task_id="clean_airflow_logs", bash_command=maintenance.clean_logs_command())
+    # find prints nothing, and the task keeps no XCom of it.
+    BashOperator(
+        task_id="clean_airflow_logs",
+        bash_command=maintenance.clean_logs_command(),
+        do_xcom_push=False,
+    )
     clean_ops()
 
 
