@@ -4,7 +4,7 @@ The warehouse holds the advertising statistics of every platform in one model, b
 
 !!! note "Planned for v0.5"
 
-    [ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) to [ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md) decide to keep the data in a new schema `core` and to turn the marts into views under the same names. The schema `core` exists, with the table of its migrations and nothing else yet ([The schema core](#the-schema-core)); the rest is not built, and this page describes the model as it is today.
+    [ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) to [ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md) decide to keep the data in a new schema `core` and to turn the marts into views under the same names. The schema `core` exists, with its tables, which wait to be filled ([The schema core](#the-schema-core)); nothing writes them or reads them yet, and this page describes the model as it is today.
 
 ## Layers
 
@@ -16,7 +16,7 @@ The warehouse holds the advertising statistics of every platform in one model, b
 | `staging` | A view for each table of each platform and of the settings, in the names of the model (`stg_<platform>__<table>`, `stg_settings__<table>`); the steps that the platforms share (`int_<entity>__<verb>`), views as well, but for the statistics of ad groups and of ads, which are tables, so that each of their tests reads a table rather than computes them again; and the seeds of the base package (`seed_…`) | `transformer` | nobody else |
 | `marts` | The tables of the model, rebuilt in full on each run of the transform | `transformer` | `metabase_reader` |
 | `ops` | The tables in which elementary records each run of dbt and its tests, and the four views of the Ops collection over them ([The schema ops](#the-schema-ops)) | `transformer` | `metabase_reader`, the four views only |
-| `core` | The table of its migrations, `schema_migrations`, and nothing else yet: the layer that is to keep the data for good from v0.5 on ([The schema core](#the-schema-core)) | `migrator`, through the migrations that `db-init` applies | nobody else yet |
+| `core` | The facts, dimensions, registries, journals and rates that are to keep the data for good from v0.5 on, empty yet, and the table of its migrations ([The schema core](#the-schema-core)) | `migrator` creates them, through the migrations that `db-init` applies; `transformer` is to write their rows | `loader`, the journal of loads only; nobody else yet |
 
 The staging views of a platform are calls of one macro for each shape of an API (`dbt/macros/shapes/`), so that the demo platform `demo_search` and the connector of Google Ads share one. A macro of statistics or conversions takes the level of its report: a campaign, an ad group or an ad. dbt replaces a view or a table by dropping the old one with every view that depends on it, so build nothing of your own on a relation of `staging` or `marts`: put a question of your own in Metabase, whose SQL PostgreSQL does not track. Between two tasks of one run, and after a run that a test stopped, a view of `staging` can be missing; the marts keep their data.
 
@@ -109,9 +109,47 @@ A task of the transform runs dbt for one node, so one run of the transform is ma
 
 !!! note "Filled in v0.5"
 
-    The schema `core` is to keep the data for good: narrow facts by grain, dimensions with versions, the rates by day, and the journals of the loads and of the restatements ([ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md), [ADR-0036](../adr/0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md), [ADR-0038](../adr/0038-load-by-copy-and-write-the-core-by-whole-days.md)). Today it holds only the table of its migrations, and the tasks of v0.5 add the rest, each table in a migration.
+    The schema `core` is to keep the data for good: narrow facts by grain, dimensions with their current attributes, the registries of accounts and of conversion actions, the rates by day, and the journals of the loads and of the restatements ([ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md), [ADR-0036](../adr/0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md), [ADR-0038](../adr/0038-load-by-copy-and-write-the-core-by-whole-days.md)). Its tables exist and wait to be filled: nothing writes them yet, dbt is to write them in v0.5, and until then the marts are built as before and read none of them.
 
-The role `migrator` owns the schema and every table that a migration creates in it. It cannot sign in and has no password: `db-init` applies each migration as the superuser of the warehouse with `SET ROLE migrator`, so `transformer`, which is to write into the tables of the core, can drop neither them nor the schema, which only their owner can ([ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md)). `transformer` may enter the schema and create the tables of its snapshots there, which are its own. `metabase_reader` and `ai_reader` get no right on it, as the views of v0.5 are to read it with the rights of their owner. Each table of the core is described in the migration that creates it, as dbt describes only what it owns (`persist_docs` needs ownership).
+The role `migrator` owns the schema and every table, sequence and function that a migration creates in it. It cannot sign in and has no password: `db-init` applies each migration as the superuser of the warehouse with `SET ROLE migrator`, so `transformer`, which is to write into the tables of the core, can drop, empty or change none of them, nor the schema, which only their owner can ([ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md)). Each table and column of the core is described in the migration that creates it, as dbt describes only what it owns (`persist_docs` needs ownership), and SQL clients read the descriptions in the warehouse.
+
+| Table | One row is | Partitions | `transformer` may |
+|---|---|---|---|
+| `ad_stats_campaign_daily` | A campaign of an account on a day: impressions, clicks, spend, the conversions of the metric of the platform and all conversions, with their values, in the currency of the account | By month of `report_date` | Read, insert and delete rows |
+| `ad_stats_ad_group_daily` | An ad group of an account on a day, with its campaign and the measures above | By month of `report_date` | Read, insert and delete rows |
+| `ad_stats_ad_daily` | An ad of an ad group of an account on a day, with its campaign and the measures above | By month of `report_date` | Read, insert and delete rows |
+| `ad_conversions_campaign_daily` | A conversion action of a campaign of an account on a day: its conversions and their value | By month of `report_date` | Read, insert and delete rows |
+| `web_sessions_daily` | A property of web analytics on a day, by source, medium and campaign: sessions, engaged sessions, key events and revenue | By month of `report_date` | Read, insert and delete rows |
+| `dim_account` | An account of an ad platform or a property of web analytics, with its surrogate key `account_sk`, its client, currency, time zone and status, whether the settings still name it, and the first and last day of its statistics | None | Read and change rows |
+| `dim_conversion_action` | A conversion action of a platform, with its surrogate key `conversion_action_sk`, its category, and whether it is primary | None | Read and change rows |
+| `dim_client` | A client of the business | None | Read and change rows |
+| `dim_campaign`, `dim_ad_group`, `dim_ad` | A campaign, an ad group or an ad, with its current name, status, common state (`active`, `paused`, `removed` or `other`), type, the days of its statistics, and whether the platform still lists it | None | Read and change rows |
+| `dim_date` | A day of the calendar, with its year, quarter, month and week | None | Read and change rows |
+| `fx_rates_daily` | A currency on a calendar day: its rate into a reporting currency through the base currency of the source, with the rate as the source published it and whether it is carried from an earlier day | None | Read and change rows |
+| `loads` | A load of a source for an account: its window or its error, and whether a run of the transform has pinned or accepted it | None | Read and change rows; `loader` may read it |
+| `account_quarantine` | A load, an account and the check that kept its window out of the core | None | Read and change rows |
+| `platform_totals_daily` | The totals of an account on a day as the platform gives them, against which its campaigns are checked | None | Read and change rows |
+| `ad_stats_campaign_daily_restatements`, `ad_stats_ad_group_daily_restatements`, `ad_stats_ad_daily_restatements` | A row of a fact of statistics that a load changed or removed, with its old values, the load that had written it and the one that replaced it | By month of `replaced_at`, kept 13 months | Read and change rows |
+| `schema_migrations` | A migration of the core that `db-init` has applied | None | Nothing |
+
+A fact carries the surrogate of its account, the IDs of the platform as `bigint` and its amounts as `numeric(18,6)` with the currency in every row; its key ends in the day, and an index on the account and the day serves a filter on an account and a period. Its counters and amounts are zero or more, but for the revenue of web analytics, which refunds can make negative. Its one foreign key points at `dim_account`; the journals have none. A dimension of an entity holds its ID both as `bigint`, which the facts carry, and as text, which the marts are to show, as the IDs of Meta exceed what a browser keeps exact. `transformer` may also take the next value of the sequences of `dim_account` and `dim_conversion_action`, which give their surrogate keys. `loader` may enter the schema to read `loads`, from which a load is to start the window of an account after its last accepted day. `metabase_reader` and `ai_reader` get no right on the core, as the views of v0.5 are to read it with the rights of their owner.
+
+### Partitions
+
+Each fact and each journal of restatements is partitioned by month of its day, a partition named after its table and its month, such as `ad_stats_campaign_daily_2026_11`, with no DEFAULT partition, so a row of a month without a partition fails with SQLSTATE 23514 and takes its whole statement with it ([ADR-0036](../adr/0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md)). The migrations create the partitions of the month in which they run and of the two after it, in UTC. Two functions of `migrator`, which only `transformer` may call, make and drop the others ([ADR-0039](../adr/0039-run-one-dbt-build-in-the-watcher-mode.md), [ADR-0046](../adr/0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md)):
+
+* `core.ensure_partition(table, month)` creates the partition of a month of a partitioned table of `migrator`, and returns `false` when it exists. It attaches a table made beforehand, so the table takes SHARE UPDATE EXCLUSIVE and the readers of the views do not wait, and it gives `transformer` MAINTAIN on the partition, for VACUUM. It refuses a table that `migrator` does not own and a month before 2000 or more than two months after the current one, so a wrong date fails rather than making a partition of its own. Of two calls for one month at once, one creates it and the other returns `false`.
+* `core.drop_partition(table, month)` drops a month of a journal of restatements, and returns `false` when it has none. It refuses every other table, so no partition of a fact can be dropped through it, as the facts are kept for good ([ADR-0044](../adr/0044-keep-the-core-for-good-and-change-it-by-migrations.md)). It waits at most 2 seconds for its lock.
+
+`transformer` has MAINTAIN on each partitioned table too, which `ANALYZE ONLY` needs: without it, the command skips the table with a WARNING and succeeds.
+
+### The freeze
+
+A row of a fact in a month that ended more than 92 days before the current date, before the window of restatements, is frozen: a trigger on each fact, `freeze_the_months_before_the_window`, refuses its DELETE and its UPDATE, for every role, `migrator` and the superuser too ([ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md)). The 92 days are the longest window of restatements, the 90 days of Google and Microsoft ([ADR-0038](../adr/0038-load-by-copy-and-write-the-core-by-whole-days.md)), and two days for the time zones of the accounts and of a session. The frozen months move with the date, and every partition takes the trigger of its table. INSERT stays allowed, so the first history of a new account goes in, and a DELETE inside the window costs a comparison for each row and no call of a function.
+
+The setting `agoranomos.thaw` lifts the freeze for one transaction, when it holds the ID of that transaction: `SELECT set_config('agoranomos.thaw', pg_current_xact_id()::text, true)`. A load of history and `data forget` are to set it so. Any role may set a setting of its own prefix, but only the roles that may delete or update the rows of a fact meet the freeze at all; a value that a session set for good, or in an earlier transaction, names another transaction and lifts nothing. `transformer` can neither disable the trigger, which needs the ownership of the table, nor set `session_replication_role`, which turns triggers off and needs the superuser.
+
+### The migrations
 
 | Column of `core.schema_migrations` | What it holds |
 |---|---|
@@ -120,7 +158,7 @@ The role `migrator` owns the schema and every table that a migration creates in 
 | `checksum` | The SHA-256 of the file as it was applied, in hexadecimal |
 | `applied_at` | When the transaction that applied the migration started |
 
-[Configuration](configuration.md#the-migrations-of-the-core) says how `db-init` applies the migrations, and [`./agoranomos status`](command-line.md#status) shows those that the warehouse has applied and those that wait.
+The migrations `0002` to `0007` create the functions of the core, the registries, the dimensions, the facts, the journals and the rates, in that order. [Configuration](configuration.md#the-migrations-of-the-core) says how `db-init` applies the migrations, and [`./agoranomos status`](command-line.md#status) shows those that the warehouse has applied and those that wait. A backup holds the core with its owners, rights, partitions and trigger, and a restore puts them back as they were ([Back up and restore](../how-to/back-up-and-restore.md)).
 
 ## The demo platforms
 

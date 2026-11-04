@@ -182,13 +182,16 @@ ALTER ROLE transformer SET lock_timeout = '1min';
 -- transformer, which is to write into its tables, can drop neither the schema nor a table of
 -- migrator in it: the owner of a schema may drop every object in it. The migrations create its
 -- tables after this file, as migrator (db-init.sh). transformer may enter it and create the tables
--- of its snapshots, which are its own; metabase_reader and ai_reader get nothing, as the views
--- that they are to read run with the rights of their owner. The schema is created here and not in
--- a migration, as no role but the superuser can create a schema, and every start sets its owner
--- again and gives back a grant that was taken away by hand.
+-- of its snapshots, which are its own; loader may enter it, to read the one table that a migration
+-- grants it, core.loads, from which a load starts the window of an account (ADR-0038);
+-- metabase_reader and ai_reader get nothing, as the views that they are to read run with the
+-- rights of their owner. The schema is created here and not in a migration, as no role but the
+-- superuser can create a schema, and every start sets its owner again and gives back a grant that
+-- was taken away by hand.
 CREATE SCHEMA IF NOT EXISTS core AUTHORIZATION migrator;
 ALTER SCHEMA core OWNER TO migrator;
 GRANT USAGE, CREATE ON SCHEMA core TO transformer;
+GRANT USAGE ON SCHEMA core TO loader;
 
 -- The demo of v0.1: one fictional ad account in raw_demo, which dlt merged through
 -- raw_demo_staging, the view staging.stg_demo__ad_stats_daily and the mart marts.ad_spend_daily.

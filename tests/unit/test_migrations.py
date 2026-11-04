@@ -29,6 +29,24 @@ CHECKSUMS = {
     "0001_create_schema_migrations.sql": (
         "459e8a656164cb0fb7c1f8c85ef941b471a4a1d4cb9efab5a5e585c2305797ce"
     ),
+    "0002_create_the_functions_of_the_core.sql": (
+        "aafbda83b58cf783328a8ba035921c369c525150774eecdac330cb50a87fb23a"
+    ),
+    "0003_create_the_registries.sql": (
+        "f51ffb6c04ddb687cef4403a17dde5793751fde987576315e6b22cacb77db923"
+    ),
+    "0004_create_the_dimensions.sql": (
+        "4ce8ed8d7cc0add51083af80a918de66c28740115c5822158320f39e7125f05c"
+    ),
+    "0005_create_the_facts.sql": (
+        "b21b12e2d575b457e01061bd221c8071c6615889ee31f55cde3cb88d6d56e5fd"
+    ),
+    "0006_create_the_journals.sql": (
+        "9ab7e54850318bf00b3b97ff5b722b93b7b1fb0d559067ce2769fea84bfe40d8"
+    ),
+    "0007_create_the_rates.sql": (
+        "f48e39bc35fe3dee5931bbd78625803c9a40f0eaed28a7455c99c79b7702ef72"
+    ),
 }
 
 
@@ -144,6 +162,164 @@ def test_the_first_migration_creates_only_the_table_of_versions_with_its_descrip
     for column in ("version", "name", "checksum", "applied_at"):
         assert f"COMMENT ON COLUMN core.schema_migrations.{column} IS ''" in text
     assert not re.search(r"\b(GRANT|REVOKE|ALTER|DROP)\b", text, re.IGNORECASE)
+
+
+def parenthesized(text: str, start: int) -> str:
+    """The text between the parenthesis at start and the one that closes it."""
+    depth = 0
+    for index in range(start, len(text)):
+        depth += {"(": 1, ")": -1}.get(text[index], 0)
+        if depth == 0:
+            return text[start + 1 : index]
+    raise ValueError(f"no closing parenthesis after {text[start : start + 40]!r}")
+
+
+def top_level_items(text: str) -> list[str]:
+    """The items of a list of SQL separated by commas outside parentheses."""
+    items, depth, item = [], 0, ""
+    for character in text:
+        depth += {"(": 1, ")": -1}.get(character, 0)
+        if character == "," and depth == 0:
+            items.append(item.strip())
+            item = ""
+        else:
+            item += character
+    return [*items, item.strip()]
+
+
+# The words that start a constraint of a table, and not a column, in CREATE TABLE.
+TABLE_CONSTRAINTS = {"PRIMARY", "UNIQUE", "CHECK", "CONSTRAINT", "FOREIGN", "EXCLUDE", "LIKE"}
+
+
+def created_tables(text: str) -> dict[str, list[str]]:
+    """The tables that the code of a migration creates, with their columns, in order."""
+    tables = {}
+    for match in re.finditer(r"\bCREATE TABLE (core\.\w+) \(", text):
+        items = top_level_items(parenthesized(text, match.end() - 1))
+        tables[match.group(1)] = [
+            item.split()[0] for item in items if item.split()[0].upper() not in TABLE_CONSTRAINTS
+        ]
+    return tables
+
+
+TABLE_MIGRATIONS = [path for path in migration_paths() if path.name[:4] != "0001"]
+
+
+def test_the_migrations_after_the_first_create_the_tables_of_the_core():
+    # B2 (#194): the facts, the registries, the dimensions, the journals and the rates, each group
+    # in a migration of its own after the functions that create their partitions.
+    tables = {
+        path.name: sorted(created_tables(code(path)))
+        for path in TABLE_MIGRATIONS
+        if created_tables(code(path))
+    }
+    assert tables == {
+        "0003_create_the_registries.sql": ["core.dim_account", "core.dim_conversion_action"],
+        "0004_create_the_dimensions.sql": [
+            "core.dim_ad",
+            "core.dim_ad_group",
+            "core.dim_campaign",
+            "core.dim_client",
+            "core.dim_date",
+        ],
+        "0005_create_the_facts.sql": [
+            "core.ad_conversions_campaign_daily",
+            "core.ad_stats_ad_daily",
+            "core.ad_stats_ad_group_daily",
+            "core.ad_stats_campaign_daily",
+            "core.web_sessions_daily",
+        ],
+        "0006_create_the_journals.sql": [
+            "core.account_quarantine",
+            "core.ad_stats_ad_daily_restatements",
+            "core.ad_stats_ad_group_daily_restatements",
+            "core.ad_stats_campaign_daily_restatements",
+            "core.loads",
+            "core.platform_totals_daily",
+        ],
+        "0007_create_the_rates.sql": ["core.fx_rates_daily"],
+    }
+
+
+@pytest.mark.parametrize("path", TABLE_MIGRATIONS, ids=lambda path: path.name)
+def test_each_object_that_a_migration_creates_is_described_in_it(path):
+    # dbt describes only what it owns (persist_docs needs ownership), so each table, column,
+    # sequence, function, trigger and index of the core is described in the migration that creates
+    # it (ADR-0038). The stack tests check the comments in the warehouse.
+    text = code(path)
+    wanted = []
+    for table, columns in created_tables(text).items():
+        wanted.append(f"COMMENT ON TABLE {table} IS ''")
+        wanted += [f"COMMENT ON COLUMN {table}.{column} IS ''" for column in columns]
+    for sequence in re.findall(r"\bCREATE SEQUENCE (core\.\w+)", text):
+        wanted.append(f"COMMENT ON SEQUENCE {sequence} IS ''")
+    for name, arguments in re.findall(r"\bCREATE FUNCTION (core\.\w+)\(([^)]*)\)", text):
+        types = ", ".join(argument.split()[-1] for argument in arguments.split(",") if argument)
+        wanted.append(f"COMMENT ON FUNCTION {name}({types}) IS ''")
+    for name, table in re.findall(r"\bCREATE TRIGGER (\w+) .*? ON (core\.\w+)", text):
+        wanted.append(f"COMMENT ON TRIGGER {name} ON {table} IS ''")
+    for name in re.findall(r"\bCREATE INDEX (\w+) ON core\.", text):
+        wanted.append(f"COMMENT ON INDEX core.{name} IS ''")
+    missing = [statement for statement in wanted if statement not in text]
+    assert not missing, f"{path.name} does not describe what it creates: {missing}"
+
+
+@pytest.mark.parametrize("path", migration_paths(), ids=lambda path: path.name)
+def test_no_migration_makes_a_partition_or_grants_to_a_role_that_reads(path):
+    # Every partition comes from core.ensure_partition, as the later ones do, and there is no
+    # DEFAULT partition, so a row of a month without one fails (ADR-0036). metabase_reader and
+    # ai_reader read the views of the marts, which run with the rights of their owner, and PUBLIC
+    # gets nothing in the core (ADR-0035).
+    text = code(path)
+    assert not re.search(r"\bPARTITION OF\b|\bDEFAULT\s*;", text, re.IGNORECASE)
+    grants = re.findall(r"\bGRANT\b[^;]*\bTO\b([^;]*);", text, re.IGNORECASE)
+    grantees = {name.strip().lower() for names in grants for name in names.split(",")}
+    assert grantees <= {"transformer", "loader"}, grantees
+
+
+@pytest.mark.parametrize("path", migration_paths(), ids=lambda path: path.name)
+def test_each_function_that_runs_as_its_owner_pins_its_search_path_and_is_kept_from_public(path):
+    # A function SECURITY DEFINER runs as migrator, and transformer may create objects in core:
+    # with the search path of the caller, a function of transformer could run in its place. Such a
+    # function is not open to PUBLIC, which gets EXECUTE on every new function.
+    text = code(path, keep_strings=True)
+    for match in re.finditer(r"\bCREATE FUNCTION (core\.\w+\([^)]*\))(.*?)\bAS\b", text):
+        name, header = match.groups()
+        if "SECURITY DEFINER" not in header:
+            continue
+        assert "SET search_path = pg_catalog, pg_temp" in header, name
+        types = ", ".join(
+            argument.split()[-1]
+            for argument in name[name.index("(") + 1 : -1].split(",")
+            if argument
+        )
+        bare = name[: name.index("(")]
+        assert f"REVOKE ALL ON FUNCTION {bare}({types}) FROM PUBLIC;" in text, name
+
+
+def test_each_fact_has_the_trigger_of_the_freeze_and_each_journal_has_none():
+    # ADR-0035: a month of a fact that ended before the window of restatements is frozen; the
+    # journals are dropped by month instead (core.drop_partition).
+    text = code(MIGRATIONS / "0005_create_the_facts.sql")
+    facts = sorted(created_tables(text))
+    frozen = re.findall(
+        r"CREATE TRIGGER freeze_the_months_before_the_window BEFORE UPDATE OR DELETE ON "
+        r"(core\.\w+) FOR EACH ROW WHEN \(OLD\.report_date < "
+        r"date_trunc\(\'\', current_date - 92\)::date\) "
+        r"EXECUTE FUNCTION core\.refuse_a_change_of_a_frozen_month\(\)",
+        text,
+    )
+    assert sorted(frozen) == facts
+    for table in facts:
+        assert f"CREATE TABLE {table} (" in text
+        assert re.search(
+            rf"CREATE TABLE {re.escape(table)} \(.*?\) PARTITION BY RANGE "
+            r"\(report_date\);",
+            text,
+        )
+    journals = code(MIGRATIONS / "0006_create_the_journals.sql")
+    assert "CREATE TRIGGER" not in journals
+    assert "REFERENCES" not in journals
 
 
 def test_migrate_sql_applies_a_migration_as_migrator_with_its_row_in_one_transaction():
