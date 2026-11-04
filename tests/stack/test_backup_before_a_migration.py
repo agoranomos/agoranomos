@@ -43,7 +43,9 @@ def backups() -> set[str]:
 
 def versions_in_the_dump(name: str) -> list[int]:
     """The numbers of the migrations that the dump of the warehouse of a backup holds, as
-    pg_restore of the image of the databases reads them from the rows of core.schema_migrations."""
+    pg_restore of the image of the databases reads them from the rows of core.schema_migrations,
+    in order. The dump keeps the rows in the order of the table on disk, which an UPDATE changes:
+    the stack test of a changed migration rewrites the row of 0001 and puts it last."""
     result = compose(
         "run",
         "--rm",
@@ -61,7 +63,7 @@ def versions_in_the_dump(name: str) -> list[int]:
     )
     assert result.returncode == 0, f"pg_restore exited with {result.returncode}"
     rows = result.stdout.split("COPY core.schema_migrations ", 1)[1].split("\n\\.\n", 1)[0]
-    return [int(line.split("\t", 1)[0]) for line in rows.splitlines()[1:]]
+    return sorted(int(line.split("\t", 1)[0]) for line in rows.splitlines()[1:])
 
 
 def test_up_takes_a_backup_before_db_init_applies_a_migration_that_waits(env):
