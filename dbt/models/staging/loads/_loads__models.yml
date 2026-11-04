@@ -1,0 +1,38 @@
+models:
+  - name: stg_loads__newest_days
+    description: >-
+      The newest whole load of each account and day of each source, one row each, which the staging
+      models of the facts read their rows by (ADR-0038): of the rows of the journal
+      _agoranomos_loads of the source with the status loaded, whose load has its row in _dlt_loads
+      with status 0, the one with the largest load ID, compared as a number, among those whose
+      window covers the day. Each run of the transform fills it anew before the staging models of
+      the facts, so they read the loads that were whole when it was filled. The account is as the
+      journal names it: the ID of a property for demo_web, and EUR, the base of the rates, for
+      demo_fx and ecb. source, account_id and day are its key. Its tests guard the marts: when one of them fails, dbt does not rebuild the
+      models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [source, account_id, day]
+    columns:
+      - name: source
+        description: >-
+          The source of the load, as the schema of its raw tables names it without raw_, such as
+          demo_search or google_ads.
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: day
+        description: The day of the account, in its time zone, that the load covers.
+        data_tests: [not_null]
+      - name: load_id
+        description: >-
+          The load, as _dlt_load_id of its rows names it: the time of the load in seconds, as text.
+        data_tests: [not_null]
+      - name: load_key
+        description: >-
+          The source, the load, the account and the day in one text, which a staging model of a
+          fact compares with the same of each row; the day as its number of days since 1 January
+          2000, and no account for a source of rates.
+        data_tests: [not_null]

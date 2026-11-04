@@ -73,9 +73,10 @@ class StandInClient:
         return f'"{self.pipeline.options["dataset_name"]}"."{name}"'
 
     def execute_sql(self, sql):
+        self.pipeline.queries.append(sql)
         if self.pipeline.state["loads"] is None:
             raise UndefinedRelation(sql)
-        if '"_agoranomos_reloads"' in sql:
+        if '"_agoranomos_loads"' in sql:
             return self.pipeline.state["reloads"]
         if '"customers"' in sql:
             return self.pipeline.state["customers"]
@@ -85,13 +86,14 @@ class StandInClient:
 class StandInPipeline:
     def __init__(self, options, state):
         self.options, self.state, self.runs, self.last_trace = options, state, [], None
-        self.formats = []
+        self.formats, self.contracts, self.queries = [], [], []
 
     def sql_client(self):
         return StandInClient(self)
 
-    def run(self, resources, loader_file_format=None):
+    def run(self, resources, loader_file_format=None, schema_contract=None):
         self.formats.append(loader_file_format)
+        self.contracts.append(schema_contract)
         rows = {r.name: list(r.data) for r in resources}
         self.runs.append((rows, {r.name: r.hints for r in resources}))
         counts = {name: sum(1 for row in found if row != MARKER) for name, found in rows.items()}
@@ -239,7 +241,8 @@ def answer(
 def ads(monkeypatch, tmp_path):
     """The module with stand-ins, and what it made and was asked: the pipelines, the requests to
     the API and their answers. state["loads"] is how many complete loads the dataset holds (None:
-    none yet), state["reloads"] what its journal gives, state["customers"] the rows of its table
+    none yet), state["reloads"] what the journal of its whole loads gives, state["customers"] the
+    rows of its table
     customers, state["failing"] the accounts whose every request fails, state["failing_at"] the
     text of the GAQL at which the request of an account fails, and state["broken_at"] the text of
     the GAQL and the kind of broken() of the answer that breaks for an account, and how many of its
@@ -314,7 +317,9 @@ def ads(monkeypatch, tmp_path):
     dlt.pipeline = lambda **options: (
         made["pipelines"].append(StandInPipeline(options, state)) or made["pipelines"][-1]
     )
-    dlt.destinations = types.SimpleNamespace(postgres=lambda credentials: ("postgres", credentials))
+    dlt.destinations = types.SimpleNamespace(
+        postgres=lambda credentials, create_indexes: ("postgres", credentials, create_indexes)
+    )
     modules["dlt.destinations.exceptions"].DatabaseUndefinedRelation = UndefinedRelation
     modules["dlt.sources.helpers.requests"].Client = Client
     modules["dlt.sources.helpers.requests"].HTTPError = HTTPError
@@ -476,7 +481,7 @@ def test_a_load_asks_v26_for_each_account_as_the_service_account(ads, monkeypatc
     ]
 
 
-def test_a_load_keeps_the_rows_as_the_api_gives_them_and_replaces_the_days_of_each_account(ads):
+def test_a_load_keeps_the_rows_as_the_api_gives_them_and_appends_the_facts(ads):
     module, _, made, extensions = ads
     counts = module.load(NOW, extensions)
     # The first load of each account: a row in each of the 37 calendar months of its history, in
@@ -491,18 +496,22 @@ def test_a_load_keeps_the_rows_as_the_api_gives_them_and_replaces_the_days_of_ea
     assert pipeline.options["dataset_name"] == "raw_google_ads"
     [(rows, hints)] = pipeline.runs
     assert pipeline.formats == ["csv"]
+    assert pipeline.contracts == [{"tables": "evolve", "columns": "evolve", "data_type": "freeze"}]
+    # dlt makes no index on _dlt_id of a new table (ADR-0035).
+    assert pipeline.options["destination"][2] is False
     assert rows["campaign_stats"][0]["metrics"] == {"impressions": "10", "costMicros": "1500000"}
-    assert hints["campaign_stats"]["write_disposition"] == {
-        "disposition": "merge",
-        "strategy": "delete-insert",
-        "destination_scope": (
-            "(customer__id = '1111111111' AND segments__date BETWEEN '2023-10-01' AND '2026-10-27')"
-            " OR (customer__id = '2222222222' AND segments__date BETWEEN '2023-10-01' AND "
-            "'2026-10-28')"
-        ),
-    }
+    # Each load appends the facts of each account under its own _dlt_load_id, and the journal holds
+    # the window of each, which staging reads (ADR-0038).
     for table in module.FACTS:
-        assert hints[table]["write_disposition"] == hints["campaign_stats"]["write_disposition"]
+        assert hints[table]["write_disposition"] == "append", table
+    windows = {
+        row["account_id"]: (row["window_from"], row["window_to"])
+        for row in rows["_agoranomos_loads"]
+    }
+    assert windows == {
+        "1111111111": (date(2023, 10, 1), date(2026, 10, 27)),
+        "2222222222": (date(2023, 10, 1), date(2026, 10, 28)),
+    }
     # dlt 1.31.0 retires the versions that a load lacks within its destination scope only, so the
     # entities of an account that a load could not read keep their versions.
     for table in ("campaigns", "ad_groups", "ads", "conversion_actions"):
@@ -562,11 +571,11 @@ def test_a_load_records_the_window_of_each_account_on_its_own_day(ads):
     module, _, made, extensions = ads
     module.load(NOW, extensions)
     [(rows, _)] = made["pipelines"][0].runs
-    record = {row["account_id"]: row for row in rows["_agoranomos_reloads"]}
+    record = {row["account_id"]: row for row in rows["_agoranomos_loads"]}
     assert record["1111111111"]["as_of"] == date(2026, 10, 28)
-    assert record["1111111111"]["window_end"] == date(2026, 10, 27)
+    assert record["1111111111"]["window_to"] == date(2026, 10, 27)
     assert record["2222222222"]["as_of"] == date(2026, 10, 29)
-    assert record["2222222222"]["window_start"] == date(2023, 10, 1)
+    assert record["2222222222"]["window_from"] == date(2023, 10, 1)
     assert {(row["status"], row["error"]) for row in record.values()} == {("loaded", None)}
 
 
@@ -593,33 +602,32 @@ def test_an_error_of_the_api_on_one_account_does_not_stop_its_neighbor(ads):
     [(rows, hints)] = pipeline.runs
     for table in ("customers", *module.ENTITIES, *module.FACTS):
         assert {row["customer"]["id"] for row in rows[table]} == {"1111111111"}, table
-    assert hints["campaign_stats"]["write_disposition"]["destination_scope"] == (
-        "(customer__id = '1111111111' AND segments__date BETWEEN '2023-10-01' AND '2026-10-27')"
-    )
     for table in module.ENTITIES:
         assert hints[table]["write_disposition"]["destination_scope"] == (
             "customer__id IN ('1111111111')"
         ), table
-    record = {row["account_id"]: row for row in rows["_agoranomos_reloads"]}
+    record = {row["account_id"]: row for row in rows["_agoranomos_loads"]}
     assert (record["1111111111"]["status"], record["1111111111"]["error"]) == ("loaded", None)
+    assert record["1111111111"]["window_from"] == date(2023, 10, 1)
     assert (record["2222222222"]["status"], record["2222222222"]["error"]) == ("failed", ERROR)
 
 
 def test_a_failed_account_has_no_day_and_no_moment_of_a_load_in_the_journal(ads):
-    # ops_loads takes max(window_end) as the last day loaded and max(loaded_at) as the last load of
-    # an account, and recorded() max(window_end): a failed attempt leaves all of them as they were,
-    # so the account shows as late and the next load takes its days; now keeps the attempt.
+    # ops_loads takes max(window_to) as the last day loaded and max(loaded_at) as the last load of
+    # an account, and recorded() max(window_to): a failed attempt leaves all of them as they were,
+    # so the account shows as late and the next load takes its days; staging passes the row over,
+    # as it has no window, so the days of the account keep the load before; now keeps the attempt.
     module, state, made, extensions = ads
     state["failing"] = {"2222222222"}
     with pytest.raises(module.AccountsFailed):
         module.load(NOW, extensions)
     [(rows, _)] = made["pipelines"][0].runs
-    [failed] = [row for row in rows["_agoranomos_reloads"] if row["status"] == "failed"]
+    [failed] = [row for row in rows["_agoranomos_loads"] if row["status"] == "failed"]
     assert failed == {
         "account_id": "2222222222",
         "as_of": None,
-        "window_start": None,
-        "window_end": None,
+        "window_from": None,
+        "window_to": None,
         "now": NOW,
         "loaded_at": None,
         "status": "failed",
@@ -631,7 +639,7 @@ def test_an_error_in_the_middle_of_an_account_leaves_nothing_of_it_in_the_load(a
     # The ads of the second account fail after its customer, its entities and the statistics of
     # its campaigns and ad groups answered: none of its rows reaches dlt, as a window replaces
     # whole days; its row of customers stays as the last load saw it, and its entities keep their
-    # versions, as the scope of each table names the accounts that the load read.
+    # versions, as the scope of each table of entities names the accounts that the load read.
     module, state, made, extensions = ads
     state.update(
         loads=1,
@@ -679,18 +687,16 @@ def test_an_error_in_the_middle_of_an_account_leaves_nothing_of_it_in_the_load(a
             "customer__status": "ENABLED",
         },
     ]
-    assert hints["campaign_stats"]["write_disposition"]["destination_scope"] == (
-        "(customer__id = '1111111111' AND segments__date BETWEEN '2026-07-30' AND '2026-10-27')"
-    )
     assert (
         hints["ads"]["write_disposition"]["destination_scope"] == "customer__id IN ('1111111111')"
     )
-    record = {row["account_id"]: row for row in rows["_agoranomos_reloads"]}
-    assert (record["2222222222"]["status"], record["2222222222"]["window_end"]) == ("failed", None)
-    assert (record["1111111111"]["status"], record["1111111111"]["window_end"]) == (
-        "loaded",
-        date(2026, 10, 27),
-    )
+    record = {row["account_id"]: row for row in rows["_agoranomos_loads"]}
+    assert (record["2222222222"]["status"], record["2222222222"]["window_to"]) == ("failed", None)
+    assert (
+        record["1111111111"]["status"],
+        record["1111111111"]["window_from"],
+        record["1111111111"]["window_to"],
+    ) == ("loaded", date(2026, 7, 30), date(2026, 10, 27))
 
 
 def test_a_load_whose_every_account_failed_writes_the_journal_alone(ads):
@@ -703,15 +709,15 @@ def test_a_load_whose_every_account_failed_writes_the_journal_alone(ads):
         f"{ERROR.replace('2222222222', '1111111111')}; {ERROR}"
     )
     [(rows, _)] = made["pipelines"][0].runs
-    assert set(rows) == {"_agoranomos_reloads"}
-    assert [(row["account_id"], row["status"]) for row in rows["_agoranomos_reloads"]] == [
+    assert set(rows) == {"_agoranomos_loads"}
+    assert [(row["account_id"], row["status"]) for row in rows["_agoranomos_loads"]] == [
         ("1111111111", "failed"),
         ("2222222222", "failed"),
     ]
 
 
 def test_an_account_whose_loads_all_failed_takes_its_history(ads):
-    # Its rows of the journal have no window, so the record of the loads has none for it.
+    # Its rows of the journal have no window, so the journal of the loads has none for it.
     module, state, made, extensions = ads
     state.update(
         loads=1,
@@ -721,22 +727,43 @@ def test_an_account_whose_loads_all_failed_takes_its_history(ads):
         ],
     )
     module.load(NOW, extensions)
-    [(_, hints)] = made["pipelines"][0].runs
-    assert hints["campaign_stats"]["write_disposition"]["destination_scope"] == (
-        "(customer__id = '1111111111' AND segments__date BETWEEN '2023-10-01' AND '2026-10-27')"
-        " OR (customer__id = '2222222222' AND segments__date BETWEEN '2026-07-31' AND "
-        "'2026-10-28')"
+    [(rows, _)] = made["pipelines"][0].runs
+    windows = {
+        row["account_id"]: (row["window_from"], row["window_to"])
+        for row in rows["_agoranomos_loads"]
+    }
+    assert windows == {
+        "1111111111": (date(2023, 10, 1), date(2026, 10, 27)),
+        "2222222222": (date(2026, 7, 31), date(2026, 10, 28)),
+    }
+    # The journal counts the loads that dlt finished, with their row in _dlt_loads: the days of a
+    # load that stopped half way are taken again.
+    [query] = [q for q in made["pipelines"][0].queries if "_agoranomos_loads" in q]
+    assert query == (
+        "SELECT j.account_id, max(j.as_of), max(j.window_to) "
+        'FROM "raw_google_ads"."_agoranomos_loads" AS j '
+        'JOIN "raw_google_ads"."_dlt_loads" AS l '
+        "ON l.load_id = j._dlt_load_id AND l.status = 0 "
+        "WHERE j.status = 'loaded' GROUP BY j.account_id"
     )
+
+
+def test_a_dataset_of_a_release_before_v0_5_takes_the_history_of_each_account_again(ads):
+    # Its loads have no row in _agoranomos_loads, which a release before v0.5 did not write: each
+    # account takes its history, and the rows of the earlier loads stay unread by staging.
+    module, state, made, extensions = ads
+    state.update(loads=3, reloads=[])
+    module.load(NOW, extensions)
+    [(rows, _)] = made["pipelines"][0].runs
+    assert {row["window_from"] for row in rows["_agoranomos_loads"]} == {date(2023, 10, 1)}
 
 
 def test_a_scope_takes_checked_account_ids_only(ads):
     module, _, _, _ = ads
-    days = (date(2026, 10, 1), date(2026, 10, 28))
-    for windows in ({}, {"111-111-1111": days}, {"1111111111' OR true --": days}):
+    for account_ids in ([], ["111-111-1111"], ["1111111111' OR true --"]):
         with pytest.raises(ValueError, match="ten digits"):
-            module.scope(windows)
-    with pytest.raises(ValueError, match="ten digits"):
-        module.accounts_scope([])
+            module.accounts_scope(account_ids)
+    assert not hasattr(module, "scope"), "the facts are appended, with no scope"
     assert module.accounts_scope(["2222222222", "1111111111"]) == (
         "customer__id IN ('1111111111', '2222222222')"
     )
@@ -957,10 +984,10 @@ def test_an_answer_that_breaks_in_the_middle_of_an_account_leaves_nothing_of_it(
     [(rows, _)] = made["pipelines"][0].runs
     for table in (*module.ENTITIES, *module.FACTS):
         assert {row["customer"]["id"] for row in rows[table]} == {"1111111111"}, table
-    record = {row["account_id"]: row for row in rows["_agoranomos_reloads"]}
+    record = {row["account_id"]: row for row in rows["_agoranomos_loads"]}
     assert record["2222222222"]["status"] == "failed"
     assert record["2222222222"]["error"].startswith(line)
-    assert record["2222222222"]["window_end"] is None
+    assert record["2222222222"]["window_to"] is None
     assert all(response.closed for response in made["responses"])
     attempts = 3 if kind == "connection" else 1
     assert requested(made).count("2222222222") == 1 + 4 + 4 + attempts
@@ -1019,5 +1046,5 @@ def test_a_load_whose_answer_breaks_off_once_loads_the_account_with_its_rows_onc
     for table in module.FACTS:
         assert [row["customer"]["id"] for row in rows[table]] == ["1111111111", "2222222222"]
         assert counts[table] == 2, table
-    record = {row["account_id"]: row for row in rows["_agoranomos_reloads"]}
+    record = {row["account_id"]: row for row in rows["_agoranomos_loads"]}
     assert {row["status"] for row in record.values()} == {"loaded"}

@@ -63,10 +63,19 @@ def load_task(code: str):
     start_date=START,
     catchup=False,
     max_active_runs=1,
+    # A run ends within an hour, retries and their waits included (ADR-0039), so that a load never
+    # lives longer than that: the cleanup of the rows of a load that did not end is to wait at least
+    # as long (ADR-0046).
+    dagrun_timeout=timedelta(hours=1),
     default_args={
-        # Retries are explicit, as the contract of the sources asks (ADR-0004).
+        # Retries are explicit, as the contract of the sources asks (ADR-0004), also after a new
+        # column of the API waited past the lock timeout of the loader role for a run of the
+        # transform that reads the table (ADR-0046). The wait doubles with each retry, from 1 to 2
+        # minutes and then from 2 to 4: Airflow 3.3.2 takes a multiplier here, and True would be
+        # 1, no backoff.
         "retries": 2,
         "retry_delay": timedelta(minutes=1),
+        "retry_exponential_backoff": 2.0,
         # A daily load takes seconds. The timeout ends a try that runs too long in Python; a
         # statement that waits on a lock is bounded by the lock timeout of the loader role.
         "execution_timeout": timedelta(minutes=10),

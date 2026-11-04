@@ -24,6 +24,7 @@ from airflow_api import (
     wait_for_dag,
     wait_for_run,
 )
+from raw_loads import DAYS, newest
 from stack_helpers import (
     REPO_ROOT,
     compose,
@@ -72,26 +73,31 @@ ASSETS = len(platforms.PLATFORMS)
 # The pool of the tasks of dbt, which airflow-init sets (ADR-0027); the settings load outside it.
 DBT_POOL = "dbt"
 Q6, Q8 = Decimal("0.000001"), Decimal("0.00000001")
-# The sums of the statistics of each ad platform in raw, in SQL that does not use the macros of the
-# model: the mart holds the same.
+# The sums of the statistics of each ad platform in the rows of raw that staging reads, those of
+# the newest whole load of each account and day (raw_loads.py), in SQL that does not use the macros
+# of the model: the mart holds the same.
 RAW_SUMS = {
     "demo_search": (
-        "SELECT sum(metrics__impressions::bigint), sum(metrics__clicks::bigint), "
-        "sum(metrics__cost_micros::numeric) / 1000000 FROM raw_demo_search.campaign_stats"
+        "SELECT sum(metrics__impressions::bigint), sum(metrics__clicks::bigint), "  # noqa: S608 (constants of the demo)
+        f"sum(metrics__cost_micros::numeric) / 1000000 FROM {newest('demo_search')}"
     ),
     "demo_social": (
-        "SELECT sum(impressions::bigint), sum(inline_link_clicks::bigint), sum(spend::numeric) "
-        "FROM raw_demo_social.insights_campaign"
+        "SELECT sum(impressions::bigint), sum(inline_link_clicks::bigint), sum(spend::numeric) "  # noqa: S608 (constants of the demo)
+        f"FROM {newest('demo_social')}"
     ),
     "demo_video": (
-        "SELECT sum(nullif(metrics__impressions::text, '-')::bigint), "
+        "SELECT sum(nullif(metrics__impressions::text, '-')::bigint), "  # noqa: S608 (constants of the demo)
         "sum(nullif(metrics__clicks::text, '-')::bigint), "
-        "sum(nullif(metrics__spend::text, '-')::numeric) FROM raw_demo_video.report_campaign_daily"
+        f"sum(nullif(metrics__spend::text, '-')::numeric) FROM {newest('demo_video')}"
     ),
 }
-# The conversions of the primary actions of demo_social in raw: those that the seed marks primary.
+# The conversions of the primary actions of demo_social in the rows that staging reads: those that
+# the seed marks primary, of the rows of the insights of campaigns that staging reads, which their
+# actions follow by _dlt_parent_id.
 RAW_SOCIAL_CONVERSIONS = (
-    "SELECT sum(value::numeric) FROM raw_demo_social.insights_campaign__actions WHERE action_type "
+    "SELECT sum(a.value::numeric) FROM raw_demo_social.insights_campaign__actions AS a "  # noqa: S608 (constants of the demo)
+    f"JOIN {newest('demo_social')} ON newest._dlt_id = a._dlt_parent_id "
+    "WHERE a.action_type "
     "IN ('offsite_conversion.fb_pixel_purchase', 'offsite_conversion.fb_pixel_lead')"
 )
 # The versions of the names of the campaigns, as staging has them from the versions that dlt keeps
@@ -105,14 +111,18 @@ NAME_PERIODS = (
     "SELECT platform, account_id, campaign_id, observed_name, valid_from, valid_to "
     "FROM marts.ad_campaign_names"
 )
-# The row that breaks a critical test of staging: negative clicks, on a day before the history.
+# The row that breaks a critical test of staging: negative clicks, of a campaign that the demo
+# does not have, on the first day of the history of an account, under the newest whole load of
+# that day, so that staging reads it.
 BROKEN_ROW = (
-    "INSERT INTO raw_demo_search.campaign_stats (customer__id, campaign__id, campaign__name, "
+    "INSERT INTO raw_demo_search.campaign_stats (customer__id, campaign__id, campaign__name, "  # noqa: S608 (constants of the demo)
     "campaign__resource_name, metrics__impressions, metrics__clicks, metrics__cost_micros, "
     "metrics__conversions, metrics__conversions_value, segments__date, _dlt_load_id, _dlt_id) "
-    "VALUES ('4170000011', '21099999998', 'Broken by a test', "
-    "'customers/4170000011/campaigns/21099999998', '10', '-5', '1000000', 0, 0, '2020-01-01', "
-    "'stack-test', 'stack-test-broken-row')"
+    "SELECT '4170000011', '21099999998', 'Broken by a test', "
+    "'customers/4170000011/campaigns/21099999998', '10', '-5', '1000000', 0, 0, d.day, "
+    "d.load_id, 'stack-test-broken-row' "
+    f"FROM ({DAYS.format(dataset='raw_demo_search')}) AS d "
+    "WHERE d.account_id = '4170000011' ORDER BY d.day LIMIT 1"
 )
 REMOVE_BROKEN_ROW = (
     "DELETE FROM raw_demo_search.campaign_stats WHERE _dlt_id = 'stack-test-broken-row'"

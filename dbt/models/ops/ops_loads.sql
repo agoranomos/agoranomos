@@ -1,42 +1,32 @@
--- The last load of each account of each platform, from the record that each load writes in the same
--- run as its rows (_agoranomos_reloads). It reads the sources only, so that it shows the loads also
--- when a model of staging fails.
-with reloads as (
-    select 'demo_fx' as platform, account_id, window_end, loaded_at
-    from {{ demo_source('raw_demo_fx', '_agoranomos_reloads') }}
+-- The last load of each account of each platform, from the journal that each load writes in the
+-- same run as its rows (_agoranomos_loads). It reads the sources only, so that it shows the loads
+-- also when a model of staging fails. A journal that no load has written, as those of the ECB and
+-- of Google Ads, whose DAGs start paused, or of the demo in a deployment without it, is empty.
+with loads as (
+    {%- for source_name, platform in [
+        ('raw_demo_fx', 'demo_fx'),
+        ('raw_demo_search', 'demo_search'),
+        ('raw_demo_social', 'demo_social'),
+        ('raw_demo_video', 'demo_video'),
+        ('raw_demo_web', 'demo_web'),
+        ('raw_ecb', 'ecb'),
+        ('raw_google_ads', 'google_ads'),
+    ] %}
+    {%- if not loop.first %}
     union all
-    select 'demo_search' as platform, account_id, window_end, loaded_at
-    from {{ demo_source('raw_demo_search', '_agoranomos_reloads') }}
-    union all
-    select 'demo_social' as platform, account_id, window_end, loaded_at
-    from {{ demo_source('raw_demo_social', '_agoranomos_reloads') }}
-    union all
-    select 'demo_video' as platform, account_id, window_end, loaded_at
-    from {{ demo_source('raw_demo_video', '_agoranomos_reloads') }}
-    union all
-    select 'demo_web' as platform, account_id, window_end, loaded_at
-    from {{ demo_source('raw_demo_web', '_agoranomos_reloads') }}
-    union all
-    -- Empty while no load has taken the rates of the ECB, whose DAG starts paused.
-    select 'ecb' as platform, account_id, window_end, loaded_at
-    from {{ relation_or_empty(source('raw_ecb', '_agoranomos_reloads'), {
-        'account_id': 'text', 'window_end': 'date', 'loaded_at': 'timestamp with time zone',
-    }) }}
-    union all
-    -- Empty while no load has taken an account of Google Ads, whose DAG starts paused.
-    select 'google_ads' as platform, account_id, window_end, loaded_at
-    from {{ relation_or_empty(source('raw_google_ads', '_agoranomos_reloads'), {
-        'account_id': 'text', 'window_end': 'date', 'loaded_at': 'timestamp with time zone',
-    }) }}
+    {%- endif %}
+    select '{{ platform }}' as platform, account_id, window_to, loaded_at
+    from {{ newest_load_table(source_name, '_agoranomos_loads') }}
+    {%- endfor %}
 )
 
 select
     platform,
     account_id,
-    max(window_end) as last_day_loaded,
+    max(window_to) as last_day_loaded,
     max(loaded_at) as last_loaded_at,
     -- When the view is read, not when it was built.
     round((extract(epoch from now() - max(loaded_at)) / 3600)::numeric, 1) as hours_since_load,
     count(*) as loads
-from reloads
+from loads
 group by platform, account_id

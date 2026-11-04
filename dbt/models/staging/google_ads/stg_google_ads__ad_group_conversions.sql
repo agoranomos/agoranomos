@@ -1,5 +1,5 @@
 -- stg_google_ads__ad_group_conversions.sql: the conversions of its ad groups by day and action.
-{{ google_ads_conversions(relation_or_empty(source('raw_google_ads', 'ad_group_conversions'), {
+{{ google_ads_conversions(newest_load(relation_or_empty(source('raw_google_ads', 'ad_group_conversions'), {
     'customer__id': 'text', 'campaign__resource_name': 'text', 'campaign__id': 'text',
     'ad_group__resource_name': 'text', 'ad_group__id': 'text', 'ad_group__name': 'text',
     'segments__date': 'date', 'segments__conversion_action': 'text',
@@ -7,4 +7,5 @@
     'metrics__conversions': 'double precision', 'metrics__conversions_value': 'text',
     'metrics__all_conversions': 'double precision',
     'metrics__all_conversions_value': 'text',
-}), 'google_ads', 'ad_group') }}
+    '_dlt_load_id': 'text',
+}), 'raw_google_ads', ref('stg_loads__newest_days')), 'google_ads', 'ad_group') }}

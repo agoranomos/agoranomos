@@ -16,29 +16,31 @@ A source goes through every layer of the model ([ADR-0025](../../../docs/adr/002
     - clicks to the site;
     - conversions as the platform counts them.
 - **The code of the platform.** A real platform keeps its own code, such as `google_ads`. A demo platform gets a code that starts with `demo_`.
-- **The reload window.** How many recent days each daily load replaces, as the platform still changes them.
+- **The reload window.** How many recent days each daily load takes again, as the platform still changes them.
 - **A decision record.** A significant choice gets an ADR in `docs/adr/` before the code: how a connector gets its credentials, or a new grain or mart, for example. It starts as `proposed`.
 
 ## The places to change
 
-1. **The warehouse.** In `postgres/warehouse.sql`, add the schemas `raw_<platform>` and `raw_<platform>_staging`. Both are owned by `loader`, and `transformer` gets usage and select on the first. Copy the block of the example; `tests/unit/test_postgres_files.py` reads its form.
+1. **The warehouse.** In `postgres/warehouse.sql`, add the schemas `raw_<platform>` and `raw_<platform>_staging`, through which dlt keeps the versions of the entities and which it empties after each load. Both are owned by `loader`, and `transformer` gets usage and select on the first. Copy the block of the example; `tests/unit/test_postgres_files.py` reads its form.
 2. **The load.** A dlt source loads, as `loader`, into `raw_<platform>` ([ADR-0004](../../../docs/adr/0004-ingest-with-dlt.md)). The demo's loads are in `airflow/dags/agoranomos_pipelines/demo/`:
     - `sources.py` holds the table hints;
-    - `platforms.py` holds the fact tables and the reload window;
+    - `platforms.py` holds the fact tables, with the columns of their account and day, and the reload window;
     - `assets.py` holds the asset of the main table, and `LOADED` there, the condition that starts the transform, takes the asset of a new source ([ADR-0039](../../../docs/adr/0039-run-one-dbt-build-in-the-watcher-mode.md)).
 
-    Every load also records the window of each account that it replaced in `_agoranomos_reloads`, in the same run. Give every table and column hint the reason that the code around it gives.
+    A fact table appends the rows of each load under its own `_dlt_load_id` (`APPEND` of `loads.py`), with no keys and no scope, and every load also records the window of each account that it took in the journal `_agoranomos_loads`, with `LOAD_HINTS` of `loads.py`, in the same run, so under the same id ([The raw layer](../../../docs/reference/data-model.md#the-raw-layer)). Give every table and column hint the reason that the code around it gives.
 
-    Each `pipeline.run` takes `loader_file_format=FILE_FORMAT` and `row_counts` of `loads.py`, so that the rows go by `COPY`. An empty string reaches the table as NULL. Money stays text, with a hint where the API writes it as a number, and never a `Decimal` of Python, which dlt would keep to nine places ([ADR-0038](../../../docs/adr/0038-load-by-copy-and-write-the-core-by-whole-days.md)).
+    Each load goes through `run` and `destination` of `loads.py`, and counts with `row_counts`, so that the rows go by `COPY`, under the contract of the schema, into tables without an index on `_dlt_id`. An empty string reaches the table as NULL. Money stays text, with a hint where the API writes it as a number, and never a `Decimal` of Python, which dlt would keep to nine places ([ADR-0038](../../../docs/adr/0038-load-by-copy-and-write-the-core-by-whole-days.md)).
 3. **Staging.** Add a folder `dbt/models/staging/<platform>/` with three kinds of files:
     - `_<platform>__sources.yml`: every raw table with a description, and `freshness: null`;
     - `_<platform>__models.yml`: every model and column with a description, and the critical tests;
-    - one `stg_<platform>__<table>.sql` for each entity, each a call of its shape macro.
+    - one `stg_<platform>__<table>.sql` for each entity, each a call of its shape macro; a fact table goes through `newest_load` of `dbt/macros/newest_load.sql`, which reads the rows of the newest whole load of each account and day, and whose `newest_load_keys` names the account and the day of the source.
+
+    The sources list the journal `_agoranomos_loads` and `_dlt_loads` too. No test reads a raw table: the tests are on the staging views ([ADR-0046](../../../docs/adr/0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md)).
 4. **Intermediate.** Add a `ref` of the new staging views to every `int_*` model that unions the platforms. `git grep` of the example finds them:
     - `int_ad_stats__unioned`, `int_ad_conversions__unioned`, `int_ad_accounts__unioned` and `int_ad_campaigns__unioned`;
     - `int_ad_campaign_names__collapsed` and `int_conversion_actions__resolved`;
     - `int_web_sessions__unioned` for web analytics.
-5. **Ops.** Add the platform's `_agoranomos_reloads` to `dbt/models/ops/ops_loads.sql`.
+5. **Ops.** Add the platform's schema and code to the list of `dbt/models/ops/ops_loads.sql`, which reads its `_agoranomos_loads`.
 6. **Seeds.** Add a row to `dbt/seeds/seed_ad_platforms.csv`. Add the conversion actions of the platform, with their categories and which are primary, to `seed_conversion_actions.csv`.
 7. **Metadata.** Every mart, column and display name stays described as [Describe the marts](../../../docs/reference/describe-the-marts.md) says. A new column that more than one model has takes a doc block in `dbt/models/_docs.md`.
 8. **Tests.**

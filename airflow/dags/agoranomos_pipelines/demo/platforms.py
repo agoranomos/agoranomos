@@ -17,8 +17,9 @@ from agoranomos_pipelines.demo.common import last_final_day
 @dataclass(frozen=True)
 class FactTable:
     """A fact table of a platform in raw, by the names that dlt gives its columns, and how it holds
-    the account and the day of a row: a load replaces the days of each account in its window
-    through these, and a reader finds the days of each account through them."""
+    the account and the day of a row: staging finds through these the newest load of the account
+    and the day of each row (newest_load_keys of dbt/macros/newest_load.sql, which a unit test
+    compares with them), and a reader finds the days of each account through them."""
 
     table: str
     account_sql: str | None  # the column of the account; None for the rates
@@ -90,7 +91,7 @@ PLATFORMS = {
             social,
             "insights_campaign",
             28,
-            # Their child tables of actions follow them through _dlt_root_id.
+            # Their child tables of actions follow their rows through _dlt_parent_id.
             *(
                 FactTable(table, '"account_id"', "{}", '"date_start"', ISO, '"date_start"')
                 for table in ("insights_campaign", "insights_adset", "insights_ad")

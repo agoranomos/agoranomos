@@ -5,17 +5,26 @@ sources:
       agoranomos_demo_history and agoranomos_demo_daily load with dlt.
     schema: raw_demo_fx
     # No freshness check of dbt: the Ops collection shows the last load of each account, from
-    # _agoranomos_reloads (models/ops/ops_loads.sql).
+    # _agoranomos_loads (models/ops/ops_loads.sql).
     config:
       freshness: null
     tables:
-      - name: _agoranomos_reloads
+      - name: _agoranomos_loads
         description: >-
-          The record of the loads of demo_fx: one row for each account in each load, with the
-          day of the load in the time zone of the account (as_of), the first and last day that
-          the load replaced (window_start, window_end), and the moment of the load.
+          The journal of the loads of demo_fx: one row for each load, written in the same run as the
+          rates of the load, so under its _dlt_load_id, with the account EUR, the base of the rates,
+          the status loaded, the day of the load in the time zone of the account (as_of), the first
+          and last day of the window that the load took (window_from, window_to), and the moment of
+          the load (loaded_at). The staging model reads, for each day, the rates of the newest whole
+          load whose window covers the day.
+      - name: _dlt_loads
+        description: >-
+          The loads of dlt into raw_demo_fx, one row each: a load is whole once it has its row here,
+          with status 0, which dlt writes after the last table of the load. The staging models read
+          the rows of whole loads only.
       - name: rates_daily
         description: >-
-          The reference rates of the euro of demo_fx, one row for each day of publication: the
-          value of one unit of base in quote. A weekend or a holiday has no row. Each load
-          replaces the days that it covers.
+          The reference rates of the euro of demo_fx, one row for each day of publication: the value
+          of one unit of base in quote. A weekend or a holiday has no row. Each load appends its
+          rows under its own _dlt_load_id, and staging reads, for each day, those of the newest
+          whole load whose window covers the day.

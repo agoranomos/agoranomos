@@ -19,7 +19,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import content
 import demo_init as di
@@ -83,6 +83,17 @@ ADVERTISING, WEB = (di.DASHBOARDS[key][0] for key in (di.ADVERTISING, di.WEB))
 QUESTIONS = {q["key"]: q for q in di.QUESTIONS}
 
 
+# What a start asks Metabase before the pipeline, which the answer decides: it signs in, finds
+# the connection of the warehouse, and asks the warehouse through it for the schemas of the demo
+# that a release before v0.5 loaded. All three write nothing.
+READS_BEFORE_THE_PIPELINE = [
+    ("POST", "/api/session"),
+    ("GET", "/api/database"),
+    ("POST", "/api/dataset"),
+]
+READS = ("/api/session", "/api/dataset")
+
+
 def leaked(text: str) -> list[str]:
     return leaked_in(text, SECRETS)
 
@@ -115,7 +126,9 @@ class FakeAirflow:
 
     The list of runs answers as the API does: the oldest first unless order_by says otherwise, 50
     to a page unless limit says otherwise and at most 100, and total_entries counts every run that
-    matches the filters.
+    matches the filters. The details of a DAG give the token of its file and when the DAG processor
+    last parsed it, and a request to parse the file again (PUT /api/v2/parseDagFile/<token>) is done
+    parse_seconds later on the clock, never when parse_seconds is None.
     """
 
     def __init__(self, clock: FakeClock) -> None:
@@ -133,6 +146,11 @@ class FakeAirflow:
         self.failures: dict[tuple[str, str], int] = {}
         self.calls: list[tuple[str, str]] = []
         self.listings: list[dict[str, list[str]]] = []
+        # The DAG processor parsed the files a minute before the start, and parses one at once
+        # when asked, as it does within seconds on a stack.
+        self.parsed_at = -60.0
+        self.parse_due: float | None = None
+        self.parse_seconds: float | None = 0.0
 
     def add_run(
         self,
@@ -245,6 +263,13 @@ class FakeAirflow:
         if auth != "Bearer airflow-token-1":
             return 401, {"detail": "Not authenticated"}
         self.catch_up()
+        asked = method == "PUT" and path == "/api/v2/parseDagFile/" + quote(FILE_TOKEN, safe="")
+        if asked and self.parse_seconds is not None:
+            self.parse_due = self.clock.now + self.parse_seconds
+        if self.parse_due is not None and self.clock.now >= self.parse_due:
+            self.parsed_at, self.parse_due = self.parse_due, None
+        if method == "PUT" and path.startswith("/api/v2/parseDagFile/"):
+            return 201, None
         segments = path.split("/")  # "", "api", "v2", "dags", <dag_id>, ...
         if segments[:4] != ["", "api", "v2", "dags"] or len(segments) < 5:
             return 404, {"detail": "Not Found"}
@@ -253,6 +278,9 @@ class FakeAirflow:
             return 404, {"detail": f"The Dag with ID: `{dag_id}` was not found"}
         if not rest and method == "GET":
             return 200, {"dag_id": dag_id, "is_paused": self.paused[dag_id]}
+        if rest == ["details"] and method == "GET" and dag_id == di.TRANSFORM_DAG:
+            parsed = stamp(self.parsed_at).replace("+00:00", "Z")
+            return 200, {"dag_id": dag_id, "file_token": FILE_TOKEN, "last_parsed_time": parsed}
         if not rest and method == "PATCH":
             self.paused[dag_id] = body["is_paused"]
             if dag_id == di.DAILY_DAG and not body["is_paused"] and not self.runs_of(dag_id):
@@ -277,6 +305,11 @@ class FakeAirflow:
             ]
             return 200, {"queued_events": events, "total_entries": len(events)}
         return 404, {"detail": "Not Found"}
+
+
+# The token of the file of the transform DAG, as Airflow 3.3.2 gives it in the details of the DAG:
+# text that a path takes only once quoted.
+FILE_TOKEN = ".eJyrVkosKMjPS8kszsjM-token/of+the=file"
 
 
 def public(run: dict[str, Any]) -> dict[str, Any]:
@@ -615,7 +648,7 @@ def test_a_second_start_changes_nothing(airflow, metabase, clock, capsys):
     for call in airflow.calls[calls_before[0] :]:
         assert call[0] == "GET" or call == ("POST", "/auth/token"), call
     for call in metabase.calls[calls_before[1] :]:
-        assert call[0] == "GET" or call == ("POST", "/api/session"), call
+        assert call[0] == "GET" or call[1] in READS, call
     assert airflow.runs == runs_before
     assert content_before == (
         metabase.collections,
@@ -819,7 +852,7 @@ def test_a_failed_history_stops_with_the_dag_named(airflow, metabase, capsys):
     airflow.results[di.LOAD_DAG] = "failed"
     assert di.main(env_for(airflow, metabase)) == 1
     assert one_line(capsys) == f"demo-init: the DAG {di.LOAD_DAG} failed: see it in Airflow"
-    assert metabase.calls == []
+    assert metabase.calls == READS_BEFORE_THE_PIPELINE
 
 
 def test_a_failed_transform_names_the_transform_dag_and_dbt(airflow, metabase, capsys):
@@ -828,7 +861,7 @@ def test_a_failed_transform_names_the_transform_dag_and_dbt(airflow, metabase, c
     line = one_line(capsys)
     assert f"the DAG {di.TRANSFORM_DAG} failed after the demo history" in line
     assert "dbt test" in line
-    assert metabase.calls == []
+    assert metabase.calls == READS_BEFORE_THE_PIPELINE
 
 
 def last_line(capsys: pytest.CaptureFixture[str]) -> str:
@@ -873,6 +906,105 @@ def test_a_history_with_a_good_transform_after_it_is_not_run_again(airflow, meta
     assert ("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns") not in airflow.calls
     assert airflow.paused == {di.LOAD_DAG: True, di.TRANSFORM_DAG: True, di.DAILY_DAG: True}
     assert "the demo pipeline ran before" in last_line(capsys)
+
+
+def test_a_demo_that_a_release_before_v0_5_loaded_runs_the_history_again(airflow, metabase, capsys):
+    # Its runs in Airflow say that the pipeline ran, and the warehouse that the raw tables of the
+    # demo hold the journal of a release before v0.5, which merged the days of each load in place:
+    # the start runs the history again, whose loads drop those tables and load them anew, and the
+    # transform after it, and the next start, which finds them in the shape of this release, runs
+    # nothing.
+    airflow.add_run(di.LOAD_DAG, "success", at=-3_600)
+    airflow.add_run(di.TRANSFORM_DAG, "success", run_type="asset_triggered", at=-3_500)
+    airflow.add_run(di.DAILY_DAG, "success", "scheduled", at=-3_400)
+    metabase.earlier_demo = ["raw_demo_search", "raw_demo_fx"]
+    assert di.main(env_for(airflow, metabase)) == 0
+    out = capsys.readouterr().out
+    assert (
+        "demo-init: raw_demo_fx, raw_demo_search: the demo as a release before v0.5 loaded it; the "
+        "history loads it again, each load under its own id"
+    ) in out.splitlines()
+    assert [run["state"] for run in airflow.runs_of(di.LOAD_DAG)] == ["success", "success"]
+    assert airflow.runs_of(di.TRANSFORM_DAG)[-1]["state"] == "success"
+    assert "the demo pipeline ran now" in out.splitlines()[-1]
+    [query] = [b[2] for b in metabase.bodies if b[1] == "/api/dataset" and "nspname" in str(b[2])]
+    assert query == {"database": 2, "type": "native", "native": {"query": di.EARLIER_DEMO}}
+    metabase.earlier_demo = []
+    runs = len(airflow.runs_of(di.LOAD_DAG))
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert len(airflow.runs_of(di.LOAD_DAG)) == runs
+    assert "the demo pipeline ran before" in last_line(capsys)
+
+
+def test_the_transform_is_parsed_again_before_the_history_starts(airflow, metabase):
+    # After an update, the DAG processor may still hold the transform of the manifest of the
+    # release before, which it parses again only every five minutes: the run that the history
+    # starts must come from the new one.
+    assert di.main(env_for(airflow, metabase)) == 0
+    parse = ("PUT", "/api/v2/parseDagFile/" + quote(FILE_TOKEN, safe=""))
+    start = ("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns")
+    assert airflow.calls.count(parse) == 1
+    assert airflow.calls.index(parse) < airflow.calls.index(start)
+    assert airflow.parsed_at >= 0
+
+
+def test_a_parse_that_takes_time_is_awaited(airflow, metabase, clock):
+    airflow.parse_seconds = 12.0
+    assert di.main(env_for(airflow, metabase)) == 0
+    [load] = airflow.runs_of(di.LOAD_DAG)
+    assert datetime.fromisoformat(load["run_after"]) >= START + timedelta(seconds=12)
+
+
+def test_a_parse_that_does_not_come_stops_the_start_before_the_history(
+    airflow, metabase, clock, capsys
+):
+    airflow.parse_seconds = None
+    assert di.main(env_for(airflow, metabase)) == 1
+    assert one_line(capsys) == (
+        f"demo-init: Airflow did not parse the DAG {di.TRANSFORM_DAG} again within "
+        f"{di.DEADLINE:g} seconds of the start of demo-init: see ./agoranomos logs "
+        "airflow-dag-processor"
+    )
+    assert ("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns") not in airflow.calls
+
+
+def test_a_history_that_has_run_needs_no_parse(airflow, metabase):
+    airflow.add_run(di.LOAD_DAG, "success", at=-3_600)
+    airflow.add_run(di.TRANSFORM_DAG, "success", run_type="asset_triggered", at=-3_500)
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert not [call for call in airflow.calls if call[0] == "PUT"]
+
+
+def test_the_demo_of_an_earlier_release_is_found_by_the_journal_of_its_loads():
+    # The journal that every load of a release before v0.5 wrote, from v0.2.0 on, and no load of
+    # this release writes; the catalog shows its name to metabase_reader, which may read no raw
+    # schema.
+    assert "c.relname = '_agoranomos_reloads'" in di.EARLIER_DEMO
+    assert "n.nspname LIKE 'raw\\_demo\\_%'" in di.EARLIER_DEMO
+    assert "FROM pg_catalog.pg_class" in di.EARLIER_DEMO
+
+
+def test_a_failed_look_at_the_demo_of_an_earlier_release_stops_before_the_pipeline(
+    airflow, metabase, capsys
+):
+    handle = metabase.dataset
+    metabase.dataset = lambda body: (202, {"status": "failed", "error": "a secret-looking text"})
+    assert di.main(env_for(airflow, metabase)) == 1
+    metabase.dataset = handle
+    assert one_line(capsys) == (
+        "demo-init: Metabase could not list the tables of the demo in the warehouse: see "
+        "./agoranomos logs metabase"
+    )
+    assert ("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns") not in airflow.calls
+
+
+def test_a_row_of_an_unexpected_shape_in_the_look_at_the_earlier_demo_ends_in_one_line(
+    airflow, metabase, capsys
+):
+    metabase.dataset = lambda body: (202, {"status": "completed", "data": {"rows": [[1, 2]]}})
+    assert di.main(env_for(airflow, metabase)) == 1
+    line = one_line(capsys)
+    assert "an answer of Metabase had an unexpected shape (TypeError in earlier_demo)" in line
 
 
 @pytest.mark.parametrize(("result", "histories"), [("success", 1), ("failed", 2)])
@@ -962,7 +1094,7 @@ def test_the_whole_job_has_one_deadline(airflow, metabase, clock, capsys):
     assert clock.now == di.DEADLINE
     [load] = airflow.runs_of(di.LOAD_DAG)
     assert load["state"] == "running"
-    assert metabase.calls == []
+    assert metabase.calls == READS_BEFORE_THE_PIPELINE
 
 
 def test_a_refusal_while_waiting_for_the_dags_stops_at_once(airflow, metabase, clock, capsys):
@@ -1152,7 +1284,8 @@ def test_a_mart_that_is_gone_after_an_earlier_run_names_the_cause_and_the_load(
 def test_a_transform_that_ran_now_and_left_no_mart_names_the_transform(airflow, metabase, capsys):
     # The pipeline runs now and succeeds, and the warehouse still has no mart, as when the model
     # of the mart was left out of the run: the line points at the run of the transform, not at a
-    # reset of the warehouse, and the job asks the warehouse once and syncs nothing.
+    # reset of the warehouse, and the job asks the warehouse once for the marts, after it asked it
+    # for the demo of an earlier release before the pipeline, and syncs nothing.
     metabase.mart_in_warehouse = False
     assert di.main(env_for(airflow, metabase)) == 1
     line = one_line(capsys)
@@ -1161,7 +1294,7 @@ def test_a_transform_that_ran_now_and_left_no_mart_names_the_transform(airflow, 
         f"{di.TRANSFORM_DAG} in Airflow"
     )
     assert airflow.calls.count(("POST", f"/api/v2/dags/{di.LOAD_DAG}/dagRuns")) == 1
-    assert metabase.calls.count(("POST", "/api/dataset")) == 1
+    assert metabase.calls.count(("POST", "/api/dataset")) == 2
     assert ("POST", "/api/database/2/sync_schema") not in metabase.calls
 
 
@@ -1921,7 +2054,7 @@ def test_the_metadata_that_metabase_makes_for_the_demo_is_left_as_it_is(
         ]
     writes = len(metabase.bodies)
     assert di.main(env_for(airflow, metabase)) == 0
-    assert [b for b in metabase.bodies[writes:] if b[1] != "/api/session"] == []
+    assert [b for b in metabase.bodies[writes:] if b[1] not in READS] == []
 
 
 def test_a_click_behavior_added_to_a_card_of_the_demo_dashboard_is_reverted(airflow, metabase):
@@ -2201,7 +2334,7 @@ def test_a_color_that_a_person_set_is_put_back(airflow, metabase, capsys, name, 
         "spend_reporting": {"color": "#A86400"}
     }
     # One write: the settings of the question, and its line.
-    [(method, path, _)] = [b for b in metabase.bodies[writes_before:] if b[1] != "/api/session"]
+    [(method, path, _)] = [b for b in metabase.bodies[writes_before:] if b[1] not in READS]
     assert (method, path) == ("PUT", f"/api/card/{card_of(metabase, name)['id']}")
     key = next(q["key"] for q in di.QUESTIONS if q["name"] == name)
     assert (

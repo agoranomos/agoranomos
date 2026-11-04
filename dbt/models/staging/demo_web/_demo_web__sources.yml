@@ -7,15 +7,23 @@ sources:
       report as text.
     schema: raw_demo_web
     # No freshness check of dbt: the Ops collection shows the last load of each account, from
-    # _agoranomos_reloads (models/ops/ops_loads.sql).
+    # _agoranomos_loads (models/ops/ops_loads.sql).
     config:
       freshness: null
     tables:
-      - name: _agoranomos_reloads
+      - name: _agoranomos_loads
         description: >-
-          The record of the loads of demo_web: one row for each account in each load, with the
-          day of the load in the time zone of the account (as_of), the first and last day that
-          the load replaced (window_start, window_end), and the moment of the load.
+          The journal of the loads of demo_web: one row for each property in each load, written in
+          the same run as the rows of the load, so under its _dlt_load_id, with the ID of the
+          property in account_id, the status loaded, the day of the load in the time zone of the
+          property (as_of), the first and last day of the window that the load took (window_from,
+          window_to), and the moment of the load (loaded_at). The staging model reads, for each
+          property and day, the rows of the newest whole load whose window covers the day.
+      - name: _dlt_loads
+        description: >-
+          The loads of dlt into raw_demo_web, one row each: a load is whole once it has its row
+          here, with status 0, which dlt writes after the last table of the load. The staging models
+          read the rows of whole loads only.
       - name: properties
         description: >-
           The properties of demo_web, one row each, with the time zone of their days and the
@@ -24,4 +32,6 @@ sources:
         description: >-
           The sessions of the properties of demo_web, one row for each property, day, source,
           medium, campaign and default channel group with any session, the day as YYYYMMDD in the
-          time zone of the property. Each load replaces the days of each property that it covers.
+          time zone of the property. Each load appends its rows under its own _dlt_load_id, and
+          staging reads, for each property and day, those of the newest whole load whose window
+          covers the day.

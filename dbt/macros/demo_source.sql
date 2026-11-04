@@ -11,17 +11,10 @@
     in PostgreSQL. tests/unit/test_dbt_project.py checks that every source of the demo is here. -#}
 {% macro demo_columns() -%}
 {%- set columns = {
-    'raw_demo_fx._agoranomos_reloads': {
-        'account_id': 'character varying', 'window_end': 'date', 'now': 'timestamp with time zone',
-        'loaded_at': 'timestamp with time zone', '_dlt_id': 'character varying',
-    },
     'raw_demo_fx.rates_daily': {
         'rate_date': 'date', 'base': 'character varying', 'quote': 'character varying',
-        'rate': 'character varying', '_dlt_id': 'character varying',
-    },
-    'raw_demo_search._agoranomos_reloads': {
-        'account_id': 'character varying', 'window_end': 'date', 'now': 'timestamp with time zone',
-        'loaded_at': 'timestamp with time zone', '_dlt_id': 'character varying',
+        'rate': 'character varying', '_dlt_load_id': 'character varying',
+        '_dlt_id': 'character varying',
     },
     'raw_demo_search.ad_conversions': {
         'customer__id': 'character varying', 'campaign__id': 'character varying',
@@ -37,7 +30,8 @@
         'ad_group_ad__resource_name': 'character varying',
         'ad_group_ad__ad__resource_name': 'character varying',
         'ad_group__resource_name': 'character varying',
-        'campaign__resource_name': 'character varying', '_dlt_id': 'character varying',
+        'campaign__resource_name': 'character varying', '_dlt_load_id': 'character varying',
+        '_dlt_id': 'character varying',
     },
     'raw_demo_search.ad_group_conversions': {
         'customer__id': 'character varying', 'campaign__id': 'character varying',
@@ -50,7 +44,8 @@
         'segments__conversion_action_name': 'character varying',
         'segments__conversion_action_category': 'character varying',
         'ad_group__resource_name': 'character varying', 'ad_group__name': 'character varying',
-        'campaign__resource_name': 'character varying', '_dlt_id': 'character varying',
+        'campaign__resource_name': 'character varying', '_dlt_load_id': 'character varying',
+        '_dlt_id': 'character varying',
     },
     'raw_demo_search.ad_group_stats': {
         'customer__id': 'character varying', 'campaign__id': 'character varying',
@@ -59,7 +54,8 @@
         'metrics__cost_micros': 'character varying', 'metrics__conversions': 'double precision',
         'metrics__conversions_value': 'character varying',
         'ad_group__resource_name': 'character varying', 'ad_group__name': 'character varying',
-        'campaign__resource_name': 'character varying', '_dlt_id': 'character varying',
+        'campaign__resource_name': 'character varying', '_dlt_load_id': 'character varying',
+        '_dlt_id': 'character varying',
     },
     'raw_demo_search.ad_groups': {
         'customer__id': 'character varying', 'campaign__id': 'character varying',
@@ -79,7 +75,8 @@
         'ad_group_ad__resource_name': 'character varying',
         'ad_group_ad__ad__resource_name': 'character varying',
         'ad_group__resource_name': 'character varying',
-        'campaign__resource_name': 'character varying', '_dlt_id': 'character varying',
+        'campaign__resource_name': 'character varying', '_dlt_load_id': 'character varying',
+        '_dlt_id': 'character varying',
     },
     'raw_demo_search.ads': {
         'customer__id': 'character varying', 'campaign__id': 'character varying',
@@ -103,6 +100,7 @@
         'segments__conversion_action_name': 'character varying',
         'segments__conversion_action_category': 'character varying',
         'campaign__resource_name': 'character varying', 'campaign__name': 'character varying',
+        '_dlt_load_id': 'character varying',
         '_dlt_id': 'character varying',
     },
     'raw_demo_search.campaign_stats': {
@@ -112,6 +110,7 @@
         'metrics__conversions': 'double precision',
         'metrics__conversions_value': 'character varying',
         'campaign__resource_name': 'character varying', 'campaign__name': 'character varying',
+        '_dlt_load_id': 'character varying',
         '_dlt_id': 'character varying',
     },
     'raw_demo_search.campaigns': {
@@ -128,10 +127,6 @@
         'customer_client__currency_code': 'character varying',
         'customer_client__time_zone': 'character varying', 'customer_client__manager': 'boolean',
         'customer_client__status': 'character varying', '_dlt_id': 'character varying',
-    },
-    'raw_demo_social._agoranomos_reloads': {
-        'account_id': 'character varying', 'window_end': 'date', 'now': 'timestamp with time zone',
-        'loaded_at': 'timestamp with time zone', '_dlt_id': 'character varying',
     },
     'raw_demo_social.ad_accounts': {
         'account_id': 'character varying', 'id': 'character varying', 'name': 'character varying',
@@ -163,7 +158,8 @@
         'account_name': 'character varying', 'ad_name': 'character varying',
         'impressions': 'character varying', 'clicks': 'character varying',
         'inline_link_clicks': 'character varying', 'spend': 'character varying',
-        'attribution_setting': 'character varying', '_dlt_id': 'character varying',
+        'attribution_setting': 'character varying', '_dlt_load_id': 'character varying',
+        '_dlt_id': 'character varying',
     },
     'raw_demo_social.insights_ad__action_values': {
         'action_type': 'character varying', 'value': 'character varying',
@@ -181,6 +177,7 @@
         'adset_name': 'character varying', 'impressions': 'character varying',
         'clicks': 'character varying', 'inline_link_clicks': 'character varying',
         'spend': 'character varying', 'attribution_setting': 'character varying',
+        '_dlt_load_id': 'character varying',
         '_dlt_id': 'character varying',
     },
     'raw_demo_social.insights_adset__action_values': {
@@ -199,6 +196,7 @@
         'campaign_name': 'character varying', 'impressions': 'character varying',
         'clicks': 'character varying', 'inline_link_clicks': 'character varying',
         'spend': 'character varying', 'attribution_setting': 'character varying',
+        '_dlt_load_id': 'character varying',
         '_dlt_id': 'character varying',
     },
     'raw_demo_social.insights_campaign__action_values': {
@@ -210,10 +208,6 @@
         'action_type': 'character varying', 'value': 'character varying',
         '_7d_click': 'character varying', '_dlt_parent_id': 'character varying',
         '_dlt_id': 'character varying',
-    },
-    'raw_demo_video._agoranomos_reloads': {
-        'account_id': 'character varying', 'window_end': 'date', 'now': 'timestamp with time zone',
-        'loaded_at': 'timestamp with time zone', '_dlt_id': 'character varying',
     },
     'raw_demo_video.adgroups': {
         'advertiser_id': 'character varying', 'campaign_id': 'character varying',
@@ -249,6 +243,7 @@
         'metrics__conversion': 'character varying',
         'metrics__complete_payment': 'character varying',
         'metrics__total_complete_payment_rate': 'character varying',
+        '_dlt_load_id': 'character varying',
         '_dlt_id': 'character varying',
     },
     'raw_demo_video.report_adgroup_daily': {
@@ -259,6 +254,7 @@
         'metrics__clicks': 'character varying', 'metrics__conversion': 'character varying',
         'metrics__complete_payment': 'character varying',
         'metrics__total_complete_payment_rate': 'character varying',
+        '_dlt_load_id': 'character varying',
         '_dlt_id': 'character varying',
     },
     'raw_demo_video.report_campaign_daily': {
@@ -269,11 +265,8 @@
         'metrics__conversion': 'character varying',
         'metrics__complete_payment': 'character varying',
         'metrics__total_complete_payment_rate': 'character varying',
+        '_dlt_load_id': 'character varying',
         '_dlt_id': 'character varying',
-    },
-    'raw_demo_web._agoranomos_reloads': {
-        'account_id': 'character varying', 'window_end': 'date', 'now': 'timestamp with time zone',
-        'loaded_at': 'timestamp with time zone', '_dlt_id': 'character varying',
     },
     'raw_demo_web.properties': {
         'name': 'character varying', 'display_name': 'character varying',
@@ -286,7 +279,8 @@
         'session_campaign_name': 'character varying', 'session_campaign_id': 'character varying',
         'session_default_channel_group': 'character varying', 'sessions': 'character varying',
         'engaged_sessions': 'character varying', 'key_events': 'character varying',
-        'total_revenue': 'character varying', '_dlt_id': 'character varying',
+        'total_revenue': 'character varying', '_dlt_load_id': 'character varying',
+        '_dlt_id': 'character varying',
     },
 } -%}
 {{- return(columns) -}}

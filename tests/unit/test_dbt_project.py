@@ -429,7 +429,8 @@ def test_the_seeds_go_to_staging_and_comment_their_tables():
 def test_the_intermediate_models_are_views_in_staging():
     # ADR-0025: until an AI role needs to tell them apart, intermediate models are views in staging,
     # but for the statistics of ad groups and of ads, whose many tests would each compute a view of
-    # their size again (ADR-0034).
+    # their size again (ADR-0034), and the rates of each day, which every unioned model of the facts
+    # and five marts read.
     project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
     pattern = r"^    intermediate:\n      \+schema: staging\n      \+materialized: view$"
     assert re.search(pattern, project, flags=re.MULTILINE)
@@ -438,7 +439,11 @@ def test_the_intermediate_models_are_views_in_staging():
         for path in (DBT / "models" / "intermediate").glob("*.sql")
         if "materialized=" in path.read_text(encoding="utf-8")
     }
-    assert tables == {"int_ad_stats_ad_group__unioned", "int_ad_stats_ad__unioned"}
+    assert tables == {
+        "int_ad_stats_ad_group__unioned",
+        "int_ad_stats_ad__unioned",
+        "int_fx_rates__filled",
+    }
     for name in tables:
         text = (DBT / "models" / "intermediate" / f"{name}.sql").read_text(encoding="utf-8")
         assert "{{ config(materialized='table') }}" in text, name
@@ -671,10 +676,27 @@ def column_tests(block: str) -> set[str]:
     return tests
 
 
+# The kinds of staging models that read a fact table of raw, whose loads each append their rows:
+# each reads its table through newest_load, the rows of the newest whole load of each account and
+# day (ADR-0038), and the other kinds read their tables as they are.
+BY_LOAD = {
+    "campaign_stats",
+    "campaign_conversions",
+    "ad_group_stats",
+    "ad_group_conversions",
+    "ad_stats",
+    "ad_conversions",
+    "sessions_daily",
+    "rates_daily",
+}
+
+
 def test_each_staging_model_of_a_platform_is_one_call_of_the_shape_of_its_api():
     # With the code of the platform of its folder and the raw tables of its own dataset: a model
     # that passed the code of another platform would still pass its key tests. An account or a
-    # property model also names the seeds that its tests read, so that they come first (below).
+    # property model also names the seeds that its tests read, so that they come first (below). A
+    # model of a fact reads the table of the fact by load, and the child tables of the actions of
+    # Meta follow their rows.
     from agoranomos_pipelines.demo import platforms
 
     assert set(SHAPED) == set(platforms.PLATFORMS)
@@ -686,12 +708,78 @@ def test_each_staging_model_of_a_platform_is_one_call_of_the_shape_of_its_api():
         for model, (macro, tables, *level) in models.items():
             path = STAGING / code / f"stg_{code}__{model}.sql"
             comment, *body = path.read_text(encoding="utf-8").splitlines()
-            relations = ", ".join(f"demo_source('{dataset}', '{table}')" for table in tables)
+            relations = [f"demo_source('{dataset}', '{table}')" for table in tables]
+            if model in BY_LOAD:
+                facts = {fact.table for fact in platforms.PLATFORMS[code].facts}
+                assert tables[0] in facts, (code, model)
+                days = "ref('stg_loads__newest_days')"
+                relations[0] = f"newest_load({relations[0]}, '{dataset}', {days})"
+            relations = ", ".join(relations)
             arguments = ", ".join([relations, f"'{code}'", *(f"'{name}'" for name in level)])
             seeds = [seed for seed, _ in IN_SEEDS.values()] if model in SEEDED else []
             depends = [f"-- depends_on: {{{{ ref('{seed}') }}}}" for seed in seeds]
             assert comment.startswith(f"-- {path.name}: "), path.name
             assert body == [*depends, f"{{{{ {macro}({arguments}) }}}}"], path.name
+
+
+def test_staging_reads_the_newest_whole_load_of_each_account_and_day():
+    # The rule of ADR-0038 and ADR-0046, and the findings of the check of November 2026: only the
+    # loads that dlt finished, only the accounts that loaded, and the newest load as a number.
+    text = (DBT / "macros" / "newest_load.sql").read_text(encoding="utf-8")
+    assert "on l.load_id = j._dlt_load_id and l.status = 0" in text
+    assert "where j.status = 'loaded'" in text
+    assert "select distinct on (j.account_id, w.day)" in text
+    assert "order by j.account_id, w.day, j._dlt_load_id::numeric desc" in text
+    # The days are a table of each run, with the statistics of PostgreSQL, joined by one key.
+    assert "    from {{ days }}\n" in text
+    assert "    where source = '{{ source_name[4:] }}'\n) as d" in text
+    # Before a run has filled the table, its rows as a query, as after an update that brings it.
+    assert "{%- if execute and load_relation(days) is none %}" in text
+    assert "    from ({{ newest_load_days(source_name) }}) as days" in text
+    assert "on d.load_key = {{ newest_load_key(source_name, 'r._dlt_load_id', account, day) }}" in (
+        text
+    )
+    model = (STAGING / "loads" / "stg_loads__newest_days.sql").read_text(encoding="utf-8")
+    assert "materialized='incremental'" in model
+    assert 'pre_hook=["{% if is_incremental() %}delete from {{ this }}{% endif %}"]' in model
+    assert 'post_hook=["analyze {{ this }}"]' in model
+    assert "{%- for source_name in newest_load_sources() %}" in model
+
+
+def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_does():
+    # For the demo, as the fact tables of platforms.py hold them, through which each load records
+    # its windows; Google Ads has the shape of demo_search, and the rates of the ECB, one account.
+    from agoranomos_pipelines.demo import platforms
+
+    text = (DBT / "macros" / "newest_load.sql").read_text(encoding="utf-8")
+    keys = {
+        source: ast.literal_eval(f"({pair.replace('(none,', '(None,')})")
+        for source, pair in re.findall(r"^    '(raw_\w+)': (\(.*\)),$", text, flags=re.MULTILINE)
+    }
+    assert set(keys) == {
+        *(platform.dataset for platform in platforms.PLATFORMS.values()),
+        "raw_ecb",
+        "raw_google_ads",
+    }
+
+    def plain(sql):
+        return sql.replace("r.", "").replace('"', "") if sql is not None else None
+
+    for platform in platforms.PLATFORMS.values():
+        account, day = (plain(sql) for sql in keys[platform.dataset])
+        for fact in platform.facts:
+            assert day == plain(fact.day_date_sql), (platform.code, fact.table)
+            if fact.account_sql is None:
+                assert account is None, platform.code
+            elif fact.account_text == "{}":
+                assert account == plain(fact.account_sql), platform.code
+            else:
+                # An ID written with a prefix, as properties/{} of GA4.
+                prefix = fact.account_text.removesuffix("{}")
+                assert prefix.count("/") == 1, platform.code
+                assert account == f"split_part({plain(fact.account_sql)}, '/', 2)", platform.code
+    assert keys["raw_google_ads"] == keys["raw_demo_search"]
+    assert keys["raw_ecb"] == (None, "cast(r.time_period as date)")
 
 
 def test_every_table_of_the_demo_can_be_missing():
@@ -721,8 +809,9 @@ def test_the_sources_of_a_platform_are_the_tables_that_its_load_writes():
     from agoranomos_pipelines.demo import platforms, shapes
 
     for code, platform in platforms.PLATFORMS.items():
-        # And the record of the windows of each load (sources.py), which the Ops collection reads.
-        written = {"_agoranomos_reloads"}
+        # And the journal of the loads (sources.py), which staging and the Ops collection read,
+        # and the loads of dlt, whose whole loads staging reads.
+        written = {"_agoranomos_loads", "_dlt_loads"}
         for (owner, table), shape in shapes.SHAPES.items():
             if owner == code:
                 lists = [field for field, kind in shape.items() if isinstance(kind, list)]
@@ -1058,9 +1147,10 @@ def test_the_staging_of_the_ecb_reads_its_csv_through_its_shape_even_before_a_lo
     comment, *_ = text.splitlines()
     assert comment.startswith("-- stg_ecb__rates_daily.sql: ")
     columns = dict(re.findall(r"'(\w+)': '([\w ]+)'", text))
-    assert columns == dict.fromkeys(ECB_COLUMNS, "text")
-    assert text.count("{{ ecb_exr(relation_or_empty(source('raw_ecb', 'rates_daily'), {") == 1
-    assert text.rstrip().endswith("}), 'ecb') }}")
+    assert columns == dict.fromkeys((*ECB_COLUMNS, "_dlt_load_id"), "text")
+    call = "{{ ecb_exr(newest_load(relation_or_empty(source('raw_ecb', 'rates_daily'), {"
+    assert text.count(call) == 1
+    assert text.rstrip().endswith("}), 'raw_ecb', ref('stg_loads__newest_days')), 'ecb') }}")
     macro = (DBT / "macros" / "shapes" / "ecb_exr.sql").read_text(encoding="utf-8")
     for column in ("time_period", "currency_denom", "currency", "obs_value"):
         assert column in macro
@@ -1075,7 +1165,8 @@ def test_the_sources_of_the_ecb_are_the_tables_that_its_load_writes():
     pattern = r"^      - name: (\w+)\n        description:"
     assert set(re.findall(pattern, text, flags=re.MULTILINE)) == {
         "rates_daily",
-        "_agoranomos_reloads",
+        "_agoranomos_loads",
+        "_dlt_loads",
     }
 
 
@@ -1096,7 +1187,7 @@ def test_the_rates_take_the_ecb_alone_once_it_has_any_and_the_loads_show_it_befo
     assert "    from {{ ref('stg_ecb__rates_daily') }}\n    union all\n" in rates
     assert "where not exists (select from {{ ref('stg_ecb__rates_daily') }})" in rates
     loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
-    assert "{{ relation_or_empty(source('raw_ecb', '_agoranomos_reloads'), {" in loads
+    assert "('raw_ecb', 'ecb')," in loads
 
 
 GOOGLE_ADS = STAGING / "google_ads"
@@ -1126,10 +1217,18 @@ def test_each_staging_model_of_google_ads_is_one_call_of_the_shape_that_the_demo
     for model, (macro, table, *level) in GOOGLE_ADS_MODELS.items():
         text = (GOOGLE_ADS / f"stg_google_ads__{model}.sql").read_text(encoding="utf-8")
         assert text.startswith(f"-- stg_google_ads__{model}.sql: "), model
-        call = f"{{{{ {macro}(relation_or_empty(source('raw_google_ads', '{table}'), {{"
+        relation = f"relation_or_empty(source('raw_google_ads', '{table}'), {{"
+        by_load = model in BY_LOAD
+        call = f"{{{{ {macro}(newest_load({relation}" if by_load else f"{{{{ {macro}({relation}"
         assert text.count(call) == 1, model
         arguments = ", ".join(["'google_ads'", *(f"'{name}'" for name in level)])
-        assert text.rstrip().endswith(f"}}), {arguments}) }}}}"), model
+        days = "ref('stg_loads__newest_days')"
+        end = (
+            f"}}), 'raw_google_ads', {days}), {arguments}) }}}}"
+            if by_load
+            else f"}}), {arguments}) }}}}"
+        )
+        assert text.rstrip().endswith(end), model
         # The model of the accounts names the seeds that its tests read, as that of the demo does.
         seeds = re.findall(r"^-- depends_on: \{\{ ref\('(\w+)'\) \}\}$", text, flags=re.MULTILINE)
         assert seeds == (
@@ -1156,7 +1255,9 @@ def test_the_columns_of_the_empty_tables_of_google_ads_are_the_fields_of_its_que
         columns = set(re.findall(r"'(\w+)': '[\w ]+'", text))
         hinted = {field.strip().replace(".", "__") for field in fields[table].split(",")}
         scd2 = {"_dlt_valid_from", "_dlt_valid_to"} if table in GOOGLE_ADS_VERSIONED else set()
-        assert columns == hinted | scd2, (model, sorted(columns ^ (hinted | scd2)))
+        load = {"_dlt_load_id"} if model in BY_LOAD else set()
+        wanted = hinted | scd2 | load
+        assert columns == wanted, (model, sorted(columns ^ wanted))
 
 
 def test_the_staging_of_google_ads_has_the_tests_of_the_staging_of_demo_search():
@@ -1190,7 +1291,8 @@ def test_the_sources_of_google_ads_are_the_tables_that_its_load_writes():
     assert source == "raw_google_ads"
     pattern = r"^      - name: (\w+)\n        description:"
     assert set(re.findall(pattern, text, flags=re.MULTILINE)) == {
-        "_agoranomos_reloads",
+        "_agoranomos_loads",
+        "_dlt_loads",
         "customers",
         "campaigns",
         "campaign_stats",
@@ -1225,7 +1327,7 @@ def test_every_union_of_the_platforms_reads_google_ads_and_the_loads_show_it():
     resolved = (INTERMEDIATE / "int_conversion_actions__resolved.sql").read_text(encoding="utf-8")
     assert "from {{ ref('stg_google_ads__conversion_actions') }}" in resolved
     loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
-    assert "{{ relation_or_empty(source('raw_google_ads', '_agoranomos_reloads'), {" in loads
+    assert "('raw_google_ads', 'google_ads')," in loads
 
 
 PROJECT_FILE = DBT / "dbt_project.yml"
@@ -1295,7 +1397,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 575, counted
+    assert counted == 581, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text

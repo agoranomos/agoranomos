@@ -396,8 +396,9 @@ SOURCES = ("demo_search", "demo_social", "demo_video", "demo_web", "demo_fx", "e
 
 @pytest.mark.parametrize("source", SOURCES)
 def test_each_source_has_its_schema_and_its_staging_schema(source):
-    # dlt loads raw_<source> as loader and merges through raw_<source>_staging; transformer reads
-    # the first, and no role but loader the second (ADR-0004).
+    # dlt appends to raw_<source> as loader and keeps the versions of the entities through
+    # raw_<source>_staging, which it also empties after every load; transformer reads the first,
+    # and no role but loader the second (ADR-0004, ADR-0038).
     text = normalized("warehouse.sql")
     raw, staging = f"raw_{source}", f"raw_{source}_staging"
     for statement in (

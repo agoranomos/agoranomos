@@ -6,30 +6,39 @@ sources:
       its responses as dlt normalizes them, nested objects joined by __, every metric as text.
     schema: raw_demo_video
     # No freshness check of dbt: the Ops collection shows the last load of each account, from
-    # _agoranomos_reloads (models/ops/ops_loads.sql).
+    # _agoranomos_loads (models/ops/ops_loads.sql).
     config:
       freshness: null
     tables:
-      - name: _agoranomos_reloads
+      - name: _agoranomos_loads
         description: >-
-          The record of the loads of demo_video: one row for each account in each load, with the
-          day of the load in the time zone of the account (as_of), the first and last day that
-          the load replaced (window_start, window_end), and the moment of the load.
+          The journal of the loads of demo_video: one row for each account in each load, written in
+          the same run as the rows of the load, so under its _dlt_load_id. An account that the load
+          took has the status loaded, the day of the load in the time zone of the account (as_of),
+          the first and last day of the window that the load took (window_from, window_to), and the
+          moment of the load (loaded_at). The staging models read, for each account and day, the
+          rows of the newest whole load whose window covers the day.
+      - name: _dlt_loads
+        description: >-
+          The loads of dlt into raw_demo_video, one row each: a load is whole once it has its row
+          here, with status 0, which dlt writes after the last table of the load. The staging models
+          read the rows of whole loads only.
       - name: advertisers
         description: >-
-          The advertisers of demo_video, its ad accounts, one row each, with their currency and
-          time zone; each load replaces them.
+          The advertisers of demo_video, its ad accounts, one row each, with their currency and time
+          zone; each load replaces them.
       - name: campaigns
         description: >-
           The campaigns of demo_video, one row for each version, from _dlt_valid_from until
-          _dlt_valid_to, as dlt keeps them with its scd2 strategy. A removed campaign is not
-          listed, so its last version ends.
+          _dlt_valid_to, as dlt keeps them with its scd2 strategy. A removed campaign is not listed,
+          so its last version ends.
       - name: report_campaign_daily
         description: >-
-          The integrated report of demo_video by campaign and day, one row for each campaign and
-          day with any metric, in the currency and the time zone of the account, - for a metric
-          that means nothing on the day. Each load replaces the days of each account that it
-          covers.
+          The integrated report of demo_video by campaign and day, one row for each campaign and day
+          with any metric, in the currency and the time zone of the account, - for a metric that
+          means nothing on the day. Each load appends its rows under its own _dlt_load_id, and
+          staging reads, for each account and day, those of the newest whole load whose window
+          covers the day.
       - name: adgroups
         description: >-
           The ad groups of demo_video, one row for each version, from _dlt_valid_from until
@@ -40,7 +49,8 @@ sources:
           The integrated report of demo_video by ad group and day, one row for each ad group and day
           with any metric, with the campaign of the ad group among its metrics, in the currency and
           the time zone of the account, - for a metric that means nothing on the day. Each load
-          replaces the days of each account that it covers.
+          appends its rows under its own _dlt_load_id, and staging reads, for each account and day,
+          those of the newest whole load whose window covers the day.
       - name: ads
         description: >-
           The ads of demo_video, one row for each version, from _dlt_valid_from until _dlt_valid_to,
@@ -51,4 +61,5 @@ sources:
           The integrated report of demo_video by ad and day, one row for each ad and day with any
           metric, with the campaign and the ad group of the ad among its metrics, in the currency
           and the time zone of the account, - for a metric that means nothing on the day. Each load
-          replaces the days of each account that it covers.
+          appends its rows under its own _dlt_load_id, and staging reads, for each account and day,
+          those of the newest whole load whose window covers the day.
