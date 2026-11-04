@@ -2,7 +2,8 @@
 -- loader is for dlt, which is to load the raw_<source> schemas (ADR-0004), transformer for dbt,
 -- which is to read them and build staging, marts and ops (ADR-0005, ADR-0029), metabase_reader
 -- reads marts and the views of the Ops collection in ops, and ai_reader, the role of MCP Toolbox,
--- reads marts and staging (ADR-0007, ADR-0030). No role but the superuser can create a
+-- reads marts and staging (ADR-0007, ADR-0030). migrator owns the schema core, whose tables the
+-- migrations of postgres/migrations create (ADR-0035, ADR-0044). No role but the superuser can create a
 -- schema, so this file creates every schema that the pipelines are to write. db-init runs it on every start, so each statement is safe to repeat.
 
 -- ALTER ROLE below carries a password in its text, and pg_stat_statements keeps the text of utility
@@ -82,6 +83,15 @@ SELECT format(
 GRANT pg_read_all_data TO backup;
 GRANT CONNECT ON DATABASE warehouse TO backup;
 ALTER ROLE backup SET default_transaction_read_only = on;
+
+-- migrator owns the schema core and what the migrations create in it (ADR-0035, ADR-0038,
+-- ADR-0044): db-init applies each migration as the superuser with SET ROLE migrator
+-- (postgres/migrate.sql), so it needs no password and cannot sign in, and no role is made a
+-- member of it. It is given no privilege: the ownership is all that it has. As for the roles
+-- above, the statement names each attribute that would give it more power, and also takes away a
+-- password given by hand.
+SELECT 'CREATE ROLE migrator' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'migrator') \gexec
+ALTER ROLE migrator WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD NULL;
 
 -- The fictional platforms of the demo (ADR-0025), which replace the one demo account of v0.1: dlt
 -- loads each into raw_demo_<platform>, and merges and keeps the versions of its campaigns through
@@ -167,6 +177,18 @@ GRANT TEMPORARY ON DATABASE warehouse TO transformer;
 -- wait behind it. transformer waits at most a minute for a lock, so a blocked run fails and the mart
 -- keeps its data.
 ALTER ROLE transformer SET lock_timeout = '1min';
+
+-- The schema core, the layer that keeps the data for good (ADR-0035), is migrator's, so that
+-- transformer, which is to write into its tables, can drop neither the schema nor a table of
+-- migrator in it: the owner of a schema may drop every object in it. The migrations create its
+-- tables after this file, as migrator (db-init.sh). transformer may enter it and create the tables
+-- of its snapshots, which are its own; metabase_reader and ai_reader get nothing, as the views
+-- that they are to read run with the rights of their owner. The schema is created here and not in
+-- a migration, as no role but the superuser can create a schema, and every start sets its owner
+-- again and gives back a grant that was taken away by hand.
+CREATE SCHEMA IF NOT EXISTS core AUTHORIZATION migrator;
+ALTER SCHEMA core OWNER TO migrator;
+GRANT USAGE, CREATE ON SCHEMA core TO transformer;
 
 -- The demo of v0.1: one fictional ad account in raw_demo, which dlt merged through
 -- raw_demo_staging, the view staging.stg_demo__ad_stats_daily and the mart marts.ad_spend_daily.

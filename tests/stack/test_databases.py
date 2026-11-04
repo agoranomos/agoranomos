@@ -1,5 +1,10 @@
+import hashlib
+import re
+import subprocess
+
 import pytest
 from stack_helpers import (
+    REPO_ROOT,
     WAREHOUSE_ROLES,
     compose,
     job_failed,
@@ -194,7 +199,12 @@ def test_role_passwords_stay_out_of_pg_stat_statements(env):
 # staging, marts and ops, metabase_reader reads marts and, in ops, the views that dbt grants it
 # (ADR-0029). The fictional platforms of the demo each have a raw schema and a staging schema of
 # their own; the settings of the model have a raw schema only, as dlt replaces its tables in place.
+# migrator owns core, and transformer may enter it and create the tables of its snapshots there
+# (ADR-0035).
 SCHEMA_PRIVILEGES = {
+    ("loader", "core"): (False, False),
+    ("transformer", "core"): (True, True),
+    ("metabase_reader", "core"): (False, False),
     ("loader", "staging"): (False, False),
     ("loader", "marts"): (False, False),
     ("loader", "ops"): (False, False),
@@ -266,6 +276,7 @@ def test_each_schema_of_the_layers_has_its_owner(env):
     )
     assert result.returncode == 0, result.stderr
     assert sorted(result.stdout.split()) == [
+        "core:migrator",
         "marts:transformer",
         "ops:transformer",
         "raw_demo_fx:loader",
@@ -415,6 +426,159 @@ def test_data_moves_through_the_layers_as_the_roles_allow(env):
         assert result.stdout.strip() == "1"
     finally:
         warehouse(env, "DROP TABLE IF EXISTS marts.layers_check, raw_demo_search.layers_check")
+
+
+# The migrations of the core in the checkout (ADR-0038, ADR-0044), as db-init records them in
+# core.schema_migrations and psql -tA prints them: the number, the name and the SHA-256 of the file.
+MIGRATIONS = sorted((REPO_ROOT / "postgres" / "migrations").glob("[0-9][0-9][0-9][0-9]_*.sql"))
+CHECKOUT_MIGRATIONS = [
+    f"{int(path.name[:4])}|{path.stem[5:]}|{hashlib.sha256(path.read_bytes()).hexdigest()}"
+    for path in MIGRATIONS
+]
+APPLIED = "SELECT version, name, checksum FROM core.schema_migrations ORDER BY version"
+APPLIED_AT = "SELECT version, applied_at FROM core.schema_migrations ORDER BY version"
+
+
+def test_the_warehouse_has_applied_each_migration_of_the_checkout_once(env):
+    assert CHECKOUT_MIGRATIONS, "postgres/migrations holds no migration"
+    assert warehouse_output(env, APPLIED).splitlines() == CHECKOUT_MIGRATIONS
+
+
+def test_the_table_of_the_migrations_belongs_to_migrator_and_is_described(env):
+    # The tables of the core describe themselves in their migrations, as dbt does not describe
+    # them (ADR-0038).
+    table = "'core.schema_migrations'::regclass"
+    owner = (
+        "SELECT pg_get_userbyid(relowner) || ':' || relkind::text "  # noqa: S608 (a constant)
+        f"FROM pg_class WHERE oid = {table}"
+    )
+    assert warehouse_output(env, owner) == "migrator:r"
+    described = (
+        "SELECT count(*) FILTER (WHERE col_description(attrelid, attnum) <> '') || ':' || "  # noqa: S608 (a constant)
+        f"count(*) || ':' || (obj_description({table}, 'pg_class') <> '') FROM pg_attribute "
+        f"WHERE attrelid = {table} AND attnum > 0 AND NOT attisdropped"
+    )
+    assert warehouse_output(env, described) == "4:4:true"
+
+
+def test_a_second_start_applies_no_migration(env):
+    before = warehouse_output(env, APPLIED_AT)
+    result = compose("run", "--rm", "--no-deps", "db-init", check=False)
+    assert result.returncode == 0, job_failed("db-init", result)
+    said = (
+        "db-init: the migrations of the core are up to date: "
+        f"{len(CHECKOUT_MIGRATIONS)} applied, none waiting"
+    ) in result.stdout
+    assert said, "db-init did not say that the migrations of the core were up to date"
+    assert warehouse_output(env, APPLIED_AT) == before
+
+
+def test_db_init_stops_on_an_applied_migration_that_changed(env):
+    # As if the file had changed since the warehouse applied it: its row gets another checksum.
+    # db-init stops before it applies anything, and says which migration changed.
+    applied = warehouse_output(env, "SELECT checksum FROM core.schema_migrations WHERE version = 1")
+    assert re.fullmatch("[0-9a-f]{64}", applied)
+    try:
+        warehouse_output(
+            env, "UPDATE core.schema_migrations SET checksum = repeat('0', 64) WHERE version = 1"
+        )
+        result = compose("run", "--rm", "--no-deps", "db-init", check=False)
+        # Never the output itself in the message: see job_failed.
+        stopped = result.returncode == 1 and (
+            f"the migration {MIGRATIONS[0].name} changed after the warehouse applied it"
+            in result.stderr
+        )
+        assert stopped, job_failed("db-init", result)
+    finally:
+        warehouse_output(
+            env,
+            f"UPDATE core.schema_migrations SET checksum = '{applied}' WHERE version = 1",  # noqa: S608 (64 hexadecimal digits)
+        )
+    assert warehouse_output(env, APPLIED).splitlines() == CHECKOUT_MIGRATIONS
+
+
+def test_migrator_cannot_sign_in_and_has_no_power_but_its_ownership(env):
+    # db-init becomes it with SET ROLE: it has no password, no attribute, no privilege on the
+    # database, no role, and no role has it (ADR-0035).
+    found = warehouse_output(
+        env,
+        "SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls, rolcanlogin, "
+        "rolpassword IS NULL, "
+        "(SELECT count(*) FROM pg_auth_members WHERE member = r.oid OR roleid = r.oid), "
+        "has_database_privilege(r.oid, 'warehouse', 'CONNECT'), "
+        "has_database_privilege(r.oid, 'warehouse', 'CREATE'), "
+        "has_database_privilege(r.oid, 'warehouse', 'TEMP') "
+        "FROM pg_authid AS r WHERE rolname = 'migrator'",
+    )
+    assert found == "f|f|f|f|f|f|t|0|f|f|f"
+
+
+def test_ai_reader_gets_nothing_in_core(env):
+    # It reads marts and staging only (ADR-0030); the views of v0.5 read the core as their owner.
+    privileges = warehouse_output(
+        env,
+        "SELECT has_schema_privilege('ai_reader', 'core', 'USAGE') "
+        "OR has_schema_privilege('ai_reader', 'core', 'CREATE')",
+    )
+    assert privileges == "f"
+
+
+# What transformer meets in the schema core when it reaches beyond the tables of its snapshots: it
+# can neither drop nor take the schema, nor change, empty or drop a table of migrator, nor become
+# migrator (ADR-0035).
+TRANSFORMER_IN_CORE = {
+    "DROP SCHEMA core": "must be owner of schema core",
+    "DROP SCHEMA core CASCADE": "must be owner of schema core",
+    "ALTER SCHEMA core OWNER TO transformer": "must be owner of schema core",
+    "DROP TABLE core.schema_migrations": "must be owner of table schema_migrations",
+    "ALTER TABLE core.schema_migrations ADD COLUMN x integer": (
+        "must be owner of table schema_migrations"
+    ),
+    "TRUNCATE core.schema_migrations": "permission denied for table schema_migrations",
+    "DELETE FROM core.schema_migrations": "permission denied for table schema_migrations",
+    "SET ROLE migrator": 'permission denied to set role "migrator"',
+}
+
+
+@pytest.mark.parametrize("sql", sorted(TRANSFORMER_IN_CORE))
+def test_transformer_can_drop_neither_the_schema_core_nor_a_table_of_migrator(env, sql):
+    result = warehouse(env, sql, "transformer")
+    assert result.returncode != 0
+    assert TRANSFORMER_IN_CORE[sql] in result.stderr
+    assert warehouse_output(env, APPLIED).splitlines() == CHECKOUT_MIGRATIONS
+
+
+def test_transformer_creates_and_drops_a_table_of_its_own_in_core(env):
+    # As dbt does for the table of a snapshot.
+    try:
+        warehouse_output(env, "CREATE TABLE core.snapshot_check (id integer)", "transformer")
+        owner = warehouse_output(
+            env,
+            "SELECT pg_get_userbyid(relowner) FROM pg_class "
+            "WHERE oid = 'core.snapshot_check'::regclass",
+        )
+        assert owner == "transformer"
+        warehouse_output(env, "DROP TABLE core.snapshot_check", "transformer")
+    finally:
+        warehouse_output(env, "DROP TABLE IF EXISTS core.snapshot_check")
+
+
+def test_status_shows_the_migrations_of_the_core_as_applied():
+    result = subprocess.run(
+        [str(REPO_ROOT / "agoranomos"), "status"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    assert result.returncode == 0, f"status exited with {result.returncode}"
+    line = (
+        rf"Migrations of the core: {len(MIGRATIONS)} applied, the last {MIGRATIONS[-1].stem} "
+        r"on \d{4}-\d\d-\d\d \d\d:\d\d UTC; none waiting \(ADR-0044\)\."
+    )
+    shown = re.search(rf"^{line}$", result.stdout, re.MULTILINE) is not None
+    assert shown, "status does not say that every migration of the core is applied"
 
 
 # The demo of v0.1 in a warehouse, as its roles made it: the raw schema and the staging schema of

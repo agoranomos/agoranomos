@@ -928,3 +928,45 @@ def test_env_example_lists_each_setting_commented_out_with_the_value_of_the_defa
     page = (REPO_ROOT / "docs/reference/configuration.md").read_text(encoding="utf-8")
     missing = [key for key in commented if f"`{key}`" not in page]
     assert not missing, f"add these settings to docs/reference/configuration.md: {missing}"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_migration_files_lists_the_migrations_of_the_checkout_in_the_order_of_their_numbers(
+    shell, tmp_path
+):
+    # The script runs from the checkout, here tmp_path, so its folder is the root.
+    folder = tmp_path / "postgres" / "migrations"
+    folder.mkdir(parents=True)
+    for name in ("0010_tenth.sql", "0002_second.sql", "0009_ninth.sql", "0001_first.sql"):
+        (folder / name).write_text("SELECT 1;\n", encoding="utf-8")
+    # Not migrations: db-init stops on the first two, and the last is no file.
+    (folder / "README.md").write_text("", encoding="utf-8")
+    (folder / "0003_third.sql.orig").write_text("", encoding="utf-8")
+    (folder / "0004_folder.sql").mkdir()
+    result = run_with_script_functions(shell, "migration_files", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["0001_first", "0002_second", "0009_ninth", "0010_tenth"]
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_migration_files_prints_nothing_without_the_folder(shell, tmp_path):
+    result = run_with_script_functions(shell, "migration_files", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_migrations_summary_counts_only_the_rows_of_the_migrations(shell, tmp_path):
+    # A line that is no row, such as a notice, counts for nothing. A migration that waits below
+    # an applied one is listed as waiting: db-init stops on it, and its log says why.
+    checkout = "0001_first\n0002_second\n0003_third"
+    rows = "NOTICE: something\n0001_first\x1f2026-11-03 10:15 UTC\n\n0003_third\x1f2026-11-05 UTC\n"
+    result = run_with_script_functions(
+        shell, 'migrations_summary "$1" "$2"', checkout, rows, cwd=tmp_path
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == (
+        "Migrations of the core: 2 applied, the last 0003_third on 2026-11-05 UTC; 1 waiting, "
+        "which ./agoranomos up applies: 0002_second (ADR-0044).\n"
+    )
+    assert result.stderr == ""

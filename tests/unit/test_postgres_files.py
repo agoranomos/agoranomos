@@ -121,9 +121,20 @@ def test_db_init_runs_the_cleanup_of_the_results_of_celery_as_their_role_only():
     # code of a task on the Celery worker can sign in as it: in that database, such code decides
     # what a statement runs, such as a trigger, or an operator of a type of its own. A statement of
     # the superuser there would run that code with the powers of the superuser, so the superuser
-    # runs the setup only, and the cleanup signs in as celery_results.
+    # runs the setup only, and the cleanup signs in as celery_results. In the warehouse, the
+    # superuser also reads the migrations of the core that it has applied (the SQL on standard
+    # input, -) and applies the others (migrate.sql), in the function migrate, which comes first in
+    # the script.
     folder = "/opt/agoranomos/postgres"
     assert run_sql_calls() == [
+        ("warehouse-db", "warehouse", "postgres", "WAREHOUSE_POSTGRES_PASSWORD", "-"),
+        (
+            "warehouse-db",
+            "warehouse",
+            "postgres",
+            "WAREHOUSE_POSTGRES_PASSWORD",
+            f"{folder}/migrate.sql",
+        ),
         (
             "platform-db",
             "postgres",
@@ -284,6 +295,39 @@ def test_ops_belongs_to_transformer_and_metabase_reader_may_only_enter_it():
     assert not re.search(r"DEFAULT PRIVILEGES[^;]*\bIN SCHEMA ops\b", text, re.IGNORECASE)
     temporary = re.findall(r"\bGRANT TEMPORARY\b[^;]*;", text, re.IGNORECASE)
     assert temporary == ["GRANT TEMPORARY ON DATABASE warehouse TO transformer;"]
+
+
+def test_migrator_owns_core_and_has_no_other_power():
+    # ADR-0035: a role of the migrations owns the schema core and its tables, so that transformer,
+    # which writes into them, can drop none of them. db-init becomes it with SET ROLE, so it cannot
+    # sign in and has no password; the statement names every attribute, as for the other roles, on
+    # every start. It is granted nothing, and no role is granted it.
+    text = normalized("warehouse.sql")
+    assert runs(
+        text,
+        "SELECT 'CREATE ROLE migrator' WHERE NOT EXISTS "
+        "(SELECT FROM pg_roles WHERE rolname = 'migrator') \\gexec",
+    )
+    attributes = re.findall(r"\bALTER ROLE migrator WITH ([^;]*);", text, re.IGNORECASE)
+    assert attributes == [
+        "NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD NULL"
+    ]
+    assert re.findall(r"\bGRANT\b[^;]*\bmigrator\b[^;]*;", text, re.IGNORECASE) == []
+    # The role exists before the schema that it owns, which the migrations fill after this file.
+    created = "CREATE SCHEMA IF NOT EXISTS core AUTHORIZATION migrator;"
+    assert runs(text, created)
+    assert runs(text, "ALTER SCHEMA core OWNER TO migrator;")
+    assert text.index("ALTER ROLE migrator") < text.index(created)
+
+
+def test_transformer_may_enter_core_and_create_its_snapshots_there_and_no_other_role_may():
+    # ADR-0035: transformer gets USAGE and CREATE on core, for the tables of its snapshots, which
+    # are its own; the tables of migrator get their grants in the migrations that create them.
+    # metabase_reader and ai_reader read views that run with the rights of their owner.
+    text = normalized("warehouse.sql")
+    on_core = re.findall(r"\b(?:GRANT|REVOKE)\b[^;]*\bcore\b[^;]*;", text, re.IGNORECASE)
+    assert on_core == ["GRANT USAGE, CREATE ON SCHEMA core TO transformer;"]
+    assert not re.search(r"DEFAULT PRIVILEGES[^;]*\bcore\b", text, re.IGNORECASE)
 
 
 def test_metabase_reader_gets_its_limits_on_every_start():
