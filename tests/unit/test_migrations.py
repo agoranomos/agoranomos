@@ -610,3 +610,113 @@ def test_migrate_stops_at_a_migration_that_fails_and_tries_none_after_it(shell, 
         result.stderr
     )
     assert "0003" not in result.stdout + result.stderr
+
+
+# The switch of the migrations of db-init, DB_INIT_MIGRATIONS (ADR-0044): ./agoranomos restore
+# runs db-init with skip before pg_restore replaces the warehouse whole, and the start after it
+# applies them. The stand-in for psql logs each call of the whole script as host, database and file,
+# and reads and answers nothing; the folder of the migrations of the image is not on this machine,
+# so a migrate that runs finds none, and says that they are up to date.
+FAKE_PSQL_CALLS = r"""#!/bin/sh
+host="" database="" file=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --host) host=$2; shift ;;
+    --dbname) database=$2; shift ;;
+    --file) file=$2; shift ;;
+  esac
+  shift
+done
+[ "$file" != - ] || cat > /dev/null
+printf '%s %s %s\n' "$host" "$database" "$file" >> "$FAKE_LOG"
+"""
+SET_UP = [
+    "platform-db postgres /opt/agoranomos/postgres/platform.sql",
+    "warehouse-db warehouse /opt/agoranomos/postgres/warehouse.sql",
+]
+READ_THE_MIGRATIONS = "warehouse-db warehouse -"
+CLEAN_UP = "platform-db celery_results /opt/agoranomos/postgres/celery_results.sql"
+UP_TO_DATE = "db-init: the migrations of the core are up to date: 0 applied, none waiting"
+LEFT = "db-init: left the migrations of the core to the next start (DB_INIT_MIGRATIONS=skip)"
+
+
+def run_db_init(shell, tmp_path, **environment):
+    """Run the whole of postgres/db-init.sh with the stand-in for psql. Return the result and the
+    calls of psql, in order."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    psql = bin_dir / "psql"
+    psql.write_text(FAKE_PSQL_CALLS, encoding="utf-8")
+    psql.chmod(0o755)
+    log = tmp_path / "psql.log"
+    result = subprocess.run(
+        [shell, str(POSTGRES / "db-init.sh")],
+        env={
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "WAREHOUSE_POSTGRES_PASSWORD": "a-password",
+            "PLATFORM_POSTGRES_PASSWORD": "a-password",
+            "CELERY_RESULTS_DB_PASSWORD": "a-password",
+            "FAKE_LOG": str(log),
+            **environment,
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    return result, calls
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("value", [None, "", "apply"], ids=["unset", "empty", "apply"])
+def test_db_init_applies_the_migrations_unless_it_is_told_to_skip_them(shell, tmp_path, value):
+    # Every start but the first db-init of a restore: compose.yaml does not pass the switch.
+    environment = {} if value is None else {"DB_INIT_MIGRATIONS": value}
+    result, calls = run_db_init(shell, tmp_path, **environment)
+    assert result.returncode == 0, result.stderr
+    assert calls == [*SET_UP, READ_THE_MIGRATIONS, CLEAN_UP]
+    assert UP_TO_DATE in result.stdout.splitlines()
+    assert LEFT not in result.stdout
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_db_init_with_skip_sets_up_the_roles_and_schemas_and_leaves_the_migrations(shell, tmp_path):
+    # pg_restore needs the roles, migrator among them, and the rest of db-init runs as always.
+    result, calls = run_db_init(shell, tmp_path, DB_INIT_MIGRATIONS="skip")
+    assert result.returncode == 0, result.stderr
+    assert calls == [*SET_UP, CLEAN_UP]
+    assert LEFT in result.stdout.splitlines()
+    assert UP_TO_DATE not in result.stdout
+    assert "db-init: the platform and warehouse instances are up to date" in result.stdout
+
+
+@pytest.mark.parametrize("value", ["Skip", "SKIP", "no", "false", "0", "apply ", "skip,apply"])
+def test_db_init_stops_on_another_value_of_the_switch_before_it_changes_anything(tmp_path, value):
+    result, calls = run_db_init("/bin/sh", tmp_path, DB_INIT_MIGRATIONS=value)
+    assert result.returncode == 1
+    assert calls == []
+    assert result.stderr == (
+        f"db-init: DB_INIT_MIGRATIONS is apply or skip, not {value}: db-init changed nothing\n"
+    )
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_migrate_with_skip_reads_and_applies_nothing(shell, tmp_path):
+    # On a folder and a warehouse on which it would apply every migration, and stop on none.
+    result, given = run_migrate(shell, tmp_path, FILES, DB_INIT_MIGRATIONS="skip")
+    assert result.returncode == 0, result.stderr
+    assert given == []
+    assert result.stdout.splitlines() == [LEFT]
+
+
+def test_no_compose_file_and_no_setting_of_env_passes_the_switch():
+    # So that a value in .env or in the shell never skips the migrations of a start: only the
+    # first db-init of ./agoranomos restore gets it, with docker compose run -e.
+    root = POSTGRES.parent
+    for name in ("compose.yaml", "compose.celery.yaml", ".env.example"):
+        assert "DB_INIT_MIGRATIONS" not in (root / name).read_text(encoding="utf-8"), name
+    script = (root / "agoranomos").read_text(encoding="utf-8")
+    assert re.findall(r".*DB_INIT_MIGRATIONS.*", script) == [
+        "  compose run --rm --no-deps -T -e DB_INIT_MIGRATIONS=skip db-init < /dev/null ||"
+    ]

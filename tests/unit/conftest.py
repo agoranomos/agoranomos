@@ -16,7 +16,9 @@ default of the stack: true or false, and without FAKE_NETWORK_IPV6 the network d
 FAKE_NETWORK_CREATE_FAIL is the error of a docker network create that fails, FAKE_NETWORK_RM_FAIL
 makes docker network rm fail. FAKE_PSQL_OUTPUT is what psql in a container prints, and
 FAKE_MIGRATIONS_OUTPUT and FAKE_MIGRATIONS_EXIT what it prints, and its exit status, for the SQL of
-the migrations of the core. Cli.stub replaces a stand-in, or adds a tool, for one test.
+the migrations of the core, FAKE_WAREHOUSE_DATA and FAKE_WAREHOUSE_DATA_EXIT for the SQL with which
+up asks whether the warehouse holds data: t, the default, or f. Cli.stub replaces a stand-in, or
+adds a tool, for one test.
 """
 
 from __future__ import annotations
@@ -197,7 +199,9 @@ case "$1" in
         # tokens, separated by the unit separator. The SQL that names core.schema_migrations, with
         # which status asks the warehouse for the migrations of the core that it has applied, gets
         # FAKE_MIGRATIONS_OUTPUT instead, by default nothing, as from a warehouse that has applied
-        # none, and FAKE_MIGRATIONS_EXIT is its exit status.
+        # none, and FAKE_MIGRATIONS_EXIT is its exit status. The SQL that reads pg_class by relkind,
+        # with which up asks whether the warehouse holds data, gets FAKE_WAREHOUSE_DATA, t by
+        # default, and FAKE_WAREHOUSE_DATA_EXIT is its exit status.
         if [ "$1" = exec ]; then
           case " $* " in
             *" psql "*)
@@ -206,6 +210,10 @@ case "$1" in
                 *core.schema_migrations*)
                   [ -z "${FAKE_MIGRATIONS_OUTPUT:-}" ] || printf '%s\n' "$FAKE_MIGRATIONS_OUTPUT"
                   exit "${FAKE_MIGRATIONS_EXIT:-0}"
+                  ;;
+                *relkind*)
+                  printf '%s\n' "${FAKE_WAREHOUSE_DATA:-t}"
+                  exit "${FAKE_WAREHOUSE_DATA_EXIT:-0}"
                   ;;
               esac
               if [ -n "${FAKE_PSQL_OUTPUT+set}" ]; then

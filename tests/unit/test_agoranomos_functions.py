@@ -970,3 +970,46 @@ def test_migrations_summary_counts_only_the_rows_of_the_migrations(shell, tmp_pa
         "which ./agoranomos up applies: 0002_second (ADR-0044).\n"
     )
     assert result.stderr == ""
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("rows", "expected"),
+    [
+        # A warehouse of v0.4.x, or a new one: no table, no row, and every migration waits.
+        ("", "0|3|0001_first, 0002_second, 0003_third|0001_first 0002_second 0003_third|"),
+        (
+            "0001_first\x1f2026-11-03 10:15 UTC",
+            "1|2|0002_second, 0003_third|0002_second 0003_third|",
+        ),
+        (
+            "0001_first\x1f2026-11-03 10:15 UTC\n0002_second\x1f2026-11-04 UTC\n"
+            "0003_third\x1f2026-11-05 UTC",
+            "3|0|||",
+        ),
+        # A newer release applied 0004: nothing waits, and db-init stops on what lacks.
+        (
+            "0001_first\x1f2026-11-03 UTC\n0002_second\x1f2026-11-04 UTC\n"
+            "0003_third\x1f2026-11-05 UTC\n0004_fourth\x1f2026-11-06 UTC",
+            "4|0|||0004_fourth",
+        ),
+    ],
+    ids=["none applied", "two wait", "none waits", "one lacks"],
+)
+def test_migrations_compare_names_those_that_wait_and_prints_nothing(
+    shell, tmp_path, rows, expected
+):
+    # up takes the backup before the migrations of waiting_names, and status says the rest.
+    checkout = "0001_first\n0002_second\n0003_third"
+    result = run_with_script_functions(
+        shell,
+        'migrations_compare "$1" "$2"; '
+        'printf "%s|%s|%s|%s|%s\\n" "$applied_count" "$waiting_count" "$waiting" '
+        '"$waiting_names" "$lacking"',
+        checkout,
+        rows,
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"{expected}\n"
+    assert result.stderr == ""

@@ -3542,6 +3542,11 @@ def calls_in_order(cli, *starts):
     return [next(i for i, call in enumerate(calls) if call.startswith(start)) for start in starts]
 
 
+# The db-init that restore runs before pg_restore: without the migrations of the core, which the
+# db-init of the start at its end applies (ADR-0044).
+RESTORE_DB_INIT = "compose run --rm --no-deps -T -e DB_INIT_MIGRATIONS=skip db-init"
+
+
 def test_restore_replaces_each_database_inside_its_container_and_starts_the_stack(cli, tmp_path):
     ready_to_restore(cli)
     result = cli.run(
@@ -3564,7 +3569,7 @@ def test_restore_replaces_each_database_inside_its_container_and_starts_the_stac
         f"compose run --rm --no-deps -T backup verify {BACKUP} warehouse airflow metabase",
         "compose stop ",
         "compose up --detach --wait warehouse-db platform-db",
-        "compose run --rm --no-deps -T db-init",
+        RESTORE_DB_INIT,
         "compose exec -T warehouse-db pg_restore",
         "compose exec -T warehouse-db vacuumdb --username=postgres --analyze-only --quiet "
         "--dbname=warehouse",
@@ -3896,7 +3901,7 @@ def test_a_failed_copy_after_another_database_is_back_says_to_finish_before_up(c
         (
             {"FAKE_COMPOSE_FAIL": "--wait"},
             "the databases did not start",
-            ("compose run --rm --no-deps -T db-init",),
+            (RESTORE_DB_INIT,),
         ),
         ({"FAKE_RUN_FAIL": "db-init"}, "db-init failed", ("compose exec",)),
     ],
@@ -4484,9 +4489,7 @@ def test_restore_changes_nothing_when_docker_cannot_make_the_ipv6_network(cli, t
     assert result.returncode == 1
     assert "Docker could not make a test network with IPv6" in result.stderr
     assert not any(
-        call.startswith(
-            ("compose stop", "compose up", "compose down", "compose run --rm --no-deps -T db-init")
-        )
+        call.startswith(("compose stop", "compose up", "compose down", RESTORE_DB_INIT))
         for call in cli.docker_calls()
     )
 
@@ -5741,6 +5744,283 @@ def test_status_takes_only_the_migrations_and_counts_none_without_the_folder(cli
     (cli.root / "postgres" / "migrations" / "0004_draft.sql.orig").write_text("", encoding="utf-8")
     result = cli.run("status", FAKE_PS_FILE=stopped)
     assert "Migrations of the core: 3 in this checkout;" in result.stdout
+
+
+# The backup before the migrations of the core (ADR-0044): up starts the databases, asks the
+# warehouse which migrations it has applied, and when some wait and it holds data, takes a backup
+# before the rest of the stack, and with it db-init, starts.
+DATABASES_FIRST = "compose up --detach --wait warehouse-db platform-db"
+STACK_START = "compose up --detach --remove-orphans"
+BEFORE_IN_A_CONTAINER = "compose run --rm --no-deps -T backup before-migrations"
+BEFORE_IN_THE_SERVICE = (
+    "compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh before-migrations"
+)
+WAIT_LINE = (
+    "Migrations of the core wait: {}. Taking a backup before db-init applies them (ADR-0044)..."
+)
+BACKUP_FAILED = "up stopped before db-init, so no migration of the core was applied"
+
+
+def psql_sql(cli):
+    """What each call of psql in a container read, in call order (FAKE_READ_STDIN)."""
+    return [received for call, received in cli.stdin_reads() if " psql " in f" {call} "]
+
+
+@pytest.mark.parametrize("ops", [False, True])
+@pytest.mark.parametrize(
+    ("rows", "waiting"),
+    [
+        ("", list(MIGRATIONS)),
+        (APPLIED_TWO, ["0003_add_a_column"]),
+    ],
+    ids=["a warehouse of v0.4.x", "one waits"],
+)
+def test_up_takes_a_backup_before_db_init_applies_the_migrations_that_wait(
+    cli, tmp_path, ops, rows, waiting
+):
+    # A warehouse of v0.4.x has no core.schema_migrations, so every migration of the checkout
+    # waits. The backup is taken as ./agoranomos backup takes it: in the running backup service of
+    # the ops profile, or in a container of its own; and before the stack, with db-init, starts.
+    if ops:
+        ops_env(cli)
+        fake = the_running_service(cli, tmp_path)
+        backup_call = f"{BEFORE_IN_THE_SERVICE} {' '.join(waiting)}"
+    else:
+        cli.run("init")
+        fake = {"FAKE_PS_FILE": ps_file(tmp_path, HEALTHY_PS)}
+        backup_call = f"{BEFORE_IN_A_CONTAINER} {' '.join(waiting)}"
+    add_migrations(cli, *MIGRATIONS)
+    write_latest(cli, **good_backup(0, kind="manual", last_ok="20261103T101500Z"))
+    result = cli.run("up", FAKE_MIGRATIONS_OUTPUT=rows, **fake, **QUICK)
+    assert result.returncode == 0, result.stderr
+    order = calls_in_order(cli, DATABASES_FIRST, "compose exec -T warehouse-db psql", backup_call)
+    assert order == sorted(order)
+    assert order[-1] < calls_in_order(cli, STACK_START)[0]
+    assert cli.docker_calls().count(backup_call) == 1
+    lines = result.stdout.splitlines()
+    assert WAIT_LINE.format(", ".join(waiting)) in lines
+    assert (
+        "The backup 20261103T101500Z keeps the databases as they were before these migrations, "
+        "and no retention removes it: ./agoranomos status lists it."
+    ) in lines
+    assert "The stack is up." in result.stdout
+
+
+def test_up_takes_no_backup_when_no_migration_waits_and_asks_the_warehouse_once(cli, tmp_path):
+    # The usual start: one look at the warehouse, and nothing more before the stack starts.
+    cli.run("init")
+    add_migrations(cli, *MIGRATIONS)
+    result = cli.run(
+        "up",
+        FAKE_MIGRATIONS_OUTPUT=APPLIED_TWO + "\n0003_add_a_column\x1f2026-11-05 08:30 UTC",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_READ_STDIN="1",
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not any("before-migrations" in call for call in cli.docker_calls())
+    assert "Migrations of the core wait" not in result.stdout
+    order = calls_in_order(cli, DATABASES_FIRST, "compose exec -T warehouse-db psql", STACK_START)
+    assert order == sorted(order)
+    warehouse_sql = [sql for sql in psql_sql(cli) if "core.schema_migrations" in sql]
+    assert len(warehouse_sql) == 1
+    assert not any("relkind" in sql for sql in psql_sql(cli))
+
+
+def test_up_takes_no_backup_of_a_warehouse_that_holds_no_data(cli, tmp_path):
+    # A new volume: every migration waits, and nothing is there that a migration could change.
+    cli.run("init")
+    add_migrations(cli, *MIGRATIONS)
+    result = cli.run(
+        "up", FAKE_WAREHOUSE_DATA="f", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    assert not any("before-migrations" in call for call in cli.docker_calls())
+    assert "Migrations of the core wait" not in result.stdout
+    assert STACK_START in cli.docker_calls()
+
+
+def test_up_without_migrations_in_the_checkout_starts_the_stack_as_before(cli, tmp_path):
+    cli.run("init")
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
+    assert result.returncode == 0, result.stderr
+    assert DATABASES_FIRST not in cli.docker_calls()
+    assert not any(" psql " in call and "warehouse-db" in call for call in cli.docker_calls())
+
+
+@pytest.mark.parametrize("ops", [False, True])
+def test_up_whose_backup_before_the_migrations_fails_stops_before_db_init(cli, tmp_path, ops):
+    if ops:
+        ops_env(cli)
+        fake = {**the_running_service(cli, tmp_path), "FAKE_EXEC_FAIL": "before-migrations"}
+    else:
+        cli.run("init")
+        fake = {"FAKE_PS_FILE": ps_file(tmp_path, HEALTHY_PS), "FAKE_RUN_FAIL": "before-migrations"}
+    add_migrations(cli, *MIGRATIONS)
+    result = cli.run("up", FAKE_MIGRATIONS_OUTPUT=APPLIED_TWO, **fake, **QUICK)
+    assert result.returncode == 1
+    assert "the backup failed: the lines above say at which step" in result.stderr
+    assert BACKUP_FAILED in result.stderr
+    assert "run ./agoranomos up again: it takes the backup again before it applies " in (
+        result.stderr
+    )
+    assert result.stderr.rstrip().endswith("before it applies 0003_add_a_column")
+    assert STACK_START not in cli.docker_calls()
+    assert "Waiting until every service is healthy" not in result.stdout
+
+
+def test_up_whose_backup_cannot_start_says_why_and_stops_before_db_init(cli, tmp_path):
+    # A check of the backup that stops, such as on root, stops up too, with both reasons. Local
+    # mode: preflight checks the user of the backups only with the ops profile.
+    cli.run("init")
+    set_env(cli, AGORANOMOS_UID="0")
+    add_migrations(cli, *MIGRATIONS)
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
+    assert result.returncode == 1
+    assert "AGORANOMOS_UID in .env is 0" in result.stderr
+    assert BACKUP_FAILED in result.stderr
+    assert not any(
+        call.startswith(("compose run", "compose exec -T backup")) for call in (cli.docker_calls())
+    )
+    assert STACK_START not in cli.docker_calls()
+
+
+@pytest.mark.parametrize(
+    ("fake", "message"),
+    [
+        (
+            {"FAKE_COMPOSE_FAIL": "--wait"},
+            "the databases did not start, so up stopped before it applied any migration of the "
+            "core: see ./agoranomos logs warehouse-db and ./agoranomos logs platform-db",
+        ),
+        (
+            {"FAKE_MIGRATIONS_EXIT": "2"},
+            "could not read from the warehouse which migrations of the core it has applied, so up "
+            "stopped before it applied any: the error above says why",
+        ),
+        (
+            {"FAKE_WAREHOUSE_DATA_EXIT": "2"},
+            "could not read from the warehouse whether it holds data, so up stopped before it "
+            "applied any migration of the core: the error above says why",
+        ),
+    ],
+    ids=["databases", "migrations", "data"],
+)
+def test_up_that_cannot_tell_whether_migrations_wait_stops_before_db_init(
+    cli, tmp_path, fake, message
+):
+    cli.run("init")
+    add_migrations(cli, *MIGRATIONS)
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **fake, **QUICK)
+    assert result.returncode == 1
+    assert message in result.stderr
+    assert not any("before-migrations" in call for call in cli.docker_calls())
+    assert STACK_START not in cli.docker_calls()
+
+
+def test_up_with_a_backup_before_the_migrations_leaves_standard_input_alone(cli, tmp_path):
+    # As every call of exec, run and up: a script fed to the shell keeps its next lines.
+    cli.run("init")
+    add_migrations(cli, *MIGRATIONS)
+    result = cli.run(
+        "up",
+        stdin=f"{REST_OF_THE_SCRIPT}\n",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_READ_STDIN="1",
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    reads = [(c, r) for c, r in cli.stdin_reads() if " psql " not in f" {c} "]
+    assert [call for call, _received in reads] == [
+        DATABASES_FIRST.removeprefix("compose "),
+        f"{BEFORE_IN_A_CONTAINER.removeprefix('compose ')} {' '.join(MIGRATIONS)}",
+        STACK_START.removeprefix("compose "),
+    ]
+    assert [received for _call, received in reads] == ["", "", ""]
+
+
+def test_restore_takes_no_backup_before_the_migrations_that_it_leaves_to_db_init(cli, tmp_path):
+    # restore puts back a backup, which is the way back itself; up alone takes the backup.
+    ready_to_restore(cli)
+    add_migrations(cli, *MIGRATIONS)
+    result = cli.run(
+        "restore",
+        BACKUP,
+        "--yes",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_READ_STDIN="1",
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not any("before-migrations" in call for call in cli.docker_calls())
+    assert not any("relkind" in sql for sql in psql_sql(cli))
+
+
+@pytest.mark.parametrize("only", [None, "warehouse", "metabase", "airflow,metabase"])
+def test_restore_leaves_the_migrations_of_the_core_to_the_start_after_the_restore(
+    cli, tmp_path, only
+):
+    # The db-init before pg_restore sets up the roles and schemas and skips the migrations: with
+    # the checkout of the release before, they would stop on the migration that the backup of up
+    # does not hold, in the warehouse that pg_restore is to replace. The db-init of the start at
+    # the end, in docker compose up, applies them, as on every start, whichever databases come back.
+    ready_to_restore(cli)
+    add_migrations(cli, *MIGRATIONS)
+    options = [] if only is None else ["--only", only]
+    result = cli.run(
+        "restore", BACKUP, *options, "--yes", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK
+    )
+    assert result.returncode == 0, result.stderr
+    calls = cli.docker_calls()
+    runs = [call for call in calls if call.startswith("compose run") and call.endswith(" db-init")]
+    assert runs == [RESTORE_DB_INIT]
+    order = calls_in_order(cli, RESTORE_DB_INIT, "compose exec -T", STACK_START)
+    assert order == sorted(order)
+    assert [call for call in calls if "DB_INIT_MIGRATIONS" in call] == [RESTORE_DB_INIT]
+
+
+def test_up_never_skips_the_migrations_of_the_core(cli, tmp_path):
+    cli.run("init")
+    add_migrations(cli, *MIGRATIONS)
+    result = cli.run("up", FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS), **QUICK)
+    assert result.returncode == 0, result.stderr
+    assert not any("DB_INIT_MIGRATIONS" in call for call in cli.docker_calls())
+
+
+def test_status_names_the_migrations_before_which_up_took_a_backup(cli):
+    cli.run("init")
+    finished = int(time.time()) - 60
+    for name, migrations in (("20261103T101500Z", "0002_a 0003_b"), ("20261103T090000Z", "")):
+        folder = cli.root / "backups" / name
+        folder.mkdir()
+        fields = [
+            '  "format": 1',
+            f'  "name": "{name}"',
+            '  "kind": "manual"',
+            *(
+                [
+                    '  "note": "taken by ./agoranomos up before db-init applied the migrations '
+                    f'of the core {migrations}"',
+                    f'  "migrations": "{migrations}"',
+                ]
+                if migrations
+                else []
+            ),
+            f'  "finished_epoch": {finished}',
+            '  "files": []',
+        ]
+        (folder / "manifest.json").write_text(
+            "{\n" + ",\n".join(fields) + "\n}\n", encoding="utf-8"
+        )
+    result = cli.run("status")
+    assert result.returncode == 0, result.stderr
+    assert re.search(
+        r"^  20261103T101500Z: \d+ KiB, 0 days old, taken by up before the migrations of the "
+        r"core 0002_a 0003_b$",
+        result.stdout,
+        re.M,
+    )
+    assert re.search(r"^  20261103T090000Z: \d+ KiB, 0 days old$", result.stdout, re.M)
 
 
 @pytest.mark.parametrize(
