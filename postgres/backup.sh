@@ -6,6 +6,10 @@
 #   backup.sh schedule    take a scheduled backup every day at BACKUP_TIME: the command of the
 #                         service; it runs backup.sh scheduled for each one
 #   backup.sh now         take a backup by hand: ./agoranomos backup
+#   backup.sh before-migrations <migration>...
+#                         take a backup by hand before db-init applies these migrations of the
+#                         core, such as 0002_add_the_facts: ./agoranomos up, when they wait
+#                         (ADR-0044); its manifest names them
 #   backup.sh health      the health check of the service: is the last good backup fresh?
 #   backup.sh verify <backup> [<database>...]
 #                         check a backup before ./agoranomos restore uses it: its files against
@@ -16,7 +20,8 @@
 # 20261011T030012Z. It holds the dump of each database (pg_dump, custom format, zstd), the global
 # objects of each instance without passwords, for reference only (db-init creates the roles), an
 # archive of the extensions folder, SHA256SUMS and manifest.json, which says whether the schedule
-# took it or a person did. It is written as .partial-<name> and renamed when it is complete, so a
+# took it or a person did, and for the backup that ./agoranomos up takes before migrations of the
+# core, which ones. It is written as .partial-<name> and renamed when it is complete, so a
 # folder with the name of a backup is a complete one. latest.json says how the last run went.
 # Every file is readable by its owner only. The retention removes scheduled backups only: a backup
 # by hand, such as the one before an upgrade, stays until the person deletes it.
@@ -136,15 +141,20 @@ write_checksums() {
   (cd "$partial" && sha256sum -- *.dump *.sql extensions.tar.gz > SHA256SUMS)
 }
 
-# Write manifest.json: who took the backup (scheduled or manual), when, the images of the
-# checkout that ran the stack (AGORANOMOS_IMAGES, which ./agoranomos hands Compose), and each file
-# with its size and SHA-256.
+# Write manifest.json: who took the backup (scheduled or manual), why and before which migrations
+# of the core when ./agoranomos up took it before them, when, the images of the checkout that ran
+# the stack (AGORANOMOS_IMAGES, which ./agoranomos hands Compose), and each file with its size and
+# SHA-256. The names of the migrations passed check_migrations, so they hold no quote and no comma.
 write_manifest() {
   {
     printf '{\n'
     printf '  "format": 1,\n'
     printf '  "name": "%s",\n' "$name"
     printf '  "kind": "%s",\n' "$kind"
+    if [ -n "$migrations" ]; then
+      printf '  "note": "%s",\n' "taken by ./agoranomos up before db-init applied the migrations of the core $migrations"
+      printf '  "migrations": "%s",\n' "$migrations"
+    fi
     printf '  "started": "%s",\n' "$started"
     printf '  "finished": "%s",\n' "$finished"
     printf '  "finished_epoch": %s,\n' "$finished_epoch"
@@ -228,8 +238,24 @@ $names"
     done
 }
 
+# Stop unless there is a migration of the core and each is named as postgres/migrations names its
+# file, without .sql: four digits, an underscore, and lower-case letters, digits and underscores.
+check_migrations() {
+  [ "$#" -ge 1 ] || fail "usage: backup.sh before-migrations <migration>..."
+  for migration in "$@"; do
+    case "$migration" in
+      [0-9][0-9][0-9][0-9]_*) ;;
+      *) fail "not the name of a migration of the core, such as 0002_add_the_facts: $migration" ;;
+    esac
+    case "${migration#[0-9][0-9][0-9][0-9]_}" in
+      '' | *[!a-z0-9_]*) fail "not the name of a migration of the core, such as 0002_add_the_facts: $migration" ;;
+    esac
+  done
+}
+
 # Take a backup: $1 is scheduled (the schedule, which does not wait for another backup) or manual
-# (a person, who waits up to LOCK_WAIT_SECONDS for one that runs).
+# (a person or ./agoranomos up, who waits up to LOCK_WAIT_SECONDS for one that runs). migrations
+# names the migrations of the core that up takes it before, and is empty otherwise.
 take_backup() {
   kind=$1
   check_settings
@@ -260,7 +286,7 @@ take_backup() {
   step "the removal of the partial backups of earlier runs" remove_partials
   step "the check that no backup has this name" name_is_free
   step "the folder of the backup" mkdir "$partial"
-  say "taking the $kind backup $name"
+  say "taking the $kind backup $name${migrations:+ before the migrations of the core $migrations}"
   for entry in $DATABASES; do
     database=${entry%%:*} host=${entry#*:}
     step "the dump of $database" pg_dump --host="$host" --username=backup --dbname="$database" \
@@ -440,14 +466,21 @@ verify() {
   fi
 }
 
+migrations=""
 case "${1:-}" in
   schedule) schedule ;;
   now) take_backup manual ;;
+  before-migrations)
+    shift
+    check_migrations "$@"
+    migrations="$*"
+    take_backup manual
+    ;;
   scheduled) take_backup scheduled ;;
   health) health ;;
   verify)
     shift
     verify "$@"
     ;;
-  *) fail "usage: backup.sh schedule | now | health | verify <backup> [<database>...]" ;;
+  *) fail "usage: backup.sh schedule | now | health | verify <backup> [<database>...] | before-migrations <migration>..." ;;
 esac

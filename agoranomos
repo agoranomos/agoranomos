@@ -1659,6 +1659,8 @@ cmd_up() {
   remove_leftover_services
   stop_for_changed_network
   say "Starting the stack. The first start builds the Airflow image, which takes a few minutes..."
+  # Before start_stack, whose db-init applies the migrations of the core that wait.
+  backup_before_migrations
   start_stack
   # At off the OAuth clients of Metabase go, with their tokens, also when the demo failed (ADR-0031).
   oauth_failed=0
@@ -1771,13 +1773,22 @@ FROM core.schema_migrations ORDER BY version;
 SQL
 }
 
-# What status says of the migrations of the core, from those of this checkout ($1, as
-# migration_files prints them) and the rows of migrations_sql ($2): how many the warehouse has
-# applied and the last of them, and those that wait for the next ./agoranomos up, which applies
-# them in db-init. An applied migration that this checkout lacks, as after a newer release, makes
-# db-init stop, so it gets a warning. A line that is not a row of migrations_sql counts for
-# nothing.
-migrations_summary() {
+# The rows of migrations_sql, which psql prints as the superuser of warehouse-db, which must run:
+# the migrations of the core that the warehouse has applied. psql says why on standard error when
+# it fails.
+migrations_applied() {
+  migrations_sql |
+    compose exec -T warehouse-db psql --username=postgres --dbname=warehouse --no-psqlrc --quiet \
+      --tuples-only --no-align --field-separator="$FIELD_SEPARATOR" --set=ON_ERROR_STOP=1
+}
+
+# Compare the migrations of the core of this checkout ($1, as migration_files prints them) with the
+# rows of migrations_sql ($2), and set: applied_count, how many the warehouse has applied, and
+# applied_last, the last of them with its time; lacking, those of them that this checkout does not
+# have; and waiting_count, waiting and waiting_names, those of this checkout that the warehouse has
+# not applied, which the next db-init applies, in waiting separated by a comma and a blank, in
+# waiting_names by a blank. A line that is not a row of migrations_sql counts for nothing.
+migrations_compare() {
   applied_count=0 applied_last="" applied_names="" lacking=""
   while IFS=$FIELD_SEPARATOR read -r applied_name applied_at; do
     case "$applied_name" in
@@ -1798,15 +1809,26 @@ $applied_name
   done << EOF
 $2
 EOF
-  waiting_count=0 waiting=""
+  waiting_count=0 waiting="" waiting_names=""
   while IFS= read -r migration; do
     [ -n "$migration" ] || continue
     case "$applied_names" in *" $migration "*) continue ;; esac
     waiting_count=$((waiting_count + 1))
     waiting="${waiting:+$waiting, }$migration"
+    waiting_names="${waiting_names:+$waiting_names }$migration"
   done << EOF
 $1
 EOF
+}
+
+# What status says of the migrations of the core, from those of this checkout ($1, as
+# migration_files prints them) and the rows of migrations_sql ($2): how many the warehouse has
+# applied and the last of them, and those that wait for the next ./agoranomos up, which applies
+# them in db-init. An applied migration that this checkout lacks, as after a newer release, makes
+# db-init stop, so it gets a warning. A line that is not a row of migrations_sql counts for
+# nothing.
+migrations_summary() {
+  migrations_compare "$1" "$2"
   if [ "$applied_count" -eq 0 ]; then
     applied_text="none applied"
   else
@@ -1833,20 +1855,74 @@ migrations_status() {
     say "Migrations of the core: $checkout_count in this checkout; status shows which of them are applied while warehouse-db runs (ADR-0044)."
     return 0
   fi
-  if ! applied_rows=$(migrations_sql |
-    compose exec -T warehouse-db psql --username=postgres --dbname=warehouse --no-psqlrc --quiet \
-      --tuples-only --no-align --field-separator="$FIELD_SEPARATOR" --set=ON_ERROR_STOP=1 2> /dev/null); then
+  if ! applied_rows=$(migrations_applied 2> /dev/null); then
     say "Migrations of the core: $checkout_count in this checkout; warehouse-db did not say which of them are applied (ADR-0044)."
     return 0
   fi
   migrations_summary "$checkout_migrations" "$applied_rows"
 }
 
-# Take a backup now (ADR-0020): in the running backup service when .env has the ops profile and the
-# service runs with the backups folder and the user that .env names now, and in a container of its
-# own otherwise, such as in local mode. The databases must run.
+# The SQL that tells whether the warehouse holds data, which up runs as postgres: t when it has a
+# table, partitioned or not, or a materialized view, in a schema that is not one of PostgreSQL, and
+# f otherwise. A new volume has none: the image creates the empty database warehouse, and db-init
+# creates roles, schemas and an extension, whose views are no tables, so the first table comes with
+# the first migration of the core or the first load.
+warehouse_data_sql() {
+  cat << 'SQL'
+SELECT EXISTS (
+  SELECT FROM pg_class AS c JOIN pg_namespace AS n ON n.oid = c.relnamespace
+  WHERE c.relkind IN ('r', 'p', 'm')
+    AND n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
+);
+SQL
+}
+
+# Take a backup before db-init applies a migration of the core (ADR-0044), as no other way leads
+# back from an applied migration. up runs this before the rest of the stack starts: it starts the
+# databases, or finds them running, and compares the migrations of this checkout with those that
+# the warehouse has applied, as status does. When none waits, it does nothing more, so an up with
+# nothing to apply takes one look at the warehouse longer. When some wait and the warehouse holds
+# data, it takes a backup by hand, as backup does, whose manifest names them; a warehouse that holds
+# no data, such as on the first start, has nothing that a migration could change, and gets none. A
+# warehouse of v0.4.x has no core.schema_migrations, so every migration waits for it. When the backup
+# or a look at the warehouse fails, up stops before db-init runs, so no migration is applied without
+# a backup. A checkout without migrations has nothing to apply.
+backup_before_migrations() {
+  checkout_migrations=$(migration_files)
+  [ -n "$checkout_migrations" ] || return 0
+  compose up --detach --wait warehouse-db platform-db < /dev/null ||
+    die "the databases did not start, so up stopped before it applied any migration of the core: see ./agoranomos logs warehouse-db and ./agoranomos logs platform-db"
+  applied_rows=$(migrations_applied) ||
+    die "could not read from the warehouse which migrations of the core it has applied, so up stopped before it applied any: the error above says why"
+  migrations_compare "$checkout_migrations" "$applied_rows"
+  [ "$waiting_count" -gt 0 ] || return 0
+  holds_data=$(warehouse_data_sql |
+    compose exec -T warehouse-db psql --username=postgres --dbname=warehouse --no-psqlrc --quiet \
+      --tuples-only --no-align --set=ON_ERROR_STOP=1) ||
+    die "could not read from the warehouse whether it holds data, so up stopped before it applied any migration of the core: the error above says why"
+  [ "$holds_data" = t ] || return 0
+  say "Migrations of the core wait: $waiting. Taking a backup before db-init applies them (ADR-0044)..."
+  # In a subshell, so that a check of take_backup that stops ends it alone, and up says what that
+  # means for the migrations.
+  # shellcheck disable=SC2086 # one argument for each migration
+  if ! (take_backup before-migrations $waiting_names); then
+    die "up stopped before db-init, so no migration of the core was applied: a backup comes first, and it failed, as the lines above say. The databases run, and the rest of the stack is as it was. Fix the cause, such as a full disk or a backups folder of another user, and run ./agoranomos up again: it takes the backup again before it applies $waiting"
+  fi
+  before_name=$(json_field "$(backups_path)/latest.json" last_ok)
+  [ -z "$before_name" ] ||
+    say "The backup $before_name keeps the databases as they were before these migrations, and no retention removes it: ./agoranomos status lists it."
+}
+
 cmd_backup() {
   [ "$#" -eq 0 ] || die "backup takes no options"
+  take_backup now
+}
+
+# Take a backup now (ADR-0020), with the arguments of postgres/backup.sh: now, or before-migrations
+# and the migrations of the core that up is about to apply. In the running backup service when .env
+# has the ops profile and the service runs with the backups folder and the user that .env names now,
+# and in a container of its own otherwise, such as in local mode. The databases must run.
+take_backup() {
   [ -f "$ENV_FILE" ] || die "there is no .env yet: run ./agoranomos up first"
   message=$(backup_user_problem)
   [ -z "$message" ] || die "$message"
@@ -1875,10 +1951,10 @@ cmd_backup() {
   # with -T: a script that is fed to the shell (ssh host bash -s) would lose its next lines to
   # the backup. So the input of both is /dev/null.
   if [ "$backup_in_service" -eq 1 ]; then
-    compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh now < /dev/null ||
+    compose exec -T backup /bin/sh /opt/agoranomos/postgres/backup.sh "$@" < /dev/null ||
       die "the backup failed: the lines above say at which step. The backups folder is $(backups_path)"
   else
-    compose run --rm --no-deps -T backup now < /dev/null ||
+    compose run --rm --no-deps -T backup "$@" < /dev/null ||
       die "the backup failed: the lines above say at which step. The backups folder is $(backups_path)"
   fi
 }
@@ -1941,7 +2017,9 @@ backup_status() {
       '' | *[!0-9]*) age_text="of an unknown age" ;;
       *) age_text="$((($(date +%s) - finished) / 86400)) days old" ;;
     esac
-    say "  ${folder##*/}: $(du -sk "$folder" | cut -f1) KiB, $age_text"
+    # The one that up took before migrations of the core names them (ADR-0044).
+    before_migrations=$(json_field "$folder/manifest.json" migrations)
+    say "  ${folder##*/}: $(du -sk "$folder" | cut -f1) KiB, $age_text${before_migrations:+, taken by up before the migrations of the core $before_migrations}"
   done
   if [ "$(json_field "$latest" result)" = failed ]; then
     # The schedule's output is in the logs of the service; a person who took a backup read why on
@@ -2059,7 +2137,8 @@ restore_signaled() {
 # Put databases back as a backup has them (ADR-0020). Nothing changes until the backup has passed
 # its check in the backup service, the images of its databases match those of the checkout, and
 # the person has said yes; then it removes what a mode left behind, stops every service but the
-# databases, runs db-init, restores each database as its superuser inside its container, through
+# databases, runs db-init without the migrations of the core, restores each database as its
+# superuser inside its container, through
 # the socket, where the image trusts it, and starts the stack. The dump goes into the /tmp of the
 # container first, so that pg_restore reads a file. From the stop on, a failure or an interrupt
 # says which databases are back, that the services are stopped, and what to do (restore_exit).
@@ -2217,7 +2296,15 @@ Check out the release that took it and restore there, or pass --force if you kno
   restore_phase=stopped
   compose up --detach --wait warehouse-db platform-db < /dev/null ||
     die "the databases did not start: see ./agoranomos logs warehouse-db and ./agoranomos logs platform-db"
-  compose run --rm --no-deps -T db-init < /dev/null || die "db-init failed: the lines above say why"
+  # The roles and schemas that pg_restore needs, migrator among them, without the migrations of the
+  # core (ADR-0044): the db-init of start_stack below applies them, or stops on a warehouse that a
+  # newer release migrated, once the databases are as the restore leaves them. Here they would meet
+  # the warehouse that pg_restore --clean --create is to replace whole: a checkout of the release
+  # before stops on the migration that the backup taken by up before it does not hold, and a
+  # restore that failed halfway can leave the table of the migrations without its rows. When the
+  # warehouse stays, as with --only metabase, the db-init of start_stack does what every start does.
+  compose run --rm --no-deps -T -e DB_INIT_MIGRATIONS=skip db-init < /dev/null ||
+    die "db-init failed: the lines above say why"
   restore_phase=restoring
   for database in $databases; do
     service=$(database_service "$database")
@@ -2632,7 +2719,7 @@ Usage: ./agoranomos <command> [options]
 Commands:
   init          Create .env from .env.example and generate the secrets that are empty (--server <domain>: turn server mode on)
   preflight     Check that this machine can run the stack (--force: warn about low resources instead of stopping)
-  up            Run init and preflight, start the stack and wait until it is healthy (--force as for preflight)
+  up            Run init and preflight, take a backup when migrations of the core wait, start the stack and wait until it is healthy (--force as for preflight)
   down          Stop the stack; the data stays in its Docker volumes
   status        Show the state and health of every service, and the last backups
   backup        Take a backup of the databases now, into the backups folder
