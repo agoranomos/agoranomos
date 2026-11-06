@@ -270,8 +270,8 @@ services:
     security_opt: ["no-new-privileges:true"]
     logging: *logging
 
-  # Migrates the metadata database, creates the admin user, keeps the user of the MCP server of Airflow
-  # and sets the pools, on every start. The entrypoint of the image migrates the database (_AIRFLOW_DB_MIGRATE) and then runs the
+  # Migrates the metadata database, creates the admin user, keeps the user of the MCP server of Airflow,
+  # sets the pools and deletes the rows older than 90 days, on every start. The entrypoint of the image migrates the database (_AIRFLOW_DB_MIGRATE) and then runs the
   # command. The command creates the admin with the Airflow CLI, called inside this Python process: the
   # entrypoint's own way, _AIRFLOW_WWW_USER_CREATE, runs airflow users create --password <the password>,
   # which puts the password on the command line of a process. Here the arguments exist only in sys.argv,
@@ -368,6 +368,56 @@ services:
                 if not security.del_register_user(ai_user):
                     raise SystemExit("could not delete the Airflow user ai")
                 print('Deleted the Airflow user "ai": the MCP server of Airflow is off')
+        # The retention of this database (ADR-0044): the rows older than 90 days go on every start,
+        # here, as a task has no access to the database of Airflow. No archive tables, which would
+        # stay and grow the database. dag stays out of the tables, and no table of these brings it
+        # in: this job runs before the DAG processor, so after a stop of more than 90 days every row
+        # of dag would look old here, and the DAGs would come back paused. The only run of the demo
+        # history is manual, which db clean does not keep, and demo-init would run the pipeline
+        # again without it: so the first call leaves out the rows of that DAG. The second takes the
+        # tables that a filter by DAG misses in Airflow 3.3.2: it filters asset_event, deadline and
+        # task_reschedule by a column dag_id that they lack, and fails on them, and log and job hold
+        # rows without a DAG, which NOT IN never selects. dag_run brings deadline into the first
+        # call, which therefore warns that it did not clean deadline, and the second cleans it. A
+        # table that a later Airflow adds is not cleaned until it is listed here: compare the lists
+        # with airflow db clean --help at an upgrade of Airflow. A failure leaves the rows to the next
+        # start and does not stop this one: db clean itself warns and goes on when a table fails with
+        # an operational or a programming error of the database, and any other error, such as one of
+        # integrity, ends in the except below with one line, and the job succeeds.
+        import pendulum
+
+        before = pendulum.now("UTC").subtract(days=90).to_iso8601_string()
+        cleanups = [
+            (
+                "callback,connection_test_request,dag_run,dag_version,import_error,"
+                "partitioned_asset_key_log,revoked_token,session,task_instance,task_instance_history,"
+                "task_state_store,trigger,xcom",
+                ["--exclude-dag-ids", "agoranomos_demo_history"],
+            ),
+            ("asset_event,deadline,job,log,task_reschedule", []),
+        ]
+        for tables, options in cleanups:
+            sys.argv = [
+                "airflow",
+                "db",
+                "clean",
+                "--clean-before-timestamp",
+                before,
+                "--tables",
+                tables,
+                *options,
+                "--skip-archive",
+                "--yes",
+            ]
+            try:
+                main()
+            except (Exception, SystemExit) as error:
+                reason = (str(error).splitlines() or [""])[0]
+                print(
+                    f"airflow-init: the database of Airflow keeps its old rows of {tables} until the"
+                    f" next start: the cleanup failed with {type(error).__name__}: {reason}",
+                    file=sys.stderr,
+                )
     environment:
       <<: *airflow-environment
       _AIRFLOW_DB_MIGRATE: "true"
@@ -574,6 +624,13 @@ services:
       # device while this is false. The login history in Account settings still asks: extra_hosts
       # below answers it.
       MB_SEND_EMAIL_ON_FIRST_LOGIN_FROM_NEW_DEVICE: "false"
+      # The log of the queries that Metabase runs, query_execution, keeps 90 days and not the 720
+      # of Metabase (ADR-0044). Metabase 0.64.1 takes the setting from the environment alone, at 30
+      # days at least, and does not show it in its API. This image writes neither audit_log nor
+      # view_log, which the setting covers too. query_execution is partitioned by month, and once
+      # it is all on partitions a month goes whole when it ends before the limit: a row stays 90
+      # to 121 days.
+      MB_AUDIT_MAX_RETENTION_DAYS: "90"
       # Prometheus metrics, for the planned Ops collection. The port is not published, so it is
       # reachable only from the Compose networks.
       MB_PROMETHEUS_SERVER_PORT: "9191"

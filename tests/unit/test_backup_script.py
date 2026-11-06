@@ -361,6 +361,70 @@ def test_the_manifest_names_the_kind_each_file_with_its_size_and_checksum_and_th
         ["sha256sum", "--check", "--quiet", "--strict", "SHA256SUMS"], cwd=folder, check=False
     )
     assert check.returncode == 0
+    # A backup that up did not take before migrations of the core has no word of them.
+    assert "note" not in found
+    assert "migrations" not in found
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_the_backup_before_migrations_is_one_by_hand_whose_manifest_names_them(shell, backups):
+    # ./agoranomos up takes it before db-init applies them (ADR-0044): a backup by hand, which no
+    # retention removes, with a note that says why it was taken.
+    result = run(shell, backups, "before-migrations", "0002_add_the_facts", "0003_add_a_column")
+    assert result.returncode == 0, result.stderr
+    found = manifest(backups, NAME)
+    assert found["kind"] == "manual"
+    assert found["migrations"] == "0002_add_the_facts 0003_add_a_column"
+    assert found["note"] == (
+        "taken by ./agoranomos up before db-init applied the migrations of the core "
+        "0002_add_the_facts 0003_add_a_column"
+    )
+    assert found["images"] == IMAGES
+    assert sorted(path.name for path in (backups / NAME).iterdir()) == sorted(
+        [*FILES, "SHA256SUMS", "manifest.json"]
+    )
+    assert latest(backups)["kind"] == "manual"
+    assert latest(backups)["last_ok"] == NAME
+    assert (
+        f"backup: taking the manual backup {NAME} before the migrations of the core "
+        "0002_add_the_facts 0003_add_a_column"
+    ) in result.stdout.splitlines()
+    assert f"the manual backup {NAME} is complete" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "names",
+    [
+        [],
+        ["0002"],
+        ["2_add"],
+        ["0002_"],
+        ["0002_Add"],
+        ["0002_add-the-facts"],
+        ['0002_add", "kind": "scheduled'],
+        ["0002_add,0003_more"],
+        ["0002_add", "../0003"],
+    ],
+    ids=[
+        "none",
+        "number only",
+        "short number",
+        "no name",
+        "upper case",
+        "hyphen",
+        "quote",
+        "comma",
+        "path",
+    ],
+)
+def test_the_backup_before_migrations_takes_only_their_names(backups, names):
+    # The names go into manifest.json as they are, so nothing but NNNN_name reaches it.
+    result = run("/bin/sh", backups, "before-migrations", *names)
+    assert result.returncode == 1
+    assert result.stderr.startswith("backup: error: ")
+    assert not any(path.is_dir() for path in backups.iterdir())
+    assert not (backups / "latest.json").exists()
+    assert not tool_calls(backups)
 
 
 @pytest.mark.parametrize("shell", SHELLS)

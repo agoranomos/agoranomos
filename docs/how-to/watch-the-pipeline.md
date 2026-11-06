@@ -30,6 +30,10 @@ The DAG `agoranomos_demo_transform` runs on the assets of the loads, not at a ti
 
 Metabase reads the four views as `metabase_reader`, which may read them and no table of elementary. The connection of the warehouse shows only the schema `marts` in Metabase, so the views do not appear in its list of tables; the questions of the dashboard are SQL that reads them. [The data model](../reference/data-model.md#the-schema-ops) describes their columns.
 
+## How long it keeps the data
+
+The dashboard reads the last 30 days of the runs of dbt, and the DAG `agoranomos_maintenance` deletes the results of the runs older than 90 days from the tables of elementary in `ops`, every day at 04:23 UTC. The same DAG deletes the logs of Airflow older than 30 days: Airflow still shows a run for 90 days, as `airflow-init` deletes the older runs at each `./agoranomos up`, so the log of a task of a run older than 30 days is gone. The DAG starts unpaused and needs nothing from you; a task of it that fails shows as a failed run of `agoranomos_maintenance` in Airflow, and the next run does the work again. [Retention](../reference/configuration.md#retention) says how long each kind of data stays.
+
 ## Keep a variant of your own
 
 Duplicate the dashboard, with copies of its questions, into a collection of your own, and change the copy: the next start puts back what differs from the code in the collection **Ops**, and logs it. To add a question about the pipeline, write it in a collection of your own as a native question on the views of `ops`.
