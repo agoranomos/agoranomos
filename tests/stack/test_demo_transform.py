@@ -120,25 +120,22 @@ NAME_PERIODS = (
     "SELECT platform, account_id, campaign_id, observed_name, valid_from, valid_to "
     "FROM marts.ad_campaign_names"
 )
-# The row that breaks a critical test of staging: negative clicks, of a campaign that the demo
-# does not have, on the first day of the history of an account, under the newest whole load of
-# that day, so that staging reads it.
+# The row that breaks a critical test of staging: a version of a campaign with no name, which no
+# check of an account covers, of a campaign that the demo does not have, under the newest whole load
+# of demo_search. A row of statistics that breaks a check, such as negative clicks, puts its account
+# in quarantine instead, and the run goes on (test_quarantine.py).
 BROKEN_ROW = (
-    "INSERT INTO raw_demo_search.campaign_stats (customer__id, campaign__id, campaign__name, "  # noqa: S608 (constants of the demo)
-    "campaign__resource_name, metrics__impressions, metrics__clicks, metrics__cost_micros, "
-    "metrics__conversions, metrics__conversions_value, segments__date, _dlt_load_id, _dlt_id) "
-    "SELECT '4170000011', '21099999998', 'Broken by a test', "
-    "'customers/4170000011/campaigns/21099999998', '10', '-5', '1000000', 0, 0, d.day, "
-    "d.load_id, 'stack-test-broken-row' "
-    f"FROM ({DAYS.format(dataset='raw_demo_search')}) AS d "
-    "WHERE d.account_id = '4170000011' ORDER BY d.day LIMIT 1"
+    "INSERT INTO raw_demo_search.campaigns (customer__id, campaign__id, _dlt_valid_from, "
+    "_dlt_valid_to, campaign__resource_name, campaign__name, campaign__status, "
+    "campaign__advertising_channel_type, _dlt_load_id, _dlt_id) "
+    "SELECT '4170000011', '21099999998', now(), NULL, "
+    "'customers/4170000011/campaigns/21099999998', NULL, 'ENABLED', 'SEARCH', max(load_id), "
+    "'stack-test-broken-row' FROM raw_demo_search._dlt_loads WHERE status = 0"
 )
-REMOVE_BROKEN_ROW = (
-    "DELETE FROM raw_demo_search.campaign_stats WHERE _dlt_id = 'stack-test-broken-row'"
-)
-BROKEN_TEST = "non_negative_stg_demo_search__campaign_stats_clicks"
+REMOVE_BROKEN_ROW = "DELETE FROM raw_demo_search.campaigns WHERE _dlt_id = 'stack-test-broken-row'"
+BROKEN_TEST = "not_null_stg_demo_search__campaigns_observed_name"
 # The task that builds the staging view of that row, and runs the test that it breaks.
-STAGING_BUILD = "dbt.stg_demo_search__campaign_stats_model_build"
+STAGING_BUILD = "dbt.stg_demo_search__campaigns_model_build"
 # The lines in which Cosmos says how it parsed the dbt project (cosmos/dbt/graph.py, Cosmos 1.16.0),
 # from the logs that the DAG processor writes for the file of the transform DAG, as JSON lines, into
 # dag_processor/<day>/<bundle>/ of the volume airflow-logs (Airflow 3.3.2); latest links to the
@@ -603,7 +600,7 @@ def put_back(env, airflow_url, token, transform_run):
 
 
 def test_a_failed_critical_test_keeps_the_marts(env, airflow_url, token, transform_run, put_back):
-    # Negative clicks break non_negative of stg_demo_search__campaign_stats: the models that read
+    # A campaign with no name breaks not_null of stg_demo_search__campaigns: the models that read
     # it do not run, and the marts keep the rows of the last good run.
     before = totals(env, MART)
     warehouse_output(env, REMOVE_BROKEN_ROW)  # left behind by a test that was stopped
