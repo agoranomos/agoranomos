@@ -33,7 +33,7 @@ Before it writes the core, each run of the transform checks the data of each acc
 - **The marts**, which the transform still builds from staging, leave the account out for that run, so its rows are missing from the dashboards until it is back.
 - **It comes back** with the first run that finds its data whole, for example after a load that brings its days again or a list that gives its currency again; a load that is still bad keeps it out. No step of yours releases it.
 - **A source stops** when more than half of the accounts of its pinned loads are in quarantine: that says that the platform or its connector failed, so none of its accounts enters the core in that run, each with the reason `source_stopped`, and the other sources go on. Exactly half stops nothing.
-- **The alarm** is this card, and two tests that warn in **Failed or warned tests**: `assert_no_account_is_in_quarantine` and `assert_no_source_is_stopped`. Alerts through Apprise, which name the reason by its code, are planned ([ADR-0045](../adr/0045-send-alerts-from-airflow-through-apprise.md)).
+- **The alarm** is this card, and two tests that warn in **Failed or warned tests**: `assert_no_account_is_in_quarantine` and `assert_no_source_is_stopped`. With an address of Apprise in `.env`, an alert names the account and the reason by its code ([Get alerts](#get-alerts)).
 
 | Reason | What the check found |
 |---|---|
@@ -73,3 +73,57 @@ The dashboard reads the last 30 days of the runs of dbt, and the DAG `agoranomos
 ## Keep a variant of your own
 
 Duplicate the dashboard, with copies of its questions, into a collection of your own, and change the copy: the next start puts back what differs from the code in the collection **Ops**, and logs it. To add a question about the pipeline, write it in a collection of your own as a native question on the views of `ops`.
+
+## Get alerts
+
+The stack can say by itself that something is wrong, through [Apprise](https://github.com/caronc/apprise), which sends to Telegram, Slack, email and many other channels with one address each ([ADR-0045](../adr/0045-send-alerts-from-airflow-through-apprise.md)). Two parts send, with no service of their own:
+
+- **A failed run.** A plugin of the Airflow image listens in the scheduler for every run of a DAG that ends failed, those of the extensions folder too, also when the kernel killed the process of a task at its memory limit, which a callback of the task never sees. It sends from a thread of its own, so the scheduler never waits for the network. A DAG that fails again within an hour of its alert sends no second one: the next alert after the hour says how many failures it held back.
+- **What does not fail.** The DAG `agoranomos_watcher` runs every 15 minutes, at 4, 19, 34 and 49 minutes past the hour, and checks the accounts in quarantine, the accounts whose data is late, the backups and the free disk. It sends an alert when a problem appears or goes away, and once a day the problems that remain. It keeps what it has seen and sent in the table `ops.alert_state`, so a channel does not fill with repeats, and a stack that restarts does not send the same alert again.
+
+With no address nothing is sent, and nothing leaves the deployment.
+
+### Turn them on
+
+1. Make the address of your channel, as [the services of Apprise](https://appriseit.com/services/) describe each one:
+    - **Telegram.** Create a bot with BotFather, which gives you its token, and send the bot a message from the chat that is to get the alerts: the method `getUpdates` of the Bot API of Telegram then answers with the ID of that chat, as [the page of Apprise for Telegram](https://appriseit.com/services/telegram/) shows. The address is `tgram://<bot-token>/<chat-id>`.
+    - **Slack.** An incoming webhook of a Slack app gives an address `https://hooks.slack.com/services/<token-a>/<token-b>/<token-c>`, which Apprise takes as it is, or as `slack://<token-a>/<token-b>/<token-c>/#<channel>`.
+2. Put it into `.env`, in single quotes, which a `#` or a space in it needs; more than one address goes in the same quotes, separated by spaces:
+
+    ```bash
+    AGORANOMOS_ALERT_URLS='tgram://<bot-token>/<chat-id>'
+    ```
+
+3. Run `./agoranomos up`, which starts the scheduler again with it, and the worker with the CeleryExecutor.
+4. Send a test alert from the scheduler. It prints `True` when every address took it:
+
+    ```bash
+    docker compose exec airflow-scheduler python -c 'import airflow, agoranomos_alerts; print(agoranomos_alerts.send("agoranomos: a test", "A test of the alerts of agoranomos.", "info"))'
+    ```
+
+An address holds the token of its channel, so keep it as you keep the other secrets of `.env`. Only the scheduler and the service that runs the tasks get it, so the code of a task can read it, also that of a DAG of the extensions folder, which is the code of the deployment itself. No log shows it: the plugin hides each address and each part of one in the log of Apprise, and a task of the watcher has Airflow mask them in its log.
+
+### What an alert says
+
+An alert holds codes, IDs and times, never an amount and never a text of a platform, such as the name of a campaign, which anyone with access to an account can write: an AI agent can read an alert without taking orders from it. It names the problem; Pipeline health, the logs of Airflow or [the skill that diagnoses a pipeline](talk-to-your-data.md) say why.
+
+- **A failed run** says `failed:`, the reason as Airflow gives it, `task_failure` for a task that failed or was killed, `timed_out` for a run that went past its time, or `all_tasks_deadlocked`, then the DAG and when the run ended.
+- **The watcher** lists what is new, what is still open and what is gone, each problem on one line:
+
+| Line | What the watcher found |
+|---|---|
+| `quarantine <reason>, <platform> <account>` | The last run of the transform kept the account out of the core, with a reason of [the table above](#when-an-account-is-in-quarantine), as `ops.ops_quarantine` shows it. |
+| `late, <platform> <account>` | The core does not hold the day that ended a day ago in the time zone of the account: the last day of its pinned loads in `core.loads` is older, as when a load stopped. Each source of the base package loads once a day, so the line comes one to two days after a load that did not run. An account that the settings no longer name is left out. |
+| `backup_failed` | The last backup of the `backup` service failed. |
+| `backup_late` | The last good backup is more than 26 hours old, or there is none 26 hours after the service started, as its health check says. |
+| `disk_low` | The disk of the data of Docker has less than 10 GiB free, the least that `./agoranomos up` needs to start. |
+
+The backups are checked only while the `backup` service of the `ops` profile runs: it publishes their status every minute in the volume `backup-status`, which the Airflow services read, as the backups folder is open to its owner only ([ADR-0020](../adr/0020-back-up-the-databases-every-day.md)). A status older than six hours, as when the `ops` profile is off, checks nothing.
+
+### What they cannot do
+
+- **Silence proves nothing.** When the server is off or the scheduler is down, nothing inside can send, and no check from outside the deployment exists: only the absence of alerts, and the dashboards, say so.
+- **A send that fails is not kept.** The alert of a failed run that a channel does not take is lost, and the log of the scheduler says so; the watcher sends its alert again at its next run, and drops an alert of a problem that is gone after a day.
+- **A paused watcher is silent.** A pause of `agoranomos_watcher` in Airflow stops its alerts, not those of failed runs.
+- **A long dump stops nothing.** The watcher reads, and writes the rows of its own table only, so a backup that runs at the same time neither waits for it nor makes it wait.
+- **Telegram and Slack are not checked by the stack tests**, which send to a local address of the JSON service of Apprise; the real channels are left to the deployment.
