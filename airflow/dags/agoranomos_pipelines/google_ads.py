@@ -26,8 +26,9 @@ first load of an account takes the last 36 months, as Google Ads keeps data by d
 request counts as one operation of the daily quota, whatever its rows, so a daily load costs eleven
 operations for each account, and the first about 230. Each load appends the facts of each account
 under its own _dlt_load_id and records the window of each account in _agoranomos_loads in the same
-run, and the staging models read, for each account and day, the rows of the newest whole load whose
-window covers the day, so the days of a window are replaced whole, empty or not (ADR-0038). A
+run, and the staging models read, for each account and day, the rows of the newest load whose
+window covers the day, of those that the run of the transform pinned, so the days of a window are
+replaced whole, empty or not (ADR-0038, ADR-0046). A
 dataset that a release before v0.5 loaded has no _agoranomos_loads, so the next load of each account
 takes its history again, and the rows of the earlier loads stay unread.
 

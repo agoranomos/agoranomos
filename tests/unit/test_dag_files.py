@@ -111,8 +111,9 @@ def test_the_transform_renders_from_the_manifest_in_the_pool_of_dbt():
     ]
     assert pools == ["DBT_POOL"], "the pool is set once on the task group of dbt"
     assert 'DBT_POOL = "dbt"' in text
-    # The task that builds the tables of elementary is a process of dbt too.
-    assert [ast.unparse(v) for v in keyword_values(path, "pool")] == ["DBT_POOL"]
+    # The task of the pin and the task that builds the tables of elementary are processes of dbt
+    # too.
+    assert [ast.unparse(v) for v in keyword_values(path, "pool")] == ["DBT_POOL", "DBT_POOL"]
 
 
 def test_a_test_of_two_nodes_runs_in_the_task_of_the_one_that_depends_on_the_other():
@@ -158,13 +159,13 @@ def test_the_transform_loads_the_settings_of_the_model_before_dbt():
     assert "source.load()" in calls
     top = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
     assert not [n for n in top if "settings" in ast.dump(n) or "dlt" in ast.dump(n)]
-    # The task comes first, then the tables of elementary, then the task group of dbt.
+    # The task comes first, then the pin, the tables of elementary and the task group of dbt.
     chains = [
         ast.unparse(node)
         for node in ast.walk(tree)
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.BinOp)
     ]
-    assert chains == ["load_settings() >> elementary >> dbt"]
+    assert chains == ["load_settings() >> pin >> elementary >> dbt"]
     assigned = {
         node.targets[0].id: ast.unparse(node.value.func)
         for node in ast.walk(tree)
@@ -172,8 +173,37 @@ def test_the_transform_loads_the_settings_of_the_model_before_dbt():
         and isinstance(node.targets[0], ast.Name)
         and isinstance(node.value, ast.Call)
     }
+    assert assigned["pin"] == "DbtRunOperationLocalOperator"
     assert assigned["elementary"] == "DbtRunLocalOperator"
     assert assigned["dbt"] == "DbtTaskGroup"
+
+
+def test_one_task_pins_the_loads_before_every_other_task_of_dbt():
+    # ADR-0046: dbt run-operation pin_loads, once in a run and before the other tasks of dbt, and
+    # not in on-run-start, which every call of dbt runs, one for each node (ADR-0028). The macro
+    # pins only with the run of Airflow that JOB_ENV gives it, so dbt by hand pins nothing. A pin
+    # updates no asset.
+    path = DAGS / "agoranomos_demo_transform.py"
+    calls = {
+        node.func.id: {k.arg: ast.unparse(k.value) for k in node.keywords}
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    pin = calls["DbtRunOperationLocalOperator"]
+    assert pin["task_id"] == "'pin'"
+    assert pin["macro_name"] == "'pin_loads'"
+    assert pin["env"] == "JOB_ENV"
+    assert pin["install_deps"] == "False"
+    assert pin["emit_datasets"] == "False"
+    assert pin["invocation_mode"] == "InvocationMode.SUBPROCESS"
+    assert pin["pool"] == "DBT_POOL"
+    assert "args" not in pin
+    macro = (ROOT / "dbt" / "macros" / "pin_loads.sql").read_text(encoding="utf-8")
+    assert "{% macro pin_loads() %}" in macro
+    assert "{%- if env_var('DBT_JOB_RUN_ID', '') == '' -%}" in macro
+    project = (ROOT / "dbt" / "dbt_project.yml").read_text(encoding="utf-8")
+    assert "on-run-start" not in project
+    assert "on-run-end" not in project
 
 
 def test_the_transform_builds_elementary_in_one_task_and_records_its_run():

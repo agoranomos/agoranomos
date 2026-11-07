@@ -1,6 +1,7 @@
 """The transform, agoranomos_demo_transform: the five assets of the history start it, it loads the
-settings of the model, and dbt builds the model; a failed critical test, or a mistake in a settings
-file, keeps the marts as they were.
+settings of the model, pins the loads that have ended, and dbt builds the model from them; a load
+that ends between two tasks of dbt waits for the next run, and a failed critical test, or a mistake
+in a settings file, keeps the marts as they were.
 
 The assertions print counts, sums, states and names, never a secret.
 """
@@ -14,6 +15,7 @@ import pytest
 from agoranomos_pipelines.demo import common, fx, platforms, world
 from airflow_api import (
     asset_events,
+    clear,
     downstream_task_ids,
     is_busy,
     run_dag,
@@ -27,6 +29,7 @@ from airflow_api import (
 from raw_loads import DAYS, newest
 from stack_helpers import (
     REPO_ROOT,
+    active_variant,
     compose,
     containers,
     docker,
@@ -47,7 +50,10 @@ pytestmark = [
 HISTORY = "agoranomos_demo_history"
 TRANSFORM = "agoranomos_demo_transform"
 SETTINGS = "load_settings"
-# The task that builds the tables of elementary, after the settings and before the tasks of dbt
+# The task that pins the loads that have ended, after the settings and before every other task of
+# dbt (ADR-0046).
+PIN = "pin"
+# The task that builds the tables of elementary, after the pin and before the tasks of dbt
 # (ADR-0029).
 ELEMENTARY = "elementary"
 MART = "marts.ad_stats_campaign_daily"
@@ -68,6 +74,9 @@ MARTS = (
 )
 # The task of the mart: each model and each seed is one task, dbt build (ADR-0028).
 MART_BUILD = "dbt.ad_stats_campaign_daily_model_build"
+# The task of the table of the days of the pin, which the staging models of the facts read the
+# loads by, from core.loads.
+DAYS_BUILD = "dbt.stg_loads__newest_days_model_build"
 MART_ASSET = "postgres://warehouse-db:5432/warehouse/marts/ad_stats_campaign_daily"
 ASSETS = len(platforms.PLATFORMS)
 # The pool of the tasks of dbt, which airflow-init sets (ADR-0027); the settings load outside it.
@@ -273,18 +282,19 @@ def test_the_five_assets_of_the_history_start_the_transform(transform_run):
     assert transform_run["state"] == "success", transform_run["state"]
 
 
-def test_the_settings_load_first_and_each_node_is_built_with_its_tests_in_one_task(
+def test_the_settings_load_first_then_the_pin_and_each_node_is_built_with_its_tests_in_one_task(
     airflow_url, token, transform_run
 ):
     downstream = downstream_task_ids(airflow_url, token, TRANSFORM)
-    assert downstream[SETTINGS] == [ELEMENTARY]
+    assert downstream[SETTINGS] == [PIN]
+    assert downstream[PIN] == [ELEMENTARY]
     reached, todo = set(), [ELEMENTARY]
     while todo:
         for following in downstream.get(todo.pop(), []):
             if following not in reached:
                 reached.add(following)
                 todo.append(following)
-    built = [task for task in downstream if task not in (SETTINGS, ELEMENTARY)]
+    built = [task for task in downstream if task not in (SETTINGS, PIN, ELEMENTARY)]
     assert reached == set(built), "a task of dbt does not wait for the tables of elementary"
     assert MART_BUILD in built, sorted(built)[:5]
     # One task of dbt build for each model and each seed: no task runs a node or its tests alone.
@@ -301,11 +311,88 @@ def test_the_tasks_of_dbt_run_in_their_pool(airflow_url, token, transform_run):
     # the settings runs before them, outside it.
     pools = {i["task_id"]: i["pool"] for i in task_instances(airflow_url, token, transform_run)}
     assert pools.pop(SETTINGS) == "default_pool"
-    # The task of elementary runs dbt too, so it takes a slot of the pool.
+    # The task of the pin and that of elementary run dbt too, so each takes a slot of the pool.
+    assert pools.pop(PIN) == DBT_POOL
     assert pools.pop(ELEMENTARY) == DBT_POOL
     assert pools, "the run has no task of dbt"
     assert {task.split(".")[0] for task in pools} == {"dbt"}, sorted(pools)[:5]
     assert set(pools.values()) == {DBT_POOL}, pools
+
+
+# The whole loads of a dataset of the demo, {dataset} in it, by load and account, as its journal
+# records them, those that a pin copies into core.loads, and those of core.loads of its source,
+# {source} in it.
+WHOLE = (
+    "SELECT j._dlt_load_id, j.account_id FROM {dataset}._agoranomos_loads AS j "
+    "JOIN {dataset}._dlt_loads AS l ON l.load_id = j._dlt_load_id AND l.status = 0"
+)
+PINNED = "SELECT load_id, account_id FROM core.loads WHERE source = '{source}'"
+# The days of the pin of a source, as the run read them.
+PIN_DAYS = (
+    "SELECT account_id, day, load_id FROM staging.stg_loads__newest_days WHERE source = '{source}'"
+)
+# The four facts of the core that an ad platform is to write, and that of web analytics, whose
+# partitions the pin creates for the months of its windows (ADR-0036, ADR-0046).
+FACTS_OF = {
+    **dict.fromkeys(
+        ("demo_search", "demo_social", "demo_video"),
+        (
+            "ad_stats_campaign_daily",
+            "ad_stats_ad_group_daily",
+            "ad_stats_ad_daily",
+            "ad_conversions_campaign_daily",
+        ),
+    ),
+    "demo_web": ("web_sessions_daily",),
+    "demo_fx": (),
+}
+# The months of the windows of the pinned loads of a source, {source} in it, whose partition of a
+# fact, {fact}, is missing: the partitions are named <table>_YYYY_MM.
+NO_PARTITION = (
+    "SELECT count(*) FROM (SELECT DISTINCT date_trunc('month', d) AS month FROM core.loads AS l "
+    "CROSS JOIN LATERAL generate_series(l.window_from::timestamp, l.window_to::timestamp, "
+    "interval '1 day') AS d WHERE l.source = '{source}' AND l.outcome = 'loaded') AS m "
+    "WHERE to_regclass(format('core.%s_%s', '{fact}', to_char(month, 'YYYY_MM'))) IS NULL"
+)
+
+
+def test_the_pin_takes_every_load_that_ended_and_the_run_reads_the_newest_of_each_day(
+    env, transform_run
+):
+    # Every load of the demo had ended before the run, so its pin took each of them, by load and
+    # account, and the run read, for each account and day, the newest load that covers it, as
+    # raw_loads.py does in SQL of its own; nothing accepts a load yet (ADR-0046).
+    for code, platform in platforms.PLATFORMS.items():
+        whole = WHOLE.format(dataset=platform.dataset)
+        pinned = PINNED.format(source=code)
+        missing = warehouse_output(env, f"SELECT count(*) FROM ({whole} EXCEPT {pinned}) AS m")  # noqa: S608 (constants of the demo)
+        assert int(missing) == 0, code
+        assert int(warehouse_output(env, f"SELECT count(*) FROM ({pinned}) AS p")) > 0, code  # noqa: S608
+        days = DAYS.format(dataset=platform.dataset)
+        read = PIN_DAYS.format(source=code)
+        differ = warehouse_output(
+            env,
+            f"SELECT count(*) FROM (({read} EXCEPT ({days})) UNION ALL "  # noqa: S608 (constants of the demo)
+            f"(({days}) EXCEPT {read})) AS d",
+        )
+        assert int(differ) == 0, code
+    states = warehouse_output(env, "SELECT DISTINCT status FROM core.loads")
+    assert states.split() == ["pinned"]
+
+
+@pytest.mark.parametrize("code", sorted(FACTS_OF))
+def test_the_pin_makes_the_partitions_of_the_months_of_the_pinned_windows(env, transform_run, code):
+    # Outside any model, as a hook before_begin breaks the transaction of a model (#191). The
+    # rates go into core.fx_rates_daily, which has no partitions.
+    for fact in FACTS_OF[code]:
+        missing = warehouse_output(env, NO_PARTITION.format(source=code, fact=fact))
+        assert int(missing) == 0, fact
+    months = warehouse_output(
+        env,
+        "SELECT count(DISTINCT date_trunc('month', window_from)) FROM core.loads "  # noqa: S608 (constants of the demo)
+        f"WHERE source = '{code}' AND outcome = 'loaded'",
+    )
+    assert int(months) > 0, code
 
 
 def started_at(service):
@@ -586,3 +673,125 @@ def test_a_broken_settings_file_stops_the_transform_and_keeps_the_marts(
         assert totals(env, MART) == before
     finally:
         path.unlink(missing_ok=True)
+
+
+# A load of demo_social as of a moment, from a first day to yesterday of each account, as a daily
+# load writes it, in the container of the tasks and outside Airflow, so that no asset event starts
+# a run of the transform; with skip, it leaves out the day that the history leaves out. dlt reads
+# the password of loader from the environment of the container, and the script prints nothing.
+LOAD = """
+import sys
+from datetime import date, datetime
+
+from agoranomos_pipelines.demo import platforms, sources
+
+now = datetime.fromisoformat(sys.argv[1])
+first = date.fromisoformat(sys.argv[2])
+skip = platforms.gap(now) if sys.argv[3] == "skip" else frozenset()
+sources.load("demo_social", now, first=lambda account: first, skip=skip)
+"""
+# The DAGs of the base package, with agoranomos_pipelines, in the containers of Airflow.
+DAGS = "/opt/agoranomos/dags"
+# The newest whole load of demo_social.
+NEWEST_SOCIAL_LOAD = (
+    "SELECT j._dlt_load_id FROM raw_demo_social._agoranomos_loads AS j "
+    "JOIN raw_demo_social._dlt_loads AS l ON l.load_id = j._dlt_load_id AND l.status = 0 "
+    "ORDER BY j._dlt_load_id::numeric DESC LIMIT 1"
+)
+
+
+def load_social(env, now, first, skip):
+    """Load demo_social as LOAD says, and return the id of the load."""
+    service = "airflow-worker" if active_variant() == "celery" else "airflow-scheduler"
+    result = compose(
+        "exec",
+        "-T",
+        "-e",
+        f"PYTHONPATH={DAGS}",
+        service,
+        "python",
+        "-c",
+        LOAD,
+        now.isoformat(),
+        first.isoformat(),
+        "skip" if skip else "keep",
+        check=False,
+    )
+    output = f"{result.stdout}\n{result.stderr}"
+    # The last lines say why a load failed, unless they hold a secret.
+    shown = [] if leaked(secrets(env), output) else output.strip().splitlines()[-5:]
+    assert result.returncode == 0, f"the load exited with {result.returncode}: {shown}"
+    return warehouse_output(env, NEWEST_SOCIAL_LOAD)
+
+
+def test_a_load_between_two_tasks_of_dbt_waits_for_the_next_run(
+    env, airflow_url, token, pipeline, put_back
+):
+    # ADR-0046: a run reads the loads that its pin took. A load of demo_social that brings the day
+    # that the history left out ends after the pin of the run of the history, and the tasks of dbt
+    # of that run from the days of the pin on run again, in the same run, as if the load had ended
+    # between two of its tasks of dbt: they read what the pin took, without the load, and the next
+    # run pins the load and reads it. A pin in on-run-start, which every task of dbt runs, would
+    # have taken the load in the second task, as the check of #188 found; so would the days of the
+    # newest loads computed from raw, as before the pin.
+    history, run = pipeline
+    now = moment(history)
+    [(account, day)] = platforms.gap(now)
+    gap = (
+        "SELECT count(*), coalesce(sum(impressions), 0), coalesce(sum(clicks), 0), "  # noqa: S608 (constants of the demo)
+        f"coalesce(sum(spend), 0) FROM {MART} WHERE platform = 'demo_social' "
+        f"AND account_id = '{account}' AND report_date = DATE '{day.isoformat()}'"
+    )
+    wait_for(
+        lambda: not is_busy(airflow_url, token, TRANSFORM, assets=ASSETS),
+        900,
+        interval=5,
+        message="the runs of the transform that earlier tests started did not end",
+    )
+    before = totals(env, MART)
+    assert warehouse_output(env, gap).split("|")[0] == "0", "the day of the gap has rows"
+    try:
+        load = load_social(env, now, day, skip=False)
+        pinned = (
+            "SELECT count(*) FROM core.loads "  # noqa: S608 (an id of the warehouse)
+            f"WHERE source = 'demo_social' AND load_id = '{load}'"
+        )
+        read = (
+            "SELECT count(*) FROM staging.stg_loads__newest_days "  # noqa: S608 (an id of the warehouse)
+            f"WHERE source = 'demo_social' AND load_id = '{load}'"
+        )
+        assert warehouse_output(env, pinned) == "0"
+        cleared_at = datetime.now(UTC)
+        cleared = clear(airflow_url, token, run, [DAYS_BUILD], include_downstream=True)
+        assert {DAYS_BUILD, MART_BUILD} <= set(cleared), cleared[:5]
+        assert not {SETTINGS, PIN, ELEMENTARY} & set(cleared), cleared[:5]
+        again = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=900)
+        assert again["state"] == "success", again["state"]
+        ended = {i["task_id"]: i["end_date"] for i in task_instances(airflow_url, token, again)}
+        for task in (DAYS_BUILD, MART_BUILD):
+            assert datetime.fromisoformat(ended[task].replace("Z", "+00:00")) > cleared_at, task
+        # The tasks that ran again read the loads of the pin of the run: the load is not pinned,
+        # its days are not read, and the mart is as it was.
+        assert warehouse_output(env, pinned) == "0"
+        assert warehouse_output(env, read) == "0"
+        assert warehouse_output(env, gap).split("|")[0] == "0"
+        assert totals(env, MART) == before
+        # The next run pins the load for each account and reads it: the day has its rows.
+        following = transform(airflow_url, token)
+        assert following["state"] == "success", following["state"]
+        accounts = len(list(platforms.PLATFORMS["demo_social"].module.accounts()))
+        assert int(warehouse_output(env, pinned)) == accounts
+        assert int(warehouse_output(env, read)) > 0
+        raw = warehouse_output(
+            env,
+            "SELECT sum(impressions::bigint), sum(inline_link_clicks::bigint), "  # noqa: S608 (constants of the demo)
+            f"sum(spend::numeric) FROM {newest('demo_social')} "
+            f"WHERE account_id = '{account}' AND date_start = DATE '{day.isoformat()}'",
+        )
+        rows, *sums = warehouse_output(env, gap).split("|")
+        assert int(rows) > 0, "the next run did not read the load"
+        assert [Decimal(value) for value in sums] == [Decimal(value) for value in raw.split("|")]
+    finally:
+        # A newer load of the same days without the day of the gap, so that the run of put_back
+        # reads the days as the history made them.
+        load_social(env, now, day, skip=True)

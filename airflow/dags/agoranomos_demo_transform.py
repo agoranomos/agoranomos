@@ -4,21 +4,22 @@ advertising statistics.
 agoranomos_demo_transform first loads the settings of the model of the deployment, the files of
 extensions/model, and the clients of the demo into raw_settings, as the loader role (ADR-0024): a
 mistake in a file fails that task with one line that names the file and the entry, nothing is
-written, and no task of dbt runs. Then it runs the dbt project through Cosmos, as the transformer
-role: the seeds, the staging models of each platform, the steps that the platforms share, and the
-marts, each built with its tests in one task, dbt build (ADR-0025, ADR-0028), and the views of the
-Ops collection. A failed critical test stops the models that read it, and the marts keep their data.
-Before them, one task builds the tables of elementary in the schema ops, into which the hooks of
-elementary in every task of dbt write the results of its models and tests (ADR-0029). The DAG runs
-when each of the five platforms of the demo has loaded since its last run, each load updating the
-asset of its main table, after each load of the rates of the ECB, and after each load of Google Ads
-(ADR-0032, ADR-0039), one run at a time: a run takes the events of the loads that ended while the
-run before it ran. A repeat is safe: the settings are loaded again, and dbt rebuilds the models. The
-DAG starts paused. With the demo
-profile, the one-shot demo-init job unpauses it and runs agoranomos_demo_history on the first
-start; without it, unpause this DAG in the Airflow UI before you trigger a load. The DAG keeps the
-word demo in its id for now, as the Ops collection and the demo name it; a change of its own is to
-rename it.
+written, and no task of dbt runs. Then one task pins the finished loads of every source into
+core.loads (ADR-0046), and the run reads those and no other: a load that ends while the run runs,
+between two of its tasks of dbt, waits for the next run. Then it runs the dbt project through
+Cosmos, as the transformer role: the seeds, the staging models of each platform, the steps that the
+platforms share, and the marts, each built with its tests in one task, dbt build (ADR-0025,
+ADR-0028), and the views of the Ops collection. A failed critical test stops the models that read
+it, and the marts keep their data. Before them, one task builds the tables of elementary in the
+schema ops, into which the hooks of elementary in every task of dbt write the results of its models
+and tests (ADR-0029). The DAG runs when each of the five platforms of the demo has loaded since its
+last run, each load updating the asset of its main table, after each load of the rates of the ECB,
+and after each load of Google Ads (ADR-0032, ADR-0039), one run at a time: a run takes the events of
+the loads that ended while the run before it ran. A repeat is safe: the settings are loaded again,
+and dbt rebuilds the models. The DAG starts paused. With the demo profile, the one-shot demo-init
+job unpauses it and runs agoranomos_demo_history on the first start; without it, unpause this DAG in
+the Airflow UI before you trigger a load. The DAG keeps the word demo in its id for now, as the Ops
+collection and the demo name it; a change of its own is to rename it.
 
 Cosmos renders its tasks from the manifest that metadata-export writes on every start (ADR-0027),
 so a change of the dbt project reaches the DAG at the next ./agoranomos up; its tasks of dbt run at
@@ -35,6 +36,7 @@ from airflow.sdk import dag, task
 from airflow.sdk.log import mask_secret
 from cosmos import (
     DbtRunLocalOperator,
+    DbtRunOperationLocalOperator,
     DbtTaskGroup,
     ExecutionConfig,
     ExecutionMode,
@@ -100,6 +102,28 @@ def agoranomos_demo_transform():
         # a mistake in a file fails this task, and the tasks of dbt after it do not run.
         source.load()
 
+    # The pin (ADR-0046): dbt run-operation pin_loads copies the rows of the journal of every
+    # finished load into core.loads, which the staging models read the loads by, and creates the
+    # partitions of the facts for the months of the pinned windows, outside any model. It runs once
+    # in a run, before every other task of dbt, as a pin in on-run-start would run in each of them,
+    # one call of dbt for each node (ADR-0028): a load that ended between two would reach the second
+    # and not the first. A failed pin stops the run before dbt reads anything, and a repeat pins
+    # what it had not.
+    pin = DbtRunOperationLocalOperator(
+        task_id="pin",
+        macro_name="pin_loads",
+        project_dir=DBT_PROJECT,
+        profile_config=PROFILE,
+        dbt_executable_path=DBT_EXECUTABLE,
+        invocation_mode=InvocationMode.SUBPROCESS,
+        install_deps=False,
+        # The run of Airflow, without which the macro refuses to pin: dbt by hand does not pin.
+        env=JOB_ENV,
+        # A pin writes no data of the model: no asset event.
+        emit_datasets=False,
+        pool=DBT_POOL,
+    )
+
     # The tables of elementary: its incremental ones keep their rows, and the post-hooks of those of
     # the artifacts of the project write its models and tests once a run. Built before the other
     # tasks of dbt, so that the hooks of the first run find them; until they exist, the hooks write
@@ -152,8 +176,8 @@ def agoranomos_demo_transform():
         # Only the tasks of dbt go into its pool.
         default_args={"pool": DBT_POOL},
     )
-    # Every task of dbt comes after the settings and the tables of elementary.
-    load_settings() >> elementary >> dbt
+    # Every task of dbt comes after the settings, the pin and the tables of elementary.
+    load_settings() >> pin >> elementary >> dbt
 
 
 agoranomos_demo_transform()

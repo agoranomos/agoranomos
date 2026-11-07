@@ -17,11 +17,12 @@ import dlt
 from dlt.destinations.exceptions import DatabaseUndefinedRelation
 
 # The write of a fact table: each load appends its rows under its own _dlt_load_id, with no keys and
-# no merge, and the staging models read, for each account and day, the rows of the newest whole
-# load whose window in the journal covers the day (dbt/macros/newest_load.sql, ADR-0038). So a load
-# replaces the days of its window whole, and a row that a platform no longer sends goes, as the
-# newest load does not hold it. The rows of the earlier loads stay in raw until the core accepts
-# them (ADR-0035): until then, raw grows by a window with each load.
+# no merge, and the staging models read, for each account and day, the rows of the newest load whose
+# window in the journal covers the day, of the whole loads that the run of the transform pinned into
+# core.loads (dbt/macros/pin_loads.sql and newest_load.sql, ADR-0038, ADR-0046). So a load replaces
+# the days of its window whole, and a row that a platform no longer sends goes, as the newest load
+# does not hold it. The rows of the earlier loads stay in raw until the core accepts them
+# (ADR-0035): until then, raw grows by a window with each load.
 APPEND = "append"
 # The contract of the schema of every load of a source: a new table or column reaches raw, and a
 # value whose type differs from that of its column stops the load, before any of it is written,
