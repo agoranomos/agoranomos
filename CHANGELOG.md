@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.5.0](https://github.com/agoranomos/agoranomos/compare/v0.4.5...v0.5.0) (2026-11-07)
+
+
+### Features
+
+* **backup:** take a backup before a migration of the core ([#269](https://github.com/agoranomos/agoranomos/issues/269)) ([f89301e](https://github.com/agoranomos/agoranomos/commit/f89301e9289fc9c263c264448fcb5509e5610d5b))
+* **dbt:** keep the dimensions of the core with their versions ([#281](https://github.com/agoranomos/agoranomos/issues/281)) ([7872c99](https://github.com/agoranomos/agoranomos/commit/7872c999a74d8d02b9cfba0eb84bc609d0bbcce8))
+* **dbt:** read only the loads that a run has pinned ([#279](https://github.com/agoranomos/agoranomos/issues/279)) ([7ce1403](https://github.com/agoranomos/agoranomos/commit/7ce14031019f4f0a487cdb031a15a2d6099c66fe))
+* **dlt:** append each load under its own id ([#273](https://github.com/agoranomos/agoranomos/issues/273)) ([ecae16c](https://github.com/agoranomos/agoranomos/commit/ecae16c5aac0d00b85ab8121330cf3b23ab1339e))
+* **stack:** clean the service databases by retention ([#271](https://github.com/agoranomos/agoranomos/issues/271)) ([a3b3be1](https://github.com/agoranomos/agoranomos/commit/a3b3be15909260d192e303c2a5d8d5e02654b754))
+* **warehouse:** apply the migrations of the core once ([#267](https://github.com/agoranomos/agoranomos/issues/267)) ([a83147d](https://github.com/agoranomos/agoranomos/commit/a83147d6fa9c98050a8e6951ebcfefceaacb8cd3))
+* **warehouse:** create the tables of the core by migrations ([#268](https://github.com/agoranomos/agoranomos/issues/268)) ([2954b06](https://github.com/agoranomos/agoranomos/commit/2954b06415a1c9e94a1519fddf240b04a4e9cbb8))
+
+
+### Bug Fixes
+
+* **airflow:** give the DAG processor 640 MiB ([#274](https://github.com/agoranomos/agoranomos/issues/274)) ([2df1014](https://github.com/agoranomos/agoranomos/commit/2df101448f17830e55e99779277052f4a178ba1f))
+
+
+### Documentation
+
+* describe Cosmos 1.16.0, which the stack runs ([#280](https://github.com/agoranomos/agoranomos/issues/280)) ([cb2b4d1](https://github.com/agoranomos/agoranomos/commit/cb2b4d1f3798a3278d8a7fd17469e09d8989a87b))
+* give the site the brand style and pictures ([#282](https://github.com/agoranomos/agoranomos/issues/282)) ([8760794](https://github.com/agoranomos/agoranomos/commit/876079401d5068e61efa2ba425a192a3694d6229))
+
 ## [0.4.5](https://github.com/agoranomos/agoranomos/compare/v0.4.4...v0.4.5) (2026-11-03)
 
 
