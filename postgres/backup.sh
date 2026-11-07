@@ -23,7 +23,9 @@
 # took it or a person did, and for the backup that ./agoranomos up takes before migrations of the
 # core, which ones. It is written as .partial-<name> and renamed when it is complete, so a
 # folder with the name of a backup is a complete one. latest.json says how the last run went.
-# Every file is readable by its owner only. The retention removes scheduled backups only: a backup
+# Every file is readable by its owner only. The schedule also publishes, every minute, the status
+# of the backups for the watcher of Airflow, in STATUS_FILE, which every user may read: times and
+# the result of the last run, no name and no path (ADR-0045). The retention removes scheduled backups only: a backup
 # by hand, such as the one before an upgrade, stays until the person deletes it.
 #
 # It reads the databases as the role backup, which may read every table and write none, with its
@@ -33,6 +35,9 @@ set -eu
 BACKUP_ROOT=${BACKUP_ROOT:-/backups}
 EXTENSIONS=${EXTENSIONS:-/opt/agoranomos/extensions}
 STARTED_FILE=${STARTED_FILE:-/tmp/backup-started}
+# On the volume backup-status, which compose.yaml mounts on /var/tmp here and read-only in the
+# Airflow services.
+STATUS_FILE=${STATUS_FILE:-/var/tmp/status.json}
 ZONEINFO=${ZONEINFO:-/usr/share/zoneinfo}
 WAREHOUSE_HOST=${WAREHOUSE_HOST:-warehouse-db}
 PLATFORM_HOST=${PLATFORM_HOST:-platform-db}
@@ -347,6 +352,36 @@ epoch_of() {
     }'
 }
 
+# Publish the status of the backups for the watcher of Airflow (ADR-0045), which the backups
+# folder, of mode 700, keeps from Airflow: the time of this check, the start of the service, the
+# result of the last run, ok or failed, and the end of the last good backup, as the health check
+# reads them. Every user may read it; it holds numbers and one word. A status that cannot be
+# written, as on a stack without its volume, says so once and stops nothing.
+publish_status() {
+  status_result=$(field "$BACKUP_ROOT/latest.json" result)
+  case "$status_result" in ok | failed) ;; *) status_result="" ;; esac
+  status_last_ok=$(field "$BACKUP_ROOT/latest.json" last_ok_epoch)
+  case "$status_last_ok" in '' | *[!0-9]*) status_last_ok=0 ;; esac
+  status_started=$(cat "$STARTED_FILE" 2> /dev/null || echo 0)
+  case "$status_started" in '' | *[!0-9]*) status_started=0 ;; esac
+  if {
+    {
+      printf '{\n'
+      printf '  "format": 1,\n'
+      printf '  "checked_epoch": %s,\n' "$(date +%s)"
+      printf '  "started_epoch": %s,\n' "$status_started"
+      printf '  "result": "%s",\n' "$status_result"
+      printf '  "last_ok_epoch": %s\n' "$status_last_ok"
+      printf '}\n'
+    } > "$STATUS_FILE.tmp" && chmod 644 "$STATUS_FILE.tmp" && mv "$STATUS_FILE.tmp" "$STATUS_FILE"
+  } 2> /dev/null; then
+    status_warned=""
+  elif [ -z "${status_warned:-}" ]; then
+    warn "cannot write the status of the backups for Airflow, $STATUS_FILE: the watcher of Airflow does not see the backups"
+    status_warned=1
+  fi
+}
+
 # Wait in a loop, a minute at a time. A stop (TERM or INT) ends a sleep at once: the trap kills it
 # and the shell exits. During a backup it is held until the backup ends, since the shell waits for
 # its child and runs the trap afterwards; Docker kills the container when its grace period (10
@@ -373,6 +408,7 @@ schedule() {
     say "the last scheduled backup failed at $(field "$recorded" attempted): the next try is an hour after it, or now"
   fi
   while :; do
+    publish_status
     # A last try in the future (a clock that was ahead and is right now) counts as none, or the
     # hour from it would shut the schedule until the clock catches up.
     [ "$last_try" -le "$(date +%s)" ] || last_try=0
@@ -384,6 +420,7 @@ schedule() {
         pending=1
         say "the backup failed: the schedule tries again in an hour"
       fi
+      publish_status
     fi
     sleep 60 &
     sleeper=$!

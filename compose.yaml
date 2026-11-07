@@ -90,6 +90,9 @@ x-airflow: &airflow
     # them, and no Airflow service can change them.
     - ${AGORANOMOS_EXTENSIONS_DIR:-./extensions}/model:/opt/agoranomos/extensions/model:ro
     - airflow-logs:/opt/airflow/logs
+    # The status of the backups, which the backup service publishes and the watcher reads
+    # (ADR-0045): no Airflow service can change it.
+    - backup-status:/opt/agoranomos/backup-status:ro
   networks: [default, data]
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
@@ -481,6 +484,11 @@ services:
       # google_ads (ADR-0032): empty until a deployment connects it.
       GOOGLE_ADS_SERVICE_ACCOUNT_KEY: ${GOOGLE_ADS_SERVICE_ACCOUNT_KEY:-}
       GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${GOOGLE_ADS_LOGIN_CUSTOMER_ID:-}
+      # The addresses of Apprise for the alerts (ADR-0045): the listener of the plugin
+      # agoranomos_alerts runs in the scheduler in both variants, and the task of the watcher where
+      # the tasks run; the worker of the CeleryExecutor gets them from here too. Empty, nothing is
+      # sent. The scheduler reaches the internet through the network default.
+      AGORANOMOS_ALERT_URLS: ${AGORANOMOS_ALERT_URLS:-}
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://localhost:8974/health"]
       interval: 10s
@@ -951,7 +959,12 @@ services:
       - ./postgres:/opt/agoranomos/postgres:ro
       - ${AGORANOMOS_EXTENSIONS_DIR:-./extensions}:/opt/agoranomos/extensions:ro
       - ${AGORANOMOS_BACKUP_DIR:-./backups}:/backups
-    # It writes into /backups only. The image declares a volume for the data of PostgreSQL, which
+      # The status of the backups for the watcher of Airflow (ADR-0045), which the folder of the
+      # backups, of mode 700, keeps from Airflow: a new named volume takes the owner and the mode of
+      # the folder of the image that it is mounted on while it is empty, and /var/tmp is open to
+      # every user (mode 1777 in Debian), so the user of AGORANOMOS_UID can write it.
+      - backup-status:/var/tmp
+    # It writes into /backups and the status only. The image declares a volume for the data of PostgreSQL, which
     # this service does not use: the tmpfs takes its place, as for db-init.
     read_only: true
     tmpfs:
@@ -1011,3 +1024,6 @@ volumes:
   metabase-content:
   # The certificates of the proxy of server mode.
   caddy-data:
+  # The status of the backups: only the backup service writes it, and the Airflow services read
+  # it (ADR-0045).
+  backup-status:
