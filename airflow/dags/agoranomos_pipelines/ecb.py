@@ -8,8 +8,9 @@ row as the CSV names its columns, which dlt writes in snake_case into raw_ecb.ra
 text, as the ECB writes them: the macro ecb_exr of dbt/macros/shapes/ reads them. Each load
 appends its rows under its own _dlt_load_id and records its window in _agoranomos_loads in the same
 run, with the account EUR, the base of the rates, as the loads of the demo do, and the staging
-model reads, for each day, the rates of the newest whole load whose window covers it (ADR-0038):
-a window without a rate, such as a weekend, comes back empty and still replaces its days. A
+model reads, for each day, the rates of the newest load whose window covers it, of those that the
+run of the transform pinned (ADR-0038, ADR-0046): a window without a rate, such as a weekend,
+comes back empty and still replaces its days. A
 dataset that a release before v0.5 loaded has no _agoranomos_loads, so its next load takes the
 history again, and the rows of the earlier loads stay unread. The first load takes the rates from
 the first day of the month 37 months back, one month before the history of Google Ads (ADR-0034),

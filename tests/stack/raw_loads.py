@@ -1,8 +1,11 @@
-"""The rows of a fact table of the demo in raw that staging reads, as SQL that does not use the
-macro of the model: for each account and day, those of the newest whole load whose window in the
-journal _agoranomos_loads covers the day (dbt/macros/newest_load.sql, ADR-0038). Each load of the
-demo appends its rows under its own _dlt_load_id, so a table holds every load until the core
-accepts it, and the tests of the demo compare the rows that this rule reads, not the table."""
+"""The rows of a fact table of the demo in raw that the next run of the transform reads, as SQL
+that does not use the macros of the model: for each account and day, those of the newest whole
+load whose window in the journal _agoranomos_loads covers the day. The run pins every whole load
+before its tasks of dbt, and its staging reads the newest pinned load of each account and day
+(dbt/macros/pin_loads.sql and newest_load.sql, ADR-0038, ADR-0046), which is this one when no load
+ended after the pin and none is accepted, as nothing accepts a load yet. Each load of the demo
+appends its rows under its own _dlt_load_id, so a table holds every load until the core accepts
+it, and the tests of the demo compare the rows that this rule reads, not the table."""
 
 from __future__ import annotations
 

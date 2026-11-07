@@ -21,12 +21,12 @@ sources:
           moment of the load (loaded_at). An account whose request to the API failed has the status
           failed, the text of the error, the moment of the attempt (now), and no day and no
           loaded_at, as nothing was loaded. The staging models read, for each account and day, the
-          rows of the newest whole load whose window covers the day.
+          rows of the newest pinned load whose window covers the day.
       - name: _dlt_loads
         description: >-
           The loads of dlt into raw_google_ads, one row each: a load is whole once it has its row
-          here, with status 0, which dlt writes after the last table of the load. The staging models
-          read the rows of whole loads only.
+          here, with status 0, which dlt writes after the last table of the load. The pin of each
+          run of the transform takes whole loads only.
       - name: customers
         description: >-
           Each account as its customer resource gives it: its ID, name, currency, time zone, status
@@ -41,13 +41,13 @@ sources:
           The statistics of each campaign by day (segments.date): impressions and clicks as strings,
           the INT64 numbers of the REST interface, cost in micros, and the conversions of the
           platform. Each load appends its rows under its own _dlt_load_id, and staging reads, for
-          each account and day, those of the newest whole load whose window covers the day.
+          each account and day, those of the newest pinned load whose window covers the day.
       - name: campaign_conversions
         description: >-
           The conversions of each campaign by day and conversion action, from a query of its own, as
           segments.conversion_action cannot be selected with the cost: the conversions of the
           platform and all conversions, with their values. Each load appends its rows under its own
-          _dlt_load_id, and staging reads, for each account and day, those of the newest whole load
+          _dlt_load_id, and staging reads, for each account and day, those of the newest pinned load
           whose window covers the day.
       - name: ad_groups
         description: >-
@@ -59,13 +59,13 @@ sources:
           The statistics of each ad group by day (segments.date): impressions and clicks as strings,
           the INT64 numbers of the REST interface, cost in micros, and the conversions of the
           platform. Each load appends its rows under its own _dlt_load_id, and staging reads, for
-          each account and day, those of the newest whole load whose window covers the day.
+          each account and day, those of the newest pinned load whose window covers the day.
       - name: ad_group_conversions
         description: >-
           The conversions of each ad group by day and conversion action, from a query of its own, as
           segments.conversion_action cannot be selected with the cost: the conversions of the
           platform and all conversions, with their values. Each load appends its rows under its own
-          _dlt_load_id, and staging reads, for each account and day, those of the newest whole load
+          _dlt_load_id, and staging reads, for each account and day, those of the newest pinned load
           whose window covers the day.
       - name: ads
         description: >-
@@ -77,12 +77,12 @@ sources:
         description: >-
           The statistics of each ad by day (segments.date), in the form of ad_group_stats. Each load
           appends its rows under its own _dlt_load_id, and staging reads, for each account and day,
-          those of the newest whole load whose window covers the day.
+          those of the newest pinned load whose window covers the day.
       - name: ad_conversions
         description: >-
           The conversions of each ad by day and conversion action, in the form of
           ad_group_conversions. Each load appends its rows under its own _dlt_load_id, and staging
-          reads, for each account and day, those of the newest whole load whose window covers the
+          reads, for each account and day, those of the newest pinned load whose window covers the
           day.
       - name: conversion_actions
         description: >-

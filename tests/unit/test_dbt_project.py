@@ -722,28 +722,126 @@ def test_each_staging_model_of_a_platform_is_one_call_of_the_shape_of_its_api():
             assert body == [*depends, f"{{{{ {macro}({arguments}) }}}}"], path.name
 
 
-def test_staging_reads_the_newest_whole_load_of_each_account_and_day():
-    # The rule of ADR-0038 and ADR-0046, and the findings of the check of November 2026: only the
-    # loads that dlt finished, only the accounts that loaded, and the newest load as a number.
+def test_staging_reads_the_newest_pinned_load_of_each_account_and_day():
+    # The rule of ADR-0038 and ADR-0046, and the findings of the checks of November 2026 (#188,
+    # #191): only the loads that a run pinned, only the accounts that loaded, the newest load as a
+    # number among the pinned and the accepted, rows of the pinned only, and of the accepted only
+    # those newer than the oldest pinned load of the account, which alone can win a day.
     text = (DBT / "macros" / "newest_load.sql").read_text(encoding="utf-8")
-    assert "on l.load_id = j._dlt_load_id and l.status = 0" in text
-    assert "where j.status = 'loaded'" in text
-    assert "select distinct on (j.account_id, w.day)" in text
-    assert "order by j.account_id, w.day, j._dlt_load_id::numeric desc" in text
+    pinned = text[text.index("{% macro pinned_loads(") :]
+    pinned = pinned[: pinned.index("{%- endmacro %}")]
+    assert "where p.source = '{{ source }}' and p.status = 'pinned' and p.outcome = 'loaded'" in (
+        pinned
+    )
+    assert "where a.source = '{{ source }}' and a.status = 'accepted' and a.outcome = 'loaded'" in (
+        pinned
+    )
+    assert "on oldest.account_id = a.account_id and a.load_id::numeric > oldest.load_number" in (
+        pinned
+    )
+    assert "min(load_id::numeric) as load_number" in pinned
+    assert "select distinct on (l.account_id, w.day)" in pinned
+    assert "order by l.account_id, w.day, l.load_id::numeric desc" in pinned
+    assert pinned.rstrip().endswith("where d.status = 'pinned'")
+    # The pin is the one thing that reads the raw journals and _dlt_loads to choose loads.
+    assert "_dlt_loads" not in pinned
+    assert "_agoranomos_loads" not in pinned
     # The days are a table of each run, with the statistics of PostgreSQL, joined by one key.
     assert "    from {{ days }}\n" in text
     assert "    where source = '{{ source_name[4:] }}'\n) as d" in text
     # Before a run has filled the table, its rows as a query, as after an update that brings it.
     assert "{%- if execute and load_relation(days) is none %}" in text
-    assert "    from ({{ newest_load_days(source_name) }}) as days" in text
+    assert "    from ({{ pinned_loads(source_name, pinned_loads_journal()) }}) as days" in text
     assert "on d.load_key = {{ newest_load_key(source_name, 'r._dlt_load_id', account, day) }}" in (
         text
+    )
+    assert (
+        "api.Relation.create(database=target.database, schema='core', identifier='loads')" in text
     )
     model = (STAGING / "loads" / "stg_loads__newest_days.sql").read_text(encoding="utf-8")
     assert "materialized='incremental'" in model
     assert 'pre_hook=["{% if is_incremental() %}delete from {{ this }}{% endif %}"]' in model
     assert 'post_hook=["analyze {{ this }}"]' in model
     assert "{%- for source_name in newest_load_sources() %}" in model
+    assert "{{ pinned_loads(source_name, source('core', 'loads')) }}" in model
+    sources = (STAGING / "loads" / "_loads__sources.yml").read_text(encoding="utf-8")
+    assert "  - name: core\n" in sources
+    assert "    schema: core\n" in sources
+    assert "      - name: loads\n" in sources
+
+
+PIN = DBT / "macros" / "pin_loads.sql"
+MIGRATIONS = DBT.parent / "postgres" / "migrations"
+
+
+def test_the_pin_copies_each_whole_load_once_and_skips_a_source_without_tables():
+    # ADR-0046 and the check of #188: one insert ... select for each source, the journal joined
+    # with _dlt_loads on the load and status 0, on conflict do nothing, a source whose tables do
+    # not exist passed over, all of it in one transaction that commits, as dbt run-operation rolls
+    # back what it does not commit (dbt-adapters 1.24.5, BaseConnectionManager.close).
+    text = PIN.read_text(encoding="utf-8")
+    assert "{%- for source_name in newest_load_sources() -%}" in text
+    for table in ("_agoranomos_loads", "_dlt_loads"):
+        assert (
+            "adapter.get_relation(\n"
+            f"            database=target.database, schema=source_name, identifier='{table}'\n"
+        ) in text, table
+    assert "{%- if journal is not none and finished is not none -%}" in text
+    assert "insert into {{ loads }} (\n" in text
+    assert (
+        "    source, load_id, account_id, window_from, window_to, outcome, error, finished_at, "
+        "invocation_id\n"
+    ) in text
+    assert "    l.inserted_at, '{{ invocation_id }}'::uuid\n" in text
+    assert "join {{ finished }} as l\n    on l.load_id = j._dlt_load_id and l.status = 0\n" in text
+    assert "on conflict (source, load_id, account_id) do nothing" in text
+    assert "{%- set loads = pinned_loads_journal() -%}" in text
+    # The rows of the pin and the months of the pinned windows, then one commit; then each
+    # partition in a transaction of its own.
+    body = text[text.index("{% macro pin_loads() %}") : text.index("{% endmacro %}")]
+    assert body.count("{%- do adapter.commit() -%}") == 2
+    assert body.index("statement('pin'") < body.index("statement('months'")
+    assert body.index("statement('months'") < body.index("{%- do adapter.commit() -%}")
+    assert "select core.ensure_partition('core.{{ fact }}'::regclass, date '{{ month }}')" in body
+    assert "where l.status = 'pinned' and l.outcome = 'loaded'" in body
+    # No model creates a partition, as a hook before_begin breaks the transaction of a model
+    # (#191).
+    for path in (DBT / "models").rglob("*"):
+        if path.is_file():
+            assert "ensure_partition" not in path.read_text(encoding="utf-8"), path.name
+
+
+def test_the_pin_makes_the_partitions_of_the_facts_that_each_source_is_to_write():
+    # The sources of the pin are those whose fact tables staging reads by load; the ad platforms
+    # write the four facts of ads, the web analytics the fact of sessions, and the rates a table of
+    # the core without partitions (ADR-0036). Every fact of the migrations is in the list.
+    text = PIN.read_text(encoding="utf-8")
+    macro = text[text.index("{% macro pinned_load_facts() -%}") :]
+    ads = re.search(r"\{%- set ads = \[(.*?)\] -%\}", macro, flags=re.DOTALL).group(1)
+    ad_facts = re.findall(r"'(\w+)'", ads)
+    facts = {
+        source: ad_facts if listed == "ads" else re.findall(r"'(\w+)'", listed)
+        for source, listed in re.findall(r"^    '(raw_\w+)': (ads|\[.*\]),$", macro, re.MULTILINE)
+    }
+    newest = (DBT / "macros" / "newest_load.sql").read_text(encoding="utf-8")
+    sources = set(re.findall(r"^    '(raw_\w+)': \(", newest, flags=re.MULTILINE))
+    assert set(facts) == sources
+    migration = (MIGRATIONS / "0005_create_the_facts.sql").read_text(encoding="utf-8")
+    partitioned = set(
+        re.findall(
+            r"^CREATE TABLE core\.(\w+) \(\n(?:.*\n)*?\) PARTITION BY RANGE \(report_date\);$",
+            migration,
+            flags=re.MULTILINE,
+        )
+    )
+    assert len(partitioned) == 5, sorted(partitioned)
+    assert {fact for listed in facts.values() for fact in listed} == partitioned
+    assert facts["raw_demo_web"] == ["web_sessions_daily"]
+    assert facts["raw_demo_fx"] == facts["raw_ecb"] == []
+    for source in ("raw_demo_search", "raw_demo_social", "raw_demo_video", "raw_google_ads"):
+        assert sorted(facts[source]) == sorted(partitioned - {"web_sessions_daily"}), source
+    rates = (MIGRATIONS / "0007_create_the_rates.sql").read_text(encoding="utf-8")
+    assert "PARTITION BY" not in rates
 
 
 def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_does():

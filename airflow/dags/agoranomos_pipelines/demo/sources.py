@@ -5,18 +5,18 @@ Each table of a platform is a resource with the hints of TABLE_HINTS: the entiti
 (replace), the campaigns, the ad groups and the ads with their history (scd2, from the moment of
 each load), and the facts, which each load appends under its own _dlt_load_id (append). Each load
 also records, in the same run, the window of each account that it took and the day of the load in
-the time zone of the account (_agoranomos_loads): the staging models read, for each account and
-day, the rows of the newest whole load whose window covers the day, so a load replaces the days of
-its window whole, a repeated load creates no duplicate in staging, and a row that a platform no
-longer sends goes. No resource has a primary key: with nested tables, as the actions of Meta are,
-dlt would need to create a temporary table, which the loader role may not. The keys are checked in
-dbt. dlt keeps the state of each pipeline in its dataset, so its local working folder is a
-temporary one, and it empties the staging dataset, through which the versions go, after each load.
-The first load of a platform, the history, also replays the names that its campaigns had. The daily
-load reads the journal: it takes, for each account, the days after the last that a whole load took,
-and at least the reload window of the platform. A dataset that a release before v0.5 loaded, with
-its merges and its journal _agoranomos_reloads, is dropped by the next load, which loads the
-history again (start_over)."""
+the time zone of the account (_agoranomos_loads): the staging models read, for each account and day,
+the rows of the newest load whose window covers the day, of those that the run of the transform
+pinned (ADR-0046), so a load replaces the days of its window whole, a repeated load creates no
+duplicate in staging, and a row that a platform no longer sends goes. No resource has a primary key:
+with nested tables, as the actions of Meta are, dlt would need to create a temporary table, which
+the loader role may not. The keys are checked in dbt. dlt keeps the state of each pipeline in its
+dataset, so its local working folder is a temporary one, and it empties the staging dataset, through
+which the versions go, after each load. The first load of a platform, the history, also replays the
+names that its campaigns had. The daily load reads the journal: it takes, for each account, the days
+after the last that a whole load took, and at least the reload window of the platform. A dataset
+that a release before v0.5 loaded, with its merges and its journal _agoranomos_reloads, is dropped
+by the next load, which loads the history again (start_over)."""
 
 from __future__ import annotations
 

@@ -33,7 +33,7 @@ A source goes through every layer of the model ([ADR-0025](../../../docs/adr/002
 3. **Staging.** Add a folder `dbt/models/staging/<platform>/` with three kinds of files:
     - `_<platform>__sources.yml`: every raw table with a description, and `freshness: null`;
     - `_<platform>__models.yml`: every model and column with a description, and the critical tests;
-    - one `stg_<platform>__<table>.sql` for each entity, each a call of its shape macro; a fact table goes through `newest_load` of `dbt/macros/newest_load.sql`, which reads the rows of the newest whole load of each account and day, and whose `newest_load_keys` names the account and the day of the source.
+    - one `stg_<platform>__<table>.sql` for each entity, each a call of its shape macro; a fact table goes through `newest_load` of `dbt/macros/newest_load.sql`, which reads the rows of the newest pinned load of each account and day, and whose `newest_load_sources` names the account and the day of the source; the source also needs its facts of the core in `pinned_load_facts` of `dbt/macros/pin_loads.sql`, whose task `pin` pins the loads of every source that `newest_load_sources` lists and makes the partitions of the months of their windows.
 
     The sources list the journal `_agoranomos_loads` and `_dlt_loads` too. No test reads a raw table: the tests are on the staging views ([ADR-0046](../../../docs/adr/0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md)).
 4. **Intermediate.** Add a `ref` of the new staging views to every `int_*` model that unions the platforms. `git grep` of the example finds them:

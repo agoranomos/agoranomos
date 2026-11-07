@@ -71,6 +71,26 @@ def run_dag(airflow_url, token, dag_id, timeout=300):
     return wait_for_run(airflow_url, token, dag_id, run["dag_run_id"], timeout)
 
 
+def clear(airflow_url, token, run, task_ids, include_downstream=False):
+    """Clear tasks of a finished run, and those after them with include_downstream, so that
+    Airflow runs them again in the same run, which goes back to queued; the other tasks of the run
+    keep their state. Returns the ids of the tasks that it cleared. Airflow 3.3.2 clears only the
+    failed tasks unless it is told otherwise (only_failed), and with dry_run it changes nothing."""
+    body = {
+        "dry_run": False,
+        "dag_run_id": run["dag_run_id"],
+        "task_ids": task_ids,
+        "only_failed": False,
+        "reset_dag_runs": True,
+        "include_downstream": include_downstream,
+    }
+    status, cleared = api(
+        airflow_url, token, "POST", f"/api/v2/dags/{run['dag_id']}/clearTaskInstances", body
+    )
+    assert status == 200, cleared
+    return sorted({instance["task_id"] for instance in cleared["task_instances"]})
+
+
 def dag_runs(airflow_url, token, dag_id, limit=20):
     """The latest runs of a DAG, the newest first."""
     path = f"/api/v2/dags/{dag_id}/dagRuns?order_by=-run_after&limit={limit}"

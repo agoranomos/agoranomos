@@ -1,0 +1,18 @@
+sources:
+  - name: core
+    description: >-
+      The core of the warehouse, whose tables the migrations of postgres/migrations create and
+      describe, owned by the role migrator, so that dbt writes their rows and can drop or change
+      none of them (ADR-0035, ADR-0038).
+    schema: core
+    # The pin writes it at the start of every run of the transform: no freshness.
+    config:
+      freshness: null
+    tables:
+      - name: loads
+        description: >-
+          The journal of the loads of the core: one row for each load of a source and each account
+          in it, which the task of the pin of each run of the transform copies from the journal
+          _agoranomos_loads of the source once the load is whole, before the tasks of dbt, with
+          its window, or its error for a failed account, and the status pinned until the core
+          accepts it. stg_loads__newest_days reads the loads of each run from it.

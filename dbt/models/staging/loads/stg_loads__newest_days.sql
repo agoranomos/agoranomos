@@ -1,7 +1,10 @@
--- stg_loads__newest_days.sql: the newest whole load of each account and day of each source.
--- A table that each run of the transform fills anew, in one transaction, and analyzes, so that the
--- planner knows its rows when a staging view of a fact joins it (newest_load). Incremental, with
--- its rows deleted first, so that the table stays the same relation, and the views over it stay.
+-- stg_loads__newest_days.sql: the newest pinned load of each account and day of each source.
+-- A table that each run of the transform fills anew from core.loads, which the task of the pin
+-- wrote before the tasks of dbt (pin_loads), in one transaction, and analyzes, so that the planner
+-- knows its rows when a staging view of a fact joins it (newest_load). core.loads changes only at
+-- the pin, so the table holds the same rows however many times a run, or dbt by hand, builds it.
+-- Incremental, with its rows deleted first, so that the table stays the same relation, and the
+-- views over it stay.
 {{ config(
     materialized='incremental',
     incremental_strategy='append',
@@ -13,5 +16,5 @@
 {%- if not loop.first %}
 union all
 {%- endif %}
-{{ newest_load_days(source_name) }}
+{{ pinned_loads(source_name, source('core', 'loads')) }}
 {%- endfor %}
