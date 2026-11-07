@@ -23,6 +23,12 @@ agoranomos comes with a demo: the history of 18 months of a fictional business w
     The demo also fills the dashboard **Advertising** of the collection **agoranomos / Advertising**, which every deployment gets, with its tabs of the platforms, the campaigns, the ad groups and ads, and the conversions: [Read the advertising dashboard](read-the-advertising-dashboard.md).
 - **Airflow**, at the address that `up` prints: sign in as `admin` with `AIRFLOW_ADMIN_PASSWORD` from `.env`, and open the DAGs `agoranomos_demo_history`, whose five tasks load one platform each, `agoranomos_demo_transform`, `agoranomos_demo_daily`, their runs and the assets between them.
 
+<figure class="ag-shot" markdown="span">
+    ![The DAGs of agoranomos in Airflow, among them agoranomos_demo_history, agoranomos_demo_transform and agoranomos_demo_daily, with their schedules and last runs](../assets/screenshots/airflow-dags-light.webp#only-light){ width="1440" height="900" loading="lazy" }
+    ![The DAGs of agoranomos in Airflow, among them agoranomos_demo_history, agoranomos_demo_transform and agoranomos_demo_daily, with their schedules and last runs, in the dark theme](../assets/screenshots/airflow-dags-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
+    <figcaption>Airflow · the DAGs of agoranomos · demo data</figcaption>
+</figure>
+
 ## What later starts do
 
 `demo-init` runs on every start, and each step looks at what is there first.
