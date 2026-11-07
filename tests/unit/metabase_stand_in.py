@@ -727,7 +727,9 @@ class FakeMetabase:
     after the table itself, as Metabase makes the row of a new table before its fields. A person
     can hide the mart (mart_hidden), or a field (its visibility_type): the metadata of the database
     then leaves it out unless the request passes include_hidden=true, and a sync does not show it
-    again. key_marts adds marts of its own, such as the target of a foreign key. A connection keeps
+    again. key_marts adds marts of its own, such as the target of a foreign key. The query of
+    demo-init for the schemas of the demo that a release before v0.5 loaded lists earlier_demo,
+    none by default. A connection keeps
     the schedules of its sync and of its scan, which PUT /api/database/:id changes as Metabase
     0.64.1 does (the method schedules below), and the instance keeps one policy of the cache at
     most (cache_policy). PUT /api/table/:id
@@ -769,6 +771,9 @@ class FakeMetabase:
         # target of a foreign key.
         self.key_marts: dict[str, tuple[str, ...]] = {}
         self.other_marts: dict[str, dict[str, Any]] = {}
+        # The schemas of the demo that hold the journal of the releases before v0.5, which the
+        # query of demo-init for them lists (EARLIER_DEMO of demo_init.py).
+        self.earlier_demo: list[str] = []
         self.sync_seconds = 10.0
         self.fields_seconds = 0.0
         self.synced_at: float | None = None
@@ -1095,6 +1100,10 @@ class FakeMetabase:
             names += list(self.key_marts)
             mart = [["marts", name, column] for name in names for column in self.columns_of(name)]
             rows = mart if self.mart_in_warehouse else []
+            return 202, {"status": "completed", "data": {"rows": rows}}
+        query = native.get("query") or ""
+        if "'_agoranomos_reloads'" in query and self.is_warehouse(body.get("database")):
+            rows = [[schema] for schema in sorted(self.earlier_demo)]
             return 202, {"status": "completed", "data": {"rows": rows}}
         return 202, {"status": "failed", "error": "this stand-in does not know the query"}
 

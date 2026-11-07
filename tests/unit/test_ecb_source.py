@@ -40,9 +40,10 @@ class StandInClient:
         return f'"{self.pipeline.options["dataset_name"]}"."{name}"'
 
     def execute_sql(self, sql):
+        self.pipeline.queries.append(sql)
         if self.pipeline.state["loads"] is None:
             raise UndefinedRelation(sql)
-        if '"_agoranomos_reloads"' in sql:
+        if '"_agoranomos_loads"' in sql:
             return self.pipeline.state["reloads"]
         return [(self.pipeline.state["loads"],)]
 
@@ -50,13 +51,14 @@ class StandInClient:
 class StandInPipeline:
     def __init__(self, options, state):
         self.options, self.state, self.runs, self.last_trace = options, state, [], None
-        self.formats = []
+        self.formats, self.contracts, self.queries = [], [], []
 
     def sql_client(self):
         return StandInClient(self)
 
-    def run(self, resources, loader_file_format=None):
+    def run(self, resources, loader_file_format=None, schema_contract=None):
         self.formats.append(loader_file_format)
+        self.contracts.append(schema_contract)
         rows = {r.name: list(r.data) for r in resources}
         self.runs.append((rows, {r.name: r.hints for r in resources}))
         counts = {name: sum(1 for row in found if row != MARKER) for name, found in rows.items()}
@@ -93,8 +95,8 @@ def resource(data, name, **hints):
 def ecb(monkeypatch):
     """The module with a stand-in for dlt, and what it made and was asked: the pipelines, the
     clients with their settings, and the requests. state["loads"] is how many complete loads the
-    dataset holds (None: no table _dlt_loads yet), state["reloads"] the rows that the record of
-    the loads gives, and state["csv"] what the ECB answers."""
+    dataset holds (None: no table _dlt_loads yet), state["reloads"] the rows that the journal of
+    the whole loads gives, and state["csv"] what the ECB answers."""
     state = {"loads": None, "reloads": [], "csv": CSV}
     made = {"pipelines": [], "clients": [], "requests": []}
 
@@ -112,7 +114,9 @@ def ecb(monkeypatch):
     dlt.pipeline = lambda **options: (
         made["pipelines"].append(StandInPipeline(options, state)) or made["pipelines"][-1]
     )
-    dlt.destinations = types.SimpleNamespace(postgres=lambda credentials: ("postgres", credentials))
+    dlt.destinations = types.SimpleNamespace(
+        postgres=lambda credentials, create_indexes: ("postgres", credentials, create_indexes)
+    )
     exceptions = types.ModuleType("dlt.destinations.exceptions")
     exceptions.DatabaseUndefinedRelation = UndefinedRelation
     requests = types.ModuleType("dlt.sources.helpers.requests")
@@ -186,7 +190,7 @@ def test_a_load_asks_the_ecb_for_the_data_of_its_window_with_explicit_retries(ec
     ]
 
 
-def test_a_load_keeps_the_rows_as_the_csv_names_them_and_replaces_its_days(ecb):
+def test_a_load_appends_the_rows_as_the_csv_names_them(ecb):
     module, _, made = ecb
     assert module.load(NOW) == 2
     [pipeline] = made["pipelines"]
@@ -194,6 +198,9 @@ def test_a_load_keeps_the_rows_as_the_csv_names_them_and_replaces_its_days(ecb):
     assert pipeline.options["pipeline_name"] == "agoranomos_ecb"
     [(rows, hints)] = pipeline.runs
     assert pipeline.formats == ["csv"]
+    assert pipeline.contracts == [{"tables": "evolve", "columns": "evolve", "data_type": "freeze"}]
+    # dlt makes no index on _dlt_id of a new table (ADR-0035).
+    assert pipeline.options["destination"][2] is False
     assert rows["rates_daily"][0] == {
         "KEY": "EXR.D.USD.EUR.SP00.A",
         "FREQ": "D",
@@ -204,11 +211,8 @@ def test_a_load_keeps_the_rows_as_the_csv_names_them_and_replaces_its_days(ecb):
         "TIME_PERIOD": "2026-10-27",
         "OBS_VALUE": "1.1121",
     }
-    assert hints["rates_daily"]["write_disposition"] == {
-        "disposition": "merge",
-        "strategy": "delete-insert",
-        "destination_scope": "time_period BETWEEN '2023-09-01' AND '2026-10-28'",
-    }
+    # Each load appends its rows, and staging reads the newest whole load of each day (ADR-0038).
+    assert hints["rates_daily"]["write_disposition"] == "append"
     # Every column stays text, as the ECB writes it, and each hint has a dict of its own.
     columns = hints["rates_daily"]["columns"]
     assert {name: hint["data_type"] for name, hint in columns.items()} == dict.fromkeys(
@@ -222,26 +226,55 @@ def test_a_load_records_its_window_in_the_same_run(ecb):
     module, _, made = ecb
     module.load(NOW)
     [(rows, hints)] = made["pipelines"][0].runs
-    [record] = rows["_agoranomos_reloads"]
-    assert {key: record[key] for key in ("account_id", "as_of", "window_start", "window_end")} == {
+    [record] = rows["_agoranomos_loads"]
+    assert {key: record[key] for key in ("account_id", "as_of", "window_from", "window_to")} == {
         "account_id": "EUR",
         "as_of": date(2026, 10, 29),
-        "window_start": date(2023, 9, 1),
-        "window_end": date(2026, 10, 28),
+        "window_from": date(2023, 9, 1),
+        "window_to": date(2026, 10, 28),
     }
     assert record["now"] == NOW
     assert record["status"] == "loaded"
-    assert hints["_agoranomos_reloads"]["write_disposition"] == "append"
-    assert set(hints["_agoranomos_reloads"]["columns"]) == {*record, "error"}
+    assert hints["_agoranomos_loads"]["write_disposition"] == "append"
+    assert set(hints["_agoranomos_loads"]["columns"]) == {*record, "error"}
 
 
 def test_a_window_without_a_rate_still_replaces_its_days(ecb):
-    # The ECB answers a weekend with an empty body: the marker makes dlt delete the days anyway.
+    # The ECB answers a weekend with an empty body: the marker makes dlt make the table, and the
+    # journal holds the window, whose days staging then reads as empty.
     module, state, made = ecb
     state.update(csv="", loads=1, reloads=[("EUR", date(2026, 10, 25), date(2026, 10, 24))])
     assert module.load(datetime(2026, 10, 26, 6, 47, tzinfo=UTC)) == 0
     [(rows, _)] = made["pipelines"][0].runs
     assert rows["rates_daily"] == [MARKER]
+    [record] = rows["_agoranomos_loads"]
+    assert (record["window_from"], record["window_to"]) == (date(2026, 10, 19), date(2026, 10, 25))
+
+
+def test_a_window_starts_after_the_last_whole_load(ecb):
+    # The journal counts the loads that dlt finished, with their row in _dlt_loads: the days of a
+    # load that stopped half way are taken again.
+    module, state, made = ecb
+    state.update(loads=1, reloads=[("EUR", date(2026, 10, 28), date(2026, 10, 27))])
+    module.load(NOW)
+    [query] = [q for q in made["pipelines"][0].queries if "_agoranomos_loads" in q]
+    assert query == (
+        "SELECT j.account_id, max(j.as_of), max(j.window_to) "
+        'FROM "raw_ecb"."_agoranomos_loads" AS j JOIN "raw_ecb"."_dlt_loads" AS l '
+        "ON l.load_id = j._dlt_load_id AND l.status = 0 "
+        "WHERE j.status = 'loaded' GROUP BY j.account_id"
+    )
+
+
+def test_a_dataset_of_a_release_before_v0_5_takes_the_history_again(ecb):
+    # Its loads have no row in _agoranomos_loads, which a release before v0.5 did not write: the
+    # load takes the history, and the rows of the earlier loads stay unread by staging.
+    module, state, made = ecb
+    state.update(loads=4, reloads=[])
+    module.load(NOW)
+    [(rows, _)] = made["pipelines"][0].runs
+    [record] = rows["_agoranomos_loads"]
+    assert record["window_from"] == date(2023, 9, 1)
 
 
 def test_a_load_is_due_until_one_has_taken_the_day_in_frankfurt(ecb):

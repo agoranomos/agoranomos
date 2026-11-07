@@ -19,10 +19,12 @@ advertising.
 
 Each step looks at the current state first. A start that finds a successful run of the history and
 a successful run of the transform after it does not run the pipeline again and leaves the pause
-state of both DAGs as it is, and a start that finds a run of the daily load leaves its pause state
-as it is too. The content of Metabase is found by the entity IDs that Metabase gave it, in the
-registry of the content, never by name, but for the one move of the collection of an earlier
-release.
+state of both DAGs as it is, unless the raw tables of the demo are in the shape of a release before
+v0.5, which merged the days of each load in place: then it runs the history again, whose loads drop
+those tables and load them anew, each load under its own id (ADR-0038). A start that finds a run of
+the daily load leaves its pause state as it is too. The content of Metabase is found by the entity
+IDs that Metabase gave it, in the registry of the content, never by name, but for the one move of
+the collection of an earlier release.
 
 The whole job has one deadline, DEADLINE seconds from its start, which every wait shares, and a
 step that runs out of time names itself; ./agoranomos up waits longer than that for the stack.
@@ -41,6 +43,7 @@ import sys
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -134,6 +137,17 @@ RAN_BEFORE_HINT = (
     f"volume: trigger {LOAD_DAG} in Airflow, and the transform that follows it builds them again"
 )
 RAN_NOW_HINT = f"see the last run of {TRANSFORM_DAG} in Airflow"
+# The schemas of the demo that a release before v0.5 loaded, as the warehouse lists them through the
+# read-only connection of Metabase: those that hold the journal of those releases,
+# _agoranomos_reloads, which each of their loads wrote from v0.2.0 on, and which the loads of this
+# release do not (airflow/dags/agoranomos_pipelines/loads.py). The catalog of PostgreSQL shows the
+# names of the tables to every role, so metabase_reader reads them with no right on the schemas.
+EARLIER_DEMO = (
+    "SELECT n.nspname FROM pg_catalog.pg_class AS c "
+    "JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace "
+    "WHERE c.relname = '_agoranomos_reloads' AND n.nspname LIKE 'raw\\_demo\\_%' "
+    "ORDER BY n.nspname"
+)
 
 
 # The filters of the questions, by the names of their template tags: their display names, the type
@@ -759,23 +773,54 @@ def wait_for_transform(airflow: Airflow, since: str, deadline: Deadline) -> None
     )
 
 
-def run_demo_pipeline(airflow: Airflow, deadline: Deadline) -> bool:
+def parsed_at(details: Mapping[str, Any]) -> datetime | None:
+    """When the DAG processor last parsed the file of a DAG, from the details of the DAG."""
+    found = details.get("last_parsed_time")
+    return datetime.fromisoformat(found.replace("Z", "+00:00")) if found else None
+
+
+def parse_the_transform_again(airflow: Airflow, deadline: Deadline) -> None:
+    """Have the DAG processor parse the file of the transform again, and wait until it has. It
+    renders the tasks of dbt from the manifest that metadata-export writes on each start, and
+    parses a file that has not changed only every five minutes (MIN_FILE_PROCESS_INTERVAL in
+    compose.yaml): after an update, the run of the transform that the history starts could
+    otherwise come from the manifest of the release before, without a model that the update
+    brings and others read, such as the table of the newest loads (ADR-0038)."""
+    path = f"/api/v2/dags/{TRANSFORM_DAG}/details"
+    details = airflow.call("GET", path)
+    before = parsed_at(details)
+    airflow.call("PUT", f"/api/v2/parseDagFile/{quote(details['file_token'], safe='')}")
+
+    def parsed() -> bool:
+        after = parsed_at(airflow.call("GET", path))
+        return after is not None and (before is None or after > before)
+
+    wait_until(
+        parsed,
+        deadline,
+        f"Airflow did not parse the DAG {TRANSFORM_DAG} again",
+        "see ./agoranomos logs airflow-dag-processor",
+    )
+
+
+def run_demo_pipeline(airflow: Airflow, deadline: Deadline, again: bool = False) -> bool:
     """Run the demo pipeline, unless the history has succeeded and a run of the transform has
-    succeeded after it; True if it ran.
+    succeeded after it and the history need not run again (again); True if it ran.
 
     A start that finds them changes nothing in Airflow, so a pause that a person made stays. A
     deployment of v0.1 has a transform that succeeded and no history, so its first start of this
     release runs both; a history with no good transform after it, as after a failed critical test,
-    runs again, which replaces the same days. Otherwise it unpauses both DAGs and waits until the
-    transform is idle before the history: with max_active_runs=1, Airflow defers the run that the
-    assets start while another run of the transform is queued or running, the deferred run
-    consumes only the events up to the one that queued it, and an event that comes in between
-    starts no run of its own. A transform that succeeds while the job waits, after a history that
-    had succeeded, as when an earlier start ran out of time during it, counts, and the history
-    does not run again. A history that is queued or running already is waited for, and not started
-    again.
+    runs again, which replaces the same days; and so does one whose tables a release before v0.5
+    loaded (again), as its runs in Airflow say nothing of that. Otherwise it unpauses both DAGs and
+    waits until the transform is idle before the history: with max_active_runs=1, Airflow defers
+    the run that the assets start while another run of the transform is queued or running, the
+    deferred run consumes only the events up to the one that queued it, and an event that comes in
+    between starts no run of its own. A transform that succeeds while the job waits, after a
+    history that had succeeded, as when an earlier start ran out of time during it, counts, and
+    the history does not run again, unless it must (again). A history that is queued or running
+    already is waited for, and not started again.
     """
-    history = newest_run(airflow, LOAD_DAG, "success")
+    history = None if again else newest_run(airflow, LOAD_DAG, "success")
     if history is not None and count_runs(
         airflow, TRANSFORM_DAG, "success", since=history["run_after"]
     ):
@@ -794,12 +839,37 @@ def run_demo_pipeline(airflow: Airflow, deadline: Deadline) -> bool:
         return True
     load = newest_run(airflow, LOAD_DAG, "queued", "running")
     if load is None:
+        parse_the_transform_again(airflow, deadline)
         load = airflow.call("POST", f"/api/v2/dags/{LOAD_DAG}/dagRuns", {"logical_date": None})
     load = wait_for_run(airflow, LOAD_DAG, load["dag_run_id"], deadline)
     if load["state"] != "success":
         raise SetupError(f"the DAG {LOAD_DAG} failed: see it in Airflow")
     wait_for_transform(airflow, load["start_date"], deadline)
     return True
+
+
+def earlier_demo(metabase: Metabase, database_id: int) -> list[str]:
+    """The schemas of the demo whose tables a release before v0.5 loaded (EARLIER_DEMO), as the
+    warehouse lists them through the connection of Metabase: none on a new warehouse, and none once
+    the history has loaded them again."""
+    answer = metabase.call(
+        "POST",
+        "/api/dataset",
+        {"database": database_id, "type": "native", "native": {"query": EARLIER_DEMO}},
+    )
+    if not isinstance(answer, dict) or answer.get("status") != "completed":
+        raise SetupError(
+            "Metabase could not list the tables of the demo in the warehouse: see ./agoranomos "
+            "logs metabase"
+        )
+    found = []
+    for row in answer["data"]["rows"]:
+        # A row is [schema]. One of another shape is an answer of an unexpected shape, which the
+        # job ends in one line that names this function, as it ends a KeyError.
+        if not isinstance(row, list) or len(row) != 1 or not isinstance(row[0], str):
+            raise TypeError("a row of the schemas of the demo is not one name")
+        found.append(row[0])
+    return found
 
 
 def start_daily_load(airflow: Airflow) -> bool:
@@ -1219,9 +1289,6 @@ def main(env: Mapping[str, str] | None = None) -> int:
         airflow = Airflow(config.airflow_url)
         sign_in_to_airflow(airflow, config.airflow_password)
         wait_for_dags(airflow, deadline)
-        ran = run_demo_pipeline(airflow, deadline)
-        if start_daily_load(airflow):
-            log(f"unpaused {DAILY_DAG}, which loads the new days of the demo every day")
         server, hint = "Metabase", Metabase.logs_hint
         metabase = Metabase(config.metabase_url)
         sign_in(metabase, config.admin_email, config.admin_password)
@@ -1231,6 +1298,18 @@ def main(env: Mapping[str, str] | None = None) -> int:
             raise SetupError(
                 "Metabase has no connection to the warehouse: see ./agoranomos logs metabase-init"
             )
+        # Asked before the pipeline, which the answer decides.
+        earlier = earlier_demo(metabase, database["id"])
+        if earlier:
+            log(
+                f"{', '.join(earlier)}: the demo as a release before v0.5 loaded it; the history "
+                "loads it again, each load under its own id"
+            )
+        server, hint = "Airflow", Airflow.logs_hint
+        ran = run_demo_pipeline(airflow, deadline, again=bool(earlier))
+        if start_daily_load(airflow):
+            log(f"unpaused {DAILY_DAG}, which loads the new days of the demo every day")
+        server, hint = "Metabase", Metabase.logs_hint
         ensure_synced(metabase, database["id"], tables, deadline, ran)
         metadata.apply(
             metabase,

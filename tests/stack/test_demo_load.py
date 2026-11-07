@@ -1,10 +1,12 @@
 """The history of the fictional platforms, agoranomos_demo_history, and their daily load,
-agoranomos_demo_daily: each raw_demo_<platform> holds what the demo generator makes for the days of
-each account that a load replaces, a repeated history and a row that a platform no longer sends
-leave no stale row, each load records the window of each account that it replaced, and the daily
-load takes the days after the last load, or nothing when the day of every account is loaded. The
-transform is paused while these tests run the loads, which would start a run of it each time, and
-runs once after the last of them.
+agoranomos_demo_daily: each load appends its rows to raw_demo_<platform> under its own _dlt_load_id
+and records the window of each account in the journal _agoranomos_loads, in the same run and so
+under the same id, which _dlt_loads marks whole; the rows that staging reads, those of the newest
+whole load of each account and day (raw_loads.py), are what the demo generator makes for those
+days, a repeated history and a row that a platform no longer sends leave no stale row in them, and
+the daily load takes the days after the last load, or nothing when the day of every account is
+loaded. The transform is paused while these tests run the loads, which would start a run of it each
+time, and runs once after the last of them.
 
 The generator is deterministic, so the tests compute what the warehouse must hold for the days that
 it holds. The assertions print counts, dates and sums, never a secret.
@@ -31,6 +33,7 @@ from airflow_api import (
     wait_for_dag,
     wait_for_run,
 )
+from raw_loads import DAYS, newest
 from stack_helpers import leaked, secrets, wait_for, warehouse_output
 
 pytestmark = [
@@ -40,6 +43,8 @@ pytestmark = [
 ]
 
 HISTORY = "agoranomos_demo_history"
+# The newest whole load of each account and day of demo_search (raw_loads.py).
+NEWEST_DAYS = DAYS.format(dataset="raw_demo_search")
 TRANSFORM = "agoranomos_demo_transform"
 DAILY = "agoranomos_demo_daily"
 # What each main table holds, as SQL over its columns and as the same from a record of the
@@ -157,8 +162,8 @@ def expected(code, now, history=None):
 
 
 def in_warehouse(env, code, now):
-    """The same, from the warehouse, for the days that a load as of now replaces, its windows:
-    earlier loads may hold days before them."""
+    """The same, from the rows of the main table that staging reads, for the days that a load as
+    of now takes, its windows: earlier loads may hold days before them."""
     platform = platforms.PLATFORMS[code]
     account, day, sums, _ = MAIN[code]
     windows = " OR ".join(
@@ -167,7 +172,7 @@ def in_warehouse(env, code, now):
         for account_id, (first, last) in platform.module.windows(now).items()
     )
     # The names and the values come from the code of the demo.
-    sql = f"SELECT {sums} FROM {platform.dataset}.{platform.main_table} WHERE {windows}"  # noqa: S608
+    sql = f"SELECT {sums} FROM {newest(code)} WHERE {windows}"  # noqa: S608
     text = warehouse_output(env, sql)
     return [
         Decimal(value or 0) if "." in (value or "") else int(value or 0)
@@ -201,17 +206,50 @@ def test_every_load_of_the_history_is_complete(env, history_run, code):
     loads, failed = map(int, text.split("|"))
     assert loads > 0
     assert failed == 0
+    # Every row of the journal belongs to a load that _dlt_loads marks whole, as staging reads it,
+    # and each load of the facts has its rows of the journal, under the same id.
+    orphans = warehouse_output(
+        env,
+        f"SELECT count(*) FROM {dataset}._agoranomos_loads AS j "  # noqa: S608 (names of the demo)
+        f"WHERE NOT EXISTS (SELECT FROM {dataset}._dlt_loads AS l "
+        "WHERE l.load_id = j._dlt_load_id AND l.status = 0)",
+    )
+    assert int(orphans) == 0
+    table = platforms.PLATFORMS[code].main_table
+    unrecorded = warehouse_output(
+        env,
+        f"SELECT count(DISTINCT r._dlt_load_id) FROM {dataset}.{table} AS r "  # noqa: S608
+        f"WHERE NOT EXISTS (SELECT FROM {dataset}._agoranomos_loads AS j "
+        "WHERE j._dlt_load_id = r._dlt_load_id)",
+    )
+    assert int(unrecorded) == 0
 
 
-def test_a_repeated_history_changes_no_row(env, airflow_url, token, history_run):
-    # A second load as of a later moment replaces the days of each account that it covers, and
-    # the days of the earlier history before them stay: the main tables hold what the generator
-    # makes as of the later moment, without a duplicate.
+def test_a_repeated_history_changes_no_row_that_staging_reads(env, airflow_url, token, history_run):
+    # A second load as of a later moment appends its rows beside those of the first, and is the
+    # newest of the days of each account that it covers, while the days of the earlier history
+    # before them stay: the rows that staging reads are what the generator makes as of the later
+    # moment, without a duplicate, and the main tables hold both loads until the core accepts them.
+    loads_before = {
+        code: int(
+            warehouse_output(
+                env,
+                f"SELECT count(DISTINCT _dlt_load_id) FROM {p.dataset}.{p.main_table}",  # noqa: S608
+            )
+        )
+        for code, p in platforms.PLATFORMS.items()
+    }
     run = run_dag(airflow_url, token, HISTORY, timeout=900)
     assert run["state"] == "success", run["state"]
     later = moment(run)
     for code in platforms.LOAD_ORDER:
         assert in_warehouse(env, code, later) == expected(code, later), code
+        platform = platforms.PLATFORMS[code]
+        loads = warehouse_output(
+            env,
+            f"SELECT count(DISTINCT _dlt_load_id) FROM {platform.dataset}.{platform.main_table}",  # noqa: S608
+        )
+        assert int(loads) == loads_before[code] + 1, code
 
 
 def test_the_names_of_campaigns_have_their_versions(env, history_run):
@@ -232,15 +270,16 @@ def test_the_names_of_campaigns_have_their_versions(env, history_run):
 
 
 # The columns of raw that staging reads, with the types that the hints of the resources give and
-# that dlt 1.31.0 writes: the day of each fact table, the money of Google as a string of micros or
-# of units, and the windows of the actions of Meta in its child tables, as dlt names them. dlt
-# writes its type text as varchar, which PostgreSQL reports as character varying. The unit tests
-# load with a stand-in of dlt, so only a load with dlt itself shows that each hint reaches its
-# column.
+# that dlt 1.32.0 writes: the day of each fact table and the id of its load, the money of Google as
+# a string of micros or of units, and the windows of the actions of Meta in its child tables, which
+# follow their row by _dlt_parent_id, as dlt names them. dlt writes its type text as varchar, which
+# PostgreSQL reports as character varying. The unit tests load with a stand-in of dlt, so only a
+# load with dlt itself shows that each hint reaches its column.
 RAW_COLUMNS = (
     "raw_demo_fx.rates_daily.rate_date:date",
     "raw_demo_search.campaign_conversions.metrics__all_conversions_value:character varying",
     "raw_demo_search.campaign_conversions.segments__date:date",
+    "raw_demo_search.campaign_stats._dlt_load_id:character varying",
     "raw_demo_search.campaign_stats.metrics__conversions_value:character varying",
     "raw_demo_search.campaign_stats.metrics__cost_micros:character varying",
     "raw_demo_search.campaign_stats.segments__date:date",
@@ -249,7 +288,7 @@ RAW_COLUMNS = (
     "raw_demo_social.insights_campaign__actions._1d_click:character varying",
     "raw_demo_social.insights_campaign__actions._1d_view:character varying",
     "raw_demo_social.insights_campaign__actions._7d_click:character varying",
-    "raw_demo_social.insights_campaign__actions._dlt_root_id:character varying",
+    "raw_demo_social.insights_campaign__actions._dlt_parent_id:character varying",
     "raw_demo_video.report_campaign_daily.dimensions__stat_time_day:character varying",
     "raw_demo_web.report_sessions_daily.date:character varying",
 )
@@ -286,7 +325,7 @@ def test_a_load_leaves_no_empty_string_in_the_journal(env, history_run):
         dataset = platforms.PLATFORMS[code].dataset
         found = warehouse_output(
             env,
-            f"SELECT count(*) FILTER (WHERE error IS NOT NULL) FROM {dataset}._agoranomos_reloads",  # noqa: S608 (names of the demo)
+            f"SELECT count(*) FILTER (WHERE error IS NOT NULL) FROM {dataset}._agoranomos_loads",  # noqa: S608 (names of the demo)
         )
         assert int(found) == 0, code
 
@@ -294,9 +333,10 @@ def test_a_load_leaves_no_empty_string_in_the_journal(env, history_run):
 def test_a_row_that_the_platform_no_longer_sends_is_gone_after_the_next_load(
     env, airflow_url, token, history_run
 ):
-    # A row inside the window of an account that the next load does not bring, as a campaign that
-    # a platform stops reporting after a correction: the scope of the load deletes it, which a
-    # merge on the keys would not.
+    # A row of the newest load of a day of an account that the next load does not bring, as a
+    # campaign that a platform stops reporting after a correction: the next load is the newest of
+    # that day, so staging no longer reads the row, which a merge on the keys would have kept. The
+    # row stays in raw, with its load, until the core accepts the load.
     [(account, last)] = [
         (a.account_id, common.last_final_day(moment(history_run), a.time_zone))
         for a in platforms.PLATFORMS["demo_search"].module.accounts()
@@ -307,26 +347,37 @@ def test_a_row_that_the_platform_no_longer_sends_is_gone_after_the_next_load(
         "campaign__name, campaign__resource_name, metrics__impressions, metrics__clicks, "
         "metrics__cost_micros, metrics__conversions, metrics__conversions_value, segments__date, "
         "_dlt_load_id, _dlt_id) "
-        f"VALUES ('{account}', '21099999999', 'Stale by a test', "
+        f"SELECT '{account}', '21099999999', 'Stale by a test', "
         f"'customers/{account}/campaigns/21099999999', '10', '1', '1000000', 0, 0, "
-        f"'{last.isoformat()}', 'stack-test', 'stack-test-stale-row')"
+        f"DATE '{last.isoformat()}', d.load_id, 'stack-test-stale-row' "
+        f"FROM ({NEWEST_DAYS}) AS d "
+        f"WHERE d.account_id = '{account}' AND d.day = DATE '{last.isoformat()}'"
+    )
+    # The row of an earlier run of this test on the same stack stays in raw too.
+    warehouse_output(
+        env, "DELETE FROM raw_demo_search.campaign_stats WHERE _dlt_id = 'stack-test-stale-row'"
     )
     warehouse_output(env, stale)
+    read = f"SELECT count(*) FROM {newest('demo_search')} WHERE _dlt_id = 'stack-test-stale-row'"  # noqa: S608
+    assert int(warehouse_output(env, read)) == 1, "staging does not read the row of the test"
     run = run_dag(airflow_url, token, HISTORY, timeout=900)
     assert run["state"] == "success", run["state"]
+    assert int(warehouse_output(env, read)) == 0, "staging reads a row that no load brings now"
     left = warehouse_output(
         env,
         "SELECT count(*) FROM raw_demo_search.campaign_stats "
         "WHERE _dlt_id = 'stack-test-stale-row'",
     )
-    assert int(left) == 0, "the load kept a row that it no longer brings"
+    assert int(left) == 1, "the load deleted a row of an earlier load"
 
 
 def test_the_history_leaves_out_the_day_that_the_demo_misses(env, history_run):
+    # Of the rows that staging reads: an earlier history, on another day, left out another day, and
+    # its rows of this one stay in raw, under its own load, which is not the newest of the day.
     [(account, day)] = platforms.gap(moment(history_run))
     count = warehouse_output(
         env,
-        "SELECT count(*) FROM raw_demo_social.insights_campaign "  # noqa: S608 (values of the demo)
+        f"SELECT count(*) FROM {newest('demo_social')} "  # noqa: S608 (values of the demo)
         f"WHERE account_id = '{account}' AND date_start = DATE '{day.isoformat()}'",
     )
     assert int(count) == 0
@@ -343,14 +394,14 @@ def test_loader_owns_the_tables_of_the_history(env, history_run):
     assert text.split() == ["loader"]
 
 
-# The columns of _agoranomos_reloads and the types that PostgreSQL reports for them: dlt writes
-# its type text as varchar and its timestamp with a time zone. The hints of the journal, which every
+# The columns of _agoranomos_loads and the types that PostgreSQL reports for them: dlt writes its
+# type text as varchar and its timestamp with a time zone. The hints of the journal, which every
 # source shares, make the columns of the status and of the error also where no row fills them.
-RELOAD_COLUMNS = {
+LOAD_COLUMNS = {
     "account_id": "character varying",
     "as_of": "date",
-    "window_start": "date",
-    "window_end": "date",
+    "window_from": "date",
+    "window_to": "date",
     "now": "timestamp with time zone",
     "loaded_at": "timestamp with time zone",
     "status": "character varying",
@@ -359,17 +410,18 @@ RELOAD_COLUMNS = {
 
 
 def test_each_load_of_the_history_records_the_window_of_each_account(env, history_run):
-    # What a later load reads to know how far each account has been loaded: the window of each
-    # account, and the day of the load in the time zone of the account, with the status loaded: a
-    # load of the demo fails whole or not at all.
+    # What staging and a later load read to know how far each account has been loaded: the
+    # window of each account, and the day of the load in the time zone of the account, with the
+    # status loaded, as a load of the demo fails whole or not at all, under the id of the load of
+    # the facts, which _dlt_loads marks whole.
     now = moment(history_run)
     for code in platforms.LOAD_ORDER:
         platform = platforms.PLATFORMS[code]
         windows = platform.module.windows(now)
         text = warehouse_output(
             env,
-            "SELECT account_id, as_of, window_start, window_end, status "  # noqa: S608 (names of the demo)
-            f"FROM {platform.dataset}._agoranomos_reloads "
+            "SELECT account_id, as_of, window_from, window_to, status "  # noqa: S608 (names of the demo)
+            f"FROM {platform.dataset}._agoranomos_loads "
             f"WHERE now = TIMESTAMPTZ '{now.isoformat()}'",
         )
         wanted = [
@@ -379,15 +431,27 @@ def test_each_load_of_the_history_records_the_window_of_each_account(env, histor
         ]
         # Sorted here, not by the collation of the warehouse.
         assert sorted(text.splitlines()) == sorted(wanted), code
+        [load] = warehouse_output(
+            env,
+            f"SELECT DISTINCT j._dlt_load_id FROM {platform.dataset}._agoranomos_loads AS j "  # noqa: S608
+            f"JOIN {platform.dataset}._dlt_loads AS l ON l.load_id = j._dlt_load_id "
+            f"AND l.status = 0 WHERE j.now = TIMESTAMPTZ '{now.isoformat()}'",
+        ).splitlines()
+        rows = warehouse_output(
+            env,
+            f"SELECT count(*) FROM {platform.dataset}.{platform.main_table} "  # noqa: S608
+            f"WHERE _dlt_load_id = '{load}'",
+        )
+        assert int(rows) == expected(code, now)[0], code
         kinds = warehouse_output(
             env,
             "SELECT column_name || ':' || data_type FROM information_schema.columns "  # noqa: S608
-            f"WHERE table_schema = '{platform.dataset}' AND table_name = '_agoranomos_reloads' "
+            f"WHERE table_schema = '{platform.dataset}' AND table_name = '_agoranomos_loads' "
             "AND column_name NOT LIKE '\\_dlt\\_%'",
         )
         # Without the columns of dlt, _dlt_load_id and _dlt_id.
         found = dict(line.split(":") for line in kinds.splitlines())
-        assert found == RELOAD_COLUMNS, code
+        assert found == LOAD_COLUMNS, code
 
 
 def test_each_load_of_the_history_updates_its_asset_and_logs_no_secret(
@@ -449,14 +513,16 @@ def run_daily(airflow_url, token):
 
 
 def newest_loads(env):
-    """The day of the newest load of each account of each platform, as _agoranomos_reloads records
-    it."""
+    """The day of the newest whole load of each account of each platform, as _agoranomos_loads
+    records it."""
     found = {}
     for code in platforms.LOAD_ORDER:
         dataset = platforms.PLATFORMS[code].dataset
         text = warehouse_output(
             env,
-            f"SELECT account_id, max(as_of) FROM {dataset}._agoranomos_reloads GROUP BY account_id",  # noqa: S608
+            f"SELECT j.account_id, max(j.as_of) FROM {dataset}._agoranomos_loads AS j "  # noqa: S608
+            f"JOIN {dataset}._dlt_loads AS l ON l.load_id = j._dlt_load_id AND l.status = 0 "
+            "GROUP BY j.account_id",
         )
         for line in text.splitlines():
             account_id, as_of = line.split("|")
@@ -497,16 +563,17 @@ LAG_DAYS = 40
 
 
 def test_a_daily_load_brings_every_day_after_the_last_load(env, airflow_url, token, history_run):
-    # As after a stand that was off for 40 days: the rows of demo_web, and the record of its loads,
-    # end 40 days before yesterday. The daily load brings every day after the last of each account
-    # and the window of each other platform, in the pool of the loads of the demo, and the main
-    # tables hold what the generator makes, without a hole or a duplicate.
+    # As after a stand that was off for 40 days: the journal of the loads of demo_web ends 40 days
+    # before yesterday, so no load covers the days after that, and staging reads none of their rows.
+    # The daily load brings every day after the last of each account and the window of each other
+    # platform, in the pool of the loads of the demo, and the rows that staging reads are what the
+    # generator makes, without a hole or a duplicate.
     web = platforms.PLATFORMS["demo_web"]
     ends = dict(
         line.split("|")
         for line in warehouse_output(
             env,
-            "SELECT account_id, max(window_end) FROM raw_demo_web._agoranomos_reloads "
+            "SELECT account_id, max(window_to) FROM raw_demo_web._agoranomos_loads "
             "GROUP BY account_id",
         ).splitlines()
     )
@@ -514,18 +581,19 @@ def test_a_daily_load_brings_every_day_after_the_last_load(env, airflow_url, tok
         account_id: datetime.fromisoformat(end).date() - timedelta(days=LAG_DAYS)
         for account_id, end in ends.items()
     }
+    warehouse_output(
+        env,
+        "UPDATE raw_demo_web._agoranomos_loads "  # noqa: S608 (a constant of this file)
+        f"SET as_of = as_of - {LAG_DAYS}, window_to = window_to - {LAG_DAYS}",
+    )
     for account_id, end in lagged.items():
-        warehouse_output(
+        unread = warehouse_output(
             env,
-            "DELETE FROM raw_demo_web.report_sessions_daily "  # noqa: S608 (values of the demo)
+            f"SELECT count(*) FROM {newest('demo_web')} "  # noqa: S608 (values of the demo)
             f"WHERE property = 'properties/{account_id}' "
             f"AND to_date(date, 'YYYYMMDD') > DATE '{end.isoformat()}'",
         )
-    warehouse_output(
-        env,
-        "UPDATE raw_demo_web._agoranomos_reloads "  # noqa: S608 (a constant of this file)
-        f"SET as_of = as_of - {LAG_DAYS}, window_end = window_end - {LAG_DAYS}",
-    )
+        assert int(unread) == 0, account_id
     run = run_daily(airflow_url, token)
     assert run["state"] == "success", run["state"]
     wanted = {"due": "success", **{f"load_{code}": "success" for code in platforms.LOAD_ORDER}}
@@ -542,8 +610,8 @@ def test_a_daily_load_brings_every_day_after_the_last_load(env, airflow_url, tok
         platform = platforms.PLATFORMS[code]
         text = warehouse_output(
             env,
-            "SELECT account_id, window_start, window_end "  # noqa: S608 (names of the demo)
-            f"FROM {platform.dataset}._agoranomos_reloads "
+            "SELECT account_id, window_from, window_to "  # noqa: S608 (names of the demo)
+            f"FROM {platform.dataset}._agoranomos_loads "
             f"WHERE now = TIMESTAMPTZ '{later.isoformat()}'",
         )
         windows = {

@@ -8,23 +8,29 @@ sources:
       tables then read none.
     schema: raw_google_ads
     # No freshness check of dbt: the Ops collection shows the last load of each account, from
-    # _agoranomos_reloads (models/ops/ops_loads.sql).
+    # _agoranomos_loads (models/ops/ops_loads.sql).
     config:
       freshness: null
     tables:
-      - name: _agoranomos_reloads
+      - name: _agoranomos_loads
         description: >-
-          The journal of the loads of Google Ads: one row for each account in each load. An account
-          that the load took has the status loaded, the day of the load in the time zone of the
-          account (as_of), the first and last day that the load replaced (window_start,
-          window_end), and the moment of the load (loaded_at). An account whose request to the API
-          failed has the status failed, the text of the error, the moment of the attempt (now), and
-          no day and no loaded_at, as nothing was loaded. The rows of the loads before the status
-          existed have none, and all of them loaded.
+          The journal of the loads of Google Ads: one row for each account in each load, written in
+          the same run as the rows of the load, so under its _dlt_load_id. An account that the load
+          took has the status loaded, the day of the load in the time zone of the account (as_of),
+          the first and last day of the window that the load took (window_from, window_to), and the
+          moment of the load (loaded_at). An account whose request to the API failed has the status
+          failed, the text of the error, the moment of the attempt (now), and no day and no
+          loaded_at, as nothing was loaded. The staging models read, for each account and day, the
+          rows of the newest whole load whose window covers the day.
+      - name: _dlt_loads
+        description: >-
+          The loads of dlt into raw_google_ads, one row each: a load is whole once it has its row
+          here, with status 0, which dlt writes after the last table of the load. The staging models
+          read the rows of whole loads only.
       - name: customers
         description: >-
-          Each account as its customer resource gives it: its ID, name, currency, time zone,
-          status and whether it is a manager account. Each load replaces the table.
+          Each account as its customer resource gives it: its ID, name, currency, time zone, status
+          and whether it is a manager account. Each load replaces the table.
       - name: campaigns
         description: >-
           The campaigns of each account, with their status and channel type, one row for each
@@ -32,15 +38,17 @@ sources:
           _dlt_valid_to.
       - name: campaign_stats
         description: >-
-          The statistics of each campaign by day (segments.date): impressions and clicks as
-          strings, the INT64 numbers of the REST interface, cost in micros, and the conversions of
-          the platform. Each load replaces the days of each account that it covers.
+          The statistics of each campaign by day (segments.date): impressions and clicks as strings,
+          the INT64 numbers of the REST interface, cost in micros, and the conversions of the
+          platform. Each load appends its rows under its own _dlt_load_id, and staging reads, for
+          each account and day, those of the newest whole load whose window covers the day.
       - name: campaign_conversions
         description: >-
-          The conversions of each campaign by day and conversion action, from a query of its own,
-          as segments.conversion_action cannot be selected with the cost: the conversions of the
-          platform and all conversions, with their values. Each load replaces the days of each
-          account that it covers.
+          The conversions of each campaign by day and conversion action, from a query of its own, as
+          segments.conversion_action cannot be selected with the cost: the conversions of the
+          platform and all conversions, with their values. Each load appends its rows under its own
+          _dlt_load_id, and staging reads, for each account and day, those of the newest whole load
+          whose window covers the day.
       - name: ad_groups
         description: >-
           The ad groups of each account, with their campaign, status and type, one row for each
@@ -50,13 +58,15 @@ sources:
         description: >-
           The statistics of each ad group by day (segments.date): impressions and clicks as strings,
           the INT64 numbers of the REST interface, cost in micros, and the conversions of the
-          platform. Each load replaces the days of each account that it covers.
+          platform. Each load appends its rows under its own _dlt_load_id, and staging reads, for
+          each account and day, those of the newest whole load whose window covers the day.
       - name: ad_group_conversions
         description: >-
           The conversions of each ad group by day and conversion action, from a query of its own, as
           segments.conversion_action cannot be selected with the cost: the conversions of the
-          platform and all conversions, with their values. Each load replaces the days of each
-          account that it covers.
+          platform and all conversions, with their values. Each load appends its rows under its own
+          _dlt_load_id, and staging reads, for each account and day, those of the newest whole load
+          whose window covers the day.
       - name: ads
         description: >-
           The ads of each account in their ad groups (ad_group_ad), with their status and type, one
@@ -66,14 +76,17 @@ sources:
       - name: ad_stats
         description: >-
           The statistics of each ad by day (segments.date), in the form of ad_group_stats. Each load
-          replaces the days of each account that it covers.
+          appends its rows under its own _dlt_load_id, and staging reads, for each account and day,
+          those of the newest whole load whose window covers the day.
       - name: ad_conversions
         description: >-
           The conversions of each ad by day and conversion action, in the form of
-          ad_group_conversions. Each load replaces the days of each account that it covers.
+          ad_group_conversions. Each load appends its rows under its own _dlt_load_id, and staging
+          reads, for each account and day, those of the newest whole load whose window covers the
+          day.
       - name: conversion_actions
         description: >-
-          The conversion actions of each account, with their status, their category, whether
-          Google counts each in metrics.conversions (include_in_conversions_metric) and whether
-          each is primary for its goal (primary_for_goal), one row for each version that the loads
-          saw: dlt keeps the versions (scd2), from _dlt_valid_from until _dlt_valid_to.
+          The conversion actions of each account, with their status, their category, whether Google
+          counts each in metrics.conversions (include_in_conversions_metric) and whether each is
+          primary for its goal (primary_for_goal), one row for each version that the loads saw: dlt
+          keeps the versions (scd2), from _dlt_valid_from until _dlt_valid_to.

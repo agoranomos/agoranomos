@@ -6,28 +6,37 @@ sources:
       responses as dlt normalizes them, nested objects joined by __.
     schema: raw_demo_search
     # No freshness check of dbt: the Ops collection shows the last load of each account, from
-    # _agoranomos_reloads (models/ops/ops_loads.sql).
+    # _agoranomos_loads (models/ops/ops_loads.sql).
     config:
       freshness: null
     tables:
-      - name: _agoranomos_reloads
+      - name: _agoranomos_loads
         description: >-
-          The record of the loads of demo_search: one row for each account in each load, with the
-          day of the load in the time zone of the account (as_of), the first and last day that
-          the load replaced (window_start, window_end), and the moment of the load.
+          The journal of the loads of demo_search: one row for each account in each load, written in
+          the same run as the rows of the load, so under its _dlt_load_id. An account that the load
+          took has the status loaded, the day of the load in the time zone of the account (as_of),
+          the first and last day of the window that the load took (window_from, window_to), and the
+          moment of the load (loaded_at). The staging models read, for each account and day, the
+          rows of the newest whole load whose window covers the day.
+      - name: _dlt_loads
+        description: >-
+          The loads of dlt into raw_demo_search, one row each: a load is whole once it has its row
+          here, with status 0, which dlt writes after the last table of the load. The staging models
+          read the rows of whole loads only.
       - name: customer_clients
         description: >-
-          The accounts under the manager account of demo_search, as customer_client lists them,
-          the manager among them; each load replaces them.
+          The accounts under the manager account of demo_search, as customer_client lists them, the
+          manager among them; each load replaces them.
       - name: campaigns
         description: >-
           The campaigns of demo_search, one row for each version, from _dlt_valid_from until
           _dlt_valid_to, as dlt keeps them with its scd2 strategy.
       - name: campaign_stats
         description: >-
-          The statistics of the campaigns of demo_search, one row for each campaign and day with
-          any metric, in the currency and the time zone of the account. Each load replaces the
-          days of each account that it covers.
+          The statistics of the campaigns of demo_search, one row for each campaign and day with any
+          metric, in the currency and the time zone of the account. Each load appends its rows under
+          its own _dlt_load_id, and staging reads, for each account and day, those of the newest
+          whole load whose window covers the day.
       - name: campaign_conversions
         description: >-
           The conversions of the campaigns of demo_search by conversion action, one row for each
@@ -39,8 +48,9 @@ sources:
       - name: ad_group_stats
         description: >-
           The statistics of the ad groups of demo_search, one row for each ad group and day with any
-          metric, in the currency and the time zone of the account. Each load replaces the days of
-          each account that it covers. A Performance Max campaign has no ad groups.
+          metric, in the currency and the time zone of the account. Each load appends its rows under
+          its own _dlt_load_id, and staging reads, for each account and day, those of the newest
+          whole load whose window covers the day. A Performance Max campaign has no ad groups.
       - name: ad_group_conversions
         description: >-
           The conversions of the ad groups of demo_search by conversion action, one row for each ad
@@ -53,8 +63,9 @@ sources:
       - name: ad_stats
         description: >-
           The statistics of the ads of demo_search, one row for each ad and day with any metric, in
-          the currency and the time zone of the account. Each load replaces the days of each account
-          that it covers.
+          the currency and the time zone of the account. Each load appends its rows under its own
+          _dlt_load_id, and staging reads, for each account and day, those of the newest whole load
+          whose window covers the day.
       - name: ad_conversions
         description: >-
           The conversions of the ads of demo_search by conversion action, one row for each ad, day

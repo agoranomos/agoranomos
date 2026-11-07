@@ -370,3 +370,38 @@ def test_the_load_of_google_ads_starts_paused_and_masks_the_key():
     ]
     assert paused == [True]
     assert 'mask_secret(google_ads.key_info()["private_key"])' in text
+
+
+@pytest.mark.parametrize(
+    ("name", "retry_delay", "max_retry_delay"),
+    [
+        ("agoranomos_demo_history.py", "timedelta(minutes=1)", None),
+        ("agoranomos_demo_daily.py", "timedelta(minutes=1)", None),
+        ("agoranomos_ecb_daily.py", "timedelta(minutes=5)", "timedelta(minutes=10)"),
+    ],
+)
+def test_the_loads_retry_with_a_growing_wait_and_end_within_an_hour(
+    name, retry_delay, max_retry_delay
+):
+    # ADR-0039: the DAGs of the loads retry with an exponential backoff, also after a new column
+    # waited past the lock timeout of loader for a run of the transform (ADR-0046), and a run ends
+    # within an hour, so that a load never lives longer: the cleanup of the rows of a load that did
+    # not end is to wait at least that long. Airflow 3.3.2 takes a multiplier for the backoff, so
+    # True would be 1, a constant wait.
+    keywords = {
+        node.arg: node.value
+        for node in ast.walk(ast.parse((DAGS / name).read_text(encoding="utf-8")))
+        if isinstance(node, ast.keyword)
+    }
+    assert ast.unparse(keywords["dagrun_timeout"]) == "timedelta(hours=1)"
+    arguments = keywords["default_args"]
+    assert isinstance(arguments, ast.Dict)
+    found = {
+        ast.literal_eval(key): ast.unparse(value)
+        for key, value in zip(arguments.keys, arguments.values, strict=True)
+    }
+    assert found["retries"] == "2"
+    assert found["retry_exponential_backoff"] == "2.0"
+    assert found["retry_delay"] == retry_delay
+    assert found.get("max_retry_delay") == max_retry_delay
+    assert found["execution_timeout"] == "timedelta(minutes=10)"

@@ -1,11 +1,12 @@
 models:
   - name: ops_loads
     description: >-
-      The last load of each account of each platform, one row each, from the record that each load
-      writes (_agoranomos_reloads): the last day that a load took, when it was loaded, and how
-      many hours ago, as of the moment that the view is read. The accounts of demo_web are its
-      properties, and demo_fx and ecb have one account each, EUR, the base of their rates; ecb has
-      none until its first load. The Ops collection of Metabase shows it (ADR-0029).
+      The last load of each account of each platform, one row each, from the journal that each load
+      writes (_agoranomos_loads): the last day that a load took, when it was loaded, and how many
+      hours ago, as of the moment that the view is read. The accounts of demo_web are its
+      properties, and demo_fx and ecb have one account each, EUR, the base of their rates; ecb and
+      google_ads have none until their first load. The Ops collection of Metabase shows it
+      (ADR-0029).
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
@@ -22,7 +23,7 @@ models:
           The hours from the last load of the account to the moment that the view is read, to one
           decimal place.
       - name: loads
-        description: How many loads of the account the record holds, the first load among them.
+        description: How many loads of the account the journal holds, the first load among them.
   - name: ops_transform_nodes
     description: >-
       Each model, seed and test of the dbt project in each run of dbt that the hooks of elementary

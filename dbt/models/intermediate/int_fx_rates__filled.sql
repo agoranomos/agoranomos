@@ -7,6 +7,11 @@
 -- ECB once it has rates, and the demo only in a deployment without them, so that a day on which
 -- the ECB publishes nothing, such as Good Friday, carries its last rate forward and never takes a
 -- fictional one (ADR-0032).
+-- A table, as the statistics of ad groups and of ads are: it reads every unioned model of the facts,
+-- and as a view each of its tests, four at a time, and each mart that converts money computed it
+-- again, which took warehouse-db past its memory limit once the staging views of the facts read
+-- the newest load of each day (ADR-0038).
+{{ config(materialized='table') }}
 with rates as (
     select rate_date, base_currency, quote_currency, rate, rate_source
     from {{ ref('stg_ecb__rates_daily') }}

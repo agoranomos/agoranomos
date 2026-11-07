@@ -94,8 +94,11 @@ SELECT 'CREATE ROLE migrator' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolna
 ALTER ROLE migrator WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD NULL;
 
 -- The fictional platforms of the demo (ADR-0025), which replace the one demo account of v0.1: dlt
--- loads each into raw_demo_<platform>, and merges and keeps the versions of its campaigns through
--- raw_demo_<platform>_staging. loader owns both; transformer may read the first.
+-- appends the rows of each load of a platform to raw_demo_<platform>, and keeps the versions of its
+-- campaigns, ad groups and ads (scd2) through raw_demo_<platform>_staging (ADR-0038). Each source
+-- keeps its staging schema while dlt keeps versions: dlt also asks for it after every load, to
+-- empty it, and a source without one would log a failure of that each time (dlt 1.32.0). loader
+-- owns both; transformer may read the first.
 CREATE SCHEMA IF NOT EXISTS raw_demo_search AUTHORIZATION loader;
 CREATE SCHEMA IF NOT EXISTS raw_demo_search_staging AUTHORIZATION loader;
 ALTER SCHEMA raw_demo_search OWNER TO loader;
@@ -131,9 +134,9 @@ ALTER SCHEMA raw_demo_fx_staging OWNER TO loader;
 GRANT USAGE ON SCHEMA raw_demo_fx TO transformer;
 GRANT SELECT ON ALL TABLES IN SCHEMA raw_demo_fx TO transformer;
 ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_demo_fx GRANT SELECT ON TABLES TO transformer;
--- The reference rates of the euro of the European Central Bank (ADR-0032), which dlt loads into
--- raw_ecb and merges through raw_ecb_staging, as it loads a platform. loader owns both;
--- transformer may read the first.
+-- The reference rates of the euro of the European Central Bank (ADR-0032), which dlt appends to
+-- raw_ecb, with raw_ecb_staging beside it, as a platform has it. loader owns both; transformer may
+-- read the first.
 CREATE SCHEMA IF NOT EXISTS raw_ecb AUTHORIZATION loader;
 CREATE SCHEMA IF NOT EXISTS raw_ecb_staging AUTHORIZATION loader;
 ALTER SCHEMA raw_ecb OWNER TO loader;
@@ -141,9 +144,9 @@ ALTER SCHEMA raw_ecb_staging OWNER TO loader;
 GRANT USAGE ON SCHEMA raw_ecb TO transformer;
 GRANT SELECT ON ALL TABLES IN SCHEMA raw_ecb TO transformer;
 ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_ecb GRANT SELECT ON TABLES TO transformer;
--- The Google Ads accounts of the deployment (ADR-0032), which dlt loads into raw_google_ads and
--- merges, and whose campaigns it keeps the versions of, through raw_google_ads_staging. loader owns
--- both; transformer may read the first.
+-- The Google Ads accounts of the deployment (ADR-0032), whose facts dlt appends to raw_google_ads,
+-- and whose campaigns, ad groups, ads and conversion actions it keeps the versions of through
+-- raw_google_ads_staging. loader owns both; transformer may read the first.
 CREATE SCHEMA IF NOT EXISTS raw_google_ads AUTHORIZATION loader;
 CREATE SCHEMA IF NOT EXISTS raw_google_ads_staging AUTHORIZATION loader;
 ALTER SCHEMA raw_google_ads OWNER TO loader;

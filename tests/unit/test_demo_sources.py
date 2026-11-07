@@ -3,14 +3,15 @@
 dlt is in the Airflow image and not in the development environment, so the module is imported
 with a stand-in for dlt that loads nothing: it records the resources that the module makes, with
 their hints, the pipelines and their runs, and answers the questions of the module whether a
-dataset holds a load and what its loads recorded in _agoranomos_reloads. The stack tests load with
-dlt itself."""
+dataset holds a load, what its whole loads recorded in _agoranomos_loads, and whether a release
+before v0.5 loaded it, and records the tables that a load drops. The stack tests load with dlt
+itself."""
 
 import importlib
 import os
-import re
 import sys
 import types
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -38,27 +39,47 @@ class StandInClient:
     def make_qualified_table_name(self, name):
         return f'"{self.pipeline.options["dataset_name"]}"."{name}"'
 
-    def execute_sql(self, sql):
-        self.pipeline.queries.append(sql)
-        found = self.pipeline.reloads if '"_agoranomos_reloads"' in sql else self.pipeline.loads
+    @contextmanager
+    def begin_transaction(self):
+        self.pipeline.transactions += 1
+        yield
+
+    def execute_sql(self, sql, *args):
+        pipeline = self.pipeline
+        pipeline.queries.append((sql, args) if args else sql)
+        if sql.startswith("SELECT count(*) FROM pg_catalog.pg_tables"):
+            # Whether the dataset holds the journal of the releases before v0.5.
+            return [(int(pipeline.earlier),)]
+        if sql.startswith("SELECT format('DROP TABLE"):
+            schemas = ", ".join(args)
+            return [(f"DROP TABLE IF EXISTS {schemas}.<table {n}> CASCADE",) for n in range(3)]
+        if sql.startswith("DROP TABLE"):
+            pipeline.dropped.append(sql)
+            pipeline.earlier, pipeline.loads, pipeline.reloads = False, None, None
+            return None
+        found = pipeline.reloads if '"_agoranomos_loads"' in sql else pipeline.loads
         if found is None:
             raise UndefinedRelation(sql)
-        return found if '"_agoranomos_reloads"' in sql else [(found,)]
+        return found if '"_agoranomos_loads"' in sql else [(found,)]
 
 
 class StandInPipeline:
-    def __init__(self, options, loads, reloads):
+    def __init__(self, options, loads, reloads, earlier):
         self.options, self.loads, self.queries, self.runs = options, loads, [], []
-        self.formats = []
-        # The rows of SELECT account_id, max(as_of), max(window_end) ... GROUP BY account_id.
+        self.dataset_name = options["dataset_name"]
+        self.formats, self.contracts = [], []
+        # The rows of SELECT account_id, max(as_of), max(window_to) ... GROUP BY account_id.
         self.reloads = reloads
+        # Whether a release before v0.5 loaded the dataset, and what a load dropped of it.
+        self.earlier, self.dropped, self.transactions = earlier, [], 0
         self.last_trace = None
 
     def sql_client(self):
         return StandInClient(self)
 
-    def run(self, resources, loader_file_format=None):
+    def run(self, resources, loader_file_format=None, schema_contract=None):
         self.formats.append(loader_file_format)
+        self.contracts.append(schema_contract)
         rows = {r.name: list(r.data) for r in resources}
         self.runs.append((rows, {r.name: r.hints for r in resources}))
         counts = {name: sum(1 for row in found if row != MARKER) for name, found in rows.items()}
@@ -95,19 +116,27 @@ def resource(data, name, **hints):
 @pytest.fixture
 def sources(monkeypatch):
     """The module with a stand-in for dlt, the pipelines that it makes, and how many loads each
-    dataset holds (None: no table _dlt_loads yet), with what the loads of each dataset recorded
-    of each account in "reloads", by dataset (none: no table _agoranomos_reloads yet)."""
-    pipelines, loads = [], {"value": None, "reloads": {}}
+    dataset holds (None: no table _dlt_loads yet), with what the whole loads of each dataset
+    recorded of each account in "reloads", by dataset (none: no table _agoranomos_loads yet), and
+    the datasets that a release before v0.5 loaded in "earlier"."""
+    pipelines, loads = [], {"value": None, "reloads": {}, "earlier": set()}
     dlt = types.ModuleType("dlt")
     dlt.resource = resource
     dlt.mark = types.SimpleNamespace(materialize_table_schema=lambda: MARKER)
     dlt.pipeline = lambda **options: (
         pipelines.append(
-            StandInPipeline(options, loads["value"], loads["reloads"].get(options["dataset_name"]))
+            StandInPipeline(
+                options,
+                loads["value"],
+                loads["reloads"].get(options["dataset_name"]),
+                options["dataset_name"] in loads["earlier"],
+            )
         )
         or pipelines[-1]
     )
-    dlt.destinations = types.SimpleNamespace(postgres=lambda credentials: ("postgres", credentials))
+    dlt.destinations = types.SimpleNamespace(
+        postgres=lambda credentials, create_indexes: ("postgres", credentials, create_indexes)
+    )
     exceptions = types.ModuleType("dlt.destinations.exceptions")
     exceptions.DatabaseUndefinedRelation = UndefinedRelation
     monkeypatch.setitem(sys.modules, "dlt", dlt)
@@ -145,20 +174,18 @@ def test_every_table_of_every_platform_has_its_hints(sources):
         elif table in ("customer_clients", "ad_accounts", "advertisers", "properties"):
             assert disposition == "replace", (code, table)
         else:
-            assert disposition == {"disposition": "merge", "strategy": "delete-insert"}, (
-                code,
-                table,
-            )
+            assert disposition == "append", (code, table)
             assert table in {f.table for f in platforms.PLATFORMS[code].facts}, (code, table)
         # With the nested tables of Meta, a primary key makes dlt create a temporary table, which
         # loader may not: no resource has one.
         assert "primary_key" not in hints, (code, table)
     facts = {(code, f.table) for code, p in platforms.PLATFORMS.items() for f in p.facts}
-    merged = {
-        key for key, h in module.TABLE_HINTS.items() if h["write_disposition"] == module.MERGE
+    appended = {
+        key for key, h in module.TABLE_HINTS.items() if h["write_disposition"] == module.APPEND
     }
-    assert facts == merged
+    assert facts == appended
     assert not hasattr(module, "FACT_SCOPES"), "the fact tables are described once, in platforms.py"
+    assert not hasattr(module, "scope"), "a load appends, and replaces no scope"
     columns = module.TABLE_HINTS[("demo_search", "campaign_stats")]["columns"]
     assert columns["segments__date"] == {"data_type": "date"}
 
@@ -166,7 +193,7 @@ def test_every_table_of_every_platform_has_its_hints(sources):
 def test_each_column_keeps_its_own_hint_across_the_tables_of_a_load(sources):
     # dlt writes the name of each column into the dict of its hint, so a dict that two columns
     # share carries the name of the last one that dlt saw, and the other loses its type: the day of
-    # the rates did so beside the days of _agoranomos_reloads, and was loaded as text.
+    # the rates did so beside the days of the journal, and was loaded as text.
     module, pipelines, _ = sources
     from agoranomos_pipelines.demo import platforms
 
@@ -178,50 +205,34 @@ def test_each_column_keeps_its_own_hint_across_the_tables_of_a_load(sources):
                 for column, schema in (hint.get("columns") or {}).items():
                     assert schema["name"] == column, (table, column, schema["name"])
     # dlt never writes into the hints of the module, which every load starts from.
-    for hint in [*module.TABLE_HINTS.values(), module.RELOAD_HINTS]:
+    for hint in [*module.TABLE_HINTS.values(), module.LOAD_HINTS]:
         assert all("name" not in schema for schema in hint["columns"].values())
 
 
-@pytest.mark.parametrize(
-    "account_id", ["41700'00011", "{0}", "4170000011 OR true", "", "Kaufhaus\u00e4", "41700\n11"]
-)
-def test_a_scope_takes_only_ids_of_letters_digits_hyphens_and_underscores(sources, account_id):
-    # The IDs go into the SQL of the scope, and dlt formats it with str.format: an ID from outside
-    # the code of the demo, as part B may pass, must not change either. The error names no ID.
-    module, _, _ = sources
-    day = date(2026, 10, 11)
-    line = (
-        "the scope of demo_search.campaign_stats takes account IDs of ASCII letters, digits, _ "
-        "and - only"
-    )
-    with pytest.raises(ValueError, match=f"^{re.escape(line)}$"):
-        module.scope("demo_search", "campaign_stats", {account_id: (day, day)})
-    assert module.scope("demo_search", "campaign_stats", {"Ab_9-0": (day, day)}).startswith(
-        "(\"customer__id\" = 'Ab_9-0'"
-    )
-
-
-def test_every_run_of_a_fact_table_replaces_the_window_of_each_account(sources):
+def test_every_run_of_a_fact_table_appends_and_the_journal_holds_its_windows(sources):
+    # Each load appends its rows under its own _dlt_load_id, with no scope to delete: the journal,
+    # in the same run, holds the window of each account, which staging reads (ADR-0038).
     module, pipelines, _ = sources
     from agoranomos_pipelines.demo import common, search
 
     module.load_history("demo_search", NOW)
-    hints = pipelines[0].runs[-1][1]
-    expected = " OR ".join(
-        f'("customer__id" = \'{a.account_id}\' AND "segments__date" BETWEEN '
-        f"'{common.history_first_day(NOW, a.time_zone).isoformat()}' AND "
-        f"'{common.last_final_day(NOW, a.time_zone).isoformat()}')"
-        for a in sorted(search.accounts(), key=lambda a: a.account_id)
-    )
+    rows, hints = pipelines[0].runs[-1]
     for table in ("campaign_stats", "campaign_conversions"):
-        replaced = {**module.MERGE, "destination_scope": expected}
-        assert hints[table]["write_disposition"] == replaced, table
+        assert hints[table]["write_disposition"] == "append", table
+    windows = {r["account_id"]: (r["window_from"], r["window_to"]) for r in rows[module.LOADS]}
+    assert windows == {
+        a.account_id: (
+            common.history_first_day(NOW, a.time_zone),
+            common.last_final_day(NOW, a.time_zone),
+        )
+        for a in search.accounts()
+    }
     # A replay of the names loads the campaigns alone, which keep their versions and no scope.
     for _rows, replay in pipelines[0].runs[:-1]:
         assert "destination_scope" not in replay["campaigns"]["write_disposition"]
 
 
-def test_a_load_of_a_window_replaces_only_that_window(sources):
+def test_a_load_of_a_window_records_only_that_window(sources):
     module, pipelines, _ = sources
     from agoranomos_pipelines.demo import common
 
@@ -229,14 +240,18 @@ def test_a_load_of_a_window_replaces_only_that_window(sources):
         return common.last_final_day(NOW, account.time_zone) - timedelta(days=6)
 
     module.load("demo_web", NOW, first=week)
-    scope = pipelines[0].runs[-1][1]["report_sessions_daily"]["write_disposition"][
-        "destination_scope"
-    ]
-    first = (common.last_final_day(NOW, "America/New_York") - timedelta(days=6)).strftime("%Y%m%d")
-    assert f"(\"property\" = 'properties/390000001' AND \"date\" BETWEEN '{first}' AND " in scope
+    rows = pipelines[0].runs[-1][0]
+    [new_york] = [r for r in rows[module.LOADS] if r["account_id"] == "390000001"]
+    yesterday = common.last_final_day(NOW, "America/New_York")
+    assert (new_york["window_from"], new_york["window_to"]) == (
+        yesterday - timedelta(days=6),
+        yesterday,
+    )
+    days = {r["date"] for r in rows["report_sessions_daily"] if r["property"].endswith("390000001")}
+    assert min(days) == (yesterday - timedelta(days=6)).strftime("%Y%m%d")
     rates = module.build("demo_fx", NOW, first=week)
     [fx] = [r for r in rates if r.name == "rates_daily"]
-    assert fx.hints["write_disposition"]["destination_scope"].startswith('"rate_date" BETWEEN ')
+    assert fx.hints["write_disposition"] == "append"
 
 
 def test_the_history_replays_the_names_into_an_empty_dataset_and_then_loads_everything(sources):
@@ -255,18 +270,20 @@ def test_the_history_replays_the_names_into_an_empty_dataset_and_then_loads_ever
         assert hints["campaigns"]["write_disposition"]["boundary_timestamp"] == moment.isoformat()
     tables = {t for code, t in shapes.SHAPES if code == "demo_search"}
     assert "ad_conversions" in tables
-    assert set(full[0]) == tables | {module.RELOADS}
+    assert set(full[0]) == tables | {module.LOADS}
     assert full[1]["campaigns"]["write_disposition"]["boundary_timestamp"] == NOW.isoformat()
     assert counts["campaign_stats"] == len(full[0]["campaign_stats"])
     assert "_dlt_pipeline_state" not in counts
-    assert module.RELOADS not in counts
+    assert module.LOADS not in counts
     # The history records its windows too, so that a later load knows how far each account goes.
-    recorded = {r["account_id"]: r for r in full[0][module.RELOADS]}
+    recorded = {r["account_id"]: r for r in full[0][module.LOADS]}
     assert set(recorded) == {a.account_id for a in search.accounts()}
     for account in search.accounts():
         row = recorded[account.account_id]
-        assert row["window_start"] == common.history_first_day(NOW, account.time_zone)
-        assert row["window_end"] == common.last_final_day(NOW, account.time_zone)
+        assert row["window_from"] == common.history_first_day(NOW, account.time_zone)
+        assert row["window_to"] == common.last_final_day(NOW, account.time_zone)
+    # A new dataset: nothing to drop.
+    assert not pipeline.dropped
 
 
 def test_a_repeated_history_does_not_replay_the_names(sources):
@@ -290,7 +307,7 @@ def test_a_history_whose_earlier_try_completed_no_load_replays_the_names(sources
 @pytest.mark.parametrize("code", ["demo_search", "demo_social", "demo_video"])
 def test_a_build_without_a_boundary_dates_the_versions_at_its_own_moment(sources, code):
     # A run of scd2 without a boundary of its own would reuse the one that dlt stored in the
-    # schema at the last load, as a run without a scope would reuse the stored scope.
+    # schema at the last load.
     module, _, _ = sources
     [campaigns] = [r for r in module.build(code, NOW) if r.name == "campaigns"]
     assert campaigns.hints["write_disposition"] == {
@@ -325,13 +342,16 @@ def test_a_load_empties_the_staging_dataset_and_signs_in_as_loader(sources):
     assert "loader-password" not in repr(pipelines[0].options["pipelines_dir"])
 
 
-def test_every_run_of_a_load_goes_by_copy(sources):
+def test_every_run_of_a_load_goes_by_copy_under_the_contract_of_the_schema(sources):
     module, pipelines, _ = sources
     # The history makes more than one run: the names of the campaigns, and then the rows.
     module.load_history("demo_search", NOW)
 
     assert len(pipelines[-1].formats) > 1
     assert set(pipelines[-1].formats) == {"csv"}
+    # A new column reaches raw, and a value of another type stops the load (ADR-0038).
+    contract = {"tables": "evolve", "columns": "evolve", "data_type": "freeze"}
+    assert pipelines[-1].contracts == [contract] * len(pipelines[-1].runs)
 
 
 def test_the_money_of_demo_search_is_text(sources):
@@ -367,9 +387,10 @@ def test_a_load_logs_counts_and_tables_and_no_secret(sources, caplog):
     assert "loader-password" not in caplog.text
 
 
-def test_a_window_without_a_row_is_still_replaced(sources):
-    # dlt deletes the destination scope of a resource only when the resource yields something: a
-    # window that comes back empty yields the marker, and dlt deletes it and inserts nothing.
+def test_a_window_without_a_row_is_still_recorded(sources):
+    # A window that comes back empty yields the marker, with which dlt makes the table and inserts
+    # nothing, and the journal holds the window: the newest load of its days holds no row of them,
+    # so staging reads them as empty.
     module, pipelines, _ = sources
     from agoranomos_pipelines.demo import common
 
@@ -379,9 +400,9 @@ def test_a_window_without_a_row_is_still_replaced(sources):
     module.load("demo_fx", NOW, first=sunday)
     rows, hints = pipelines[-1].runs[-1]
     assert rows["rates_daily"] == [MARKER]
-    assert hints["rates_daily"]["write_disposition"]["destination_scope"] == (
-        "\"rate_date\" BETWEEN '2026-10-11' AND '2026-10-11'"
-    )
+    assert hints["rates_daily"]["write_disposition"] == "append"
+    [journal] = rows[module.LOADS]
+    assert (journal["window_from"], journal["window_to"]) == (date(2026, 10, 11),) * 2
 
     def week(account):
         return common.last_final_day(NOW, account.time_zone) - timedelta(days=6)
@@ -393,8 +414,9 @@ def test_a_window_without_a_row_is_still_replaced(sources):
 
 
 def test_every_load_records_the_window_and_the_day_of_each_account(sources):
-    # In the same run as the facts, so that a load that fails records nothing. Late in the evening
-    # of UTC the day of the load differs by time zone: 13 October in Berlin, 12 in Los Angeles.
+    # In the same run as the facts, so under the same _dlt_load_id: a load that does not end whole
+    # has no row in _dlt_loads, and nobody reads its window. Late in the evening of UTC the day of
+    # the load differs by time zone: 13 October in Berlin, 12 in Los Angeles.
     module, pipelines, _ = sources
     from agoranomos_pipelines.demo import common, social
 
@@ -405,29 +427,40 @@ def test_every_load_records_the_window_and_the_day_of_each_account(sources):
 
     counts = module.load("demo_social", late, first=week)
     rows, hints = pipelines[-1].runs[-1]
-    assert hints[module.RELOADS]["write_disposition"] == "append"
-    recorded = {r["account_id"]: r for r in rows[module.RELOADS]}
+    assert hints[module.LOADS]["write_disposition"] == "append"
+    assert set(hints[module.LOADS]["columns"]) == {
+        "account_id",
+        "as_of",
+        "window_from",
+        "window_to",
+        "now",
+        "loaded_at",
+        "status",
+        "error",
+    }
+    recorded = {r["account_id"]: r for r in rows[module.LOADS]}
     assert set(recorded) == {a.account_id for a in social.accounts()}
     for account in social.accounts():
         row = recorded[account.account_id]
         assert row["as_of"] == common.local_today(late, account.time_zone)
         window = (week(account), common.last_final_day(late, account.time_zone))
-        assert (row["window_start"], row["window_end"]) == window
+        assert (row["window_from"], row["window_to"]) == window
         assert row["now"] == late
         assert row["status"] == "loaded"
     assert {r["as_of"] for r in recorded.values()} == {date(2026, 10, 12), date(2026, 10, 13)}
-    assert module.RELOADS not in counts
+    assert module.LOADS not in counts
 
 
 def test_a_pipeline_opens_as_loader_into_the_dataset_of_its_platform(sources):
-    # A caller can read through it what earlier loads left in the dataset before it loads.
+    # A caller can read through it what earlier loads left in the dataset before it loads. dlt
+    # makes no index on _dlt_id of a new table (ADR-0035).
     module, pipelines, _ = sources
 
     with module.open_pipeline("demo_web") as pipeline:
         assert pipeline is pipelines[-1]
         names = (pipeline.options["pipeline_name"], pipeline.options["dataset_name"])
         assert names == ("agoranomos_demo_web", "raw_demo_web")
-        assert pipeline.options["destination"] == ("postgres", module.credentials())
+        assert pipeline.options["destination"] == ("postgres", module.credentials(), False)
         workdir = pipeline.options["pipelines_dir"]
         assert os.path.isdir(workdir)
     assert not os.path.exists(workdir), "dlt keeps the state of a pipeline in its dataset"
@@ -436,7 +469,7 @@ def test_a_pipeline_opens_as_loader_into_the_dataset_of_its_platform(sources):
 def loaded(loads, code, days_ago, as_of_days_ago=None, now=NOW, skip=()):
     """Loads of a platform whose last day of each account is days_ago before yesterday of the
     account, made on the day as_of_days_ago before today (by default the day after that last day),
-    as _agoranomos_reloads records them; the accounts of skip have no record."""
+    as the whole loads of _agoranomos_loads record them; the accounts of skip have no record."""
     from agoranomos_pipelines.demo import common, platforms
 
     as_of_days_ago = days_ago if as_of_days_ago is None else as_of_days_ago
@@ -454,8 +487,8 @@ def loaded(loads, code, days_ago, as_of_days_ago=None, now=NOW, skip=()):
 
 def recorded_windows(module, pipelines):
     """The window of each account that the last run recorded."""
-    rows = pipelines[-1].runs[-1][0][module.RELOADS]
-    return {row["account_id"]: (row["window_start"], row["window_end"]) for row in rows}
+    rows = pipelines[-1].runs[-1][0][module.LOADS]
+    return {row["account_id"]: (row["window_from"], row["window_to"]) for row in rows}
 
 
 def test_a_daily_load_takes_the_days_after_the_last_load(sources):
@@ -470,12 +503,10 @@ def test_a_daily_load_takes_the_days_after_the_last_load(sources):
     for account in web.accounts():
         yesterday = common.last_final_day(NOW, account.time_zone)
         assert windows[account.account_id] == (yesterday - timedelta(days=39), yesterday)
-    scope = pipelines[-1].runs[-1][1]["report_sessions_daily"]["write_disposition"]
+    rows = pipelines[-1].runs[-1][0]["report_sessions_daily"]
+    days = {r["date"] for r in rows if r["property"] == "properties/390000001"}
     first = (common.last_final_day(NOW, "America/New_York") - timedelta(days=39)).strftime("%Y%m%d")
-    assert (
-        f"(\"property\" = 'properties/390000001' AND \"date\" BETWEEN '{first}' AND "
-        in (scope["destination_scope"])
-    )
+    assert min(days) == first
     # A daily load does not replay the names of the campaigns.
     assert len(pipelines[-1].runs) == 1
 
@@ -484,7 +515,7 @@ def test_a_daily_load_takes_the_days_after_the_last_load(sources):
     "code", ["demo_fx", "demo_search", "demo_social", "demo_video", "demo_web"]
 )
 def test_a_daily_load_takes_at_least_the_reload_window_of_the_platform(sources, code):
-    # Loaded yesterday: the load replaces the recent days whose numbers still change (ADR-0025).
+    # Loaded yesterday: the load takes again the recent days whose numbers still change (ADR-0025).
     module, pipelines, loads = sources
     from agoranomos_pipelines.demo import platforms
 
@@ -543,20 +574,24 @@ def test_an_account_that_no_load_recorded_gets_the_days_of_the_history(sources):
     assert (windows["4170000011"][1] - windows["4170000011"][0]).days == 89
 
 
-def test_the_record_of_the_loads_is_read_by_account(sources):
+def test_the_journal_of_the_whole_loads_is_read_by_account(sources):
+    # Only the loads that dlt finished count, with their row in _dlt_loads: the rows of a load that
+    # stopped half way are not read by staging, so the next load takes their days again.
     module, pipelines, loads = sources
 
     assert module.last_loads("demo_video") is None
-    assert not [q for q in pipelines[-1].queries if module.RELOADS in q]
+    assert not [q for q in pipelines[-1].queries if module.LOADS in q]
     loaded(loads, "demo_video", 3)
     last = module.last_loads("demo_video")
-    [query] = [q for q in pipelines[-1].queries if module.RELOADS in q]
+    [query] = [q for q in pipelines[-1].queries if module.LOADS in q]
     assert query == (
-        "SELECT account_id, max(as_of), max(window_end) "
-        'FROM "raw_demo_video"."_agoranomos_reloads" GROUP BY account_id'
+        "SELECT j.account_id, max(j.as_of), max(j.window_to) "
+        'FROM "raw_demo_video"."_agoranomos_loads" AS j JOIN "raw_demo_video"."_dlt_loads" AS l '
+        "ON l.load_id = j._dlt_load_id AND l.status = 0 "
+        "WHERE j.status = 'loaded' GROUP BY j.account_id"
     )
     assert set(last) == {"7300000000000000001"}
-    # Loads, and no record yet: none of the accounts has a last day.
+    # Loads, and no journal yet: none of the accounts has a last day.
     loads["reloads"].clear()
     assert module.last_loads("demo_video") == {}
 
@@ -595,3 +630,43 @@ def test_whether_a_load_is_due_depends_on_the_day_of_each_account(sources):
     assert module.behind("demo_social", late) == ["802000000000002"]
     assert module.behind("demo_video", late) == []
     assert module.due(late) is True
+
+
+def test_a_dataset_of_a_release_before_v0_5_is_dropped_and_loaded_again(sources, caplog):
+    # A release before v0.5 merged the days of each load in place and kept _agoranomos_reloads: a
+    # row of a fact carries the id of the load that last wrote it, which staging cannot read by
+    # load. The load drops every table of the dataset and of its staging dataset, in one
+    # transaction, as their owner, and loads the history, with the names, as into a new dataset.
+    module, pipelines, loads = sources
+    from agoranomos_pipelines.demo import common, search
+
+    caplog.set_level("INFO")
+    loads["earlier"].add("raw_demo_search")
+    loaded(loads, "demo_search", 0)
+    assert module.last_loads("demo_search") is None
+    assert module.behind("demo_search", NOW) == ["4170000011", "4170000012"]
+    module.load_daily("demo_search", NOW)
+    pipeline = pipelines[-1]
+    [listing] = [q for q in pipeline.queries if isinstance(q, tuple) and "format" in q[0]]
+    assert listing == (
+        "SELECT format('DROP TABLE IF EXISTS %%I.%%I CASCADE', schemaname, tablename) "
+        "FROM pg_catalog.pg_tables WHERE schemaname IN (%s, %s) ORDER BY 1",
+        ("raw_demo_search", "raw_demo_search_staging"),
+    )
+    assert len(pipeline.dropped) == 3
+    assert pipeline.transactions == 1
+    dropped = "raw_demo_search was loaded by a release before v0.5: dropped its 3 tables"
+    assert dropped in caplog.text
+    assert len(pipeline.runs) == len(search.name_versions(NOW)) + 1
+    for account in search.accounts():
+        window = recorded_windows(module, pipelines)[account.account_id]
+        assert window[0] == common.history_first_day(NOW, account.time_zone)
+
+
+def test_a_dataset_of_this_release_is_never_dropped(sources):
+    module, pipelines, loads = sources
+    loaded(loads, "demo_search", 1)
+    module.load_daily("demo_search", NOW)
+    module.load_history("demo_search", NOW)
+    assert not any(pipeline.dropped for pipeline in pipelines)
+    assert not any(pipeline.transactions for pipeline in pipelines)
