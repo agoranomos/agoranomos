@@ -538,6 +538,16 @@ def test_the_day_that_the_demo_misses_is_a_warning_and_has_no_row(
         f"AND report_date = DATE '{day.isoformat()}'",
     )
     assert int(rows) == 0
+    # The core no longer holds it either: the history before held the day, and this one replaced
+    # it whole with no row (ADR-0038).
+    held = warehouse_output(
+        env,
+        "SELECT count(*) FROM core.ad_stats_campaign_daily AS f "  # noqa: S608 (constants of this file)
+        "JOIN core.dim_account AS a ON a.account_sk = f.account_sk "
+        f"WHERE a.platform = 'demo_social' AND a.account_id = '{account}' "
+        f"AND f.report_date = DATE '{day.isoformat()}'",
+    )
+    assert int(held) == 0
     [tests] = [
         i
         for i in task_instances(airflow_url, token, run)
@@ -545,6 +555,40 @@ def test_the_day_that_the_demo_misses_is_a_warning_and_has_no_row(
     ]
     assert tests["state"] == "success", "a warning failed the task"
     assert logged(task_log(airflow_url, token, tests), "int_ad_stats__unioned_has_no_missing_day")
+
+
+# The rows of the facts of statistics of the core in a month that the freeze keeps, whose load is
+# not the newest that the run pinned for their account and day, and those whose load is one of
+# the history at {moment}, of the ad platforms of the demo.
+FROZEN_ROWS = """
+SELECT count(*) FILTER (WHERE l.load_id IS DISTINCT FROM d.load_id),
+  count(*) FILTER (WHERE l.load_id IN ({history}))
+FROM core.{fact} AS f
+JOIN core.dim_account AS a ON a.account_sk = f.account_sk
+JOIN core.loads AS l ON l.load_sk = f.load_sk
+LEFT JOIN staging.stg_loads__newest_days AS d
+  ON d.source = a.platform AND d.account_id = a.account_id AND d.day = f.report_date
+WHERE f.report_date < date_trunc('month', current_date - 92)::date
+"""
+
+
+@pytest.mark.parametrize("fact", ["ad_stats_campaign_daily", "ad_stats_ad_daily"])
+def test_a_history_that_comes_again_replaces_the_frozen_months_of_the_facts(env, pipeline, fact):
+    # ADR-0035: the trigger of the freeze refuses a delete in a month that ended before the window
+    # of restatements, and a load of history that comes again lifts it for the transaction of the
+    # model of each fact that is to replace such a row: the frozen months of the facts now hold
+    # the rows of this history, the newest load of their days.
+    history, _ = pipeline
+    loads = " UNION ALL ".join(
+        f"SELECT _dlt_load_id FROM {platforms.PLATFORMS[code].dataset}._agoranomos_loads "  # noqa: S608 (names of the demo)
+        f"WHERE now = TIMESTAMPTZ '{moment(history).isoformat()}'"
+        for code in ("demo_search", "demo_social", "demo_video")
+    )
+    stale, rewritten = warehouse_output(env, FROZEN_ROWS.format(fact=fact, history=loads)).split(
+        "|"
+    )
+    assert int(stale) == 0, f"rows of frozen months of core.{fact} keep an older load"
+    assert int(rewritten) > 0, f"no row of a frozen month of core.{fact} comes from the history"
 
 
 def test_cosmos_emits_the_asset_of_the_mart(airflow_url, token, transform_run):
@@ -601,8 +645,10 @@ def put_back(env, airflow_url, token, transform_run):
 
 def test_a_failed_critical_test_keeps_the_marts(env, airflow_url, token, transform_run, put_back):
     # A campaign with no name breaks not_null of stg_demo_search__campaigns: the models that read
-    # it do not run, and the marts keep the rows of the last good run.
+    # it do not run, and the marts keep the rows of the last good run, as the facts of the core
+    # keep theirs.
     before = totals(env, MART)
+    held = totals(env, "core.ad_stats_campaign_daily")
     warehouse_output(env, REMOVE_BROKEN_ROW)  # left behind by a test that was stopped
     try:
         warehouse_output(env, BROKEN_ROW)
@@ -613,7 +659,9 @@ def test_a_failed_critical_test_keeps_the_marts(env, airflow_url, token, transfo
         assert states[SETTINGS] == "success"
         assert states[STAGING_BUILD] == "failed"
         assert states[MART_BUILD] == "upstream_failed"
+        assert states["dbt.core_ad_stats_campaign_daily_model_build"] == "upstream_failed"
         assert totals(env, MART) == before
+        assert totals(env, "core.ad_stats_campaign_daily") == held
         # The log of the failed task names the test that failed, with its one row, as dbt 1.12
         # prints it. No log of the run holds a secret: a failure prints more than a success does.
         [failed] = [i for i in instances if i["task_id"] == STAGING_BUILD]
