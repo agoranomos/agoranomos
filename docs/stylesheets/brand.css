@@ -8,8 +8,8 @@
   Mute secondary text and Amber for what works: links, the active page, the prompt.
   In both, the header and the tabs are Void and carry the logo for dark backgrounds, and the
   footer is Void. The first screen of the home page follows the scheme, as the banners of the
-  brand book do: Paper with its dot grid in the light scheme, the dark world with its dot grid and
-  Aurora in the dark one.
+  brand book do: Paper with its dot grid and a warm Aurora in the light scheme, the dark world with
+  its dot grid and Aurora in the dark one.
 
   The fonts are Fira Sans (text) and Fira Code (headings, labels, figures and code), served from
   ../assets/fonts under the SIL Open Font License 1.1 (OFL-FiraSans.txt, OFL-FiraCode.txt).
@@ -118,13 +118,19 @@
     - ok-dark: the success color on Paper (4.49:1 for marks), where Mint is too light;
     - code-light: the background of inline code in the light scheme, Bone at 70 % over Paper;
     - mute-deep: icons, scrollbars and dashed rules on Void, never text;
-    - dash-light: the dashed rule of the brand book's documentation on Paper (2.56:1, a decoration beside the icon of the kind).
+    - dash-light: the dashed rule of the brand book's documentation on Paper (2.56:1, a decoration beside the icon of the kind);
+    - aurora-on-paper: Aurora for the first screen on Paper, the same two glows, stronger, as a
+      glow shows less on a light ground. Where it is strongest, Mute dark keeps 4.80:1 and Void
+      13.67:1, and Rust 4.12:1, which the slogan, large text, needs at 3:1.
   */
   --ag-mute-dark: #5a5862;
   --ag-ok-dark: #1a7f55;
   --ag-code-light: #eceae5;
   --ag-mute-deep: #5f5d66;
   --ag-dash-light: #9a98a2;
+  --ag-aurora-on-paper:
+    radial-gradient(40% 60% at 80% 20%, rgb(255 110 30 / 28%), transparent 70%),
+    radial-gradient(30% 50% at 10% 90%, rgb(255 176 32 / 18%), transparent 70%);
   --ag-mono: "Fira Code", ui-monospace, Menlo, Consolas, monospace;
   --ag-sans: "Fira Sans", "Helvetica Neue", Arial, sans-serif;
 }
@@ -1293,8 +1299,8 @@ body {
   The first screen of the home page (overrides/home.html) is the site of the brand book: a label,
   the slogan with the cursor, the lead, the buttons, three facts and the diagram of the pipeline,
   on the dot grid. It follows the scheme as the banners of the brand book do (hero-light.svg,
-  hero-dark.svg): Void with Aurora, Bone text and Amber in the dark scheme, Paper without Aurora,
-  Void text and Rust in the light one (Rust on Paper 5.40:1, Mute dark 6.29:1).
+  hero-dark.svg): Void with Aurora, Bone text and Amber in the dark scheme, Paper with Aurora on
+  Paper, Void text and Rust in the light one (Rust on Paper 5.40:1, Mute dark 6.29:1).
 */
 .ag-hero {
   --ag-hero-bg: var(--ag-void);
@@ -1322,7 +1328,7 @@ body {
 
   --ag-hero-bg: var(--ag-paper);
   --ag-hero-dots: var(--ag-dots-on-paper);
-  --ag-hero-aurora: none;
+  --ag-hero-aurora: var(--ag-aurora-on-paper);
   --ag-hero-fg: var(--ag-void);
   --ag-hero-mute: var(--ag-mute-dark);
   --ag-hero-accent: var(--ag-rust);
