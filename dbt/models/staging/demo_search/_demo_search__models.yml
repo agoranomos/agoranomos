@@ -138,6 +138,8 @@ models:
         data_tests: [not_null]
       - name: campaign_status
         description: '{{ doc("campaign_status") }}'
+      - name: campaign_state
+        description: '{{ doc("campaign_state") }}'
       - name: campaign_type
         description: '{{ doc("campaign_type") }}'
       - name: valid_from
@@ -342,6 +344,8 @@ models:
         data_tests: [not_null]
       - name: ad_group_status
         description: '{{ doc("ad_group_status") }}'
+      - name: ad_group_state
+        description: '{{ doc("ad_group_state") }}'
       - name: ad_group_type
         description: '{{ doc("ad_group_type") }}'
       - name: valid_from
@@ -381,6 +385,8 @@ models:
         description: '{{ doc("observed_name") }}'
       - name: ad_status
         description: '{{ doc("ad_status") }}'
+      - name: ad_state
+        description: '{{ doc("ad_state") }}'
       - name: ad_type
         description: '{{ doc("ad_type") }}'
       - name: valid_from

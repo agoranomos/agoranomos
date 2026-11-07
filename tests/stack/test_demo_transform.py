@@ -175,7 +175,7 @@ def settings_file(env, name):
 
 def transform(airflow_url, token):
     run = trigger(airflow_url, token, TRANSFORM)
-    return wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=900)
+    return wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=1200)
 
 
 def logged(entries, text):
@@ -210,7 +210,7 @@ def pipeline(env, airflow_url, token):
     unpause(airflow_url, token, TRANSFORM)
     wait_for(
         lambda: not is_busy(airflow_url, token, TRANSFORM, assets=ASSETS),
-        900,
+        1200,
         interval=5,
         message="the runs of the transform that earlier histories started did not end",
     )
@@ -231,7 +231,7 @@ def pipeline(env, airflow_url, token):
         interval=5,
         message="the five assets of the history started no run of the transform",
     )
-    return history, wait_for_run(airflow_url, token, TRANSFORM, started["run_id"], timeout=900)
+    return history, wait_for_run(airflow_url, token, TRANSFORM, started["run_id"], timeout=1200)
 
 
 @pytest.fixture(scope="module")
@@ -297,9 +297,20 @@ def test_the_settings_load_first_then_the_pin_and_each_node_is_built_with_its_te
     built = [task for task in downstream if task not in (SETTINGS, PIN, ELEMENTARY)]
     assert reached == set(built), "a task of dbt does not wait for the tables of elementary"
     assert MART_BUILD in built, sorted(built)[:5]
-    # One task of dbt build for each model and each seed: no task runs a node or its tests alone.
-    alone = [task for task in built if not task.endswith(("_model_build", "_seed_build"))]
+    # One task of dbt build for each model, each seed and each snapshot of the versions of the core
+    # (ADR-0036): no task runs a node or its tests alone.
+    alone = [
+        task
+        for task in built
+        if not task.endswith(("_model_build", "_seed_build", "_snapshot_build"))
+    ]
     assert not alone, sorted(alone)[:5]
+    snapshots = sorted(task for task in built if task.endswith("_snapshot_build"))
+    assert snapshots == [
+        "dbt.dim_ad_group_versions_snapshot_build",
+        "dbt.dim_ad_versions_snapshot_build",
+        "dbt.dim_campaign_versions_snapshot_build",
+    ], snapshots
     states = {i["task_id"]: i["state"] for i in task_instances(airflow_url, token, transform_run)}
     assert set(states.values()) == {"success"}, sorted(
         t for t, s in states.items() if s != "success"
@@ -744,7 +755,7 @@ def test_a_load_between_two_tasks_of_dbt_waits_for_the_next_run(
     )
     wait_for(
         lambda: not is_busy(airflow_url, token, TRANSFORM, assets=ASSETS),
-        900,
+        1200,
         interval=5,
         message="the runs of the transform that earlier tests started did not end",
     )
@@ -765,7 +776,7 @@ def test_a_load_between_two_tasks_of_dbt_waits_for_the_next_run(
         cleared = clear(airflow_url, token, run, [DAYS_BUILD], include_downstream=True)
         assert {DAYS_BUILD, MART_BUILD} <= set(cleared), cleared[:5]
         assert not {SETTINGS, PIN, ELEMENTARY} & set(cleared), cleared[:5]
-        again = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=900)
+        again = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=1200)
         assert again["state"] == "success", again["state"]
         ended = {i["task_id"]: i["end_date"] for i in task_instances(airflow_url, token, again)}
         for task in (DAYS_BUILD, MART_BUILD):

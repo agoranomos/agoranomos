@@ -37,7 +37,7 @@ def transform_run(airflow_url, token):
 def test_elementary_records_each_model_and_seed_of_a_run(env, airflow_url, token, transform_run):
     # Each task of dbt is one node and its tests, and elementary records each node with the run of
     # Airflow that the task gives dbt.
-    suffixes = ("_model_build", "_seed_build")
+    suffixes = ("_model_build", "_seed_build", "_snapshot_build")
     built = {
         instance["task_id"].removeprefix("dbt.").removesuffix(suffix)
         for instance in task_instances(airflow_url, token, transform_run)
@@ -49,7 +49,7 @@ def test_elementary_records_each_model_and_seed_of_a_run(env, airflow_url, token
     text = warehouse_output(
         env,
         "SELECT node_name || '|' || status FROM ops.ops_transform_nodes "  # noqa: S608 (an ID of Airflow, quoted)
-        f"WHERE airflow_run_id = '{run_id}' AND resource_type IN ('model', 'seed')",
+        f"WHERE airflow_run_id = '{run_id}' AND resource_type IN ('model', 'seed', 'snapshot')",
     )
     recorded = dict(line.split("|") for line in text.splitlines())
     assert set(recorded) == built, sorted(set(recorded) ^ built)[:5]

@@ -235,7 +235,7 @@ def test_the_file_overrides_the_flag_of_google_ads_which_overrides_the_seed():
         "        case when a.platform = 'google_ads' then l.include_in_conversions_metric end,\n"
         "        s.is_primary,\n"
         "        false\n"
-        "    ) as is_primary\n"
+        "    ) as is_primary,\n"
     ) in text
     assert "left join {{ ref('stg_settings__conversion_actions') }} as x\n" in text
     assert "left join {{ ref('seed_conversion_actions') }} as s\n" in text

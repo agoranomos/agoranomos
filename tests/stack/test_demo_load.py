@@ -121,7 +121,7 @@ def transform_paused(airflow_url, token):
     was_paused = is_paused(airflow_url, token, TRANSFORM)
     wait_for(
         lambda: not is_busy(airflow_url, token, TRANSFORM, assets=len(platforms.PLATFORMS)),
-        900,
+        1200,
         interval=5,
         message="the runs of the transform that earlier tests started did not end",
     )
@@ -131,7 +131,7 @@ def transform_paused(airflow_url, token):
         return
     unpause(airflow_url, token, TRANSFORM)
     run = trigger(airflow_url, token, TRANSFORM)
-    run = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=900)
+    run = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=1200)
     assert run["state"] == "success", run["state"]
 
 

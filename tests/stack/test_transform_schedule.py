@@ -69,7 +69,7 @@ def idle_transform(airflow_url, token):
     unpause(airflow_url, token, TRANSFORM)
     wait_for(
         lambda: not is_busy(airflow_url, token, TRANSFORM, assets=DEMO_ASSETS),
-        900,
+        1200,
         interval=5,
         message="the runs of the transform that earlier tests started did not end",
     )
@@ -105,5 +105,5 @@ def test_a_load_of_the_rates_starts_the_transform(airflow_url, token, idle_trans
     # would come along, so the test asks for its own event and not for the only one.
     consumed = {(e["id"], e["uri"]) for e in consumed_events(airflow_url, token, run)}
     assert (event["id"], RATES) in consumed, sorted(consumed)
-    run = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=900)
+    run = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=1200)
     assert run["state"] == "success", run["state"]

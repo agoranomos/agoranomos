@@ -1,6 +1,8 @@
 -- Every conversion action of the data or of the seed, with its name, its category and whether it
 -- is primary: the settings of the deployment first, then, for Google Ads, what the account says
--- of the action, then the seed of the base package, then what the platform says (ADR-0025).
+-- of the action, then the seed of the base package, then what the platform says (ADR-0025); and
+-- what the platform says of it, its status, its category and its flag of the metric of
+-- conversions, for the registry of conversion actions of the core (ADR-0036).
 with found as (
     select platform, conversion_action_id, conversion_action_name, platform_category
     from {{ ref('stg_demo_search__campaign_conversions') }}
@@ -45,6 +47,7 @@ listed as (
         conversion_action_id,
         max(conversion_action_name) as conversion_action_name,
         max(platform_category) as platform_category,
+        max(conversion_action_status) as conversion_action_status,
         coalesce(bool_or(include_in_conversions_metric), false) as include_in_conversions_metric
     from listed_versions
     where recency = 1
@@ -86,7 +89,10 @@ select
         case when a.platform = 'google_ads' then l.include_in_conversions_metric end,
         s.is_primary,
         false
-    ) as is_primary
+    ) as is_primary,
+    l.conversion_action_status,
+    coalesce(o.platform_category, l.platform_category) as platform_category,
+    l.include_in_conversions_metric
 from actions as a
 left join observed as o
     on o.platform = a.platform and o.conversion_action_id = a.conversion_action_id

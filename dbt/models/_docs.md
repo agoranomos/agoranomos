@@ -45,6 +45,10 @@ Where the row of the settings comes from: extensions, the settings of this deplo
 The ID of the ad account that the row belongs to, as the ad platform gives it, as text; in the settings of the clients, also the ID of a property of web analytics. platform and account_id together identify an account.
 {% enddocs %}
 
+{% docs account_sk %}
+The surrogate key of the account in the core, account_sk of core.dim_account, which never changes for an account and which every fact of the core carries.
+{% enddocs %}
+
 {% docs account_name %}
 The current name of the ad account, as the ad platform gives it, where anyone with access to the account can change it.
 {% enddocs %}
@@ -63,6 +67,10 @@ The name of the campaign that the row carried when it was loaded. A platform giv
 
 {% docs observed_name %}
 A name that the campaign, the ad group or the ad had, from valid_from until valid_to, as the loads saw it; none for an ad of a type that has no name on its platform, such as a responsive search ad of Google.
+{% enddocs %}
+
+{% docs current_name %}
+The name of the campaign, the ad group or the ad of the row as its newest version in the lists of its account has it, or, for one that only the statistics name, as its newest row of statistics carries it; none for an ad of a type that has no name on its platform, such as a responsive search ad of Google.
 {% enddocs %}
 
 {% docs currency %}
@@ -153,6 +161,10 @@ The status of the ad account at the last load, as the ad platform writes it, suc
 The status of the campaign at the last load, or in a version of the campaign its status in that version, as the ad platform writes it, such as ENABLED, PAUSED or REMOVED for Google, ACTIVE or DELETED for Meta, or ENABLE for TikTok.
 {% enddocs %}
 
+{% docs campaign_state %}
+The status of the campaign in the words of every platform, from its status of the platform (campaign_status): active, paused, removed, or other for a status that none of these names, as the shape of the API of the platform maps it. A campaign that the platform no longer lists keeps the state of the last list that named it, and one that only the statistics name has other.
+{% enddocs %}
+
 {% docs campaign_type %}
 The type of the campaign as the ad platform gives it: the advertising channel type of Google, such as SEARCH or PERFORMANCE_MAX, or the objective of Meta or of TikTok.
 {% enddocs %}
@@ -173,6 +185,10 @@ The name of the ad group that the row carried when it was loaded. A platform giv
 The status of the ad group at the last load, or in a version of the ad group its status in that version, as the ad platform writes it, such as ENABLED or REMOVED for Google, ACTIVE or DELETED for Meta, or ENABLE for TikTok. It is the status of the ad group itself: an ad group of a paused campaign can still be enabled.
 {% enddocs %}
 
+{% docs ad_group_state %}
+The status of the ad group in the words of every platform, from its status of the platform (ad_group_status): active, paused, removed, or other for a status that none of these names, as the shape of the API of the platform maps it. An ad group that the platform no longer lists keeps the state of the last list that named it, and one that only the statistics name has other.
+{% enddocs %}
+
 {% docs ad_group_type %}
 The type of the ad group as the ad platform gives it: the type of Google, such as SEARCH_STANDARD or SHOPPING_PRODUCT_ADS, or the optimization goal of the ad set of Meta or of the ad group of TikTok.
 {% enddocs %}
@@ -191,6 +207,10 @@ The name of the ad that the row carried when it was loaded, none for a type of a
 
 {% docs ad_status %}
 The status of the ad at the last load, or in a version of the ad its status in that version, as the ad platform writes it, such as ENABLED or REMOVED for an ad in its ad group of Google, ACTIVE or DELETED for Meta, or ENABLE for TikTok.
+{% enddocs %}
+
+{% docs ad_state %}
+The status of the ad in the words of every platform, from its status of the platform (ad_status): active, paused, removed, or other for a status that none of these names, as the shape of the API of the platform maps it. An ad that the platform no longer lists keeps the state of the last list that named it, and one that only the statistics name has other.
 {% enddocs %}
 
 {% docs ad_type %}
@@ -219,6 +239,18 @@ The last day that the advertising statistics hold for the account, the campaign,
 
 {% docs name_count %}
 How many different names the campaign had, as the loads saw them.
+{% enddocs %}
+
+{% docs is_listed %}
+Whether the newest list of its account that the loads gave names the campaign, the ad group or the ad of the row: false for one that the platform no longer shows, such as a campaign that TikTok leaves out once it is deleted, and for one that only the statistics name, whose spend still counts.
+{% enddocs %}
+
+{% docs last_seen_at %}
+When a list of its account last named the campaign, the ad group or the ad of the row, as this run of the transform sees it: for one that the newest list names, when the newest load of the account that the runs pinned ended, or the start of its newest version when that is later; for one that the platform no longer lists, the start of its newest version; none for one that only the statistics name.
+{% enddocs %}
+
+{% docs is_stub %}
+Whether the account comes only from the data of this run, as its statistics or its sessions name it, and from no list of accounts, so that its name, currency and time zone are unknown.
 {% enddocs %}
 
 {% docs property_id %}

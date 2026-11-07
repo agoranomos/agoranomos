@@ -1,0 +1,426 @@
+models:
+  - name: dim_client
+    description: >-
+      The clients of the business, such as brands, shops or legal entities, one row each, as the
+      settings of the model name them, with the default client Unassigned, which holds the accounts
+      that no setting names (ADR-0024).
+    columns:
+      - name: client_id
+        description: >-
+          The ID of the client, as the settings of the model name it: those of the deployment in
+          extensions/model/clients.toml, or the file of the demo; unassigned for the default client.
+        data_tests:
+          - unique:
+              config: {tags: [critical]}
+      - name: client_name
+        description: >-
+          The name of the client, as the settings of the model give it; Unassigned for the default
+          client.
+      - name: is_default
+        description: >-
+          Whether the client is the default one, Unassigned, which holds the accounts that no
+          setting names.
+  - name: dim_date
+    description: >-
+      The calendar: one row for each day, with its year, quarter, month and week, for the views that
+      need a day with no fact, such as a continuous series of a chart.
+    columns:
+      - name: calendar_date
+        description: >-
+          The day.
+        data_tests:
+          - unique:
+              config: {tags: [critical]}
+      - name: year
+        description: >-
+          The year of the day.
+      - name: quarter
+        description: >-
+          The quarter of the year of the day, from 1 to 4.
+      - name: month
+        description: >-
+          The month of the year of the day, from 1 to 12.
+      - name: month_start
+        description: >-
+          The first day of the month of the day.
+      - name: iso_year
+        description: >-
+          The year of the week of the day by ISO 8601, which differs from year in the first and last
+          days of some years.
+      - name: iso_week
+        description: >-
+          The week of the day by ISO 8601, from 1 to 53; a week starts on Monday.
+      - name: week_start
+        description: >-
+          The Monday of the week of the day.
+      - name: day_of_week
+        description: >-
+          The day of the week by ISO 8601, from 1 for Monday to 7 for Sunday.
+      - name: is_weekend
+        description: >-
+          Whether the day is a Saturday or a Sunday.
+  - name: dim_account
+    description: >-
+      The registry of accounts: one row for each account of an ad platform and each property of web
+      analytics, with its surrogate key account_sk, which every fact of the core carries and points
+      at with its one foreign key. platform and account_id identify an account too. It holds the
+      current attributes of each account.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id]
+          config: {tags: [critical]}
+      - few_stubs:
+          arguments:
+            group_by: platform
+            stub: is_stub
+          config:
+            severity: warn
+    columns:
+      - name: account_sk
+        description: >-
+          The surrogate key of the account, from the sequence core.dim_account_account_sk_seq; it
+          never changes for an account.
+        data_tests:
+          - unique:
+              config: {tags: [critical]}
+      - name: platform
+        description: >-
+          The code of the platform of the account, such as google_ads or demo_search, as the marts
+          name it.
+      - name: account_id
+        description: >-
+          The ID of the account as the platform gives it, as text: of an ad account, or of a
+          property of web analytics without its prefix properties/. platform and account_id together
+          identify the account.
+      - name: account_name
+        description: >-
+          The current name of the account, as the platform gives it, where anyone with access to the
+          account can change it; none for an account that no load has listed.
+      - name: client_id
+        description: >-
+          The client of the business that the account belongs to, client_id of core.dim_client, as
+          the settings of the model name it; unassigned for an account that no setting names.
+      - name: currency
+        description: >-
+          The currency of the account, in which the platform reports its amounts, as a three-letter
+          code of ISO 4217; none for an account that no load has listed.
+      - name: time_zone
+        description: >-
+          The time zone of the account, as a name of the tz database of IANA, such as Europe/Berlin,
+          in which the platform reports its days; none for an account that no load has listed.
+      - name: manager_account_id
+        description: >-
+          The ID of the manager account that the account is under, as the platform gives it; none
+          where there is none.
+      - name: account_status
+        description: >-
+          The status of the account at the last load that listed it, as the platform writes it, such
+          as ENABLED for Google.
+      - name: hierarchy_rule
+        description: >-
+          The rule by which the connector of the platform maps the levels of the platform onto the
+          three grains of the core, campaign, ad group and ad, for a platform whose levels differ
+          from them, such as the campaign groups of LinkedIn; none where the levels of the platform
+          are those three.
+      - name: is_active
+        description: >-
+          Whether the settings of the model still name the account: an account that leaves the
+          settings keeps its data and is no longer active.
+      - name: is_stub
+        description: >-
+          Whether the row is a stub, made for an account that data names and that no load of the
+          list of accounts gave, so that its name, currency and time zone are unknown.
+      - name: first_report_date
+        description: >-
+          The first day that the facts of advertising statistics of the core hold for the account;
+          none for an account without statistics.
+      - name: last_report_date
+        description: >-
+          The last day that the facts of advertising statistics of the core hold for the account;
+          none for an account without statistics.
+  - name: dim_conversion_action
+    description: >-
+      The registry of conversion actions: one row for each conversion action of each platform, with
+      its surrogate key conversion_action_sk, which core.ad_conversions_campaign_daily carries.
+      platform and conversion_action_id identify an action too, as the settings of the model name
+      it. It holds the current attributes of each action and whether it counts as primary.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, conversion_action_id]
+          config: {tags: [critical]}
+    columns:
+      - name: conversion_action_sk
+        description: >-
+          The surrogate key of the conversion action, from the sequence
+          core.dim_conversion_action_conversion_action_sk_seq; it never changes for an action.
+        data_tests:
+          - unique:
+              config: {tags: [critical]}
+      - name: platform
+        description: >-
+          The code of the platform of the conversion action, such as google_ads or demo_search, as
+          the marts name it.
+      - name: conversion_action_id
+        description: >-
+          The ID of the conversion action as the platform names it, as text: the ID of a conversion
+          action of Google, the action type of Meta, such as offsite_conversion.fb_pixel_purchase,
+          or the metric of TikTok, such as complete_payment.
+      - name: conversion_action_name
+        description: >-
+          The name of the conversion action, as the platform gives it, or as the seed of conversion
+          actions of the base package names it where it names one.
+      - name: conversion_action_status
+        description: >-
+          The status of the conversion action at the last load that listed it, as the platform
+          writes it, such as ENABLED, HIDDEN or REMOVED for Google; none where the platform lists no
+          actions.
+      - name: platform_category
+        description: >-
+          The category that the platform gives the conversion action, in lower case, such as
+          purchase or submit_lead_form; none where the platform gives none.
+      - name: conversion_category
+        description: >-
+          What kind of conversion the action is: purchase, lead, sign_up, add_to_cart, app_install
+          or other, from the settings of the deployment, the seed of the base package, or the
+          category that the platform gives, in that order.
+      - name: include_in_conversions_metric
+        description: >-
+          Whether the platform counts the action in its own metric of conversions, as it says of the
+          action, such as include_in_conversions_metric of Google; none where the platform says
+          nothing of it.
+      - name: is_primary
+        description: >-
+          Whether the action counts in the conversions of the primary actions of the deployment: as
+          extensions/model/conversion_actions.toml says where it names the action, else as the
+          platform counts it (include_in_conversions_metric), else as the seed of conversion actions
+          says; false for an action that none of them names.
+  - name: dim_campaign
+    description: >-
+      The campaigns of every ad platform, one row each, with their current attributes: those of the
+      newest list of their account, or, for a campaign that only the statistics name, its name from
+      the statistics. account_sk and campaign_id are its key. A campaign that the platform no longer
+      lists stays, with is_listed false.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [account_sk, campaign_id]
+          config: {tags: [critical]}
+      - few_stubs:
+          arguments:
+            group_by: account_sk
+            stub: not is_listed and last_seen_at is null
+          config:
+            severity: warn
+    columns:
+      - name: account_sk
+        description: >-
+          The account of the campaign, account_sk of core.dim_account.
+      - name: campaign_id
+        description: >-
+          The ID of the campaign as the ad platform gives it, a number, unique inside its account.
+      - name: campaign_id_text
+        description: >-
+          The same ID as text, as the marts show it: a number above 2^53 keeps every digit as text.
+      - name: campaign_name
+        description: >-
+          The current name of the campaign, as the ad platform gives it, where anyone with access to
+          the account can change it.
+      - name: campaign_status
+        description: >-
+          The status of the campaign at the last load that listed it, as the ad platform writes it,
+          such as ENABLED, PAUSED or REMOVED for Google, ACTIVE or DELETED for Meta, or ENABLE for
+          TikTok.
+      - name: campaign_state
+        description: >-
+          The status of the campaign in the words of every platform: active, paused, removed, or
+          other for a status that none of these names.
+      - name: campaign_type
+        description: >-
+          The type of the campaign as the ad platform gives it: the advertising channel type of
+          Google, such as SEARCH or PERFORMANCE_MAX, or the objective of Meta or of TikTok.
+      - name: start_date
+        description: >-
+          The first day on which the campaign may serve, as the ad platform gives it; none where it
+          gives none.
+      - name: end_date
+        description: >-
+          The last day on which the campaign may serve, as the ad platform gives it; none for a
+          campaign without an end.
+      - name: budget
+        description: >-
+          The budget of the campaign, in the currency of its account, for the period of
+          budget_period; none for a campaign without a budget of its own.
+      - name: budget_period
+        description: >-
+          The period of the budget, as the ad platform writes it, such as DAILY for Google or
+          BUDGET_MODE_TOTAL for TikTok.
+      - name: name_count
+        description: >-
+          How many different names the campaign had, as the loads saw them.
+      - name: first_report_date
+        description: >-
+          The first day that core.ad_stats_campaign_daily holds for the campaign; none for one
+          without statistics.
+      - name: last_report_date
+        description: >-
+          The last day that core.ad_stats_campaign_daily holds for the campaign; none for one
+          without statistics.
+      - name: last_seen_at
+        description: >-
+          When the newest list of campaigns of the account that named the campaign was loaded; none
+          for a campaign that only the statistics name.
+      - name: is_listed
+        description: >-
+          Whether the newest list of campaigns of the account names the campaign: false for one that
+          the platform no longer shows, or that only the statistics name, whose spend still counts.
+  - name: dim_ad_group
+    description: >-
+      The ad groups of every ad platform, ad sets of Meta among them, one row each, with their
+      campaign and current attributes: those of the newest list of their account, or, for an ad
+      group that only the statistics name, its name from the statistics. account_sk and ad_group_id
+      are its key. An ad group that the platform no longer lists stays, with is_listed false.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [account_sk, ad_group_id]
+          config: {tags: [critical]}
+      - few_stubs:
+          arguments:
+            group_by: account_sk
+            stub: not is_listed and last_seen_at is null
+          config:
+            severity: warn
+    columns:
+      - name: account_sk
+        description: >-
+          The account of the ad group, account_sk of core.dim_account.
+      - name: ad_group_id
+        description: >-
+          The ID of the ad group as the ad platform gives it, a number, unique inside its account.
+      - name: ad_group_id_text
+        description: >-
+          The same ID as text, as the marts show it: a number above 2^53 keeps every digit as text.
+      - name: campaign_id
+        description: >-
+          The campaign of the ad group, campaign_id of core.dim_campaign in the same account.
+      - name: ad_group_name
+        description: >-
+          The current name of the ad group, as the ad platform gives it, where anyone with access to
+          the account can change it.
+      - name: ad_group_status
+        description: >-
+          The status of the ad group itself at the last load that listed it, as the ad platform
+          writes it, such as ENABLED or REMOVED for Google, ACTIVE or DELETED for Meta, or ENABLE
+          for TikTok: an ad group of a paused campaign can still be enabled.
+      - name: ad_group_state
+        description: >-
+          The status of the ad group in the words of every platform: active, paused, removed, or
+          other for a status that none of these names.
+      - name: ad_group_type
+        description: >-
+          The type of the ad group as the ad platform gives it: the type of Google, such as
+          SEARCH_STANDARD, or the optimization goal of the ad set of Meta or of the ad group of
+          TikTok.
+      - name: start_date
+        description: >-
+          The first day on which the ad group may serve, as the ad platform gives it; none where it
+          gives none.
+      - name: end_date
+        description: >-
+          The last day on which the ad group may serve, as the ad platform gives it; none for an ad
+          group without an end.
+      - name: budget
+        description: >-
+          The budget of the ad group, in the currency of its account, for the period of
+          budget_period; none for an ad group without a budget of its own, such as every ad group of
+          Google.
+      - name: budget_period
+        description: >-
+          The period of the budget, as the ad platform writes it.
+      - name: first_report_date
+        description: >-
+          The first day that core.ad_stats_ad_group_daily holds for the ad group; none for one
+          without statistics.
+      - name: last_report_date
+        description: >-
+          The last day that core.ad_stats_ad_group_daily holds for the ad group; none for one
+          without statistics.
+      - name: last_seen_at
+        description: >-
+          When the newest list of ad groups of the account that named the ad group was loaded; none
+          for an ad group that only the statistics name.
+      - name: is_listed
+        description: >-
+          Whether the newest list of ad groups of the account names the ad group: false for one that
+          the platform no longer shows, or that only the statistics name, whose spend still counts.
+  - name: dim_ad
+    description: >-
+      The ads of every ad platform, one row each, with their campaign, ad group and current
+      attributes: those of the newest list of their account, or, for an ad that only the statistics
+      name, its name from the statistics. account_sk, ad_group_id and ad_id are its key, as an ad is
+      defined only inside its ad group. An ad that the platform no longer lists stays, with
+      is_listed false.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [account_sk, ad_group_id, ad_id]
+          config: {tags: [critical]}
+      - few_stubs:
+          arguments:
+            group_by: account_sk
+            stub: not is_listed and last_seen_at is null
+          config:
+            severity: warn
+    columns:
+      - name: account_sk
+        description: >-
+          The account of the ad, account_sk of core.dim_account.
+      - name: ad_group_id
+        description: >-
+          The ad group of the ad, ad_group_id of core.dim_ad_group in the same account.
+      - name: ad_id
+        description: >-
+          The ID of the ad as the ad platform gives it, a number, unique inside its ad group.
+      - name: ad_id_text
+        description: >-
+          The same ID as text, as the marts show it: a number above 2^53 keeps every digit as text.
+      - name: campaign_id
+        description: >-
+          The campaign of the ad, campaign_id of core.dim_campaign in the same account.
+      - name: ad_name
+        description: >-
+          The current name of the ad, as the ad platform gives it, where anyone with access to the
+          account can change it; none for a type of ad that has no name on its platform, such as a
+          responsive search ad of Google.
+      - name: ad_status
+        description: >-
+          The status of the ad at the last load that listed it, as the ad platform writes it, such
+          as ENABLED or REMOVED for an ad in its ad group of Google, ACTIVE or DELETED for Meta, or
+          ENABLE for TikTok.
+      - name: ad_state
+        description: >-
+          The status of the ad in the words of every platform: active, paused, removed, or other for
+          a status that none of these names.
+      - name: ad_type
+        description: >-
+          The type of the ad as the ad platform gives it: the type of Google, such as
+          RESPONSIVE_SEARCH_AD, or the format of TikTok, such as SINGLE_VIDEO; none for Meta, whose
+          ads have no type.
+      - name: first_report_date
+        description: >-
+          The first day that core.ad_stats_ad_daily holds for the ad; none for one without
+          statistics.
+      - name: last_report_date
+        description: >-
+          The last day that core.ad_stats_ad_daily holds for the ad; none for one without
+          statistics.
+      - name: last_seen_at
+        description: >-
+          When the newest list of ads of the account that named the ad was loaded; none for an ad
+          that only the statistics name.
+      - name: is_listed
+        description: >-
+          Whether the newest list of ads of the account names the ad: false for one that the
+          platform no longer shows, or that only the statistics name, whose spend still counts.

@@ -13,6 +13,7 @@ model-paths: ["models"]
 seed-paths: ["seeds"]
 test-paths: ["tests"]
 macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
 # The packages of packages.yml, which the Airflow image installs here when it is built: the project
 # is mounted read-only, and no task of dbt runs dbt deps (ADR-0029).
 packages-install-path: /opt/airflow/dbt_packages
@@ -39,6 +40,21 @@ models:
     marts:
       +schema: marts
       +materialized: table
+    # The dimensions and the registries of the core (ADR-0036, ADR-0038): incremental models that
+    # merge their rows into the tables that the migrations of postgres/migrations create, own and
+    # describe, so that transformer can neither drop nor change a table (ADR-0035). Never a full
+    # refresh, as a rebuild would drop the table with the views over it; a model whose columns or
+    # types no longer match its table fails rather than change it, as dbt would drop a column with
+    # cascade to widen its type; and no comment, as persist_docs needs the ownership of the table.
+    core:
+      +schema: core
+      +materialized: incremental
+      +incremental_strategy: merge
+      +full_refresh: false
+      +on_schema_change: fail
+      +persist_docs:
+        relation: false
+        columns: false
     # The models of the Ops collection in Metabase (ADR-0029): views over the results that
     # elementary records and over the record of the loads, which metabase_reader may read; the
     # tables of elementary in the same schema it may not.
@@ -51,22 +67,48 @@ models:
   elementary:
     +schema: ops
 
-# The settings of elementary (ADR-0029). No rows of the data that a test finds: the result of a
-# test is its status and the number of rows. The tables of the artifacts of the project, such as
-# its models and tests, are written once a run, by the task that builds the models of elementary,
-# and not by the hooks of each task of dbt, which takes about a second instead of three.
+# The versions of the campaigns, the ad groups and the ads (ADR-0036): snapshots of dbt in core,
+# which transformer creates and so owns, with the right CREATE on the schema (warehouse.sql), and
+# whose descriptions persist_docs writes. Each compares the columns of its check_cols in
+# _snapshots.yml, and keeps the newest version of an entity that a run no longer reads, as a run
+# does not read the entities of every account (hard_deletes ignore). The version that holds ends at
+# the end of 9999, not at none, so that a fact finds the version of its day with one condition;
+# from its second run a snapshot writes through a temporary table, which transformer may create
+# (#187).
+snapshots:
+  agoranomos:
+    +schema: core
+    +strategy: check
+    +hard_deletes: ignore
+    +dbt_valid_to_current: "'9999-12-31 00:00:00'::timestamp"
+    +persist_docs:
+      relation: true
+      columns: true
+
 vars:
+  # The settings of elementary (ADR-0029). No rows of the data that a test finds: the result of a
+  # test is its status and the number of rows. The tables of the artifacts of the project, such as
+  # its models and tests, are written once a run, by the task that builds the models of
+  # elementary, and not by the hooks of each task of dbt, which takes about a second instead of
+  # three.
   test_sample_row_count: 0
   disable_dbt_artifacts_autoupload: true
+  # The share of the rows of an account in a dimension of the core above which its stubs, the
+  # entities that only the statistics name, raise a warning (tests/generic/few_stubs.sql,
+  # ADR-0036). Google lists the removed entities too, so a stub there means a connector that left
+  # out a list; 5% leaves room for the deleted entities of Meta and of TikTok, which their lists
+  # can leave out. Not checked yet on a live account.
+  stub_share_warn: 0.05
 
 # The tests of the base package. A test with the severity error, the default, stops the models that
 # read its node (TestBehavior.BUILD of Cosmos, ADR-0028), and carries the tag critical (ADR-0038),
 # for a run of the blocking tests by hand: dbt build --select tag:critical (CONTRIBUTING.md). Every
 # test of the staging models and of the marts blocks, so their directories give the tag here: dbt
 # gives a generic test the configs of the directory of its YAML file. Tags add up and none can be
-# taken back, so where a directory holds a warning, the intermediate models, each test that blocks
-# carries the tag in its YAML; so do the tests of the seeds, whose YAML lies at the root of seeds,
-# and the singular test that blocks, in its config; the four singular tests that warn carry none.
+# taken back, so where a directory holds a warning, the intermediate models and the core, each test
+# that blocks carries the tag in its YAML; so do the tests of the seeds, whose YAML lies at the root
+# of seeds, and those of the snapshots, and the singular test that blocks, in its config; the four
+# singular tests that warn carry none.
 # tests/unit/test_dbt_project.py checks that the tag and the severity agree.
 data_tests:
   agoranomos:

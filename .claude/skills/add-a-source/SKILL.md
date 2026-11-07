@@ -14,7 +14,8 @@ A source goes through every layer of the model ([ADR-0025](../../../docs/adr/002
     - a name of a platform through `to_name` of `dbt/macros/names.sql`, as an empty one is none;
     - `report_date` in the time zone of the account;
     - clicks to the site;
-    - conversions as the platform counts them.
+    - conversions as the platform counts them;
+    - the common state of a campaign, an ad group or an ad, `active`, `paused`, `removed` or `other`, beside its status, through one macro of the shape that maps the statuses of the platform, such as `google_ads_state` ([ADR-0036](../../../docs/adr/0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md)).
 - **The code of the platform.** A real platform keeps its own code, such as `google_ads`. A demo platform gets a code that starts with `demo_`.
 - **The reload window.** How many recent days each daily load takes again, as the platform still changes them.
 - **A decision record.** A significant choice gets an ADR in `docs/adr/` before the code: how a connector gets its credentials, or a new grain or mart, for example. It starts as `proposed`.
@@ -39,7 +40,8 @@ A source goes through every layer of the model ([ADR-0025](../../../docs/adr/002
 4. **Intermediate.** Add a `ref` of the new staging views to every `int_*` model that unions the platforms. `git grep` of the example finds them:
     - `int_ad_stats__unioned`, `int_ad_conversions__unioned`, `int_ad_accounts__unioned` and `int_ad_campaigns__unioned`;
     - `int_ad_campaign_names__collapsed` and `int_conversion_actions__resolved`;
-    - `int_web_sessions__unioned` for web analytics.
+    - `int_web_sessions__unioned` for web analytics;
+    - `int_accounts__current`, `int_campaigns__current`, `int_ad_groups__current` and `int_ads__current`, over which the core takes its dimensions and their versions, and the union of the versions of the campaigns in `dbt/models/core/dim_campaign.sql`, which counts their names ([The schema core](../../../docs/reference/data-model.md#the-schema-core)).
 5. **Ops.** Add the platform's schema and code to the list of `dbt/models/ops/ops_loads.sql`, which reads its `_agoranomos_loads`.
 6. **Seeds.** Add a row to `dbt/seeds/seed_ad_platforms.csv`. Add the conversion actions of the platform, with their categories and which are primary, to `seed_conversion_actions.csv`.
 7. **Metadata.** Every mart, column and display name stays described as [Describe the marts](../../../docs/reference/describe-the-marts.md) says. A new column that more than one model has takes a doc block in `dbt/models/_docs.md`.
