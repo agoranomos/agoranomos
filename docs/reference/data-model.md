@@ -122,7 +122,7 @@ The schema `ops` holds the tables of the package elementary, in which its hooks 
 | View | One row for | What it holds |
 |---|---|---|
 | `ops_loads` | Each account of each platform | The last day that a load took for the account, when it was loaded, how many hours ago, and how many loads the journal holds, from `_agoranomos_loads` of each schema `raw_<platform>` |
-| `ops_transform_nodes` | Each model, seed and test in each run of dbt | Its status, its seconds, when it started and ended, the rows that it changed or found, what dbt said of it, and the DAG and the run of Airflow whose task ran dbt |
+| `ops_transform_nodes` | Each model, seed, snapshot and test in each run of dbt | Its status, its seconds, when it started and ended, the rows that it changed or found, what dbt said of it, and the DAG and the run of Airflow whose task ran dbt |
 | `ops_transform_tests` | Each test in each run of dbt | The model and the column that it checks, its kind, its severity, its status and the rows that it found |
 | `ops_warehouse_tables` | Each table of the warehouse | The rows that the last ANALYZE estimated and the bytes that the table takes with its indexes, when the view is read |
 

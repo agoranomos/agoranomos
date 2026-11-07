@@ -1,5 +1,5 @@
 -- Each node of the project in each run of dbt that the hooks of elementary recorded, the models,
--- seeds and tests of the project, without those of elementary itself. A task of the transform runs
+-- seeds, snapshots and tests of the project, without those of elementary itself. A task of the transform runs
 -- dbt for one node, so a run of the transform is many runs of dbt, which share the ID of the run of
 -- Airflow that the task gives dbt (agoranomos_demo_transform.py).
 select

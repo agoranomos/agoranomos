@@ -155,7 +155,8 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "key": "failed-models",
         "name": "Failed models",
         "description": (
-            "How many models and seeds of the dbt project failed in the last run of the transform."
+            "How many models, seeds and snapshots of the dbt project failed in the last run of the "
+            "transform."
         ),
         "display": "scalar",
         "columns": ("models",),
@@ -164,7 +165,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "SELECT count(*) AS models",
             "FROM ops.ops_transform_nodes",
             f"WHERE {IN_LAST_RUN}",
-            "    AND resource_type IN ('model', 'seed')",
+            "    AND resource_type IN ('model', 'seed', 'snapshot')",
             "    AND status = 'error'",
         ),
         "layout": {"row": 0, "col": 6, "size_x": 6, "size_y": 3},
@@ -252,8 +253,8 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "key": "slowest-models",
         "name": "Slowest models of the last run",
         "description": (
-            "The ten models and seeds of the dbt project that took the most seconds in the last "
-            "run of the transform, without their tests."
+            "The ten models, seeds and snapshots of the dbt project that took the most seconds in "
+            "the last run of the transform, without their tests."
         ),
         "display": "row",
         "columns": ("node_name", "seconds"),
@@ -263,7 +264,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "SELECT node_name, round(execution_seconds::numeric, 1) AS seconds",
             "FROM ops.ops_transform_nodes",
             f"WHERE {IN_LAST_RUN}",
-            "    AND resource_type IN ('model', 'seed')",
+            "    AND resource_type IN ('model', 'seed', 'snapshot')",
             "ORDER BY execution_seconds DESC",
             "LIMIT 10",
         ),
@@ -273,15 +274,15 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "key": "failed-model-runs",
         "name": "Models that failed, last 30 days",
         "description": (
-            "Each run of a model or a seed of the dbt project that failed in the last 30 days, "
-            "with what dbt said of it, newest first."
+            "Each run of a model, a seed or a snapshot of the dbt project that failed in the last "
+            "30 days, with what dbt said of it, newest first."
         ),
         "display": "table",
         "columns": ("started_at", "node_name", "resource_type", "message"),
         "query": sql(
             "SELECT started_at, node_name, resource_type, message",
             "FROM ops.ops_transform_nodes",
-            "WHERE resource_type IN ('model', 'seed')",
+            "WHERE resource_type IN ('model', 'seed', 'snapshot')",
             "    AND status = 'error'",
             "    AND started_at >= now() - interval '30 days'",
             "ORDER BY started_at DESC",

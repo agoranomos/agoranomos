@@ -9,7 +9,7 @@ Sign in to Metabase as [Run agoranomos locally](run-locally.md#sign-in) says and
 ## What it shows
 
 - **Late accounts**: how many accounts were last loaded more than 36 hours ago. The daily load of the demo runs once a day, so a number above 0 means that a load did not run or failed: look at `agoranomos_demo_daily` in Airflow.
-- **Failed models** and **Failed or warned tests**: the models and seeds that failed, and the tests that warned, failed or ended in an error, in the last run of the transform. The demo leaves one day of one account out on purpose, so one test, `int_ad_stats__unioned_has_no_missing_day`, warns on every run of the demo.
+- **Failed models** and **Failed or warned tests**: the models, seeds and snapshots that failed, and the tests that warned, failed or ended in an error, in the last run of the transform. The demo leaves one day of one account out on purpose, so one test, `int_ad_stats__unioned_has_no_missing_day`, warns on every run of the demo.
 - **Warehouse, MB**: the room that the tables of the warehouse take, with their indexes.
 - **Last load of each account**: the last day that a load took for each account of each platform, in the time zone of the account, when it was loaded, and how many hours ago.
 - **Duration of each run of the transform, last 30 days**, and the **slowest models of the last run**.
