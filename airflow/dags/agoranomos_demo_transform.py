@@ -117,7 +117,7 @@ def agoranomos_demo_transform():
         dbt_executable_path=DBT_EXECUTABLE,
         invocation_mode=InvocationMode.SUBPROCESS,
         install_deps=False,
-        # The run of Airflow, without which the macro pins nothing: dbt by hand does not pin.
+        # The run of Airflow, without which the macro refuses to pin: dbt by hand does not pin.
         env=JOB_ENV,
         # A pin writes no data of the model: no asset event.
         emit_datasets=False,
