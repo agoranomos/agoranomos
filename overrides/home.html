@@ -1,6 +1,6 @@
 {#-
-  The home page: a first screen in the dark world of the brand above the text of docs/index.md,
-  which sets `template: home.html` in its front matter. The styles are in docs/stylesheets/brand.css
+  The home page: a first screen in the style of the banners of the brand, light or dark with the
+  scheme, above the text of docs/index.md, which sets `template: home.html` in its front matter. The styles are in docs/stylesheets/brand.css
   (Home). It extends main.html, so the rules of that file hold here too.
 
   The first screen states only what the release does: keep it in step with the README and with
@@ -37,7 +37,8 @@
         <div><span class="ag-label">Start</span><b>./agoranomos up</b><span>one command starts the whole stack</span></div>
       </div>
       <figure class="ag-hero__pipeline">
-        <img src="{{ 'assets/readme/pipeline-dark.svg' | url }}" width="1252" height="596" alt="The pipeline: demo data, dlt, the PostgreSQL warehouse with raw, staging and marts built by dbt, Metabase and the MCP servers run today, and Airflow runs the load and the dbt build. The connector of Google Ads is in place, with no load on a real account yet. The Claude apps and Claude Code reach the data through the MCP servers: the one built into Metabase and, in local mode, the read-only servers of the warehouse and of Airflow. The Metabase refresh, the connectors of more ad platforms, the MCP server of dbt and the AI clients ChatGPT, Gemini and Kimi are planned.">
+        <img class="ag-light" src="{{ 'assets/readme/pipeline-light.svg' | url }}" width="1252" height="596" alt="The pipeline: demo data, dlt, the PostgreSQL warehouse with raw, staging and marts built by dbt, Metabase and the MCP servers run today, and Airflow runs the load and the dbt build. The connector of Google Ads is in place, with no load on a real account yet. The Claude apps and Claude Code reach the data through the MCP servers: the one built into Metabase and, in local mode, the read-only servers of the warehouse and of Airflow. The Metabase refresh, the connectors of more ad platforms, the MCP server of dbt and the AI clients ChatGPT, Gemini and Kimi are planned.">
+        <img class="ag-dark" src="{{ 'assets/readme/pipeline-dark.svg' | url }}" width="1252" height="596" alt="The pipeline: demo data, dlt, the PostgreSQL warehouse with raw, staging and marts built by dbt, Metabase and the MCP servers run today, and Airflow runs the load and the dbt build. The connector of Google Ads is in place, with no load on a real account yet. The Claude apps and Claude Code reach the data through the MCP servers: the one built into Metabase and, in local mode, the read-only servers of the warehouse and of Airflow. The Metabase refresh, the connectors of more ad platforms, the MCP server of dbt and the AI clients ChatGPT, Gemini and Kimi are planned.">
       </figure>
     </div>
   </section>

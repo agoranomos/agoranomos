@@ -6,8 +6,10 @@
   Void code blocks and dashed admonitions. Ember appears only in graphics there, never in text.
   Dark scheme ("slate"): the dark world of the brand, a Void page with Graphite panels, Bone text,
   Mute secondary text and Amber for what works: links, the active page, the prompt.
-  In both, the header and the tabs are Void and carry the logo for dark backgrounds, the first
-  screen of the home page is the dark world with its dot grid and Aurora, and the footer is Void.
+  In both, the header and the tabs are Void and carry the logo for dark backgrounds, and the
+  footer is Void. The first screen of the home page follows the scheme, as the banners of the
+  brand book do: Paper with its dot grid in the light scheme, the dark world with its dot grid and
+  Aurora in the dark one.
 
   The fonts are Fira Sans (text) and Fira Code (headings, labels, figures and code), served from
   ../assets/fonts under the SIL Open Font License 1.1 (OFL-FiraSans.txt, OFL-FiraCode.txt).
@@ -1288,18 +1290,46 @@ body {
 /* Home ------------------------------------------------------------------------------------- */
 
 /*
-  The first screen of the home page (overrides/home.html) is the site of the brand book in both
-  schemes: Void, the dot grid and Aurora, a label, the slogan with the cursor, the lead, two
-  buttons, three facts and the diagram of the pipeline.
+  The first screen of the home page (overrides/home.html) is the site of the brand book: a label,
+  the slogan with the cursor, the lead, the buttons, three facts and the diagram of the pipeline,
+  on the dot grid. It follows the scheme as the banners of the brand book do (hero-light.svg,
+  hero-dark.svg): Void with Aurora, Bone text and Amber in the dark scheme, Paper without Aurora,
+  Void text and Rust in the light one (Rust on Paper 5.40:1, Mute dark 6.29:1).
 */
 .ag-hero {
+  --ag-hero-bg: var(--ag-void);
+  --ag-hero-dots: var(--ag-dots);
+  --ag-hero-aurora: var(--ag-aurora);
+  --ag-hero-fg: var(--ag-bone);
+  --ag-hero-mute: var(--ag-mute);
+  --ag-hero-accent: var(--ag-amber);
+  --ag-hero-on-accent: var(--ag-void);
+  --ag-hero-glow: var(--ag-ember-glow);
+  --ag-hero-rule: var(--ag-line);
+  --ag-hero-frame: var(--ag-line-2);
+
   position: relative;
   overflow: hidden;
-  color: var(--ag-bone);
-  background-color: var(--ag-void);
-  background-image: var(--ag-dots);
+  color: var(--ag-hero-fg);
+  background-color: var(--ag-hero-bg);
+  background-image: var(--ag-hero-dots);
   background-size: 16px 16px;
-  border-bottom: 1px solid var(--ag-line);
+  border-bottom: 1px solid var(--ag-hero-rule);
+}
+
+[data-md-color-scheme="default"] .ag-hero {
+  color-scheme: light;
+
+  --ag-hero-bg: var(--ag-paper);
+  --ag-hero-dots: var(--ag-dots-on-paper);
+  --ag-hero-aurora: none;
+  --ag-hero-fg: var(--ag-void);
+  --ag-hero-mute: var(--ag-mute-dark);
+  --ag-hero-accent: var(--ag-rust);
+  --ag-hero-on-accent: var(--ag-paper);
+  --ag-hero-glow: none;
+  --ag-hero-rule: var(--ag-rule);
+  --ag-hero-frame: rgb(9 9 11 / 22%);
 }
 
 .ag-hero::before {
@@ -1307,7 +1337,7 @@ body {
   inset: 0;
   pointer-events: none;
   content: "";
-  background: var(--ag-aurora);
+  background: var(--ag-hero-aurora);
 }
 
 .ag-hero__inner {
@@ -1317,7 +1347,7 @@ body {
 
 .ag-label {
   margin: 0;
-  color: var(--ag-mute);
+  color: var(--ag-hero-mute);
   font-family: var(--ag-mono);
   font-size: 0.55rem;
   font-weight: 500;
@@ -1328,7 +1358,7 @@ body {
 
 .ag-hero__title {
   margin: 1rem 0 0;
-  color: var(--ag-bone);
+  color: var(--ag-hero-fg);
   font-family: var(--ag-mono);
   font-size: clamp(2rem, 9vw, 4.6rem);
   font-weight: 700;
@@ -1339,7 +1369,7 @@ body {
 
 .ag-hero__title em {
   font-style: normal;
-  color: var(--ag-amber);
+  color: var(--ag-hero-accent);
   white-space: nowrap;
 }
 
@@ -1350,7 +1380,7 @@ body {
   height: 0.8em;
   margin-left: 0.1em;
   vertical-align: -0.02em;
-  background-color: var(--ag-amber);
+  background-color: var(--ag-hero-accent);
   animation: ag-blink 1.1s steps(1) infinite;
 }
 
@@ -1369,13 +1399,13 @@ body {
 .ag-hero__lead {
   max-width: 34rem;
   margin: 1.4rem 0 0;
-  color: var(--ag-mute);
+  color: var(--ag-hero-mute);
   font-size: 0.9rem;
   line-height: 1.55;
 }
 
 .ag-hero__lead strong {
-  color: var(--ag-bone);
+  color: var(--ag-hero-fg);
   font-weight: 500;
 }
 
@@ -1396,31 +1426,39 @@ body {
   font-weight: 600;
   line-height: 1;
   text-decoration: none;
-  border: 1px solid var(--ag-line-2);
+  border: 1px solid var(--ag-hero-frame);
 }
 
 .ag-hero .ag-button {
-  color: var(--ag-bone);
+  color: var(--ag-hero-fg);
 }
 
 .ag-hero .ag-button:is(:hover, :focus) {
-  color: var(--ag-amber);
-  border-color: var(--ag-amber);
+  color: var(--ag-hero-accent);
+  border-color: var(--ag-hero-accent);
 }
 
 .ag-hero .ag-button--primary,
 .ag-hero .ag-button--primary:is(:hover, :focus) {
-  color: var(--ag-void);
-  background-color: var(--ag-amber);
-  border-color: var(--ag-amber);
+  color: var(--ag-hero-on-accent);
+  background-color: var(--ag-hero-accent);
+  border-color: var(--ag-hero-accent);
 }
 
 .ag-hero .ag-button--primary:is(:hover, :focus) {
-  box-shadow: var(--ag-ember-glow);
+  box-shadow: var(--ag-hero-glow);
 }
 
+/*
+  The diagram of the pipeline is a picture of the README with a dot grid of its own, which its
+  scale moves off the grid of the first screen: it sits in a frame of one rule, on its own
+  background, with the grid below it, as a panel of the brand book does. Each scheme shows its
+  variant of the picture.
+*/
 .ag-hero__pipeline {
-  margin: 2rem 0 0;
+  margin: 2rem 0 2.4rem;
+  background-color: var(--ag-hero-bg);
+  border: 1px solid var(--ag-hero-frame);
 }
 
 .ag-hero__pipeline img {
@@ -1429,12 +1467,21 @@ body {
   height: auto;
 }
 
+[data-md-color-scheme="default"] .ag-hero__pipeline img.ag-dark,
+.ag-hero__pipeline img.ag-light {
+  display: none;
+}
+
+[data-md-color-scheme="default"] .ag-hero__pipeline img.ag-light {
+  display: block;
+}
+
 /* The facts under the first screen, as on the cover of the brand book. */
 .ag-facts {
   display: grid;
   grid-template-columns: 1fr;
   margin-top: 1.6rem;
-  border-top: 1px solid var(--ag-line);
+  border-top: 1px solid var(--ag-hero-rule);
 }
 
 .ag-facts > div {
@@ -1444,7 +1491,7 @@ body {
 }
 
 .ag-facts b {
-  color: var(--ag-bone);
+  color: var(--ag-hero-fg);
   font-family: var(--ag-mono);
   font-size: 1rem;
   font-weight: 600;
@@ -1453,7 +1500,7 @@ body {
 }
 
 .ag-facts span:last-child {
-  color: var(--ag-mute);
+  color: var(--ag-hero-mute);
   font-size: 0.75rem;
 }
 
@@ -1468,7 +1515,7 @@ body {
 
   .ag-facts > div {
     padding: 1.1rem 1.2rem;
-    border-left: 1px solid var(--ag-line);
+    border-left: 1px solid var(--ag-hero-rule);
   }
 
   .ag-facts > div:first-child {
