@@ -2,13 +2,18 @@
 -- versions that dlt keeps change with the status as well, so consecutive versions of one name
 -- are one period.
 with versions as (
-    select * from {{ ref('stg_demo_search__campaigns') }}
-    union all
-    select * from {{ ref('stg_demo_social__campaigns') }}
-    union all
-    select * from {{ ref('stg_demo_video__campaigns') }}
-    union all
-    select * from {{ ref('stg_google_ads__campaigns') }}
+    select *
+    from (
+        select * from {{ ref('stg_demo_search__campaigns') }}
+        union all
+        select * from {{ ref('stg_demo_social__campaigns') }}
+        union all
+        select * from {{ ref('stg_demo_video__campaigns') }}
+        union all
+        select * from {{ ref('stg_google_ads__campaigns') }}
+    ) as unioned
+    -- An account in quarantine in this run stays out of the marts, as out of the core (ADR-0035).
+    where {{ not_in_quarantine(ref('int_g1_failures'), 'unioned.platform', 'unioned.account_id') }}
 ),
 
 marked as (

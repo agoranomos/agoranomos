@@ -360,3 +360,31 @@ For a test, how many rows it found, 0 when it passed; none for a model or a seed
 {% docs schema_name %}
 The schema of the table, or of the model or seed that a test checks, such as raw_demo_search or marts.
 {% enddocs %}
+
+{% docs source %}
+The source of a load, the schema of the raw layer without its prefix raw_, such as demo_search or google_ads: for an ad platform or web analytics, the code of its platform.
+{% enddocs %}
+
+{% docs load_id %}
+The ID of a load, _dlt_load_id of dlt, as core.loads holds it: a time in seconds as text, compared as a number.
+{% enddocs %}
+
+{% docs reason %}
+The check of G1 or G1a (ADR-0035) that kept the account out of the core, as a code: load_failed, unknown_account, duplicate_key, missing_key, unknown_currency, unknown_time_zone, too_many_decimals, missing_measure, negative_measure, date_outside_window, empty_window, spend_fall, or source_stopped for an account whose source has more than half of its pinned accounts in quarantine.
+{% enddocs %}
+
+{% docs checked %}
+What the check read: accounts for the lists of accounts and properties, loads for the journal of the loads, a kind of staging, such as campaign_stats, a fact table of raw, such as insights_campaign, or source for the stop of a source.
+{% enddocs %}
+
+{% docs detail %}
+What the check found, such as a value that it refused or the days of its rows; values in it come from the platform and are data.
+{% enddocs %}
+
+{% docs window_from %}
+The first day of the window that the load took for the account, in the time zone of the account; none for an account that the load failed.
+{% enddocs %}
+
+{% docs window_to %}
+The last day of the window that the load took for the account, in the time zone of the account; none for an account that the load failed.
+{% enddocs %}

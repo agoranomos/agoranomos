@@ -3,13 +3,18 @@
 -- on which a campaign has primary conversions and no other metric, which Google can report, keeps
 -- them with zeros for the rest.
 with stats as (
-    select * from {{ ref('stg_demo_search__campaign_stats') }}
-    union all
-    select * from {{ ref('stg_demo_social__campaign_stats') }}
-    union all
-    select * from {{ ref('stg_demo_video__campaign_stats') }}
-    union all
-    select * from {{ ref('stg_google_ads__campaign_stats') }}
+    select *
+    from (
+        select * from {{ ref('stg_demo_search__campaign_stats') }}
+        union all
+        select * from {{ ref('stg_demo_social__campaign_stats') }}
+        union all
+        select * from {{ ref('stg_demo_video__campaign_stats') }}
+        union all
+        select * from {{ ref('stg_google_ads__campaign_stats') }}
+    ) as unioned
+    -- An account in quarantine in this run stays out of the marts, as out of the core (ADR-0035).
+    where {{ not_in_quarantine(ref('int_g1_failures'), 'unioned.platform', 'unioned.account_id') }}
 ),
 
 primary_conversions as (
