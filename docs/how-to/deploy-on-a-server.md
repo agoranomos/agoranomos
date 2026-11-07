@@ -114,6 +114,13 @@ Then open `http://127.0.0.1:8080` and sign in as `admin` with `AIRFLOW_ADMIN_PAS
 
 ## What is open
 
+<figure class="ag-diagram">
+<div class="ag-diagram__scroll">
+--8<-- "server-mode.svg"
+</div>
+<figcaption>Server mode · what is open, where the data goes, and the daily backup</figcaption>
+</figure>
+
 | Port | On | What |
 |---|---|---|
 | 80, TCP | every address | Caddy: the redirect to HTTPS and the checks of Let's Encrypt |
