@@ -2,12 +2,13 @@
 # the Airflow services that run tasks have it, and dbt hides the values of DBT_ENV_SECRET_ variables in
 # its logs. metadata-export reads the project without it, because dbt ls does not connect, and the
 # DAG processor runs no dbt: it renders the transform DAG from the manifest of that job (ADR-0027).
-# Cosmos 1.15.1 reads this file again, without dbt, and builds the URIs of the assets that it emits
-# from the host, the port and the database. Its readers know the filters of Jinja but not those of
-# dbt: the reader of the local mode, which the DAG uses, knows only as_number of them, and the reader
-# of the watcher mode knows none, so that as_number there means no asset at all
-# (astronomer/astronomer-cosmos#2948). So the file keeps to one plain env_var call, and the numbers
-# are literals.
+# Cosmos 1.16.0 reads this file again, without dbt, and builds the URIs of the assets that it emits
+# from the host, the port and the database. Its readers know the filters of Jinja but not all those
+# of dbt: the reader of the local mode, which the DAG uses, is that of openlineage-integration-common
+# and knows only as_number of them. The reader of the watcher mode knows the four of dbt, as_number,
+# as_bool, as_text and as_native, since Cosmos 1.16.0 (astronomer/astronomer-cosmos#2950), and emits
+# no asset when the type, the host or the port keeps Jinja that it cannot render. So the file keeps
+# to one plain env_var call, and the numbers are literals.
 agoranomos:
   target: prod
   outputs:

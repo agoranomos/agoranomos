@@ -44,20 +44,20 @@ Solid arrows show how data moves. Dotted arrows show what Airflow runs.
 
 ## Components
 
-| Layer | Component | What it does | Version line, as of 2026-10 | ADR |
+| Layer | Component | What it does | Version line, as of 2026-11 | ADR |
 |---|---|---|---|---|
 | Runtime | Python | Language of the pipelines and tooling; the version supported by every component | 3.13 | [0012](../adr/0012-python-and-tooling.md) |
-| Ingestion | dlt | Incremental loading, schema evolution, merge | 1.31 | [0004](../adr/0004-ingest-with-dlt.md) |
+| Ingestion | dlt | Incremental loading, schema evolution, merge | 1.32 | [0004](../adr/0004-ingest-with-dlt.md) |
 | Orchestration | Apache Airflow | Scheduling and orchestration; by default the LocalExecutor runs tasks in the scheduler, and the CeleryExecutor variant runs them on separate workers | 3.3 | [0002](../adr/0002-orchestrate-with-airflow-3.md), [0015](../adr/0015-run-localexecutor-by-default.md) |
 | | Valkey | Message broker of the CeleryExecutor variant | 9 | [0002](../adr/0002-orchestrate-with-airflow-3.md) |
 | Storage | PostgreSQL | The warehouse and the platform databases | 18 | [0003](../adr/0003-two-postgres-instances.md) |
 | Transformation | dbt Core with dbt-postgres | SQL models, tests and documentation | dbt Core 1.12, dbt-postgres 1.11 | [0005](../adr/0005-transform-with-dbt-core.md) |
-| | Cosmos | Runs dbt models as Airflow tasks | 1.15 | [0005](../adr/0005-transform-with-dbt-core.md) |
+| | Cosmos | Runs dbt models as Airflow tasks | 1.16 | [0005](../adr/0005-transform-with-dbt-core.md) |
 | Data quality | dbt tests and elementary | Tests from day one, and the result of every model and test of each run in the warehouse; the report of elementary is planned | elementary 0.26 | [0005](../adr/0005-transform-with-dbt-core.md), [0029](../adr/0029-record-the-runs-of-dbt-with-elementary-and-show-them-in-ops.md) |
 | BI | Metabase OSS | Dashboards, metrics, glossary and a built-in MCP server | 0.64 | [0006](../adr/0006-metabase-as-bi.md) |
 | AI access | astro-airflow-mcp | MCP server for Airflow, read-only | 0.9 | [0007](../adr/0007-ai-access-via-mcp-read-only.md), [0030](../adr/0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md) |
 | | MCP Toolbox for Databases | SQL tools for the warehouse, as a read-only role | 1.15 | [0007](../adr/0007-ai-access-via-mcp-read-only.md), [0030](../adr/0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md) |
-| | dbt-mcp | Lineage, docs, compile and test on a dev target | 2.5 | [0007](../adr/0007-ai-access-via-mcp-read-only.md) |
+| | dbt-mcp | Lineage, docs, compile and test on a dev target | 2.10 | [0007](../adr/0007-ai-access-via-mcp-read-only.md) |
 
 ## Load: dlt
 

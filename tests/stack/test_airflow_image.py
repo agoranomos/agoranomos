@@ -55,7 +55,7 @@ COSMOS_CACHES = {
     "AIRFLOW__COSMOS__ENABLE_CACHE_DBT_LS": "False",
     "AIRFLOW__COSMOS__ENABLE_CACHE_DBT_YAML_SELECTORS": "False",
 }
-# Cosmos 1.15.1 decides in DbtGraph whether to read and write each cache in a Variable
+# Cosmos 1.16.0 decides in DbtGraph whether to read and write each cache in a Variable
 # (cosmos/dbt/graph.py), from its settings and the cache key that every DAG of Cosmos has. The
 # probe asks a graph with a cache key, as the DAG processor builds one, so it gets the answer that
 # a parse gets; a renamed setting or method fails it. It prints two flags.

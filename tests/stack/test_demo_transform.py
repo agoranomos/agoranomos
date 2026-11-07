@@ -139,7 +139,7 @@ REMOVE_BROKEN_ROW = (
 BROKEN_TEST = "non_negative_stg_demo_search__campaign_stats_clicks"
 # The task that builds the staging view of that row, and runs the test that it breaks.
 STAGING_BUILD = "dbt.stg_demo_search__campaign_stats_model_build"
-# The lines in which Cosmos says how it parsed the dbt project (cosmos/dbt/graph.py, Cosmos 1.15.1),
+# The lines in which Cosmos says how it parsed the dbt project (cosmos/dbt/graph.py, Cosmos 1.16.0),
 # from the logs that the DAG processor writes for the file of the transform DAG, as JSON lines, into
 # dag_processor/<day>/<bundle>/ of the volume airflow-logs (Airflow 3.3.2); latest links to the
 # newest day. The DAG processor has no secret, and only these events are printed.

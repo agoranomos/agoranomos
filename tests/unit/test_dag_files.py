@@ -117,7 +117,7 @@ def test_the_transform_renders_from_the_manifest_in_the_pool_of_dbt():
 
 
 def test_a_test_of_two_nodes_runs_in_the_task_of_the_one_that_depends_on_the_other():
-    # Cosmos 1.15.1 builds each node and runs its tests in one task, dbt build (BUILD, ADR-0028),
+    # Cosmos 1.16.0 builds each node and runs its tests in one task, dbt build (BUILD, ADR-0028),
     # and selects the tests as ExecutionConfig says. Buildable: a test of two nodes, such as a
     # relationships test of a model against a seed, runs only in the task of the node that depends
     # on the other, after both, and its failure stops the models below. Eager, the default: the task
