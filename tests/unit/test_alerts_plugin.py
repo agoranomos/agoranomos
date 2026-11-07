@@ -189,7 +189,7 @@ def test_a_message_goes_to_every_address_as_text(plugin, monkeypatch, caplog):
     assert StandInApprise.assets == [{"app_id": "agoranomos", "app_desc": "agoranomos"}]
     # The log names how many addresses there are, never one of them.
     text = "\n".join(record.getMessage() for record in caplog.records)
-    assert "Sent an alert to 2 addresses" in text
+    assert "Sent an alert (addresses: 2): agoranomos: a title" in text
     for part in ("127.0.0.1", "made-up-path", "made-up-bot-token", "987654321"):
         assert part not in text
 
@@ -354,9 +354,7 @@ def test_a_task_masks_the_setting_and_each_address(plugin, monkeypatch):
     assert masked == [f"{JSON}, {TELEGRAM}", JSON, TELEGRAM]
 
 
-def test_the_listener_imports_apprise_in_the_main_thread_before_the_first_send(
-    plugin, monkeypatch
-):
+def test_the_listener_imports_apprise_in_the_main_thread_before_the_first_send(plugin, monkeypatch):
     # The scheduler forks its workers from its main thread: an import in the thread that sends
     # could leave a child with the lock of an import that never ends.
     monkeypatch.setattr(plugin.sys, "argv", ["airflow", "scheduler"])

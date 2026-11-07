@@ -48,6 +48,10 @@ from stack_helpers import (
     warehouse_output,
 )
 
+# The daily load of the demo could start a run of the transform, which empties the table of the
+# checks, in the middle of the test of the quarantine.
+pytestmark = pytest.mark.usefixtures("daily_load_paused")
+
 WATCHER = "agoranomos_watcher"
 TRANSFORM = "agoranomos_demo_transform"
 FIXTURE = REPO_ROOT / "tests" / "stack" / "fixtures" / "ci_alert_check.py"
@@ -253,16 +257,20 @@ def test_the_watcher_keeps_its_state_where_metabase_and_mcp_read_nothing(env, qu
     assert grants == "transformer|false|false"
 
 
-def test_no_log_holds_an_address(env, airflow_url, token, killed_run, quarantine):
-    # The scheduler sent the alert of the killed run, and the task of the watcher those of the
-    # quarantine: neither log names the address. Read where they are used, so that no frame of a
-    # failed test holds them.
-    values = {SETTING: Secret(env[SETTING])}
-    found = leaked(values, compose("logs", "--no-color", SCHEDULER, TASK_RUNNER).stdout)
+def test_no_log_of_the_scheduler_holds_an_address(env, killed_run):
+    # The scheduler sent the alert of the killed run, and with the LocalExecutor ran the tasks of
+    # the watcher. Read where it is used, so that no frame of a failed test holds it.
+    found = leaked(
+        {SETTING: Secret(env[SETTING])},
+        compose("logs", "--no-color", SCHEDULER, TASK_RUNNER).stdout,
+    )
     assert not found, f"the logs of the scheduler or of the tasks hold {found}"
+
+
+def test_no_log_of_the_watcher_holds_an_address(env, airflow_url, token, quarantine):
     for run in quarantine["runs"]:
         [instance] = task_instances(airflow_url, token, run)
-        found = leaked(values, task_log(airflow_url, token, instance))
+        found = leaked({SETTING: Secret(env[SETTING])}, task_log(airflow_url, token, instance))
         assert not found, f"the log of the task of the watcher holds {found}"
 
 

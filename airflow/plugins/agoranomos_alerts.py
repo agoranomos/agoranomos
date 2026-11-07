@@ -14,10 +14,10 @@ callback of the task does not see (ADR-0045). It never waits for the network: it
 on a queue, and one thread of the scheduler sends the messages one at a time, each address within
 the timeouts of Apprise, 4 seconds to connect and 4 to read, which an address can change with cto=
 and rto=. Apprise is imported, and the addresses read, once, in the main thread, at the first
-failed run (prepared). A full queue drops the message and says so in the log. A DAG that fails again within an
-hour of its last message sends no new one: the next message after the hour counts the failures that
-it held back. The listener does nothing in the other processes of Airflow, such as the API server,
-which calls it for a run that a person marks failed and holds no address.
+failed run (prepared). A full queue drops the message and says so in the log. A DAG that fails
+again within an hour of its last message sends no new one: the next message after the hour counts
+the failures that it held back. The listener does nothing in the other processes of Airflow, such
+as the API server, which calls it for a run that a person marks failed and holds no address.
 
 A message holds codes, IDs and times, never an amount and never text of a platform, which anyone
 can write: the reason of a failed run as Airflow gives it (task_failure, timed_out or
@@ -233,7 +233,7 @@ def send(title: str, body: str, kind: str = "failure") -> bool | None:
         log.warning("Apprise failed to send an alert: %s", type(error).__name__)
         return False
     if outcome:
-        log.info("Sent an alert to %d addresses: %s", len(alerts), title)
+        log.info("Sent an alert (addresses: %d): %s", len(alerts), title)
         return True
     log.warning("An alert did not reach every address of %s: %s", SETTING, title)
     return False
