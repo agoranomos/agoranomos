@@ -27,6 +27,10 @@ models:
         description: '{{ doc("clicks") }}'
       - name: spend
         description: '{{ doc("spend") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
   - name: stg_google_ads__campaign_conversions
     description: >-
       The conversions of the campaigns of the Google Ads accounts of the deployment by conversion
@@ -61,6 +65,14 @@ models:
         description: '{{ doc("conversions") }}'
       - name: conversion_value
         description: '{{ doc("conversion_value") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
   - name: stg_google_ads__accounts
     description: >-
       The Google Ads accounts that extensions/model/clients.toml names, one row each, as the
@@ -153,6 +165,10 @@ models:
         description: '{{ doc("clicks") }}'
       - name: spend
         description: '{{ doc("spend") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
   - name: stg_google_ads__ad_group_conversions
     description: >-
       The conversions of the ad groups of the Google Ads accounts of the deployment by conversion
@@ -189,6 +205,14 @@ models:
         description: '{{ doc("conversions") }}'
       - name: conversion_value
         description: '{{ doc("conversion_value") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
   - name: stg_google_ads__ad_stats
     description: >-
       The statistics of the ads of the Google Ads accounts of the deployment, one row for each ad
@@ -222,6 +246,10 @@ models:
         description: '{{ doc("clicks") }}'
       - name: spend
         description: '{{ doc("spend") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
   - name: stg_google_ads__ad_conversions
     description: >-
       The conversions of the ads of the Google Ads accounts of the deployment by conversion action,
@@ -259,6 +287,14 @@ models:
         description: '{{ doc("conversions") }}'
       - name: conversion_value
         description: '{{ doc("conversion_value") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
   - name: stg_google_ads__ad_groups
     description: >-
       The versions of the ad groups of the Google Ads accounts of the deployment, one row for each

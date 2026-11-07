@@ -26,3 +26,8 @@ sources:
           The statistics of the campaigns by day in the core, as the runs before this one left
           them: the checks of G1a in int_g1_failures compare the spend of the window of each
           account with what this table holds on the same days, before this run writes the core.
+      - name: web_sessions_daily
+        description: >-
+          The sessions of web analytics by day in the core, as the runs before this one left them:
+          the checks of G1a in int_g1_failures find a load of a property with no row on the days on
+          which this table holds sessions, before this run writes the core.
