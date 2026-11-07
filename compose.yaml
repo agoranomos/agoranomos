@@ -964,8 +964,8 @@ services:
       # the folder of the image that it is mounted on while it is empty, and /var/tmp is open to
       # every user (mode 1777 in Debian), so the user of AGORANOMOS_UID can write it.
       - backup-status:/var/tmp
-    # It writes into /backups and the status only. The image declares a volume for the data of PostgreSQL, which
-    # this service does not use: the tmpfs takes its place, as for db-init.
+    # It writes into /backups and the status only. The image declares a volume for the data of
+    # PostgreSQL, which this service does not use: the tmpfs takes its place, as for db-init.
     read_only: true
     tmpfs:
       - /tmp

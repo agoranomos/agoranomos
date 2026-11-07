@@ -25,8 +25,9 @@
 # folder with the name of a backup is a complete one. latest.json says how the last run went.
 # Every file is readable by its owner only. The schedule also publishes, every minute, the status
 # of the backups for the watcher of Airflow, in STATUS_FILE, which every user may read: times and
-# the result of the last run, no name and no path (ADR-0045). The retention removes scheduled backups only: a backup
-# by hand, such as the one before an upgrade, stays until the person deletes it.
+# the result of the last run, no name and no path (ADR-0045). The retention removes scheduled
+# backups only: a backup by hand, such as the one before an upgrade, stays until the person
+# deletes it.
 #
 # It reads the databases as the role backup, which may read every table and write none, with its
 # password in PGPASSWORD (compose.yaml), never on a command line.
