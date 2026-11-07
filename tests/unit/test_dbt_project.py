@@ -11,11 +11,12 @@ REPORTING = "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
 
 
 def test_the_profile_has_no_jinja_filter_and_literal_numbers():
-    # Cosmos 1.15.1 reads profiles.yml again, without dbt, to build the URIs of the assets that it
-    # emits. Its readers know the filters of Jinja but not those of dbt: the reader of the local
-    # mode knows only as_number of them, and the reader of the watcher mode none, so that as_number
-    # there means no asset at all (astronomer/astronomer-cosmos#2948). So the profile keeps to one
-    # plain env_var call.
+    # Cosmos 1.16.0 reads profiles.yml again, without dbt, to build the URIs of the assets that it
+    # emits. Its readers know the filters of Jinja but not all those of dbt: the reader of the
+    # local mode, that of openlineage-integration-common, knows only as_number of them. The reader
+    # of the watcher mode knows the four of dbt since Cosmos 1.16.0
+    # (astronomer/astronomer-cosmos#2950), and emits no asset when the type, the host or the port
+    # keeps Jinja that it cannot render. So the profile keeps to one plain env_var call.
     profile = (DBT / "profiles.yml").read_text(encoding="utf-8")
     assert re.findall(r"\{\{(.*?)\}\}", profile) == [
         " env_var('DBT_ENV_SECRET_WAREHOUSE_PASSWORD', '') "
