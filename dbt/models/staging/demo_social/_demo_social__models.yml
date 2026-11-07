@@ -3,12 +3,10 @@ models:
     description: >-
       The statistics of the campaigns of demo_social, one row for each campaign and day, from its
       insights at the level of campaigns, with the column names of the model; clicks are its link
-      clicks. report_date, platform, account_id and campaign_id are its key. Its tests guard the
-      marts: when one of them fails, dbt does not rebuild the models that read this one.
-    data_tests:
-      - unique_combination:
-          arguments:
-            columns: [report_date, platform, account_id, campaign_id]
+      clicks. report_date, platform, account_id and campaign_id are its key. int_g1_failures checks
+      its rows for each account, and holds an account whose rows fail out of the core and the marts
+      (ADR-0035). Its tests guard the marts: when one of them fails, dbt does not rebuild the models
+      that read this one.
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
@@ -21,29 +19,23 @@ models:
         data_tests: [not_null]
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
       - name: loaded_campaign_name
         description: '{{ doc("loaded_campaign_name") }}'
       - name: impressions
         description: '{{ doc("impressions") }}'
-        data_tests: [not_null, non_negative]
       - name: clicks
         description: '{{ doc("clicks") }}'
-        data_tests: [not_null, non_negative]
       - name: spend
         description: '{{ doc("spend") }}'
-        data_tests: [not_null, non_negative]
   - name: stg_demo_social__campaign_conversions
     description: >-
       The conversions of the campaigns of demo_social by action type, one row for each campaign, day
       and action type that its insights list among the actions or the action values, with the count
       and the value of the attribution setting of its row. report_date, platform, account_id,
-      campaign_id and conversion_action_id are its key. Its tests guard the marts: when one of them
-      fails, dbt does not rebuild the models that read this one.
-    data_tests:
-      - unique_combination:
-          arguments:
-            columns: [report_date, platform, account_id, campaign_id, conversion_action_id]
+      campaign_id and conversion_action_id are its key. int_g1_failures checks its rows for each
+      account, and holds an account whose rows fail out of the core and the marts (ADR-0035). Its
+      tests guard the marts: when one of them fails, dbt does not rebuild the models that read this
+      one.
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
@@ -56,10 +48,8 @@ models:
         data_tests: [not_null]
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
       - name: conversion_action_id
         description: '{{ doc("conversion_action_id") }}'
-        data_tests: [not_null]
       - name: conversion_action_name
         description: '{{ doc("conversion_action_name") }}'
       - name: platform_category
@@ -68,18 +58,14 @@ models:
         description: '{{ doc("attribution_setting") }}'
       - name: conversions
         description: '{{ doc("conversions") }}'
-        data_tests: [not_null, non_negative]
       - name: conversion_value
         description: '{{ doc("conversion_value") }}'
-        data_tests: [not_null, non_negative]
   - name: stg_demo_social__accounts
     description: >-
-      The ad accounts of demo_social, one row each. platform and account_id are its key. Its tests
-      guard the marts: when one of them fails, dbt does not rebuild the models that read this one.
-    data_tests:
-      - unique_combination:
-          arguments:
-            columns: [platform, account_id]
+      The ad accounts of demo_social, one row each. platform and account_id are its key.
+      int_g1_failures checks each account for its key, its currency and its time zone, and holds one
+      that fails out of the core and the marts (ADR-0035). Its tests guard the marts: when one of
+      them fails, dbt does not rebuild the models that read this one.
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
@@ -91,20 +77,8 @@ models:
         description: '{{ doc("account_name") }}'
       - name: currency
         description: '{{ doc("currency") }}'
-        data_tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('seed_iso_4217_currencies')
-                field: currency_code
       - name: time_zone
         description: '{{ doc("time_zone") }}'
-        data_tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('seed_iana_time_zones')
-                field: time_zone
       - name: manager_account_id
         description: '{{ doc("manager_account_id") }}'
       - name: account_status
@@ -148,12 +122,10 @@ models:
     description: >-
       The statistics of the ad sets of demo_social, its ad groups, one row for each ad set and day,
       from its insights at the level of ad sets, with the column names of the model; clicks are its
-      link clicks. report_date, platform, account_id and ad_group_id are its key. Its tests guard
-      the marts: when one of them fails, dbt does not rebuild the models that read this one.
-    data_tests:
-      - unique_combination:
-          arguments:
-            columns: [report_date, platform, account_id, ad_group_id]
+      link clicks. report_date, platform, account_id and ad_group_id are its key. int_g1_failures
+      checks its rows for each account, and holds an account whose rows fail out of the core and the
+      marts (ADR-0035). Its tests guard the marts: when one of them fails, dbt does not rebuild the
+      models that read this one.
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
@@ -166,32 +138,25 @@ models:
         data_tests: [not_null]
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
       - name: ad_group_id
         description: '{{ doc("ad_group_id") }}'
-        data_tests: [not_null]
       - name: loaded_ad_group_name
         description: '{{ doc("loaded_ad_group_name") }}'
       - name: impressions
         description: '{{ doc("impressions") }}'
-        data_tests: [not_null, non_negative]
       - name: clicks
         description: '{{ doc("clicks") }}'
-        data_tests: [not_null, non_negative]
       - name: spend
         description: '{{ doc("spend") }}'
-        data_tests: [not_null, non_negative]
   - name: stg_demo_social__ad_group_conversions
     description: >-
       The conversions of the ad sets of demo_social, its ad groups by conversion action, one row for
       each ad set, day and action with any conversion, that its insights list among the actions or
       the action values, with the count and the value of the attribution setting of its row.
-      report_date, platform, account_id, ad_group_id and conversion_action_id are its key. Its tests
-      guard the marts: when one of them fails, dbt does not rebuild the models that read this one.
-    data_tests:
-      - unique_combination:
-          arguments:
-            columns: [report_date, platform, account_id, ad_group_id, conversion_action_id]
+      report_date, platform, account_id, ad_group_id and conversion_action_id are its key.
+      int_g1_failures checks its rows for each account, and holds an account whose rows fail out of
+      the core and the marts (ADR-0035). Its tests guard the marts: when one of them fails, dbt does
+      not rebuild the models that read this one.
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
@@ -204,13 +169,10 @@ models:
         data_tests: [not_null]
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
       - name: ad_group_id
         description: '{{ doc("ad_group_id") }}'
-        data_tests: [not_null]
       - name: conversion_action_id
         description: '{{ doc("conversion_action_id") }}'
-        data_tests: [not_null]
       - name: conversion_action_name
         description: '{{ doc("conversion_action_name") }}'
       - name: platform_category
@@ -219,20 +181,16 @@ models:
         description: '{{ doc("attribution_setting") }}'
       - name: conversions
         description: '{{ doc("conversions") }}'
-        data_tests: [not_null, non_negative]
       - name: conversion_value
         description: '{{ doc("conversion_value") }}'
-        data_tests: [not_null, non_negative]
   - name: stg_demo_social__ad_stats
     description: >-
       The statistics of the ads of demo_social, one row for each ad and day, from its insights at
       the level of ads, with the column names of the model; clicks are its link clicks. report_date,
-      platform, account_id, ad_group_id and ad_id are its key. Its tests guard the marts: when one
-      of them fails, dbt does not rebuild the models that read this one.
-    data_tests:
-      - unique_combination:
-          arguments:
-            columns: [report_date, platform, account_id, ad_group_id, ad_id]
+      platform, account_id, ad_group_id and ad_id are its key. int_g1_failures checks its rows for
+      each account, and holds an account whose rows fail out of the core and the marts (ADR-0035).
+      Its tests guard the marts: when one of them fails, dbt does not rebuild the models that read
+      this one.
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
@@ -245,35 +203,27 @@ models:
         data_tests: [not_null]
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
       - name: ad_group_id
         description: '{{ doc("ad_group_id") }}'
-        data_tests: [not_null]
       - name: ad_id
         description: '{{ doc("ad_id") }}'
-        data_tests: [not_null]
       - name: loaded_ad_name
         description: '{{ doc("loaded_ad_name") }}'
       - name: impressions
         description: '{{ doc("impressions") }}'
-        data_tests: [not_null, non_negative]
       - name: clicks
         description: '{{ doc("clicks") }}'
-        data_tests: [not_null, non_negative]
       - name: spend
         description: '{{ doc("spend") }}'
-        data_tests: [not_null, non_negative]
   - name: stg_demo_social__ad_conversions
     description: >-
       The conversions of the ads of demo_social by conversion action, one row for each ad, day and
       action with any conversion, that its insights list among the actions or the action values,
       with the count and the value of the attribution setting of its row. report_date, platform,
-      account_id, ad_group_id, ad_id and conversion_action_id are its key. Its tests guard the
-      marts: when one of them fails, dbt does not rebuild the models that read this one.
-    data_tests:
-      - unique_combination:
-          arguments:
-            columns: [report_date, platform, account_id, ad_group_id, ad_id, conversion_action_id]
+      account_id, ad_group_id, ad_id and conversion_action_id are its key. int_g1_failures checks
+      its rows for each account, and holds an account whose rows fail out of the core and the marts
+      (ADR-0035). Its tests guard the marts: when one of them fails, dbt does not rebuild the models
+      that read this one.
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
@@ -286,16 +236,12 @@ models:
         data_tests: [not_null]
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
       - name: ad_group_id
         description: '{{ doc("ad_group_id") }}'
-        data_tests: [not_null]
       - name: ad_id
         description: '{{ doc("ad_id") }}'
-        data_tests: [not_null]
       - name: conversion_action_id
         description: '{{ doc("conversion_action_id") }}'
-        data_tests: [not_null]
       - name: conversion_action_name
         description: '{{ doc("conversion_action_name") }}'
       - name: platform_category
@@ -304,10 +250,8 @@ models:
         description: '{{ doc("attribution_setting") }}'
       - name: conversions
         description: '{{ doc("conversions") }}'
-        data_tests: [not_null, non_negative]
       - name: conversion_value
         description: '{{ doc("conversion_value") }}'
-        data_tests: [not_null, non_negative]
   - name: stg_demo_social__ad_groups
     description: >-
       The versions of the ad sets of demo_social, its ad groups, one row for each version that the

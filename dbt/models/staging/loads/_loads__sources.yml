@@ -16,3 +16,13 @@ sources:
           _agoranomos_loads of the source once the load is whole, before the tasks of dbt, with
           its window, or its error for a failed account, and the status pinned until the core
           accepts it. stg_loads__newest_days reads the loads of each run from it.
+      - name: dim_account
+        description: >-
+          The registry of the accounts of the core, which the model dim_account writes, as the runs
+          before this one left it: the checks of G1a in int_g1_failures read it before this run
+          writes the core, to find the accounts of the rows of core.ad_stats_campaign_daily.
+      - name: ad_stats_campaign_daily
+        description: >-
+          The statistics of the campaigns by day in the core, as the runs before this one left
+          them: the checks of G1a in int_g1_failures compare the spend of the window of each
+          account with what this table holds on the same days, before this run writes the core.

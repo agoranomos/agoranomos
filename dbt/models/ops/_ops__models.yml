@@ -107,3 +107,36 @@ models:
           that was not analyzed yet.
       - name: total_bytes
         description: The bytes that the table takes on disk, with its indexes and TOAST.
+  - name: ops_quarantine
+    description: >-
+      The accounts that the last run of the transform kept out of the core, in quarantine, one row
+      for each account and reason (ADR-0035): an account whose data failed a check of G1 or G1a, and
+      each pinned account of a source with more than half of its pinned accounts in quarantine. The
+      core keeps the data of such an account as it was, the raw layer keeps the rows of its loads,
+      and the marts, which staging still builds, leave it out for the run. An account leaves the
+      view when the next run finds its data whole, as a healthy load brings it; the journal
+      core.account_quarantine keeps every load, account and reason that a run kept out. The Ops
+      collection of Metabase shows it.
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+      - name: reason
+        description: '{{ doc("reason") }}'
+      - name: detail
+        description: '{{ doc("detail") }}'
+      - name: loads_held
+        description: How many loads of the account the checks kept out of the core for the reason.
+      - name: held_from
+        description: >-
+          The first day of the windows of those loads, which the core did not take; none for a
+          load that failed.
+      - name: held_to
+        description: >-
+          The last day of the windows of those loads, which the core did not take; none for a load
+          that failed.
+      - name: since
+        description: >-
+          When the journal first recorded the reason for a load of the account that is still
+          pinned, as core.account_quarantine has it; none for an account that no load names.

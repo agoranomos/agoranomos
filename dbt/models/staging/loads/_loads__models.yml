@@ -17,9 +17,7 @@ models:
             columns: [source, account_id, day]
     columns:
       - name: source
-        description: >-
-          The source of the load, as the schema of its raw tables names it without raw_, such as
-          demo_search or google_ads.
+        description: '{{ doc("source") }}'
         data_tests: [not_null]
       - name: account_id
         description: '{{ doc("account_id") }}'
@@ -28,8 +26,7 @@ models:
         description: The day of the account, in its time zone, that the load covers.
         data_tests: [not_null]
       - name: load_id
-        description: >-
-          The load, as _dlt_load_id of its rows names it: the time of the load in seconds, as text.
+        description: '{{ doc("load_id") }}'
         data_tests: [not_null]
       - name: load_key
         description: >-

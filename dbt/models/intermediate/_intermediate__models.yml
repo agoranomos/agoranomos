@@ -50,9 +50,9 @@ models:
       The ad accounts of every ad platform, one row each, with the client that each belongs to: the
       one that the settings of the deployment name for it, else the one of the file of the demo,
       else Unassigned. platform and account_id are its key. It reads the staging models of the
-      accounts of each platform, stg_settings__account_clients and int_clients__resolved. Its
-      tests guard the marts: when one of them fails, dbt does not rebuild the models that read
-      this one.
+      accounts of each platform, stg_settings__account_clients and int_clients__resolved. An account
+      that int_g1_failures holds in quarantine in this run is left out. Its tests guard the marts:
+      when one of them fails, dbt does not rebuild the models that read this one.
     data_tests:
       - unique_combination:
           arguments:
@@ -97,8 +97,9 @@ models:
       The campaigns of every ad platform, one row each, as the newest of their versions has them,
       whether the campaign is current or no longer listed, with how many names it had. platform,
       account_id and campaign_id are its key. It reads the staging models of the campaigns of each
-      platform. Its tests guard the marts: when one of them fails, dbt does not rebuild the models
-      that read this one.
+      platform. An account that int_g1_failures holds in quarantine in this run is left out. Its
+      tests guard the marts: when one of them fails, dbt does not rebuild the models that read this
+      one.
     data_tests:
       - unique_combination:
           arguments:
@@ -128,8 +129,9 @@ models:
       period in which it kept one name, from valid_from until valid_to: consecutive versions with
       the same name, which differ in another field such as the status, are one period. platform,
       account_id, campaign_id and valid_from are its key. It reads the staging models of the
-      campaigns of each platform. Its tests guard the marts: when one of them fails, dbt does not
-      rebuild the models that read this one.
+      campaigns of each platform. An account that int_g1_failures holds in quarantine in this run is
+      left out. Its tests guard the marts: when one of them fails, dbt does not rebuild the models
+      that read this one.
     data_tests:
       - unique_combination:
           arguments:
@@ -199,8 +201,9 @@ models:
       action with any conversion, with the category of the action, whether it is primary, and the
       client and the currency of the account. report_date, platform, account_id, campaign_id and
       conversion_action_id are its key. It reads the staging models of the conversions of each
-      platform, int_conversion_actions__resolved and int_ad_accounts__unioned. Its tests guard the
-      marts: when one of them fails, dbt does not rebuild the models that read this one.
+      platform, int_conversion_actions__resolved and int_ad_accounts__unioned. An account that
+      int_g1_failures holds in quarantine in this run is left out. Its tests guard the marts: when
+      one of them fails, dbt does not rebuild the models that read this one.
     data_tests:
       - unique_combination:
           arguments:
@@ -262,9 +265,10 @@ models:
       primary conversion actions; a day on which a campaign has primary conversions and no other
       metric keeps them, with zeros for the rest. report_date, platform, account_id and campaign_id
       are its key. It reads the staging models of the statistics of each platform,
-      int_ad_conversions__unioned, int_ad_accounts__unioned and int_ad_campaigns__unioned. Its
-      tests guard the marts: when one of them fails, dbt does not rebuild the models that read
-      this one; the test of a missing day is a warning.
+      int_ad_conversions__unioned, int_ad_accounts__unioned and int_ad_campaigns__unioned. An
+      account that int_g1_failures holds in quarantine in this run is left out. Its tests guard the
+      marts: when one of them fails, dbt does not rebuild the models that read this one; the test of
+      a missing day is a warning.
     data_tests:
       - unique_combination:
           arguments:
@@ -390,13 +394,14 @@ models:
   - name: int_web_sessions__unioned
     description: >-
       The sessions of web analytics, one row for each property, day in the time zone of the
-      property, source, medium and campaign of the sessions, with the client of the property and
-      the ad campaign whose ID the links carried, when exactly one campaign of the data has it.
+      property, source, medium and campaign of the sessions, with the client of the property and the
+      ad campaign whose ID the links carried, when exactly one campaign of the data has it.
       report_date, property_id, session_source, session_medium, session_campaign_name and
       session_campaign_id are its key. It reads the staging models of the sessions and the
       properties of web analytics, stg_settings__account_clients, int_clients__resolved and
-      int_ad_campaigns__unioned. Its tests guard the marts: when one of them fails, dbt does not
-      rebuild the models that read this one.
+      int_ad_campaigns__unioned. A property that int_g1_failures holds in quarantine in this run is
+      left out. Its tests guard the marts: when one of them fails, dbt does not rebuild the models
+      that read this one.
     data_tests:
       - unique_combination:
           arguments:
@@ -456,8 +461,9 @@ models:
       The ad groups of every ad platform, one row each, as the newest of their versions has them,
       whether the ad group is current or no longer listed, with its campaign: the ad sets of Meta
       among them. platform, account_id and ad_group_id are its key. It reads the staging models of
-      the ad groups of each platform. Its tests guard the marts: when one of them fails, dbt does
-      not rebuild the models that read this one.
+      the ad groups of each platform. An account that int_g1_failures holds in quarantine in this
+      run is left out. Its tests guard the marts: when one of them fails, dbt does not rebuild the
+      models that read this one.
     data_tests:
       - unique_combination:
           arguments:
@@ -495,8 +501,9 @@ models:
       The ads of every ad platform, one row each, as the newest of their versions has them, whether
       the ad is current or no longer listed, with its campaign and its ad group, and its ID as its
       name where the platform gives it none. platform, account_id, ad_group_id and ad_id are its
-      key. It reads the staging models of the ads of each platform. Its tests guard the marts: when
-      one of them fails, dbt does not rebuild the models that read this one.
+      key. It reads the staging models of the ads of each platform. An account that int_g1_failures
+      holds in quarantine in this run is left out. Its tests guard the marts: when one of them
+      fails, dbt does not rebuild the models that read this one.
     data_tests:
       - unique_combination:
           arguments:
@@ -541,8 +548,9 @@ models:
       A Performance Max campaign of Google has no ad groups, so the ad groups of an account can add
       up to less than its campaigns. It reads the staging models of the statistics and the
       conversions of the ad groups of each platform, int_conversion_actions__resolved,
-      int_ad_accounts__unioned, int_ad_campaigns__unioned and int_ad_groups__unioned. Its tests
-      guard the marts: when one of them fails, dbt does not rebuild the models that read this one.
+      int_ad_accounts__unioned, int_ad_campaigns__unioned and int_ad_groups__unioned. An account
+      that int_g1_failures holds in quarantine in this run is left out. Its tests guard the marts:
+      when one of them fails, dbt does not rebuild the models that read this one.
     data_tests:
       - unique_combination:
           arguments:
@@ -644,8 +652,9 @@ models:
       with zeros for the rest. report_date, platform, account_id, ad_group_id and ad_id are its key.
       It reads the staging models of the statistics and the conversions of the ads of each platform,
       int_conversion_actions__resolved, int_ad_accounts__unioned, int_ad_campaigns__unioned,
-      int_ad_groups__unioned and int_ads__unioned. Its tests guard the marts: when one of them
-      fails, dbt does not rebuild the models that read this one.
+      int_ad_groups__unioned and int_ads__unioned. An account that int_g1_failures holds in
+      quarantine in this run is left out. Its tests guard the marts: when one of them fails, dbt
+      does not rebuild the models that read this one.
     data_tests:
       - unique_combination:
           arguments:
@@ -754,11 +763,14 @@ models:
       the transform takes into the core, one row each: those that the lists of accounts and of
       properties give, with their attributes, and those that only the statistics of campaigns or the
       sessions name, as stubs; with the first and the last day of the statistics of campaigns that
-      this run reads. platform and account_id are its key. The registry core.dim_account takes its
-      rows from it, and int_campaigns__current, int_ad_groups__current and int_ads__current take
-      their accounts from it. It reads the staging models of the accounts, the properties, the
-      statistics of campaigns and the sessions of each platform. Its tests guard the core: when one
-      of them fails, dbt does not build the models that read this one.
+      this run reads; but for the accounts that int_g1_failures holds in quarantine in this run,
+      once core.account_quarantine has recorded them. The checks hold an account that no list gives
+      out as unknown_account, so no stub enters from here. platform and account_id are its key. The
+      registry core.dim_account takes its rows from it, and int_campaigns__current,
+      int_ad_groups__current and int_ads__current take their accounts from it. It reads the staging
+      models of the accounts, the properties, the statistics of campaigns and the sessions of each
+      platform. Its tests guard the core: when one of them fails, dbt does not build the models that
+      read this one.
     data_tests:
       - unique_combination:
           arguments:
@@ -926,3 +938,58 @@ models:
         description: '{{ doc("first_report_date") }}'
       - name: last_report_date
         description: '{{ doc("last_report_date") }}'
+  - name: int_g1_failures
+    description: >-
+      The checks of G1 and G1a (ADR-0035) on the data that this run of the transform reads, before
+      it writes the core: one row for each load, account, reason and kind of data that failed. An
+      account with a row here is in quarantine for this run: int_accounts__current, and so every
+      dimension of the core, and the intermediate models of the marts leave it out, and
+      core.account_quarantine records it. G1 checks each kind of facts of staging for keys that two
+      rows share or that miss a part, and for measures that are missing or below zero; the lists of
+      accounts and properties for an account listed twice, a currency outside ISO 4217 and a time
+      zone outside IANA; the journal of the loads for an account whose newest pinned load failed,
+      and for an account that the loads name and no list gives; and the fact tables of raw for rows
+      outside the window of their load and a spend with more than six decimal places. G1a compares
+      the spend of the campaigns of each load with what the core holds on the same days. A source
+      with more than half of its pinned accounts here stops, and its other pinned accounts get the
+      reason source_stopped. A table that each run fills anew, one statement for each kind of data.
+      source, load_id, account_id, reason and checked are its key. Its tests guard the core and the
+      marts: when one of them fails, dbt does not build the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [source, load_id, account_id, reason, checked]
+          config: {tags: [critical]}
+    columns:
+      - name: source
+        description: '{{ doc("source") }}'
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
+      - name: load_id
+        description: '{{ doc("load_id") }}'
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
+      - name: reason
+        description: '{{ doc("reason") }}'
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
+          - accepted_values:
+              arguments:
+                values: ["load_failed", "unknown_account", "duplicate_key", "missing_key", "unknown_currency", "unknown_time_zone", "too_many_decimals", "missing_measure", "negative_measure", "date_outside_window", "empty_window", "spend_fall", "source_stopped"]
+              config: {tags: [critical]}
+      - name: checked
+        description: '{{ doc("checked") }}'
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
+      - name: detail
+        description: '{{ doc("detail") }}'
+      - name: window_from
+        description: '{{ doc("window_from") }}'
+      - name: window_to
+        description: '{{ doc("window_to") }}'

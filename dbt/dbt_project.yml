@@ -99,6 +99,14 @@ vars:
   # out a list; 5% leaves room for the deleted entities of Meta and of TikTok, which their lists
   # can leave out. Not checked yet on a live account.
   stub_share_warn: 0.05
+  # The share of the spend that the core holds for an account on the days of a window that a load
+  # may lose before G1a puts the account in quarantine (macros/quarantine.sql, ADR-0035): a window
+  # replaces whole days, so a read that lost most of an account, such as a token that lost the
+  # right to some of its campaigns, would erase them. A restatement of the platform moves the
+  # spend of past days a little, and a window with no row at all goes to quarantine whatever the
+  # share. Half leaves room for the restatements of a small account on a short window. Not checked
+  # yet on a live account: the stand of #217 sets it.
+  quarantine_spend_fall: 0.5
 
 # The tests of the base package. A test with the severity error, the default, stops the models that
 # read its node (TestBehavior.BUILD of Cosmos, ADR-0028), and carries the tag critical (ADR-0038),

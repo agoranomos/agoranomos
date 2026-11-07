@@ -46,3 +46,5 @@ join {{ ref('int_clients__resolved') }} as c
     on c.client_id = coalesce(m.client_id, 'unassigned')
 left join campaigns as ad
     on ad.campaign_id = s.session_campaign_id
+-- A property in quarantine in this run stays out of the marts, as out of the core (ADR-0035).
+where {{ not_in_quarantine(ref('int_g1_failures'), 's.platform', 's.property_id') }}

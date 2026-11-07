@@ -3,13 +3,18 @@
 -- Its tests check each ad group against the campaigns of the platforms.
 -- depends_on: {{ ref('int_ad_campaigns__unioned') }}
 with versions as (
-    select * from {{ ref('stg_demo_search__ad_groups') }}
-    union all
-    select * from {{ ref('stg_demo_social__ad_groups') }}
-    union all
-    select * from {{ ref('stg_demo_video__ad_groups') }}
-    union all
-    select * from {{ ref('stg_google_ads__ad_groups') }}
+    select *
+    from (
+        select * from {{ ref('stg_demo_search__ad_groups') }}
+        union all
+        select * from {{ ref('stg_demo_social__ad_groups') }}
+        union all
+        select * from {{ ref('stg_demo_video__ad_groups') }}
+        union all
+        select * from {{ ref('stg_google_ads__ad_groups') }}
+    ) as unioned
+    -- An account in quarantine in this run stays out of the marts, as out of the core (ADR-0035).
+    where {{ not_in_quarantine(ref('int_g1_failures'), 'unioned.platform', 'unioned.account_id') }}
 ),
 
 newest as (

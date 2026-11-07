@@ -1,13 +1,18 @@
 -- The campaigns of every platform as of the last load: the newest version of each, whether
 -- current or retired, as dlt keeps them, and how many names each had.
 with versions as (
-    select * from {{ ref('stg_demo_search__campaigns') }}
-    union all
-    select * from {{ ref('stg_demo_social__campaigns') }}
-    union all
-    select * from {{ ref('stg_demo_video__campaigns') }}
-    union all
-    select * from {{ ref('stg_google_ads__campaigns') }}
+    select *
+    from (
+        select * from {{ ref('stg_demo_search__campaigns') }}
+        union all
+        select * from {{ ref('stg_demo_social__campaigns') }}
+        union all
+        select * from {{ ref('stg_demo_video__campaigns') }}
+        union all
+        select * from {{ ref('stg_google_ads__campaigns') }}
+    ) as unioned
+    -- An account in quarantine in this run stays out of the marts, as out of the core (ADR-0035).
+    where {{ not_in_quarantine(ref('int_g1_failures'), 'unioned.platform', 'unioned.account_id') }}
 ),
 
 newest as (

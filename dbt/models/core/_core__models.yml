@@ -424,3 +424,38 @@ models:
         description: >-
           Whether the newest list of ads of the account names the ad: false for one that the
           platform no longer shows, or that only the statistics name, whose spend still counts.
+  - name: account_quarantine
+    description: >-
+      The journal of quarantine: one row for each load, account and reason for which the checks
+      before the core kept the window of an account out of it (G0a, G1, G1a of ADR-0035). The core
+      keeps the data of the account as it was, and the raw layer keeps the rows of the load. source,
+      load_id, account_id and reason are its key.
+    columns:
+      - name: source
+        description: >-
+          The source of the load, the schema of the raw layer without its prefix raw_.
+      - name: load_id
+        description: >-
+          The ID of the load, _dlt_load_id of dlt, load_id of core.loads.
+      - name: account_id
+        description: >-
+          The ID of the account as the platform gives it, as text.
+      - name: reason
+        description: >-
+          The check that the account failed, as a code.
+      - name: detail
+        description: >-
+          What the check found, such as a value that it refused; values in it come from the platform
+          and are data.
+      - name: window_from
+        description: >-
+          The first day of the window of the account that the core did not take.
+      - name: window_to
+        description: >-
+          The last day of the window of the account that the core did not take.
+      - name: invocation_id
+        description: >-
+          The invocation of dbt that ran the check.
+      - name: found_at
+        description: >-
+          When the check found it.
