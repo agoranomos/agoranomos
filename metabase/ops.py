@@ -3,8 +3,9 @@ keeps in the collection agoranomos / Ops as the code says, on every start, with 
 (content.py, ADR-0018, ADR-0029).
 
 Its questions are native SQL on the views of the schema ops that the transform builds
-(dbt/models/ops): the last load of each account, the runs of the transform with their models and
-tests, as the hooks of elementary record them, and the size of the tables of the warehouse.
+(dbt/models/ops): the accounts that the checks of the last run kept out of the core (ADR-0035), the
+last load of each account, the runs of the transform with their models and tests, as the hooks of
+elementary record them, and the size of the tables of the warehouse.
 Metabase reads them as metabase_reader, which may read these views and no table of elementary. The
 connection shows only the schema marts in Metabase, and a native question reads any schema that its
 role may read. Until the first run of the transform has built the views, the questions show the
@@ -21,15 +22,15 @@ import content
 OPS_KEY = "ops"
 OPS_NAME = "Ops"
 OPS_DESCRIPTION = (
-    "The pipeline of agoranomos itself: the loads of each account, the runs of the transform with "
-    "their models and tests, and the size of the warehouse."
+    "The pipeline of agoranomos itself: the accounts in quarantine, the loads of each account, the "
+    "runs of the transform with their models and tests, and the size of the warehouse."
 )
 PIPELINE = "pipeline"
 PIPELINE_NAME = "Pipeline health"
 PIPELINE_DESCRIPTION = (
-    "The state of the pipeline: when each account was last loaded, how the last runs of the "
-    "transform went, which models failed and which tests warned or failed, and the largest "
-    "tables of the warehouse."
+    "The state of the pipeline: which accounts the last run of the transform kept out of the core "
+    "and why, when each account was last loaded, how the last runs of the transform went, which "
+    "models failed and which tests warned or failed, and the largest tables of the warehouse."
 )
 
 # The types that Metabase 0.64.1 gives the columns of the answers, and the semantic types that it
@@ -69,6 +70,9 @@ COLUMN_TYPES = {
     "schema_name": TEXT,
     "table_name": TEXT,
     "estimated_rows": COUNT,
+    "reason": TEXT,
+    "since": MOMENT,
+    "detail": TEXT,
 }
 SEMANTIC_TYPES = {
     "started_at": "type/CreationTimestamp",
@@ -106,6 +110,9 @@ TITLES = {
     "schema_name": "Schema",
     "table_name": "Table",
     "estimated_rows": "Rows (Estimate)",
+    "reason": "Reason",
+    "since": "In Quarantine Since",
+    "detail": "What the Check Found",
 }
 # The columns shown with one decimal; the others as Metabase shows them.
 ONE_DECIMAL = frozenset({"megabytes", "hours_since_load", "minutes", "seconds"})
@@ -202,6 +209,23 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "layout": {"row": 0, "col": 18, "size_x": 6, "size_y": 3},
     },
     {
+        "key": "quarantine",
+        "name": "Accounts in quarantine",
+        "description": (
+            "The accounts that the last run of the transform kept out of the core, by the reason "
+            "of the check that each failed, since when, and what the check found: the core keeps "
+            "their data as it was until a load of the account passes the checks."
+        ),
+        "display": "table",
+        "columns": ("platform", "account_id", "reason", "since", "detail"),
+        "query": sql(
+            "SELECT platform, account_id, reason, since, detail",
+            "FROM ops.ops_quarantine",
+            "ORDER BY since DESC NULLS FIRST, platform, account_id, reason",
+        ),
+        "layout": {"row": 3, "col": 0, "size_x": 24, "size_y": 5},
+    },
+    {
         "key": "loads",
         "name": "Last load of each account",
         "description": (
@@ -222,7 +246,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "FROM ops.ops_loads",
             "ORDER BY hours_since_load DESC, platform, account_id",
         ),
-        "layout": {"row": 3, "col": 0, "size_x": 24, "size_y": 9},
+        "layout": {"row": 8, "col": 0, "size_x": 24, "size_y": 9},
     },
     {
         "key": "run-durations",
@@ -247,7 +271,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "GROUP BY airflow_run_id",
             "ORDER BY started_at",
         ),
-        "layout": {"row": 12, "col": 0, "size_x": 12, "size_y": 6},
+        "layout": {"row": 17, "col": 0, "size_x": 12, "size_y": 6},
     },
     {
         "key": "slowest-models",
@@ -268,7 +292,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "ORDER BY execution_seconds DESC",
             "LIMIT 10",
         ),
-        "layout": {"row": 12, "col": 12, "size_x": 12, "size_y": 6},
+        "layout": {"row": 17, "col": 12, "size_x": 12, "size_y": 6},
     },
     {
         "key": "failed-model-runs",
@@ -288,7 +312,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "ORDER BY started_at DESC",
             "LIMIT 100",
         ),
-        "layout": {"row": 18, "col": 0, "size_x": 24, "size_y": 5},
+        "layout": {"row": 23, "col": 0, "size_x": 24, "size_y": 5},
     },
     {
         "key": "problem-test-runs",
@@ -326,7 +350,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "ORDER BY last_run_at DESC",
             "LIMIT 100",
         ),
-        "layout": {"row": 23, "col": 0, "size_x": 24, "size_y": 6},
+        "layout": {"row": 28, "col": 0, "size_x": 24, "size_y": 6},
     },
     {
         "key": "largest-tables",
@@ -347,7 +371,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "ORDER BY total_bytes DESC",
             "LIMIT 20",
         ),
-        "layout": {"row": 29, "col": 0, "size_x": 24, "size_y": 6},
+        "layout": {"row": 34, "col": 0, "size_x": 24, "size_y": 6},
     },
 )
 
