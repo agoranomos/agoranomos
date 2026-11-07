@@ -73,15 +73,15 @@ snapshots:
               config: {tags: [critical]}
       - name: dbt_updated_at
         description: >-
-          When the run of the transform that saw this version started, in UTC, as dbt records it.
+          When the snapshot that wrote this version ran, in UTC, as dbt records it.
       - name: dbt_valid_from
         description: >-
-          When the version starts: when the run of the transform that first saw these values
-          started, in UTC.
+          When the version starts: when the snapshot of the run of the transform that first saw
+          these values ran, in UTC.
       - name: dbt_valid_to
         description: >-
-          When the version ends: when the run of the transform that saw the next one started, in
-          UTC; 9999-12-31 for the version that holds.
+          When the version ends: when the snapshot of the run of the transform that saw the next
+          one ran, in UTC; 9999-12-31 for the version that holds.
   - name: dim_ad_group_versions
     description: >-
       The versions of the ad groups of every ad platform, ad sets of Meta among them, one row for
@@ -158,15 +158,15 @@ snapshots:
               config: {tags: [critical]}
       - name: dbt_updated_at
         description: >-
-          When the run of the transform that saw this version started, in UTC, as dbt records it.
+          When the snapshot that wrote this version ran, in UTC, as dbt records it.
       - name: dbt_valid_from
         description: >-
-          When the version starts: when the run of the transform that first saw these values
-          started, in UTC.
+          When the version starts: when the snapshot of the run of the transform that first saw
+          these values ran, in UTC.
       - name: dbt_valid_to
         description: >-
-          When the version ends: when the run of the transform that saw the next one started, in
-          UTC; 9999-12-31 for the version that holds.
+          When the version ends: when the snapshot of the run of the transform that saw the next
+          one ran, in UTC; 9999-12-31 for the version that holds.
   - name: dim_ad_versions
     description: >-
       The versions of the ads of every ad platform, one row for each version, from dbt_valid_from
@@ -230,12 +230,12 @@ snapshots:
               config: {tags: [critical]}
       - name: dbt_updated_at
         description: >-
-          When the run of the transform that saw this version started, in UTC, as dbt records it.
+          When the snapshot that wrote this version ran, in UTC, as dbt records it.
       - name: dbt_valid_from
         description: >-
-          When the version starts: when the run of the transform that first saw these values
-          started, in UTC.
+          When the version starts: when the snapshot of the run of the transform that first saw
+          these values ran, in UTC.
       - name: dbt_valid_to
         description: >-
-          When the version ends: when the run of the transform that saw the next one started, in
-          UTC; 9999-12-31 for the version that holds.
+          When the version ends: when the snapshot of the run of the transform that saw the next
+          one ran, in UTC; 9999-12-31 for the version that holds.
