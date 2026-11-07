@@ -2,6 +2,12 @@
 
 The collection **agoranomos / Advertising** in Metabase holds the dashboard **Advertising**: the spend, the results and the KPIs of every ad platform of the deployment, on five tabs, for the period, the client, the platform, the account and the campaign of its filters ([ADR-0034](../adr/0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md)).
 
+<figure class="ag-shot" markdown="span">
+    ![The tab Overview of the dashboard Advertising in Metabase: the filters, the KPIs of the last week compared with the week before, and the spend and the conversions over time](../assets/screenshots/advertising-overview-light.webp#only-light){ width="1440" height="900" loading="lazy" }
+    ![The tab Overview of the dashboard Advertising in Metabase: the filters, the KPIs of the last week compared with the week before, and the spend and the conversions over time, in the dark theme](../assets/screenshots/advertising-overview-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
+    <figcaption>Metabase · agoranomos / Advertising · the tab Overview · demo data</figcaption>
+</figure>
+
 ## Open it
 
 Sign in to Metabase as [Run agoranomos locally](run-locally.md#sign-in) says and open the collection **agoranomos / Advertising**. `metabase-init` makes the dashboard once Metabase shows the marts, after the first run of the transform, with or without the demo, and keeps it as the code says on every start, view-only for every group but Administrators ([ADR-0018](../adr/0018-keep-the-content-of-the-package-in-metabase-as-code.md)). With the demo, `demo-init` makes it at the first start, right after the transform. Until then, the log of the start says that the dashboard waits for the marts.
@@ -27,6 +33,12 @@ The cards of web analytics take the period, the time grouping and the client onl
 - **Conversions.** The conversions and the conversion value of each conversion action, primary or not, with its category and the attribution setting of its platform, the conversions by category over time, and the key events of web analytics over time.
 
 A click on a campaign, in the table of the campaigns or of the top campaigns, opens the tab **Ad groups and ads** with the filter **Campaign** set to it.
+
+<figure class="ag-shot" markdown="span">
+    ![The tab Campaigns of the dashboard Advertising in Metabase: every campaign with its platform, account, statistics and KPIs](../assets/screenshots/advertising-campaigns-light.webp#only-light){ width="1440" height="900" loading="lazy" }
+    ![The tab Campaigns of the dashboard Advertising in Metabase: every campaign with its platform, account, statistics and KPIs, in the dark theme](../assets/screenshots/advertising-campaigns-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
+    <figcaption>Metabase · agoranomos / Advertising · the tab Campaigns · demo data</figcaption>
+</figure>
 
 ## How the numbers are computed
 

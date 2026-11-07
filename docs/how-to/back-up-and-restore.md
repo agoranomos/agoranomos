@@ -4,6 +4,13 @@ A backup of agoranomos holds its three databases, the warehouse, Airflow and Met
 
 ## What a backup holds
 
+<figure class="ag-diagram">
+<div class="ag-diagram__scroll">
+--8<-- "backups.svg"
+</div>
+<figcaption>A backup · what it takes, where it goes, and the way back</figcaption>
+</figure>
+
 Each backup is a folder of the backups folder, `./backups` unless `AGORANOMOS_BACKUP_DIR` says otherwise, named after the time of its start in UTC, such as `20261011T030012Z`. The commands of this guide write `backups/` and `extensions/`: use your folders if you changed `AGORANOMOS_BACKUP_DIR` or `AGORANOMOS_EXTENSIONS_DIR`.
 
 | File | What |
