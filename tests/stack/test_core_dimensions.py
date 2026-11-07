@@ -204,7 +204,7 @@ def built(env, airflow_url, token):
     wait_for_dag(airflow_url, token, TRANSFORM)
     wait_for(
         lambda: not is_busy(airflow_url, token, TRANSFORM, assets=len(platforms.PLATFORMS)),
-        900,
+        1200,
         interval=5,
         message="the runs of the transform that earlier tests started did not end",
     )

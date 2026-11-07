@@ -588,14 +588,15 @@ def fresh_build(airflow_url, token):
             )
         ),
         # As long as the other waits of tests/stack for a transform: on a laptop with an Intel Core
-        # i5-3230M one run of the transform of the demo took 10.4 to 11.3 minutes.
-        900,
+        # i5-3230M one run of the transform of the demo took 10.4 to 11.3 minutes, and 13.9 to 14.1
+        # minutes with the dimensions and the versions of the core (November 2026).
+        1200,
         interval=5,
         message="the runs of the demo DAGs that earlier tests started did not end",
     )
     unpause(airflow_url, token, TRANSFORM)
     run = trigger(airflow_url, token, TRANSFORM)
-    run = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=900)
+    run = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=1200)
     assert run["state"] == "success", run["state"]
     return run
 
