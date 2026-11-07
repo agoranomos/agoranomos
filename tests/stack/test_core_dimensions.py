@@ -272,7 +272,9 @@ def test_the_dimensions_hold_what_the_marts_of_the_old_path_hold(env, built):
     # The marts still read the old path (#201 switches them): the dimensions of the core hold the
     # same accounts, campaigns, ad groups, ads and clients, with the same names, statuses, types,
     # days of statistics and counts of names. An ad that its platform gives no name has none in
-    # the core and its ID in the mart.
+    # the core and its ID in the mart. A client that has left the settings, as the one that
+    # test_demo_transform.py names for a run, keeps its row in the core and leaves the mart, and no
+    # account of the core is its any more.
     pairs = {
         "accounts": (
             "SELECT platform, account_id, account_name, client_id, currency::text, time_zone, "
@@ -321,8 +323,16 @@ def test_the_dimensions_hold_what_the_marts_of_the_old_path_hold(env, built):
             f"(SELECT count(*) FROM ({mart}) AS a)",
         )
         only_core, only_mart, rows = (int(part) for part in differ.split("|"))
-        assert (only_core, only_mart) == (0, 0), (what, only_core, only_mart)
+        assert only_mart == 0, (what, only_core, only_mart)
+        assert only_core == 0 or what == "clients", (what, only_core, only_mart)
         assert rows > 0, what
+    left = warehouse_output(
+        env,
+        "SELECT count(*) FROM core.dim_client AS c "
+        "WHERE NOT EXISTS (SELECT FROM marts.clients AS m WHERE m.client_id = c.client_id) "
+        "AND EXISTS (SELECT FROM core.dim_account AS a WHERE a.client_id = c.client_id)",
+    )
+    assert left == "0", f"{left} clients that left the settings still hold accounts"
     # The demo lists every entity that its statistics name: no stub.
     stubs = warehouse_output(
         env,
