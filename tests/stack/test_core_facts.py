@@ -117,8 +117,10 @@ def dbt(*args: str):
 
 def copy_load(env, load, days):
     """The rows of the load that staging reads for the account on days, in each fact table of
-    raw_demo_search, under the load of the test, as loader."""
-    listed = ", ".join(f"DATE '{day}'" for day in days)
+    raw_demo_search, under the load of the test, as loader, which may not read staging: the days
+    and their loads go in as values."""
+    read = dict(rows(env, DAYS))
+    listed = ", ".join(f"(DATE '{day}', '{read[day]}')" for day in days)
     for table in TABLES:
         columns = warehouse_output(
             env,
@@ -131,10 +133,9 @@ def copy_load(env, load, days):
             env,
             f"INSERT INTO raw_demo_search.{table} ({columns}, _dlt_load_id, _dlt_id) "  # noqa: S608 (names of the demo)
             f"SELECT {columns}, '{load}', '{MARK}-' || md5(random()::text) "
-            f"FROM raw_demo_search.{table} AS r JOIN ({DAYS}) AS d "
+            f"FROM raw_demo_search.{table} AS r JOIN (VALUES {listed}) AS d (day, load_id) "
             "ON d.load_id = r._dlt_load_id AND d.day = r.segments__date "
-            f"WHERE r.customer__id = '{ACCOUNT}' "
-            f"AND r.segments__date IN ({listed})",
+            f"WHERE r.customer__id = '{ACCOUNT}'",
             "loader",
         )
 
