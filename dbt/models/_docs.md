@@ -186,7 +186,7 @@ The status of the ad group at the last load, or in a version of the ad group its
 {% enddocs %}
 
 {% docs ad_group_state %}
-The status of the ad group in the words of every platform, from its status of the platform (ad_group_status): active, paused, removed, or other for a status that none of these names, as the shape of the API of the platform maps it. A ad group that the platform no longer lists keeps the state of the last list that named it, and one that only the statistics name has other.
+The status of the ad group in the words of every platform, from its status of the platform (ad_group_status): active, paused, removed, or other for a status that none of these names, as the shape of the API of the platform maps it. An ad group that the platform no longer lists keeps the state of the last list that named it, and one that only the statistics name has other.
 {% enddocs %}
 
 {% docs ad_group_type %}
@@ -210,7 +210,7 @@ The status of the ad at the last load, or in a version of the ad its status in t
 {% enddocs %}
 
 {% docs ad_state %}
-The status of the ad in the words of every platform, from its status of the platform (ad_status): active, paused, removed, or other for a status that none of these names, as the shape of the API of the platform maps it. A ad that the platform no longer lists keeps the state of the last list that named it, and one that only the statistics name has other.
+The status of the ad in the words of every platform, from its status of the platform (ad_status): active, paused, removed, or other for a status that none of these names, as the shape of the API of the platform maps it. An ad that the platform no longer lists keeps the state of the last list that named it, and one that only the statistics name has other.
 {% enddocs %}
 
 {% docs ad_type %}

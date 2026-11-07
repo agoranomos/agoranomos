@@ -27,10 +27,10 @@ models:
   - name: ops_transform_nodes
     description: >-
       Each model, seed, snapshot and test of the dbt project in each run of dbt that the hooks of
-      elementary recorded (ADR-0029), one row each, without the nodes of elementary itself. A task of the
-      transform runs dbt for one node, so one run of the transform is many runs of dbt, which share
-      airflow_run_id. A run of dbt by hand has no airflow_run_id. The Ops collection of Metabase
-      shows it.
+      elementary recorded (ADR-0029), one row each, without the nodes of elementary itself. A task
+      of the transform runs dbt for one node, so one run of the transform is many runs of dbt, which
+      share airflow_run_id. A run of dbt by hand has no airflow_run_id. The Ops collection of
+      Metabase shows it.
     columns:
       - name: airflow_dag_id
         description: '{{ doc("airflow_dag_id") }}'
