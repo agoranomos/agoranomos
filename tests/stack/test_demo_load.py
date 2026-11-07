@@ -33,7 +33,7 @@ from airflow_api import (
     wait_for_dag,
     wait_for_run,
 )
-from raw_loads import DAYS, newest
+from raw_loads import DAYS, account_of, newest
 from stack_helpers import leaked, secrets, wait_for, warehouse_output
 
 pytestmark = [
@@ -564,7 +564,10 @@ LAG_DAYS = 40
 
 def test_a_daily_load_brings_every_day_after_the_last_load(env, airflow_url, token, history_run):
     # As after a stand that was off for 40 days: the journal of the loads of demo_web ends 40 days
-    # before yesterday, so no load covers the days after that, and staging reads none of their rows.
+    # before yesterday, and no load holds a row of the days after that, so staging reads none. The
+    # rows after the new end of each window go too: a load with rows outside its window is what the
+    # checks of the transform put an account in quarantine for (date_outside_window), which would
+    # empty the marts of web analytics for the tests after this one.
     # The daily load brings every day after the last of each account and the window of each other
     # platform, in the pool of the loads of the demo, and the rows that staging reads are what the
     # generator makes, without a hole or a duplicate.
@@ -585,6 +588,14 @@ def test_a_daily_load_brings_every_day_after_the_last_load(env, airflow_url, tok
         env,
         "UPDATE raw_demo_web._agoranomos_loads "  # noqa: S608 (a constant of this file)
         f"SET as_of = as_of - {LAG_DAYS}, window_to = window_to - {LAG_DAYS}",
+    )
+    [fact] = web.facts
+    warehouse_output(
+        env,
+        f"DELETE FROM {web.dataset}.{fact.table} AS r "  # noqa: S608 (names of the demo)
+        f"USING {web.dataset}._agoranomos_loads AS j "
+        f"WHERE j._dlt_load_id = r._dlt_load_id AND j.account_id = {account_of(fact)} "
+        f"AND {fact.day_date_sql} > j.window_to",
     )
     for account_id, end in lagged.items():
         unread = warehouse_output(

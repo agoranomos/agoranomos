@@ -1,0 +1,530 @@
+{#- The checks of G1 and G1a of ADR-0035, which each run of the transform makes on the data of each
+    account that it reads, before it writes the core: the model int_g1_failures runs them, one
+    statement for each kind of data, and holds a row for each load, account, reason and kind of
+    data that failed. An account with a row there stays out of the core in that run: its window
+    is not written, its dimensions and its facts keep what they held, and core.account_quarantine
+    records why (ADR-0035, "Quarantine"). The same filter keeps it out of the marts of the old path
+    until #201 serves the marts from the core. -#}
+
+{#- The reasons of quarantine, as codes, in the order of the checks: the newest pinned load of the
+    account failed for it; the loads name an account that no list gives; two rows share a key, or
+    a list gives the account twice; a row misses a part of its key; the currency of the account is
+    not one of ISO 4217; its time zone is not one of IANA; a spend has more than six decimal
+    places; a measure is missing or below zero; a load holds rows outside its window; a load has no
+    row on the days of its window while the core holds spend on them (G1a); the spend of a load
+    fell by more than var('quarantine_spend_fall') against the core (G1a); more than half of the
+    pinned accounts of the source are in quarantine, so the source stops. -#}
+{% macro quarantine_reasons() -%}
+{{- return([
+    'load_failed', 'unknown_account', 'duplicate_key', 'missing_key', 'unknown_currency',
+    'unknown_time_zone', 'too_many_decimals', 'missing_measure', 'negative_measure',
+    'date_outside_window', 'empty_window', 'spend_fall', 'source_stopped',
+]) -}}
+{%- endmacro %}
+
+{#- The sources whose accounts the checks read: those of newest_load_sources whose rows name an
+    account, the ad platforms and web analytics. The rates have one account each, the base of the
+    rates, and their own check comes with #200. -#}
+{% macro quarantine_sources() -%}
+    {%- set found = [] -%}
+    {%- for source_name, keys in newest_load_sources().items() -%}
+        {%- if keys[0] is not none -%}
+            {%- do found.append(source_name[4:]) -%}
+        {%- endif -%}
+    {%- endfor -%}
+    {{- return(found) -}}
+{%- endmacro %}
+
+{#- The kinds of facts of staging that G1 checks, as the tests of staging checked them before
+    (tests/unit/test_dbt_project.py): the column of the account; the columns of the key after the
+    day, the platform and the account; the other IDs that a row needs; the measures that a row
+    needs; and the measures that are zero or more. -#}
+{% macro quarantine_fact_kinds() -%}
+{%- set metrics = ['impressions', 'clicks', 'spend'] -%}
+{%- set converted = ['conversions', 'conversion_value'] -%}
+{{- return({
+    'campaign_stats': ('account_id', ['campaign_id'], [], metrics, metrics),
+    'ad_group_stats': ('account_id', ['ad_group_id'], ['campaign_id'], metrics, metrics),
+    'ad_stats': ('account_id', ['ad_group_id', 'ad_id'], ['campaign_id'], metrics, metrics),
+    'campaign_conversions': (
+        'account_id', ['campaign_id', 'conversion_action_id'], [], converted, converted
+    ),
+    'ad_group_conversions': (
+        'account_id', ['ad_group_id', 'conversion_action_id'], ['campaign_id'], converted,
+        converted
+    ),
+    'ad_conversions': (
+        'account_id', ['ad_group_id', 'ad_id', 'conversion_action_id'], ['campaign_id'],
+        converted, converted
+    ),
+    'sessions_daily': (
+        'property_id',
+        ['session_source', 'session_medium', 'session_campaign_name', 'session_campaign_id'],
+        [],
+        ['sessions'],
+        ['sessions', 'engaged_sessions', 'key_events', 'total_revenue'],
+    ),
+}) -}}
+{%- endmacro %}
+
+{#- The fact tables of raw that each source appends by load, which the checks of the windows and
+    of the decimal places read as they are: each table with the column of its spend as text, and
+    whether that spend is in micros, as cost_micros of Google is. A table of conversions or of
+    sessions has no spend. The account and the day of a row are those of newest_load_sources. -#}
+{% macro quarantine_raw_tables() -%}
+{%- set google = [
+    ('campaign_stats', 'metrics__cost_micros', true),
+    ('campaign_conversions', none, false),
+    ('ad_group_stats', 'metrics__cost_micros', true),
+    ('ad_group_conversions', none, false),
+    ('ad_stats', 'metrics__cost_micros', true),
+    ('ad_conversions', none, false),
+] -%}
+{{- return({
+    'raw_demo_search': google,
+    'raw_demo_social': [
+        ('insights_campaign', 'spend', false),
+        ('insights_adset', 'spend', false),
+        ('insights_ad', 'spend', false),
+    ],
+    'raw_demo_video': [
+        ('report_campaign_daily', 'metrics__spend', false),
+        ('report_adgroup_daily', 'metrics__spend', false),
+        ('report_ad_daily', 'metrics__spend', false),
+    ],
+    'raw_demo_web': [('report_sessions_daily', none, false)],
+    'raw_google_ads': google,
+}) -}}
+{%- endmacro %}
+
+{#- The columns of the table of the failures, in their order, as each statement inserts them. -#}
+{% macro quarantine_columns() -%}
+{{- return([
+    'source', 'load_id', 'account_id', 'reason', 'checked', 'detail', 'window_from', 'window_to',
+]) -}}
+{%- endmacro %}
+
+{#- One statement of the checks: the rows of a query of failures into the table of the failures. -#}
+{% macro quarantine_insert(failures, query) -%}
+insert into {{ failures }} ({{ quarantine_columns() | join(', ') }})
+{{ query }}
+{%- endmacro %}
+
+{#- The failures that a query of checks found, with the load of each and its window: found gives
+    the source, the account, the load where the check knows it, the reason, what it checked and
+    what it found. A failure of the account as a whole, such as its currency, takes the newest load
+    that this run reads for the account, from days, the table stg_loads__newest_days, or else the
+    newest load of the account that a run pinned; a list can name an account that no load names,
+    and its failure then has no load. loads is core.loads. -#}
+{% macro quarantine_attributed(found, days, loads) -%}
+with found as (
+    {{ found }}
+),
+
+newest_read as (
+    select distinct on (source, account_id) source, account_id, load_id
+    from {{ days }}
+    order by source, account_id, load_id::numeric desc
+),
+
+newest_pinned as (
+    select distinct on (source, account_id) source, account_id, load_id
+    from {{ loads }}
+    where status = 'pinned'
+    order by source, account_id, load_id::numeric desc
+),
+
+attributed as (
+    select
+        f.source,
+        coalesce(f.load_id, r.load_id, p.load_id) as load_id,
+        f.account_id,
+        f.reason,
+        f.checked,
+        f.detail
+    from found as f
+    left join newest_read as r
+        on r.source = f.source and r.account_id = f.account_id
+    left join newest_pinned as p
+        on p.source = f.source and p.account_id = f.account_id
+)
+
+select
+    a.source::text as source,
+    a.load_id::text as load_id,
+    a.account_id::text as account_id,
+    a.reason::text as reason,
+    a.checked::text as checked,
+    a.detail::text as detail,
+    l.window_from,
+    l.window_to
+from attributed as a
+left join {{ loads }} as l
+    on l.source = a.source and l.load_id = a.load_id and l.account_id = a.account_id
+{%- endmacro %}
+
+{#- The checks of the accounts as a whole: the newest pinned load of an account that failed for
+    it, an account that a list gives twice, a currency outside ISO 4217 or a time zone outside
+    IANA, which a cast to char(3) would cut silently in the core (ADR-0038), and an account that
+    the pinned loads name and no list gives, which the core cannot convert or place in a day
+    (ADR-0035, "a known account for each fact"). lists are the staging models of the accounts and
+    the properties, each with the column of its account; currencies and time_zones the seeds. -#}
+{% macro quarantine_account_findings(lists, currencies, time_zones, days, loads) -%}
+with listed as (
+    {%- for relation, account in lists %}
+    {%- if not loop.first %}
+    union all
+    {%- endif %}
+    select platform as source, {{ account }} as account_id, currency, time_zone
+    from {{ relation }}
+    {%- endfor %}
+),
+
+accounts as (
+    select
+        l.source,
+        l.account_id,
+        count(*) as listings,
+        bool_or(c.currency_code is null) as unknown_currency,
+        min(coalesce(l.currency, 'none')) filter (where c.currency_code is null) as currency,
+        bool_or(z.time_zone is null) as unknown_time_zone,
+        min(coalesce(l.time_zone, 'none')) filter (where z.time_zone is null) as time_zone
+    from listed as l
+    left join {{ currencies }} as c
+        on c.currency_code = l.currency
+    left join {{ time_zones }} as z
+        on z.time_zone = l.time_zone
+    group by l.source, l.account_id
+),
+
+newest_pinned as (
+    select distinct on (source, account_id) source, account_id, load_id, outcome, error
+    from {{ loads }}
+    where status = 'pinned'
+        and source in ('{{ quarantine_sources() | join("', '") }}')
+    order by source, account_id, load_id::numeric desc
+),
+
+named as (
+    select distinct source, account_id
+    from {{ days }}
+    where source in ('{{ quarantine_sources() | join("', '") }}')
+)
+
+select
+    source,
+    account_id,
+    load_id,
+    'load_failed' as reason,
+    'loads' as checked,
+    coalesce(error, 'the load recorded no error') as detail
+from newest_pinned
+where outcome = 'failed'
+union all
+select
+    n.source,
+    n.account_id,
+    null,
+    'unknown_account',
+    'accounts',
+    'no list of accounts or properties gives the account'
+from named as n
+left join accounts as a
+    on a.source = n.source and a.account_id = n.account_id
+where a.account_id is null
+union all
+select source, account_id, null, 'duplicate_key', 'accounts', 'listed ' || listings || ' times'
+from accounts
+where listings > 1
+union all
+select source, account_id, null, 'unknown_currency', 'accounts', currency
+from accounts
+where unknown_currency
+union all
+select source, account_id, null, 'unknown_time_zone', 'accounts', time_zone
+from accounts
+where unknown_time_zone
+{%- endmacro %}
+
+{#- The days of an account on which a check failed, as the detail of its failure. -#}
+{% macro quarantine_days(day) -%}
+case
+    when count(*) = 1 then 'on ' || min({{ day }})
+    else 'on ' || count(*) || ' days from ' || min({{ day }}) || ' to ' || max({{ day }})
+end
+{%- endmacro %}
+
+{#- The checks of the rows of one kind of facts, kind of quarantine_fact_kinds, over its staging
+    models, relations, which read the newest pinned load of each account and day: two rows with one
+    key, a part of the key or another ID that is missing, a measure that is missing, and one below
+    zero. One pass over the rows: one aggregate by the key, whose memory PostgreSQL bounds by
+    work_mem and spills beyond (#191), then the days of each account with a failure, each with the
+    load that this run reads for the day, from days. -#}
+{% macro quarantine_fact_findings(kind, relations, days) -%}
+{%- set account, key, ids, required, counted = quarantine_fact_kinds()[kind] -%}
+{%- set measures = required + (counted | reject('in', required) | list) -%}
+with read as (
+    {%- for relation in relations %}
+    {%- if not loop.first %}
+    union all
+    {%- endif %}
+    select
+        platform as source,
+        {{ account }} as account_id,
+        report_date,
+        {{ (key + ids + measures) | join(', ') }}
+    from {{ relation }}
+    {%- endfor %}
+),
+
+keys as (
+    select
+        source,
+        account_id,
+        report_date,
+        count(*) > 1 as is_duplicate,
+        bool_or({{ (key + ids) | join(' is null or ') }} is null) as misses_key,
+        bool_or({{ required | join(' is null or ') }} is null) as misses_measure,
+        bool_or({{ counted | join(' < 0 or ') }} < 0) as is_negative
+    from read
+    group by source, account_id, report_date, {{ key | join(', ') }}
+),
+
+failed_days as (
+    select
+        source,
+        account_id,
+        report_date,
+        bool_or(is_duplicate) as duplicate_key,
+        bool_or(misses_key) as missing_key,
+        bool_or(misses_measure) as missing_measure,
+        coalesce(bool_or(is_negative), false) as negative_measure
+    from keys
+    group by source, account_id, report_date
+    having bool_or(is_duplicate or misses_key or misses_measure or coalesce(is_negative, false))
+)
+
+select
+    f.source,
+    f.account_id,
+    d.load_id,
+    c.reason,
+    '{{ kind }}' as checked,
+    {{ quarantine_days('f.report_date') }} as detail
+from failed_days as f
+join {{ days }} as d
+    on d.source = f.source and d.account_id = f.account_id and d.day = f.report_date
+cross join lateral (
+    values
+        ('duplicate_key', f.duplicate_key),
+        ('missing_key', f.missing_key),
+        ('missing_measure', f.missing_measure),
+        ('negative_measure', f.negative_measure)
+) as c (reason, failed)
+where c.failed
+group by f.source, f.account_id, d.load_id, c.reason
+{%- endmacro %}
+
+{#- The checks of the fact tables of one source in raw as they are, of the loads that this run reads
+    for each account: rows dated outside the window that the journal of the load gives the
+    account, which staging never reads, and a spend with more than six decimal places, which a
+    cast to numeric(18,6) in staging would round silently (ADR-0036). One small aggregate for each
+    table, by load and account. A table that no load has written yet is left out. -#}
+{% macro quarantine_raw_findings(source_name, days, loads) -%}
+{%- set code = source_name[4:] -%}
+{%- set account, day = newest_load_keys(source_name) -%}
+{%- set parts = [] -%}
+{%- for table, spend, micros in quarantine_raw_tables()[source_name] -%}
+    {%- if source_name.startswith('raw_demo_') -%}
+        {%- set relation = demo_source(source_name, table) -%}
+    {%- else -%}
+        {%- set columns = {
+            'customer__id': 'text', 'segments__date': 'date', '_dlt_load_id': 'text',
+        } -%}
+        {%- if spend is not none -%}
+            {%- do columns.update({spend: 'text'}) -%}
+        {%- endif -%}
+        {%- set relation = relation_or_empty(source(source_name, table), columns) -%}
+    {%- endif -%}
+    {%- if spend is none -%}
+        {%- set places = 'null::integer' -%}
+    {%- else -%}
+        {%- set places = 'max(scale(trim_scale(cast(nullif(nullif(trim(cast(r.' ~ spend
+            ~ " as text)), ''), '-') as numeric))))" ~ (' + 6' if micros else '') -%}
+    {%- endif -%}
+    {%- do parts.append(
+        "select '" ~ table ~ "' as checked, r._dlt_load_id as load_id, " ~ account
+        ~ " as account_id, min(" ~ day ~ ") as first_day, max(" ~ day ~ ") as last_day, "
+        ~ places ~ " as places\n    from (select * from " ~ relation ~ ") as r\n    group by "
+        ~ "r._dlt_load_id, " ~ account
+    ) -%}
+{%- endfor %}
+with tables as (
+    {{ parts | join('\n    union all\n    ') }}
+),
+
+read as (
+    select distinct account_id, load_id
+    from {{ days }}
+    where source = '{{ code }}'
+)
+
+select
+    '{{ code }}' as source,
+    t.account_id,
+    t.load_id,
+    c.reason,
+    t.checked,
+    c.detail
+from tables as t
+join read as d
+    on d.account_id = t.account_id and d.load_id = t.load_id
+join {{ loads }} as l
+    on l.source = '{{ code }}' and l.load_id = t.load_id and l.account_id = t.account_id
+cross join lateral (
+    values
+        (
+            'date_outside_window',
+            t.first_day < l.window_from or t.last_day > l.window_to,
+            'rows from ' || t.first_day || ' to ' || t.last_day || ', a window from '
+                || l.window_from || ' to ' || l.window_to
+        ),
+        (
+            'too_many_decimals',
+            coalesce(t.places > 6, false),
+            'a spend with ' || t.places || ' decimal places'
+        )
+) as c (reason, failed, detail)
+where c.failed
+{%- endmacro %}
+
+{#- G1a, against a collapse (ADR-0035): for each load that this run reads for an account of the
+    ad platforms, the spend of the statistics of campaigns on the days that the load gives, against
+    the spend that the core holds on the same days. A load with no row on its days, as a lost token
+    gives, is empty_window; a spend that fell by more than var('quarantine_spend_fall') of what the
+    core holds, spend_fall. A window replaces whole days, so either would erase them. relations are
+    the staging models of the statistics of campaigns, and accounts and facts the tables
+    core.dim_account and core.ad_stats_campaign_daily as the runs before this one left them; the
+    days of the core are bounded by those of the windows, so that PostgreSQL reads only the
+    partitions of the windows. -#}
+{% macro quarantine_collapse_findings(relations, days, accounts, facts) -%}
+with window_days as (
+    select source, account_id, day, load_id
+    from {{ days }}
+    where source in ('{{ quarantine_sources() | join("', '") }}')
+),
+
+held as (
+    select a.platform as source, a.account_id, f.report_date as day, sum(f.spend) as spend
+    from {{ facts }} as f
+    join {{ accounts }} as a
+        on a.account_sk = f.account_sk
+    where f.report_date >= (select min(day) from window_days)
+        and f.report_date <= (select max(day) from window_days)
+    group by a.platform, a.account_id, f.report_date
+),
+
+read as (
+    {%- for relation in relations %}
+    {%- if not loop.first %}
+    union all
+    {%- endif %}
+    select platform as source, account_id, report_date, spend
+    from {{ relation }}
+    {%- endfor %}
+),
+
+read_days as (
+    select source, account_id, report_date as day, sum(spend) as spend
+    from read
+    group by source, account_id, report_date
+),
+
+compared as (
+    select
+        w.source,
+        w.account_id,
+        w.load_id,
+        min(w.day) as first_day,
+        max(w.day) as last_day,
+        coalesce(sum(h.spend), 0) as held_spend,
+        coalesce(sum(r.spend) filter (where h.day is not null), 0) as read_spend,
+        count(r.day) as read_days
+    from window_days as w
+    left join held as h
+        on h.source = w.source and h.account_id = w.account_id and h.day = w.day
+    left join read_days as r
+        on r.source = w.source and r.account_id = w.account_id and r.day = w.day
+    group by w.source, w.account_id, w.load_id
+)
+
+select
+    source,
+    account_id,
+    load_id,
+    case when read_days = 0 then 'empty_window' else 'spend_fall' end as reason,
+    'campaign_stats' as checked,
+    case
+        when read_days = 0 then
+            'no row from ' || first_day || ' to ' || last_day || ', against a spend of '
+            || held_spend || ' in the core'
+        else 'a spend of ' || read_spend || ' against ' || held_spend || ' in the core on the same days'
+    end as detail
+from compared
+where held_spend > 0
+    and (read_days = 0 or read_spend < held_spend * (1 - {{ var('quarantine_spend_fall') }}))
+{%- endmacro %}
+
+{#- The stop of a source (ADR-0035, ADR-0046): a source with more than half of its accounts in
+    quarantine, of the accounts that core.loads holds pinned for it, stops, and each of its pinned
+    accounts gets the reason source_stopped, so that the healthy ones stay out of the core too;
+    exactly half stops nothing. A filter in SQL, not a test at error, which would stop the healthy
+    sources too (#188). It reads the failures that the statements before it wrote. -#}
+{% macro quarantine_stop_findings(failures, loads) -%}
+with pinned as (
+    select distinct source, account_id
+    from {{ loads }}
+    where status = 'pinned'
+        and source in ('{{ quarantine_sources() | join("', '") }}')
+),
+
+held as (
+    select p.source, count(distinct p.account_id) as accounts
+    from pinned as p
+    where exists (
+        select from {{ failures }} as f
+        where f.source = p.source and f.account_id = p.account_id
+    )
+    group by p.source
+),
+
+stopped as (
+    select h.source, h.accounts as held, count(*) as accounts
+    from held as h
+    join pinned as p
+        on p.source = h.source
+    group by h.source, h.accounts
+    having h.accounts * 2 > count(*)
+)
+
+select
+    p.source,
+    p.account_id,
+    null as load_id,
+    'source_stopped' as reason,
+    'source' as checked,
+    'in quarantine: ' || s.held || ' of the pinned accounts of the source, ' || s.accounts
+        as detail
+from stopped as s
+join pinned as p
+    on p.source = s.source
+{%- endmacro %}
+
+{#- Whether a row of an account is kept in this run: no check of int_g1_failures, failures, held
+    its account out of the core (ADR-0035). platform and account are the columns of the row. -#}
+{% macro not_in_quarantine(failures, platform, account) -%}
+not exists (
+    select from {{ failures }} as quarantined
+    where quarantined.source = {{ platform }} and quarantined.account_id = {{ account }}
+)
+{%- endmacro %}

@@ -4,12 +4,9 @@ models:
       The statistics of the campaigns of the Google Ads accounts of the deployment, one row for each
       campaign and day, with the column names of the model; money in units, from the micros of the
       API. It is empty until the first load. report_date, platform, account_id and campaign_id are
-      its key. Its tests guard the marts: when one of them fails, dbt
-      does not rebuild the models that read this one.
-    data_tests:
-      - unique_combination:
-          arguments:
-            columns: [report_date, platform, account_id, campaign_id]
+      its key. int_g1_failures checks its rows for each account, and holds an account whose rows
+      fail out of the core and the marts (ADR-0035). Its tests guard the marts: when one of them
+      fails, dbt does not rebuild the models that read this one.
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
@@ -22,30 +19,24 @@ models:
         data_tests: [not_null]
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
       - name: loaded_campaign_name
         description: '{{ doc("loaded_campaign_name") }}'
       - name: impressions
         description: '{{ doc("impressions") }}'
-        data_tests: [not_null, non_negative]
       - name: clicks
         description: '{{ doc("clicks") }}'
-        data_tests: [not_null, non_negative]
       - name: spend
         description: '{{ doc("spend") }}'
-        data_tests: [not_null, non_negative]
   - name: stg_google_ads__campaign_conversions
     description: >-
       The conversions of the campaigns of the Google Ads accounts of the deployment by conversion
       action, one row for each campaign, day and action with any conversion, from the report by
       conversion action of the API: every conversion of an action, also of an action that does not
-      count in the conversions of the platform. It is empty until the first load. report_date, platform, account_id, campaign_id and conversion_action_id are its key.
-      Its tests guard the marts: when one of them fails, dbt does not rebuild the models that read
-      this one.
-    data_tests:
-      - unique_combination:
-          arguments:
-            columns: [report_date, platform, account_id, campaign_id, conversion_action_id]
+      count in the conversions of the platform. It is empty until the first load. report_date,
+      platform, account_id, campaign_id and conversion_action_id are its key. int_g1_failures checks
+      its rows for each account, and holds an account whose rows fail out of the core and the marts
+      (ADR-0035). Its tests guard the marts: when one of them fails, dbt does not rebuild the models
+      that read this one.
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
@@ -58,10 +49,8 @@ models:
         data_tests: [not_null]
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
       - name: conversion_action_id
         description: '{{ doc("conversion_action_id") }}'
-        data_tests: [not_null]
       - name: conversion_action_name
         description: '{{ doc("conversion_action_name") }}'
       - name: platform_category
@@ -70,21 +59,17 @@ models:
         description: '{{ doc("attribution_setting") }}'
       - name: conversions
         description: '{{ doc("conversions") }}'
-        data_tests: [not_null, non_negative]
       - name: conversion_value
         description: '{{ doc("conversion_value") }}'
-        data_tests: [not_null, non_negative]
   - name: stg_google_ads__accounts
     description: >-
       The Google Ads accounts that extensions/model/clients.toml names, one row each, as the
       customer resource of each account gives it: a manager account, which has no statistics, is
       left out, and manager_account_id is empty, as each account is read on its own. It is empty
-      until the first load. platform and account_id are its key. Its tests guard the marts: when one of them fails, dbt
-      does not rebuild the models that read this one.
-    data_tests:
-      - unique_combination:
-          arguments:
-            columns: [platform, account_id]
+      until the first load. platform and account_id are its key. int_g1_failures checks each account
+      for its key, its currency and its time zone, and holds one that fails out of the core and the
+      marts (ADR-0035). Its tests guard the marts: when one of them fails, dbt does not rebuild the
+      models that read this one.
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
@@ -96,20 +81,8 @@ models:
         description: '{{ doc("account_name") }}'
       - name: currency
         description: '{{ doc("currency") }}'
-        data_tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('seed_iso_4217_currencies')
-                field: currency_code
       - name: time_zone
         description: '{{ doc("time_zone") }}'
-        data_tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('seed_iana_time_zones')
-                field: time_zone
       - name: manager_account_id
         description: '{{ doc("manager_account_id") }}'
       - name: account_status
@@ -155,12 +128,9 @@ models:
       ad group and day, from the query FROM ad_group, with the column names of the model; money in
       units, from the micros of the API. It is empty until the first load. report_date, platform,
       account_id and ad_group_id are its key. A Performance Max campaign has no ad groups, and so no
-      row here. Its tests guard the marts: when one of them fails, dbt does not rebuild the models
-      that read this one.
-    data_tests:
-      - unique_combination:
-          arguments:
-            columns: [report_date, platform, account_id, ad_group_id]
+      row here. int_g1_failures checks its rows for each account, and holds an account whose rows
+      fail out of the core and the marts (ADR-0035). Its tests guard the marts: when one of them
+      fails, dbt does not rebuild the models that read this one.
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
@@ -173,33 +143,26 @@ models:
         data_tests: [not_null]
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
       - name: ad_group_id
         description: '{{ doc("ad_group_id") }}'
-        data_tests: [not_null]
       - name: loaded_ad_group_name
         description: '{{ doc("loaded_ad_group_name") }}'
       - name: impressions
         description: '{{ doc("impressions") }}'
-        data_tests: [not_null, non_negative]
       - name: clicks
         description: '{{ doc("clicks") }}'
-        data_tests: [not_null, non_negative]
       - name: spend
         description: '{{ doc("spend") }}'
-        data_tests: [not_null, non_negative]
   - name: stg_google_ads__ad_group_conversions
     description: >-
       The conversions of the ad groups of the Google Ads accounts of the deployment by conversion
       action, one row for each ad group, day and action with any conversion, from the query by
       conversion action FROM ad_group: every conversion of an action, also of an action that does
       not count in the conversions of the platform. It is empty until the first load. report_date,
-      platform, account_id, ad_group_id and conversion_action_id are its key. Its tests guard the
-      marts: when one of them fails, dbt does not rebuild the models that read this one.
-    data_tests:
-      - unique_combination:
-          arguments:
-            columns: [report_date, platform, account_id, ad_group_id, conversion_action_id]
+      platform, account_id, ad_group_id and conversion_action_id are its key. int_g1_failures checks
+      its rows for each account, and holds an account whose rows fail out of the core and the marts
+      (ADR-0035). Its tests guard the marts: when one of them fails, dbt does not rebuild the models
+      that read this one.
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
@@ -212,13 +175,10 @@ models:
         data_tests: [not_null]
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
       - name: ad_group_id
         description: '{{ doc("ad_group_id") }}'
-        data_tests: [not_null]
       - name: conversion_action_id
         description: '{{ doc("conversion_action_id") }}'
-        data_tests: [not_null]
       - name: conversion_action_name
         description: '{{ doc("conversion_action_name") }}'
       - name: platform_category
@@ -227,22 +187,17 @@ models:
         description: '{{ doc("attribution_setting") }}'
       - name: conversions
         description: '{{ doc("conversions") }}'
-        data_tests: [not_null, non_negative]
       - name: conversion_value
         description: '{{ doc("conversion_value") }}'
-        data_tests: [not_null, non_negative]
   - name: stg_google_ads__ad_stats
     description: >-
       The statistics of the ads of the Google Ads accounts of the deployment, one row for each ad
       and day, from the query FROM ad_group_ad, with the column names of the model; money in units,
       from the micros of the API. It is empty until the first load. report_date, platform,
       account_id, ad_group_id and ad_id are its key. A type of ad that has no name on Google, such
-      as a responsive search ad, has none here. Its tests guard the marts: when one of them fails,
-      dbt does not rebuild the models that read this one.
-    data_tests:
-      - unique_combination:
-          arguments:
-            columns: [report_date, platform, account_id, ad_group_id, ad_id]
+      as a responsive search ad, has none here. int_g1_failures checks its rows for each account,
+      and holds an account whose rows fail out of the core and the marts (ADR-0035). Its tests guard
+      the marts: when one of them fails, dbt does not rebuild the models that read this one.
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
@@ -255,35 +210,27 @@ models:
         data_tests: [not_null]
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
       - name: ad_group_id
         description: '{{ doc("ad_group_id") }}'
-        data_tests: [not_null]
       - name: ad_id
         description: '{{ doc("ad_id") }}'
-        data_tests: [not_null]
       - name: loaded_ad_name
         description: '{{ doc("loaded_ad_name") }}'
       - name: impressions
         description: '{{ doc("impressions") }}'
-        data_tests: [not_null, non_negative]
       - name: clicks
         description: '{{ doc("clicks") }}'
-        data_tests: [not_null, non_negative]
       - name: spend
         description: '{{ doc("spend") }}'
-        data_tests: [not_null, non_negative]
   - name: stg_google_ads__ad_conversions
     description: >-
       The conversions of the ads of the Google Ads accounts of the deployment by conversion action,
       one row for each ad, day and action with any conversion, from the query by conversion action
       FROM ad_group_ad. It is empty until the first load. report_date, platform, account_id,
-      ad_group_id, ad_id and conversion_action_id are its key. Its tests guard the marts: when one
-      of them fails, dbt does not rebuild the models that read this one.
-    data_tests:
-      - unique_combination:
-          arguments:
-            columns: [report_date, platform, account_id, ad_group_id, ad_id, conversion_action_id]
+      ad_group_id, ad_id and conversion_action_id are its key. int_g1_failures checks its rows for
+      each account, and holds an account whose rows fail out of the core and the marts (ADR-0035).
+      Its tests guard the marts: when one of them fails, dbt does not rebuild the models that read
+      this one.
     columns:
       - name: report_date
         description: '{{ doc("report_date") }}'
@@ -296,16 +243,12 @@ models:
         data_tests: [not_null]
       - name: campaign_id
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
       - name: ad_group_id
         description: '{{ doc("ad_group_id") }}'
-        data_tests: [not_null]
       - name: ad_id
         description: '{{ doc("ad_id") }}'
-        data_tests: [not_null]
       - name: conversion_action_id
         description: '{{ doc("conversion_action_id") }}'
-        data_tests: [not_null]
       - name: conversion_action_name
         description: '{{ doc("conversion_action_name") }}'
       - name: platform_category
@@ -314,10 +257,8 @@ models:
         description: '{{ doc("attribution_setting") }}'
       - name: conversions
         description: '{{ doc("conversions") }}'
-        data_tests: [not_null, non_negative]
       - name: conversion_value
         description: '{{ doc("conversion_value") }}'
-        data_tests: [not_null, non_negative]
   - name: stg_google_ads__ad_groups
     description: >-
       The versions of the ad groups of the Google Ads accounts of the deployment, one row for each

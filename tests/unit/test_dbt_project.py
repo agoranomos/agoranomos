@@ -431,7 +431,8 @@ def test_the_intermediate_models_are_views_in_staging():
     # ADR-0025: until an AI role needs to tell them apart, intermediate models are views in staging,
     # but for the statistics of ad groups and of ads, whose many tests would each compute a view of
     # their size again (ADR-0034), and the rates of each day, which every unioned model of the facts
-    # and five marts read.
+    # and five marts read; and the checks of G1, which each run fills anew, as the days of the pin
+    # are (ADR-0035).
     project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
     pattern = r"^    intermediate:\n      \+schema: staging\n      \+materialized: view$"
     assert re.search(pattern, project, flags=re.MULTILINE)
@@ -444,8 +445,9 @@ def test_the_intermediate_models_are_views_in_staging():
         "int_ad_stats_ad_group__unioned",
         "int_ad_stats_ad__unioned",
         "int_fx_rates__filled",
+        "int_g1_failures",
     }
-    for name in tables:
+    for name in tables - {"int_g1_failures"}:
         text = (DBT / "models" / "intermediate" / f"{name}.sql").read_text(encoding="utf-8")
         assert "{{ config(materialized='table') }}" in text, name
 
@@ -575,9 +577,11 @@ AD_GROUP_KEY = ["report_date", "platform", "account_id", "ad_group_id"]
 AD_KEY = [*AD_GROUP_KEY, "ad_id"]
 METRICS = ["impressions", "clicks", "spend"]
 CONVERTED = ["conversions", "conversion_value"]
-# The critical tests of each kind of staging model: its key, which unique_combination checks, the
-# columns that not_null checks, and those that non_negative checks.
-CRITICAL = {
+# What the checks of int_g1_failures check for each kind of staging model of a platform, for each
+# account, as the tests of staging checked it for all accounts at once before (ADR-0035): its key,
+# the columns that must be there, and those that are zero or more; and, for the accounts and the
+# properties, the currency and the time zone, against the seeds (IN_SEEDS).
+CHECKED = {
     "campaign_stats": (
         STATS_KEY,
         [*STATS_KEY, "impressions", "clicks", "spend"],
@@ -647,15 +651,43 @@ CRITICAL = {
         ["rate"],
     ),
 }
+# The kinds whose data G1 checks for each account: the facts and the lists of accounts and of
+# properties. The lists of the entities, whose versions dlt keeps, and the rates, which name no
+# account, keep their tests in staging.
+BY_ACCOUNT = {
+    "campaign_stats",
+    "campaign_conversions",
+    "ad_group_stats",
+    "ad_group_conversions",
+    "ad_stats",
+    "ad_conversions",
+    "sessions_daily",
+    "accounts",
+    "properties",
+}
+# The columns of a row that no account can get wrong alone, which the tests of staging still
+# check for all accounts: the day, the platform and the account of a fact, which the join of
+# newest_load guarantees, and the platform and the ID of an account or a property, without which
+# no check can name the account.
+NAMED_BY_THE_LOAD = {
+    "sessions_daily": ["report_date", "property_id"],
+    "accounts": ACCOUNT_KEY,
+    "properties": ["platform", "property_id"],
+}
+# The critical tests of each kind of staging model: its key, which unique_combination checks, or
+# none, the columns that not_null checks, and those that non_negative checks.
+CRITICAL = {
+    kind: (None, NAMED_BY_THE_LOAD.get(kind, STATS_KEY[:3]), []) if kind in BY_ACCOUNT else checked
+    for kind, checked in CHECKED.items()
+}
 # The key test of a model, with its columns in flow style.
 UNIQUE = r"^      - unique_combination:\n          arguments:\n            columns: \[(.*)\]$"
-# The columns of an account or a property that must be in a seed: the seed and its column.
+# The columns of an account or a property that must be in a seed: the seed and its column, which
+# the checks of int_g1_failures read.
 IN_SEEDS = {
     "currency": ("seed_iso_4217_currencies", "currency_code"),
     "time_zone": ("seed_iana_time_zones", "time_zone"),
 }
-# The kinds of staging models whose tests read the seeds.
-SEEDED = {"accounts", "properties"}
 
 
 def blocks(text: str, indent: int) -> dict[str, str]:
@@ -694,10 +726,10 @@ BY_LOAD = {
 
 def test_each_staging_model_of_a_platform_is_one_call_of_the_shape_of_its_api():
     # With the code of the platform of its folder and the raw tables of its own dataset: a model
-    # that passed the code of another platform would still pass its key tests. An account or a
-    # property model also names the seeds that its tests read, so that they come first (below). A
-    # model of a fact reads the table of the fact by load, and the child tables of the actions of
-    # Meta follow their rows.
+    # that passed the code of another platform would still pass its key tests. A model of a fact
+    # reads the table of the fact by load, and the child tables of the actions of Meta follow their
+    # rows. No model names a seed: the checks of int_g1_failures read the currencies and the time
+    # zones, which the tests of the accounts and the properties read before.
     from agoranomos_pipelines.demo import platforms
 
     assert set(SHAPED) == set(platforms.PLATFORMS)
@@ -717,10 +749,8 @@ def test_each_staging_model_of_a_platform_is_one_call_of_the_shape_of_its_api():
                 relations[0] = f"newest_load({relations[0]}, '{dataset}', {days})"
             relations = ", ".join(relations)
             arguments = ", ".join([relations, f"'{code}'", *(f"'{name}'" for name in level)])
-            seeds = [seed for seed, _ in IN_SEEDS.values()] if model in SEEDED else []
-            depends = [f"-- depends_on: {{{{ ref('{seed}') }}}}" for seed in seeds]
             assert comment.startswith(f"-- {path.name}: "), path.name
-            assert body == [*depends, f"{{{{ {macro}({arguments}) }}}}"], path.name
+            assert body == [f"{{{{ {macro}({arguments}) }}}}"], path.name
 
 
 def test_staging_reads_the_newest_pinned_load_of_each_account_and_day():
@@ -926,17 +956,20 @@ def test_the_sources_of_a_platform_are_the_tables_that_its_load_writes():
 
 def test_the_staging_models_of_the_platforms_have_their_critical_tests():
     # Each test is an error, so a row that breaks one stops the models that read the model
-    # (TestBehavior.BUILD of Cosmos): no test of staging is a warning.
+    # (TestBehavior.BUILD of Cosmos): no test of staging is a warning. A test of the data of one
+    # account would stop every account with it, so G1 checks those for each account instead
+    # (ADR-0035), and staging keeps the tests that no account fails alone.
     for code, models in SHAPED.items():
         text = (STAGING / code / f"_{code}__models.yml").read_text(encoding="utf-8")
         assert "severity" not in text, code
+        assert "relationships" not in text, code
         described = blocks(text, 2)
         assert set(described) == {f"stg_{code}__{model}" for model in models}, code
         for model in models:
             key, not_null, non_negative = CRITICAL[model]
             block = described[f"stg_{code}__{model}"]
             unique = re.findall(UNIQUE, block, flags=re.MULTILINE)
-            assert [part.split(", ") for part in unique] == [key], (code, model)
+            assert [part.split(", ") for part in unique] == ([key] if key else []), (code, model)
             columns = blocks(block, 6)
             tested = {name: column_tests(column) for name, column in columns.items()}
             assert {c for c, tests in tested.items() if "not_null" in tests} == set(not_null), (
@@ -946,12 +979,8 @@ def test_the_staging_models_of_the_platforms_have_their_critical_tests():
             assert {c for c, tests in tested.items() if "non_negative" in tests} == set(
                 non_negative
             ), (code, model)
-            seeded = {c for c, tests in tested.items() if "relationships" in tests}
-            assert seeded == (set(IN_SEEDS) if model in SEEDED else set())
-            for column in seeded:
-                seed, field = IN_SEEDS[column]
-                target = rf"^ +to: ref\('{seed}'\)\n +field: {field}$"
-                assert re.search(target, columns[column], flags=re.MULTILINE), (code, column)
+            # Its description says which checks hold its accounts out.
+            assert ("int_g1_failures checks" in folded(block, 4)) is (model in BY_ACCOUNT), model
 
 
 def test_every_column_of_the_staging_of_the_platforms_takes_the_doc_block_of_its_name():
@@ -1030,7 +1059,7 @@ def test_a_test_of_several_nodes_is_on_one_that_depends_on_the_others():
         for path in (DBT / "models").rglob("*.sql")
     }
     checked = read_together()
-    assert len(checked) >= 8, "the tests of the accounts and properties against the seeds"
+    assert len(checked) >= 8, "the tests of the intermediate models against each other"
     for where, nodes in checked:
         assert any(nodes - {node} <= ancestors(node, parents) for node in nodes), (
             where,
@@ -1060,7 +1089,7 @@ TO_ADS = (
 TO_RATES = (["report_date", "currency"], "int_fx_rates__filled", ["rate_date", "currency"])
 # The columns of the statistics of an ad group or an ad that must not be null, after their key.
 NAMED = ["currency", "client_id", "campaign_id", "campaign_name", "ad_group_name"]
-SESSIONS_KEY = CRITICAL["sessions_daily"][0]
+SESSIONS_KEY = CHECKED["sessions_daily"][0]
 # The critical tests of each intermediate model, every one an error: its key, which
 # unique_combination checks, or unique for a key of one column; the columns that not_null checks;
 # the relationships of a column to a column of another model; and those of columns to columns.
@@ -1124,6 +1153,13 @@ INTERMEDIATE_TESTS = {
     "int_campaigns__current": ([*ACCOUNT_KEY, "campaign_id"], [], {}, []),
     "int_ad_groups__current": ([*ACCOUNT_KEY, "ad_group_id"], ["campaign_id"], {}, []),
     "int_ads__current": ([*ACCOUNT_KEY, "ad_group_id", "ad_id"], ["campaign_id"], {}, []),
+    # The checks of G1 and G1a, by load, account, reason and what they read (ADR-0035).
+    "int_g1_failures": (
+        ["source", "load_id", "account_id", "reason", "checked"],
+        ["source", "account_id", "reason", "checked"],
+        {},
+        [],
+    ),
 }
 COMPOSITE = (
     r"^      - relationships_composite:\n          arguments:\n            columns: \[(.*)\]\n"
@@ -1206,7 +1242,12 @@ def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
             {"int_ad_stats_ad_group__unioned", "int_ad_stats_ad__unioned"},
             True,
         ),
+        # A quarantine and the stop of a source are the run working as meant (ADR-0035): they warn,
+        # and Ops shows them, as a test at error would stop the healthy accounts too (#188).
+        "assert_no_account_is_in_quarantine": ({"int_g1_failures"}, True),
+        "assert_no_source_is_stopped": ({"int_g1_failures"}, True),
     }
+    assert {path.stem for path in (DBT / "tests").glob("*.sql")} == set(wanted)
     for name, (reads, warns) in wanted.items():
         text = (DBT / "tests" / f"{name}.sql").read_text(encoding="utf-8")
         assert set(referenced(text)) == reads, name
@@ -1333,11 +1374,8 @@ def test_each_staging_model_of_google_ads_is_one_call_of_the_shape_that_the_demo
             else f"}}), {arguments}) }}}}"
         )
         assert text.rstrip().endswith(end), model
-        # The model of the accounts names the seeds that its tests read, as that of the demo does.
-        seeds = re.findall(r"^-- depends_on: \{\{ ref\('(\w+)'\) \}\}$", text, flags=re.MULTILINE)
-        assert seeds == (
-            ["seed_iso_4217_currencies", "seed_iana_time_zones"] if model == "accounts" else []
-        )
+        # No model names a seed, as none of the demo does: the checks of int_g1_failures read them.
+        assert "depends_on" not in text, model
     macros = (DBT / "macros" / "shapes" / "google_ads_v25.sql").read_text(encoding="utf-8")
     assert "{% macro google_ads_customers(relation, platform) %}" in macros
     assert "{% macro google_ads_conversion_actions(relation, platform) %}" in macros
@@ -1515,7 +1553,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 609, counted
+    assert counted == 376, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text
@@ -1539,6 +1577,10 @@ def test_each_name_of_a_shape_goes_through_to_name():
 CORE = DBT / "models" / "core"
 # The migrations that create the dimensions and the registries of the core (ADR-0036).
 DIMENSION_MIGRATIONS = ("0003_create_the_registries.sql", "0004_create_the_dimensions.sql")
+# The journals of the core that a model writes, by their migration: the journal of quarantine,
+# from the checks of G1 and G1a (ADR-0035). The pin writes core.loads, and the other journals wait
+# for the facts.
+JOURNAL_MODELS = {"0006_create_the_journals.sql": {"account_quarantine"}}
 COMMENT = re.compile(
     r"^COMMENT ON (TABLE|COLUMN) core\.(\w+)(?:\.(\w+))? IS\n'((?:[^']|'')*)';$", flags=re.M
 )
@@ -1560,27 +1602,34 @@ CURRENT_TO = "\"'9999-12-31 00:00:00'::timestamp\""
 
 
 def dimension_tables() -> dict[str, dict]:
-    """The dimensions and registries of the migrations: for each table, its columns in order, its
-    key, its natural key where it has one, and the comments of the table and of its columns."""
-    text = "".join((MIGRATIONS / name).read_text(encoding="utf-8") for name in DIMENSION_MIGRATIONS)
+    """The tables of the migrations that the models of the core write, the dimensions and
+    registries and the journal of quarantine: for each table, its columns in order, its key, its
+    natural key where it has one, and the comments of the table and of its columns."""
     tables: dict[str, dict] = {}
-    for name, body in CREATE.findall(text):
-        columns, key, unique = [], [], []
-        for raw in body.splitlines():
-            line = raw.strip().rstrip(",")
-            if found := re.fullmatch(r"PRIMARY KEY \((.*)\)", line):
-                key = split(found.group(1))
-            elif found := re.fullmatch(r"UNIQUE \((.*)\)", line):
-                unique = split(found.group(1))
-            elif raw.startswith("  ") and not raw.startswith("   "):
-                column = re.match(r"(\w+) ", line)
-                if column and column.group(1) != "CHECK":
-                    columns.append(column.group(1))
-                    if " PRIMARY KEY" in line:
-                        key = [column.group(1)]
-        tables[name] = {"columns": columns, "key": key, "unique": unique, "comments": {}}
-    for kind, table, column, body in COMMENT.findall(text):
-        tables[table]["comments"][None if kind == "TABLE" else column] = body.replace("''", "'")
+    for migration in [*DIMENSION_MIGRATIONS, *JOURNAL_MODELS]:
+        text = (MIGRATIONS / migration).read_text(encoding="utf-8")
+        kept = JOURNAL_MODELS.get(migration)
+        for name, body in CREATE.findall(text):
+            if kept is not None and name not in kept:
+                continue
+            columns, key, unique = [], [], []
+            for raw in body.splitlines():
+                line = raw.strip().rstrip(",")
+                if found := re.fullmatch(r"PRIMARY KEY \((.*)\)", line):
+                    key = split(found.group(1))
+                elif found := re.fullmatch(r"UNIQUE \((.*)\)", line):
+                    unique = split(found.group(1))
+                elif raw.startswith("  ") and not raw.startswith("   "):
+                    column = re.match(r"(\w+) ", line)
+                    if column and column.group(1) != "CHECK":
+                        columns.append(column.group(1))
+                        if " PRIMARY KEY" in line:
+                            key = [column.group(1)]
+            tables[name] = {"columns": columns, "key": key, "unique": unique, "comments": {}}
+        for kind, table, column, body in COMMENT.findall(text):
+            if table in tables:
+                comment = body.replace("''", "'")
+                tables[table]["comments"][None if kind == "TABLE" else column] = comment
     return tables
 
 
@@ -1660,6 +1709,12 @@ def test_the_views_of_the_core_take_their_accounts_from_one_place():
     # quarantine, stays out of every dimension by one filter (ADR-0035, ADR-0036).
     registry = (CORE / "dim_account.sql").read_text(encoding="utf-8")
     assert "from {{ ref('int_accounts__current') }} as c" in registry
+    # The filter: an account that the checks of this run hold, once the journal has recorded it.
+    current = (INTERMEDIATE / "int_accounts__current.sql").read_text(encoding="utf-8")
+    assert "-- depends_on: {{ ref('account_quarantine') }}\n" in current
+    assert current.endswith(
+        "where {{ not_in_quarantine(ref('int_g1_failures'), 'n.platform', 'n.account_id') }}\n"
+    )
     for dimension, view in ENTITIES.items():
         text = (INTERMEDIATE / f"{view}.sql").read_text(encoding="utf-8")
         assert "from {{ ref('int_accounts__current') }} as a" in text, view
@@ -1754,7 +1809,8 @@ def test_each_shape_maps_the_statuses_of_its_platform_to_the_common_state():
 def test_the_marts_read_the_old_path_and_nothing_of_the_core():
     # The dimensions of the core are laid beside the live marts (#177), which switch to views over
     # the core in one pull request (#201): until then no mart, and no model that a mart reads,
-    # reads a model of the core or a version.
+    # reads a model of the core or a version. They read the checks of int_g1_failures, which read
+    # the tables of the core as sources, as the runs before this one left them.
     core = {path.stem for path in CORE.glob("*.sql")} | {
         path.stem for path in SNAPSHOTS.glob("*.sql")
     }
@@ -1764,3 +1820,219 @@ def test_the_marts_read_the_old_path_and_nothing_of_the_core():
     }
     for path in (DBT / "models" / "marts").glob("*.sql"):
         assert not ({path.stem} | ancestors(path.stem, parents)) & core, path.stem
+        assert "int_g1_failures" in ancestors(path.stem, parents) or path.stem in (
+            "ad_platforms",
+            "clients",
+            "fx_rates_daily",
+        ), path.stem
+
+
+QUARANTINE = DBT / "macros" / "quarantine.sql"
+G1 = INTERMEDIATE / "int_g1_failures.sql"
+
+
+def macro_text(name: str) -> str:
+    """The body of a macro of macros/quarantine.sql."""
+    text = QUARANTINE.read_text(encoding="utf-8")
+    body = text[text.index(f"{{% macro {name}(") :]
+    return body[: body.index("{%- endmacro %}")]
+
+
+def returned(name: str) -> object:
+    """The value that a macro of macros/quarantine.sql returns, a literal of lists and tuples of
+    texts, with its variables set from the lists that it sets first."""
+    body = macro_text(name)
+    value = body[body.index("return(") + len("return(") : body.rindex(") -}}")]
+    for variable, listed in re.findall(r"\{%- set (\w+) = (\[.*?\]) -%\}", body, flags=re.S):
+        value = re.sub(rf"\b{variable}\b", listed, value)
+    for jinja, python in (("true", "True"), ("false", "False"), ("none", "None")):
+        value = re.sub(rf"\b{jinja}\b", python, value)
+    return ast.literal_eval(value)
+
+
+def g1_config() -> str:
+    """The text of the config() call of int_g1_failures, whose hooks hold ) }} of their own."""
+    text = G1.read_text(encoding="utf-8")
+    return text[text.index("{{ config(\n") : text.index("\n) }}\n")]
+
+
+def hooks() -> list[str]:
+    """The statements of the post-hooks of int_g1_failures, in their order."""
+    return re.findall(r'^        "(.*)",$', g1_config(), re.M)
+
+
+def test_g1_checks_each_kind_of_facts_as_the_tests_of_staging_did():
+    # ADR-0035: the keys, the IDs and the measures of the facts are checked for each account, so
+    # that one account that fails holds out itself alone; the tests of staging checked them for all
+    # accounts at once, and a failure stopped them all.
+    kinds = returned("quarantine_fact_kinds")
+    assert set(kinds) == BY_ACCOUNT - {"accounts", "properties"}
+    for kind, (account, key, ids, required, counted) in kinds.items():
+        unique, not_null, non_negative = CHECKED[kind]
+        assert set(unique) - {"platform"} == {"report_date", account, *key}, kind
+        assert set(not_null) - {"report_date", "platform", account} == {*key, *ids, *required}
+        assert set(non_negative) == set(counted), kind
+    # The accounts and the properties: listed twice, and a currency and a time zone of the seeds.
+    accounts = macro_text("quarantine_account_findings")
+    for seed, field in IN_SEEDS.values():
+        assert f"on {'c' if 'iso' in seed else 'z'}.{field} = l." in accounts, seed
+    assert "where listings > 1" in accounts
+    model = G1.read_text(encoding="utf-8")
+    for seed, _ in IN_SEEDS.values():
+        assert f"ref('{seed}')" in model, seed
+
+
+def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
+    # R5 (#191): as one statement over the three levels, G1 held a dozen aggregates at once and was
+    # the largest process of the database. Each statement of the hooks inserts the failures of one
+    # kind, or of the raw tables of one source, into the table, then G1a, then the stop, which reads
+    # what the others wrote, and the statistics of the table come last.
+    config = g1_config()
+    assert "materialized='incremental'" in config
+    assert 'pre_hook=["{% if is_incremental() %}delete from {{ this }}{% endif %}"]' in config
+    statements = hooks()
+    assert statements[-1] == "analyze {{ this }}"
+    kinds = list(returned("quarantine_fact_kinds"))
+    by_kind = statements[: len(kinds)]
+    for statement, kind in zip(by_kind, kinds, strict=True):
+        assert statement.count("quarantine_insert(this, quarantine_attributed(") == 1, kind
+        assert f"quarantine_fact_findings('{kind}', [" in statement, kind
+        codes = ["demo_web"] if kind == "sessions_daily" else [*SHAPED_ADS, "google_ads"]
+        read = re.findall(r"ref\('(stg_\w+)'\)", statement)
+        assert read == [*(f"stg_{code}__{kind}" for code in codes), *["stg_loads__newest_days"] * 2]
+    raw, collapse, stop = statements[len(kinds) : -1]
+    assert raw.startswith("{% for source_name in quarantine_raw_tables() %}")
+    assert raw.count("quarantine_insert(") == 1
+    assert "quarantine_collapse_findings([" in collapse
+    assert "source('core', 'dim_account'), source('core', 'ad_stats_campaign_daily')" in collapse
+    assert "quarantine_stop_findings(this, source('core', 'loads'))" in stop
+    # dbt orders the model after what the statements read.
+    model = G1.read_text(encoding="utf-8")
+    for name in set(re.findall(r"ref\('(stg_\w+)'\)", config)):
+        assert (
+            f"-- depends_on: {{{{ ref('{name}') }}}}" in model or name == "stg_loads__newest_days"
+        )
+
+
+# The ad platforms of the demo.
+SHAPED_ADS = ["demo_search", "demo_social", "demo_video"]
+
+
+def test_g1_reads_the_fact_tables_of_raw_of_each_source_that_names_an_account():
+    # Rows outside the window of their load and a spend with more than six places are lost in
+    # staging, which reads by window and rounds to numeric(18,6): the checks read raw as it is.
+    from agoranomos_pipelines.demo import platforms
+
+    tables = returned("quarantine_raw_tables")
+    newest = (DBT / "macros" / "newest_load.sql").read_text(encoding="utf-8")
+    named = {
+        source
+        for source, account in re.findall(
+            r"^    '(raw_\w+)': \((none|'[^']*'|\"[^\"]*\"),", newest, re.M
+        )
+        if account != "none"
+    }
+    assert set(tables) == named
+    for code in [*SHAPED_ADS, "demo_web"]:
+        dataset = platforms.PLATFORMS[code].dataset
+        assert [table for table, _, _ in tables[dataset]] == [
+            fact.table for fact in platforms.PLATFORMS[code].facts
+        ], code
+    assert tables["raw_google_ads"] == tables["raw_demo_search"]
+    # The spend of each table, as the shape of its platform reads it.
+    shapes = {
+        "raw_demo_search": "google_ads_v25.sql",
+        "raw_demo_social": "meta_v26.sql",
+        "raw_demo_video": "tiktok_v1_3.sql",
+    }
+    for dataset, shape in shapes.items():
+        text = (DBT / "macros" / "shapes" / shape).read_text(encoding="utf-8")
+        for table, spend, micros in tables[dataset]:
+            if spend is not None:
+                cast = "micros_to_number" if micros else "to_number"
+                assert f"{{{{ {cast}('{spend}') }}}} as spend" in text, (dataset, table)
+    assert all(spend is None for _, spend, _ in tables["raw_demo_web"])
+
+
+def test_the_reasons_of_quarantine_are_one_list():
+    reasons = returned("quarantine_reasons")
+    yaml = (INTERMEDIATE / "_intermediate__models.yml").read_text(encoding="utf-8")
+    [values] = re.findall(r"^                values: \[(\"load_failed\".*)\]$", yaml, re.M)
+    assert [value.strip().strip('"') for value in values.split(",")] == reasons
+    docs = (DBT / "models" / "_docs.md").read_text(encoding="utf-8")
+    block = docs[docs.index("{% docs reason %}") :]
+    block = block[: block.index("{% enddocs %}")]
+    assert re.findall(r"\b([a-z]+(?:_[a-z]+)+)\b", block)[: len(reasons)] == reasons
+    text = QUARANTINE.read_text(encoding="utf-8")
+    body = text[text.index("{%- endmacro %}") :]
+    for reason in reasons:
+        assert f"'{reason}'" in body, reason
+
+
+def test_an_account_in_quarantine_stays_out_of_the_marts_of_the_old_path():
+    # Until #201 serves the marts from the core, they are tables of staging that every run builds
+    # whole: each intermediate model that reads the data of an account from staging leaves out an
+    # account that the checks hold, as int_accounts__current does for the core.
+    exempt = {
+        "int_g1_failures",
+        "int_accounts__current",
+        # Their accounts are those of int_accounts__current.
+        "int_campaigns__current",
+        "int_ad_groups__current",
+        "int_ads__current",
+        # The conversion actions and the rates are not the data of an account.
+        "int_conversion_actions__resolved",
+        "int_fx_rates__filled",
+    }
+    platforms = (*SHAPED_ADS, "demo_web", "google_ads")
+    filtered = 0
+    for path in sorted(INTERMEDIATE.glob("*.sql")):
+        text = path.read_text(encoding="utf-8")
+        reads = [
+            name
+            for name in referenced(text)
+            if name.startswith(tuple(f"stg_{p}__" for p in platforms))
+        ]
+        if path.stem in exempt or not reads:
+            continue
+        unions = text.count("as unioned\n")
+        filters = text.count("{{ not_in_quarantine(ref('int_g1_failures'), ")
+        assert filters >= 1, path.stem
+        assert filters == max(unions, 1), path.stem
+        filtered += 1
+    assert filtered == 10
+
+
+def test_g1a_and_the_stop_of_a_source_follow_adr_0035():
+    # G1a against the core as the runs before left it, by load, with a threshold in the vars; the
+    # stop by a filter in SQL, strictly more than half of the pinned accounts of the source, and a
+    # warning, not a test at error, which would stop the healthy sources too (#188).
+    project = PROJECT_FILE.read_text(encoding="utf-8")
+    assert "\n  quarantine_spend_fall: 0.5\n" in project
+    collapse = macro_text("quarantine_collapse_findings")
+    assert "read_spend < held_spend * (1 - {{ var('quarantine_spend_fall') }})" in collapse
+    assert "case when read_days = 0 then 'empty_window' else 'spend_fall' end" in collapse
+    assert "group by w.source, w.account_id, w.load_id" in collapse
+    stop = macro_text("quarantine_stop_findings")
+    assert "where status = 'pinned'" in stop
+    assert "having h.accounts * 2 > count(*)" in stop
+    sources = (STAGING / "loads" / "_loads__sources.yml").read_text(encoding="utf-8")
+    tables = re.findall(r"^      - name: (\w+)\n", sources, flags=re.M)
+    assert tables == ["loads", "dim_account", "ad_stats_campaign_daily"]
+    for name in ("assert_no_account_is_in_quarantine", "assert_no_source_is_stopped"):
+        text = (DBT / "tests" / f"{name}.sql").read_text(encoding="utf-8")
+        assert "{{ config(severity='warn') }}" in text, name
+
+
+def test_the_journal_of_quarantine_keeps_the_first_finding_of_each_load():
+    # A load stays pinned until the core accepts it, so every run checks it again: the merge takes
+    # only the loads, accounts and reasons that the journal does not hold yet, with the run of dbt
+    # that found them and when.
+    text = (CORE / "account_quarantine.sql").read_text(encoding="utf-8")
+    assert "from {{ ref('int_g1_failures') }}\n    where load_id is not null\n" in text
+    assert "left join existing as q\n" in text
+    assert text.rstrip().endswith("where q.source is null")
+    assert "'{{ invocation_id }}'::uuid as invocation_id" in text
+    assert "now()::timestamptz as found_at" in text
+    ops = (DBT / "models" / "ops" / "ops_quarantine.sql").read_text(encoding="utf-8")
+    assert referenced(ops) == ["int_g1_failures", "account_quarantine", "source:core.loads"]

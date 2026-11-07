@@ -2,13 +2,18 @@
 -- to the default client (ADR-0024). Its tests check each platform against the list of platforms.
 -- depends_on: {{ ref('int_ad_platforms__unioned') }}
 with accounts as (
-    select * from {{ ref('stg_demo_search__accounts') }}
-    union all
-    select * from {{ ref('stg_demo_social__accounts') }}
-    union all
-    select * from {{ ref('stg_demo_video__accounts') }}
-    union all
-    select * from {{ ref('stg_google_ads__accounts') }}
+    select *
+    from (
+        select * from {{ ref('stg_demo_search__accounts') }}
+        union all
+        select * from {{ ref('stg_demo_social__accounts') }}
+        union all
+        select * from {{ ref('stg_demo_video__accounts') }}
+        union all
+        select * from {{ ref('stg_google_ads__accounts') }}
+    ) as unioned
+    -- An account in quarantine in this run stays out of the marts, as out of the core (ADR-0035).
+    where {{ not_in_quarantine(ref('int_g1_failures'), 'unioned.platform', 'unioned.account_id') }}
 ),
 
 mapped as (

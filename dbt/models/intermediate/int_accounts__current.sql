@@ -4,7 +4,10 @@
 -- that each row of a fact has its account; with the first and the last day of the statistics of
 -- its campaigns that this run reads. The registry core.dim_account takes its rows from here, and
 -- the views of the entities take their accounts from here, so an account that is to stay out of
--- the core in a run, as one in quarantine (ADR-0035), is left out here once and for all of them.
+-- the core in a run, as one in quarantine (ADR-0035), is left out here once and for all of them:
+-- each account with a row in int_g1_failures, after core.account_quarantine has recorded it. So a
+-- stub, an account that no list gives, never enters: the checks hold it out as unknown_account.
+-- depends_on: {{ ref('account_quarantine') }}
 with listed as (
     select platform, account_id, account_name, currency, time_zone, manager_account_id, account_status
     from {{ ref('stg_demo_search__accounts') }}
@@ -73,3 +76,4 @@ left join listed as l
     on l.platform = n.platform and l.account_id = n.account_id
 left join reported as r
     on r.platform = n.platform and r.account_id = n.account_id
+where {{ not_in_quarantine(ref('int_g1_failures'), 'n.platform', 'n.account_id') }}

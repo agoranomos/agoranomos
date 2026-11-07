@@ -9,23 +9,33 @@
 -- A test checks the ads of each ad group against the ad group, so it runs after both.
 -- depends_on: {{ ref('int_ad_stats_ad_group__unioned') }}
 with stats as (
-    select * from {{ ref('stg_demo_search__ad_stats') }}
-    union all
-    select * from {{ ref('stg_demo_social__ad_stats') }}
-    union all
-    select * from {{ ref('stg_demo_video__ad_stats') }}
-    union all
-    select * from {{ ref('stg_google_ads__ad_stats') }}
+    select *
+    from (
+        select * from {{ ref('stg_demo_search__ad_stats') }}
+        union all
+        select * from {{ ref('stg_demo_social__ad_stats') }}
+        union all
+        select * from {{ ref('stg_demo_video__ad_stats') }}
+        union all
+        select * from {{ ref('stg_google_ads__ad_stats') }}
+    ) as unioned
+    -- An account in quarantine in this run stays out of the marts, as out of the core (ADR-0035).
+    where {{ not_in_quarantine(ref('int_g1_failures'), 'unioned.platform', 'unioned.account_id') }}
 ),
 
 conversions as (
-    select * from {{ ref('stg_demo_search__ad_conversions') }}
-    union all
-    select * from {{ ref('stg_demo_social__ad_conversions') }}
-    union all
-    select * from {{ ref('stg_demo_video__ad_conversions') }}
-    union all
-    select * from {{ ref('stg_google_ads__ad_conversions') }}
+    select *
+    from (
+        select * from {{ ref('stg_demo_search__ad_conversions') }}
+        union all
+        select * from {{ ref('stg_demo_social__ad_conversions') }}
+        union all
+        select * from {{ ref('stg_demo_video__ad_conversions') }}
+        union all
+        select * from {{ ref('stg_google_ads__ad_conversions') }}
+    ) as unioned
+    -- An account in quarantine in this run stays out of the marts, as out of the core (ADR-0035).
+    where {{ not_in_quarantine(ref('int_g1_failures'), 'unioned.platform', 'unioned.account_id') }}
 ),
 
 primary_conversions as (
