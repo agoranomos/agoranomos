@@ -297,9 +297,20 @@ def test_the_settings_load_first_then_the_pin_and_each_node_is_built_with_its_te
     built = [task for task in downstream if task not in (SETTINGS, PIN, ELEMENTARY)]
     assert reached == set(built), "a task of dbt does not wait for the tables of elementary"
     assert MART_BUILD in built, sorted(built)[:5]
-    # One task of dbt build for each model and each seed: no task runs a node or its tests alone.
-    alone = [task for task in built if not task.endswith(("_model_build", "_seed_build"))]
+    # One task of dbt build for each model, each seed and each snapshot of the versions of the core
+    # (ADR-0036): no task runs a node or its tests alone.
+    alone = [
+        task
+        for task in built
+        if not task.endswith(("_model_build", "_seed_build", "_snapshot_build"))
+    ]
     assert not alone, sorted(alone)[:5]
+    snapshots = sorted(task for task in built if task.endswith("_snapshot_build"))
+    assert snapshots == [
+        "dbt.dim_ad_group_versions_snapshot_build",
+        "dbt.dim_ad_versions_snapshot_build",
+        "dbt.dim_campaign_versions_snapshot_build",
+    ], snapshots
     states = {i["task_id"]: i["state"] for i in task_instances(airflow_url, token, transform_run)}
     assert set(states.values()) == {"success"}, sorted(
         t for t, s in states.items() if s != "success"

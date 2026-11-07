@@ -1,0 +1,241 @@
+snapshots:
+  - name: dim_campaign_versions
+    description: >-
+      The versions of the campaigns of every ad platform, one row for each version, from
+      dbt_valid_from until dbt_valid_to: each run of the transform compares the current attributes
+      of each campaign, from int_campaigns__current, with its version that holds, and a change of
+      its name, status, type, dates or budget closes that version and starts a new one. A campaign
+      that a run does not read keeps its version, so the newest version of every campaign holds,
+      until the end of 9999. account_sk, campaign_id and dbt_valid_from are its key. The versions
+      start at the first run of the transform that builds them, and hold the names that a campaign
+      had since then.
+    config:
+      unique_key: [account_sk, campaign_id]
+      check_cols:
+        [campaign_name, campaign_status, campaign_type, start_date, end_date, budget, budget_period]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [account_sk, campaign_id, dbt_valid_from]
+          config: {tags: [critical]}
+      - versions_follow_each_other:
+          arguments:
+            key_columns: [account_sk, campaign_id]
+            current_to: "'9999-12-31 00:00:00'::timestamp"
+          config: {tags: [critical]}
+    columns:
+      - name: account_sk
+        description: >-
+          The account of the campaign, account_sk of core.dim_account.
+      - name: campaign_id
+        description: >-
+          The ID of the campaign as the ad platform gives it, a number, unique inside its account.
+      - name: campaign_name
+        description: >-
+          The name of the campaign in this version, as the ad platform gave it, or, for a campaign
+          that only the statistics named, as its newest row of statistics carried it.
+      - name: campaign_status
+        description: >-
+          The status of the campaign in this version, as the ad platform wrote it, such as ENABLED,
+          PAUSED or REMOVED for Google, ACTIVE or DELETED for Meta, or ENABLE for TikTok; none for
+          a campaign that only the statistics named.
+      - name: campaign_state
+        description: >-
+          The status of the campaign in this version in the words of every platform: active,
+          paused, removed, or other for a status that none of these names.
+      - name: campaign_type
+        description: >-
+          The type of the campaign in this version, as the ad platform gave it: the advertising
+          channel type of Google, such as SEARCH or PERFORMANCE_MAX, or the objective of Meta or of
+          TikTok.
+      - name: start_date
+        description: >-
+          The first day on which the campaign could serve in this version; none, as no connector
+          gives it yet.
+      - name: end_date
+        description: >-
+          The last day on which the campaign could serve in this version; none, as no connector
+          gives it yet.
+      - name: budget
+        description: >-
+          The budget of the campaign in this version, in the currency of its account; none, as no
+          connector gives it yet.
+      - name: budget_period
+        description: >-
+          The period of the budget of the campaign in this version; none, as no connector gives it
+          yet.
+      - name: dbt_scd_id
+        description: >-
+          The ID of the version, a hash of the key of the campaign and of the start of the version,
+          which dbt gives it.
+        data_tests:
+          - unique:
+              config: {tags: [critical]}
+      - name: dbt_updated_at
+        description: >-
+          When the run of the transform that saw this version started, in UTC, as dbt records it.
+      - name: dbt_valid_from
+        description: >-
+          When the version starts: when the run of the transform that first saw these values
+          started, in UTC.
+      - name: dbt_valid_to
+        description: >-
+          When the version ends: when the run of the transform that saw the next one started, in
+          UTC; 9999-12-31 for the version that holds.
+  - name: dim_ad_group_versions
+    description: >-
+      The versions of the ad groups of every ad platform, ad sets of Meta among them, one row for
+      each version, from dbt_valid_from until dbt_valid_to: each run of the transform compares the
+      current attributes of each ad group, from int_ad_groups__current, with its version that
+      holds, and a change of its name, status, type, dates or budget closes that version and starts
+      a new one. An ad group that a run does not read keeps its version, so the newest version of
+      every ad group holds, until the end of 9999. account_sk, ad_group_id and dbt_valid_from are
+      its key. The versions start at the first run of the transform that builds them.
+    config:
+      unique_key: [account_sk, ad_group_id]
+      check_cols:
+        [ad_group_name, ad_group_status, ad_group_type, start_date, end_date, budget, budget_period]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [account_sk, ad_group_id, dbt_valid_from]
+          config: {tags: [critical]}
+      - versions_follow_each_other:
+          arguments:
+            key_columns: [account_sk, ad_group_id]
+            current_to: "'9999-12-31 00:00:00'::timestamp"
+          config: {tags: [critical]}
+    columns:
+      - name: account_sk
+        description: >-
+          The account of the ad group, account_sk of core.dim_account.
+      - name: ad_group_id
+        description: >-
+          The ID of the ad group as the ad platform gives it, a number, unique inside its account.
+      - name: campaign_id
+        description: >-
+          The campaign of the ad group, campaign_id of core.dim_campaign in the same account.
+      - name: ad_group_name
+        description: >-
+          The name of the ad group in this version, as the ad platform gave it, or, for an ad group
+          that only the statistics named, as its newest row of statistics carried it.
+      - name: ad_group_status
+        description: >-
+          The status of the ad group itself in this version, as the ad platform wrote it, such as
+          ENABLED or REMOVED for Google, ACTIVE or DELETED for Meta, or ENABLE for TikTok; none for
+          an ad group that only the statistics named.
+      - name: ad_group_state
+        description: >-
+          The status of the ad group in this version in the words of every platform: active,
+          paused, removed, or other for a status that none of these names.
+      - name: ad_group_type
+        description: >-
+          The type of the ad group in this version, as the ad platform gave it: the type of Google,
+          such as SEARCH_STANDARD, or the optimization goal of the ad set of Meta or of the ad group
+          of TikTok.
+      - name: start_date
+        description: >-
+          The first day on which the ad group could serve in this version; none, as no connector
+          gives it yet.
+      - name: end_date
+        description: >-
+          The last day on which the ad group could serve in this version; none, as no connector
+          gives it yet.
+      - name: budget
+        description: >-
+          The budget of the ad group in this version, in the currency of its account; none, as no
+          connector gives it yet.
+      - name: budget_period
+        description: >-
+          The period of the budget of the ad group in this version; none, as no connector gives it
+          yet.
+      - name: dbt_scd_id
+        description: >-
+          The ID of the version, a hash of the key of the ad group and of the start of the version,
+          which dbt gives it.
+        data_tests:
+          - unique:
+              config: {tags: [critical]}
+      - name: dbt_updated_at
+        description: >-
+          When the run of the transform that saw this version started, in UTC, as dbt records it.
+      - name: dbt_valid_from
+        description: >-
+          When the version starts: when the run of the transform that first saw these values
+          started, in UTC.
+      - name: dbt_valid_to
+        description: >-
+          When the version ends: when the run of the transform that saw the next one started, in
+          UTC; 9999-12-31 for the version that holds.
+  - name: dim_ad_versions
+    description: >-
+      The versions of the ads of every ad platform, one row for each version, from dbt_valid_from
+      until dbt_valid_to: each run of the transform compares the current attributes of each ad,
+      from int_ads__current, with its version that holds, and a change of its name, status or type
+      closes that version and starts a new one. An ad that a run does not read keeps its version,
+      so the newest version of every ad holds, until the end of 9999. account_sk, ad_group_id,
+      ad_id and dbt_valid_from are its key, as an ad is defined only inside its ad group. The
+      versions start at the first run of the transform that builds them.
+    config:
+      unique_key: [account_sk, ad_group_id, ad_id]
+      check_cols: [ad_name, ad_status, ad_type]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [account_sk, ad_group_id, ad_id, dbt_valid_from]
+          config: {tags: [critical]}
+      - versions_follow_each_other:
+          arguments:
+            key_columns: [account_sk, ad_group_id, ad_id]
+            current_to: "'9999-12-31 00:00:00'::timestamp"
+          config: {tags: [critical]}
+    columns:
+      - name: account_sk
+        description: >-
+          The account of the ad, account_sk of core.dim_account.
+      - name: ad_group_id
+        description: >-
+          The ad group of the ad, ad_group_id of core.dim_ad_group in the same account.
+      - name: ad_id
+        description: >-
+          The ID of the ad as the ad platform gives it, a number, unique inside its ad group.
+      - name: campaign_id
+        description: >-
+          The campaign of the ad, campaign_id of core.dim_campaign in the same account.
+      - name: ad_name
+        description: >-
+          The name of the ad in this version, as the ad platform gave it, or, for an ad that only
+          the statistics named, as its newest row of statistics carried it; none for a type of ad
+          that has no name on its platform, such as a responsive search ad of Google.
+      - name: ad_status
+        description: >-
+          The status of the ad in this version, as the ad platform wrote it, such as ENABLED or
+          REMOVED for an ad in its ad group of Google, ACTIVE or DELETED for Meta, or ENABLE for
+          TikTok; none for an ad that only the statistics named.
+      - name: ad_state
+        description: >-
+          The status of the ad in this version in the words of every platform: active, paused,
+          removed, or other for a status that none of these names.
+      - name: ad_type
+        description: >-
+          The type of the ad in this version, as the ad platform gave it: the type of Google, such
+          as RESPONSIVE_SEARCH_AD, or the format of TikTok, such as SINGLE_VIDEO; none for Meta,
+          whose ads have no type.
+      - name: dbt_scd_id
+        description: >-
+          The ID of the version, a hash of the key of the ad and of the start of the version, which
+          dbt gives it.
+        data_tests:
+          - unique:
+              config: {tags: [critical]}
+      - name: dbt_updated_at
+        description: >-
+          When the run of the transform that saw this version started, in UTC, as dbt records it.
+      - name: dbt_valid_from
+        description: >-
+          When the version starts: when the run of the transform that first saw these values
+          started, in UTC.
+      - name: dbt_valid_to
+        description: >-
+          When the version ends: when the run of the transform that saw the next one started, in
+          UTC; 9999-12-31 for the version that holds.

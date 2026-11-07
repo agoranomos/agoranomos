@@ -8,8 +8,9 @@ written, and no task of dbt runs. Then one task pins the finished loads of every
 core.loads (ADR-0046), and the run reads those and no other: a load that ends while the run runs,
 between two of its tasks of dbt, waits for the next run. Then it runs the dbt project through
 Cosmos, as the transformer role: the seeds, the staging models of each platform, the steps that the
-platforms share, and the marts, each built with its tests in one task, dbt build (ADR-0025,
-ADR-0028), and the views of the Ops collection. A failed critical test stops the models that read
+platforms share, the dimensions of the core with the snapshots of the versions of the entities
+(ADR-0036), and the marts, each built with its tests in one task, dbt build (ADR-0025, ADR-0028),
+and the views of the Ops collection. A failed critical test stops the models that read
 it, and the marts keep their data. Before them, one task builds the tables of elementary in the
 schema ops, into which the hooks of elementary in every task of dbt write the results of its models
 and tests (ADR-0029). The DAG runs when each of the five platforms of the demo has loaded since its

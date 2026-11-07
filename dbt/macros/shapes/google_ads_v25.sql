@@ -88,6 +88,19 @@ from {{ relation }}
 where not customer__manager
 {% endmacro %}
 
+{#- The common state of a campaign, an ad group or an ad of Google Ads, from its status (ADR-0036):
+    ENABLED is active, PAUSED paused and REMOVED removed, the same values for the three levels;
+    UNKNOWN, UNSPECIFIED and a status without one are other (CampaignStatus, AdGroupStatus and
+    AdGroupAdStatus of the API v25 and v26, as of November 2026). -#}
+{% macro google_ads_state(status) -%}
+    case {{ status }}
+        when 'ENABLED' then 'active'
+        when 'PAUSED' then 'paused'
+        when 'REMOVED' then 'removed'
+        else 'other'
+    end
+{%- endmacro %}
+
 {#- The versions of the campaigns that dlt keeps (scd2). -#}
 {% macro google_ads_campaigns(relation, platform) %}
 select
@@ -96,6 +109,7 @@ select
     campaign__id as campaign_id,
     {{ to_name('campaign__name') }} as observed_name,
     campaign__status as campaign_status,
+    {{ google_ads_state('campaign__status') }} as campaign_state,
     campaign__advertising_channel_type as campaign_type,
     _dlt_valid_from as valid_from,
     _dlt_valid_to as valid_to
@@ -111,6 +125,7 @@ select
     ad_group__id as ad_group_id,
     {{ to_name('ad_group__name') }} as observed_name,
     ad_group__status as ad_group_status,
+    {{ google_ads_state('ad_group__status') }} as ad_group_state,
     ad_group__type as ad_group_type,
     _dlt_valid_from as valid_from,
     _dlt_valid_to as valid_to
@@ -128,6 +143,7 @@ select
     ad_group_ad__ad__id as ad_id,
     {{ to_name('ad_group_ad__ad__name') }} as observed_name,
     ad_group_ad__status as ad_status,
+    {{ google_ads_state('ad_group_ad__status') }} as ad_state,
     ad_group_ad__ad__type as ad_type,
     _dlt_valid_from as valid_from,
     _dlt_valid_to as valid_to

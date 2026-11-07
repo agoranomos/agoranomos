@@ -102,6 +102,19 @@ select
 from {{ relation }}
 {% endmacro %}
 
+{#- The common state of a campaign, an ad group or an ad of TikTok, from its operation_status
+    (ADR-0036): ENABLE is active, DISABLE paused and DELETE removed, the values with which the API
+    sets the status of each level (StatusOptType of the official SDK of the API for Business, as of
+    November 2026); any other value is other. -#}
+{% macro tiktok_state(status) -%}
+    case {{ status }}
+        when 'ENABLE' then 'active'
+        when 'DISABLE' then 'paused'
+        when 'DELETE' then 'removed'
+        else 'other'
+    end
+{%- endmacro %}
+
 {% macro tiktok_campaigns(relation, platform) %}
 select
     '{{ platform }}' as platform,
@@ -109,6 +122,7 @@ select
     campaign_id,
     {{ to_name('campaign_name') }} as observed_name,
     operation_status as campaign_status,
+    {{ tiktok_state('operation_status') }} as campaign_state,
     objective_type as campaign_type,
     _dlt_valid_from as valid_from,
     _dlt_valid_to as valid_to
@@ -124,6 +138,7 @@ select
     adgroup_id as ad_group_id,
     {{ to_name('adgroup_name') }} as observed_name,
     operation_status as ad_group_status,
+    {{ tiktok_state('operation_status') }} as ad_group_state,
     optimization_goal as ad_group_type,
     _dlt_valid_from as valid_from,
     _dlt_valid_to as valid_to
@@ -140,6 +155,7 @@ select
     ad_id,
     {{ to_name('ad_name') }} as observed_name,
     operation_status as ad_status,
+    {{ tiktok_state('operation_status') }} as ad_state,
     ad_format as ad_type,
     _dlt_valid_from as valid_from,
     _dlt_valid_to as valid_to

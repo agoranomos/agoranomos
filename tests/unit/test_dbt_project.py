@@ -1119,6 +1119,11 @@ INTERMEDIATE_TESTS = {
     ),
     "int_fx_rates__filled": (["rate_date", "currency"], ["rate", "rate_source"], {}, []),
     "int_web_sessions__unioned": (SESSIONS_KEY, ["client_id", "currency"], {}, [TO_RATES]),
+    # The views over which the core takes its dimensions and their versions (ADR-0036).
+    "int_accounts__current": (ACCOUNT_KEY, [], {}, []),
+    "int_campaigns__current": ([*ACCOUNT_KEY, "campaign_id"], [], {}, []),
+    "int_ad_groups__current": ([*ACCOUNT_KEY, "ad_group_id"], ["campaign_id"], {}, []),
+    "int_ads__current": ([*ACCOUNT_KEY, "ad_group_id", "ad_id"], ["campaign_id"], {}, []),
 }
 COMPOSITE = (
     r"^      - relationships_composite:\n          arguments:\n            columns: \[(.*)\]\n"
@@ -1418,10 +1423,20 @@ def test_every_union_of_the_platforms_reads_google_ads_and_the_loads_show_it():
         "int_ads__unioned": "stg_google_ads__ads",
         "int_ad_stats_ad_group__unioned": "stg_google_ads__ad_group_stats",
         "int_ad_stats_ad__unioned": "stg_google_ads__ad_stats",
+        "int_accounts__current": [
+            "stg_google_ads__accounts",
+            "stg_google_ads__campaign_stats",
+            "stg_demo_web__properties",
+            "stg_demo_web__sessions_daily",
+        ],
+        "int_campaigns__current": ["stg_google_ads__campaigns", "stg_google_ads__campaign_stats"],
+        "int_ad_groups__current": ["stg_google_ads__ad_groups", "stg_google_ads__ad_group_stats"],
+        "int_ads__current": ["stg_google_ads__ads", "stg_google_ads__ad_stats"],
     }
     for model, staged in unions.items():
         text = (INTERMEDIATE / f"{model}.sql").read_text(encoding="utf-8")
-        assert f"from {{{{ ref('{staged}') }}}}" in text, model
+        for name in [staged] if isinstance(staged, str) else staged:
+            assert f"from {{{{ ref('{name}') }}}}" in text, (model, name)
     # And the conversion actions that the accounts list, which say which of them are primary.
     resolved = (INTERMEDIATE / "int_conversion_actions__resolved.sql").read_text(encoding="utf-8")
     assert "from {{ ref('stg_google_ads__conversion_actions') }}" in resolved
@@ -1430,6 +1445,8 @@ def test_every_union_of_the_platforms_reads_google_ads_and_the_loads_show_it():
 
 
 PROJECT_FILE = DBT / "dbt_project.yml"
+SNAPSHOTS = DBT / "snapshots"
+SNAPSHOTS_FILE = SNAPSHOTS / "_snapshots.yml"
 # The directories of models whose tests take the tag critical from dbt_project.yml, by the
 # directory of their YAML file, as dbt gives the fqn of a generic test (dbt-core 1.12.6).
 TAGGED_DIRECTORIES = ("staging", "marts")
@@ -1477,16 +1494,18 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
     # ADR-0038: the tag critical marks the tests that block, every test with the severity error,
     # for a run of them by hand, dbt build --select tag:critical (CONTRIBUTING.md). Tags add up
     # and none can be taken back, so a directory gives the tag only where every test of it blocks:
-    # the staging models and the marts. The intermediate models hold a warning, and the YAML of
-    # the seeds lies at the root of seeds, so each of their tests that blocks carries the tag in
-    # its own config, as does the singular test that blocks.
+    # the staging models and the marts. The intermediate models and the dimensions of the core hold
+    # a warning, and the YAML of the seeds and that of the snapshots lie outside models, so each of
+    # their tests that blocks carries the tag in its own config, as does the singular test that
+    # blocks.
     project = PROJECT_FILE.read_text(encoding="utf-8")
     assert "\ndata_tests:\n  agoranomos:\n" in project
     for directory in TAGGED_DIRECTORIES:
         assert f"\n    {directory}:\n      +tags: [critical]\n" in project, directory
     assert project.count("+tags: [critical]") == len(TAGGED_DIRECTORIES)
     counted = 0
-    for path in [*sorted((DBT / "models").rglob("*.yml")), SEEDS / "_seeds.yml"]:
+    files = [*sorted((DBT / "models").rglob("*.yml")), SEEDS / "_seeds.yml", SNAPSHOTS_FILE]
+    for path in files:
         relative = path.relative_to(DBT)
         by_directory = relative.parts[0] == "models" and relative.parts[1] in TAGGED_DIRECTORIES
         tests = generic_tests(path.read_text(encoding="utf-8"))
@@ -1496,7 +1515,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 581, counted
+    assert counted == 609, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text
@@ -1515,3 +1534,233 @@ def test_each_name_of_a_shape_goes_through_to_name():
         for line in path.read_text(encoding="utf-8").splitlines():
             if name.search(line):
                 assert "to_name(" in line, (path.name, line)
+
+
+CORE = DBT / "models" / "core"
+# The migrations that create the dimensions and the registries of the core (ADR-0036).
+DIMENSION_MIGRATIONS = ("0003_create_the_registries.sql", "0004_create_the_dimensions.sql")
+COMMENT = re.compile(
+    r"^COMMENT ON (TABLE|COLUMN) core\.(\w+)(?:\.(\w+))? IS\n'((?:[^']|'')*)';$", flags=re.M
+)
+CREATE = re.compile(r"^CREATE TABLE core\.(\w+) \(\n(.*?)\n\);$", flags=re.M | re.S)
+# The registries, with their surrogate key and the natural key on which the model merges.
+REGISTRIES = {
+    "dim_account": ("account_sk", ["platform", "account_id"]),
+    "dim_conversion_action": ("conversion_action_sk", ["platform", "conversion_action_id"]),
+}
+# The views of staging over which the core takes the entities and their versions.
+ENTITIES = {
+    "dim_campaign": "int_campaigns__current",
+    "dim_ad_group": "int_ad_groups__current",
+    "dim_ad": "int_ads__current",
+}
+# The end of a version that holds (dbt_valid_to_current), in dbt_project.yml and in the tests of
+# the versions.
+CURRENT_TO = "\"'9999-12-31 00:00:00'::timestamp\""
+
+
+def dimension_tables() -> dict[str, dict]:
+    """The dimensions and registries of the migrations: for each table, its columns in order, its
+    key, its natural key where it has one, and the comments of the table and of its columns."""
+    text = "".join((MIGRATIONS / name).read_text(encoding="utf-8") for name in DIMENSION_MIGRATIONS)
+    tables: dict[str, dict] = {}
+    for name, body in CREATE.findall(text):
+        columns, key, unique = [], [], []
+        for raw in body.splitlines():
+            line = raw.strip().rstrip(",")
+            if found := re.fullmatch(r"PRIMARY KEY \((.*)\)", line):
+                key = split(found.group(1))
+            elif found := re.fullmatch(r"UNIQUE \((.*)\)", line):
+                unique = split(found.group(1))
+            elif raw.startswith("  ") and not raw.startswith("   "):
+                column = re.match(r"(\w+) ", line)
+                if column and column.group(1) != "CHECK":
+                    columns.append(column.group(1))
+                    if " PRIMARY KEY" in line:
+                        key = [column.group(1)]
+        tables[name] = {"columns": columns, "key": key, "unique": unique, "comments": {}}
+    for kind, table, column, body in COMMENT.findall(text):
+        tables[table]["comments"][None if kind == "TABLE" else column] = body.replace("''", "'")
+    return tables
+
+
+def folded(block: str, indent: int) -> str:
+    """The description of an item of YAML whose keys are at indent, folded with >- as dbt reads it:
+    its lines joined by spaces."""
+    found = re.search(
+        rf"^ {{{indent}}}description: >-\n((?: {{{indent + 2}}}.*\n?)+)", block, flags=re.M
+    )
+    assert found, block[:80]
+    return " ".join(line.strip() for line in found.group(1).splitlines())
+
+
+def model_config(text: str) -> str:
+    """The text of the config() call of a model."""
+    found = re.search(r"\{\{ config\((.*?)\) \}\}", text, flags=re.S)
+    assert found, text[:80]
+    return found.group(1)
+
+
+def test_the_dimensions_of_the_core_merge_into_the_tables_of_the_migrations():
+    # ADR-0036 and ADR-0038: incremental merge models, never a full refresh, that fail rather than
+    # change their table, which only its owner may, and that write no comment, which needs the
+    # ownership too (ADR-0035). A registry takes its key as coalesce(the key of the table,
+    # nextval), as dbt writes every column, and the merge leaves the key out of what it updates.
+    project = PROJECT_FILE.read_text(encoding="utf-8")
+    section = (
+        "\n    core:\n      +schema: core\n      +materialized: incremental\n"
+        "      +incremental_strategy: merge\n      +full_refresh: false\n"
+        "      +on_schema_change: fail\n      +persist_docs:\n        relation: false\n"
+        "        columns: false\n"
+    )
+    assert section in project
+    tables = dimension_tables()
+    assert {path.stem for path in CORE.glob("*.sql")} == set(tables)
+    for name, table in tables.items():
+        text = (CORE / f"{name}.sql").read_text(encoding="utf-8")
+        config = model_config(text)
+        assert "materialized" not in config, name
+        assert "source(" not in text, name
+        assert "from {{ this }}" in text, name
+        if name in REGISTRIES:
+            sk, natural = REGISTRIES[name]
+            assert table["key"] == [sk], name
+            assert table["unique"] == natural, name
+            assert f"unique_key={natural!r}" in config, name
+            assert f"merge_exclude_columns=[{sk!r}]" in config, name
+            sequence = f"core.{name}_{sk}_seq"
+            assert re.search(rf"coalesce\(\s*\w+\.{sk},\s*nextval\('{sequence}'\)\s*\)", text), name
+        else:
+            key = table["key"]
+            wanted = repr(key[0]) if len(key) == 1 else repr(key)
+            assert f"unique_key={wanted}" in config, name
+            assert "nextval" not in text, name
+
+
+def test_the_descriptions_of_the_core_are_the_comments_of_its_migrations():
+    # The migrations describe the tables of the core in the warehouse, as persist_docs needs the
+    # ownership of a table (ADR-0038): the YAML of each model says the same of the table and of
+    # every column, so that dbt and the warehouse describe them alike.
+    text = (CORE / "_core__models.yml").read_text(encoding="utf-8")
+    tables = dimension_tables()
+    described = blocks(text, 2)
+    assert set(described) == set(tables)
+    for name, table in tables.items():
+        block = described[name]
+        assert folded(block, 4) == table["comments"][None], name
+        columns = blocks(block, 6)
+        assert list(columns) == table["columns"], name
+        for column, item in columns.items():
+            assert folded(item, 8) == table["comments"][column], (name, column)
+
+
+def test_the_views_of_the_core_take_their_accounts_from_one_place():
+    # The registry of accounts and the views of the entities take their accounts from
+    # int_accounts__current, so that an account that stays out of the core in a run, as one in
+    # quarantine, stays out of every dimension by one filter (ADR-0035, ADR-0036).
+    registry = (CORE / "dim_account.sql").read_text(encoding="utf-8")
+    assert "from {{ ref('int_accounts__current') }} as c" in registry
+    for dimension, view in ENTITIES.items():
+        text = (INTERMEDIATE / f"{view}.sql").read_text(encoding="utf-8")
+        assert "from {{ ref('int_accounts__current') }} as a" in text, view
+        assert "join {{ ref('dim_account') }} as d" in text, view
+        assert "from {{ source('core', 'loads') }}" in text, view
+        model = (CORE / f"{dimension}.sql").read_text(encoding="utf-8")
+        assert f"from {{{{ ref('{view}') }}}}" in model, dimension
+
+
+def test_the_versions_of_the_entities_are_snapshots_of_the_views_of_staging():
+    # ADR-0036 and R1 (#187): snapshots with the strategy check on a list of columns, hard_deletes
+    # ignore and dbt_valid_to_current, in core, which transformer owns and so describes; each
+    # reads a view of staging and never a source, which fails while its table does not exist.
+    project = PROJECT_FILE.read_text(encoding="utf-8")
+    assert 'snapshot-paths: ["snapshots"]' in project
+    section = (
+        "\nsnapshots:\n  agoranomos:\n    +schema: core\n    +strategy: check\n"
+        f"    +hard_deletes: ignore\n    +dbt_valid_to_current: {CURRENT_TO}\n"
+        "    +persist_docs:\n      relation: true\n      columns: true\n"
+    )
+    assert section in project
+    tables = dimension_tables()
+    text = SNAPSHOTS_FILE.read_text(encoding="utf-8")
+    described = blocks(text, 2)
+    wanted = {f"{dimension}_versions": view for dimension, view in ENTITIES.items()}
+    assert set(described) == set(wanted)
+    assert {path.stem for path in SNAPSHOTS.glob("*.sql")} == set(wanted)
+    meta = ["dbt_scd_id", "dbt_updated_at", "dbt_valid_from", "dbt_valid_to"]
+    for name, view in wanted.items():
+        sql = (SNAPSHOTS / f"{name}.sql").read_text(encoding="utf-8")
+        assert f"{{% snapshot {name} %}}" in sql, name
+        assert "{% endsnapshot %}" in sql, name
+        assert referenced(sql) == [view], name
+        selected = re.findall(r" as (\w+),?$", sql, flags=re.M)
+        block = described[name]
+        key = tables[name.removesuffix("_versions")]["key"]
+        assert f"      unique_key: [{', '.join(key)}]" in block, name
+        check = re.search(r"check_cols:\s*\[(.*?)\]", block, flags=re.S)
+        assert check, name
+        checked = split(check.group(1))
+        assert set(checked) <= set(selected) - set(key), name
+        assert not any(column.endswith("_state") for column in checked), name
+        assert set(blocks(block, 6)) == {*selected, *meta}, name
+        assert f"            current_to: {CURRENT_TO}\n" in block, name
+        assert f"            key_columns: [{', '.join(key)}]\n" in block, name
+        assert f"            columns: [{', '.join([*key, 'dbt_valid_from'])}]\n" in block, name
+
+
+# The common state of an entity by the status of each shape of an API (ADR-0036), within the values
+# that the tables of the core allow.
+STATES = {
+    "google_ads_v25.sql": (
+        "google_ads_state",
+        {"ENABLED": "active", "PAUSED": "paused", "REMOVED": "removed"},
+        ("campaign__status", "ad_group__status", "ad_group_ad__status"),
+    ),
+    "meta_v26.sql": (
+        "meta_state",
+        {"ACTIVE": "active", "PAUSED": "paused", "DELETED": "removed", "ARCHIVED": "removed"},
+        ("status", "status", "status"),
+    ),
+    "tiktok_v1_3.sql": (
+        "tiktok_state",
+        {"ENABLE": "active", "DISABLE": "paused", "DELETE": "removed"},
+        ("operation_status", "operation_status", "operation_status"),
+    ),
+}
+
+
+def test_each_shape_maps_the_statuses_of_its_platform_to_the_common_state():
+    migration = (MIGRATIONS / "0004_create_the_dimensions.sql").read_text(encoding="utf-8")
+    allowed = re.findall(r"_state IN \((.*?)\)", migration)
+    assert len(allowed) == 3
+    assert {value for found in allowed for value in split(found)} == {
+        "'active'",
+        "'paused'",
+        "'removed'",
+        "'other'",
+    }
+    for file, (macro, mapping, statuses) in STATES.items():
+        text = (DBT / "macros" / "shapes" / file).read_text(encoding="utf-8")
+        body = text[text.index(f"{{% macro {macro}(status) -%}}") :]
+        body = body[: body.index("{%- endmacro %}")]
+        found = dict(re.findall(r"when '(\w+)' then '(\w+)'", body))
+        assert found == mapping, file
+        assert "        else 'other'\n" in body, file
+        for level, status in zip(("campaign", "ad_group", "ad"), statuses, strict=True):
+            line = f"    {{{{ {macro}('{status}') }}}} as {level}_state,\n"
+            assert f"as {level}_status,\n{line}" in text, (file, level)
+
+
+def test_the_marts_read_the_old_path_and_nothing_of_the_core():
+    # The dimensions of the core are laid beside the live marts (#177), which switch to views over
+    # the core in one pull request (#201): until then no mart, and no model that a mart reads,
+    # reads a model of the core or a version.
+    core = {path.stem for path in CORE.glob("*.sql")} | {
+        path.stem for path in SNAPSHOTS.glob("*.sql")
+    }
+    parents = {
+        path.stem: set(referenced(path.read_text(encoding="utf-8")))
+        for path in (DBT / "models").rglob("*.sql")
+    }
+    for path in (DBT / "models" / "marts").glob("*.sql"):
+        assert not ({path.stem} | ancestors(path.stem, parents)) & core, path.stem

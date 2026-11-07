@@ -156,7 +156,9 @@ models:
       the seed, else the one that the category of the platform maps to, else other; and whether it
       is primary, as the settings of the deployment say, else, for Google Ads, the flag
       include_in_conversions_metric of the newest version of the action in the accounts, with which
-      Google counts it in its metric of conversions, else the seed, else not. platform and
+      Google counts it in its metric of conversions, else the seed, else not; and, for the registry
+      of conversion actions of the core, the status, the category and that flag of the newest
+      version of the action in the accounts of Google Ads, where they list it. platform and
       conversion_action_id are its key. It reads the staging models of the conversions of each
       platform, stg_google_ads__conversion_actions, seed_conversion_actions and
       stg_settings__conversion_actions. Its tests guard the marts: when one of them fails, dbt does
@@ -185,6 +187,12 @@ models:
         data_tests:
           - not_null:
               config: {tags: [critical]}
+      - name: conversion_action_status
+        description: '{{ doc("conversion_action_status") }}'
+      - name: platform_category
+        description: '{{ doc("platform_category") }}'
+      - name: include_in_conversions_metric
+        description: '{{ doc("include_in_conversions_metric") }}'
   - name: int_ad_conversions__unioned
     description: >-
       The conversions of every ad platform by conversion action, one row for each campaign, day and
@@ -740,3 +748,181 @@ models:
         description: '{{ doc("conversions") }}'
       - name: conversion_value
         description: '{{ doc("conversion_value") }}'
+  - name: int_accounts__current
+    description: >-
+      The accounts of the ad platforms and the properties of web analytics whose data this run of
+      the transform takes into the core, one row each: those that the lists of accounts and of
+      properties give, with their attributes, and those that only the statistics of campaigns or the
+      sessions name, as stubs; with the first and the last day of the statistics of campaigns that
+      this run reads. platform and account_id are its key. The registry core.dim_account takes its
+      rows from it, and int_campaigns__current, int_ad_groups__current and int_ads__current take
+      their accounts from it. It reads the staging models of the accounts, the properties, the
+      statistics of campaigns and the sessions of each platform. Its tests guard the core: when one
+      of them fails, dbt does not build the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id]
+          config: {tags: [critical]}
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+      - name: account_name
+        description: '{{ doc("account_name") }}'
+      - name: currency
+        description: '{{ doc("currency") }}'
+      - name: time_zone
+        description: '{{ doc("time_zone") }}'
+      - name: manager_account_id
+        description: '{{ doc("manager_account_id") }}'
+      - name: account_status
+        description: '{{ doc("account_status") }}'
+      - name: is_stub
+        description: '{{ doc("is_stub") }}'
+      - name: first_report_date
+        description: '{{ doc("first_report_date") }}'
+      - name: last_report_date
+        description: '{{ doc("last_report_date") }}'
+  - name: int_campaigns__current
+    description: >-
+      The campaigns whose data this run of the transform takes into the core, one row each, with
+      their current attributes: the newest version of each campaign that a list of its account
+      gave, whether the newest list still names it or not, and each campaign that only the
+      statistics of campaigns name, as a stub, with the name of its newest row of statistics; with
+      the surrogate of its account, the common state of its status, whether the newest list names
+      it, when a list last named it, and the first and the last day of the statistics that this run
+      reads. platform, account_id and campaign_id are its key. The snapshot dim_campaign_versions
+      and the dimension core.dim_campaign read it. It reads the staging models of the campaigns and
+      of their statistics of each platform, int_accounts__current, core.dim_account and core.loads.
+      Its tests guard the core: when one of them fails, dbt does not build the models that read
+      this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id, campaign_id]
+          config: {tags: [critical]}
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+      - name: account_sk
+        description: '{{ doc("account_sk") }}'
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+      - name: current_name
+        description: '{{ doc("current_name") }}'
+      - name: campaign_status
+        description: '{{ doc("campaign_status") }}'
+      - name: campaign_state
+        description: '{{ doc("campaign_state") }}'
+      - name: campaign_type
+        description: '{{ doc("campaign_type") }}'
+      - name: is_listed
+        description: '{{ doc("is_listed") }}'
+      - name: last_seen_at
+        description: '{{ doc("last_seen_at") }}'
+      - name: first_report_date
+        description: '{{ doc("first_report_date") }}'
+      - name: last_report_date
+        description: '{{ doc("last_report_date") }}'
+  - name: int_ad_groups__current
+    description: >-
+      The ad groups whose data this run of the transform takes into the core, ad sets of Meta among
+      them, one row each, with their campaign and their current attributes: the newest version of
+      each ad group that a list of its account gave, whether the newest list still names it or not,
+      and each ad group that only the statistics of ad groups name, as a stub, with the name and the
+      campaign of its newest row of statistics; with the surrogate of its account, the common state
+      of its status, whether the newest list names it, when a list last named it, and the first and
+      the last day of the statistics that this run reads. platform, account_id and ad_group_id are
+      its key. The snapshot dim_ad_group_versions and the dimension core.dim_ad_group read it. It
+      reads the staging models of the ad groups and of their statistics of each platform,
+      int_accounts__current, core.dim_account and core.loads. Its tests guard the core: when one of
+      them fails, dbt does not build the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id, ad_group_id]
+          config: {tags: [critical]}
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+      - name: account_sk
+        description: '{{ doc("account_sk") }}'
+      - name: ad_group_id
+        description: '{{ doc("ad_group_id") }}'
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
+      - name: current_name
+        description: '{{ doc("current_name") }}'
+      - name: ad_group_status
+        description: '{{ doc("ad_group_status") }}'
+      - name: ad_group_state
+        description: '{{ doc("ad_group_state") }}'
+      - name: ad_group_type
+        description: '{{ doc("ad_group_type") }}'
+      - name: is_listed
+        description: '{{ doc("is_listed") }}'
+      - name: last_seen_at
+        description: '{{ doc("last_seen_at") }}'
+      - name: first_report_date
+        description: '{{ doc("first_report_date") }}'
+      - name: last_report_date
+        description: '{{ doc("last_report_date") }}'
+  - name: int_ads__current
+    description: >-
+      The ads whose data this run of the transform takes into the core, one row each, with their
+      campaign, their ad group and their current attributes: the newest version of each ad that a
+      list of its account gave, whether the newest list still names it or not, and each ad that
+      only the statistics of ads name, as a stub, with the name and the campaign of its newest row
+      of statistics; with the surrogate of its account, the common state of its status, whether the
+      newest list names it, when a list last named it, and the first and the last day of the
+      statistics that this run reads. platform, account_id, ad_group_id and ad_id are its key, as an
+      ad is defined only inside its ad group. The snapshot dim_ad_versions and the dimension
+      core.dim_ad read it. It reads the staging models of the ads and of their statistics of each
+      platform, int_accounts__current, core.dim_account and core.loads. Its tests guard the core:
+      when one of them fails, dbt does not build the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id, ad_group_id, ad_id]
+          config: {tags: [critical]}
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+      - name: account_sk
+        description: '{{ doc("account_sk") }}'
+      - name: ad_group_id
+        description: '{{ doc("ad_group_id") }}'
+      - name: ad_id
+        description: '{{ doc("ad_id") }}'
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
+      - name: current_name
+        description: '{{ doc("current_name") }}'
+      - name: ad_status
+        description: '{{ doc("ad_status") }}'
+      - name: ad_state
+        description: '{{ doc("ad_state") }}'
+      - name: ad_type
+        description: '{{ doc("ad_type") }}'
+      - name: is_listed
+        description: '{{ doc("is_listed") }}'
+      - name: last_seen_at
+        description: '{{ doc("last_seen_at") }}'
+      - name: first_report_date
+        description: '{{ doc("first_report_date") }}'
+      - name: last_report_date
+        description: '{{ doc("last_report_date") }}'

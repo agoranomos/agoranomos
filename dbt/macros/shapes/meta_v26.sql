@@ -89,6 +89,21 @@ select
 from {{ relation }}
 {% endmacro %}
 
+{#- The common state of a campaign, an ad set or an ad of Meta, from its status, which the API names
+    status and configured_status (ADR-0036): ACTIVE is active, PAUSED paused, and DELETED and
+    ARCHIVED removed, as an archived object no longer runs and ADR-0036 counts it among the removed
+    ones; any other value is other (the reference of the campaign of the Marketing API, as of
+    November 2026). -#}
+{% macro meta_state(status) -%}
+    case {{ status }}
+        when 'ACTIVE' then 'active'
+        when 'PAUSED' then 'paused'
+        when 'DELETED' then 'removed'
+        when 'ARCHIVED' then 'removed'
+        else 'other'
+    end
+{%- endmacro %}
+
 {% macro meta_campaigns(relation, platform) %}
 select
     '{{ platform }}' as platform,
@@ -96,6 +111,7 @@ select
     id as campaign_id,
     {{ to_name('name') }} as observed_name,
     status as campaign_status,
+    {{ meta_state('status') }} as campaign_state,
     objective as campaign_type,
     _dlt_valid_from as valid_from,
     _dlt_valid_to as valid_to
@@ -112,6 +128,7 @@ select
     id as ad_group_id,
     {{ to_name('name') }} as observed_name,
     status as ad_group_status,
+    {{ meta_state('status') }} as ad_group_state,
     optimization_goal as ad_group_type,
     _dlt_valid_from as valid_from,
     _dlt_valid_to as valid_to
@@ -128,6 +145,7 @@ select
     id as ad_id,
     {{ to_name('name') }} as observed_name,
     status as ad_status,
+    {{ meta_state('status') }} as ad_state,
     cast(null as text) as ad_type,
     _dlt_valid_from as valid_from,
     _dlt_valid_to as valid_to
