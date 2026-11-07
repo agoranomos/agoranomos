@@ -10,10 +10,10 @@
     account failed for it; the loads name an account that no list gives; two rows share a key, or
     a list gives the account twice; a row misses a part of its key; the currency of the account is
     not one of ISO 4217; its time zone is not one of IANA; a spend has more than six decimal
-    places; a measure is missing or below zero; a load holds rows outside its window; the window
-    has no row of an account whose spend the core holds (G1a); the spend of the window fell by
-    more than var('quarantine_spend_fall') against the core (G1a); more than half of the pinned
-    accounts of the source are in quarantine, so the source stops. -#}
+    places; a measure is missing or below zero; a load holds rows outside its window; a load has no
+    row on the days of its window while the core holds spend on them (G1a); the spend of a load
+    fell by more than var('quarantine_spend_fall') against the core (G1a); more than half of the
+    pinned accounts of the source are in quarantine, so the source stops. -#}
 {% macro quarantine_reasons() -%}
 {{- return([
     'load_failed', 'unknown_account', 'duplicate_key', 'missing_key', 'unknown_currency',
