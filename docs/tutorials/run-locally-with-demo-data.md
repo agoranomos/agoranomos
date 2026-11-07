@@ -65,6 +65,12 @@ It takes about half an hour, most of it the first start.
 4. Look further back. Click **Period: Previous 30 days**, change `30` and `days` to `3` and `months`, and click **Update filter**. The cards now cover the three whole months before this one. The demo holds 18 months of history up to yesterday, so any period in them has data.
 5. Remove the filters **Client** and **Platform** with the **×** next to their values. Metabase keeps the values of the filters that you set for the next time that you open the dashboard, for your account only.
 
+<figure class="ag-shot" markdown="span">
+    ![The dashboard Advertising overview (demo) in Metabase: the filters Period, Client and Platform, the spend, the conversions, the cost per conversion and the return on ad spend of the previous 30 days, and the spend of each day on each platform](../assets/screenshots/demo-advertising-light.webp#only-light){ width="1440" height="900" loading="lazy" }
+    ![The dashboard Advertising overview (demo) in Metabase: the filters Period, Client and Platform, the spend, the conversions, the cost per conversion and the return on ad spend of the previous 30 days, and the spend of each day on each platform, in the dark theme](../assets/screenshots/demo-advertising-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
+    <figcaption>Metabase · agoranomos / Demo · Advertising overview (demo) · demo data</figcaption>
+</figure>
+
 ## Look at the web analytics
 
 1. Go back to the collection **Demo**, which the path at the top of the page links to, and open **Web analytics (demo)**.
@@ -72,6 +78,12 @@ It takes about half an hour, most of it the first start.
     It shows the **Sessions**, **Engagement rate**, **Key events** and **Revenue** of the sites of both clients, the sessions of each day in each channel group, the results of each channel group and the sources and mediums with the most sessions. Its filters are **Period** and **Client**.
 
 2. Scroll to **Sessions of ad campaigns**. Its rows are the sessions that came from the campaigns of the three ad platforms: the same campaigns as on the advertising dashboard, seen from the sites.
+
+<figure class="ag-shot" markdown="span">
+    ![The dashboard Web analytics (demo) in Metabase: the sessions, the engagement rate, the key events and the revenue of the sites of both clients, and the sessions of each day in each channel group](../assets/screenshots/demo-web-analytics-light.webp#only-light){ width="1440" height="900" loading="lazy" }
+    ![The dashboard Web analytics (demo) in Metabase: the sessions, the engagement rate, the key events and the revenue of the sites of both clients, and the sessions of each day in each channel group, in the dark theme](../assets/screenshots/demo-web-analytics-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
+    <figcaption>Metabase · agoranomos / Demo · Web analytics (demo) · demo data</figcaption>
+</figure>
 
 ## See where the numbers come from
 
@@ -84,6 +96,12 @@ It takes about half an hour, most of it the first start.
     - each task after them built one model or seed of dbt and ran its tests: from a view of the data of each platform, through the steps that the platforms share, to the marts, such as `ad_stats_campaign_daily`, which the advertising dashboard reads.
 4. Look at the DAG `agoranomos_demo_daily`. It brings each new day of the demo every day at 09:17 UTC, and the transform runs again after it. Its first run came right after the history and usually found every account loaded already, so it skipped its loads.
 
+<figure class="ag-shot" markdown="span">
+    ![The graph of the DAG agoranomos_demo_transform in Airflow: the tasks load_settings, pin and elementary, then the task group dbt, and beside it the duration of the last run](../assets/screenshots/airflow-transform-light.webp#only-light){ width="1440" height="900" loading="lazy" }
+    ![The graph of the DAG agoranomos_demo_transform in Airflow: the tasks load_settings, pin and elementary, then the task group dbt, and beside it the duration of the last run, in the dark theme](../assets/screenshots/airflow-transform-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
+    <figcaption>Airflow · the graph of agoranomos_demo_transform · demo data</figcaption>
+</figure>
+
 ## Check the health of the pipeline
 
 1. Back in Metabase, open the collection **agoranomos**, then **Ops**, and the dashboard **Pipeline health**.
@@ -92,6 +110,12 @@ It takes about half an hour, most of it the first start.
     - **Failed models** shows 0: every model and seed of the last run of the transform was built.
     - **Failed or warned tests** shows 1. The demo leaves one day of one account out on purpose, and the test `int_ad_stats__unioned_has_no_missing_day` warns about it on every run. **Tests that warned or failed, last 30 days**, further down, names it.
 3. Look at **Last load of each account**: one row for each account of each platform, with the last day that a load took and how many hours ago it ran.
+
+<figure class="ag-shot" markdown="span">
+    ![The dashboard Pipeline health in Metabase: late accounts, failed models, failed or warned tests and the size of the warehouse, then the last load of each account](../assets/screenshots/pipeline-health-light.webp#only-light){ width="1440" height="900" loading="lazy" }
+    ![The dashboard Pipeline health in Metabase: late accounts, failed models, failed or warned tests and the size of the warehouse, then the last load of each account, in the dark theme](../assets/screenshots/pipeline-health-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
+    <figcaption>Metabase · agoranomos / Ops · Pipeline health · demo data</figcaption>
+</figure>
 
 ## Stop and start again
 

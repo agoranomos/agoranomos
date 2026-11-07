@@ -12,6 +12,13 @@ Ask an AI client about your advertising and web analytics: the Claude apps, Clau
 
 In server mode, only the server of Metabase runs, over HTTPS. The server of dbt is planned for a later release ([ADR-0030](../adr/0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md)).
 
+<figure class="ag-diagram">
+<div class="ag-diagram__scroll">
+--8<-- "mcp-servers.svg"
+</div>
+<figcaption>The MCP servers · who connects to which · what each reads, and as whom</figcaption>
+</figure>
+
 ## Before you begin
 
 1. Start the stack, in [local mode](run-locally.md) or [on a server](deploy-on-a-server.md).

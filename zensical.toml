@@ -104,11 +104,15 @@ font = false
 # to a page that has a diagram. The script sets the global mermaid, and the theme then draws the diagrams with it
 # instead of loading Mermaid from unpkg.com (the Diagrams page of the Zensical documentation shows this way).
 custom_dir = "overrides"
+# The tabs under the header carry the sections of the documentation, and the path over the title of a page names its
+# section; brand.css draws both as the labels of the brand. The home page has its own template, overrides/home.html.
 features = [
   "content.code.copy",
   "navigation.footer",
   "navigation.indexes",
+  "navigation.path",
   "navigation.sections",
+  "navigation.tabs",
   "navigation.top",
   "search.highlight",
 ]
@@ -137,9 +141,15 @@ accent = "custom"
 toggle.icon = "lucide/moon"
 toggle.name = "Switch to system preference"
 
+# attr_list and md_in_html give a picture its size and put it into a figure with a caption. pymdownx.snippets draws the
+# diagrams of docs/assets/diagrams into their pages, so that they take the fonts of the site and the colors of the
+# scheme; a missing file fails the build.
 [project.markdown_extensions]
 admonition = {}
+attr_list = {}
+md_in_html = {}
 pymdownx.details = {}
+pymdownx.snippets = { base_path = ["docs/assets/diagrams"], check_paths = true }
 pymdownx.superfences.custom_fences = [
   { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
 ]
