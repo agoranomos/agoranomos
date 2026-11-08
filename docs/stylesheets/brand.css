@@ -121,7 +121,7 @@
     - dash-light: the dashed rule of the brand book's documentation on Paper (2.56:1, a decoration beside the icon of the kind);
     - aurora-on-paper: Aurora for the first screen on Paper, the same two glows, stronger, as a
       glow shows less on a light ground. Where it is strongest, Mute dark keeps 4.80:1 and Void
-      13.67:1, and Rust 4.12:1, which the slogan, large text, needs at 3:1.
+      13.67:1.
   */
   --ag-mute-dark: #5a5862;
   --ag-ok-dark: #1a7f55;
@@ -1300,7 +1300,10 @@ body {
   the slogan with the cursor, the lead, the buttons, three facts and the diagram of the pipeline,
   on the dot grid. It follows the scheme as the banners of the brand book do (hero-light.svg,
   hero-dark.svg): Void with Aurora, Bone text and Amber in the dark scheme, Paper with Aurora on
-  Paper, Void text and Rust in the light one (Rust on Paper 5.40:1, Mute dark 6.29:1).
+  Paper, Void text and Amber dark in the light one, the shade of Amber that the brand gives marks
+  on Paper, so that the slogan keeps the hue of the dark scheme (Amber dark on Paper 4.21:1, and
+  3.21:1 where the glow is strongest, which large text needs at 3:1; Mute dark 6.29:1). The
+  primary button is Amber with Void text in both (10.88:1).
 */
 .ag-hero {
   --ag-hero-bg: var(--ag-void);
@@ -1309,7 +1312,7 @@ body {
   --ag-hero-fg: var(--ag-bone);
   --ag-hero-mute: var(--ag-mute);
   --ag-hero-accent: var(--ag-amber);
-  --ag-hero-on-accent: var(--ag-void);
+  --ag-hero-hover: var(--ag-amber);
   --ag-hero-glow: var(--ag-ember-glow);
   --ag-hero-rule: var(--ag-line);
   --ag-hero-frame: var(--ag-line-2);
@@ -1331,8 +1334,8 @@ body {
   --ag-hero-aurora: var(--ag-aurora-on-paper);
   --ag-hero-fg: var(--ag-void);
   --ag-hero-mute: var(--ag-mute-dark);
-  --ag-hero-accent: var(--ag-rust);
-  --ag-hero-on-accent: var(--ag-paper);
+  --ag-hero-accent: var(--ag-amber-dark);
+  --ag-hero-hover: var(--ag-hero-fg);
   --ag-hero-glow: none;
   --ag-hero-rule: var(--ag-rule);
   --ag-hero-frame: rgb(9 9 11 / 22%);
@@ -1440,15 +1443,15 @@ body {
 }
 
 .ag-hero .ag-button:is(:hover, :focus) {
-  color: var(--ag-hero-accent);
+  color: var(--ag-hero-hover);
   border-color: var(--ag-hero-accent);
 }
 
 .ag-hero .ag-button--primary,
 .ag-hero .ag-button--primary:is(:hover, :focus) {
-  color: var(--ag-hero-on-accent);
-  background-color: var(--ag-hero-accent);
-  border-color: var(--ag-hero-accent);
+  color: var(--ag-void);
+  background-color: var(--ag-amber);
+  border-color: var(--ag-amber);
 }
 
 .ag-hero .ag-button--primary:is(:hover, :focus) {
