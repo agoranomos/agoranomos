@@ -2,8 +2,9 @@
   The brand style of the agoranomos documentation, after the brand book of agoranomos, version 1.0
   of 8 October 2026: its tokens, its type, and its part on the documentation.
 
-  Light scheme ("default"): a Paper page with the navigation on Bone, Void text, Rust links,
-  Void code blocks and dashed admonitions. Ember appears only in graphics there, never in text.
+  Light scheme ("default"): a Paper page with the navigation on Bone, Void text, Void code blocks
+  and dashed admonitions, and one orange for every accent: links, labels, the active page, the
+  warnings, the lines of data of the diagrams, and the slogan and the button of the home page.
   Dark scheme ("slate"): the dark world of the brand, a Void page with Graphite panels, Bone text,
   Mute secondary text and Amber for what works: links, the active page, the prompt.
   In both, the header and the tabs are Void and carry the logo for dark backgrounds, and the
@@ -17,7 +18,9 @@
 
   Every text color below keeps at least 4.5:1 against its background (WCAG 2.2, level AA),
   in highlighted and selected code too, and every line or mark that carries meaning keeps 3:1,
-  with one exception: the Amber of the slogan on the light first screen of the home page (Home).
+  with one exception, which the maintainer chose: the one orange of the light scheme is 2.24:1
+  on Paper, so the links, the labels and the slogan in it are under that contrast there. The
+  links keep their underline.
   The secondary text of the search dialog (its result paths and counts) is the theme's own: an
   alpha set inside its shadow DOM, which these variables do not reach.
 */
@@ -120,6 +123,9 @@
     - code-light: the background of inline code in the light scheme, Bone at 70 % over Paper;
     - mute-deep: icons, scrollbars and dashed rules on Void, never text;
     - dash-light: the dashed rule of the brand book's documentation on Paper (2.56:1, a decoration beside the icon of the kind);
+    - orange-on-paper: the one orange of the light scheme, a clean Amber, hue 35 at full
+      saturation, a little darker than Amber so that it shows more on Paper (2.24:1, Void on it
+      8.01:1);
     - aurora-on-paper: Aurora for the first screen on Paper, the same two glows, stronger, as a
       glow shows less on a light ground. Where it is strongest, Mute dark keeps 4.80:1 and Void
       13.67:1.
@@ -129,6 +135,7 @@
   --ag-code-light: #eceae5;
   --ag-mute-deep: #5f5d66;
   --ag-dash-light: #9a98a2;
+  --ag-orange-on-paper: #f08c00;
   --ag-aurora-on-paper:
     radial-gradient(40% 60% at 80% 20%, rgb(255 110 30 / 28%), transparent 70%),
     radial-gradient(30% 50% at 10% 90%, rgb(255 176 32 / 18%), transparent 70%);
@@ -146,13 +153,13 @@
 [data-md-color-scheme="default"] {
   color-scheme: light;
 
-  --md-primary-fg-color: var(--ag-rust);
-  --md-primary-fg-color--light: var(--ag-rust);
-  --md-primary-fg-color--dark: var(--ag-rust);
+  --md-primary-fg-color: var(--ag-orange-on-paper);
+  --md-primary-fg-color--light: var(--ag-orange-on-paper);
+  --md-primary-fg-color--dark: var(--ag-orange-on-paper);
   --md-primary-bg-color: var(--ag-paper);
   --md-primary-bg-color--light: rgb(244 243 239 / 70%);
-  --md-accent-fg-color: var(--ag-rust);
-  --md-accent-fg-color--transparent: rgb(178 58 14 / 8%);
+  --md-accent-fg-color: var(--ag-orange-on-paper);
+  --md-accent-fg-color--transparent: rgb(240 140 0 / 8%);
   --md-accent-bg-color: var(--ag-paper);
   --md-accent-bg-color--light: rgb(244 243 239 / 70%);
 
@@ -166,7 +173,7 @@
   --md-default-bg-color--lightest: rgb(244 243 239 / 12%);
 
   --md-typeset-color: var(--ag-void);
-  --md-typeset-a-color: var(--ag-rust);
+  --md-typeset-a-color: var(--ag-orange-on-paper);
   --md-typeset-mark-color: rgb(255 176 32 / 35%);
   --md-typeset-table-color: rgb(9 9 11 / 14%);
   --md-typeset-table-color--light: rgb(9 9 11 / 3%);
@@ -194,7 +201,7 @@
   --ag-aside: var(--ag-bone);
   --ag-aside-fg: #26252b;
   --ag-rule: rgb(9 9 11 / 14%);
-  --ag-signal: var(--ag-rust);
+  --ag-signal: var(--ag-orange-on-paper);
   --ag-block-bg: var(--ag-void);
   --ag-block-rule: var(--ag-void);
   --ag-dots-page: var(--ag-dots-on-paper);
@@ -206,8 +213,8 @@
   */
   --ag-note: var(--ag-dash-light);
   --ag-note-icon: var(--ag-dusk-dark);
-  --ag-warning: var(--ag-amber-dark);
-  --ag-danger: var(--ag-rust-chart);
+  --ag-warning: var(--ag-orange-on-paper);
+  --ag-danger: var(--ag-orange-on-paper);
   --ag-success: var(--ag-ok-dark);
   --ag-adm-label: var(--ag-mute-dark);
 
@@ -221,8 +228,8 @@
   --ag-dg-plan: var(--ag-dash-light);
   --ag-dg-plan-text: #6e6c76;
   --ag-dg-ctl: #8a8893;
-  --ag-dg-data: var(--ag-rust-chart);
-  --ag-dg-mark: var(--ag-ember);
+  --ag-dg-data: var(--ag-orange-on-paper);
+  --ag-dg-mark: var(--ag-orange-on-paper);
   --ag-dg-user: var(--ag-dusk-dark);
 }
 
@@ -1301,10 +1308,9 @@ body {
   the slogan with the cursor, the lead, the buttons, three facts and the diagram of the pipeline,
   on the dot grid. It follows the scheme as the banners of the brand book do (hero-light.svg,
   hero-dark.svg): Void with Aurora and Bone text in the dark scheme, Paper with Aurora on Paper
-  and Void text in the light one (Mute dark 6.29:1), and Amber for the slogan, the cursor and the
-  primary button in both, which the maintainer chose to keep as one color. So the second line of
-  the slogan, Amber on Paper at 1.65:1, is the one text of the site under the contrast of WCAG AA.
-  The primary button is Amber with Void text (10.88:1).
+  and Void text in the light one (Mute dark 6.29:1). The slogan, the cursor and the primary
+  button take the orange of the scheme: Amber on Void, and on Paper the one orange of the light
+  scheme (see the rule of contrast at the top). The primary button has Void text in both.
 */
 .ag-hero {
   --ag-hero-bg: var(--ag-void);
@@ -1335,6 +1341,7 @@ body {
   --ag-hero-aurora: var(--ag-aurora-on-paper);
   --ag-hero-fg: var(--ag-void);
   --ag-hero-mute: var(--ag-mute-dark);
+  --ag-hero-accent: var(--ag-orange-on-paper);
   --ag-hero-hover: var(--ag-hero-fg);
   --ag-hero-glow: none;
   --ag-hero-rule: var(--ag-rule);
@@ -1450,8 +1457,8 @@ body {
 .ag-hero .ag-button--primary,
 .ag-hero .ag-button--primary:is(:hover, :focus) {
   color: var(--ag-void);
-  background-color: var(--ag-amber);
-  border-color: var(--ag-amber);
+  background-color: var(--ag-hero-accent);
+  border-color: var(--ag-hero-accent);
 }
 
 .ag-hero .ag-button--primary:is(:hover, :focus) {
