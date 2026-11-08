@@ -16,7 +16,8 @@
   No request goes to a font host: zensical.toml sets `font = false`.
 
   Every text color below keeps at least 4.5:1 against its background (WCAG 2.2, level AA),
-  in highlighted and selected code too, and every line or mark that carries meaning keeps 3:1.
+  in highlighted and selected code too, and every line or mark that carries meaning keeps 3:1,
+  with one exception: the Amber of the slogan on the light first screen of the home page (Home).
   The secondary text of the search dialog (its result paths and counts) is the theme's own: an
   alpha set inside its shadow DOM, which these variables do not reach.
 */
@@ -1299,11 +1300,11 @@ body {
   The first screen of the home page (overrides/home.html) is the site of the brand book: a label,
   the slogan with the cursor, the lead, the buttons, three facts and the diagram of the pipeline,
   on the dot grid. It follows the scheme as the banners of the brand book do (hero-light.svg,
-  hero-dark.svg): Void with Aurora, Bone text and Amber in the dark scheme, Paper with Aurora on
-  Paper, Void text and Amber dark in the light one, the shade of Amber that the brand gives marks
-  on Paper, so that the slogan keeps the hue of the dark scheme (Amber dark on Paper 4.21:1, and
-  3.21:1 where the glow is strongest, which large text needs at 3:1; Mute dark 6.29:1). The
-  primary button is Amber with Void text in both (10.88:1).
+  hero-dark.svg): Void with Aurora and Bone text in the dark scheme, Paper with Aurora on Paper
+  and Void text in the light one (Mute dark 6.29:1), and Amber for the slogan, the cursor and the
+  primary button in both, which the maintainer chose to keep as one color. So the second line of
+  the slogan, Amber on Paper at 1.65:1, is the one text of the site under the contrast of WCAG AA.
+  The primary button is Amber with Void text (10.88:1).
 */
 .ag-hero {
   --ag-hero-bg: var(--ag-void);
@@ -1334,7 +1335,6 @@ body {
   --ag-hero-aurora: var(--ag-aurora-on-paper);
   --ag-hero-fg: var(--ag-void);
   --ag-hero-mute: var(--ag-mute-dark);
-  --ag-hero-accent: var(--ag-amber-dark);
   --ag-hero-hover: var(--ag-hero-fg);
   --ag-hero-glow: none;
   --ag-hero-rule: var(--ag-rule);
