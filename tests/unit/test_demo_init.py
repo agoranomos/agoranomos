@@ -2285,19 +2285,19 @@ def test_a_display_name_that_changes_reaches_the_titles_at_the_next_start(
     }
 
 
-# The charts with one series, which the color of the project draws, and those with a series for each
+# The charts with one series, which the orange of the site draws, and those with a series for each
 # value of their breakout, which keep the colors of Metabase.
 CHARTS = ("Spend by client",)
 BREAKOUTS = ("Spend by day and platform", "Sessions by day and channel group")
 
 
-def test_the_charts_are_drawn_in_the_first_color_of_the_project(airflow, metabase):
+def test_the_charts_are_drawn_in_the_orange_of_the_site(airflow, metabase):
     assert di.main(env_for(airflow, metabase)) == 0
     for name in CHARTS:
         # The series of a chart with the one metric spend_reporting is keyed by the name of its
         # column.
         assert settings_of(metabase, name)["series_settings"] == {
-            "spend_reporting": {"color": "#A86400"}
+            "spend_reporting": {"color": "#F08C00"}
         }
     # A chart with a breakout, and a number, have no series settings.
     for name in (*BREAKOUTS, "Spend"):
@@ -2312,17 +2312,17 @@ def test_a_chart_without_the_color_gets_it_back(airflow, metabase, name):
     settings["series_settings"] = {"spend_reporting": {"title": "Cost"}}
     assert di.main(env_for(airflow, metabase)) == 0
     settings = settings_of(metabase, name)
-    assert settings["series_settings"] == {"spend_reporting": {"color": "#A86400"}}
+    assert settings["series_settings"] == {"spend_reporting": {"color": "#F08C00"}}
     assert settings["graph.metrics"] == ["spend_reporting"]
     del settings["series_settings"]
     assert di.main(env_for(airflow, metabase)) == 0
     assert settings_of(metabase, name)["series_settings"] == {
-        "spend_reporting": {"color": "#A86400"}
+        "spend_reporting": {"color": "#F08C00"}
     }
 
 
 @pytest.mark.parametrize("name", CHARTS)
-@pytest.mark.parametrize("color", ["#4F6382", "#a86400", "red", ""])
+@pytest.mark.parametrize("color", ["#4F6382", "#f08c00", "red", ""])
 def test_a_color_that_a_person_set_is_put_back(airflow, metabase, capsys, name, color):
     assert di.main(env_for(airflow, metabase)) == 0
     series = settings_of(metabase, name)["series_settings"]
@@ -2331,11 +2331,29 @@ def test_a_color_that_a_person_set_is_put_back(airflow, metabase, capsys, name, 
     capsys.readouterr()
     assert di.main(env_for(airflow, metabase)) == 0
     assert settings_of(metabase, name)["series_settings"] == {
-        "spend_reporting": {"color": "#A86400"}
+        "spend_reporting": {"color": "#F08C00"}
     }
     # One write: the settings of the question, and its line.
     [(method, path, _)] = [b for b in metabase.bodies[writes_before:] if b[1] not in READS]
     assert (method, path) == ("PUT", f"/api/card/{card_of(metabase, name)['id']}")
+    key = next(q["key"] for q in di.QUESTIONS if q["name"] == name)
+    assert (
+        f"demo-init: revert of an edit: question demo/{key} visualization_settings"
+        in capsys.readouterr().out.splitlines()
+    )
+
+
+@pytest.mark.parametrize("name", CHARTS)
+def test_a_chart_in_the_color_before_gets_the_orange(airflow, metabase, capsys, name):
+    # The charts with one series were drawn in #A86400 before they took the orange of the site: the
+    # next start of a deployment that has them draws them in the orange.
+    assert di.main(env_for(airflow, metabase)) == 0
+    settings_of(metabase, name)["series_settings"] = {"spend_reporting": {"color": "#A86400"}}
+    capsys.readouterr()
+    assert di.main(env_for(airflow, metabase)) == 0
+    assert settings_of(metabase, name)["series_settings"] == {
+        "spend_reporting": {"color": "#F08C00"}
+    }
     key = next(q["key"] for q in di.QUESTIONS if q["name"] == name)
     assert (
         f"demo-init: revert of an edit: question demo/{key} visualization_settings"
@@ -2352,7 +2370,7 @@ def test_the_series_settings_of_a_person_give_way_to_those_of_the_code(airflow, 
     }
     assert di.main(env_for(airflow, metabase)) == 0
     assert settings_of(metabase, "Spend by client")["series_settings"] == {
-        "spend_reporting": {"color": "#A86400"}
+        "spend_reporting": {"color": "#F08C00"}
     }
 
 
@@ -2365,7 +2383,7 @@ def test_a_chart_whose_series_settings_lack_its_metric_gets_those_of_the_code(
     settings_of(metabase, name)["series_settings"] = dict(others)
     assert di.main(env_for(airflow, metabase)) == 0
     assert settings_of(metabase, name)["series_settings"] == {
-        "spend_reporting": {"color": "#A86400"}
+        "spend_reporting": {"color": "#F08C00"}
     }
 
 

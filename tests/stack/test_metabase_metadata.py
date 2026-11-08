@@ -42,8 +42,9 @@ note = "A note of the stack test."
 # The questions of the demo, by their keys in the registry of the content, and by their names.
 QUESTIONS = {question["key"]: question for question in demo_init.QUESTIONS}
 QUESTIONS_BY_NAME = {question["name"]: question for question in demo_init.QUESTIONS}
-# The first color of the palette of the project for a light background.
-SERIES_COLOR = "#A86400"
+# The color of a chart of the package with one series: the orange of the light scheme of the
+# documentation site.
+SERIES_COLOR = "#F08C00"
 KINDS = (metadata.FIRST, metadata.UPDATE, metadata.REVERT)
 
 
@@ -414,7 +415,7 @@ def test_the_demo_questions_have_the_titles_of_their_columns_and_axes(metabase_u
 
 
 @needs_the_demo
-def test_the_demo_charts_are_drawn_in_the_color_of_the_project(metabase_url, session):
+def test_the_demo_charts_are_drawn_in_the_orange_of_the_site(metabase_url, session):
     # Metabase keys the color of the one series of a chart by the name of its metric column.
     # A chart with a breakout, a number and a table keep the colors of Metabase.
     colors = {
