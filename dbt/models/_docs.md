@@ -109,6 +109,22 @@ The value of the conversions of the row, as the ad platform reports it, in the c
 The conversion value of the row in the reporting currency (see reporting_currency), at the rate of its report_date in fx_rates_daily, to six decimal places.
 {% enddocs %}
 
+{% docs platform_conversions %}
+The conversions of the row in the own metric of conversions of the ad platform, which its account shows as conversions: metrics.conversions of Google, which counts the actions that the account includes in it, and the metric conversion of TikTok, the event that the campaign optimizes for. In a table by conversion action, those of the action of the row: on Google 0 for an action that metrics.conversions leaves out, and on the other platforms every conversion of the action. In a table by campaign, ad group or ad, none on Meta, which counts each action apart and has no such metric. Attribution can give a row part of a conversion, and the platform can still change it for recent days.
+{% enddocs %}
+
+{% docs platform_conversion_value %}
+The value of the conversions of platform_conversions, as the ad platform reports it, in the currency of the account (see currency); none where the platform gives none, as for the metric conversion of TikTok, and on Meta in a table by campaign, ad group or ad.
+{% enddocs %}
+
+{% docs all_conversions %}
+All the conversions of the action of the row, those of the actions that the own metric of conversions of the platform leaves out among them, such as metrics.all_conversions of Google; none where the platform has no such metric, as on Meta and TikTok.
+{% enddocs %}
+
+{% docs all_conversion_value %}
+The value of the conversions of all_conversions, as the ad platform reports it, in the currency of the account (see currency); none where the platform has no such metric.
+{% enddocs %}
+
 {% docs conversion_action_id %}
 The ID of the conversion action, as the platform names it: the ID of a conversion action of Google, the action type of Meta, such as offsite_conversion.fb_pixel_purchase, or the metric of TikTok, such as complete_payment.
 {% enddocs %}
@@ -367,6 +383,14 @@ The source of a load, the schema of the raw layer without its prefix raw_, such 
 
 {% docs load_id %}
 The ID of a load, _dlt_load_id of dlt, as core.loads holds it: a time in seconds as text, compared as a number.
+{% enddocs %}
+
+{% docs load_sk %}
+The load that gives the day of the row, load_sk of core.loads: for an account and a day, the newest load that the runs pinned whose window covers the day.
+{% enddocs %}
+
+{% docs day_key %}
+The source, the account and the day of the row in one text, as source|account_id|the number of days since 1 January 2000, on which the rows of staging join the days of the windows: the planner estimates a join on one column from its statistics.
 {% enddocs %}
 
 {% docs reason %}
