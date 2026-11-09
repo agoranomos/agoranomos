@@ -140,3 +140,113 @@ models:
         description: >-
           When the journal first recorded the reason for a load of the account that is still
           pinned, as core.account_quarantine has it; none for an account that no load names.
+  - name: ops_maintenance_steps
+    description: >-
+      The steps of the DAG of maintenance, agoranomos_maintenance, one row for each step on one
+      table (ADR-0039): a partition of the core that it made, a parent of a fact that it analyzed,
+      a month of a fact that it froze, a month of a journal of restatements that it dropped, and
+      the rows that it deleted from _dlt_loads and core.loads. The tasks of the maintenance write
+      the rows and keep them 90 days; dbt makes the table, empty, and adds no row. The Ops
+      collection of Metabase shows it.
+    columns:
+      - name: finished_at
+        description: When the step ended, with its time zone.
+      - name: maintenance_run_id
+        description: '{{ doc("maintenance_run_id") }}'
+      - name: task
+        description: >-
+          The task of the DAG of maintenance that took the step, such as make_partitions,
+          analyze_the_facts, freeze_old_months, drop_old_journal_months, clean_dlt_loads or
+          clean_core_loads.
+      - name: target
+        description: >-
+          What the step worked on: a table or a partition of the core as schema.table, the table
+          _dlt_loads of a raw schema, or the rows of a source in core.loads.
+      - name: seconds
+        description: How many seconds the step took, to the millisecond.
+      - name: rows_deleted
+        description: How many rows the step deleted; none for a step that deletes no row.
+  - name: ops_disk
+    description: >-
+      The disk and the size of the warehouse, one row for each day that the DAG of maintenance
+      measured them (ADR-0039): the size and the free space of the disk of the volumes of Docker, as
+      the volume of the logs of Airflow sees it, the bytes of the warehouse and of its schema core,
+      and the bytes of the partitions of the facts whose months are in the window of restatements,
+      with an estimate of the free space in them. The task record_the_disk writes the rows and keeps
+      them 90 days; dbt makes the table, empty, and adds no row. The Ops collection of Metabase
+      shows it.
+    columns:
+      - name: measured_at
+        description: When the task measured the disk, with its time zone.
+      - name: maintenance_run_id
+        description: '{{ doc("maintenance_run_id") }}'
+      - name: disk_bytes
+        description: >-
+          The size of the disk that holds the volume of the logs of Airflow, in bytes: the disk of
+          the volumes of Docker, the warehouse among them, unless the deployment put them on
+          another.
+      - name: disk_free_bytes
+        description: >-
+          The bytes of that disk that a user other than root may still fill, as the task saw them.
+      - name: warehouse_bytes
+        description: The bytes that the database of the warehouse takes on disk.
+      - name: core_bytes
+        description: >-
+          The bytes that the tables of the schema core take on disk, the partitions of the facts and
+          of the journals among them, with their indexes and TOAST.
+      - name: window_bytes
+        description: >-
+          The bytes that the partitions of the facts take, with their indexes, whose months are in
+          the window of restatements, which each run of the transform writes again.
+      - name: window_free_bytes
+        description: >-
+          An estimate of the bytes inside the tables of those partitions that no row fills, which
+          the rows that a run replaced leave free for the next run: from the rows that PostgreSQL
+          counts in each and the average width of a row in the statistics of its fact. None while a
+          fact has no statistics, before its first ANALYZE.
+  - name: ops_core_totals
+    description: >-
+      The monthly comparison of the core with the totals that the platforms give for each account
+      and day, core.platform_totals_daily (ADR-0039), one row for each account with totals in each
+      comparison: over the 90 days before the day of the comparison, in UTC, the days with totals,
+      those on which the impressions, the clicks or the spend of the campaigns of the account in
+      core.ad_stats_campaign_daily differ from them, and the sums of both. The task
+      compare_with_platform_totals of the DAG of maintenance writes the rows once a month, when it
+      finds totals, and keeps them 13 months; dbt makes the table, empty, and adds no row. The Ops
+      collection of Metabase shows it.
+    columns:
+      - name: checked_at
+        description: When the comparison ran, with its time zone.
+      - name: maintenance_run_id
+        description: '{{ doc("maintenance_run_id") }}'
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+      - name: first_day
+        description: The first day of the totals of the account that the comparison took.
+      - name: last_day
+        description: The last day of the totals of the account that the comparison took.
+      - name: days
+        description: How many days of the account have totals of the platform in those 90 days.
+      - name: days_differing
+        description: >-
+          How many of those days the impressions, the clicks or the spend of the campaigns of the
+          account in the core differ from the totals, a day with no row in the core among them, as
+          for an account in quarantine.
+      - name: platform_impressions
+        description: The impressions of the account over those days, as the platform totals them.
+      - name: core_impressions
+        description: The impressions of the campaigns of the account over those days in the core.
+      - name: platform_clicks
+        description: The clicks of the account over those days, as the platform totals them.
+      - name: core_clicks
+        description: The clicks of the campaigns of the account over those days in the core.
+      - name: platform_spend
+        description: >-
+          The spend of the account over those days, as the platform totals it, in the currency of
+          the account.
+      - name: core_spend
+        description: >-
+          The spend of the campaigns of the account over those days in the core, in the currency of
+          the account.
