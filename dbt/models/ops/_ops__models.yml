@@ -24,6 +24,32 @@ models:
           decimal place.
       - name: loads
         description: How many loads of the account the journal holds, the first load among them.
+  - name: ops_rates
+    description: >-
+      The age of the last rate into the reporting currency that the source of the rates published,
+      as core.fx_rates_daily holds it (ADR-0042): one row once the core holds a published rate, with
+      the source, the day of the last rate, how many business days, Monday to Friday, have passed
+      since that day up to the day on which the view is read, and whether that is more than 3. The
+      ECB publishes on the working days of TARGET, and its daily load takes the days up to
+      yesterday, so the last rate is usually 1 business day old; a closing day of TARGET counts as a
+      business day. ./agoranomos status warns when it is late.
+    columns:
+      - name: reporting_currency
+        description: '{{ doc("reporting_currency") }}'
+      - name: rate_source
+        description: >-
+          The source of the last rate, ecb for the European Central Bank or demo_fx for the demo.
+      - name: last_rate_date
+        description: >-
+          The day of the last rate that the source published, as core.fx_rates_daily holds it.
+      - name: business_days_since_rate
+        description: >-
+          How many days, Monday to Friday, there are after last_rate_date up to the day on which
+          the view is read, that day included.
+      - name: is_late
+        description: >-
+          Whether business_days_since_rate is more than 3: the loads of the rates brought no newer
+          rate for more than 3 business days.
   - name: ops_transform_nodes
     description: >-
       Each model, seed, snapshot and test of the dbt project in each run of dbt that the hooks of

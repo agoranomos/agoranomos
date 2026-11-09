@@ -31,3 +31,9 @@ sources:
           The sessions of web analytics by day in the core, as the runs before this one left them:
           the checks of G1a in int_g1_failures find a load of a property with no row on the days on
           which this table holds sessions, before this run writes the core.
+      - name: fx_rates_daily
+        description: >-
+          The rates of the core into the reporting currency, which the model core_fx_rates_daily
+          writes, as the runs before this one left them: the check of the rates in
+          int_g1_failures finds an account whose currency neither they nor the loads of the rates
+          that this run reads have a rate of, before this run writes the core.

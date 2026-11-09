@@ -9,22 +9,24 @@
 {#- The reasons of quarantine, as codes, in the order of the checks: the newest pinned load of the
     account failed for it; the loads name an account that no list gives; two rows share a key, or
     a list gives the account twice; a row misses a part of its key; the currency of the account is
-    not one of ISO 4217; its time zone is not one of IANA; a spend has more than six decimal
-    places; a measure is missing or below zero; a load holds rows outside its window; a load has no
-    row on the days of its window while the core holds spend on them (G1a); the spend of a load
-    fell by more than var('quarantine_spend_fall') against the core (G1a); more than half of the
-    pinned accounts of the source are in quarantine, so the source stops. -#}
+    not one of ISO 4217; its time zone is not one of IANA; the source of the rates has no rate of
+    its currency into the reporting currency (ADR-0042); a spend has more than six decimal places;
+    a measure is missing or below zero; a load holds rows outside its window; a load has no row on
+    the days of its window while the core holds spend on them (G1a); the spend of a load fell by
+    more than var('quarantine_spend_fall') against the core (G1a); more than half of the pinned
+    accounts of the source are in quarantine, so the source stops. -#}
 {% macro quarantine_reasons() -%}
 {{- return([
     'load_failed', 'unknown_account', 'duplicate_key', 'missing_key', 'unknown_currency',
-    'unknown_time_zone', 'too_many_decimals', 'missing_measure', 'negative_measure',
-    'date_outside_window', 'empty_window', 'spend_fall', 'source_stopped',
+    'unknown_time_zone', 'missing_rate', 'too_many_decimals', 'missing_measure',
+    'negative_measure', 'date_outside_window', 'empty_window', 'spend_fall', 'source_stopped',
 ]) -}}
 {%- endmacro %}
 
 {#- The sources whose accounts the checks read: those of newest_load_sources whose rows name an
     account, the ad platforms and web analytics. The rates have one account each, the base of the
-    rates, and their own check comes with #200. -#}
+    rates, and an account of an ad platform or a property whose currency they lack goes to
+    quarantine instead (quarantine_rate_findings). -#}
 {% macro quarantine_sources() -%}
     {%- set found = [] -%}
     {%- for source_name, keys in newest_load_sources().items() -%}
@@ -253,6 +255,63 @@ union all
 select source, account_id, null, 'unknown_time_zone', 'accounts', time_zone
 from accounts
 where unknown_time_zone
+{%- endmacro %}
+
+{#- The check of the rates (ADR-0042): an account whose currency has no rate into the reporting
+    currency at the source of the rates, neither among the rates of the loads that this run reads
+    nor in core.fx_rates_daily as the runs before this one left it, so that the core takes no fact
+    that a view could not convert, and no rate of 1 or 0 stands for a missing one. Only the
+    accounts that the pinned loads of this run name, as only they write the core; a currency
+    outside ISO 4217 has a reason of its own, and the reporting currency needs no rate. A day of a
+    currency that has a rate but none on or before that day is a gap, which the test of G3 finds
+    after the write of the rates. lists are the staging models of the accounts and the properties,
+    each with the column of its account; currencies the seed of ISO 4217; days the table
+    stg_loads__newest_days; ecb and demo the staging models of the rates of the ECB and of the
+    demo, and rates core.fx_rates_daily (macros/rates.sql). -#}
+{% macro quarantine_rate_findings(lists, currencies, days, ecb, demo, rates) -%}
+with listed as (
+    {%- for relation, account in lists %}
+    {%- if not loop.first %}
+    union all
+    {%- endif %}
+    select platform as source, {{ account }} as account_id, currency
+    from {{ relation }}
+    {%- endfor %}
+),
+
+named as (
+    select distinct source, account_id
+    from {{ days }}
+    where source in ('{{ quarantine_sources() | join("', '") }}')
+),
+
+published as (
+    {{ rates_published(ecb, demo, rates) }}
+),
+
+rated as (
+    select currency from ({{ rates_into_reporting('published') }}) as read_rates
+    union
+    select currency::text
+    from {{ rates }}
+    where reporting_currency = {{ reporting_currency() }}
+)
+
+select distinct
+    l.source,
+    l.account_id,
+    null as load_id,
+    'missing_rate' as reason,
+    'rates' as checked,
+    'no rate of ' || l.currency || ' into ' || {{ reporting_currency() }}
+        || ' from the source of the rates, ' || {{ rates_source(ecb, rates) }} as detail
+from listed as l
+join named as n
+    on n.source = l.source and n.account_id = l.account_id
+join {{ currencies }} as c
+    on c.currency_code = l.currency
+where l.currency <> {{ reporting_currency() }}
+    and not exists (select from rated as r where r.currency = l.currency)
 {%- endmacro %}
 
 {#- The days of an account on which a check failed, as the detail of its failure. -#}
