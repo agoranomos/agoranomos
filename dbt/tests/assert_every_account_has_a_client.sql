@@ -2,5 +2,5 @@
 -- may not have named its clients yet (ADR-0024).
 {{ config(severity='warn') }}
 select platform, account_id
-from {{ ref('int_ad_accounts__unioned') }}
+from {{ ref('ad_accounts') }}
 where client_id = 'unassigned'

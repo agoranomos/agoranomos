@@ -125,19 +125,19 @@ def list_items(text: str) -> list[dict[str, str]]:
     return items
 
 
-def test_a_key_of_a_contract_has_no_name():
-    # dbt builds a table under a temporary name and renames it, and the index of a key keeps the
-    # name that it got: a named key collides with itself on the next run ("relation ... already
-    # exists"), while PostgreSQL gives an unnamed one a free name each time.
-    keys = [
+def test_no_model_declares_a_constraint():
+    # The keys of the core are in the tables of its migrations (ADR-0038), and the marts are views,
+    # which PostgreSQL gives no constraint (ADR-0037): a constraint in the YAML of a model would be
+    # one that nothing enforces.
+    found = [
         (path.name, item)
         for path in yaml_files()
         for item in list_items(path.read_text(encoding="utf-8"))
-        if item.get("type") == "primary_key"
+        if item.get("type") in ("primary_key", "foreign_key", "unique", "not_null", "check")
     ]
-    assert keys, "no model declares a primary key"
-    named = [name for name, item in keys if "name" in item]
-    assert not named, f"a primary key has a name in {named}"
+    assert not found, found
+    for path in yaml_files():
+        assert "constraints:" not in path.read_text(encoding="utf-8"), path.name
 
 
 def test_a_description_over_several_lines_ends_without_a_line_break():
@@ -149,7 +149,8 @@ def test_a_description_over_several_lines_ends_without_a_line_break():
         assert set(found) <= {">-"}, f"{path.name}: write descriptions as >-, not {found}"
 
 
-# The key of each mart (ADR-0025), which its contract makes a primary key of PostgreSQL.
+# The key of each mart (ADR-0025, ADR-0037), which its test unique_combination checks: a view has
+# no primary key.
 MART_KEYS = {
     "ad_stats_campaign_daily": "[report_date, platform, account_id, campaign_id]",
     "ad_conversions_campaign_daily": (
@@ -169,7 +170,22 @@ MART_KEYS = {
     "ad_stats_ad_daily": "[report_date, platform, account_id, ad_group_id, ad_id]",
     "ad_groups": "[platform, account_id, ad_group_id]",
     "ads": "[platform, account_id, ad_group_id, ad_id]",
+    "conversion_actions": "[platform, conversion_action_id]",
 }
+# The views of the facts (ADR-0037), whose tests read the days of the windows that the run pinned,
+# as those of the facts of the core do (ADR-0038): each test of the view of a whole table would
+# read every partition of its fact.
+FACT_MARTS = (
+    "ad_stats_campaign_daily",
+    "ad_conversions_campaign_daily",
+    "web_sessions_daily",
+    "ad_stats_ad_group_daily",
+    "ad_stats_ad_daily",
+)
+WINDOW_WHERE = (
+    "where: >-\n{pad}report_date >= (select min(window_from) from core.loads where status = "
+    "'pinned'\n{pad}and outcome = 'loaded')\n"
+)
 
 
 # The semantic types that Metabase 0.64.1 gives a field by its name, each time that it analyzes the
@@ -306,6 +322,7 @@ LISTED_COLUMNS = {
     "kind",
     "mimics",
     "platform",
+    "platform_category",
     "platform_name",
     "rate_source",
     "reporting_currency",
@@ -318,7 +335,11 @@ SEARCHED_COLUMNS = {"observed_name", "session_source"}
 
 def field_values(data_type: str, column: str) -> str:
     """How a filter offers the values of a column of a mart (ADR-0037)."""
-    if data_type == "boolean" or column in LISTED_COLUMNS or column.endswith(("_status", "_type")):
+    if (
+        data_type == "boolean"
+        or column in LISTED_COLUMNS
+        or column.endswith(("_status", "_state", "_type"))
+    ):
         return "list"
     if column in SEARCHED_COLUMNS or column.endswith("_name"):
         return "search"
@@ -346,14 +367,84 @@ def test_every_mart_has_a_contract_and_its_key():
     text = (DBT / "models" / "marts" / "_marts__models.yml").read_text(encoding="utf-8")
     blocks = re.split(r"^  - name: ", text, flags=re.MULTILINE)[1:]
     found = {block.split("\n", 1)[0]: block for block in blocks}
-    assert set(MART_KEYS) <= set(found)
+    assert set(found) == set(MART_KEYS)
+    assert {path.stem for path in (DBT / "models" / "marts").glob("*.sql")} == set(MART_KEYS)
     for name, key in MART_KEYS.items():
+        # The contract of a view keeps the names and the types of its columns.
         contract = r"^      contract:\n        enforced: true$"
         assert re.search(contract, found[name], flags=re.MULTILINE), name
-        assert f"      - type: primary_key\n        columns: {key}\n" in found[name], name
-        # The constraint is checked only when dbt builds the table; the test checks the data.
         unique = f"      - unique_combination:\n          arguments:\n            columns: {key}\n"
         assert unique in found[name], name
+        windowed = unique + "          config:\n            " + WINDOW_WHERE.format(pad=" " * 14)
+        assert (windowed in found[name]) is (name in FACT_MARTS), name
+
+
+def test_every_test_of_a_view_of_a_fact_reads_the_days_of_the_windows():
+    text = (DBT / "models" / "marts" / "_marts__models.yml").read_text(encoding="utf-8")
+    described = blocks(text, 2)
+    for name in FACT_MARTS:
+        block = described[name]
+        tests = generic_tests(block)
+        assert tests, name
+        # Every test, of the model and of each column, has the where of the window in its config.
+        whereas = re.findall(
+            r"^ +where: >-\n +report_date >= \(select min\(window_from\)", block, re.M
+        )
+        assert len(whereas) == len(tests), name
+        assert "data_tests: [" not in block, name
+    for name in set(MART_KEYS) - set(FACT_MARTS):
+        assert "where:" not in described[name], name
+
+
+def test_the_views_of_the_marts_read_the_core_alone():
+    # A view of marts over a view or a table of staging would go with it on every run, as dbt
+    # rebuilds those with drop ... cascade, and the view would get a new oid (#187, ADR-0039). The
+    # views read the tables of the core, which the migrations create or the snapshots keep, and
+    # the platforms as rows of their own text (macros/platforms.sql).
+    core = {path.stem for path in (DBT / "models" / "core").glob("*.sql")}
+    snapshots = {path.stem for path in SNAPSHOTS.glob("*.sql")}
+    marts = DBT / "models" / "marts"
+    for path in sorted(marts.glob("*.sql")):
+        text = path.read_text(encoding="utf-8")
+        read = set(referenced(text)) - set(MART_KEYS) - {"source:core.loads"}
+        assert read <= core | snapshots | {"seed_ad_platforms"}, (path.stem, read)
+        for seed in re.findall(r"ref\('(seed_\w+)'\)", text):
+            assert f"platforms(ref('{seed}'))" in text, (path.stem, seed)
+        assert set(SOURCE.findall(text)) <= {("core", "loads")}, path.stem
+        # A plain join, which PostgreSQL flattens into a query, for a view of a fact.
+        if path.stem in FACT_MARTS:
+            body = JINJA_COMMENT.sub("", text)
+            body = "\n".join(line for line in body.splitlines() if not line.startswith("--"))
+            for word in ("distinct", " over (", "limit ", "with "):
+                assert word not in body.lower(), (path.stem, word)
+            # The one grouping is a subquery of one row for each ID, which the planner leaves out.
+            assert body.lower().count("group by") == int(path.stem == "web_sessions_daily"), path
+            assert "left join {{ ref('dim_account') }} as a\n" in text, path.stem
+    project = PROJECT_FILE.read_text(encoding="utf-8")
+    assert "    marts:\n      +schema: marts\n      +materialized: view\n" in project
+
+
+def test_a_run_keeps_a_view_of_the_marts_that_exists():
+    # ADR-0039: a run of the transform leaves a view of marts that exists as it is, and its tests
+    # run; a relation of another kind, a table of v0.4, becomes a view, and rebuild_views builds
+    # them all again.
+    text = (DBT / "macros" / "marts_view.sql").read_text(encoding="utf-8")
+    assert "{% materialization view, default %}" in text
+    assert "{%- set existing = load_cached_relation(this) -%}" in text
+    assert (
+        "{%- if model.schema == 'marts' and existing is not none and existing.is_view\n"
+        "        and not var('rebuild_views', false) -%}"
+    ) in text
+    assert "{{- return({'relations': [this.incorporate(type='view')]}) -}}" in text
+    assert text.rstrip().endswith(
+        "{{- return(dbt.materialization_view_default()) -}}\n{% endmaterialization %}"
+    )
+    overrides = [
+        path.name
+        for path in (DBT / "macros").rglob("*.sql")
+        if "{% materialization" in path.read_text(encoding="utf-8")
+    ]
+    assert overrides == ["marts_view.sql"]
 
 
 # The foreign keys of the marts in Metabase (ADR-0034): the column of each name, in every mart but
@@ -382,7 +473,7 @@ def test_the_foreign_keys_of_the_marts_point_at_a_key_of_one_column():
                 assert semantic == "type/FK", (mart, column)
                 assert target is not None, (mart, column)
                 assert target.groups() == (f"marts.{home}", column), (mart, column)
-    assert found == 19
+    assert found == 20
 
 
 def seed_rows(name: str) -> list[dict[str, str]]:
@@ -429,10 +520,8 @@ def test_the_seeds_go_to_staging_and_comment_their_tables():
 
 def test_the_intermediate_models_are_views_in_staging():
     # ADR-0025: until an AI role needs to tell them apart, intermediate models are views in staging,
-    # but for the statistics of ad groups and of ads, whose many tests would each compute a view of
-    # their size again (ADR-0034), and the rates of each day, which every unioned model of the facts
-    # and five marts read; and the checks of G1 and the days of the windows of the facts, which
-    # each run fills anew, as the days of the pin are (ADR-0035, ADR-0038).
+    # but for the checks of G1 and the days of the windows of the facts, which each run fills anew,
+    # as the days of the pin are (ADR-0035, ADR-0038).
     project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
     pattern = r"^    intermediate:\n      \+schema: staging\n      \+materialized: view$"
     assert re.search(pattern, project, flags=re.MULTILINE)
@@ -441,16 +530,7 @@ def test_the_intermediate_models_are_views_in_staging():
         for path in (DBT / "models" / "intermediate").glob("*.sql")
         if "materialized=" in path.read_text(encoding="utf-8")
     }
-    assert tables == {
-        "int_ad_stats_ad_group__unioned",
-        "int_ad_stats_ad__unioned",
-        "int_fx_rates__filled",
-        "int_g1_failures",
-        "int_window_days",
-    }
-    for name in tables - {"int_g1_failures", "int_window_days"}:
-        text = (DBT / "models" / "intermediate" / f"{name}.sql").read_text(encoding="utf-8")
-        assert "{{ config(materialized='table') }}" in text, name
+    assert tables == {"int_g1_failures", "int_window_days"}
 
 
 def test_the_reporting_currency_is_written_one_way_everywhere():
@@ -1069,86 +1149,17 @@ def test_a_test_of_several_nodes_is_on_one_that_depends_on_the_others():
 
 
 INTERMEDIATE = DBT / "models" / "intermediate"
-# The relationships of columns of an intermediate model to the columns of another model, which
-# relationships_composite checks: the columns, the other model, and its columns.
-TO_ACCOUNTS = (["platform", "account_id"], "int_ad_accounts__unioned", ["platform", "account_id"])
-TO_CAMPAIGNS = (
-    ["platform", "account_id", "campaign_id"],
-    "int_ad_campaigns__unioned",
-    ["platform", "account_id", "campaign_id"],
-)
-TO_AD_GROUPS = (
-    ["platform", "account_id", "ad_group_id"],
-    "int_ad_groups__unioned",
-    ["platform", "account_id", "ad_group_id"],
-)
-TO_ADS = (
-    ["platform", "account_id", "ad_group_id", "ad_id"],
-    "int_ads__unioned",
-    ["platform", "account_id", "ad_group_id", "ad_id"],
-)
-TO_RATES = (["report_date", "currency"], "int_fx_rates__filled", ["rate_date", "currency"])
-# The columns of the statistics of an ad group or an ad that must not be null, after their key.
-NAMED = ["currency", "client_id", "campaign_id", "campaign_name", "ad_group_name"]
-SESSIONS_KEY = CHECKED["sessions_daily"][0]
 # The critical tests of each intermediate model, every one an error: its key, which
 # unique_combination checks, or unique for a key of one column; the columns that not_null checks;
 # the relationships of a column to a column of another model; and those of columns to columns.
 INTERMEDIATE_TESTS = {
-    "int_ad_platforms__unioned": (["platform"], ["platform"], {}, []),
     "int_clients__resolved": (["client_id"], ["client_id", "client_name"], {}, []),
-    "int_ad_accounts__unioned": (
-        ACCOUNT_KEY,
-        ["client_id", "currency", "time_zone"],
-        {"platform": ("int_ad_platforms__unioned", "platform")},
-        [],
-    ),
-    "int_ad_campaigns__unioned": ([*ACCOUNT_KEY, "campaign_id"], ["campaign_name"], {}, []),
-    "int_ad_campaign_names__collapsed": ([*ACCOUNT_KEY, "campaign_id", "valid_from"], [], {}, []),
     "int_conversion_actions__resolved": (
         ["platform", "conversion_action_id"],
         ["is_primary"],
         {},
         [],
     ),
-    "int_ad_conversions__unioned": (
-        [*STATS_KEY, "conversion_action_id"],
-        ["currency", "is_primary"],
-        {},
-        [TO_CAMPAIGNS, TO_RATES],
-    ),
-    "int_ad_stats__unioned": (
-        STATS_KEY,
-        [*STATS_KEY, "currency", "client_id", "campaign_name", "spend"],
-        {},
-        [TO_ACCOUNTS, TO_CAMPAIGNS, TO_RATES],
-    ),
-    "int_ad_groups__unioned": (
-        [*ACCOUNT_KEY, "ad_group_id"],
-        ["campaign_id", "ad_group_name"],
-        {},
-        [TO_CAMPAIGNS],
-    ),
-    "int_ads__unioned": (
-        [*ACCOUNT_KEY, "ad_group_id", "ad_id"],
-        ["campaign_id", "ad_name"],
-        {},
-        [TO_AD_GROUPS],
-    ),
-    "int_ad_stats_ad_group__unioned": (
-        AD_GROUP_KEY,
-        [*AD_GROUP_KEY, *NAMED, "spend"],
-        {},
-        [TO_ACCOUNTS, TO_CAMPAIGNS, TO_AD_GROUPS, TO_RATES],
-    ),
-    "int_ad_stats_ad__unioned": (
-        AD_KEY,
-        [*AD_KEY, *NAMED, "ad_name", "spend"],
-        {},
-        [TO_ACCOUNTS, TO_CAMPAIGNS, TO_ADS, TO_RATES],
-    ),
-    "int_fx_rates__filled": (["rate_date", "currency"], ["rate", "rate_source"], {}, []),
-    "int_web_sessions__unioned": (SESSIONS_KEY, ["client_id", "currency"], {}, [TO_RATES]),
     # The views over which the core takes its dimensions and their versions (ADR-0036).
     "int_accounts__current": (ACCOUNT_KEY, [], {}, []),
     "int_campaigns__current": ([*ACCOUNT_KEY, "campaign_id"], [], {}, []),
@@ -1169,12 +1180,6 @@ COMPOSITE = (
     r"            to: ref\('(\w+)'\)\n            to_columns: \[(.*)\]$"
 )
 RELATIONSHIPS = r"^ +to: ref\('(\w+)'\)\n +field: (\w+)$"
-# The one warning of the intermediate models, a missing day, under the name that the log prints.
-GAP = (
-    "      - gap:\n          name: int_ad_stats__unioned_has_no_missing_day\n"
-    "          arguments:\n            account_columns: [platform, account_id]\n"
-    "            date_column: report_date\n          config:\n            severity: warn\n"
-)
 
 
 def split(columns: str) -> list[str]:
@@ -1189,9 +1194,7 @@ def test_the_intermediate_models_have_their_critical_tests():
     assert found == set(INTERMEDIATE_TESTS), sorted(found ^ set(INTERMEDIATE_TESTS))
     described = blocks(text, 2)
     assert set(described) == set(INTERMEDIATE_TESTS)
-    assert text.count("severity") == 1, "only the test of a missing day is a warning"
-    assert text.count(GAP) == 1, "the warning of a missing day, by its name"
-    assert GAP in described["int_ad_stats__unioned"]
+    assert "severity" not in text, "no test of the intermediate models is a warning"
     for model, (key, not_null, related, composite) in INTERMEDIATE_TESTS.items():
         block = described[model]
         columns = blocks(block, 6)
@@ -1241,23 +1244,25 @@ G2_SUMS = [
 
 
 def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
-    # Clicks above impressions, an account of no client and lower levels above their parents can be
-    # right, so they warn; primary actions that do not add up to the conversions of a campaign
-    # cannot.
+    # Clicks above impressions, an account of no client, a missing day and lower levels above their
+    # parents can be right, so they warn; so can primary actions that do not add up to
+    # conversions_primary, as a day with nothing but a primary action that the metric of the
+    # platform leaves out has no row of statistics (ADR-0036). They read the views of the marts.
     wanted = {
-        "assert_clicks_within_impressions": ({"int_ad_stats__unioned"}, True),
-        "assert_every_account_has_a_client": ({"int_ad_accounts__unioned"}, True),
+        "assert_clicks_within_impressions": ({"ad_stats_campaign_daily"}, True),
+        "assert_every_account_has_a_client": ({"ad_accounts"}, True),
+        "assert_no_day_of_an_account_is_missing": ({"ad_stats_campaign_daily"}, True),
         "assert_primary_actions_add_up_to_the_conversions": (
-            {"int_ad_conversions__unioned", "int_ad_stats__unioned"},
-            False,
+            {"ad_conversions_campaign_daily", "ad_stats_campaign_daily"},
+            True,
         ),
         # Reports of two levels loaded at different moments can disagree on recent days.
         "assert_ad_groups_add_up_to_no_more_than_their_campaigns": (
-            {"int_ad_stats__unioned", "int_ad_stats_ad_group__unioned"},
+            {"ad_stats_campaign_daily", "ad_stats_ad_group_daily"},
             True,
         ),
         "assert_ads_add_up_to_no_more_than_their_ad_groups": (
-            {"int_ad_stats_ad_group__unioned", "int_ad_stats_ad__unioned"},
+            {"ad_stats_ad_group_daily", "ad_stats_ad_daily"},
             True,
         ),
         # A quarantine and the stop of a source are the run working as meant (ADR-0035): they warn,
@@ -1357,12 +1362,13 @@ def test_the_staging_of_the_ecb_has_the_critical_tests_of_the_rates_of_the_demo(
 
 
 def test_the_rates_take_the_ecb_alone_once_it_has_any_and_the_loads_show_it_before_a_load():
-    # Never a fictional rate of the demo on a day on which the ECB publishes none (ADR-0032).
-    rates = (DBT / "models" / "intermediate" / "int_fx_rates__filled.sql").read_text(
-        encoding="utf-8"
-    )
-    assert "    from {{ ref('stg_ecb__rates_daily') }}\n    union all\n" in rates
-    assert "where not exists (select from {{ ref('stg_ecb__rates_daily') }})" in rates
+    # Never a fictional rate of the demo on a day on which the ECB publishes none (ADR-0032): the
+    # rates of the core take the ECB once it has a rate in staging or in the core.
+    rates = (DBT / "macros" / "rates.sql").read_text(encoding="utf-8")
+    assert (
+        "    when exists (select from {{ ecb }}) or exists (select from {{ rates }} where "
+        "rate_source = 'ecb')\n        then 'ecb'\n    else 'demo_fx'\n"
+    ) in rates
     loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
     assert "('raw_ecb', 'ecb')," in loads
 
@@ -1483,16 +1489,7 @@ def test_the_sources_of_google_ads_are_the_tables_that_its_load_writes():
 
 def test_every_union_of_the_platforms_reads_google_ads_and_the_loads_show_it():
     unions = {
-        "int_ad_stats__unioned": "stg_google_ads__campaign_stats",
-        "int_ad_conversions__unioned": "stg_google_ads__campaign_conversions",
-        "int_ad_accounts__unioned": "stg_google_ads__accounts",
-        "int_ad_campaigns__unioned": "stg_google_ads__campaigns",
-        "int_ad_campaign_names__collapsed": "stg_google_ads__campaigns",
         "int_conversion_actions__resolved": "stg_google_ads__campaign_conversions",
-        "int_ad_groups__unioned": "stg_google_ads__ad_groups",
-        "int_ads__unioned": "stg_google_ads__ads",
-        "int_ad_stats_ad_group__unioned": "stg_google_ads__ad_group_stats",
-        "int_ad_stats_ad__unioned": "stg_google_ads__ad_stats",
         "int_accounts__current": [
             "stg_google_ads__accounts",
             "stg_google_ads__campaign_stats",
@@ -1585,7 +1582,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 387, counted
+    assert counted == 316, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text
@@ -1923,27 +1920,6 @@ def test_each_shape_maps_the_statuses_of_its_platform_to_the_common_state():
             assert f"as {level}_status,\n{line}" in text, (file, level)
 
 
-def test_the_marts_read_the_old_path_and_nothing_of_the_core():
-    # The dimensions of the core are laid beside the live marts (#177), which switch to views over
-    # the core in one pull request (#201): until then no mart, and no model that a mart reads,
-    # reads a model of the core or a version. They read the checks of int_g1_failures, which read
-    # the tables of the core as sources, as the runs before this one left them.
-    core = {path.stem for path in CORE.glob("*.sql")} | {
-        path.stem for path in SNAPSHOTS.glob("*.sql")
-    }
-    parents = {
-        path.stem: set(referenced(path.read_text(encoding="utf-8")))
-        for path in (DBT / "models").rglob("*.sql")
-    }
-    for path in (DBT / "models" / "marts").glob("*.sql"):
-        assert not ({path.stem} | ancestors(path.stem, parents)) & core, path.stem
-        assert "int_g1_failures" in ancestors(path.stem, parents) or path.stem in (
-            "ad_platforms",
-            "clients",
-            "fx_rates_daily",
-        ), path.stem
-
-
 QUARANTINE = DBT / "macros" / "quarantine.sql"
 G1 = INTERMEDIATE / "int_g1_failures.sql"
 
@@ -2134,40 +2110,6 @@ def test_the_reasons_of_quarantine_are_one_list():
     body = text[text.index("{%- endmacro %}") :]
     for reason in reasons:
         assert f"'{reason}'" in body, reason
-
-
-def test_an_account_in_quarantine_stays_out_of_the_marts_of_the_old_path():
-    # Until #201 serves the marts from the core, they are tables of staging that every run builds
-    # whole: each intermediate model that reads the data of an account from staging leaves out an
-    # account that the checks hold, as int_accounts__current does for the core.
-    exempt = {
-        "int_g1_failures",
-        "int_accounts__current",
-        # Their accounts are those of int_accounts__current.
-        "int_campaigns__current",
-        "int_ad_groups__current",
-        "int_ads__current",
-        # The conversion actions and the rates are not the data of an account.
-        "int_conversion_actions__resolved",
-        "int_fx_rates__filled",
-    }
-    platforms = (*SHAPED_ADS, "demo_web", "google_ads")
-    filtered = 0
-    for path in sorted(INTERMEDIATE.glob("*.sql")):
-        text = path.read_text(encoding="utf-8")
-        reads = [
-            name
-            for name in referenced(text)
-            if name.startswith(tuple(f"stg_{p}__" for p in platforms))
-        ]
-        if path.stem in exempt or not reads:
-            continue
-        unions = text.count("as unioned\n")
-        filters = text.count("{{ not_in_quarantine(ref('int_g1_failures'), ")
-        assert filters >= 1, path.stem
-        assert filters == max(unions, 1), path.stem
-        filtered += 1
-    assert filtered == 10
 
 
 def test_g1a_and_the_stop_of_a_source_follow_adr_0035():

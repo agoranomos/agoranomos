@@ -1,26 +1,57 @@
--- Advertising statistics by day and ad group on every platform, with money in the currency of the
--- account and in the reporting currency, and the conversions of the primary actions (ADR-0034).
+-- Advertising statistics by day and ad group on every platform, a view over the core (ADR-0037):
+-- one row of core.ad_stats_ad_group_daily, with the names and states of its dimensions, money in
+-- the currency of the account and in the reporting currency at the rate of its day, and when its
+-- load ended, as ad_stats_campaign_daily has them. The conversions of the primary actions are
+-- none at this level: the conversions by action of ad groups are a module (ADR-0036).
+-- The test of the ad groups against their campaigns reads the view of campaigns, which dbt orders
+-- before it: depends_on: {{ ref('ad_stats_campaign_daily') }}
 select
-    s.report_date,
-    s.platform,
+    f.report_date,
+    a.platform,
     p.platform_name,
-    s.client_id,
-    s.client_name,
-    s.account_id,
-    s.account_name,
-    s.campaign_id,
-    s.campaign_name,
-    s.ad_group_id,
-    s.ad_group_name,
-    s.currency,
-    s.impressions,
-    s.clicks,
-    cast(s.spend as numeric(18,6)) as spend,
-    cast(s.conversions as numeric(18,6)) as conversions,
-    cast(s.conversion_value as numeric(18,6)) as conversion_value,
-    f.reporting_currency,
-    cast(round(s.spend * f.rate, 6) as numeric(18,6)) as spend_reporting,
-    cast(round(s.conversion_value * f.rate, 6) as numeric(18,6)) as conversion_value_reporting
-from {{ ref('int_ad_stats_ad_group__unioned') }} as s
-join {{ ref('int_ad_platforms__unioned') }} as p on p.platform = s.platform
-join {{ ref('int_fx_rates__filled') }} as f on f.rate_date = s.report_date and f.currency = s.currency
+    a.client_id,
+    c.client_name,
+    a.account_id,
+    a.account_name,
+    m.campaign_id_text as campaign_id,
+    m.campaign_name,
+    g.ad_group_id_text as ad_group_id,
+    g.ad_group_name,
+    cast(f.currency as text) as currency,
+    f.impressions,
+    f.clicks,
+    f.spend,
+    f.conversions,
+    f.conversion_value,
+    cast({{ reporting_currency() }} as text) as reporting_currency,
+    cast(f.spend * r.rate_into_reporting_currency as numeric(18,6)) as spend_reporting,
+    cast(f.conversion_value * r.rate_into_reporting_currency as numeric(18,6))
+        as conversion_value_reporting,
+    a.time_zone,
+    g.ad_group_status,
+    g.ad_group_state,
+    g.ad_group_type,
+    g.is_listed,
+    f.all_conversions,
+    cast(null as numeric(18,6)) as conversions_primary,
+    r.rate_into_reporting_currency as fx_rate_into_reporting_currency,
+    r.published_on as fx_rate_date,
+    r.is_carried_forward as is_fx_rate_carried_forward,
+    l.finished_at as loaded_at,
+    a.is_active as is_account_active
+from {{ ref('core_ad_stats_ad_group_daily') }} as f
+left join {{ ref('dim_account') }} as a
+    on a.account_sk = f.account_sk
+left join {{ ref('dim_client') }} as c
+    on c.client_id = a.client_id
+left join {{ platforms(ref('seed_ad_platforms')) }}
+    on p.platform = a.platform
+left join {{ ref('dim_campaign') }} as m
+    on m.account_sk = f.account_sk and m.campaign_id = f.campaign_id
+left join {{ ref('dim_ad_group') }} as g
+    on g.account_sk = f.account_sk and g.ad_group_id = f.ad_group_id
+left join {{ ref('core_fx_rates_daily') }} as r
+    on r.rate_date = f.report_date and r.currency = f.currency
+    and r.reporting_currency = {{ reporting_currency() }}
+left join {{ source('core', 'loads') }} as l
+    on l.load_sk = f.load_sk
