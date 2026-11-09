@@ -429,10 +429,10 @@ def test_the_seeds_go_to_staging_and_comment_their_tables():
 
 def test_the_intermediate_models_are_views_in_staging():
     # ADR-0025: until an AI role needs to tell them apart, intermediate models are views in staging,
-    # but for the statistics of ad groups and of ads, whose many tests would each compute a view of
-    # their size again (ADR-0034), and the rates of each day, which every unioned model of the facts
-    # and five marts read; and the checks of G1, which each run fills anew, as the days of the pin
-    # are (ADR-0035).
+    # but for the statistics of campaigns, of ad groups and of ads, whose many tests would each
+    # compute a view of their size again (ADR-0034), and the rates of each day, which every unioned
+    # model of the facts and five marts read; and the checks of G1, which each run fills anew, as
+    # the days of the pin are (ADR-0035).
     project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
     pattern = r"^    intermediate:\n      \+schema: staging\n      \+materialized: view$"
     assert re.search(pattern, project, flags=re.MULTILINE)
@@ -442,6 +442,7 @@ def test_the_intermediate_models_are_views_in_staging():
         if "materialized=" in path.read_text(encoding="utf-8")
     }
     assert tables == {
+        "int_ad_stats__unioned",
         "int_ad_stats_ad_group__unioned",
         "int_ad_stats_ad__unioned",
         "int_fx_rates__filled",
