@@ -300,9 +300,9 @@ rated as (
 select distinct
     l.source,
     l.account_id,
-    null as load_id,
-    'missing_rate' as reason,
-    'rates' as checked,
+    cast(null as text) as load_id,
+    'missing_rate'::text as reason,
+    'rates'::text as checked,
     'no rate of ' || l.currency || ' into ' || {{ reporting_currency() }}
         || ' from the source of the rates, ' || {{ rates_source(ecb, rates) }} as detail
 from listed as l
