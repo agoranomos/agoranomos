@@ -37,11 +37,12 @@ A source goes through every layer of the model ([ADR-0025](../../../docs/adr/002
     - one `stg_<platform>__<table>.sql` for each entity, each a call of its shape macro; a fact table goes through `newest_load` of `dbt/macros/newest_load.sql`, which reads the rows of the newest pinned load of each account and day, and whose `newest_load_sources` names the account and the day of the source; the source also needs its facts of the core in `pinned_load_facts` of `dbt/macros/pin_loads.sql`, whose task `pin` pins the loads of every source that `newest_load_sources` lists and makes the partitions of the months of their windows.
 
     The sources list the journal `_agoranomos_loads` and `_dlt_loads` too. No test reads a raw table: the tests are on the staging views ([ADR-0046](../../../docs/adr/0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md)).
-4. **Intermediate.** Add a `ref` of the new staging views to every `int_*` model that unions the platforms. `git grep` of the example finds them:
-    - `int_ad_stats__unioned`, `int_ad_conversions__unioned`, `int_ad_accounts__unioned` and `int_ad_campaigns__unioned`;
-    - `int_ad_campaign_names__collapsed` and `int_conversion_actions__resolved`;
-    - `int_web_sessions__unioned` for web analytics;
-    - `int_accounts__current`, `int_campaigns__current`, `int_ad_groups__current` and `int_ads__current`, over which the core takes its dimensions and their versions, and the union of the versions of the campaigns in `dbt/models/core/dim_campaign.sql`, which counts their names ([The schema core](../../../docs/reference/data-model.md#the-schema-core)).
+4. **Intermediate and core.** Add a `ref` of the new staging views to every model that unions the platforms. `git grep` of the example finds them:
+    - `int_conversion_actions__resolved`;
+    - `int_accounts__current`, `int_campaigns__current`, `int_ad_groups__current` and `int_ads__current`, over which the core takes its dimensions and their versions, and the union of the versions of the campaigns in `dbt/models/core/dim_campaign.sql`, which counts their names ([The schema core](../../../docs/reference/data-model.md#the-schema-core));
+    - the models of the facts of the core, `dbt/models/core/core_<fact>.sql`, and the tests of their sums, `dbt/tests/assert_the_core_holds_the_*_of_staging.sql`.
+
+    The marts are views over the core, and need no change for a new platform ([The marts](../../../docs/reference/data-model.md#the-marts)).
 5. **Ops.** Add the platform's schema and code to the list of `dbt/models/ops/ops_loads.sql`, which reads its `_agoranomos_loads`.
 6. **Seeds.** Add a row to `dbt/seeds/seed_ad_platforms.csv`. Add the conversion actions of the platform, with their categories and which are primary, to `seed_conversion_actions.csv`.
 7. **Metadata.** Every mart, column and display name stays described as [Describe the marts](../../../docs/reference/describe-the-marts.md) says. A new column that more than one model has takes a doc block in `dbt/models/_docs.md`.

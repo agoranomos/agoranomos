@@ -44,7 +44,7 @@ A click on a campaign, in the table of the campaigns or of the top campaigns, op
 
 - **Money** is in the reporting currency, `AGORANOMOS_REPORTING_CURRENCY` of `.env`.
 - **A KPI is a ratio of sums**, over the rows that the filters select: CTR is the sum of the clicks divided by the sum of the impressions, never an average of the rates of the rows. Each card computes it from the same declaration in dbt as the metric of Metabase of the same name, such as `CTR (Campaigns)` in the collection **agoranomos / Metrics** ([Describe the marts](../reference/describe-the-marts.md#metrics)).
-- **The conversions** are those of the primary conversion actions, as each platform counts them. Each platform credits its own ads and dates a conversion by the click, so a sum across platforms can count one conversion more than once, and the last days still rise for a while. **The key events** of web analytics date each by its event and credit it to one source, so the two counts differ.
+- **The conversions** are those of the own metric of conversions of each platform, as its account shows them, and none on Meta, which counts each action apart; the marts give the conversions of the primary conversion actions of the deployment of a campaign as `conversions_primary` ([The data model](../reference/data-model.md#conversions)). Each platform credits its own ads and dates a conversion by the click, so a sum across platforms can count one conversion more than once, and the last days still rise for a while. **The key events** of web analytics date each by its event and credit it to one source, so the two counts differ.
 
 [The data model](../reference/data-model.md) describes the marts that the dashboard reads.
 

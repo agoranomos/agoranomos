@@ -22,7 +22,7 @@ Build in Metabase, through the MCP server `agoranomos-metabase`, with the accoun
 
 1. Ask what the dashboard is for, who reads it, and its period, if the request does not say.
 2. Pick the marts. [The data model](../../../docs/reference/data-model.md) lists them:
-    - `ad_stats_campaign_daily` for spend, impressions, clicks and primary conversions, and `ad_stats_ad_group_daily` and `ad_stats_ad_daily` for the same by ad group and by ad, without the Performance Max campaigns of Google, which have no ad groups;
+    - `ad_stats_campaign_daily` for spend, impressions, clicks and conversions, those of the metric of each platform in `conversions` and those of the primary actions of the deployment in `conversions_primary`, and `ad_stats_ad_group_daily` and `ad_stats_ad_daily` for the same by ad group and by ad, with no `conversions_primary`, without the Performance Max campaigns of Google, which have no ad groups;
     - `ad_conversions_campaign_daily` for conversions by action;
     - `web_sessions_daily` for the sessions of web analytics;
     - the dimensions, such as `clients`, `ad_accounts`, `ad_groups` and `ads`, for filters.
