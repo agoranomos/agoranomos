@@ -124,6 +124,11 @@ def test_a_kpi_of_the_dashboard_is_the_ratio_of_sql_over_the_mart(
     for line in warehouse_output(env, sql).splitlines():
         platform, ctr, cpa = line.split("|")
         assert abs(Decimal(str(shown[platform]["ctr"])) - Decimal(ctr)) <= TOLERANCE, platform
+        # conversions is the metric of the platform, which Meta, and so demo_social, has none of
+        # (ADR-0037): its cost per conversion is none.
+        if cpa == "":
+            assert shown[platform]["cost_per_conversion"] is None, platform
+            continue
         cost = Decimal(str(shown[platform]["cost_per_conversion"]))
         assert abs(cost - Decimal(cpa)) <= TOLERANCE, platform
 
