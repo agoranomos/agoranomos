@@ -1,0 +1,49 @@
+{#-
+  The home page: a first screen in the style of the banners of the brand, light or dark with the
+  scheme, above the text of docs/index.md, which sets `template: home.html` in its front matter. The styles are in docs/stylesheets/brand.css
+  (Home). It extends main.html, so the rules of that file hold here too.
+
+  The first screen states only what the release does: keep it in step with the README and with
+  the status note of docs/index.md.
+-#}
+{% extends "main.html" %}
+{#- The theme puts the tabs under the hero block: here they come first, under the header. -#}
+{% block tabs %}{% endblock %}
+{% block hero %}
+  {% if "navigation.tabs" in features %}
+    {% include "partials/tabs.html" %}
+  {% endif %}
+  <section class="ag-hero" aria-labelledby="ag-hero-title">
+    <div class="ag-hero__inner md-grid">
+      <p class="ag-label">open-source marketing bi · pre-alpha</p>
+      <h1 id="ag-hero-title" class="ag-hero__title">
+        <span class="md-visually-hidden">agoranomos: </span>ads in.<br>
+        <em>answers out.<span class="ag-cursor" aria-hidden="true"></span></em>
+      </h1>
+      <p class="ag-hero__lead">
+        Ad data goes into a <strong>PostgreSQL warehouse of your own</strong>: dlt loads it, dbt models
+        it, Metabase shows it in ready dashboards, and Claude answers questions about it through
+        MCP. <strong>One command</strong> starts the whole stack on your machine or your server,
+        with the data of a fictional business to explore.
+      </p>
+      <div class="ag-hero__buttons">
+        <a class="ag-button ag-button--primary" href="{{ 'tutorials/run-locally-with-demo-data/' | url }}">$ ./agoranomos up</a>
+        <a class="ag-button" href="{{ 'how-to/see-the-demo/' | url }}">see the demo →</a>
+        <a class="ag-button" href="{{ config.repo_url }}">github →</a>
+      </div>
+      <div class="ag-facts">
+        <div><span class="ag-label">Code</span><b>open source</b><span>Apache-2.0, in one public repository</span></div>
+        <div><span class="ag-label">Data</span><b>on your own server</b><span>PostgreSQL, Airflow and Metabase run where you start them</span></div>
+        <div><span class="ag-label">Start</span><b>./agoranomos up</b><span>one command starts the whole stack</span></div>
+      </div>
+      <figure class="ag-hero__pipeline">
+        <img class="ag-light" src="{{ 'assets/readme/pipeline-light.svg' | url }}" width="1252" height="596" alt="The pipeline: demo data, dlt, the PostgreSQL warehouse with raw, staging and marts built by dbt, Metabase and the MCP servers run today, and Airflow runs the load and the dbt build. The connector of Google Ads is in place, with no load on a real account yet. The Claude apps and Claude Code reach the data through the MCP servers: the one built into Metabase and, in local mode, the read-only servers of the warehouse and of Airflow. The Metabase refresh, the connectors of more ad platforms, the MCP server of dbt and the AI clients ChatGPT, Gemini and Kimi are planned.">
+        <img class="ag-dark" src="{{ 'assets/readme/pipeline-dark.svg' | url }}" width="1252" height="596" alt="The pipeline: demo data, dlt, the PostgreSQL warehouse with raw, staging and marts built by dbt, Metabase and the MCP servers run today, and Airflow runs the load and the dbt build. The connector of Google Ads is in place, with no load on a real account yet. The Claude apps and Claude Code reach the data through the MCP servers: the one built into Metabase and, in local mode, the read-only servers of the warehouse and of Airflow. The Metabase refresh, the connectors of more ad platforms, the MCP server of dbt and the AI clients ChatGPT, Gemini and Kimi are planned.">
+      </figure>
+    </div>
+  </section>
+{% endblock %}
+{#- The page has its title in the first screen, so the content block shows the text alone. -#}
+{% block content %}
+  <div class="ag-home">{{ page.content }}</div>
+{% endblock %}

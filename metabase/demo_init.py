@@ -10,7 +10,7 @@ and puts the demo, its questions and its two dashboards, Advertising overview an
 in the collection agoranomos / Demo as the code says (content.py, ADR-0018): an edit is reverted
 and logged, an item in the trash comes back, and every group but Administrators gets at most View
 on them. The questions get the titles of their columns and axes from the display names of the
-metadata, money in the reporting currency of the metadata, and the colors of the project; each
+metadata, money in the reporting currency of the metadata, and the color of the charts; each
 has the filters of its dashboard, the period, the client and, for the advertising, the platform,
 which the filters of the dashboard set. The demo collection of v0.1, the one whose dashboard the
 account of demo-init made, moves into agoranomos as Demo once, after every item in it that the

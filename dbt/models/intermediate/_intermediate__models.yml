@@ -950,7 +950,8 @@ models:
       zone outside IANA; the journal of the loads for an account whose newest pinned load failed,
       and for an account that the loads name and no list gives; and the fact tables of raw for rows
       outside the window of their load and a spend with more than six decimal places. G1a compares
-      the spend of the campaigns of each load with what the core holds on the same days. A source
+      the spend of the campaigns of each load, and the sessions of each load of web analytics, with
+      what the core holds on the same days. A source
       with more than half of its pinned accounts here stops, and its other pinned accounts get the
       reason source_stopped. A table that each run fills anew, one statement for each kind of data.
       source, load_id, account_id, reason and checked are its key. Its tests guard the core and the
@@ -993,3 +994,34 @@ models:
         description: '{{ doc("window_from") }}'
       - name: window_to
         description: '{{ doc("window_to") }}'
+  - name: int_window_days
+    description: >-
+      The days of the windows that this run of the transform writes into the facts of the core
+      (ADR-0038): one row for each account of the ad platforms or property of web analytics and
+      each day of the loads that the run pinned, with the newest load that covers the day, the
+      surrogate and the currency of the account, and the surrogate of the load. A model of a fact
+      replaces each day whole: the rows of its load go in, and a day on which the load holds no row
+      is emptied. An account that the checks of this run hold, in int_g1_failures, has no row here,
+      so that every fact keeps its days. A table that each run fills anew. account_sk and
+      report_date are its key. Its tests guard the core: when one of them fails, dbt does not build
+      the facts.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [account_sk, report_date]
+          config: {tags: [critical]}
+    columns:
+      - name: source
+        description: '{{ doc("source") }}'
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+      - name: account_sk
+        description: '{{ doc("account_sk") }}'
+      - name: currency
+        description: '{{ doc("currency") }}'
+      - name: report_date
+        description: '{{ doc("report_date") }}'
+      - name: load_sk
+        description: '{{ doc("load_sk") }}'
+      - name: day_key
+        description: '{{ doc("day_key") }}'

@@ -32,7 +32,10 @@ select
     {{ to_count('impressions') }} as impressions,
     {#- Clicks to the site: the clicks of Meta count every click (ADR-0025). -#}
     {{ to_count('inline_link_clicks') }} as clicks,
-    {{ to_number('spend') }} as spend
+    {{ to_number('spend') }} as spend,
+    {#- Meta has no metric of conversions of its own: it counts each action apart. #}
+    cast(null as numeric(18,6)) as platform_conversions,
+    cast(null as numeric(18,6)) as platform_conversion_value
 from {{ relation }}
 {% endmacro %}
 
@@ -72,7 +75,11 @@ select
     cast(null as text) as platform_category,
     i.attribution_setting,
     j.conversions,
-    j.conversion_value
+    j.conversion_value,
+    j.conversions as platform_conversions,
+    j.conversion_value as platform_conversion_value,
+    cast(null as numeric(18,6)) as all_conversions,
+    cast(null as numeric(18,6)) as all_conversion_value
 from joined as j
 join (select * from {{ insights }}) as i on i._dlt_id = j.parent_id
 {% endmacro %}

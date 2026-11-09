@@ -1,19 +1,28 @@
 /*
-  The brand style of the agoranomos documentation.
+  The brand style of the agoranomos documentation, after the brand book of agoranomos, version 1.0
+  of 8 October 2026: its tokens, its type, and its part on the documentation.
 
-  Light scheme ("default"): Paper background, Void text, Rust links.
-  Dark scheme ("slate"): Void background, Bone text, Mute secondary text, Amber links.
-  In both, the header is Void and carries the logo for dark backgrounds, and code blocks are a
-  terminal: Graphite, Bone text, Amber keywords and prompts.
+  Light scheme ("default"): a Paper page with the navigation on Bone, Void text, Void code blocks
+  and dashed admonitions, and one orange for every accent: links, labels, the active page, the
+  warnings, the lines of data of the diagrams, and the slogan and the button of the home page.
+  Dark scheme ("slate"): the dark world of the brand, a Void page with Graphite panels, Bone text,
+  Mute secondary text and Amber for what works: links, the active page, the prompt.
+  In both, the header and the tabs are Void and carry the logo for dark backgrounds, and the
+  footer is Void. The first screen of the home page follows the scheme, as the banners of the
+  brand book do: Paper with its dot grid in the light scheme, the dark world with its dot grid and
+  Aurora in the dark one.
 
-  The fonts are Fira Sans (text) and Fira Code (headings, labels and code), served from
+  The fonts are Fira Sans (text) and Fira Code (headings, labels, figures and code), served from
   ../assets/fonts under the SIL Open Font License 1.1 (OFL-FiraSans.txt, OFL-FiraCode.txt).
   No request goes to a font host: zensical.toml sets `font = false`.
 
   Every text color below keeps at least 4.5:1 against its background (WCAG 2.2, level AA),
-  in highlighted and selected code too. The secondary text of the search dialog (its result
-  paths and counts) is the theme's own: an alpha set inside its shadow DOM, which these
-  variables do not reach.
+  in highlighted and selected code too, and every line or mark that carries meaning keeps 3:1,
+  with one exception, which the maintainer chose: the one orange of the light scheme is 2.24:1
+  on Paper, so the links, the labels and the slogan in it are under that contrast there. The
+  links keep their underline.
+  The secondary text of the search dialog (its result paths and counts) is the theme's own: an
+  alpha set inside its shadow DOM, which these variables do not reach.
 */
 
 /* Fonts ------------------------------------------------------------------------------------ */
@@ -87,24 +96,45 @@
   --ag-ok: #3ddc97;
   --ag-paper: #f4f3ef;
   --ag-rust: #b23a0e;
-  /* Chart colors of the brand: the dark variants for icons on Paper, the others on dark. */
+  /* Chart colors of the brand: the dark variants for marks on Paper, the others on dark. */
   --ag-amber-dark: #a86400;
   --ag-rust-chart: #c2360a;
   --ag-dusk-dark: #4f6382;
   --ag-dusk: #6f86a6;
   --ag-ember-soft: #f06a3a;
+  /* The surfaces of the dark panels of the brand book: a panel, a node, a bar, a node frame. */
+  --ag-panel: #0e0e11;
+  --ag-node: #121215;
+  --ag-bar: #0c0c0f;
+  --ag-line-2: #34343c;
+  /* The gradients of the brand: Ember for lines of data, Aurora behind a first screen. */
+  --ag-ember-line: linear-gradient(90deg, #ffb020, #ff4a1c);
+  --ag-ember-glow: 0 0 18px 4px rgb(255 110 30 / 50%);
+  --ag-aurora:
+    radial-gradient(40% 60% at 80% 20%, rgb(255 110 30 / 28%), transparent 70%),
+    radial-gradient(30% 50% at 10% 90%, rgb(255 176 32 / 12%), transparent 70%);
+  /* The dot grid of the brand: a 1 px dot every 16 px. */
+  --ag-dots: radial-gradient(rgb(232 230 225 / 12%) 1px, transparent 1.2px);
+  --ag-dots-on-paper: radial-gradient(rgb(9 9 11 / 9%) 1px, transparent 1.2px);
   /*
     Values derived for this site, not tokens of the brand:
-    - mute-dark: secondary text on Paper (6.29:1), where Mute (3.14:1) is too light for text;
-    - ok-dark: the success color on Paper (4.49:1), where Mint is too light;
+    - mute-dark: secondary text on Paper (6.29:1) and on Bone (5.60:1), where Mute is too light;
+    - ok-dark: the success color on Paper (4.49:1 for marks), where Mint is too light;
     - code-light: the background of inline code in the light scheme, Bone at 70 % over Paper;
-    - mute-deep: icons and scrollbars on Void, never text.
+    - mute-deep: icons, scrollbars and dashed rules on Void, never text;
+    - dash-light: the dashed rule of the brand book's documentation on Paper (2.56:1, a decoration beside the icon of the kind);
+    - orange-on-paper: the one orange of the light scheme, a clean Amber, hue 35 at full
+      saturation, a little darker than Amber so that it shows more on Paper (2.24:1, Void on it
+      8.01:1).
   */
   --ag-mute-dark: #5a5862;
   --ag-ok-dark: #1a7f55;
   --ag-code-light: #eceae5;
   --ag-mute-deep: #5f5d66;
+  --ag-dash-light: #9a98a2;
+  --ag-orange-on-paper: #f08c00;
   --ag-mono: "Fira Code", ui-monospace, Menlo, Consolas, monospace;
+  --ag-sans: "Fira Sans", "Helvetica Neue", Arial, sans-serif;
 }
 
 :root > * {
@@ -117,13 +147,13 @@
 [data-md-color-scheme="default"] {
   color-scheme: light;
 
-  --md-primary-fg-color: var(--ag-rust);
-  --md-primary-fg-color--light: var(--ag-rust);
-  --md-primary-fg-color--dark: var(--ag-rust);
+  --md-primary-fg-color: var(--ag-orange-on-paper);
+  --md-primary-fg-color--light: var(--ag-orange-on-paper);
+  --md-primary-fg-color--dark: var(--ag-orange-on-paper);
   --md-primary-bg-color: var(--ag-paper);
   --md-primary-bg-color--light: rgb(244 243 239 / 70%);
-  --md-accent-fg-color: var(--ag-rust);
-  --md-accent-fg-color--transparent: rgb(178 58 14 / 8%);
+  --md-accent-fg-color: var(--ag-orange-on-paper);
+  --md-accent-fg-color--transparent: rgb(240 140 0 / 8%);
   --md-accent-bg-color: var(--ag-paper);
   --md-accent-bg-color--light: rgb(244 243 239 / 70%);
 
@@ -137,9 +167,9 @@
   --md-default-bg-color--lightest: rgb(244 243 239 / 12%);
 
   --md-typeset-color: var(--ag-void);
-  --md-typeset-a-color: var(--ag-rust);
+  --md-typeset-a-color: var(--ag-orange-on-paper);
   --md-typeset-mark-color: rgb(255 176 32 / 35%);
-  --md-typeset-table-color: rgb(9 9 11 / 12%);
+  --md-typeset-table-color: rgb(9 9 11 / 14%);
   --md-typeset-table-color--light: rgb(9 9 11 / 3%);
   --md-typeset-kbd-color: var(--ag-paper);
   --md-typeset-kbd-accent-color: #fff;
@@ -160,21 +190,41 @@
   --color-background-subtle: 232 230 225;
   --color-backdrop: 244 243 239;
 
-  /* The rule under the Void header: none on Paper, Line on Void. */
-  --ag-header-rule: transparent;
+  /* The surfaces of this site. */
+  --ag-page: var(--ag-paper);
+  --ag-aside: var(--ag-bone);
+  --ag-aside-fg: #26252b;
+  --ag-rule: rgb(9 9 11 / 14%);
+  --ag-signal: var(--ag-orange-on-paper);
+  --ag-block-bg: var(--ag-void);
+  --ag-block-rule: var(--ag-void);
+  --ag-dots-page: var(--ag-dots-on-paper);
 
   /*
-    Admonitions: the color of the icon and the rule, and the tint behind the text. On Paper the
-    danger color is the chart Rust: Ember falls below 3:1 on its own tint.
+    Admonitions: a dashed rule in the color of the kind, as in the brand book's documentation,
+    with a label in Fira Code. On Paper the label stays Mute dark (6.29:1): the colors of the
+    kinds mark the rule and the icon only (Amber dark 4.21:1, chart Rust 4.94:1, Dusk dark 5.50:1).
   */
-  --ag-note: var(--ag-dusk-dark);
-  --ag-note-bg: rgb(79 99 130 / 8%);
-  --ag-warning: var(--ag-amber-dark);
-  --ag-warning-bg: rgb(168 100 0 / 8%);
-  --ag-danger: var(--ag-rust-chart);
-  --ag-danger-bg: rgb(194 54 10 / 6%);
+  --ag-note: var(--ag-dash-light);
+  --ag-note-icon: var(--ag-dusk-dark);
+  --ag-warning: var(--ag-orange-on-paper);
+  --ag-danger: var(--ag-orange-on-paper);
   --ag-success: var(--ag-ok-dark);
-  --ag-success-bg: rgb(26 127 85 / 8%);
+  --ag-adm-label: var(--ag-mute-dark);
+
+  /* Diagrams drawn into a page (see "Diagrams"). */
+  --ag-dg-bg: var(--ag-paper);
+  --ag-dg-node: #fbfaf7;
+  --ag-dg-node-line: #2a2a30;
+  --ag-dg-frame: rgb(9 9 11 / 22%);
+  --ag-dg-text: var(--ag-void);
+  --ag-dg-label: var(--ag-mute-dark);
+  --ag-dg-plan: var(--ag-dash-light);
+  --ag-dg-plan-text: #6e6c76;
+  --ag-dg-ctl: #8a8893;
+  --ag-dg-data: var(--ag-orange-on-paper);
+  --ag-dg-mark: var(--ag-orange-on-paper);
+  --ag-dg-user: var(--ag-dusk-dark);
 }
 
 /* Dark scheme ------------------------------------------------------------------------------ */
@@ -230,16 +280,34 @@
   --color-background-subtle: 42 42 48;
   --color-backdrop: 9 9 11;
 
-  --ag-header-rule: var(--ag-line);
+  --ag-page: var(--ag-void);
+  --ag-aside: var(--ag-panel);
+  --ag-aside-fg: var(--ag-bone);
+  --ag-rule: var(--ag-line);
+  --ag-signal: var(--ag-amber);
+  --ag-block-bg: var(--ag-graphite);
+  --ag-block-rule: var(--ag-line);
+  --ag-dots-page: var(--ag-dots);
 
-  --ag-note: var(--ag-dusk);
-  --ag-note-bg: rgb(111 134 166 / 10%);
+  --ag-note: var(--ag-mute-deep);
+  --ag-note-icon: var(--ag-dusk);
   --ag-warning: var(--ag-amber);
-  --ag-warning-bg: rgb(255 176 32 / 8%);
   --ag-danger: var(--ag-ember);
-  --ag-danger-bg: rgb(255 74 28 / 8%);
   --ag-success: var(--ag-ok);
-  --ag-success-bg: rgb(61 220 151 / 8%);
+  --ag-adm-label: var(--ag-mute);
+
+  --ag-dg-bg: var(--ag-void);
+  --ag-dg-node: var(--ag-node);
+  --ag-dg-node-line: var(--ag-line-2);
+  --ag-dg-frame: var(--ag-line);
+  --ag-dg-text: var(--ag-bone);
+  --ag-dg-label: var(--ag-mute);
+  --ag-dg-plan: #3a3a42;
+  --ag-dg-plan-text: var(--ag-mute);
+  --ag-dg-ctl: #4a4a52;
+  --ag-dg-data: var(--ag-amber);
+  --ag-dg-mark: var(--ag-amber);
+  --ag-dg-user: var(--ag-dusk);
 }
 
 /* Selection: a soft Amber in both schemes. */
@@ -247,14 +315,23 @@
   background-color: rgb(255 176 32 / 35%);
 }
 
-/* Header ----------------------------------------------------------------------------------- */
+:focus-visible {
+  outline-color: var(--md-accent-fg-color);
+}
+
+body {
+  background-color: var(--ag-page);
+}
+
+/* Header and tabs -------------------------------------------------------------------------- */
 
 /*
-  The header and the head of the navigation drawer take the colors of the dark scheme in both
-  schemes, so that the search button, the palette toggle and the repository link inside them
-  stay readable on the dark background.
+  The header, the tabs under it and the head of the navigation drawer take the colors of the
+  dark scheme in both schemes, as the top bar of the brand book does, so that the search button,
+  the palette toggle and the repository link inside them stay readable on Void.
 */
 .md-header,
+.md-tabs,
 .md-nav--primary .md-nav__title[for="__drawer"] {
   color-scheme: dark;
 
@@ -275,8 +352,14 @@
   backdrop-filter: none;
 }
 
+/* One rule of Line under the Void band of the header and the tabs, as under the top bar. */
 .md-header--shadow {
-  box-shadow: 0 0.05rem 0 var(--ag-header-rule);
+  box-shadow: none;
+}
+
+.md-header:not(:has(+ .md-container .md-tabs)),
+.md-tabs {
+  border-bottom: 1px solid var(--ag-line);
 }
 
 .md-header__title,
@@ -287,16 +370,72 @@
   letter-spacing: -0.01em;
 }
 
+/* The search button: a Graphite field with square corners, its shortcut in Mute. */
+.md-search__button {
+  font-family: var(--ag-mono);
+  font-size: 0.6rem;
+  background-color: var(--ag-graphite);
+  box-shadow: inset 0 0 0 1px var(--ag-line);
+}
+
+.md-search__button:hover {
+  box-shadow: inset 0 0 0 1px var(--ag-mute-deep);
+}
+
+.md-source {
+  font-family: var(--ag-mono);
+  font-size: 0.6rem;
+}
+
+/*
+  The tabs are the sections of the top bar of the brand book: labels in Fira Code, capitals,
+  spaced, Mute at rest (5.71:1 on Void), Bone when hovered, and Bone with an Amber square for the
+  section of the page.
+*/
+.md-tabs__link {
+  font-family: var(--ag-mono);
+  font-size: 0.55rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ag-mute);
+  opacity: 1;
+}
+
+.md-tabs__link:is(:hover, :focus) {
+  color: var(--ag-bone);
+}
+
+.md-tabs__item--active {
+  border-bottom-color: transparent;
+}
+
+.md-tabs__item--active .md-tabs__link {
+  color: var(--ag-bone);
+}
+
+.md-tabs__item--active .md-tabs__link::before {
+  display: inline-block;
+  width: 0.35rem;
+  height: 0.35rem;
+  margin: 0.2rem 0.4rem 0 0;
+  content: "";
+  background-color: var(--ag-amber);
+}
+
 /* Square corners, like the cells of the mark. */
 .md-search__button,
 .md-search__button::after,
 .md-nav__link,
 .md-nav__source,
+.md-sidebar,
 .md-sidebar--secondary .md-sidebar__inner,
 .md-tooltip,
 .md-tooltip2__inner,
 .md-dialog,
-.md-typeset .md-button {
+.md-typeset .md-button,
+.md-typeset .grid > .card,
+.md-typeset .grid.cards > :is(ul, ol) > li {
   border-radius: 0;
 }
 
@@ -359,6 +498,11 @@
     display: none;
   }
 
+  /* The header has no tabs on narrow screens, so it draws the rule itself. */
+  .md-header {
+    border-bottom: 1px solid var(--ag-line);
+  }
+
   /* The navigation is a drawer: square, like the cells of the mark, with a dark head. */
   .md-sidebar--primary {
     border-radius: 0;
@@ -378,6 +522,151 @@
     padding: 0;
     margin: 0;
   }
+}
+
+/* Navigation ------------------------------------------------------------------------------- */
+
+/*
+  On wide screens the navigation is the aside of the brand book's documentation: a column on
+  Bone in the light scheme and on the panel color in the dark one, from the left edge of the
+  window to the text. The column is drawn behind the sidebar, so it scrolls with nothing.
+*/
+@media screen and (min-width: 76.25em) {
+  .md-main__inner {
+    margin-top: 0;
+  }
+
+  .md-sidebar--primary {
+    position: sticky;
+    align-self: flex-start;
+    padding-top: 1.6rem;
+  }
+
+  .md-sidebar--primary::before {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: -1;
+    width: 100vw;
+    height: 100vh;
+    content: "";
+    background-color: var(--ag-aside);
+    box-shadow: inset -1px 0 0 var(--ag-rule);
+  }
+
+  .md-sidebar--secondary {
+    padding-top: 1.6rem;
+  }
+
+  .md-content {
+    padding-top: 0.5rem;
+  }
+
+  .md-nav--primary .md-nav__link {
+    color: var(--ag-aside-fg);
+  }
+
+  /* The sections of the navigation read as labels: Fira Code, capitals, spaced. */
+  .md-nav--primary > .md-nav__list > .md-nav__item--section > .md-nav__link {
+    margin-top: 0.6rem;
+    color: var(--md-default-fg-color--light);
+    font-family: var(--ag-mono);
+    font-size: 0.55rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+}
+
+.md-nav__link {
+  transition: color 0.15s;
+}
+
+/*
+  The page that is open: Rust on Bone (4.80:1) or Amber on the panel (10.54:1), semibold, after a square
+  of the mark. No background, so the aside stays one surface.
+*/
+.md-nav__item .md-nav__link--active,
+.md-nav--primary .md-nav__item .md-nav__link--active {
+  font-weight: 600;
+}
+
+.md-nav--primary .md-nav__link--active:not(.md-nav__container) {
+  position: relative;
+  color: var(--md-typeset-a-color);
+  background: none;
+}
+
+@media screen and (min-width: 76.25em) {
+  .md-nav--primary .md-nav__link--active:not(.md-nav__container)::before {
+    position: absolute;
+    top: 0.6em;
+    left: -0.3rem;
+    width: 0.3rem;
+    height: 0.3rem;
+    content: "";
+    background-color: var(--md-typeset-a-color);
+  }
+}
+
+.md-nav--primary .md-nav__link[href]:is(:hover, :focus):not(.md-nav__link--active) {
+  color: var(--md-typeset-a-color);
+  background: none;
+}
+
+.md-nav__title {
+  font-family: var(--ag-mono);
+  font-weight: 600;
+}
+
+/* The table of contents: its title is a label, its links are secondary text. */
+.md-nav--secondary .md-nav__title {
+  color: var(--md-default-fg-color--light);
+  font-size: 0.55rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: none;
+  box-shadow: none;
+}
+
+.md-nav--secondary .md-nav__link {
+  color: var(--md-default-fg-color--light);
+}
+
+.md-nav--secondary .md-nav__link--active,
+.md-nav--secondary .md-nav__link:is(:hover, :focus) {
+  color: var(--md-typeset-a-color);
+}
+
+/*
+  The path above the title of a page is the label of the brand: Fira Code, capitals, spaced, the
+  parts parted by a middle dot.
+*/
+.md-path {
+  font-family: var(--ag-mono);
+  font-size: 0.55rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.md-path__link {
+  color: var(--md-default-fg-color--light);
+}
+
+.md-path__link:is(:hover, :focus) {
+  color: var(--md-typeset-a-color);
+}
+
+.md-path__item:not(:first-child)::before {
+  width: auto;
+  height: auto;
+  content: "·";
+  background: none;
+  -webkit-mask-image: none;
+  mask-image: none;
+  color: var(--md-default-fg-color--light);
 }
 
 /* Text --------------------------------------------------------------------------------------- */
@@ -401,26 +690,29 @@
   font-variant-ligatures: none;
 }
 
+/* The scale of the brand book: H1 Code 700, -3 %; H2 Code 600, -2 %; H3 Code 600, -1 %. */
 .md-typeset h1 {
-  margin-bottom: 1em;
-  font-size: 1.75em;
+  margin: 0.2em 0 0.9em;
+  font-size: 2.1em;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1.08;
   letter-spacing: -0.03em;
 }
 
 .md-typeset h2 {
-  margin-top: 1.8em;
-  font-size: 1.375em;
+  padding-top: 1.1em;
+  margin-top: 1.6em;
+  font-size: 1.4em;
   font-weight: 600;
-  line-height: 1.3;
+  line-height: 1.2;
   letter-spacing: -0.02em;
+  border-top: 1px solid var(--ag-rule);
 }
 
 .md-typeset h3 {
   font-size: 1.125em;
   font-weight: 600;
-  line-height: 1.4;
+  line-height: 1.35;
   letter-spacing: -0.01em;
 }
 
@@ -432,12 +724,18 @@
 
 @media screen and (max-width: 44.984375em) {
   .md-typeset h1 {
-    font-size: 1.5em;
+    font-size: 1.6em;
   }
 
   .md-typeset h2 {
     font-size: 1.25em;
   }
+}
+
+/* The permalink of a heading: a hash in Mute, Rust or Amber when hovered. */
+.md-typeset .headerlink {
+  color: var(--md-default-fg-color--lighter);
+  font-weight: 400;
 }
 
 .md-typeset a {
@@ -456,7 +754,13 @@
   font-weight: 600;
 }
 
-/* Code: Fira Code with its ligatures, square corners like the cells of the mark. */
+.md-typeset hr {
+  border-bottom-color: var(--ag-rule);
+}
+
+/* Code ------------------------------------------------------------------------------------- */
+
+/* Fira Code with its ligatures, square corners like the cells of the mark. */
 .md-typeset code,
 .md-typeset kbd,
 .md-typeset pre {
@@ -473,15 +777,17 @@
 }
 
 /*
-  Code blocks are a terminal in both schemes: Graphite, Bone text, Amber keywords, Mint strings.
-  Inline code keeps the colors of its scheme. Every color is set here rather than taken from the
-  scheme, because the theme resolves its derived colors once, for the whole page.
+  Code blocks are a terminal in both schemes, as in the brand book: Void on Paper and Graphite
+  in the dark scheme, Bone text, Amber keywords and prompts, Mint strings. Inline code keeps the
+  colors of its scheme. Every color is set here rather than taken from the scheme, because the
+  theme resolves its derived colors once, for the whole page. The contrasts below are on
+  Graphite, the lighter of the two backgrounds: on Void each is higher.
 */
 .md-typeset .highlight {
   color-scheme: dark;
 
   --md-code-fg-color: var(--ag-bone);
-  --md-code-bg-color: var(--ag-graphite);
+  --md-code-bg-color: var(--ag-block-bg);
   --md-code-bg-color--light: rgb(22 22 26 / 90%);
   --md-code-bg-color--lighter: rgb(22 22 26 / 54%);
   --md-code-hl-color: var(--ag-amber);
@@ -523,19 +829,44 @@
   color: var(--ag-amber);
 }
 
+/* A rule of Line around each block in the dark scheme, where Graphite meets Void. */
+.md-typeset pre > code,
 [data-md-color-scheme="slate"] .md-typeset pre > code {
-  box-shadow: inset 0 0 0 0.05rem var(--ag-line);
+  box-shadow: inset 0 0 0 1px var(--ag-block-rule);
 }
 
-/* Tables: 14 px text, the header row on the code background. */
+/* Tables ------------------------------------------------------------------------------------- */
+
+/*
+  Tables after the brand book: rules of Line between the rows, no fill, and the header as labels
+  in Fira Code, capitals, spaced, in the secondary color.
+*/
 .md-typeset table:not([class]) {
   font-size: 0.7rem;
+  background-color: transparent;
+  border-color: var(--ag-rule);
   border-radius: 0;
 }
 
 .md-typeset table:not([class]) th {
-  font-weight: 600;
-  background-color: var(--md-code-bg-color);
+  color: var(--md-default-fg-color--light);
+  font-family: var(--ag-mono);
+  font-size: 0.55rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  vertical-align: bottom;
+  background-color: transparent;
+  border-bottom: 1px solid var(--ag-rule);
+}
+
+.md-typeset table:not([class]) td {
+  border-top-color: var(--ag-rule);
+}
+
+.md-typeset table:not([class]) tbody tr:hover {
+  background-color: var(--md-accent-fg-color--transparent);
+  box-shadow: none;
 }
 
 /* On a phone, tighter cells leave more room for the text. */
@@ -553,78 +884,701 @@
 
 /* Admonitions ---------------------------------------------------------------------------- */
 
+/*
+  The admonition of the brand book's documentation: a dashed rule of 1.5 px, no fill, and a title
+  that is a label in Fira Code, capitals, spaced. The kind sets the color of the rule and of the
+  icon; the text keeps the color of the page.
+*/
 .md-typeset :is(.admonition, details) {
   --ag-adm: var(--ag-note);
-  --ag-adm-bg: var(--ag-note-bg);
+  --ag-adm-icon: var(--ag-note-icon);
 
+  padding: 0 0.9rem;
   font-size: 0.75rem;
-  border-left: 0.15rem solid var(--ag-adm);
+  border: 1.5px dashed var(--ag-adm);
   border-radius: 0;
+  box-shadow: none;
 }
 
 .md-typeset :is(.admonition, details):is(.warning, .caution, .attention) {
   --ag-adm: var(--ag-warning);
-  --ag-adm-bg: var(--ag-warning-bg);
+  --ag-adm-icon: var(--ag-warning);
 }
 
 .md-typeset :is(.admonition, details):is(.danger, .error, .failure, .fail, .missing, .bug) {
   --ag-adm: var(--ag-danger);
-  --ag-adm-bg: var(--ag-danger-bg);
+  --ag-adm-icon: var(--ag-danger);
 }
 
 .md-typeset :is(.admonition, details):is(.success, .check, .done) {
   --ag-adm: var(--ag-success);
-  --ag-adm-bg: var(--ag-success-bg);
+  --ag-adm-icon: var(--ag-success);
 }
 
 /* Three classes, as in the theme's own rules for each type, so that these win. */
 .md-typeset :is(.admonition, details)[class] {
-  background-color: var(--ag-adm-bg);
+  background-color: transparent;
+  border-color: var(--ag-adm);
 }
 
 .md-typeset :is(.admonition, details) > :is(.admonition-title, summary) {
+  margin-top: 0.9rem;
+  margin-bottom: 0.6em;
+  color: var(--ag-adm-label);
+  font-family: var(--ag-mono);
+  font-size: 0.6rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background-color: transparent;
+}
+
+.md-typeset :is(.admonition, details)[class] > :is(.admonition-title, summary) {
+  background-color: transparent;
+}
+
+.md-typeset :is(.admonition, details) > :is(.admonition-title, summary)::before {
+  top: 0.05em;
+  background-color: var(--ag-adm-icon);
+}
+
+.md-typeset details > summary::after {
+  color: var(--ag-adm-icon);
+}
+
+/* A name in code keeps its case inside a label: `.env` is not `.ENV`. */
+.md-typeset :is(.admonition-title, summary, th) code,
+.md-path code {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Buttons ---------------------------------------------------------------------------------- */
+
+/* The buttons of the brand: Fira Code 600, square; the primary one Void on Amber (10.88:1). */
+.md-typeset .md-button {
+  padding: 0.7em 1.1em;
+  font-family: var(--ag-mono);
+  font-weight: 600;
+  color: var(--md-default-fg-color);
+  background-color: transparent;
+  border: 1px solid var(--ag-rule);
+}
+
+.md-typeset .md-button:is(:hover, :focus) {
+  color: var(--md-typeset-a-color);
+  border-color: currentcolor;
+}
+
+.md-typeset .md-button--primary,
+.md-typeset .md-button--primary:is(:hover, :focus) {
+  color: var(--ag-void);
+  background-color: var(--ag-amber);
+  border-color: var(--ag-amber);
+}
+
+/* Cards ------------------------------------------------------------------------------------ */
+
+/*
+  The grid of cards of the theme, as the panels of the brand book: a rule of Line, no corners,
+  and on hover the rule turns to the color of links rather than lifting with a shadow.
+*/
+.md-typeset .grid.cards > :is(ul, ol) > li,
+.md-typeset .grid > .card {
+  padding: 0.9rem 1rem;
+  background-color: var(--ag-page);
+  border: 1px solid var(--ag-rule);
+}
+
+.md-typeset .grid.cards > :is(ul, ol) > li:is(:hover, :focus-within),
+.md-typeset .grid > .card:is(:hover, :focus-within) {
+  border-color: var(--md-typeset-a-color);
+  box-shadow: none;
+}
+
+.md-typeset .grid.cards > :is(ul, ol) > li > hr {
+  border-bottom-color: var(--ag-rule);
+}
+
+/* Figures ---------------------------------------------------------------------------------- */
+
+/*
+  A screenshot sits in the browser window of the brand book: a bar of three dots over the image,
+  a rule around it, and under it a caption that is a label. Each screenshot comes in a light and
+  a dark variant, which the theme shows by the scheme (#only-light, #only-dark).
+*/
+.md-typeset figure.ag-shot {
+  display: block;
+  width: auto;
+  margin: 1.6em 0;
+  text-align: left;
+  background-color: var(--ag-bar);
+  border: 1px solid var(--ag-line-2);
+}
+
+[data-md-color-scheme="default"] .md-typeset figure.ag-shot {
+  border-color: var(--ag-void);
+}
+
+.md-typeset figure.ag-shot::before {
+  display: block;
+  height: 1.4rem;
+  content: "";
+  background:
+    radial-gradient(circle at 0.75rem 50%, #2e2e35 0.22rem, transparent 0.24rem),
+    radial-gradient(circle at 1.4rem 50%, #2e2e35 0.22rem, transparent 0.24rem),
+    radial-gradient(circle at 2.05rem 50%, #2e2e35 0.22rem, transparent 0.24rem),
+    var(--ag-bar);
+  border-bottom: 1px solid var(--ag-line);
+}
+
+.md-typeset figure.ag-shot img {
+  display: block;
+  width: 100%;
+  margin: 0;
+}
+
+/* The theme hides the variant of the other scheme; these rules keep that over the one above. */
+[data-md-color-scheme="default"] .md-typeset figure.ag-shot img[src$="#only-dark"],
+[data-md-color-scheme="slate"] .md-typeset figure.ag-shot img[src$="#only-light"] {
+  display: none;
+}
+
+.md-typeset figure:is(.ag-shot, .ag-diagram) figcaption {
+  max-width: none;
+  padding: 0.55rem 0.8rem;
+  margin: 0;
+  font-family: var(--ag-mono);
+  font-size: 0.55rem;
+  font-style: normal;
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.md-typeset figure.ag-shot figcaption {
+  color: var(--ag-mute);
+  background-color: var(--ag-bar);
+  border-top: 1px solid var(--ag-line);
+}
+
+/* Diagrams --------------------------------------------------------------------------------- */
+
+/*
+  A diagram of the brand, drawn into the page from docs/assets/diagrams, so that it takes the
+  fonts of the site and the colors of the scheme: nodes with a label and a name, a square of
+  Amber on what runs today, lines of data, thin lines for what Airflow or a person starts, and
+  dashed grey for what is planned. On the dark scheme the lines of data are the Ember gradient
+  with its glow; the light scheme has no gradient, as the brand book asks for Paper.
+*/
+.md-typeset figure.ag-diagram {
+  display: block;
+  width: auto;
+  margin: 1.6em 0;
+  text-align: left;
+  background-color: var(--ag-dg-bg);
+  background-image: var(--ag-dots-page);
+  background-size: 16px 16px;
+  border: 1px solid var(--ag-rule);
+}
+
+.md-typeset figure.ag-diagram svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: var(--ag-mono);
+}
+
+/* A wide diagram keeps a readable size on a phone and scrolls sideways inside its figure. */
+.md-typeset figure.ag-diagram .ag-diagram__scroll {
+  padding: 0.8rem;
+  overflow-x: auto;
+}
+
+@media screen and (max-width: 44.984375em) {
+  .md-typeset figure.ag-diagram .ag-diagram__scroll > svg {
+    min-width: 34rem;
+  }
+}
+
+.md-typeset figure.ag-diagram figcaption {
+  color: var(--md-default-fg-color--light);
+  border-top: 1px solid var(--ag-rule);
+}
+
+.ag-diagram .dg-node rect {
+  fill: var(--ag-dg-node);
+  stroke: var(--ag-dg-node-line);
+  stroke-width: 1.5;
+}
+
+.ag-diagram .dg-node.dg-plan rect {
+  fill: none;
+  stroke: var(--ag-dg-plan);
+  stroke-dasharray: 5 4;
+}
+
+.ag-diagram .dg-node.dg-user rect {
+  stroke: var(--ag-dg-user);
+}
+
+.ag-diagram .dg-k {
+  fill: var(--ag-dg-label);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.6px;
+}
+
+.ag-diagram .dg-t {
+  fill: var(--ag-dg-text);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ag-diagram .dg-s {
+  fill: var(--ag-dg-label);
+  font-size: 11px;
+}
+
+.ag-diagram .dg-plan .dg-t {
+  fill: var(--ag-dg-plan-text);
+}
+
+.ag-diagram .dg-node rect.dg-sq {
+  fill: var(--ag-dg-mark);
+  stroke: none;
+}
+
+.ag-diagram .dg-frame {
+  fill: none;
+  stroke: var(--ag-dg-frame);
+  stroke-width: 1.5;
+}
+
+.ag-diagram .dg-data {
+  fill: none;
+  stroke: var(--ag-dg-data);
+  stroke-width: 2;
+}
+
+.ag-diagram .dg-glow {
+  display: none;
+  fill: none;
+  stroke-width: 7;
+  opacity: 0.5;
+}
+
+[data-md-color-scheme="slate"] .ag-diagram .dg-data {
+  stroke: url("#ag-dg-ember");
+}
+
+[data-md-color-scheme="slate"] .ag-diagram .dg-glow {
+  display: inline;
+  stroke: url("#ag-dg-ember");
+  filter: url("#ag-dg-blur");
+}
+
+.ag-diagram .dg-ctl {
+  fill: none;
+  stroke: var(--ag-dg-ctl);
+  stroke-width: 1.25;
+}
+
+.ag-diagram .dg-ctl-head {
+  fill: none;
+  stroke: var(--ag-dg-ctl);
+  stroke-width: 1.25;
+}
+
+.ag-diagram .dg-dash {
+  fill: none;
+  stroke: var(--ag-dg-plan);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 5;
+}
+
+.ag-diagram .dg-legend {
+  fill: var(--ag-dg-label);
+  font-size: 11px;
+}
+
+/* Mermaid ---------------------------------------------------------------------------------- */
+
+/*
+  A Mermaid diagram takes the same language: nodes on the node color with a frame, edges in the
+  color of the lines of data, labels in the text color, on the dot grid. Its labels stay in Fira
+  Sans, the font with which Mermaid measures them: in the wider Fira Code they would overflow.
+*/
+[data-md-color-scheme] .mermaid {
+  --md-mermaid-node-bg-color: var(--ag-dg-node);
+  --md-mermaid-node-fg-color: var(--ag-dg-node-line);
+  --md-mermaid-label-fg-color: var(--ag-dg-text);
+  --md-mermaid-label-bg-color: var(--ag-dg-bg);
+  --md-mermaid-edge-color: var(--ag-dg-data);
+
+  padding: 1rem;
+  background-color: var(--ag-dg-bg);
+  background-image: var(--ag-dots-page);
+  background-size: 16px 16px;
+  border: 1px solid var(--ag-rule);
+}
+
+/* Footer ----------------------------------------------------------------------------------- */
+
+/*
+  The footer is Void in both schemes, with the dot grid of the brand. The links to the previous
+  and the next page are labels and titles in Fira Code, and the copyright is a label.
+*/
+.md-footer {
+  color-scheme: dark;
+
+  --md-default-fg-color: var(--ag-bone);
+  --md-default-fg-color--light: var(--ag-mute);
+  --md-default-fg-color--lightest: var(--ag-line);
+  --md-accent-fg-color: var(--ag-amber);
+
+  color: var(--ag-bone);
+  background-color: var(--ag-void);
+  background-image: var(--ag-dots);
+  background-size: 16px 16px;
+  border-top: 1px solid var(--ag-line);
+}
+
+.md-footer__link {
+  color: var(--ag-bone);
+}
+
+.md-footer__link:is(:hover, :focus) {
+  color: var(--ag-amber);
+  opacity: 1;
+}
+
+.md-footer__title {
   font-family: var(--ag-mono);
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
-.md-typeset :is(.admonition, details) > :is(.admonition-title, summary)::before {
-  background-color: var(--ag-adm);
+.md-footer__direction {
+  color: var(--ag-mute);
+  font-family: var(--ag-mono);
+  font-size: 0.55rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 1;
 }
 
-.md-typeset details > summary::after {
-  color: var(--ag-adm);
+.md-footer-meta,
+[data-md-color-scheme] .md-footer-meta {
+  color-scheme: dark;
+
+  --md-default-fg-color--light: var(--ag-mute);
+  --md-default-fg-color--lighter: var(--ag-mute-deep);
+  --md-typeset-a-color: var(--ag-amber);
+  --md-accent-fg-color: var(--ag-amber);
+
+  background-color: var(--ag-void);
+  border-top: 1px solid var(--ag-line);
 }
 
-/* Navigation ----------------------------------------------------------------------------- */
-
-.md-nav__item .md-nav__link--active,
-.md-nav--primary .md-nav__item .md-nav__link--active {
-  font-weight: 600;
+.md-copyright {
+  color: var(--ag-mute);
+  font-family: var(--ag-mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.02em;
 }
 
-/* On wide screens the sections of the navigation read as labels: Fira Code, capitals, spaced. */
-@media screen and (min-width: 76.25em) {
-  .md-nav--primary > .md-nav__list > .md-nav__item--section > .md-nav__link {
-    color: var(--md-default-fg-color--light);
-    font-family: var(--ag-mono);
-    font-size: 0.6rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+.md-copyright a {
+  color: var(--ag-mute);
+}
+
+/* Home ------------------------------------------------------------------------------------- */
+
+/*
+  The first screen of the home page (overrides/home.html) is the site of the brand book: a label,
+  the slogan with the cursor, the lead, the buttons, three facts and the diagram of the pipeline,
+  on the dot grid. It follows the scheme as the banners of the brand book do (hero-light.svg,
+  hero-dark.svg): Void with Aurora and Bone text in the dark scheme, Paper without a glow and Void
+  text in the light one (Mute dark 6.29:1). The slogan, the cursor and the primary
+  button take the orange of the scheme: Amber on Void, and on Paper the one orange of the light
+  scheme (see the rule of contrast at the top). The primary button has Void text in both.
+*/
+.ag-hero {
+  --ag-hero-bg: var(--ag-void);
+  --ag-hero-dots: var(--ag-dots);
+  --ag-hero-aurora: var(--ag-aurora);
+  --ag-hero-fg: var(--ag-bone);
+  --ag-hero-mute: var(--ag-mute);
+  --ag-hero-accent: var(--ag-amber);
+  --ag-hero-hover: var(--ag-amber);
+  --ag-hero-glow: var(--ag-ember-glow);
+  --ag-hero-rule: var(--ag-line);
+  --ag-hero-frame: var(--ag-line-2);
+
+  position: relative;
+  overflow: hidden;
+  color: var(--ag-hero-fg);
+  background-color: var(--ag-hero-bg);
+  background-image: var(--ag-hero-dots);
+  background-size: 16px 16px;
+  border-bottom: 1px solid var(--ag-hero-rule);
+}
+
+[data-md-color-scheme="default"] .ag-hero {
+  color-scheme: light;
+
+  --ag-hero-bg: var(--ag-paper);
+  --ag-hero-dots: var(--ag-dots-on-paper);
+  --ag-hero-aurora: none;
+  --ag-hero-fg: var(--ag-void);
+  --ag-hero-mute: var(--ag-mute-dark);
+  --ag-hero-accent: var(--ag-orange-on-paper);
+  --ag-hero-hover: var(--ag-hero-fg);
+  --ag-hero-glow: none;
+  --ag-hero-rule: var(--ag-rule);
+  --ag-hero-frame: rgb(9 9 11 / 22%);
+}
+
+.ag-hero::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  background: var(--ag-hero-aurora);
+}
+
+.ag-hero__inner {
+  position: relative;
+  padding: 2.4rem 1.2rem 0;
+}
+
+.ag-label {
+  margin: 0;
+  color: var(--ag-hero-mute);
+  font-family: var(--ag-mono);
+  font-size: 0.55rem;
+  font-weight: 500;
+  line-height: 1.4;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ag-hero__title {
+  margin: 1rem 0 0;
+  color: var(--ag-hero-fg);
+  font-family: var(--ag-mono);
+  font-size: clamp(2rem, 9vw, 4.6rem);
+  font-weight: 700;
+  font-variant-ligatures: none;
+  line-height: 0.95;
+  letter-spacing: -0.03em;
+}
+
+.ag-hero__title em {
+  font-style: normal;
+  color: var(--ag-hero-accent);
+  white-space: nowrap;
+}
+
+/* The cursor of the brand: one on the screen, blinking every 1.1 s, still when motion is reduced. */
+.ag-cursor {
+  display: inline-block;
+  width: 0.46em;
+  height: 0.8em;
+  margin-left: 0.1em;
+  vertical-align: -0.02em;
+  background-color: var(--ag-hero-accent);
+  animation: ag-blink 1.1s steps(1) infinite;
+}
+
+@keyframes ag-blink {
+  50% {
+    opacity: 0;
   }
 }
 
-.md-nav__title {
+@media (prefers-reduced-motion: reduce) {
+  .ag-cursor {
+    animation: none;
+  }
+}
+
+.ag-hero__lead {
+  max-width: 34rem;
+  margin: 1.4rem 0 0;
+  color: var(--ag-hero-mute);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.ag-hero__lead strong {
+  color: var(--ag-hero-fg);
+  font-weight: 500;
+}
+
+.ag-hero__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1.6rem;
+}
+
+.ag-button {
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.6rem 0.8rem;
   font-family: var(--ag-mono);
+  font-size: 0.75rem;
   font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+  border: 1px solid var(--ag-hero-frame);
 }
 
-/* Footer: the copyright band on Bone in the light scheme and on Graphite in the dark one. */
-[data-md-color-scheme="default"] .md-footer-meta {
-  background-color: var(--ag-bone);
+.ag-hero .ag-button {
+  color: var(--ag-hero-fg);
 }
 
-[data-md-color-scheme="slate"] .md-footer-meta {
-  background-color: var(--ag-graphite);
+.ag-hero .ag-button:is(:hover, :focus) {
+  color: var(--ag-hero-hover);
+  border-color: var(--ag-hero-accent);
+}
+
+.ag-hero .ag-button--primary,
+.ag-hero .ag-button--primary:is(:hover, :focus) {
+  color: var(--ag-void);
+  background-color: var(--ag-hero-accent);
+  border-color: var(--ag-hero-accent);
+}
+
+.ag-hero .ag-button--primary:is(:hover, :focus) {
+  box-shadow: var(--ag-hero-glow);
+}
+
+/*
+  The diagram of the pipeline is a picture of the README with a dot grid of its own, which its
+  scale moves off the grid of the first screen: it sits in a frame of one rule, on its own
+  background, with the grid below it, as a panel of the brand book does. Each scheme shows its
+  variant of the picture.
+*/
+.ag-hero__pipeline {
+  margin: 2rem 0 2.4rem;
+  background-color: var(--ag-hero-bg);
+  border: 1px solid var(--ag-hero-frame);
+}
+
+.ag-hero__pipeline img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+[data-md-color-scheme="default"] .ag-hero__pipeline img.ag-dark,
+.ag-hero__pipeline img.ag-light {
+  display: none;
+}
+
+[data-md-color-scheme="default"] .ag-hero__pipeline img.ag-light {
+  display: block;
+}
+
+/* The facts under the first screen, as on the cover of the brand book. */
+.ag-facts {
+  display: grid;
+  grid-template-columns: 1fr;
+  margin-top: 1.6rem;
+  border-top: 1px solid var(--ag-hero-rule);
+}
+
+.ag-facts > div {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.9rem 0;
+}
+
+.ag-facts b {
+  color: var(--ag-hero-fg);
+  font-family: var(--ag-mono);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.ag-facts span:last-child {
+  color: var(--ag-hero-mute);
+  font-size: 0.75rem;
+}
+
+@media screen and (min-width: 45em) {
+  .ag-hero__inner {
+    padding-top: 3.2rem;
+  }
+
+  .ag-facts {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .ag-facts > div {
+    padding: 1.1rem 1.2rem;
+    border-left: 1px solid var(--ag-hero-rule);
+  }
+
+  .ag-facts > div:first-child {
+    padding-left: 0;
+    border-left: 0;
+  }
+}
+
+/* The text of the home page: section labels over the headings, and numbered cards. */
+.ag-home .md-typeset h2 {
+  margin-top: 1.2em;
+}
+
+.md-typeset .ag-kicker {
+  color: var(--md-default-fg-color--light);
+  font-family: var(--ag-mono);
+  font-size: 0.55rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* The paragraph of a label takes the rule of the heading under it, and the heading none. */
+.md-typeset p:has(> .ag-kicker:only-child) {
+  padding-top: 1.4em;
+  margin: 2.4em 0 0;
+  border-top: 1px solid var(--ag-rule);
+}
+
+.md-typeset p:has(> .ag-kicker:only-child) + h2 {
+  padding-top: 0;
+  margin-top: 0.3em;
+  border-top: 0;
+}
+
+/* Four cards side by side on a wide screen, two on a tablet, one on a phone. */
+@media screen and (min-width: 60em) {
+  .md-typeset .grid.cards.ag-four {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.md-typeset .grid.cards .ag-n {
+  color: var(--md-typeset-a-color);
+  font-family: var(--ag-mono);
+  font-size: 0.6rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+}
+
+.md-typeset .grid.cards strong:first-of-type {
+  font-family: var(--ag-mono);
+  font-size: 1.05em;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }

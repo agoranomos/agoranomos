@@ -154,7 +154,9 @@ def test_dbt_build_creates_the_snapshot_on_an_empty_raw_layer_and_dbt_snapshot_a
     # without the demo, dbt snapshot fails, as the view of staging under the snapshot does not exist
     # yet; dbt build builds that view first and creates the snapshot empty, as each task of the
     # transform does (TestBehavior.BUILD); from its second run the snapshot writes through a
-    # temporary table, which transformer may create.
+    # temporary table, which transformer may create. The build takes the snapshot with what reads it
+    # and everything that those read (@): the facts of the core under it read the days of the
+    # windows, int_window_days, which is no ancestor of the snapshot.
     fresh = compose(
         "run",
         "--rm",
@@ -181,7 +183,7 @@ def test_dbt_build_creates_the_snapshot_on_an_empty_raw_layer_and_dbt_snapshot_a
         assert alone.returncode != 0, "dbt snapshot alone built the snapshot on an empty raw layer"
         assert 'relation "staging.int_campaigns__current" does not exist' in alone.stdout
         assert snapshot_state(env) == "", "dbt snapshot alone created the snapshot"
-        built = dbt("build", "--select", "+dim_campaign_versions+")
+        built = dbt("build", "--select", "@dim_campaign_versions")
         assert built.returncode == 0, built.stdout[-3000:]
         assert snapshot_state(env) == "transformer:0"
         again = dbt("build", "--select", "dim_campaign_versions")

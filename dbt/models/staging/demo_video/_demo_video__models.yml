@@ -27,6 +27,10 @@ models:
         description: '{{ doc("clicks") }}'
       - name: spend
         description: '{{ doc("spend") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
   - name: stg_demo_video__campaign_conversions
     description: >-
       The conversions of the campaigns of demo_video by action, one row for each campaign, day and
@@ -60,6 +64,14 @@ models:
         description: '{{ doc("conversions") }}'
       - name: conversion_value
         description: '{{ doc("conversion_value") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
   - name: stg_demo_video__accounts
     description: >-
       The ad accounts of demo_video, its advertisers, one row each. platform and account_id are its
@@ -149,6 +161,10 @@ models:
         description: '{{ doc("clicks") }}'
       - name: spend
         description: '{{ doc("spend") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
   - name: stg_demo_video__ad_group_conversions
     description: >-
       The conversions of the ad groups of demo_video by conversion action, one row for each ad
@@ -184,6 +200,14 @@ models:
         description: '{{ doc("conversions") }}'
       - name: conversion_value
         description: '{{ doc("conversion_value") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
   - name: stg_demo_video__ad_stats
     description: >-
       The statistics of the ads of demo_video, one row for each ad and day, from its integrated
@@ -216,6 +240,10 @@ models:
         description: '{{ doc("clicks") }}'
       - name: spend
         description: '{{ doc("spend") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
   - name: stg_demo_video__ad_conversions
     description: >-
       The conversions of the ads of demo_video by conversion action, one row for each ad, day and
@@ -253,6 +281,14 @@ models:
         description: '{{ doc("conversions") }}'
       - name: conversion_value
         description: '{{ doc("conversion_value") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
   - name: stg_demo_video__ad_groups
     description: >-
       The versions of the ad groups of demo_video, one row for each version that the loads saw, from

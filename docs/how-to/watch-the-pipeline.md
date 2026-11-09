@@ -2,6 +2,12 @@
 
 The collection **agoranomos / Ops** in Metabase holds the dashboard **Pipeline health**, which shows how the pipeline itself is doing: which accounts the last run of the transform kept out of the core, when each account was last loaded, how the runs of the transform went, which models failed and which tests warned or failed, and how much room the warehouse takes ([ADR-0029](../adr/0029-record-the-runs-of-dbt-with-elementary-and-show-them-in-ops.md)).
 
+<figure class="ag-shot" markdown="span">
+    ![The dashboard Pipeline health in Metabase: late accounts, failed models, failed or warned tests and the size of the warehouse, then the accounts in quarantine, none, and the last load of each account](../assets/screenshots/pipeline-health-light.webp#only-light){ width="1440" height="900" loading="lazy" }
+    ![The dashboard Pipeline health in Metabase: late accounts, failed models, failed or warned tests and the size of the warehouse, then the accounts in quarantine, none, and the last load of each account, in the dark theme](../assets/screenshots/pipeline-health-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
+    <figcaption>Metabase · agoranomos / Ops · Pipeline health · demo data</figcaption>
+</figure>
+
 ## Open it
 
 Sign in to Metabase as [Run agoranomos locally](run-locally.md#sign-in) says and open the collection **agoranomos / Ops**. `metabase-init` makes it on the first start, with or without the demo, and keeps it as the code says on every start, view-only for every group but Administrators, as it does for the demo ([ADR-0018](../adr/0018-keep-the-content-of-the-package-in-metabase-as-code.md)). Until the first run of the transform has built the views that it reads, its questions show an error of PostgreSQL that the relation does not exist; with the demo, the first start runs the transform.
@@ -10,7 +16,7 @@ Sign in to Metabase as [Run agoranomos locally](run-locally.md#sign-in) says and
 
 - **Late accounts**: how many accounts were last loaded more than 36 hours ago. The daily load of the demo runs once a day, so a number above 0 means that a load did not run or failed: look at `agoranomos_demo_daily` in Airflow.
 - **Accounts in quarantine**: the accounts that the last run of the transform kept out of the core, with the reason, since when, and what the check found ([When an account is in quarantine](#when-an-account-is-in-quarantine)). The demo has none.
-- **Failed models** and **Failed or warned tests**: the models, seeds and snapshots that failed, and the tests that warned, failed or ended in an error, in the last run of the transform. The demo leaves one day of one account out on purpose, so one test, `int_ad_stats__unioned_has_no_missing_day`, warns on every run of the demo.
+- **Failed models** and **Failed or warned tests**: the models, seeds and snapshots that failed, and the tests that warned, failed or ended in an error, in the last run of the transform. The demo leaves one day of one account out on purpose, so one test, `int_ad_stats__unioned_has_no_missing_day`, warns on every run of the demo. A test whose name starts with `assert_the_core_holds_` checks that a fact of the core adds up to what staging read for the days that the run wrote ([The data model](../reference/data-model.md#the-facts-and-the-journals-of-restatements)): when it fails, the write lost or doubled rows, the run is red, and the next run writes the same days again.
 - **Warehouse, MB**: the room that the tables of the warehouse take, with their indexes.
 - **Last load of each account**: the last day that a load took for each account of each platform, in the time zone of the account, when it was loaded, and how many hours ago.
 - **Duration of each run of the transform, last 30 days**, and the **slowest models of the last run**.
@@ -23,7 +29,7 @@ A test records its status and the number of rows that it found, never the rows: 
 
 Before it writes the core, each run of the transform checks the data of each account that it reads, the checks G1 and G1a of [ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md). An account that fails one stays out of that run, in quarantine, and the other accounts go on: the run stays green, as one account with bad data must not stop the rest.
 
-- **The core** keeps the data of the account as it was: its row of `core.dim_account`, its entities and their versions do not change, and the facts are to do the same once the transform writes them. The raw layer keeps the rows of its loads.
+- **The core** keeps the data of the account as it was: its row of `core.dim_account`, its entities, their versions and the days of its facts do not change. The raw layer keeps the rows of its loads.
 - **The marts**, which the transform still builds from staging, leave the account out for that run, so its rows are missing from the dashboards until it is back.
 - **It comes back** with the first run that finds its data whole, for example after a load that brings its days again or a list that gives its currency again; a load that is still bad keeps it out. No step of yours releases it.
 - **A source stops** when more than half of the accounts of its pinned loads are in quarantine: that says that the platform or its connector failed, so none of its accounts enters the core in that run, each with the reason `source_stopped`, and the other sources go on. Exactly half stops nothing.
@@ -41,7 +47,7 @@ Before it writes the core, each run of the transform checks the data of each acc
 | `missing_measure` | A count or an amount that a row needs is missing. |
 | `negative_measure` | A count or an amount is below zero. |
 | `date_outside_window` | A load holds rows of days outside the window that it recorded for the account. |
-| `empty_window` | A load has no row on the days of its window while the core holds spend on them, as a lost token gives. |
+| `empty_window` | A load has no row on the days of its window while the core holds spend on them, or, for web analytics, sessions, as a lost token gives. |
 | `spend_fall` | The spend of a load fell by more than half of what the core holds on the same days. The share is `quarantine_spend_fall` in the `vars` of `dbt/dbt_project.yml`, 0.5. |
 | `source_stopped` | More than half of the pinned accounts of the source are in quarantine. |
 

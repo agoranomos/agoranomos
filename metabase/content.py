@@ -69,13 +69,13 @@ Log = Callable[[str], None]
 
 # The settings of a chart that hold the titles of its axes.
 AXIS_TITLES = ("graph.x_axis.title_text", "graph.y_axis.title_text")
-# The color of the series of a chart of the package with one series: the first color of the chart
-# palette of the project, which is made for a light background (the default of a Metabase
-# dashboard). Metabase keeps the color of a series in series_settings, under the series key, which
-# for a chart with one metric and no breakout is the name of the metric column. A color with no
+# The color of the series of a chart of the package with one series: the orange of the light scheme
+# of the documentation site, which Metabase draws as it is on its light and on its dark background
+# alike. Metabase keeps the color of a series in series_settings, under the series key, which for a
+# chart with one metric and no breakout is the name of the metric column. A color with no
 # color_name is drawn as it is. A chart with a breakout has a series for each value of the data, in
 # the colors of Metabase.
-SERIES_COLOR = "#A86400"
+SERIES_COLOR = "#F08C00"
 # The widget type of a filter that changes the grouping of time of a question, and does not filter
 # it: its template tag has the type temporal-unit, and a card of a dashboard targets it with the
 # number of the stage of its query, 0 for a native question (buildTemplateTagVariableTarget,

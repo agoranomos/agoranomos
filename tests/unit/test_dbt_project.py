@@ -431,8 +431,8 @@ def test_the_intermediate_models_are_views_in_staging():
     # ADR-0025: until an AI role needs to tell them apart, intermediate models are views in staging,
     # but for the statistics of ad groups and of ads, whose many tests would each compute a view of
     # their size again (ADR-0034), and the rates of each day, which every unioned model of the facts
-    # and five marts read; and the checks of G1, which each run fills anew, as the days of the pin
-    # are (ADR-0035).
+    # and five marts read; and the checks of G1 and the days of the windows of the facts, which
+    # each run fills anew, as the days of the pin are (ADR-0035, ADR-0038).
     project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
     pattern = r"^    intermediate:\n      \+schema: staging\n      \+materialized: view$"
     assert re.search(pattern, project, flags=re.MULTILINE)
@@ -446,8 +446,9 @@ def test_the_intermediate_models_are_views_in_staging():
         "int_ad_stats_ad__unioned",
         "int_fx_rates__filled",
         "int_g1_failures",
+        "int_window_days",
     }
-    for name in tables - {"int_g1_failures"}:
+    for name in tables - {"int_g1_failures", "int_window_days"}:
         text = (DBT / "models" / "intermediate" / f"{name}.sql").read_text(encoding="utf-8")
         assert "{{ config(materialized='table') }}" in text, name
 
@@ -1160,6 +1161,8 @@ INTERMEDIATE_TESTS = {
         {},
         [],
     ),
+    # The days of the windows that the facts of the core take (ADR-0038).
+    "int_window_days": (["account_sk", "report_date"], [], {}, []),
 }
 COMPOSITE = (
     r"^      - relationships_composite:\n          arguments:\n            columns: \[(.*)\]\n"
@@ -1222,6 +1225,21 @@ def test_the_intermediate_models_have_their_critical_tests():
     ]
 
 
+# The ad platforms of the model, whose staging the facts of ads of the core read.
+AD_PLATFORMS = ("demo_search", "demo_social", "demo_video", "google_ads")
+# The tests of the sums of G2: what each compares, the fact of the core, and the staging models.
+G2_SUMS = [
+    *(
+        (f"statistics_of_{level}s", f"ad_stats_{level}_daily", f"{level}_stats")
+        for level in ("campaign", "ad_group", "ad")
+    ),
+    ("conversions_of_campaigns", "ad_conversions_campaign_daily", "campaign_conversions"),
+]
+G2_SUMS = [
+    (what, fact, {f"stg_{code}__{kind}" for code in AD_PLATFORMS}) for what, fact, kind in G2_SUMS
+] + [("sessions", "web_sessions_daily", {"stg_demo_web__sessions_daily"})]
+
+
 def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
     # Clicks above impressions, an account of no client and lower levels above their parents can be
     # right, so they warn; primary actions that do not add up to the conversions of a campaign
@@ -1246,6 +1264,14 @@ def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
         # and Ops shows them, as a test at error would stop the healthy accounts too (#188).
         "assert_no_account_is_in_quarantine": ({"int_g1_failures"}, True),
         "assert_no_source_is_stopped": ({"int_g1_failures"}, True),
+        # G2 (ADR-0035): a fact that does not hold the sums of staging lost or doubled rows.
+        **{
+            f"assert_the_core_holds_the_{what}_of_staging": (
+                {f"core_{fact}", "int_window_days", *staged},
+                False,
+            )
+            for what, fact, staged in G2_SUMS
+        },
     }
     assert {path.stem for path in (DBT / "tests").glob("*.sql")} == set(wanted)
     for name, (reads, warns) in wanted.items():
@@ -1553,7 +1579,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 376, counted
+    assert counted == 387, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text
@@ -1578,8 +1604,8 @@ CORE = DBT / "models" / "core"
 # The migrations that create the dimensions and the registries of the core (ADR-0036).
 DIMENSION_MIGRATIONS = ("0003_create_the_registries.sql", "0004_create_the_dimensions.sql")
 # The journals of the core that a model writes, by their migration: the journal of quarantine,
-# from the checks of G1 and G1a (ADR-0035). The pin writes core.loads, and the other journals wait
-# for the facts.
+# from the checks of G1 and G1a (ADR-0035). The pin writes core.loads, the models of the facts the
+# journals of restatements in their hooks, and the totals of G0a wait for #212.
 JOURNAL_MODELS = {"0006_create_the_journals.sql": {"account_quarantine"}}
 COMMENT = re.compile(
     r"^COMMENT ON (TABLE|COLUMN) core\.(\w+)(?:\.(\w+))? IS\n'((?:[^']|'')*)';$", flags=re.M
@@ -1633,6 +1659,31 @@ def dimension_tables() -> dict[str, dict]:
     return tables
 
 
+FACT_CREATE = re.compile(
+    r"^CREATE TABLE core\.(\w+) \(\n(.*?)\n\) PARTITION BY RANGE \(report_date\);$",
+    flags=re.M | re.S,
+)
+FACT_COLUMN = re.compile(r"^  (\w+) ([a-z]+(?:\(\d+(?:,\d+)?\))?)")
+
+
+def fact_tables() -> dict[str, dict]:
+    """The facts of the core, as migration 0005 creates them: for each, its columns in order with
+    their types, without a collation, and the comments of the table and of its columns."""
+    text = (MIGRATIONS / "0005_create_the_facts.sql").read_text(encoding="utf-8")
+    tables: dict[str, dict] = {}
+    for name, body in FACT_CREATE.findall(text):
+        columns = {
+            found.group(1): found.group(2)
+            for found in map(FACT_COLUMN.match, body.splitlines())
+            if found and found.group(1) not in ("PRIMARY", "CHECK", "UNIQUE")
+        }
+        tables[name] = {"columns": list(columns), "types": columns, "comments": {}}
+    for kind, table, column, body in COMMENT.findall(text):
+        if table in tables:
+            tables[table]["comments"][None if kind == "TABLE" else column] = body.replace("''", "'")
+    return tables
+
+
 def folded(block: str, indent: int) -> str:
     """The description of an item of YAML whose keys are at indent, folded with >- as dbt reads it:
     its lines joined by spaces."""
@@ -1664,7 +1715,8 @@ def test_the_dimensions_of_the_core_merge_into_the_tables_of_the_migrations():
     )
     assert section in project
     tables = dimension_tables()
-    assert {path.stem for path in CORE.glob("*.sql")} == set(tables)
+    facts = {f"core_{fact}" for fact in fact_tables()}
+    assert {path.stem for path in CORE.glob("*.sql")} == set(tables) | facts
     for name, table in tables.items():
         text = (CORE / f"{name}.sql").read_text(encoding="utf-8")
         config = model_config(text)
@@ -1692,6 +1744,8 @@ def test_the_descriptions_of_the_core_are_the_comments_of_its_migrations():
     # every column, so that dbt and the warehouse describe them alike.
     text = (CORE / "_core__models.yml").read_text(encoding="utf-8")
     tables = dimension_tables()
+    # The models of the facts write into the tables of their alias, as the marts have their names.
+    tables |= {f"core_{fact}": table for fact, table in fact_tables().items()}
     described = blocks(text, 2)
     assert set(described) == set(tables)
     for name, table in tables.items():
@@ -1861,17 +1915,48 @@ def hooks() -> list[str]:
     return re.findall(r'^        "(.*)",$', g1_config(), re.M)
 
 
+# The measures of staging that the facts of the core take beyond those that the tests of staging
+# checked (ADR-0036), by kind: those that a column NOT NULL of a fact takes, and those that a
+# column of zero or more takes, which G1 checks too, so that one account cannot fail the write of a
+# fact for all.
+STATS_TAKEN = ([], ["platform_conversions", "platform_conversion_value"])
+ACTIONS_TAKEN = (
+    ["platform_conversions"],
+    [
+        "platform_conversions",
+        "platform_conversion_value",
+        "all_conversions",
+        "all_conversion_value",
+    ],
+)
+CORE_TAKES = {
+    **dict.fromkeys(("campaign_stats", "ad_group_stats", "ad_stats"), STATS_TAKEN),
+    **dict.fromkeys(
+        ("campaign_conversions", "ad_group_conversions", "ad_conversions"), ACTIONS_TAKEN
+    ),
+    "sessions_daily": (["engaged_sessions"], []),
+}
+
+
 def test_g1_checks_each_kind_of_facts_as_the_tests_of_staging_did():
     # ADR-0035: the keys, the IDs and the measures of the facts are checked for each account, so
     # that one account that fails holds out itself alone; the tests of staging checked them for all
-    # accounts at once, and a failure stopped them all.
+    # accounts at once, and a failure stopped them all. The measures that the core takes besides
+    # are checked as well, as a NULL or a value below zero in a column of a fact that refuses it
+    # would fail its write for every account (ADR-0036).
     kinds = returned("quarantine_fact_kinds")
     assert set(kinds) == BY_ACCOUNT - {"accounts", "properties"}
+    assert set(CORE_TAKES) == set(kinds)
     for kind, (account, key, ids, required, counted) in kinds.items():
         unique, not_null, non_negative = CHECKED[kind]
+        needed, positive = CORE_TAKES[kind]
         assert set(unique) - {"platform"} == {"report_date", account, *key}, kind
-        assert set(not_null) - {"report_date", "platform", account} == {*key, *ids, *required}
-        assert set(non_negative) == set(counted), kind
+        assert set(not_null) - {"report_date", "platform", account} | set(needed) == {
+            *key,
+            *ids,
+            *required,
+        }, kind
+        assert set(non_negative) | set(positive) == set(counted), kind
     # The accounts and the properties: listed twice, and a currency and a time zone of the seeds.
     accounts = macro_text("quarantine_account_findings")
     for seed, field in IN_SEEDS.values():
@@ -1900,11 +1985,18 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
         codes = ["demo_web"] if kind == "sessions_daily" else [*SHAPED_ADS, "google_ads"]
         read = re.findall(r"ref\('(stg_\w+)'\)", statement)
         assert read == [*(f"stg_{code}__{kind}" for code in codes), *["stg_loads__newest_days"] * 2]
-    raw, collapse, stop = statements[len(kinds) : -1]
+    raw, collapse, sessions, stop = statements[len(kinds) : -1]
     assert raw.startswith("{% for source_name in quarantine_raw_tables() %}")
     assert raw.count("quarantine_insert(") == 1
     assert "quarantine_collapse_findings([" in collapse
-    assert "source('core', 'dim_account'), source('core', 'ad_stats_campaign_daily')" in collapse
+    assert "source('core', 'dim_account'), source('core', 'ad_stats_campaign_daily'))" in collapse
+    # Web analytics has no spend: G1a finds a load of a property with no row where the core holds
+    # sessions, before a window erases them.
+    assert "quarantine_collapse_findings([ref('stg_demo_web__sessions_daily')]" in sessions
+    assert (
+        "source('core', 'dim_account'), source('core', 'web_sessions_daily'), measure='sessions', "
+        "checked='sessions_daily', account='property_id', fall=false)"
+    ) in sessions
     assert "quarantine_stop_findings(this, source('core', 'loads'))" in stop
     # dbt orders the model after what the statements read.
     model = G1.read_text(encoding="utf-8")
@@ -2010,15 +2102,20 @@ def test_g1a_and_the_stop_of_a_source_follow_adr_0035():
     project = PROJECT_FILE.read_text(encoding="utf-8")
     assert "\n  quarantine_spend_fall: 0.5\n" in project
     collapse = macro_text("quarantine_collapse_findings")
-    assert "read_spend < held_spend * (1 - {{ var('quarantine_spend_fall') }})" in collapse
+    assert "{%- if fall %}\n        or read < held * (1 - {{ var('quarantine_spend_fall') }})" in (
+        collapse
+    )
     assert "case when read_days = 0 then 'empty_window' else 'spend_fall' end" in collapse
+    assert "measure='spend', checked='campaign_stats',\n    account='account_id', fall=true" in (
+        collapse
+    )
     assert "group by w.source, w.account_id, w.load_id" in collapse
     stop = macro_text("quarantine_stop_findings")
     assert "where status = 'pinned'" in stop
     assert "having h.accounts * 2 > count(*)" in stop
     sources = (STAGING / "loads" / "_loads__sources.yml").read_text(encoding="utf-8")
     tables = re.findall(r"^      - name: (\w+)\n", sources, flags=re.M)
-    assert tables == ["loads", "dim_account", "ad_stats_campaign_daily"]
+    assert tables == ["loads", "dim_account", "ad_stats_campaign_daily", "web_sessions_daily"]
     for name in ("assert_no_account_is_in_quarantine", "assert_no_source_is_stopped"):
         text = (DBT / "tests" / f"{name}.sql").read_text(encoding="utf-8")
         assert "{{ config(severity='warn') }}" in text, name
@@ -2036,3 +2133,200 @@ def test_the_journal_of_quarantine_keeps_the_first_finding_of_each_load():
     assert "now()::timestamptz as found_at" in text
     ops = (DBT / "models" / "ops" / "ops_quarantine.sql").read_text(encoding="utf-8")
     assert referenced(ops) == ["int_g1_failures", "account_quarantine", "source:core.loads"]
+
+
+FACT_MACROS = DBT / "macros" / "facts.sql"
+
+
+def facts_macro(name: str) -> str:
+    """The body of a macro of macros/facts.sql."""
+    text = FACT_MACROS.read_text(encoding="utf-8")
+    body = text[text.index(f"{{% macro {name}(") :]
+    return body[: body.index("{%- endmacro %}")]
+
+
+def facts_returned(name: str) -> object:
+    """The value that a macro of macros/facts.sql returns, as returned() reads one of
+    macros/quarantine.sql."""
+    body = facts_macro(name)
+    value = body[body.index("return(") + len("return(") : body.rindex(") -}}")]
+    for variable, listed in re.findall(r"\{%- set (\w+) = (\[.*?\]) -%\}", body, flags=re.S):
+        value = re.sub(rf"\b{variable}\b", listed, value)
+    for jinja, python in (("true", "True"), ("false", "False"), ("none", "None")):
+        value = re.sub(rf"\b{jinja}\b", python, value)
+    return ast.literal_eval(value)
+
+
+def fact_config(fact: str) -> tuple[str, str]:
+    """The text of the config() call of the model of a fact, whose hooks hold ) }} of their own,
+    and the text of the model after it."""
+    text = (CORE / f"core_{fact}.sql").read_text(encoding="utf-8")
+    end = text.index("\n) }}\n")
+    return text[text.index("{{ config(\n") : end], text[end + len("\n) }}\n") :]
+
+
+# The lower bound of the windows of a run, as SQL that PostgreSQL computes when a statement runs.
+WINDOW_START = (
+    "(select min(window_from) from core.loads where status = 'pinned' and outcome = 'loaded')"
+)
+
+
+def test_the_facts_of_the_core_replace_whole_days_of_the_windows():
+    # ADR-0038 and R5 (#191): the standard delete+insert by account and day, with the lower bound
+    # of the windows in incremental_predicates, into the table of the migration under its name,
+    # and the hooks in the transaction of the model: the thaw first, the journal of restatements of
+    # a fact of statistics, and the empty days last. No hook before_begin, which makes dbt commit
+    # before it, so that the hooks and the write commit one by one, and no partition from a model:
+    # the pin makes them.
+    journals = {
+        name.removesuffix("_restatements")
+        for name in re.findall(
+            r"^CREATE TABLE core\.(\w+_restatements) \(",
+            (MIGRATIONS / "0006_create_the_journals.sql").read_text(encoding="utf-8"),
+            flags=re.M,
+        )
+    }
+    facts = fact_tables()
+    assert len(facts) == 5
+    assert journals < set(facts)
+    grains = facts_returned("fact_grains")
+    assert set(grains) == set(facts)
+    for fact in facts:
+        config, body = fact_config(fact)
+        assert f"    alias='{fact}',\n" in config, fact
+        assert "    incremental_strategy='delete+insert',\n" in config, fact
+        assert "    unique_key=['account_sk', 'report_date'],\n" in config, fact
+        predicate = (
+            "    incremental_predicates=['DBT_INTERNAL_DEST.report_date >= ' ~ window_start()],\n"
+        )
+        assert predicate in config, fact
+        assert "post_hook" not in config, fact
+        assert "before_begin" not in config, fact
+        [rows] = re.findall(r"^\{\{ (fact_\w+_rows\(.*\)) \}\}$", body, flags=re.M)
+        hooks = re.findall(r'^        "\{\{ (\w+)\((.*)\) \}\}",$', config, flags=re.M)
+        days = "ref('int_window_days')"
+        wanted = [("fact_thaw", days)]
+        if fact in journals:
+            wanted.append(("fact_restatements", f"{rows}, {days}"))
+        wanted.append(("fact_empty_days", f"{rows}, {days}"))
+        assert hooks == wanted, fact
+        # The grain of the fact: its key between the account and the day, its other IDs and its
+        # measures, which with the currency and the load are its columns, and its journal.
+        key, others, measures, journal = grains[fact]
+        columns = ["account_sk", *key, *others, "report_date", *measures, "currency", "load_sk"]
+        assert sorted(columns) == sorted(facts[fact]["columns"]), fact
+        assert journal is (fact in journals), fact
+
+
+def test_the_rows_of_a_fact_take_the_columns_and_the_types_of_its_table():
+    # A model casts to the exact types of its table (ADR-0038): a wider type would make dbt drop
+    # the column with cascade, which only the lack of the right stops, and on_schema_change fail
+    # stops a model whose columns differ.
+    facts = fact_tables()
+    macros = {
+        "ad_stats_campaign_daily": ("fact_stats_rows", ["campaign_id"]),
+        "ad_stats_ad_group_daily": ("fact_stats_rows", ["campaign_id", "ad_group_id"]),
+        "ad_stats_ad_daily": ("fact_stats_rows", ["campaign_id", "ad_group_id", "ad_id"]),
+        "ad_conversions_campaign_daily": ("fact_conversions_rows", []),
+        "web_sessions_daily": ("fact_sessions_rows", []),
+    }
+    assert set(macros) == set(facts)
+    cast = re.compile(r"^    cast\(.*? as ([\w(),]+)\) as (\w+|\{\{ id \}\}),?$", flags=re.M)
+    for fact, (macro, ids) in macros.items():
+        _, body = fact_config(fact)
+        assert f"{{{{ {macro}(" in body, fact
+        found = []
+        for kind, column in cast.findall(facts_macro(macro)):
+            found += [(id_, kind) for id_ in ids] if column == "{{ id }}" else [(column, kind)]
+        assert found == list(facts[fact]["types"].items()), fact
+        # The rows join the days of the windows on their key of one column.
+        assert "on d.day_key = {{ window_day_key('r.platform', " in facts_macro(macro), fact
+
+
+def test_the_window_of_the_facts_is_a_subquery_on_the_pinned_loads():
+    # R5 (#191): dbt renders a config and the where of a test when it parses the project, with no
+    # database, and refuses a macro of the project in the where of a test; a subquery on
+    # core.loads in their text lets PostgreSQL prune the partitions when the statement runs.
+    assert facts_macro("window_start").split("-%}", 1)[1].strip() == WINDOW_START
+    text = (CORE / "_core__models.yml").read_text(encoding="utf-8")
+    conditions = re.findall(r"^( +)where: >-\n((?:\1  .*\n)+)", text, flags=re.M)
+    assert len(conditions) == 10, len(conditions)
+    for _, lines in conditions:
+        assert (
+            " ".join(line.strip() for line in lines.splitlines())
+            == f"report_date >= {WINDOW_START}"
+        )
+    # The bound of the freeze is that of the trigger of each fact, so that a fact lifts it when it
+    # is to replace a row of a frozen month, as a load of history that comes again does.
+    migration = (MIGRATIONS / "0005_create_the_facts.sql").read_text(encoding="utf-8")
+    bounds = set(re.findall(r"WHEN \(OLD\.report_date < (.*)\)$", migration, flags=re.M))
+    assert bounds == {facts_macro("frozen_before").split("-%}", 1)[1].strip()}
+    thaw = facts_macro("fact_thaw")
+    assert "select set_config('agoranomos.thaw', pg_current_xact_id()::text, true)" in thaw
+    assert "where f.report_date < {{ frozen_before() }}" in thaw
+
+
+def test_the_days_of_the_windows_leave_out_the_accounts_in_quarantine():
+    # ADR-0035: a fact keeps the days of an account that the checks hold, and of a source that
+    # stops, as they were: the one table of the days of the windows leaves them out, and every
+    # model of a fact, its hooks and its tests read the days from it.
+    text = (INTERMEDIATE / "int_window_days.sql").read_text(encoding="utf-8")
+    assert referenced(text) == [
+        "stg_loads__newest_days",
+        "dim_account",
+        "source:core.loads",
+        "int_g1_failures",
+    ]
+    assert text.endswith(
+        "where {{ not_in_quarantine(ref('int_g1_failures'), 'd.source', 'd.account_id') }}\n"
+    )
+    assert 'post_hook=["analyze {{ this }}"]' in text
+    for fact in fact_tables():
+        config, body = fact_config(fact)
+        assert set(re.findall(r"ref\('(int_\w+)'\)", config + body)) == {"int_window_days"}, fact
+
+
+def test_the_pin_makes_the_months_of_the_journals_of_restatements():
+    # A model of a fact writes its journal with the moment of its transaction: the pin makes the
+    # current month and the next of each journal, in UTC, before the tasks of dbt.
+    text = PIN.read_text(encoding="utf-8")
+    assert "{%- if fact_grains()[fact][3] -%}" in text
+    assert """{%- do journals.append("('" ~ fact ~ "_restatements')") -%}""" in text
+    assert (
+        "cross join generate_series(\n    date_trunc('month', now() at time zone 'UTC'),\n"
+        "    date_trunc('month', now() at time zone 'UTC') + interval '1 month',\n"
+    ) in text
+
+
+def test_g2_compares_every_fact_with_staging_and_its_entities_with_their_dimensions():
+    # ADR-0035: the sums of staging and of the core by account and day over the windows, and the
+    # share of the rows of a fact whose entity has no row in its dimension, after the write; both
+    # are errors, which the tests of each fact run after it, in its task.
+    assert {fact for _, fact, _ in G2_SUMS} == set(fact_tables())
+    for what, fact, staged in G2_SUMS:
+        test = (DBT / "tests" / f"assert_the_core_holds_the_{what}_of_staging.sql").read_text(
+            encoding="utf-8"
+        )
+        assert f"{{{{ fact_sums_differ(ref('core_{fact}'), [" in test, what
+        assert set(referenced(test)) == {f"core_{fact}", "int_window_days", *staged}, what
+    text = (CORE / "_core__models.yml").read_text(encoding="utf-8")
+    described = blocks(text, 2)
+    dimensions = {
+        "ad_stats_campaign_daily": ("[account_sk, campaign_id]", "dim_campaign"),
+        "ad_stats_ad_group_daily": ("[account_sk, ad_group_id]", "dim_ad_group"),
+        "ad_stats_ad_daily": ("[account_sk, ad_group_id, ad_id]", "dim_ad"),
+        "ad_conversions_campaign_daily": ("[account_sk, campaign_id]", "dim_campaign"),
+    }
+    for fact in fact_tables():
+        block = described[f"core_{fact}"]
+        if fact in dimensions:
+            columns, dimension = dimensions[fact]
+            assert (
+                "      - few_without_a_dimension:\n          arguments:\n"
+                f"            columns: {columns}\n            to: ref('{dimension}')\n"
+                f"            to_columns: {columns}\n"
+            ) in block, fact
+        else:
+            assert "few_without_a_dimension" not in block, fact
+    project = PROJECT_FILE.read_text(encoding="utf-8")
+    assert "\n  dimensionless_share: 0.001\n" in project
