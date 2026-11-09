@@ -1,13 +1,14 @@
 -- The checks of G0a, G1 and G1a of ADR-0035 on the data that this run of the transform reads,
--- before it writes the core: one row for each load, account, reason and kind of data that failed. An account
--- with a row here is in quarantine for this run: int_accounts__current, and so every dimension of
--- the core, and the marts of the old path leave it out, core.account_quarantine records it, and a
--- source with more than half of its pinned accounts here stops whole (macros/quarantine.sql).
--- A table that each run fills anew, one statement for each kind of data: as one statement, the
--- checks of three levels held a dozen aggregates at once, and were the largest process of the
--- database (#191), and every dimension, and the facts of #199, read the accounts that it holds.
--- Incremental, with its rows deleted first, so that the table stays the same relation, and the
--- views over it stay; its statistics come last, for the filters that read it.
+-- before it writes the core: one row for each load, account, reason and kind of data that failed.
+-- An account with a row here is in quarantine for this run: int_accounts__current, and so every
+-- dimension of the core, and the marts of the old path leave it out, core.account_quarantine
+-- records it, and a source with more than half of its pinned accounts here stops whole
+-- (macros/quarantine.sql). A table that each run fills anew, one statement for each kind of data:
+-- as one statement, the checks of three levels held a dozen aggregates at once, and were the
+-- largest process of the database (#191), and every dimension, and the facts of #199, read the
+-- accounts that it holds. Incremental, with its rows deleted first, so that the table stays the
+-- same relation, and the views over it stay; its statistics come last, for the filters that read
+-- it.
 {{ config(
     materialized='incremental',
     incremental_strategy='append',
