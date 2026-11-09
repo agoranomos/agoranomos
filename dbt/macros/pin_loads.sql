@@ -8,8 +8,10 @@
 
     In one transaction, the macro copies into core.loads, for each source whose journal and
     _dlt_loads exist, the rows of the journal of every whole load, which _dlt_loads has with status
-    0, that core.loads does not hold yet: the window or the error of each account of the load, and
-    the moment when the load ended. A source that no load has written is passed over, as a
+    0, that core.loads does not hold yet: the window or the error of each account of the load, its
+    kind, window for the usual window of the account or history for a load of the days before it
+    (ADR-0038), which a journal without the column, or a row without it, gives as window, and the
+    moment when the load ended. A source that no load has written is passed over, as a
     deployment without the demo never loads the sources of the demo. The ID of the call of dbt
     records which pin took a row. Then it creates, through core.ensure_partition, the partitions of
     the facts that each source is to write, for every month of the windows that are pinned, and
@@ -36,13 +38,19 @@
             database=target.database, schema=source_name, identifier='_dlt_loads'
         ) -%}
         {%- if journal is not none and finished is not none -%}
+            {#- A journal gets the column kind with the first load that writes it, and the journal
+                of a source that does not write it has none. -#}
+            {%- set kinds = adapter.get_columns_in_relation(journal)
+                | selectattr('name', 'equalto', 'kind') | list -%}
             {%- call statement('pin', fetch_result=false) -%}
 insert into {{ loads }} (
-    source, load_id, account_id, window_from, window_to, outcome, error, finished_at, invocation_id
+    source, load_id, account_id, window_from, window_to, outcome, error, finished_at, invocation_id,
+    kind
 )
 select
     '{{ source }}', j._dlt_load_id, j.account_id, j.window_from, j.window_to, j.status, j.error,
-    l.inserted_at, '{{ invocation_id }}'::uuid
+    l.inserted_at, '{{ invocation_id }}'::uuid,
+    {% if kinds %}case when j.kind = 'history' then 'history' else 'window' end{% else %}'window'{% endif %}
 from {{ journal }} as j
 join {{ finished }} as l
     on l.load_id = j._dlt_load_id and l.status = 0

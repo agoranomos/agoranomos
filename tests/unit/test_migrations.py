@@ -47,6 +47,9 @@ CHECKSUMS = {
     "0007_create_the_rates.sql": (
         "f48e39bc35fe3dee5931bbd78625803c9a40f0eaed28a7455c99c79b7702ef72"
     ),
+    "0008_add_the_kind_of_a_load.sql": (
+        "8e503096f4274b41140d8f71e691d471cbc39f3a335e063f8501108f36c78d3c"
+    ),
 }
 
 
@@ -260,6 +263,8 @@ def test_each_object_that_a_migration_creates_is_described_in_it(path):
         wanted.append(f"COMMENT ON TRIGGER {name} ON {table} IS ''")
     for name in re.findall(r"\bCREATE INDEX (\w+) ON core\.", text):
         wanted.append(f"COMMENT ON INDEX core.{name} IS ''")
+    for table, column in re.findall(r"\bALTER TABLE (core\.\w+) ADD COLUMN (\w+)", text):
+        wanted.append(f"COMMENT ON COLUMN {table}.{column} IS ''")
     missing = [statement for statement in wanted if statement not in text]
     assert not missing, f"{path.name} does not describe what it creates: {missing}"
 
@@ -295,6 +300,18 @@ def test_each_function_that_runs_as_its_owner_pins_its_search_path_and_is_kept_f
         )
         bare = name[: name.index("(")]
         assert f"REVOKE ALL ON FUNCTION {bare}({types}) FROM PUBLIC;" in text, name
+
+
+def test_the_kind_of_a_load_tells_the_usual_window_from_the_history():
+    # ADR-0038, "The first load" (#213): the pin copies the kind of each load from its journal,
+    # window or history, and a row of an earlier pin takes window. A column of a table that the
+    # grants of 0006 cover is no right of its own.
+    text = code(MIGRATIONS / "0008_add_the_kind_of_a_load.sql", keep_strings=True)
+    assert (
+        "ALTER TABLE core.loads ADD COLUMN kind text NOT NULL DEFAULT 'window' "
+        "CHECK (kind IN ('window', 'history'));"
+    ) in text
+    assert not re.search(r"\b(GRANT|REVOKE)\b", text)
 
 
 def test_each_fact_has_the_trigger_of_the_freeze_and_each_journal_has_none():

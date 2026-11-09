@@ -823,9 +823,16 @@ def test_the_pin_copies_each_whole_load_once_and_skips_a_source_without_tables()
     assert "insert into {{ loads }} (\n" in text
     assert (
         "    source, load_id, account_id, window_from, window_to, outcome, error, finished_at, "
-        "invocation_id\n"
+        "invocation_id,\n    kind\n"
     ) in text
-    assert "    l.inserted_at, '{{ invocation_id }}'::uuid\n" in text
+    assert "    l.inserted_at, '{{ invocation_id }}'::uuid,\n" in text
+    # The kind of the load, window or history (ADR-0038), from a journal that has the column, and
+    # window from one that does not, or from a row without it.
+    assert (
+        "{% if kinds %}case when j.kind = 'history' then 'history' else 'window' end"
+        "{% else %}'window'{% endif %}"
+    ) in text
+    assert "adapter.get_columns_in_relation(journal)" in text
     assert "join {{ finished }} as l\n    on l.load_id = j._dlt_load_id and l.status = 0\n" in text
     assert "on conflict (source, load_id, account_id) do nothing" in text
     assert "{%- set loads = pinned_loads_journal() -%}" in text

@@ -236,7 +236,9 @@ def test_a_load_records_its_window_in_the_same_run(ecb):
     assert record["now"] == NOW
     assert record["status"] == "loaded"
     assert hints["_agoranomos_loads"]["write_disposition"] == "append"
-    assert set(hints["_agoranomos_loads"]["columns"]) == {*record, "error"}
+    # The kind of a load is a column of every journal, which the rates leave empty: the pin
+    # gives such a row the kind window (ADR-0038).
+    assert set(hints["_agoranomos_loads"]["columns"]) == {*record, "error", "kind"}
 
 
 def test_a_window_without_a_rate_still_replaces_its_days(ecb):
