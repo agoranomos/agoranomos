@@ -69,7 +69,7 @@ The DAG `agoranomos_demo_transform` runs on the assets of the loads, not at a ti
 - **The tables.** The view `ops.ops_warehouse_tables` reads the catalog of PostgreSQL when the question runs.
 - **The quarantine.** The view `ops.ops_quarantine` reads what the checks of the last run found, `staging.int_g1_failures`, which each run fills anew, and the journal `core.account_quarantine`.
 
-Metabase reads the five views as `metabase_reader`, which may read them, and `ops.ops_rates`, and no table of elementary. The connection of the warehouse shows only the schema `marts` in Metabase, so the views do not appear in its list of tables; the questions of the dashboard are SQL that reads them. [The data model](../reference/data-model.md#the-schema-ops) describes their columns.
+Metabase reads the five views as `metabase_reader`, which may read them and `ops.ops_rates`, and no table of elementary. The connection of the warehouse shows only the schema `marts` in Metabase, so the views do not appear in its list of tables; the questions of the dashboard are SQL that reads them. [The data model](../reference/data-model.md#the-schema-ops) describes their columns.
 
 ## How long it keeps the data
 
