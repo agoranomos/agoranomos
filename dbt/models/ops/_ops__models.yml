@@ -24,6 +24,31 @@ models:
           decimal place.
       - name: loads
         description: How many loads of the account the journal holds, the first load among them.
+  - name: ops_history
+    description: >-
+      How far back the loads of each account of each platform reach, one row each, from the loads
+      that the runs of the transform pinned into core.loads (ADR-0038): the first day of any whole
+      load of the account, and the loads of its history, which come after its usual window, in
+      portions by quarter from the newest to the oldest, as the history of Google Ads takes them,
+      or in one load, as the demo takes its own. An account appears with its first pinned load.
+      The Ops collection of Metabase shows it.
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+      - name: first_day_loaded
+        description: >-
+          The first day that a whole load of the account took, of any kind, in the time zone of
+          the account: it moves back as the portions of the history come.
+      - name: portions
+        description: >-
+          How many loads of the kind history of the account core.loads holds; 0 while its history
+          has not started.
+      - name: last_portion_at
+        description: >-
+          When the newest load of the kind history of the account ended, with its time zone; none
+          while its history has not started.
   - name: ops_transform_nodes
     description: >-
       Each model, seed, snapshot and test of the dbt project in each run of dbt that the hooks of

@@ -5,7 +5,8 @@ keeps in the collection agoranomos / Ops as the code says, on every start, with 
 Its questions are native SQL on the views of the schema ops that the transform builds
 (dbt/models/ops): the accounts that the checks of the last run kept out of the core (ADR-0035), the
 last load of each account, the runs of the transform with their models and tests, as the hooks of
-elementary record them, and the size of the tables of the warehouse.
+elementary record them, the size of the tables of the warehouse, and how far back the loads of each
+account reach, with the portions of its history (ADR-0038).
 Metabase reads them as metabase_reader, which may read these views and no table of elementary. The
 connection shows only the schema marts in Metabase, and a native question reads any schema that its
 role may read. Until the first run of the transform has built the views, the questions show the
@@ -23,14 +24,16 @@ OPS_KEY = "ops"
 OPS_NAME = "Ops"
 OPS_DESCRIPTION = (
     "The pipeline of agoranomos itself: the accounts in quarantine, the loads of each account, the "
-    "runs of the transform with their models and tests, and the size of the warehouse."
+    "runs of the transform with their models and tests, the size of the warehouse, and the "
+    "history of each account."
 )
 PIPELINE = "pipeline"
 PIPELINE_NAME = "Pipeline health"
 PIPELINE_DESCRIPTION = (
     "The state of the pipeline: which accounts the last run of the transform kept out of the core "
     "and why, when each account was last loaded, how the last runs of the transform went, which "
-    "models failed and which tests warned or failed, and the largest tables of the warehouse."
+    "models failed and which tests warned or failed, the largest tables of the warehouse, and how "
+    "far back the loads of each account reach."
 )
 
 # The types that Metabase 0.64.1 gives the columns of the answers, and the semantic types that it
@@ -73,6 +76,9 @@ COLUMN_TYPES = {
     "reason": TEXT,
     "since": MOMENT,
     "detail": TEXT,
+    "first_day_loaded": ("type/Date", "date"),
+    "portions": COUNT,
+    "last_portion_at": MOMENT,
 }
 SEMANTIC_TYPES = {
     "started_at": "type/CreationTimestamp",
@@ -113,6 +119,9 @@ TITLES = {
     "reason": "Reason",
     "since": "In Quarantine Since",
     "detail": "What the Check Found",
+    "first_day_loaded": "First Day Loaded",
+    "portions": "Portions of History",
+    "last_portion_at": "Last Portion",
 }
 # The columns shown with one decimal; the others as Metabase shows them.
 ONE_DECIMAL = frozenset({"megabytes", "hours_since_load", "minutes", "seconds"})
@@ -372,6 +381,23 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "LIMIT 20",
         ),
         "layout": {"row": 34, "col": 0, "size_x": 24, "size_y": 6},
+    },
+    {
+        "key": "history",
+        "name": "History of each account",
+        "description": (
+            "The first day that a load took for each account of each platform, and how many loads "
+            "of its history have come, which follow its usual window in portions by quarter, from "
+            "the newest to the oldest, and when the last one ended (ADR-0038)."
+        ),
+        "display": "table",
+        "columns": ("platform", "account_id", "first_day_loaded", "portions", "last_portion_at"),
+        "query": sql(
+            "SELECT platform, account_id, first_day_loaded, portions, last_portion_at",
+            "FROM ops.ops_history",
+            "ORDER BY platform, account_id",
+        ),
+        "layout": {"row": 40, "col": 0, "size_x": 24, "size_y": 6},
     },
 )
 
