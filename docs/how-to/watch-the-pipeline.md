@@ -27,7 +27,7 @@ A test records its status and the number of rows that it found, never the rows: 
 
 ## When an account is in quarantine
 
-Before it writes the core, each run of the transform checks the data of each account that it reads, the checks G1 and G1a of [ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md). An account that fails one stays out of that run, in quarantine, and the other accounts go on: the run stays green, as one account with bad data must not stop the rest.
+Before it writes the core, each run of the transform checks the data of each account that it reads, the checks G0a, G1 and G1a of [ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md). An account that fails one stays out of that run, in quarantine, and the other accounts go on: the run stays green, as one account with bad data must not stop the rest.
 
 - **The core** keeps the data of the account as it was: its row of `core.dim_account`, its entities, their versions and the days of its facts do not change. The raw layer keeps the rows of its loads.
 - **The marts**, which the transform still builds from staging, leave the account out for that run, so its rows are missing from the dashboards until it is back.
@@ -47,6 +47,7 @@ Before it writes the core, each run of the transform checks the data of each acc
 | `missing_measure` | A count or an amount that a row needs is missing. |
 | `negative_measure` | A count or an amount is below zero. |
 | `date_outside_window` | A load holds rows of days outside the window that it recorded for the account. |
+| `totals_differ` | On a day of a load, the impressions, clicks or spend of the campaigns of the account do not add up to the totals that its platform gave for the account in the same load, as when a read of the API lost a part of the account. Only Google Ads loads such totals, and its share of tolerance, `platform_totals_tolerance` in the `vars` of `dbt/dbt_project.yml`, is 0. |
 | `empty_window` | A load has no row on the days of its window while the core holds spend on them, or, for web analytics, sessions, as a lost token gives. |
 | `spend_fall` | The spend of a load fell by more than half of what the core holds on the same days. The share is `quarantine_spend_fall` in the `vars` of `dbt/dbt_project.yml`, 0.5. |
 | `source_stopped` | More than half of the pinned accounts of the source are in quarantine. |
