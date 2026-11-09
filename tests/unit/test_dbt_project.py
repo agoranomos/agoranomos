@@ -1251,7 +1251,7 @@ def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
     wanted = {
         "assert_clicks_within_impressions": ({"ad_stats_campaign_daily"}, True),
         "assert_every_account_has_a_client": ({"ad_accounts"}, True),
-        "assert_no_day_of_an_account_is_missing": ({"ad_stats_campaign_daily"}, True),
+        "assert_every_day_of_an_account_has_statistics": ({"ad_stats_campaign_daily"}, True),
         "assert_primary_actions_add_up_to_the_conversions": (
             {"ad_conversions_campaign_daily", "ad_stats_campaign_daily"},
             True,

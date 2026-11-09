@@ -108,7 +108,7 @@ It takes about half an hour, most of it the first start.
 2. Read its first row:
     - **Late accounts** shows 0: every account was loaded in the last 36 hours.
     - **Failed models** shows 0: every model and seed of the last run of the transform was built.
-    - **Failed or warned tests** shows 1. The demo leaves one day of one account out on purpose, and the test `assert_no_day_of_an_account_is_missing` warns about it on every run. **Tests that warned or failed, last 30 days**, further down, names it.
+    - **Failed or warned tests** shows 1. The demo leaves one day of one account out on purpose, and the test `assert_every_day_of_an_account_has_statistics` warns about it on every run. **Tests that warned or failed, last 30 days**, further down, names it.
 3. Look at **Last load of each account**: one row for each account of each platform, with the last day that a load took and how many hours ago it ran.
 
 <figure class="ag-shot" markdown="span">

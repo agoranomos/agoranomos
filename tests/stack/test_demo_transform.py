@@ -606,7 +606,9 @@ def test_the_day_that_the_demo_misses_is_a_warning_and_has_no_row(
     # task of that view.
     [tests] = [i for i in task_instances(airflow_url, token, run) if i["task_id"] == MART_BUILD]
     assert tests["state"] == "success", "a warning failed the task"
-    assert logged(task_log(airflow_url, token, tests), "assert_no_day_of_an_account_is_missing")
+    assert logged(
+        task_log(airflow_url, token, tests), "assert_every_day_of_an_account_has_statistics"
+    )
 
 
 # The rows of the facts of statistics of the core in a month that the freeze keeps, whose load is
