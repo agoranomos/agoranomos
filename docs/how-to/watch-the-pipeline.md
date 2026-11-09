@@ -22,6 +22,7 @@ Sign in to Metabase as [Run agoranomos locally](run-locally.md#sign-in) says and
 - **Duration of each run of the transform, last 30 days**, and the **slowest models of the last run**.
 - **Models that failed, last 30 days**, with what dbt said of each, and **tests that warned or failed, last 30 days**, by model, column and kind of test.
 - **Largest tables of the warehouse**: the 20 tables that take the most room, with the rows that PostgreSQL estimates for each.
+- **History of each account**: the first day that the loads of each account reach, how many loads of its history have come, and when the last one ended. The history of an account of Google Ads comes after its usual window, a quarter at a time from the newest, so its first day moves back by a quarter with each portion until it reaches 36 months ([Connect Google Ads](connect-google-ads.md#when-the-history-arrives)); the demo takes its 18 months in one load.
 
 A test records its status and the number of rows that it found, never the rows: to see them, run the test in a shell of the scheduler, or open its log in Airflow.
 
@@ -56,7 +57,7 @@ To see what a check found, read the card, or `ops.ops_quarantine` and the journa
 
 ## What starts the transform
 
-The DAG `agoranomos_demo_transform` runs on the assets of the loads, not at a time of day ([ADR-0039](../adr/0039-run-one-dbt-build-in-the-watcher-mode.md)). Each load updates the asset of its main table, and the transform runs when the five platforms of the demo have each loaded since its last run, after each load of the rates of the ECB, `agoranomos_ecb_daily`, and after each load of Google Ads, `agoranomos_google_ads_daily`; the condition is `LOADED` in `airflow/dags/agoranomos_pipelines/assets.py`. The five platforms of the demo count as one: a run of `agoranomos_demo_history` or of `agoranomos_demo_daily` starts the transform once, after its last load, and not while the loads of the other platforms replace their days. One run of the transform runs at a time: while a run is queued or running, Airflow keeps the events of the loads that end, and starts one run for all of them once it ends. A load whose task failed updates no asset, so it starts no run. To run the transform at any other moment, trigger it in Airflow: a repeat is safe.
+The DAG `agoranomos_demo_transform` runs on the assets of the loads, not at a time of day ([ADR-0039](../adr/0039-run-one-dbt-build-in-the-watcher-mode.md)). Each load updates the asset of its main table, and the transform runs when the five platforms of the demo have each loaded since its last run, after each load of the rates of the ECB, `agoranomos_ecb_daily`, and after each load of Google Ads, `agoranomos_google_ads_daily`; the condition is `LOADED` in `airflow/dags/agoranomos_pipelines/assets.py`. The five platforms of the demo count as one: a run of `agoranomos_demo_history` or of `agoranomos_demo_daily` starts the transform once, after its last load, and not while the loads of the other platforms replace their days. One run of the transform runs at a time: while a run is queued or running, Airflow keeps the events of the loads that end, and starts one run for all of them once it ends. A load whose task failed updates no asset, so it starts no run. To run the transform at any other moment, trigger it in Airflow: a repeat is safe. A run in which every task succeeded ends with the task `transformed`, which updates the asset `TRANSFORMED`; `agoranomos_google_ads_history` runs on it and starts the next portion of the history of Google Ads, if there is one ([Connect Google Ads](connect-google-ads.md#when-the-history-arrives)).
 
 ## Where the data comes from
 
@@ -64,8 +65,9 @@ The DAG `agoranomos_demo_transform` runs on the assets of the loads, not at a ti
 - **The runs of dbt.** The package elementary records the result of each model, seed and test in its tables in the schema `ops`, from the hooks that it adds to every run of dbt, with the run of Airflow that the task gives dbt. The first task of dbt of each run of the transform, `elementary`, builds those tables. The views `ops.ops_transform_nodes` and `ops.ops_transform_tests` read them, without the SQL of a model and the settings of a run, which the tables also keep.
 - **The tables.** The view `ops.ops_warehouse_tables` reads the catalog of PostgreSQL when the question runs.
 - **The quarantine.** The view `ops.ops_quarantine` reads what the checks of the last run found, `staging.int_g1_failures`, which each run fills anew, and the journal `core.account_quarantine`.
+- **The history.** The view `ops.ops_history` reads `core.loads`, which the task `pin` of each run of the transform writes, with the kind of each load: `window` for the usual window of an account, `history` for a load of the days before it.
 
-Metabase reads the five views as `metabase_reader`, which may read them and no table of elementary. The connection of the warehouse shows only the schema `marts` in Metabase, so the views do not appear in its list of tables; the questions of the dashboard are SQL that reads them. [The data model](../reference/data-model.md#the-schema-ops) describes their columns.
+Metabase reads the six views as `metabase_reader`, which may read them and no table of elementary. The connection of the warehouse shows only the schema `marts` in Metabase, so the views do not appear in its list of tables; the questions of the dashboard are SQL that reads them. [The data model](../reference/data-model.md#the-schema-ops) describes their columns.
 
 ## How long it keeps the data
 
