@@ -43,6 +43,7 @@ Before it writes the core, each run of the transform checks the data of each acc
 | `missing_key` | A row misses a part of its key, such as its campaign or its conversion action. |
 | `unknown_currency` | The currency of the account is not a code of ISO 4217, such as `ZZZ`. |
 | `unknown_time_zone` | The time zone of the account is not one of the tz database of IANA. |
+| `missing_rate` | The currency of the account has no rate into the reporting currency, neither in the loads of the rates nor in the core, as with a currency that the ECB does not publish, and the core would hold amounts that it cannot convert. The detail names the currency and the source of the rates. |
 | `too_many_decimals` | A spend in raw has more than six decimal places, which the core would round. |
 | `missing_measure` | A count or an amount that a row needs is missing. |
 | `negative_measure` | A count or an amount is below zero. |
@@ -52,6 +53,10 @@ Before it writes the core, each run of the transform checks the data of each acc
 | `source_stopped` | More than half of the pinned accounts of the source are in quarantine. |
 
 To see what a check found, read the card, or `ops.ops_quarantine` and the journal `core.account_quarantine` in a SQL client: the journal keeps each load, account and reason that a run kept out, with the window that the core did not take and when the check first found it, also after the account is back. The rows of the load are in the schema `raw_<platform>` under its `_dlt_load_id`.
+
+## How old the rates are
+
+The rates into the reporting currency come from the loads of the rates of the ECB, `agoranomos_ecb_daily`, or of the demo without them, and the core carries the last published rate to each day after it, with a flag ([The data model](../reference/data-model.md#the-rates)). `./agoranomos status` says how old the last rate is, as in `Rates: the last rate of ecb into USD is of 2026-11-09, 1 business day ago (ADR-0042).`, and warns when it is more than 3 business days old, Monday to Friday ([ADR-0042](../adr/0042-take-the-rates-from-the-bank-of-italy-and-the-national-bank-of-kazakhstan.md)): the loads of the rates brought no newer one, and the runs of the DAG of the source in Airflow say why. The view `ops.ops_rates` holds the same, for a SQL client. The ECB publishes on the working days of TARGET, so its last rate is usually 1 business day old; a load takes the last 14 days again, so a missed day closes by itself once a load succeeds. Amounts in the currency of an account do not depend on the rates.
 
 ## What starts the transform
 
@@ -64,7 +69,7 @@ The DAG `agoranomos_demo_transform` runs on the assets of the loads, not at a ti
 - **The tables.** The view `ops.ops_warehouse_tables` reads the catalog of PostgreSQL when the question runs.
 - **The quarantine.** The view `ops.ops_quarantine` reads what the checks of the last run found, `staging.int_g1_failures`, which each run fills anew, and the journal `core.account_quarantine`.
 
-Metabase reads the five views as `metabase_reader`, which may read them and no table of elementary. The connection of the warehouse shows only the schema `marts` in Metabase, so the views do not appear in its list of tables; the questions of the dashboard are SQL that reads them. [The data model](../reference/data-model.md#the-schema-ops) describes their columns.
+Metabase reads the five views as `metabase_reader`, which may read them, and `ops.ops_rates`, and no table of elementary. The connection of the warehouse shows only the schema `marts` in Metabase, so the views do not appear in its list of tables; the questions of the dashboard are SQL that reads them. [The data model](../reference/data-model.md#the-schema-ops) describes their columns.
 
 ## How long it keeps the data
 
