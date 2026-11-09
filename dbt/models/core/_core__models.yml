@@ -459,6 +459,38 @@ models:
       - name: found_at
         description: >-
           When the check found it.
+  - name: platform_totals_daily
+    description: >-
+      The totals of an account by day as the platform gives them in a request of their own at the
+      level of the account (G0a of ADR-0035), against which the rows of its campaigns are checked:
+      one row for an account on a day, from the newest load that took the day. source, account_id
+      and report_date are its key.
+    columns:
+      - name: source
+        description: >-
+          The source of the load, the schema of the raw layer without its prefix raw_.
+      - name: account_id
+        description: >-
+          The ID of the account as the platform gives it, as text.
+      - name: report_date
+        description: >-
+          The day of the totals, in the time zone of the account.
+      - name: impressions
+        description: >-
+          The impressions of the account on the day, as the platform totals them.
+      - name: clicks
+        description: >-
+          The clicks of the account on the day, as the platform totals them.
+      - name: spend
+        description: >-
+          The spend of the account on the day, as the platform totals it, in the currency of the
+          row, exact to six decimal places.
+      - name: currency
+        description: >-
+          The currency of the spend, that of the account, as a three-letter code of ISO 4217.
+      - name: load_id
+        description: >-
+          The load that brought the totals, load_id of core.loads.
   - name: core_ad_stats_campaign_daily
     description: >-
       Advertising statistics by day and campaign of every ad platform: one row for a campaign of an

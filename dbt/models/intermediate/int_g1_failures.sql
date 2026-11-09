@@ -1,5 +1,5 @@
--- The checks of G1 and G1a of ADR-0035 on the data that this run of the transform reads, before it
--- writes the core: one row for each load, account, reason and kind of data that failed. An account
+-- The checks of G0a, G1 and G1a of ADR-0035 on the data that this run of the transform reads,
+-- before it writes the core: one row for each load, account, reason and kind of data that failed. An account
 -- with a row here is in quarantine for this run: int_accounts__current, and so every dimension of
 -- the core, and the marts of the old path leave it out, core.account_quarantine records it, and a
 -- source with more than half of its pinned accounts here stops whole (macros/quarantine.sql).
@@ -22,6 +22,7 @@
         "{{ quarantine_insert(this, quarantine_attributed(quarantine_fact_findings('ad_conversions', [ref('stg_demo_search__ad_conversions'), ref('stg_demo_social__ad_conversions'), ref('stg_demo_video__ad_conversions'), ref('stg_google_ads__ad_conversions')], ref('stg_loads__newest_days')), ref('stg_loads__newest_days'), source('core', 'loads'))) }}",
         "{{ quarantine_insert(this, quarantine_attributed(quarantine_fact_findings('sessions_daily', [ref('stg_demo_web__sessions_daily')], ref('stg_loads__newest_days')), ref('stg_loads__newest_days'), source('core', 'loads'))) }}",
         "{% for source_name in quarantine_raw_tables() %}{{ quarantine_insert(this, quarantine_attributed(quarantine_raw_findings(source_name, ref('stg_loads__newest_days'), source('core', 'loads')), ref('stg_loads__newest_days'), source('core', 'loads'))) }};{% endfor %}",
+        "{{ quarantine_insert(this, quarantine_attributed(quarantine_totals_findings([(ref('stg_google_ads__campaign_stats'), ref('stg_google_ads__account_totals'))], ref('stg_loads__newest_days')), ref('stg_loads__newest_days'), source('core', 'loads'))) }}",
         "{{ quarantine_insert(this, quarantine_attributed(quarantine_collapse_findings([ref('stg_demo_search__campaign_stats'), ref('stg_demo_social__campaign_stats'), ref('stg_demo_video__campaign_stats'), ref('stg_google_ads__campaign_stats')], ref('stg_loads__newest_days'), source('core', 'dim_account'), source('core', 'ad_stats_campaign_daily')), ref('stg_loads__newest_days'), source('core', 'loads'))) }}",
         "{{ quarantine_insert(this, quarantine_attributed(quarantine_collapse_findings([ref('stg_demo_web__sessions_daily')], ref('stg_loads__newest_days'), source('core', 'dim_account'), source('core', 'web_sessions_daily'), measure='sessions', checked='sessions_daily', account='property_id', fall=false), ref('stg_loads__newest_days'), source('core', 'loads'))) }}",
         "{{ quarantine_insert(this, quarantine_attributed(quarantine_stop_findings(this, source('core', 'loads')), ref('stg_loads__newest_days'), source('core', 'loads'))) }}",
@@ -54,6 +55,7 @@
 -- depends_on: {{ ref('stg_demo_video__ad_conversions') }}
 -- depends_on: {{ ref('stg_google_ads__ad_conversions') }}
 -- depends_on: {{ ref('stg_demo_web__sessions_daily') }}
+-- depends_on: {{ ref('stg_google_ads__account_totals') }}
 -- depends_on: {{ source('core', 'dim_account') }}
 -- depends_on: {{ source('core', 'ad_stats_campaign_daily') }}
 -- depends_on: {{ source('core', 'web_sessions_daily') }}

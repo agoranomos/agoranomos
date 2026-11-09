@@ -2,7 +2,7 @@
 -- (ADR-0038): for each account of the ad platforms and each property of web analytics and each
 -- day of the loads that the run pinned, the newest load that covers the day, from
 -- stg_loads__newest_days, with the surrogate and the currency of the account from core.dim_account
--- and the surrogate of the load from core.loads. A model of a fact replaces each of these days
+-- and the surrogate of the load from core.loads, beside its ID. A model of a fact replaces each of these days
 -- whole: the rows of its load go in, and a day on which the load holds no row is emptied
 -- (macros/facts.sql). An account that the checks of this run hold, each account of
 -- int_g1_failures, a source that stops among them, is left out here, so that every fact keeps its
@@ -26,6 +26,7 @@ select
     a.currency::char(3) as currency,
     d.day::date as report_date,
     l.load_sk::integer as load_sk,
+    d.load_id::text as load_id,
     {{ window_day_key('d.source', 'd.account_id', 'd.day') }} as day_key
 from {{ ref('stg_loads__newest_days') }} as d
 join {{ ref('dim_account') }} as a

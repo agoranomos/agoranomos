@@ -722,6 +722,7 @@ BY_LOAD = {
     "ad_conversions",
     "sessions_daily",
     "rates_daily",
+    "account_totals",
 }
 
 
@@ -1377,6 +1378,7 @@ GOOGLE_ADS_MODELS = {
     "ad_stats": ("google_ads_stats", "ad_stats", "ad"),
     "ad_conversions": ("google_ads_conversions", "ad_conversions", "ad"),
     "conversion_actions": ("google_ads_conversion_actions", "conversion_actions"),
+    "account_totals": ("google_ads_totals", "customer_stats"),
 }
 # The tables of entities of Google Ads, whose versions dlt keeps (scd2).
 GOOGLE_ADS_VERSIONED = ("campaigns", "ad_groups", "ads", "conversion_actions")
@@ -1392,7 +1394,10 @@ def test_each_staging_model_of_google_ads_is_one_call_of_the_shape_that_the_demo
         by_load = model in BY_LOAD
         call = f"{{{{ {macro}(newest_load({relation}" if by_load else f"{{{{ {macro}({relation}"
         assert text.count(call) == 1, model
-        arguments = ", ".join(["'google_ads'", *(f"'{name}'" for name in level)])
+        # The statistics of the connector carry all the conversions of Google, which those of
+        # demo_search do not.
+        everything = ["all_conversions=true"] if model.endswith("_stats") else []
+        arguments = ", ".join(["'google_ads'", *(f"'{name}'" for name in level), *everything])
         days = "ref('stg_loads__newest_days')"
         end = (
             f"}}), 'raw_google_ads', {days}), {arguments}) }}}}"
@@ -1405,6 +1410,10 @@ def test_each_staging_model_of_google_ads_is_one_call_of_the_shape_that_the_demo
     macros = (DBT / "macros" / "shapes" / "google_ads_v25.sql").read_text(encoding="utf-8")
     assert "{% macro google_ads_customers(relation, platform) %}" in macros
     assert "{% macro google_ads_conversion_actions(relation, platform) %}" in macros
+    assert "{% macro google_ads_totals(relation, platform) %}" in macros
+    assert (
+        "{% macro google_ads_stats(relation, platform, level='campaign', all_conversions=false) %}"
+    ) in macros
 
 
 def test_the_columns_of_the_empty_tables_of_google_ads_are_the_fields_of_its_queries():
@@ -1430,11 +1439,19 @@ def test_the_columns_of_the_empty_tables_of_google_ads_are_the_fields_of_its_que
 
 def test_the_staging_of_google_ads_has_the_tests_of_the_staging_of_demo_search():
     # The same macros give the same columns, and the same critical tests guard both. The
-    # conversion actions, which the demo does not have, come last.
+    # conversion actions and the totals of the accounts, which the demo does not have, come last.
     demo = (STAGING / "demo_search" / "_demo_search__models.yml").read_text(encoding="utf-8")
     text = (GOOGLE_ADS / "_google_ads__models.yml").read_text(encoding="utf-8")
     ads, actions = text.split("  - name: stg_google_ads__conversion_actions\n")
-    assert "  - name: stg_" not in actions
+    actions, totals = actions.split("  - name: stg_google_ads__account_totals\n")
+    assert "  - name: stg_" not in actions + totals
+    # The totals name the account and the day as a fact does, which the join of the load
+    # guarantees.
+    tested = {
+        name: column_tests(column)
+        for name, column in blocks("    columns:\n" + totals.split("    columns:\n")[1], 6).items()
+    }
+    assert {name for name, tests in tested.items() if tests} == set(STATS_KEY[:3])
 
     def tests(text):
         return [
@@ -1472,6 +1489,7 @@ def test_the_sources_of_google_ads_are_the_tables_that_its_load_writes():
         "ad_stats",
         "ad_conversions",
         "conversion_actions",
+        "customer_stats",
     }
 
 
@@ -1579,7 +1597,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 387, counted
+    assert counted == 390, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text
@@ -1604,9 +1622,13 @@ CORE = DBT / "models" / "core"
 # The migrations that create the dimensions and the registries of the core (ADR-0036).
 DIMENSION_MIGRATIONS = ("0003_create_the_registries.sql", "0004_create_the_dimensions.sql")
 # The journals of the core that a model writes, by their migration: the journal of quarantine,
-# from the checks of G1 and G1a (ADR-0035). The pin writes core.loads, the models of the facts the
-# journals of restatements in their hooks, and the totals of G0a wait for #212.
-JOURNAL_MODELS = {"0006_create_the_journals.sql": {"account_quarantine"}}
+# from the checks of G0a, G1 and G1a, and the totals of the platforms, which G0a checks the
+# campaigns against (ADR-0035). The pin writes core.loads, and the models of the facts the journals
+# of restatements in their hooks.
+JOURNAL_MODELS = {"0006_create_the_journals.sql": {"account_quarantine", "platform_totals_daily"}}
+# The models of the core that replace the days of the windows of a run, as the facts do, and so
+# read nothing of their own table.
+BY_WINDOW = {"platform_totals_daily"}
 COMMENT = re.compile(
     r"^COMMENT ON (TABLE|COLUMN) core\.(\w+)(?:\.(\w+))? IS\n'((?:[^']|'')*)';$", flags=re.M
 )
@@ -1722,7 +1744,7 @@ def test_the_dimensions_of_the_core_merge_into_the_tables_of_the_migrations():
         config = model_config(text)
         assert "materialized" not in config, name
         assert "source(" not in text, name
-        assert "from {{ this }}" in text, name
+        assert ("from {{ this }}" in text) is (name not in BY_WINDOW), name
         if name in REGISTRIES:
             sk, natural = REGISTRIES[name]
             assert table["key"] == [sk], name
@@ -1919,7 +1941,15 @@ def hooks() -> list[str]:
 # checked (ADR-0036), by kind: those that a column NOT NULL of a fact takes, and those that a
 # column of zero or more takes, which G1 checks too, so that one account cannot fail the write of a
 # fact for all.
-STATS_TAKEN = ([], ["platform_conversions", "platform_conversion_value"])
+STATS_TAKEN = (
+    [],
+    [
+        "platform_conversions",
+        "platform_conversion_value",
+        "all_conversions",
+        "all_conversion_value",
+    ],
+)
 ACTIONS_TAKEN = (
     ["platform_conversions"],
     [
@@ -1970,8 +2000,8 @@ def test_g1_checks_each_kind_of_facts_as_the_tests_of_staging_did():
 def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
     # R5 (#191): as one statement over the three levels, G1 held a dozen aggregates at once and was
     # the largest process of the database. Each statement of the hooks inserts the failures of one
-    # kind, or of the raw tables of one source, into the table, then G1a, then the stop, which reads
-    # what the others wrote, and the statistics of the table come last.
+    # kind, or of the raw tables of one source, into the table, then G0a, then G1a, then the stop,
+    # which reads what the others wrote, and the statistics of the table come last.
     config = g1_config()
     assert "materialized='incremental'" in config
     assert 'pre_hook=["{% if is_incremental() %}delete from {{ this }}{% endif %}"]' in config
@@ -1985,9 +2015,13 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
         codes = ["demo_web"] if kind == "sessions_daily" else [*SHAPED_ADS, "google_ads"]
         read = re.findall(r"ref\('(stg_\w+)'\)", statement)
         assert read == [*(f"stg_{code}__{kind}" for code in codes), *["stg_loads__newest_days"] * 2]
-    raw, collapse, sessions, stop = statements[len(kinds) : -1]
+    raw, totals, collapse, sessions, stop = statements[len(kinds) : -1]
     assert raw.startswith("{% for source_name in quarantine_raw_tables() %}")
     assert raw.count("quarantine_insert(") == 1
+    assert (
+        "quarantine_totals_findings([(ref('stg_google_ads__campaign_stats'), "
+        "ref('stg_google_ads__account_totals'))], ref('stg_loads__newest_days'))"
+    ) in totals
     assert "quarantine_collapse_findings([" in collapse
     assert "source('core', 'dim_account'), source('core', 'ad_stats_campaign_daily'))" in collapse
     # Web analytics has no spend: G1a finds a load of a property with no row where the core holds
@@ -2030,12 +2064,18 @@ def test_g1_reads_the_fact_tables_of_raw_of_each_source_that_names_an_account():
         assert [table for table, _, _ in tables[dataset]] == [
             fact.table for fact in platforms.PLATFORMS[code].facts
         ], code
-    assert tables["raw_google_ads"] == tables["raw_demo_search"]
+    # The connector of Google Ads also loads the totals of each account, which demo_search does
+    # not.
+    assert tables["raw_google_ads"] == [
+        *tables["raw_demo_search"],
+        ("customer_stats", "metrics__cost_micros", True),
+    ]
     # The spend of each table, as the shape of its platform reads it.
     shapes = {
         "raw_demo_search": "google_ads_v25.sql",
         "raw_demo_social": "meta_v26.sql",
         "raw_demo_video": "tiktok_v1_3.sql",
+        "raw_google_ads": "google_ads_v25.sql",
     }
     for dataset, shape in shapes.items():
         text = (DBT / "macros" / "shapes" / shape).read_text(encoding="utf-8")
@@ -2044,6 +2084,59 @@ def test_g1_reads_the_fact_tables_of_raw_of_each_source_that_names_an_account():
                 cast = "micros_to_number" if micros else "to_number"
                 assert f"{{{{ {cast}('{spend}') }}}} as spend" in text, (dataset, table)
     assert all(spend is None for _, spend, _ in tables["raw_demo_web"])
+
+
+def test_g0a_checks_the_campaigns_of_an_account_against_its_totals_on_each_day():
+    # ADR-0035: the impressions, clicks and spend of the rows of the campaigns of a load, summed by
+    # account and day, against the totals that the platform gives for the account in the same
+    # load, a day without a row on one side as zero, within the share of the platform in the vars,
+    # zero for Google; a load with no totals at all, as one of a connector before them, passes.
+    project = PROJECT_FILE.read_text(encoding="utf-8")
+    assert "\n  platform_totals_tolerance:\n    google_ads: 0\n" in project
+    text = macro_text("quarantine_totals_findings")
+    assert "{%- set tolerances = var('platform_totals_tolerance', {}) -%}" in text
+    assert "when w.source = '{{ platform }}' then {{ share | float }}" in text
+    assert "join totalled as t\n        on t.source = d.source and t.load_id = d.load_id" in text
+    for measure in ("impressions", "clicks", "spend"):
+        assert f"coalesce(c.{measure}, 0) as campaign_{measure}" in text, measure
+        assert f"coalesce(a.{measure}, 0) as total_{measure}" in text, measure
+        assert (
+            f"abs(campaign_{measure} - total_{measure}) > share * abs(total_{measure})" in text
+        ), measure
+    assert "'totals_differ' as reason" in text
+    assert "group by source, account_id, load_id" in text
+    # The model of the core keeps the totals of the windows that the run writes, of the accounts
+    # out of quarantine, with zero on a day that the load holds none of.
+    model = (CORE / "platform_totals_daily.sql").read_text(encoding="utf-8")
+    assert "{{ config(unique_key=['source', 'account_id', 'report_date']) }}" in model
+    assert "from {{ ref('int_window_days') }} as d\njoin totalled as w\n" in model
+    assert "from {{ ref('stg_google_ads__account_totals') }}" in model
+    for measure in ("impressions", "clicks"):
+        assert f"coalesce(t.{measure}, 0)::bigint as {measure}" in model, measure
+    assert "coalesce(t.spend, 0)::numeric(18,6) as spend" in model
+    shape = (DBT / "macros" / "shapes" / "google_ads_v25.sql").read_text(encoding="utf-8")
+    assert "    _dlt_load_id as load_id\nfrom {{ relation }}" in shape
+
+
+def test_the_facts_of_statistics_take_all_the_conversions_of_the_platform():
+    # The connector of Google Ads reads metrics.all_conversions at each level, and the shapes of
+    # the other platforms have none; the facts take them, and G2 compares them with staging.
+    text = (DBT / "macros" / "facts.sql").read_text(encoding="utf-8")
+    facts = text[text.index("{% macro fact_stats_rows(") :]
+    facts = facts[: facts.index("{%- endmacro %}")]
+    assert "cast(r.all_conversions as numeric(18,6)) as all_conversions" in facts
+    assert "cast(r.all_conversion_value as numeric(18,6)) as all_conversion_value" in facts
+    assert "    or r.all_conversions <> 0\n    or r.all_conversion_value <> 0\n" in facts
+    for what in ("statistics_of_campaigns", "statistics_of_ad_groups", "statistics_of_ads"):
+        test = (DBT / "tests" / f"assert_the_core_holds_the_{what}_of_staging.sql").read_text(
+            encoding="utf-8"
+        )
+        assert (
+            "'all_conversions': 'all_conversions', 'all_conversion_value': 'all_conversion_value'"
+        ) in test, what
+    for shape in ("meta_v26.sql", "tiktok_v1_3.sql"):
+        text = (DBT / "macros" / "shapes" / shape).read_text(encoding="utf-8")
+        assert "cast(null as numeric(18,6)) as all_conversions,\n" in text, shape
 
 
 def test_the_reasons_of_quarantine_are_one_list():

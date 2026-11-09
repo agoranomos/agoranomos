@@ -940,20 +940,23 @@ models:
         description: '{{ doc("last_report_date") }}'
   - name: int_g1_failures
     description: >-
-      The checks of G1 and G1a (ADR-0035) on the data that this run of the transform reads, before
-      it writes the core: one row for each load, account, reason and kind of data that failed. An
-      account with a row here is in quarantine for this run: int_accounts__current, and so every
-      dimension of the core, and the intermediate models of the marts leave it out, and
+      The checks of G0a, G1 and G1a (ADR-0035) on the data that this run of the transform reads,
+      before it writes the core: one row for each load, account, reason and kind of data that
+      failed. An account with a row here is in quarantine for this run: int_accounts__current, and
+      so every dimension of the core, and the intermediate models of the marts leave it out, and
       core.account_quarantine records it. G1 checks each kind of facts of staging for keys that two
       rows share or that miss a part, and for measures that are missing or below zero; the lists of
       accounts and properties for an account listed twice, a currency outside ISO 4217 and a time
       zone outside IANA; the journal of the loads for an account whose newest pinned load failed,
       and for an account that the loads name and no list gives; and the fact tables of raw for rows
-      outside the window of their load and a spend with more than six decimal places. G1a compares
+      outside the window of their load and a spend with more than six decimal places. G0a compares
+      the impressions, clicks and spend of the campaigns of each account and day with the totals
+      that its platform gives for the account in the same load, where its loads bring them, as
+      those of Google Ads do, within the share of var('platform_totals_tolerance'). G1a compares
       the spend of the campaigns of each load, and the sessions of each load of web analytics, with
-      what the core holds on the same days. A source
-      with more than half of its pinned accounts here stops, and its other pinned accounts get the
-      reason source_stopped. A table that each run fills anew, one statement for each kind of data.
+      what the core holds on the same days. A source with more than half of its pinned accounts
+      here stops, and its other pinned accounts get the reason source_stopped. A table that each
+      run fills anew, one statement for each kind of data.
       source, load_id, account_id, reason and checked are its key. Its tests guard the core and the
       marts: when one of them fails, dbt does not build the models that read this one.
     data_tests:
@@ -981,7 +984,7 @@ models:
               config: {tags: [critical]}
           - accepted_values:
               arguments:
-                values: ["load_failed", "unknown_account", "duplicate_key", "missing_key", "unknown_currency", "unknown_time_zone", "too_many_decimals", "missing_measure", "negative_measure", "date_outside_window", "empty_window", "spend_fall", "source_stopped"]
+                values: ["load_failed", "unknown_account", "duplicate_key", "missing_key", "unknown_currency", "unknown_time_zone", "too_many_decimals", "missing_measure", "negative_measure", "date_outside_window", "totals_differ", "empty_window", "spend_fall", "source_stopped"]
               config: {tags: [critical]}
       - name: checked
         description: '{{ doc("checked") }}'
@@ -999,8 +1002,8 @@ models:
       The days of the windows that this run of the transform writes into the facts of the core
       (ADR-0038): one row for each account of the ad platforms or property of web analytics and
       each day of the loads that the run pinned, with the newest load that covers the day, the
-      surrogate and the currency of the account, and the surrogate of the load. A model of a fact
-      replaces each day whole: the rows of its load go in, and a day on which the load holds no row
+      surrogate and the currency of the account, and the surrogate and the ID of the load. A model of
+      a fact replaces each day whole: the rows of its load go in, and a day on which the load holds no row
       is emptied. An account that the checks of this run hold, in int_g1_failures, has no row here,
       so that every fact keeps its days. A table that each run fills anew. account_sk and
       report_date are its key. Its tests guard the core: when one of them fails, dbt does not build
@@ -1023,5 +1026,7 @@ models:
         description: '{{ doc("report_date") }}'
       - name: load_sk
         description: '{{ doc("load_sk") }}'
+      - name: load_id
+        description: '{{ doc("load_id") }}'
       - name: day_key
         description: '{{ doc("day_key") }}'
