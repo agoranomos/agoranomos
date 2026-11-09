@@ -15,8 +15,9 @@ dataset that a release before v0.5 loaded has no _agoranomos_loads, so its next 
 history again, and the rows of the earlier loads stay unread. The first load takes the rates from
 the first day of the month 37 months back, one month before the history of Google Ads (ADR-0034),
 so that its first day has a rate; a later one, the days from the day after the last that a whole
-load took, or from 7 days back when that is earlier, so that a rate that the ECB corrects comes
-again. Both end yesterday in Frankfurt, where the ECB publishes."""
+load took, or from 14 days back when that is earlier, so that a rate that the ECB corrects, or that
+an earlier load missed, comes again and replaces a carried one in core.fx_rates_daily (ADR-0042).
+Both end yesterday in Frankfurt, where the ECB publishes."""
 
 from __future__ import annotations
 
@@ -59,7 +60,7 @@ URL = "https://data-api.ecb.europa.eu/service/data/EXR/D..EUR.SP00.A"
 # The account of the record of the loads: the base of the rates, as demo_fx has it.
 ACCOUNT = "EUR"
 TIME_ZONE = ZoneInfo("Europe/Berlin")
-WINDOW_DAYS = 7
+WINDOW_DAYS = 14
 HISTORY_MONTHS = 37
 # The hints of the table, by the names that dlt gives the columns of the CSV: each load appends its
 # rows. Every column stays text, as the ECB writes it, and staging casts it.
