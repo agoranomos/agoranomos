@@ -22,6 +22,7 @@
 
 {#- The statistics of a level by day: FROM campaign, FROM ad_group or FROM ad_group_ad. -#}
 {% macro google_ads_stats(relation, platform, level='campaign') %}
+{%- call nonzero(['impressions', 'clicks', 'spend', 'platform_conversions', 'platform_conversion_value']) %}
 select
     cast(segments__date as date) as report_date,
     '{{ platform }}' as platform,
@@ -35,12 +36,14 @@ select
     {{ to_number('metrics__conversions') }} as platform_conversions,
     {{ to_number('metrics__conversions_value') }} as platform_conversion_value
 from {{ relation }}
+{%- endcall %}
 {% endmacro %}
 
 {#- The report by conversion action of a level, a query of its own: every conversion of the action,
     also of one that does not count in metrics.conversions; which actions count is for
     int_conversion_actions__resolved to say. -#}
 {% macro google_ads_conversions(relation, platform, level='campaign') %}
+{%- call nonzero(['conversions', 'conversion_value', 'platform_conversions', 'platform_conversion_value', 'all_conversions', 'all_conversion_value']) %}
 select
     cast(segments__date as date) as report_date,
     '{{ platform }}' as platform,
@@ -64,6 +67,7 @@ select
     cast(metrics__all_conversions as numeric(18,6)) as all_conversions,
     {{ to_number('metrics__all_conversions_value') }} as all_conversion_value
 from {{ relation }}
+{%- endcall %}
 {% endmacro %}
 
 {#- The client accounts of a manager account; the manager itself has no statistics. -#}

@@ -13,7 +13,8 @@
     windows come from the task of the pin, outside any model (pin_loads.sql). The rows come from
     staging, of the days of int_window_days, which leaves out the accounts in quarantine and the
     sources that stop (ADR-0035), as integers, numeric(18,6) and char(3), the types of the tables
-    of the migrations, and a row whose measures are all zero is left out (ADR-0036). -#}
+    of the migrations; staging has left out a row whose measures are all zero (ADR-0036,
+    macros/numbers.sql). -#}
 
 {#- The first day that the pinned windows reach, as SQL: the lower bound of the delete of a fact,
     its incremental_predicates, and of the hooks and tests of the facts, so that PostgreSQL reads
@@ -131,11 +132,6 @@ select
 from read as r
 join {{ days }} as d
     on d.day_key = {{ window_day_key('r.platform', 'r.account_id', 'r.report_date') }}
-where r.impressions <> 0
-    or r.clicks <> 0
-    or r.spend <> 0
-    or r.platform_conversions <> 0
-    or r.platform_conversion_value <> 0
 {%- endmacro %}
 
 {#- The rows of the fact of the conversions of the campaigns by action that this run writes: those
@@ -179,10 +175,6 @@ join {{ days }} as d
     on d.day_key = {{ window_day_key('r.platform', 'r.account_id', 'r.report_date') }}
 join {{ actions }} as a
     on a.platform = r.platform and a.conversion_action_id = r.conversion_action_id
-where r.platform_conversions <> 0
-    or r.all_conversions <> 0
-    or r.platform_conversion_value <> 0
-    or r.all_conversion_value <> 0
 {%- endmacro %}
 
 {#- The rows of the fact of the sessions of web analytics that this run writes: those of relations,
@@ -227,7 +219,6 @@ select
 from read as r
 join {{ days }} as d
     on d.day_key = {{ window_day_key('r.platform', 'r.property_id', 'r.report_date') }}
-where r.sessions <> 0 or r.engaged_sessions <> 0 or r.key_events <> 0 or r.total_revenue <> 0
 {%- endmacro %}
 
 {#- The first pre-hook of a fact: the freeze (ADR-0035) lifted for the transaction of the model,

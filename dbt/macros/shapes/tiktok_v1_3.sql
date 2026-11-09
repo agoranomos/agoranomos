@@ -30,6 +30,7 @@
 {%- endmacro %}
 
 {% macro tiktok_stats(relation, platform, level='campaign') %}
+{%- call nonzero(['impressions', 'clicks', 'spend', 'platform_conversions', 'platform_conversion_value']) %}
 select
     cast(left(cast(dimensions__stat_time_day as text), 10) as date) as report_date,
     '{{ platform }}' as platform,
@@ -44,6 +45,7 @@ select
     {{ to_number('metrics__conversion') }} as platform_conversions,
     cast(null as numeric(18,6)) as platform_conversion_value
 from {{ relation }}
+{%- endcall %}
 {% endmacro %}
 
 {#- Two actions: complete payments, with their value in total_complete_payment_rate, which despite

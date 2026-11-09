@@ -15,3 +15,13 @@
 {% macro micros_to_number(expression) -%}
     cast(cast(nullif(trim(cast({{ expression }} as text)), '') as numeric(20,0)) / 1000000 as numeric(18,6))
 {%- endmacro %}
+
+{#- The rows of a report of facts, the SQL of the call block, with any of their measures other
+    than zero: a row whose measures are all zero, or none, is left out of staging, whatever the API
+    returned (ADR-0036), and a row with zero impressions and a conversion stays. -#}
+{% macro nonzero(measures) -%}
+select * from (
+{{ caller() }}
+) as reported
+where {% for measure in measures %}{{ measure }} <> 0{% if not loop.last %} or {% endif %}{% endfor %}
+{%- endmacro %}
