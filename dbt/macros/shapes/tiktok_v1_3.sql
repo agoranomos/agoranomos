@@ -38,7 +38,11 @@ select
     {{ to_count('metrics__impressions') }} as impressions,
     {#- Clicks (destination), to the site. -#}
     {{ to_count('metrics__clicks') }} as clicks,
-    {{ to_number('metrics__spend') }} as spend
+    {{ to_number('metrics__spend') }} as spend,
+    {#- The conversions of the optimization event, the metric conversion of TikTok, which has no
+        value of its own. #}
+    {{ to_number('metrics__conversion') }} as platform_conversions,
+    cast(null as numeric(18,6)) as platform_conversion_value
 from {{ relation }}
 {% endmacro %}
 
@@ -85,7 +89,11 @@ select
     platform_category,
     cast(null as text) as attribution_setting,
     conversions,
-    coalesce(conversion_value, 0) as conversion_value
+    coalesce(conversion_value, 0) as conversion_value,
+    conversions as platform_conversions,
+    coalesce(conversion_value, 0) as platform_conversion_value,
+    cast(null as numeric(18,6)) as all_conversions,
+    cast(null as numeric(18,6)) as all_conversion_value
 from actions
 where conversions > 0 or conversion_value > 0
 {% endmacro %}

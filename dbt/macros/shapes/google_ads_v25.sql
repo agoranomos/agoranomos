@@ -30,7 +30,10 @@ select
     {{- google_ads_level(level) }}
     {{ to_count('metrics__impressions') }} as impressions,
     {{ to_count('metrics__clicks') }} as clicks,
-    {{ micros_to_number('metrics__cost_micros') }} as spend
+    {{ micros_to_number('metrics__cost_micros') }} as spend,
+    {#- The own metric of conversions of Google, the actions that the account includes in it. #}
+    {{ to_number('metrics__conversions') }} as platform_conversions,
+    {{ to_number('metrics__conversions_value') }} as platform_conversion_value
 from {{ relation }}
 {% endmacro %}
 
@@ -54,7 +57,12 @@ select
     lower(segments__conversion_action_category) as platform_category,
     cast(null as text) as attribution_setting,
     cast(metrics__all_conversions as numeric(18,6)) as conversions,
-    {{ to_number('metrics__all_conversions_value') }} as conversion_value
+    {{ to_number('metrics__all_conversions_value') }} as conversion_value,
+    {#- Of them, those that metrics.conversions counts, 0 for an action that it leaves out. #}
+    {{ to_number('metrics__conversions') }} as platform_conversions,
+    {{ to_number('metrics__conversions_value') }} as platform_conversion_value,
+    cast(metrics__all_conversions as numeric(18,6)) as all_conversions,
+    {{ to_number('metrics__all_conversions_value') }} as all_conversion_value
 from {{ relation }}
 {% endmacro %}
 

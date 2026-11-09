@@ -459,3 +459,409 @@ models:
       - name: found_at
         description: >-
           When the check found it.
+  - name: core_ad_stats_campaign_daily
+    description: >-
+      Advertising statistics by day and campaign of every ad platform: one row for a campaign of an
+      account on a day, in the time zone of the account, as the platform reports its campaign level,
+      with the amounts in the currency of the account. account_sk, campaign_id and report_date are
+      its key. Partitioned by month of report_date; a month that ended before the window of
+      restatements is frozen (the trigger freeze_the_months_before_the_window).
+    data_tests:
+      - few_without_a_dimension:
+          arguments:
+            columns: [account_sk, campaign_id]
+            to: ref('dim_campaign')
+            to_columns: [account_sk, campaign_id]
+          config:
+            where: >-
+              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              and outcome = 'loaded')
+            tags: [critical]
+    columns:
+      - name: account_sk
+        description: >-
+          The account of the row, account_sk of core.dim_account, which gives its platform, ID,
+          client, currency and time zone.
+      - name: campaign_id
+        description: >-
+          The ID of the campaign as the ad platform gives it, a number, unique inside its account;
+          core.dim_campaign holds its attributes.
+      - name: report_date
+        description: >-
+          The day that the row covers, in the time zone of its account; not the day that the data
+          was loaded. Its month is the partition of the row.
+      - name: impressions
+        description: >-
+          How many times the ads of the campaign were shown on the day, as the ad platform counts
+          them: showings, not people.
+      - name: clicks
+        description: >-
+          How many times the ads of the campaign were clicked on the day with a click that leads to
+          the site, as the ad platform counts them: the clicks of Google, the clicks (destination)
+          of TikTok, the link clicks of Meta.
+      - name: spend
+        description: >-
+          What the ads of the campaign cost on the day, as the ad platform reports it in its
+          statistics, in the currency of the row, exact to six decimal places; not the amount that
+          the platform invoices.
+      - name: conversions
+        description: >-
+          The conversions of the campaign on the day in the own metric of conversions of the ad
+          platform, such as metrics.conversions of Google, fractional where attribution shares a
+          conversion; none where the platform has no such metric.
+      - name: all_conversions
+        description: >-
+          All the conversions of the campaign on the day, those of the actions that the own metric
+          of the platform leaves out among them, such as metrics.all_conversions of Google; none
+          where the platform has no such metric.
+      - name: conversion_value
+        description: >-
+          The value of the conversions of the column conversions, in the currency of the row; none
+          where the platform gives none.
+      - name: all_conversion_value
+        description: >-
+          The value of the conversions of the column all_conversions, in the currency of the row;
+          none where the platform gives none.
+      - name: currency
+        description: >-
+          The currency of the amounts of the row, that of its account, as a three-letter code of ISO
+          4217.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('seed_iso_4217_currencies')
+                field: currency_code
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
+                tags: [critical]
+      - name: load_sk
+        description: >-
+          The load that wrote the row, load_sk of core.loads.
+  - name: core_ad_stats_ad_group_daily
+    description: >-
+      Advertising statistics by day and ad group of every ad platform, ad sets of Meta among them:
+      one row for an ad group of an account on a day, in the time zone of the account, as the
+      platform reports its ad group level, with the amounts in the currency of the account.
+      account_sk, ad_group_id and report_date are its key. Partitioned by month of report_date; a
+      month that ended before the window of restatements is frozen (the trigger
+      freeze_the_months_before_the_window).
+    data_tests:
+      - few_without_a_dimension:
+          arguments:
+            columns: [account_sk, ad_group_id]
+            to: ref('dim_ad_group')
+            to_columns: [account_sk, ad_group_id]
+          config:
+            where: >-
+              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              and outcome = 'loaded')
+            tags: [critical]
+    columns:
+      - name: account_sk
+        description: >-
+          The account of the row, account_sk of core.dim_account, which gives its platform, ID,
+          client, currency and time zone.
+      - name: campaign_id
+        description: >-
+          The campaign of the ad group, as the ad platform gives its ID, a number.
+      - name: ad_group_id
+        description: >-
+          The ID of the ad group as the ad platform gives it, a number, unique inside its account;
+          core.dim_ad_group holds its attributes.
+      - name: report_date
+        description: >-
+          The day that the row covers, in the time zone of its account; not the day that the data
+          was loaded. Its month is the partition of the row.
+      - name: impressions
+        description: >-
+          How many times the ads of the ad group were shown on the day, as the ad platform counts
+          them: showings, not people.
+      - name: clicks
+        description: >-
+          How many times the ads of the ad group were clicked on the day with a click that leads to
+          the site, as the ad platform counts them: the clicks of Google, the clicks (destination)
+          of TikTok, the link clicks of Meta.
+      - name: spend
+        description: >-
+          What the ads of the ad group cost on the day, as the ad platform reports it in its
+          statistics, in the currency of the row, exact to six decimal places; not the amount that
+          the platform invoices.
+      - name: conversions
+        description: >-
+          The conversions of the ad group on the day in the own metric of conversions of the ad
+          platform, such as metrics.conversions of Google, fractional where attribution shares a
+          conversion; none where the platform has no such metric.
+      - name: all_conversions
+        description: >-
+          All the conversions of the ad group on the day, those of the actions that the own metric
+          of the platform leaves out among them, such as metrics.all_conversions of Google; none
+          where the platform has no such metric.
+      - name: conversion_value
+        description: >-
+          The value of the conversions of the column conversions, in the currency of the row; none
+          where the platform gives none.
+      - name: all_conversion_value
+        description: >-
+          The value of the conversions of the column all_conversions, in the currency of the row;
+          none where the platform gives none.
+      - name: currency
+        description: >-
+          The currency of the amounts of the row, that of its account, as a three-letter code of ISO
+          4217.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('seed_iso_4217_currencies')
+                field: currency_code
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
+                tags: [critical]
+      - name: load_sk
+        description: >-
+          The load that wrote the row, load_sk of core.loads.
+  - name: core_ad_stats_ad_daily
+    description: >-
+      Advertising statistics by day and ad of every ad platform: one row for an ad of an account on
+      a day, in the time zone of the account, as the platform reports its ad level, with the amounts
+      in the currency of the account. account_sk, ad_group_id, ad_id and report_date are its key, as
+      an ad is defined only inside its ad group. Partitioned by month of report_date; a month that
+      ended before the window of restatements is frozen (the trigger
+      freeze_the_months_before_the_window).
+    data_tests:
+      - few_without_a_dimension:
+          arguments:
+            columns: [account_sk, ad_group_id, ad_id]
+            to: ref('dim_ad')
+            to_columns: [account_sk, ad_group_id, ad_id]
+          config:
+            where: >-
+              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              and outcome = 'loaded')
+            tags: [critical]
+    columns:
+      - name: account_sk
+        description: >-
+          The account of the row, account_sk of core.dim_account, which gives its platform, ID,
+          client, currency and time zone.
+      - name: campaign_id
+        description: >-
+          The campaign of the ad, as the ad platform gives its ID, a number.
+      - name: ad_group_id
+        description: >-
+          The ad group of the ad, as the ad platform gives its ID, a number.
+      - name: ad_id
+        description: >-
+          The ID of the ad as the ad platform gives it, a number, unique inside its ad group;
+          core.dim_ad holds its attributes.
+      - name: report_date
+        description: >-
+          The day that the row covers, in the time zone of its account; not the day that the data
+          was loaded. Its month is the partition of the row.
+      - name: impressions
+        description: >-
+          How many times the ad was shown on the day, as the ad platform counts it: showings, not
+          people.
+      - name: clicks
+        description: >-
+          How many times the ad was clicked on the day with a click that leads to the site, as the
+          ad platform counts them: the clicks of Google, the clicks (destination) of TikTok, the
+          link clicks of Meta.
+      - name: spend
+        description: >-
+          What the ad cost on the day, as the ad platform reports it in its statistics, in the
+          currency of the row, exact to six decimal places; not the amount that the platform
+          invoices.
+      - name: conversions
+        description: >-
+          The conversions of the ad on the day in the own metric of conversions of the ad platform,
+          such as metrics.conversions of Google, fractional where attribution shares a conversion;
+          none where the platform has no such metric.
+      - name: all_conversions
+        description: >-
+          All the conversions of the ad on the day, those of the actions that the own metric of the
+          platform leaves out among them, such as metrics.all_conversions of Google; none where the
+          platform has no such metric.
+      - name: conversion_value
+        description: >-
+          The value of the conversions of the column conversions, in the currency of the row; none
+          where the platform gives none.
+      - name: all_conversion_value
+        description: >-
+          The value of the conversions of the column all_conversions, in the currency of the row;
+          none where the platform gives none.
+      - name: currency
+        description: >-
+          The currency of the amounts of the row, that of its account, as a three-letter code of ISO
+          4217.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('seed_iso_4217_currencies')
+                field: currency_code
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
+                tags: [critical]
+      - name: load_sk
+        description: >-
+          The load that wrote the row, load_sk of core.loads.
+  - name: core_ad_conversions_campaign_daily
+    description: >-
+      Conversions by day, campaign and conversion action of every ad platform: one row for a
+      conversion action of a campaign of an account on a day, in the time zone of the account, with
+      the value in the currency of the account. account_sk, campaign_id, conversion_action_sk and
+      report_date are its key. Partitioned by month of report_date; a month that ended before the
+      window of restatements is frozen (the trigger freeze_the_months_before_the_window).
+    data_tests:
+      - few_without_a_dimension:
+          arguments:
+            columns: [account_sk, campaign_id]
+            to: ref('dim_campaign')
+            to_columns: [account_sk, campaign_id]
+          config:
+            where: >-
+              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              and outcome = 'loaded')
+            tags: [critical]
+    columns:
+      - name: account_sk
+        description: >-
+          The account of the row, account_sk of core.dim_account, which gives its platform, ID,
+          client, currency and time zone.
+      - name: campaign_id
+        description: >-
+          The ID of the campaign as the ad platform gives it, a number, unique inside its account;
+          core.dim_campaign holds its attributes.
+      - name: conversion_action_sk
+        description: >-
+          The conversion action of the row, conversion_action_sk of core.dim_conversion_action,
+          which gives its ID, name, category and whether it is primary.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_conversion_action')
+                field: conversion_action_sk
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
+                tags: [critical]
+      - name: report_date
+        description: >-
+          The day that the row covers, in the time zone of its account; not the day that the data
+          was loaded. Its month is the partition of the row.
+      - name: conversions
+        description: >-
+          The conversions of the action in the campaign on the day that the own metric of
+          conversions of the ad platform counts, such as metrics.conversions of Google, 0 for an
+          action that the metric leaves out; fractional where attribution shares a conversion.
+      - name: all_conversions
+        description: >-
+          All the conversions of the action in the campaign on the day, such as
+          metrics.all_conversions of Google; none where the platform has no such metric.
+      - name: conversion_value
+        description: >-
+          The value of the conversions of the column conversions, in the currency of the row; none
+          where the platform gives none.
+      - name: all_conversion_value
+        description: >-
+          The value of the conversions of the column all_conversions, in the currency of the row;
+          none where the platform gives none.
+      - name: attribution_setting
+        description: >-
+          The window of attribution with which the platform counted the conversions of the row, as
+          the platform writes it, such as 7d_click_1d_view; none where the platform gives none.
+      - name: currency
+        description: >-
+          The currency of the amounts of the row, that of its account, as a three-letter code of ISO
+          4217.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('seed_iso_4217_currencies')
+                field: currency_code
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
+                tags: [critical]
+      - name: load_sk
+        description: >-
+          The load that wrote the row, load_sk of core.loads.
+  - name: core_web_sessions_daily
+    description: >-
+      Sessions of web analytics by day, property, source, medium and campaign: one row for the
+      sessions of a property on a day, in the time zone of the property, with one source, medium and
+      campaign, and the revenue in the currency of the property. account_sk, session_source,
+      session_medium, session_campaign_name, session_campaign_id and report_date are its key,
+      compared byte by byte. Partitioned by month of report_date; a month that ended before the
+      window of restatements is frozen (the trigger freeze_the_months_before_the_window).
+    columns:
+      - name: account_sk
+        description: >-
+          The property of web analytics of the row, account_sk of core.dim_account, which registers
+          the properties beside the ad accounts and gives its platform, ID, client, currency and
+          time zone.
+      - name: session_source
+        description: >-
+          Where the sessions came from, as web analytics records it: the utm_source of a link, or a
+          site or a search engine; (direct) for sessions with no source.
+      - name: session_medium
+        description: >-
+          The medium of the sessions, as web analytics records it: the utm_medium of a link, such as
+          cpc, or organic, referral or (none).
+      - name: session_campaign_name
+        description: >-
+          The name of the campaign of the sessions as their links carried it on the day, the
+          utm_campaign; a value in parentheses, such as (organic), (direct) or (not set), for
+          sessions without one.
+      - name: session_campaign_id
+        description: >-
+          The ID of the campaign of the sessions as their links carried it, the utm_id: the ID of
+          the ad campaign when its links carry it; (not set) otherwise.
+      - name: report_date
+        description: >-
+          The day that the row covers, in the time zone of its property; not the day that the data
+          was loaded. Its month is the partition of the row.
+      - name: session_default_channel_group
+        description: >-
+          The channel of the sessions, by the rules of web analytics, such as Paid Search, Paid
+          Social, Organic Search or Direct.
+      - name: sessions
+        description: >-
+          How many sessions web analytics counted on the day for the row: visits, not people, and
+          not the clicks of the ad platforms.
+      - name: engaged_sessions
+        description: >-
+          How many of the sessions web analytics counted as engaged, by its own rule, such as a
+          session of more than ten seconds.
+      - name: key_events
+        description: >-
+          How many key events web analytics counted in the sessions, the events that the property
+          marks as key, such as a purchase.
+      - name: total_revenue
+        description: >-
+          The revenue that web analytics records for the sessions, less the refunds of the day, in
+          the currency of the row; negative on a day whose refunds exceed it.
+      - name: currency
+        description: >-
+          The currency of the revenue of the row, that of its property, as a three-letter code of
+          ISO 4217.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('seed_iso_4217_currencies')
+                field: currency_code
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
+                tags: [critical]
+      - name: load_sk
+        description: >-
+          The load that wrote the row, load_sk of core.loads.

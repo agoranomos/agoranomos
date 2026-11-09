@@ -107,6 +107,12 @@ vars:
   # share. Half leaves room for the restatements of a small account on a short window. Not checked
   # yet on a live account: the stand of #217 sets it.
   quarantine_spend_fall: 0.5
+  # The share of the rows of a fact of the core in the windows of a run whose entity, a campaign, an
+  # ad group or an ad, has no row in its dimension, above which G2 fails the run
+  # (tests/generic/few_without_a_dimension.sql, ADR-0035). Each entity that the statistics name gets
+  # a row, as a stub if no list gives it, so one in a thousand is a margin, not an expectation. Not
+  # checked yet on a live account.
+  dimensionless_share: 0.001
 
 # The tests of the base package. A test with the severity error, the default, stops the models that
 # read its node (TestBehavior.BUILD of Cosmos, ADR-0028), and carries the tag critical (ADR-0038),

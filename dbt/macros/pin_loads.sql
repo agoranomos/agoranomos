@@ -12,9 +12,11 @@
     the moment when the load ended. A source that no load has written is passed over, as a
     deployment without the demo never loads the sources of the demo. The ID of the call of dbt
     records which pin took a row. Then it creates, through core.ensure_partition, the partitions of
-    the facts that each source is to write, for every month of the windows that are pinned, each in
-    a transaction of its own and outside any model: a hook before_begin of a model breaks the
-    transaction of the model (#191). The rows stay pinned until the core accepts their loads.
+    the facts that each source is to write, for every month of the windows that are pinned, and
+    those of the journals of restatements for the current month and the next, in UTC, into which
+    the models of the facts write with the moment of their transaction, each in a transaction of
+    its own and outside any model: a hook before_begin of a model breaks the transaction of the
+    model (#191). The rows stay pinned until the core accepts their loads.
     transformer runs it, with its rights on core.loads and on core.ensure_partition. -#}
 {% macro pin_loads() %}
     {%- if env_var('DBT_JOB_RUN_ID', '') == '' -%}
@@ -54,12 +56,19 @@ on conflict (source, load_id, account_id) do nothing
         {%- endif -%}
     {%- endfor -%}
     {#- The months of the windows that are pinned, for each fact that their source is to write,
-        read in the transaction of the pin, which then commits. -#}
+        and the current month and the next of each journal of restatements, read in the
+        transaction of the pin, which then commits. -#}
     {%- set facts = [] -%}
     {%- for source_name, tables in pinned_load_facts().items() -%}
         {%- for table in tables -%}
             {%- do facts.append("('" ~ source_name[4:] ~ "', '" ~ table ~ "')") -%}
         {%- endfor -%}
+    {%- endfor -%}
+    {%- set journals = [] -%}
+    {%- for fact in fact_grains() -%}
+        {%- if fact_grains()[fact][3] -%}
+            {%- do journals.append("('" ~ fact ~ "_restatements')") -%}
+        {%- endif -%}
     {%- endfor -%}
     {%- call statement('months', fetch_result=true) -%}
 select f.fact, to_char(m.month, 'YYYY-MM-DD')
@@ -71,6 +80,14 @@ cross join lateral generate_series(
 ) as m (month)
 where l.status = 'pinned' and l.outcome = 'loaded'
 group by 1, 2
+union
+select j.journal, to_char(m.month, 'YYYY-MM-DD')
+from (values {{ journals | join(', ') }}) as j (journal)
+cross join generate_series(
+    date_trunc('month', now() at time zone 'UTC'),
+    date_trunc('month', now() at time zone 'UTC') + interval '1 month',
+    interval '1 month'
+) as m (month)
 order by 1, 2
     {%- endcall -%}
     {%- set months = load_result('months')['data'] -%}
@@ -87,7 +104,8 @@ select core.ensure_partition('core.{{ fact }}'::regclass, date '{{ month }}')
     {%- endfor -%}
     {{- log(
         'Pinned the new rows of the journals of the loads: ' ~ ((pinned | join(', ')) or 'none')
-        ~ '. The pinned windows take ' ~ (months | length) ~ ' months of the facts, of which '
+        ~ '. The pinned windows and the journals take ' ~ (months | length)
+        ~ ' months of the facts and the journals, of which '
         ~ (created | length) ~ ' got their partition now.',
         info=True
     ) -}}

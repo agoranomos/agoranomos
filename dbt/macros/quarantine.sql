@@ -36,32 +36,41 @@
 {%- endmacro %}
 
 {#- The kinds of facts of staging that G1 checks, as the tests of staging checked them before
-    (tests/unit/test_dbt_project.py): the column of the account; the columns of the key after the
-    day, the platform and the account; the other IDs that a row needs; the measures that a row
-    needs; and the measures that are zero or more. -#}
+    (tests/unit/test_dbt_project.py), with the measures that the facts of the core take, whose
+    columns are NOT NULL or zero or more there, so that one account cannot fail the write of a
+    fact for all: the column of the account; the columns of the key after the day, the platform
+    and the account; the other IDs that a row needs; the measures that a row needs; and the
+    measures that are zero or more. -#}
 {% macro quarantine_fact_kinds() -%}
 {%- set metrics = ['impressions', 'clicks', 'spend'] -%}
-{%- set converted = ['conversions', 'conversion_value'] -%}
+{%- set counted = [
+    'impressions', 'clicks', 'spend', 'platform_conversions', 'platform_conversion_value',
+] -%}
+{%- set converted = ['conversions', 'conversion_value', 'platform_conversions'] -%}
+{%- set valued = [
+    'conversions', 'conversion_value', 'platform_conversions', 'platform_conversion_value',
+    'all_conversions', 'all_conversion_value',
+] -%}
 {{- return({
-    'campaign_stats': ('account_id', ['campaign_id'], [], metrics, metrics),
-    'ad_group_stats': ('account_id', ['ad_group_id'], ['campaign_id'], metrics, metrics),
-    'ad_stats': ('account_id', ['ad_group_id', 'ad_id'], ['campaign_id'], metrics, metrics),
+    'campaign_stats': ('account_id', ['campaign_id'], [], metrics, counted),
+    'ad_group_stats': ('account_id', ['ad_group_id'], ['campaign_id'], metrics, counted),
+    'ad_stats': ('account_id', ['ad_group_id', 'ad_id'], ['campaign_id'], metrics, counted),
     'campaign_conversions': (
-        'account_id', ['campaign_id', 'conversion_action_id'], [], converted, converted
+        'account_id', ['campaign_id', 'conversion_action_id'], [], converted, valued
     ),
     'ad_group_conversions': (
         'account_id', ['ad_group_id', 'conversion_action_id'], ['campaign_id'], converted,
-        converted
+        valued
     ),
     'ad_conversions': (
         'account_id', ['ad_group_id', 'ad_id', 'conversion_action_id'], ['campaign_id'],
-        converted, converted
+        converted, valued
     ),
     'sessions_daily': (
         'property_id',
         ['session_source', 'session_medium', 'session_campaign_name', 'session_campaign_id'],
         [],
-        ['sessions'],
+        ['sessions', 'engaged_sessions'],
         ['sessions', 'engaged_sessions', 'key_events', 'total_revenue'],
     ),
 }) -}}
@@ -398,16 +407,20 @@ cross join lateral (
 where c.failed
 {%- endmacro %}
 
-{#- G1a, against a collapse (ADR-0035): for each load that this run reads for an account of the
-    ad platforms, the spend of the statistics of campaigns on the days that the load gives, against
-    the spend that the core holds on the same days. A load with no row on its days, as a lost token
-    gives, is empty_window; a spend that fell by more than var('quarantine_spend_fall') of what the
-    core holds, spend_fall. A window replaces whole days, so either would erase them. relations are
-    the staging models of the statistics of campaigns, and accounts and facts the tables
-    core.dim_account and core.ad_stats_campaign_daily as the runs before this one left them; the
-    days of the core are bounded by those of the windows, so that PostgreSQL reads only the
-    partitions of the windows. -#}
-{% macro quarantine_collapse_findings(relations, days, accounts, facts) -%}
+{#- G1a, against a collapse (ADR-0035): for each load that this run reads for an account, a measure
+    of its rows on the days that the load gives, against what the core holds on the same days. A
+    load with no row on its days, as a lost token gives, is empty_window; a measure that fell by
+    more than var('quarantine_spend_fall') of what the core holds, spend_fall, where fall is true. A
+    window replaces whole days, so either would erase them. relations are the staging models of a
+    kind of facts, checked, with the column of their account, account; accounts and facts the
+    tables core.dim_account and the fact of the core of that kind as the runs before this one left
+    them. The ad platforms compare the spend of the statistics of campaigns, and web analytics,
+    which has no spend, the sessions, for an empty window only. The days of the core are bounded by
+    those of the windows, so that PostgreSQL reads only the partitions of the windows. -#}
+{% macro quarantine_collapse_findings(
+    relations, days, accounts, facts, measure='spend', checked='campaign_stats',
+    account='account_id', fall=true
+) -%}
 with window_days as (
     select source, account_id, day, load_id
     from {{ days }}
@@ -415,7 +428,11 @@ with window_days as (
 ),
 
 held as (
-    select a.platform as source, a.account_id, f.report_date as day, sum(f.spend) as spend
+    select
+        a.platform as source,
+        a.account_id,
+        f.report_date as day,
+        sum(f.{{ measure }}) as held
     from {{ facts }} as f
     join {{ accounts }} as a
         on a.account_sk = f.account_sk
@@ -429,13 +446,13 @@ read as (
     {%- if not loop.first %}
     union all
     {%- endif %}
-    select platform as source, account_id, report_date, spend
+    select platform as source, {{ account }} as account_id, report_date, {{ measure }}
     from {{ relation }}
     {%- endfor %}
 ),
 
 read_days as (
-    select source, account_id, report_date as day, sum(spend) as spend
+    select source, account_id, report_date as day, sum({{ measure }}) as read
     from read
     group by source, account_id, report_date
 ),
@@ -447,8 +464,8 @@ compared as (
         w.load_id,
         min(w.day) as first_day,
         max(w.day) as last_day,
-        coalesce(sum(h.spend), 0) as held_spend,
-        coalesce(sum(r.spend) filter (where h.day is not null), 0) as read_spend,
+        coalesce(sum(h.held), 0) as held,
+        coalesce(sum(r.read) filter (where h.day is not null), 0) as read,
         count(r.day) as read_days
     from window_days as w
     left join held as h
@@ -463,16 +480,21 @@ select
     account_id,
     load_id,
     case when read_days = 0 then 'empty_window' else 'spend_fall' end as reason,
-    'campaign_stats' as checked,
+    '{{ checked }}' as checked,
     case
         when read_days = 0 then
-            'no row from ' || first_day || ' to ' || last_day || ', against a spend of '
-            || held_spend || ' in the core'
-        else 'a spend of ' || read_spend || ' against ' || held_spend || ' in the core on the same days'
+            'no row from ' || first_day || ' to ' || last_day || ', against {{ measure }} of '
+            || held || ' in the core'
+        else '{{ measure }} of ' || read || ' against ' || held || ' in the core on the same days'
     end as detail
 from compared
-where held_spend > 0
-    and (read_days = 0 or read_spend < held_spend * (1 - {{ var('quarantine_spend_fall') }}))
+where held > 0
+    and (
+        read_days = 0
+        {%- if fall %}
+        or read < held * (1 - {{ var('quarantine_spend_fall') }})
+        {%- endif %}
+    )
 {%- endmacro %}
 
 {#- The stop of a source (ADR-0035, ADR-0046): a source with more than half of its accounts in
