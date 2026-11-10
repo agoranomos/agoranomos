@@ -702,6 +702,48 @@ services:
     security_opt: ["no-new-privileges:true"]
     logging: *logging
 
+  # Builds the views of marts on every start, after db-init has applied the migrations of the core
+  # and before metabase-init applies their metadata (ADR-0039, ADR-0044): a run of the transform
+  # leaves a view that exists as it is, so a release that changes a view, or a new reporting
+  # currency, which it also computes the rates of the core in, reaches the warehouse here. It runs
+  # dbt of the Airflow image as transformer, the one secret that it holds, on the network data
+  # alone, as nobody, with neither the entrypoint of Airflow nor its settings, and waits for the
+  # nodes of a run of the transform that write, which wait for it in turn
+  # (metabase/marts_init.py).
+  marts-init:
+    image: agoranomos-airflow:local
+    pull_policy: never
+    profiles: [core]
+    restart: "no"
+    user: "65534:65534"
+    mem_limit: 256m
+    memswap_limit: 256m
+    # The Python of the virtual environment of dbt, which has psycopg2 for the lock.
+    entrypoint: ["/opt/airflow/dbt_venv/bin/python", "/opt/agoranomos/metabase/marts_init.py"]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      # No usage telemetry from dbt; the image sets the same.
+      DBT_ENGINE_SEND_ANONYMOUS_USAGE_STATS: "False"
+      DO_NOT_TRACK: "1"
+      # The reporting currency of the marts (ADR-0025), which dbt renders into the views, and the
+      # password of transformer, whose values dbt hides in its logs.
+      AGORANOMOS_REPORTING_CURRENCY: ${AGORANOMOS_REPORTING_CURRENCY:-USD}
+      DBT_ENV_SECRET_WAREHOUSE_PASSWORD: ${WAREHOUSE_TRANSFORMER_PASSWORD:?run ./agoranomos init}
+    volumes:
+      - ./dbt:/opt/agoranomos/dbt:ro
+      - ./metabase:/opt/agoranomos/metabase:ro
+    # dbt writes its target and logs folders under /tmp, and they go with the container.
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks: [data]
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
   # Sets Metabase up on the first start and keeps the warehouse connection current on every start. Metabase
   # makes the connection to the warehouse, so this job needs the default network only, to reach Metabase.
   # Then it applies the metadata of the marts: the export and this deployment's overrides, both read-only;
@@ -753,6 +795,9 @@ services:
       metabase:
         condition: service_healthy
       metadata-export:
+        condition: service_completed_successfully
+      # The views of this release, whose fields it describes (ADR-0044).
+      marts-init:
         condition: service_completed_successfully
     # It writes nothing but the registry of the content, on its volume: PYTHONDONTWRITEBYTECODE
     # keeps Python from writing its bytecode.

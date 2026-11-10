@@ -149,6 +149,7 @@ def test_the_services_of_the_variants_are_the_ones_that_have_limits():
         "airflow-triggerer",
         "db-init",
         "demo-init",
+        "marts-init",
         "metabase",
         "metabase-init",
         "metadata-export",
