@@ -181,6 +181,7 @@ def environment(backups: Path, **fake: str) -> dict[str, str]:
         "BACKUP_ROOT": str(backups),
         "EXTENSIONS": str(tmp / "extensions"),
         "STARTED_FILE": str(tmp / "started"),
+        "STATUS_FILE": str(tmp / "status.json"),
         "FAKE_LOG": str(tmp / "tools.log"),
         "FAKE_NOW": str(NOW),
         "TZ": "UTC",
@@ -1382,3 +1383,28 @@ def test_usage(backups):
     result = run("/bin/sh", backups, "restore")
     assert result.returncode == 1
     assert "usage: backup.sh schedule | now | health | verify" in result.stderr
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_the_schedule_publishes_the_status_of_the_backups_for_airflow(shell, backups):
+    # The watcher of Airflow reads it from a volume of its own, as the backups folder is open to
+    # its owner only (ADR-0045): every user may read it, and it holds the times and the result of
+    # the last run that the health check reads, and no name and no path.
+    result = simulate(shell, backups, NOW, NOW + 3 * 60, 60)
+    assert result.returncode == 0, result.stderr
+    path = backups.parent / "status.json"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o644
+    status = json.loads(path.read_text(encoding="utf-8"))
+    checked = status.pop("checked_epoch")
+    assert NOW <= checked <= NOW + 3 * 60
+    assert status == {"format": 1, "started_epoch": NOW, "result": "ok", "last_ok_epoch": NOW}
+    assert not list(backups.parent.glob("status.json.tmp"))
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_status_that_cannot_be_written_warns_once_and_the_backups_go_on(shell, backups):
+    missing = backups.parent / "missing" / "status.json"
+    result = simulate(shell, backups, NOW, NOW + 5 * 60, 60, STATUS_FILE=str(missing))
+    assert result.returncode == 0, result.stderr
+    assert result.stderr.count("cannot write the status of the backups for Airflow") == 1
+    assert latest(backups)["result"] == "ok"
