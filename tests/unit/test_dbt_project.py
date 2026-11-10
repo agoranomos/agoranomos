@@ -1269,6 +1269,17 @@ def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
         # and Ops shows them, as a test at error would stop the healthy accounts too (#188).
         "assert_no_account_is_in_quarantine": ({"int_g1_failures"}, True),
         "assert_no_source_is_stopped": ({"int_g1_failures"}, True),
+        # An account that leaves the settings keeps its data (ADR-0044): it warns, with the
+        # registry that sets the activity, over the facts as the runs before left them, which are
+        # ancestors of the registry through G1a, so it runs in the task of dim_account.
+        "assert_every_account_with_data_is_in_the_settings": (
+            {
+                "dim_account",
+                "source:core.ad_stats_campaign_daily",
+                "source:core.web_sessions_daily",
+            },
+            True,
+        ),
         # G3 (ADR-0035, ADR-0042): a day of the windows of the facts without a rate in the core
         # would have no amount in the reporting currency.
         "assert_the_core_has_a_rate_for_every_day_of_the_windows": (
