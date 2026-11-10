@@ -429,10 +429,10 @@ def test_the_seeds_go_to_staging_and_comment_their_tables():
 
 def test_the_intermediate_models_are_views_in_staging():
     # ADR-0025: until an AI role needs to tell them apart, intermediate models are views in staging,
-    # but for the statistics of ad groups and of ads, whose many tests would each compute a view of
-    # their size again (ADR-0034), and the rates of each day, which every unioned model of the facts
-    # and five marts read; and the checks of G1 and the days of the windows of the facts, which
-    # each run fills anew, as the days of the pin are (ADR-0035, ADR-0038).
+    # but for the statistics of campaigns, of ad groups and of ads, whose many tests would each
+    # compute a view of their size again (ADR-0034), and the rates of each day, which every unioned
+    # model of the facts and five marts read; and the checks of G1 and the days of the windows of
+    # the facts, which each run fills anew, as the days of the pin are (ADR-0035, ADR-0038).
     project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
     pattern = r"^    intermediate:\n      \+schema: staging\n      \+materialized: view$"
     assert re.search(pattern, project, flags=re.MULTILINE)
@@ -442,6 +442,7 @@ def test_the_intermediate_models_are_views_in_staging():
         if "materialized=" in path.read_text(encoding="utf-8")
     }
     assert tables == {
+        "int_ad_stats__unioned",
         "int_ad_stats_ad_group__unioned",
         "int_ad_stats_ad__unioned",
         "int_fx_rates__filled",
@@ -1265,6 +1266,12 @@ def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
         # and Ops shows them, as a test at error would stop the healthy accounts too (#188).
         "assert_no_account_is_in_quarantine": ({"int_g1_failures"}, True),
         "assert_no_source_is_stopped": ({"int_g1_failures"}, True),
+        # G3 (ADR-0035, ADR-0042): a day of the windows of the facts without a rate in the core
+        # would have no amount in the reporting currency.
+        "assert_the_core_has_a_rate_for_every_day_of_the_windows": (
+            {"int_window_days", RATES_MODEL},
+            False,
+        ),
         # G2 (ADR-0035): a fact that does not hold the sums of staging lost or doubled rows.
         **{
             f"assert_the_core_holds_the_{what}_of_staging": (
@@ -1649,14 +1656,13 @@ ENTITIES = {
 CURRENT_TO = "\"'9999-12-31 00:00:00'::timestamp\""
 
 
-def dimension_tables() -> dict[str, dict]:
-    """The tables of the migrations that the models of the core write, the dimensions and
-    registries and the journal of quarantine: for each table, its columns in order, its key, its
-    natural key where it has one, and the comments of the table and of its columns."""
+def migration_tables(migrations: dict[str, set[str] | None]) -> dict[str, dict]:
+    """The tables that the migrations create, of each migration those of its set, or all of them
+    for none: for each table, its columns in order, its key, its natural key where it has one, and
+    the comments of the table and of its columns."""
     tables: dict[str, dict] = {}
-    for migration in [*DIMENSION_MIGRATIONS, *JOURNAL_MODELS]:
+    for migration, kept in migrations.items():
         text = (MIGRATIONS / migration).read_text(encoding="utf-8")
-        kept = JOURNAL_MODELS.get(migration)
         for name, body in CREATE.findall(text):
             if kept is not None and name not in kept:
                 continue
@@ -1679,6 +1685,23 @@ def dimension_tables() -> dict[str, dict]:
                 comment = body.replace("''", "'")
                 tables[table]["comments"][None if kind == "TABLE" else column] = comment
     return tables
+
+
+def dimension_tables() -> dict[str, dict]:
+    """The tables of the migrations that the models of the core write by their names, the
+    dimensions and registries and the journal of quarantine."""
+    return migration_tables({**dict.fromkeys(DIMENSION_MIGRATIONS), **JOURNAL_MODELS})
+
+
+# The rates of the core, which the model core_fx_rates_daily writes under the name of its table, as
+# a mart has the name (ADR-0042).
+RATES_MIGRATION = "0007_create_the_rates.sql"
+RATES_MODEL = "core_fx_rates_daily"
+
+
+def rates_table() -> dict:
+    """The table of the rates of the core, as migration 0007 creates it."""
+    return migration_tables({RATES_MIGRATION: {"fx_rates_daily"}})["fx_rates_daily"]
 
 
 FACT_CREATE = re.compile(
@@ -1738,7 +1761,7 @@ def test_the_dimensions_of_the_core_merge_into_the_tables_of_the_migrations():
     assert section in project
     tables = dimension_tables()
     facts = {f"core_{fact}" for fact in fact_tables()}
-    assert {path.stem for path in CORE.glob("*.sql")} == set(tables) | facts
+    assert {path.stem for path in CORE.glob("*.sql")} == set(tables) | facts | {RATES_MODEL}
     for name, table in tables.items():
         text = (CORE / f"{name}.sql").read_text(encoding="utf-8")
         config = model_config(text)
@@ -1768,6 +1791,7 @@ def test_the_descriptions_of_the_core_are_the_comments_of_its_migrations():
     tables = dimension_tables()
     # The models of the facts write into the tables of their alias, as the marts have their names.
     tables |= {f"core_{fact}": table for fact, table in fact_tables().items()}
+    tables[RATES_MODEL] = rates_table()
     described = blocks(text, 2)
     assert set(described) == set(tables)
     for name, table in tables.items():
@@ -1777,6 +1801,46 @@ def test_the_descriptions_of_the_core_are_the_comments_of_its_migrations():
         assert list(columns) == table["columns"], name
         for column, item in columns.items():
             assert folded(item, 8) == table["comments"][column], (name, column)
+
+
+def test_the_rates_of_the_core_merge_the_days_that_a_run_brings():
+    # ADR-0042: a rate for each calendar day, currency of the accounts and reporting currency,
+    # through the euro with no rounding and carried over a day without one with a flag, by an
+    # incremental merge into the table of migration 0007 in the types of its columns, which writes
+    # only the rows that changed. The ECB once it has a rate, in staging or in the core, so that a
+    # run that reads no load of the ECB takes no rate of the demo.
+    text = (CORE / f"{RATES_MODEL}.sql").read_text(encoding="utf-8")
+    config = model_config(text)
+    assert "alias='fx_rates_daily'" in config
+    assert "unique_key=['rate_date', 'currency', 'reporting_currency']" in config
+    table = rates_table()
+    assert table["key"] == ["rate_date", "currency", "reporting_currency"]
+    [(_, body)] = CREATE.findall((MIGRATIONS / RATES_MIGRATION).read_text(encoding="utf-8"))
+    columns = {
+        found.group(1): found.group(2)
+        for found in map(FACT_COLUMN.match, body.splitlines())
+        if found and found.group(1) not in ("PRIMARY", "CHECK", "UNIQUE")
+    }
+    assert list(columns) == table["columns"]
+    for column, kind in columns.items():
+        assert re.search(rf" as {re.escape(kind)}\) as {column},?\n", text), column
+    assert set(referenced(text)) == {
+        "stg_ecb__rates_daily",
+        "stg_demo_fx__rates_daily",
+        "stg_loads__newest_days",
+        "int_window_days",
+        "dim_account",
+    }
+    assert "round(" not in text
+    assert "published_on < rate_date as is_carried_forward" in text
+    assert "{{ 'true' if var('recompute_rates') else 'false' }}" in text
+    assert "\n  recompute_rates: false\n" in PROJECT_FILE.read_text(encoding="utf-8")
+    rates = (DBT / "macros" / "rates.sql").read_text(encoding="utf-8")
+    assert "or exists (select from {{ rates }} where rate_source = 'ecb')" in rates
+    assert "r.rate / c.rate as rate_into_reporting_currency" in rates
+    # A load of the ECB reads the last 14 days again (ADR-0042).
+    ecb = (DAGS_PIPELINES / "ecb.py").read_text(encoding="utf-8")
+    assert "\nWINDOW_DAYS = 14\n" in ecb
 
 
 def test_the_views_of_the_core_take_their_accounts_from_one_place():
@@ -2000,8 +2064,8 @@ def test_g1_checks_each_kind_of_facts_as_the_tests_of_staging_did():
 def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
     # R5 (#191): as one statement over the three levels, G1 held a dozen aggregates at once and was
     # the largest process of the database. Each statement of the hooks inserts the failures of one
-    # kind, or of the raw tables of one source, into the table, then G0a, then G1a, then the stop,
-    # which reads what the others wrote, and the statistics of the table come last.
+    # kind, or of the raw tables of one source, into the table, then G0a, then G1a, then the rates,
+    # then the stop, which reads what the others wrote, and the statistics of the table come last.
     config = g1_config()
     assert "materialized='incremental'" in config
     assert 'pre_hook=["{% if is_incremental() %}delete from {{ this }}{% endif %}"]' in config
@@ -2015,7 +2079,7 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
         codes = ["demo_web"] if kind == "sessions_daily" else [*SHAPED_ADS, "google_ads"]
         read = re.findall(r"ref\('(stg_\w+)'\)", statement)
         assert read == [*(f"stg_{code}__{kind}" for code in codes), *["stg_loads__newest_days"] * 2]
-    raw, totals, collapse, sessions, stop = statements[len(kinds) : -1]
+    raw, totals, collapse, sessions, rates, stop = statements[len(kinds) : -1]
     assert raw.startswith("{% for source_name in quarantine_raw_tables() %}")
     assert raw.count("quarantine_insert(") == 1
     assert (
@@ -2031,13 +2095,25 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
         "source('core', 'dim_account'), source('core', 'web_sessions_daily'), measure='sessions', "
         "checked='sessions_daily', account='property_id', fall=false)"
     ) in sessions
+    # ADR-0042: the currency of an account with no rate, in the rates of the run or in the core,
+    # before the stop, which counts it.
+    assert "quarantine_rate_findings([" in rates
+    assert (
+        "ref('stg_ecb__rates_daily'), ref('stg_demo_fx__rates_daily'), "
+        "source('core', 'fx_rates_daily'))"
+    ) in rates
     assert "quarantine_stop_findings(this, source('core', 'loads'))" in stop
-    # dbt orders the model after what the statements read.
+    # dbt orders the model after what the statements read: a line depends_on, or a ref of its
+    # query.
     model = G1.read_text(encoding="utf-8")
+    query = model[model.index("\n) }}\n") :]
     for name in set(re.findall(r"ref\('(stg_\w+)'\)", config)):
         assert (
-            f"-- depends_on: {{{{ ref('{name}') }}}}" in model or name == "stg_loads__newest_days"
-        )
+            f"-- depends_on: {{{{ ref('{name}') }}}}" in model
+            or f"ref('{name}')" in query
+            or name == "stg_loads__newest_days"
+        ), name
+    assert "-- depends_on: {{ source('core', 'fx_rates_daily') }}" in model
 
 
 # The ad platforms of the demo.
@@ -2208,7 +2284,13 @@ def test_g1a_and_the_stop_of_a_source_follow_adr_0035():
     assert "having h.accounts * 2 > count(*)" in stop
     sources = (STAGING / "loads" / "_loads__sources.yml").read_text(encoding="utf-8")
     tables = re.findall(r"^      - name: (\w+)\n", sources, flags=re.M)
-    assert tables == ["loads", "dim_account", "ad_stats_campaign_daily", "web_sessions_daily"]
+    assert tables == [
+        "loads",
+        "dim_account",
+        "ad_stats_campaign_daily",
+        "web_sessions_daily",
+        "fx_rates_daily",
+    ]
     for name in ("assert_no_account_is_in_quarantine", "assert_no_source_is_stopped"):
         text = (DBT / "tests" / f"{name}.sql").read_text(encoding="utf-8")
         assert "{{ config(severity='warn') }}" in text, name

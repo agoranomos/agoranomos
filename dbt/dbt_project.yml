@@ -123,6 +123,12 @@ vars:
   # a row, as a stub if no list gives it, so one in a thousand is a margin, not an expectation. Not
   # checked yet on a live account.
   dimensionless_share: 0.001
+  # Whether core_fx_rates_daily computes every day of the rates again, and not only the days that
+  # the loads of the run bring (models/core/core_fx_rates_daily.sql, ADR-0042), as after a change of
+  # AGORANOMOS_REPORTING_CURRENCY: dbt run --select core_fx_rates_daily --vars
+  # '{recompute_rates: true}'. A run computes every day by itself for a reporting currency of which
+  # the table holds no row yet.
+  recompute_rates: false
 
 # The tests of the base package. A test with the severity error, the default, stops the models that
 # read its node (TestBehavior.BUILD of Cosmos, ADR-0028), and carries the tag critical (ADR-0038),

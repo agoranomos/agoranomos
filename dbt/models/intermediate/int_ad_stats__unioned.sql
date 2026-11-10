@@ -2,6 +2,11 @@
 -- the client and the currency of the account, and the conversions of the primary actions. A day
 -- on which a campaign has primary conversions and no other metric, which Google can report, keeps
 -- them with zeros for the rest.
+-- A table, as the statistics of ad groups and of ads are: as a view, each of its tests, four at a
+-- time, the test of a missing day twice in one statement, and each model and singular test that
+-- reads it computed the statistics of every platform again, which took warehouse-db to its memory
+-- limit once raw held about ten loads of the history, as in the second run of the stack tests.
+{{ config(materialized='table') }}
 with stats as (
     select *
     from (

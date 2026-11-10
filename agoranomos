@@ -1721,6 +1721,7 @@ cmd_status() {
   [ -z "$status_table" ] || printf '%s\n' "$status_table"
   warehouse_db_status
   migrations_status
+  rates_status
   backup_status
 }
 
@@ -1860,6 +1861,65 @@ migrations_status() {
     return 0
   fi
   migrations_summary "$checkout_migrations" "$applied_rows"
+}
+
+# The SQL of the age of the rates of the core (ADR-0042), which status runs as postgres: a line
+# built once the transform has built the view ops.ops_rates, then its row, if the core holds a
+# published rate: the source, the reporting currency, the day of the last rate, how many business
+# days ago, and t when that is more than 3. A warehouse that no run of the transform has reached
+# has no view and gives no line.
+rates_sql() {
+  cat << 'SQL'
+SELECT to_regclass('ops.ops_rates') IS NOT NULL AS built \gset
+\if :built
+SELECT 'built';
+SELECT rate_source, reporting_currency, last_rate_date, business_days_since_rate, is_late
+FROM ops.ops_rates;
+\endif
+SQL
+}
+
+# What status says of the rates of the core, from the lines of rates_sql ($1): the day of the last
+# rate that the source published into the reporting currency and how many business days ago, with a
+# warning when that is more than 3, as the view ops.ops_rates says (ADR-0042), and the DAG of the
+# loads of the source; or that the core holds none yet.
+rates_summary() {
+  case "$1" in
+    built*) ;;
+    *)
+      say "Rates: none in the core yet; the first run of the transform writes them (ADR-0042)."
+      return 0
+      ;;
+  esac
+  rate_line=$(printf '%s\n' "$1" | awk -v separator="$FIELD_SEPARATOR" 'index($0, separator) { print; exit }')
+  if [ -z "$rate_line" ]; then
+    say "Rates: the core holds no rate that a source published, so only the accounts in the reporting currency enter it (ADR-0042)."
+    return 0
+  fi
+  IFS=$FIELD_SEPARATOR read -r rate_source rate_currency rate_day rate_age rate_late << EOF
+$rate_line
+EOF
+  case "$rate_age" in 1) rate_days="1 business day" ;; *) rate_days="$rate_age business days" ;; esac
+  say "Rates: the last rate of $rate_source into $rate_currency is of $rate_day, $rate_days ago (ADR-0042)."
+  [ "$rate_late" = t ] || return 0
+  case "$rate_source" in
+    ecb) rate_dag=agoranomos_ecb_daily ;;
+    demo_fx) rate_dag=agoranomos_demo_daily ;;
+    *) rate_dag="the DAG of its loads" ;;
+  esac
+  warn "the last rate of $rate_source is $rate_days old, more than 3: its loads brought no newer one, and the core carries it to each day since. The runs of $rate_dag in Airflow say why"
+}
+
+# What status says of the rates of the core (ADR-0042), while warehouse-db runs, by the table that
+# status printed; nothing while it does not run or does not answer.
+rates_status() {
+  printf '%s\n' "$status_table" |
+    awk '$1 == "warehouse-db" && $2 == "running" { found = 1 } END { exit !found }' || return 0
+  rates_rows=$(rates_sql |
+    compose exec -T warehouse-db psql --username=postgres --dbname=warehouse --no-psqlrc --quiet \
+      --tuples-only --no-align --field-separator="$FIELD_SEPARATOR" --set=ON_ERROR_STOP=1 \
+      2> /dev/null) || return 0
+  rates_summary "$rates_rows"
 }
 
 # The SQL that tells whether the warehouse holds data, which up runs as postgres: t when it has a

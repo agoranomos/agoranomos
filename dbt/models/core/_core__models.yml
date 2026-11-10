@@ -897,3 +897,46 @@ models:
       - name: load_sk
         description: >-
           The load that wrote the row, load_sk of core.loads.
+  - name: core_fx_rates_daily
+    description: >-
+      The rates into the reporting currency: one row for each calendar day, each currency of the
+      accounts and each reporting currency, with the last rate that the source published on or
+      before the day. rate_date, currency and reporting_currency are its key. Each deployment takes
+      the rates from the source itself, which rate_source names.
+    columns:
+      - name: rate_date
+        description: >-
+          The calendar day of the rate, whether or not the source published a rate on it.
+      - name: currency
+        description: >-
+          The currency that the rate converts from, as a three-letter code of ISO 4217.
+      - name: reporting_currency
+        description: >-
+          The currency that the rate converts into, as a three-letter code of ISO 4217.
+      - name: rate_into_reporting_currency
+        description: >-
+          The value of one unit of currency in reporting_currency on the day, through the base
+          currency of the source with no rounding: an amount in currency times this rate is the
+          amount in reporting_currency. The reporting currency has the rate 1.
+      - name: base_currency
+        description: >-
+          The base currency of the source of the rate, against which it publishes its rates, such
+          as EUR for the reference rates of the euro; none where currency is the reporting
+          currency.
+      - name: base_rate
+        description: >-
+          The rate of currency against base_currency as the source published it, in the convention
+          of the source, such as the units of currency for one euro for the reference rates of the
+          euro; none where currency is the reporting currency.
+      - name: rate_source
+        description: >-
+          The source of the rate, such as ecb for the European Central Bank or demo_fx for the
+          demo, or identity where currency is the reporting currency.
+      - name: published_on
+        description: >-
+          The day of the publication of the rate, rate_date or an earlier day for a carried rate;
+          none where currency is the reporting currency.
+      - name: is_carried_forward
+        description: >-
+          Whether the rate is the last one published before the day, on a day without a
+          publication, such as a weekend or a holiday.
