@@ -716,8 +716,10 @@ services:
     profiles: [core]
     restart: "no"
     user: "65534:65534"
-    mem_limit: 256m
-    memswap_limit: 256m
+    # 1.5 times its peak of 184 MiB on a new warehouse, by the formula of the one-shot jobs
+    # (docs/reference/system-requirements.md).
+    mem_limit: 384m
+    memswap_limit: 384m
     # The Python of the virtual environment of dbt, which has psycopg2 for the lock.
     entrypoint: ["/opt/airflow/dbt_venv/bin/python", "/opt/agoranomos/metabase/marts_init.py"]
     environment:
