@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-10
 decision-makers: Andrei Gromov
 ---
@@ -49,5 +49,5 @@ Chosen option: "Leave `amcheck` out", because the maintainer chose to give no ro
 ## More Information
 
 * **Implementation status, as of November 2026:** the DAG of maintenance of B12 (#294) runs no `amcheck`.
-* Related decisions: at acceptance this record replaces "the DAG of maintenance runs `amcheck` from contrib" of "The protection of the core" in [ADR-0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) and "It runs `amcheck`" of the DAG of maintenance in [ADR-0039](0039-run-one-dbt-build-in-the-watcher-mode.md). The rest of both records stays.
+* Related decisions: this record replaces "the DAG of maintenance runs `amcheck` from contrib" of "The protection of the core" in [ADR-0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) and "It runs `amcheck`" of the DAG of maintenance in [ADR-0039](0039-run-one-dbt-build-in-the-watcher-mode.md). The rest of both records stays.
 * Revisit this record when a deployment loses data to a corruption that the checksums did not show, or when PostgreSQL offers such a check to a role without a grant.
