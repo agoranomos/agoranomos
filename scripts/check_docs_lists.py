@@ -2,7 +2,7 @@
 
 Zensical renders the pages with Python-Markdown, which nests a list item one level for each four
 spaces of its indentation: an item indented by two spaces renders as an item of the outer list,
-not as a nested one. The strict Zensical build does not warn about it (as of Zensical 0.0.68), so
+not as a nested one. The strict Zensical build does not warn about it (as of Zensical 0.1.0), so
 this script runs as a prek hook. It skips fenced code blocks and the front matter.
 
 Usage: python scripts/check_docs_lists.py [page ...]   (without pages: every page in docs/)
