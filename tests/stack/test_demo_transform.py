@@ -136,15 +136,16 @@ NAME_PERIODS = (
     "SELECT platform, account_id, campaign_id, observed_name, valid_from, valid_to "
     "FROM marts.ad_campaign_names"
 )
-# The row that breaks a critical test of staging: a version of a campaign with no name, which no
-# check of an account covers, of a campaign that the demo does not have, under the newest whole load
-# of demo_search. A row of statistics that breaks a check, such as negative clicks, puts its account
-# in quarantine instead, and the run goes on (test_quarantine.py).
+# The row that breaks a critical test of staging: a campaign with no name in the list of an account,
+# which no check of an account covers, of a campaign that the demo does not have, under the newest
+# whole load of demo_search, whose list staging reads. A row of statistics that breaks a check, such
+# as negative clicks, puts its account in quarantine instead, and the run goes on
+# (test_quarantine.py).
 BROKEN_ROW = (
-    "INSERT INTO raw_demo_search.campaigns (customer__id, campaign__id, _dlt_valid_from, "
-    "_dlt_valid_to, campaign__resource_name, campaign__name, campaign__status, "
+    "INSERT INTO raw_demo_search.campaigns (customer__id, campaign__id, "
+    "campaign__resource_name, campaign__name, campaign__status, "
     "campaign__advertising_channel_type, _dlt_load_id, _dlt_id) "
-    "SELECT '4170000011', '21099999998', now(), NULL, "
+    "SELECT '4170000011', '21099999998', "
     "'customers/4170000011/campaigns/21099999998', NULL, 'ENABLED', 'SEARCH', max(load_id), "
     "'stack-test-broken-row' FROM raw_demo_search._dlt_loads WHERE status = 0"
 )
@@ -534,18 +535,28 @@ def test_every_day_of_a_campaign_has_its_current_name(env, transform_run):
         "HAVING count(DISTINCT campaign_name) > 1) AS split",
     )
     assert int(split) == 0
-    # A campaign that the history renamed every half-year: the name of its open version.
+    # A campaign that the demo renames every half-year: the name in the newest list of its account
+    # that the runs pinned, and as many names as its versions in the core have had, from the first
+    # run of the transform on (ADR-0036).
     current = warehouse_output(
         env,
-        "SELECT campaign__name FROM raw_demo_search.campaigns "
-        "WHERE campaign__id = '21000000102' AND _dlt_valid_to IS NULL",
+        "SELECT c.campaign__name FROM raw_demo_search.campaigns AS c JOIN core.loads AS l "
+        "ON l.source = 'demo_search' AND l.load_id = c._dlt_load_id "
+        "AND l.account_id = c.customer__id AND l.outcome = 'loaded' "
+        "WHERE c.campaign__id = '21000000102' ORDER BY c._dlt_load_id::numeric DESC LIMIT 1",
     )
+    names = warehouse_output(
+        env,
+        "SELECT count(DISTINCT observed_name) FROM marts.ad_campaign_names "
+        "WHERE campaign_id = '21000000102'",
+    )
+    assert int(names) >= 1
     shown = warehouse_output(
         env,
         "SELECT campaign_name || '|' || name_count FROM marts.ad_campaigns "
         "WHERE campaign_id = '21000000102'",
     )
-    assert shown == f"{current}|2"
+    assert shown == f"{current}|{names}"
     named = warehouse_output(
         env,
         f"SELECT DISTINCT campaign_name FROM {MART} WHERE campaign_id = '21000000102'",  # noqa: S608 (constants of this file)

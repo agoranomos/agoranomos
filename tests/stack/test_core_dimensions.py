@@ -346,6 +346,76 @@ def test_the_views_of_the_dimensions_show_the_dimensions_of_the_core(env, built)
     assert stubs == "0", stubs
 
 
+# The account of demo_search whose newest list of campaigns the next test changes, the load of that
+# list, which the runs pinned, and a name that the demo does not give.
+LIST_ACCOUNT = "4170000011"
+NEWEST_LIST = (
+    "SELECT load_id, finished_at FROM core.loads WHERE source = 'demo_search' "  # noqa: S608 (constants of this file)
+    f"AND account_id = '{LIST_ACCOUNT}' AND outcome = 'loaded' AND status = 'pinned' "
+    "ORDER BY load_id::numeric DESC LIMIT 1"
+)
+RENAMED = "Renamed by the test of the lists"
+CURRENT_CAMPAIGN = (
+    "SELECT current_name, coalesce(campaign_status, ''), campaign_state, "  # noqa: S608 (constants of this file)
+    "coalesce(campaign_type, ''), last_seen_at, is_listed FROM staging.int_campaigns__current "
+    f"WHERE platform = 'demo_search' AND account_id = '{LIST_ACCOUNT}' AND campaign_id = '{{}}'"
+)
+
+
+@pytest.mark.demo
+def test_the_views_of_the_entities_read_the_newest_list_of_each_account(env, built):
+    # Each load appends the full list of the entities of each account, and staging reads the list
+    # of the newest load of the account that the runs pinned (ADR-0038). A campaign that the newest
+    # list no longer names keeps the attributes that the core holds, and is no longer listed; a
+    # change in the newest list is what the view gives, with the end of its load as last_seen_at.
+    # The test takes one campaign out of the newest list and renames another, as loader, and puts
+    # both back in a finally; it reads the views and runs no transform, so the core stays as it is.
+    load_id, finished_at = warehouse_output(env, NEWEST_LIST).split("|")
+    listed = [
+        line.split("|")
+        for line in warehouse_output(
+            env,
+            "SELECT _dlt_id, campaign__id, campaign__name FROM raw_demo_search.campaigns "  # noqa: S608 (values of the demo and of the core)
+            f"WHERE _dlt_load_id = '{load_id}' AND customer__id = '{LIST_ACCOUNT}' "
+            "ORDER BY campaign__id",
+        ).splitlines()
+    ]
+    assert len(listed) >= 2, listed
+    (dropped_row, dropped, _), (renamed_row, renamed, name) = listed[:2]
+    held = warehouse_output(
+        env,
+        "SELECT c.campaign_name, coalesce(c.campaign_status, ''), c.campaign_state, "  # noqa: S608 (values of the demo and of the core)
+        "coalesce(c.campaign_type, ''), c.last_seen_at FROM core.dim_campaign AS c "
+        "JOIN core.dim_account AS a USING (account_sk) WHERE a.platform = 'demo_search' "
+        f"AND a.account_id = '{LIST_ACCOUNT}' AND c.campaign_id_text = '{dropped}' AND c.is_listed",
+    )
+    assert held, f"campaign {dropped} is not listed in the core"
+    staged = (
+        "SELECT count(*), count(DISTINCT campaign_id), min(load_id), max(load_id) "  # noqa: S608 (constants of this file)
+        f"FROM staging.stg_demo_search__campaigns WHERE account_id = '{LIST_ACCOUNT}'"
+    )
+    assert warehouse_output(env, staged) == f"{len(listed)}|{len(listed)}|{load_id}|{load_id}"
+    hide = "UPDATE raw_demo_search.campaigns SET _dlt_load_id = '{load}' WHERE _dlt_id = '{row}'"
+    # The name as a dollar-quoted constant, so that any name of the demo goes back as it was.
+    name_it = (
+        "UPDATE raw_demo_search.campaigns SET campaign__name = $name${name}$name$ "
+        "WHERE _dlt_id = '{row}'"
+    )
+    try:
+        # A load id that no load has: the row is in no list that staging reads.
+        warehouse_output(env, hide.format(load="0", row=dropped_row), "loader")
+        warehouse_output(env, name_it.format(name=RENAMED, row=renamed_row), "loader")
+        count = len(listed) - 1
+        assert warehouse_output(env, staged) == f"{count}|{count}|{load_id}|{load_id}"
+        assert warehouse_output(env, CURRENT_CAMPAIGN.format(dropped)) == f"{held}|f"
+        now = warehouse_output(env, CURRENT_CAMPAIGN.format(renamed)).split("|")
+        assert (now[0], now[4], now[5]) == (RENAMED, finished_at, "t"), now
+    finally:
+        warehouse_output(env, hide.format(load=load_id, row=dropped_row), "loader")
+        warehouse_output(env, name_it.format(name=name, row=renamed_row), "loader")
+    assert warehouse_output(env, staged) == f"{len(listed)}|{len(listed)}|{load_id}|{load_id}"
+
+
 # Each table of the core that dbt writes, as one digest of its rows and of the transaction that
 # wrote each of them, xmin: a row that a merge updates gets a new one, even with the same values.
 DIGEST = (

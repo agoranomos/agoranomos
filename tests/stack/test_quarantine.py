@@ -41,12 +41,19 @@ BAD, GOOD = ACCOUNTS["4170000012"], ACCOUNTS["4170000011"]
 # euros in US dollars, do not have.
 UNRATED = ACCOUNTS["802000000000002"]
 UNRATED_CURRENCY = "GBP"
-LISTED_SOCIAL = "SELECT currency FROM raw_demo_social.ad_accounts WHERE account_id = '{id}'"
+LISTED_SOCIAL = (
+    "SELECT currency FROM raw_demo_social.ad_accounts WHERE account_id = '{id}' "
+    "ORDER BY _dlt_load_id::numeric DESC LIMIT 1"
+)
 SET_SOCIAL = "UPDATE raw_demo_social.ad_accounts SET currency = '{value}' WHERE account_id = '{id}'"
 [VIDEO] = [account for account in world.ACCOUNTS if account.platform == "demo_video"]
 RENAMED = "Renamed by the test of the quarantine"
-# The rows of the lists of demo_search, which each load replaces.
-LISTED = "SELECT {column} FROM raw_demo_search.customer_clients WHERE customer_client__id = '{id}'"
+# The rows of the lists of accounts of demo_search, which each load appends whole, with the same
+# values in each: the test reads that of the newest load, and changes and puts back those of all.
+LISTED = (
+    "SELECT {column} FROM raw_demo_search.customer_clients WHERE customer_client__id = '{id}' "
+    "ORDER BY _dlt_load_id::numeric DESC LIMIT 1"
+)
 SET = (
     "UPDATE raw_demo_search.customer_clients SET {column} = '{value}' "
     "WHERE customer_client__id = '{id}'"
