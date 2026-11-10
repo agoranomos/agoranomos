@@ -424,7 +424,7 @@ models:
         config:
           meta:
             metabase:
-              display_name: Rate into Reporting Currency
+              display_name: Rate in Reporting Currency
               semantic_type: null
               has_field_values: none
       - name: fx_rate_date
@@ -451,7 +451,7 @@ models:
         config:
           meta:
             metabase:
-              display_name: Loaded At
+              display_name: Loaded at
               semantic_type: null
               has_field_values: none
       - name: is_account_active
@@ -736,7 +736,7 @@ models:
         config:
           meta:
             metabase:
-              display_name: Rate into Reporting Currency
+              display_name: Rate in Reporting Currency
               semantic_type: null
               has_field_values: none
       - name: fx_rate_date
@@ -763,7 +763,7 @@ models:
         config:
           meta:
             metabase:
-              display_name: Loaded At
+              display_name: Loaded at
               semantic_type: null
               has_field_values: none
       - name: is_account_active
@@ -1025,7 +1025,7 @@ models:
         config:
           meta:
             metabase:
-              display_name: Rate into Reporting Currency
+              display_name: Rate in Reporting Currency
               semantic_type: null
               has_field_values: none
       - name: fx_rate_date
@@ -1052,7 +1052,7 @@ models:
         config:
           meta:
             metabase:
-              display_name: Loaded At
+              display_name: Loaded at
               semantic_type: null
               has_field_values: none
       - name: is_account_active
@@ -1997,7 +1997,7 @@ models:
         config:
           meta:
             metabase:
-              display_name: Rate into Reporting Currency
+              display_name: Rate in Reporting Currency
               semantic_type: null
               has_field_values: none
       - name: fx_rate_date
@@ -2024,7 +2024,7 @@ models:
         config:
           meta:
             metabase:
-              display_name: Loaded At
+              display_name: Loaded at
               semantic_type: null
               has_field_values: none
       - name: is_account_active
@@ -2422,7 +2422,7 @@ models:
         config:
           meta:
             metabase:
-              display_name: Rate into Reporting Currency
+              display_name: Rate in Reporting Currency
               semantic_type: null
               has_field_values: none
       - name: fx_rate_date
@@ -2449,7 +2449,7 @@ models:
         config:
           meta:
             metabase:
-              display_name: Loaded At
+              display_name: Loaded at
               semantic_type: null
               has_field_values: none
       - name: is_account_active
