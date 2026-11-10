@@ -25,13 +25,14 @@ sources:
           run of the transform takes whole loads only.
       - name: advertisers
         description: >-
-          The advertisers of demo_video, its ad accounts, one row each, with their currency and time
-          zone; each load replaces them.
+          The advertisers of demo_video, its ad accounts, with their currency and time zone. Each
+          load appends the list under its own _dlt_load_id, and staging reads the row of each
+          account of the newest pinned load of the account.
       - name: campaigns
         description: >-
-          The campaigns of demo_video, one row for each version, from _dlt_valid_from until
-          _dlt_valid_to, as dlt keeps them with its scd2 strategy. A removed campaign is not listed,
-          so its last version ends.
+          The campaigns of demo_video. Each load appends the full list of each account under its own
+          _dlt_load_id, and staging reads the list of the newest pinned load of each account. A
+          removed campaign is not listed, so it leaves the list.
       - name: report_campaign_daily
         description: >-
           The integrated report of demo_video by campaign and day, one row for each campaign and day
@@ -41,9 +42,9 @@ sources:
           covers the day.
       - name: adgroups
         description: >-
-          The ad groups of demo_video, one row for each version, from _dlt_valid_from until
-          _dlt_valid_to, as dlt keeps them with its scd2 strategy. The ad groups of a removed
-          campaign are not listed, so their last versions end.
+          The ad groups of demo_video. Each load appends the full list of each account under its own
+          _dlt_load_id, and staging reads the list of the newest pinned load of each account. The ad
+          groups of a removed campaign are not listed, so they leave the list.
       - name: report_adgroup_daily
         description: >-
           The integrated report of demo_video by ad group and day, one row for each ad group and day
@@ -53,9 +54,9 @@ sources:
           those of the newest pinned load whose window covers the day.
       - name: ads
         description: >-
-          The ads of demo_video, one row for each version, from _dlt_valid_from until _dlt_valid_to,
-          as dlt keeps them with its scd2 strategy. The ads of a removed campaign are not listed, so
-          their last versions end.
+          The ads of demo_video. Each load appends the full list of each account under its own
+          _dlt_load_id, and staging reads the list of the newest pinned load of each account. The
+          ads of a removed campaign are not listed, so they leave the list.
       - name: report_ad_daily
         description: >-
           The integrated report of demo_video by ad and day, one row for each ad and day with any

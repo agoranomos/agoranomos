@@ -5,12 +5,12 @@ agoranomos_demo_history loads, as the loader role, the demo data of a business w
 their ad accounts on demo_search, demo_social and demo_video, their properties on demo_web, and the
 rates of demo_fx, in the shapes of the Google Ads API v25, the Meta Marketing API v26.0, the TikTok
 API for Business v1.3 and the GA4 Data API v1beta, up to yesterday in the time zone of each
-account, into raw_demo_<platform>. The first run of each platform also replays the names that its
-campaigns had. A repeat is safe: each load replaces the days of each account that it covers. The
-five loads run one after another, and each updates the asset of its main table. The loads of this
-DAG and of agoranomos_demo_daily, which brings the new days after the history, run one at a time,
-in the pool demo_load. The DAG has no schedule and starts paused: with the demo profile, the
-one-shot demo-init job unpauses it and triggers it once, on the first start.
+account, into raw_demo_<platform>, with the list of the entities of each account as it is at the
+load. A repeat is safe: each load replaces the days of each account that it covers, and the list of
+each account. The five loads run one after another, and each updates the asset of its main table.
+The loads of this DAG and of agoranomos_demo_daily, which brings the new days after the history,
+run one at a time, in the pool demo_load. The DAG has no schedule and starts paused: with the demo
+profile, the one-shot demo-init job unpauses it and triggers it once, on the first start.
 """
 
 from __future__ import annotations

@@ -21,6 +21,26 @@ sources:
           The registry of the accounts of the core, which the model dim_account writes, as the runs
           before this one left it: the checks of G1a in int_g1_failures read it before this run
           writes the core, to find the accounts of the rows of core.ad_stats_campaign_daily.
+      - name: dim_campaign
+        description: >-
+          The campaigns of the core, which the model dim_campaign writes, as the runs before this
+          one left them: int_campaigns__current keeps the attributes of a campaign that the newest
+          list of its account no longer names, and says that the platform no longer lists it.
+      - name: dim_ad_group
+        description: >-
+          The ad groups of the core, which the model dim_ad_group writes, as the runs before this
+          one left them: int_ad_groups__current keeps the attributes of an ad group that the newest
+          list of its account no longer names, and says that the platform no longer lists it.
+      - name: dim_ad
+        description: >-
+          The ads of the core, which the model dim_ad writes, as the runs before this one left them:
+          int_ads__current keeps the attributes of an ad that the newest list of its account no
+          longer names, and says that the platform no longer lists it.
+      - name: dim_conversion_action
+        description: >-
+          The registry of the conversion actions of the core, which the model dim_conversion_action
+          writes, as the runs before this one left it: int_conversion_actions__resolved keeps what
+          a list of Google Ads said of an action that no list of this run names.
       - name: ad_stats_campaign_daily
         description: >-
           The statistics of the campaigns by day in the core, as the runs before this one left

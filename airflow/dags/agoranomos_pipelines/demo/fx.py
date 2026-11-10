@@ -63,7 +63,3 @@ def windows(now: datetime, first=None) -> dict[str, tuple[date, date]]:
             max(last_final_day(now, a.time_zone) for a in world.ACCOUNTS),
         )
     }
-
-
-def name_versions(now: datetime) -> list[datetime]:
-    return []

@@ -113,7 +113,7 @@ where not customer__manager
     end
 {%- endmacro %}
 
-{#- The versions of the campaigns that dlt keeps (scd2). -#}
+{#- The campaigns of the newest list of each account (newest_list), with the load of the list. -#}
 {% macro google_ads_campaigns(relation, platform) %}
 select
     '{{ platform }}' as platform,
@@ -123,12 +123,11 @@ select
     campaign__status as campaign_status,
     {{ google_ads_state('campaign__status') }} as campaign_state,
     campaign__advertising_channel_type as campaign_type,
-    _dlt_valid_from as valid_from,
-    _dlt_valid_to as valid_to
+    _dlt_load_id as load_id
 from {{ relation }}
 {% endmacro %}
 
-{#- The versions of the ad groups that dlt keeps (scd2). -#}
+{#- The ad groups of the newest list of each account (newest_list), with the load of the list. -#}
 {% macro google_ads_ad_groups(relation, platform) %}
 select
     '{{ platform }}' as platform,
@@ -139,13 +138,13 @@ select
     ad_group__status as ad_group_status,
     {{ google_ads_state('ad_group__status') }} as ad_group_state,
     ad_group__type as ad_group_type,
-    _dlt_valid_from as valid_from,
-    _dlt_valid_to as valid_to
+    _dlt_load_id as load_id
 from {{ relation }}
 {% endmacro %}
 
-{#- The versions of the ads that dlt keeps (scd2): the status is that of the ad in its ad group, and
-    a type of ad that has no name, such as a responsive search ad, has none. -#}
+{#- The ads of the newest list of each account (newest_list), with the load of the list: the status
+    is that of the ad in its ad group, and a type of ad that has no name, such as a responsive
+    search ad, has none. -#}
 {% macro google_ads_ads(relation, platform) %}
 select
     '{{ platform }}' as platform,
@@ -157,14 +156,13 @@ select
     ad_group_ad__status as ad_status,
     {{ google_ads_state('ad_group_ad__status') }} as ad_state,
     ad_group_ad__ad__type as ad_type,
-    _dlt_valid_from as valid_from,
-    _dlt_valid_to as valid_to
+    _dlt_load_id as load_id
 from {{ relation }}
 {% endmacro %}
 
-{#- The versions of the conversion actions of an account that dlt keeps (scd2), for the connector
-    of Google Ads, which reads them FROM conversion_action; the demo has none. An action that a
-    manager account owns can be listed by each account that uses it. -#}
+{#- The conversion actions of the newest list of each account (newest_list), with the load of the
+    list, for the connector of Google Ads, which reads them FROM conversion_action; the demo has
+    none. An action that a manager account owns can be listed by each account that uses it. -#}
 {% macro google_ads_conversion_actions(relation, platform) %}
 select
     '{{ platform }}' as platform,
@@ -175,7 +173,6 @@ select
     lower(conversion_action__category) as platform_category,
     conversion_action__include_in_conversions_metric as include_in_conversions_metric,
     conversion_action__primary_for_goal as primary_for_goal,
-    _dlt_valid_from as valid_from,
-    _dlt_valid_to as valid_to
+    _dlt_load_id as load_id
 from {{ relation }}
 {% endmacro %}

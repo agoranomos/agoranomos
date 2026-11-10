@@ -115,6 +115,7 @@ from {{ relation }}
     end
 {%- endmacro %}
 
+{#- The campaigns of the newest list of each account (newest_list), with the load of the list. -#}
 {% macro meta_campaigns(relation, platform) %}
 select
     '{{ platform }}' as platform,
@@ -124,13 +125,12 @@ select
     status as campaign_status,
     {{ meta_state('status') }} as campaign_state,
     objective as campaign_type,
-    _dlt_valid_from as valid_from,
-    _dlt_valid_to as valid_to
+    _dlt_load_id as load_id
 from {{ relation }}
 {% endmacro %}
 
-{#- The versions of the ad sets, the ad groups of Meta, that dlt keeps (scd2). Their type is their
-    optimization goal. -#}
+{#- The ad sets, the ad groups of Meta, of the newest list of each account (newest_list), with the
+    load of the list. Their type is their optimization goal. -#}
 {% macro meta_ad_groups(relation, platform) %}
 select
     '{{ platform }}' as platform,
@@ -141,12 +141,12 @@ select
     status as ad_group_status,
     {{ meta_state('status') }} as ad_group_state,
     optimization_goal as ad_group_type,
-    _dlt_valid_from as valid_from,
-    _dlt_valid_to as valid_to
+    _dlt_load_id as load_id
 from {{ relation }}
 {% endmacro %}
 
-{#- The versions of the ads that dlt keeps (scd2): an ad of Meta has no type. -#}
+{#- The ads of the newest list of each account (newest_list), with the load of the list: an ad of
+    Meta has no type. -#}
 {% macro meta_ads(relation, platform) %}
 select
     '{{ platform }}' as platform,
@@ -158,7 +158,6 @@ select
     status as ad_status,
     {{ meta_state('status') }} as ad_state,
     cast(null as text) as ad_type,
-    _dlt_valid_from as valid_from,
-    _dlt_valid_to as valid_to
+    _dlt_load_id as load_id
 from {{ relation }}
 {% endmacro %}

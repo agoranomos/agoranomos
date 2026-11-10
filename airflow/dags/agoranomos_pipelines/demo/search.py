@@ -304,7 +304,3 @@ def records(now, first=None, skip=frozenset()) -> dict[str, Iterator[dict[str, o
 
 def windows(now: datetime, first=None) -> dict[str, tuple[date, date]]:
     return world.windows(PLATFORM, now, first)
-
-
-def name_versions(now: datetime) -> list[datetime]:
-    return world.name_versions(PLATFORM, now)

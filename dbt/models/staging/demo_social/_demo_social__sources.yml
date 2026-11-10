@@ -25,12 +25,13 @@ sources:
           run of the transform takes whole loads only.
       - name: ad_accounts
         description: >-
-          The ad accounts of demo_social, one row each, with their currency and time zone; each load
-          replaces them.
+          The ad accounts of demo_social, with their currency and time zone. Each load appends the
+          list under its own _dlt_load_id, and staging reads the row of each account of the newest
+          pinned load of the account.
       - name: campaigns
         description: >-
-          The campaigns of demo_social, one row for each version, from _dlt_valid_from until
-          _dlt_valid_to, as dlt keeps them with its scd2 strategy.
+          The campaigns of demo_social. Each load appends the full list of each account under its
+          own _dlt_load_id, and staging reads the list of the newest pinned load of each account.
       - name: insights_campaign
         description: >-
           The insights of demo_social at the level of campaigns, one row for each campaign and day
@@ -48,8 +49,9 @@ sources:
           _1d_click, _7d_click and _1d_view; its _dlt_parent_id is the _dlt_id of its row.
       - name: adsets
         description: >-
-          The ad sets of demo_social, its ad groups, one row for each version, from _dlt_valid_from
-          until _dlt_valid_to, as dlt keeps them with its scd2 strategy.
+          The ad sets of demo_social, its ad groups. Each load appends the full list of each account
+          under its own _dlt_load_id, and staging reads the list of the newest pinned load of each
+          account.
       - name: insights_adset
         description: >-
           The insights of demo_social at the level of ad sets, one row for each ad set and day with
@@ -68,8 +70,8 @@ sources:
           _1d_click, _7d_click and _1d_view; its _dlt_parent_id is the _dlt_id of its row.
       - name: ads
         description: >-
-          The ads of demo_social, one row for each version, from _dlt_valid_from until
-          _dlt_valid_to, as dlt keeps them with its scd2 strategy.
+          The ads of demo_social. Each load appends the full list of each account under its own
+          _dlt_load_id, and staging reads the list of the newest pinned load of each account.
       - name: insights_ad
         description: >-
           The insights of demo_social at the level of ads, one row for each ad and day with any

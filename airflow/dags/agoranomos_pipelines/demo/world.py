@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from functools import cache
 
 from agoranomos_pipelines.demo.common import (
@@ -860,18 +860,3 @@ def windows(
         )
         for account in accounts_of(platform)
     }
-
-
-def name_versions(platform: str, now: datetime) -> list[datetime]:
-    """The moments whose names of campaigns the first load replays, in order, at 00:00 UTC: the
-    first day of the history, and each day inside it on which a campaign of the platform changes
-    its name. None for a platform whose campaigns keep their names."""
-    accounts = accounts_of(platform)
-    first = min(history_first_day(now, account.time_zone) for account in accounts)
-    last = max(last_final_day(now, account.time_zone) for account in accounts)
-    changes = sorted(
-        {day for c in CAMPAIGNS if c.platform == platform for day in c.names.changes(first, last)}
-    )
-    if not changes:
-        return []
-    return [datetime.combine(day, time(), UTC) for day in (first, *changes)]

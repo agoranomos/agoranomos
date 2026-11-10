@@ -27,21 +27,11 @@ observed as (
     group by platform, conversion_action_id
 ),
 
--- The newest version of each conversion action of each Google Ads account, whether current or
--- retired, as dlt keeps them.
-listed_versions as (
-    select
-        *,
-        row_number() over (
-            partition by platform, account_id, conversion_action_id order by valid_from desc
-        ) as recency
-    from {{ ref('stg_google_ads__conversion_actions') }}
-),
-
--- Whether Google counts each action in its metric of conversions (include_in_conversions_metric):
--- an action that a manager account owns can be listed by more than one account, and counts when
--- one of them counts it; an action that an account lists without the flag does not count.
-listed as (
+-- Whether Google counts each action in its metric of conversions (include_in_conversions_metric),
+-- as the newest list of conversion actions of each Google Ads account that this run reads gives
+-- it: an action that a manager account owns can be listed by more than one account, and counts
+-- when one of them counts it; an action that an account lists without the flag does not count.
+newest as (
     select
         platform,
         conversion_action_id,
@@ -49,9 +39,29 @@ listed as (
         max(platform_category) as platform_category,
         max(conversion_action_status) as conversion_action_status,
         coalesce(bool_or(include_in_conversions_metric), false) as include_in_conversions_metric
-    from listed_versions
-    where recency = 1
+    from {{ ref('stg_google_ads__conversion_actions') }}
     group by platform, conversion_action_id
+),
+
+-- An action that a list named before and that no list of this run names keeps what the core holds
+-- of it, as the runs before this one left it: only a list gives the flag, so an action of the core
+-- with one came from a list.
+listed as (
+    select * from newest
+    union all
+    select
+        k.platform,
+        k.conversion_action_id,
+        k.conversion_action_name,
+        k.platform_category,
+        k.conversion_action_status,
+        k.include_in_conversions_metric
+    from {{ source('core', 'dim_conversion_action') }} as k
+    where k.include_in_conversions_metric is not null
+        and not exists (
+            select from newest as n
+            where n.platform = k.platform and n.conversion_action_id = k.conversion_action_id
+        )
 ),
 
 actions as (

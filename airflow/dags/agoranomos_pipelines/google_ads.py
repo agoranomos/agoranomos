@@ -12,7 +12,7 @@ objects joined by __: the shape that demo_search mimics, which the macros of
 dbt/macros/shapes/google_ads_v25.sql read (none of their fields changed in v26).
 
 A load first reads each account (customer), then its campaigns, its ad groups, its ads and its
-conversion actions, whose versions dlt keeps (scd2), and then the statistics and the conversions by
+conversion actions, the full lists of the account, and then the statistics and the conversions by
 conversion action of each of the three levels, by day, in a request of their own, as
 segments.conversion_action cannot be selected with metrics.cost_micros (ADR-0034). A Performance
 Max campaign has no ad groups. A conversion action carries include_in_conversions_metric, whether
@@ -24,11 +24,12 @@ the two differ. The days of each account run from the day after the last that a 
 first load of an account takes the last 36 months, as Google Ads keeps data by day for 37 only
 (ADR-0034), a calendar month in each request. All end yesterday in the time zone of the account. A
 request counts as one operation of the daily quota, whatever its rows, so a daily load costs eleven
-operations for each account, and the first about 230. Each load appends the facts of each account
-under its own _dlt_load_id and records the window of each account in _agoranomos_loads in the same
-run, and the staging models read, for each account and day, the rows of the newest load whose
-window covers the day, of those that the run of the transform pinned, so the days of a window are
-replaced whole, empty or not (ADR-0038, ADR-0046). A
+operations for each account, and the first about 230. Each load appends the lists and the facts
+of each account under its own _dlt_load_id and records the window of each account in
+_agoranomos_loads in the same run, and the staging models read, of the loads that the run of the
+transform pinned, the lists of the newest load of each account, and, for each account and day, the
+rows of the newest load whose window covers the day, so the days of a window are replaced whole,
+empty or not (ADR-0038, ADR-0046). A
 dataset that a release before v0.5 loaded has no _agoranomos_loads, so the next load of each account
 takes its history again, and the rows of the earlier loads stay unread.
 
@@ -65,7 +66,6 @@ from typing import TextIO
 from zoneinfo import ZoneInfo
 
 import dlt
-from dlt.destinations.exceptions import DatabaseUndefinedRelation
 from dlt.sources.helpers.requests import Client, HTTPError, RequestException
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
@@ -220,7 +220,7 @@ RESOURCES = {
     "ad_conversions": "ad_group_ad",
     "conversion_actions": "conversion_action",
 }
-# The tables whose versions dlt keeps, and the fact tables, to which each load appends its rows.
+# The tables of the lists of each account, and the fact tables: each load appends its rows to both.
 ENTITIES = ("campaigns", "ad_groups", "ads", "conversion_actions")
 FACTS = (
     "campaign_stats",
@@ -232,7 +232,6 @@ FACTS = (
 )
 DOUBLE = {"data_type": "double"}
 BOOL = {"data_type": "bool"}
-SCD2 = {"disposition": "merge", "strategy": "scd2"}
 # The columns of a field of each query: the names that dlt gives the fields, with their types.
 COLUMNS = {
     "metrics.conversions": DOUBLE,
@@ -256,11 +255,11 @@ def columns(table: str) -> dict[str, dict]:
 # The hints of each table, by the names that dlt gives the fields: every field of its query, so
 # that dlt makes each column even when no row of a load has it, with the INT64 numbers as text, as
 # the REST interface writes them, the money as text too, and the other numbers as the API gives
-# them.
+# them. Every table appends: the customer of each account that a load read and its lists, as the
+# facts, so staging reads the newest load of each account (ADR-0038).
 HINTS = {
-    "customers": {"write_disposition": "replace", "columns": columns("customers")},
-    **{table: {"write_disposition": SCD2, "columns": columns(table)} for table in ENTITIES},
-    **{table: {"write_disposition": APPEND, "columns": columns(table)} for table in FACTS},
+    table: {"write_disposition": APPEND, "columns": columns(table)}
+    for table in ("customers", *ENTITIES, *FACTS)
 }
 
 
@@ -599,14 +598,6 @@ def checked(account_ids: Iterable[str]) -> list[str]:
     return found
 
 
-def accounts_scope(account_ids: Iterable[str]) -> str:
-    """The rows of a table of entities whose versions a load may retire, as the SQL condition of
-    dlt's destination scope: those of the accounts that the load read, so that the entities of an
-    account whose load failed keep their versions (dlt 1.31.0: the scope bounds what scd2
-    retires)."""
-    return "customer__id IN (" + ", ".join(f"'{a}'" for a in checked(account_ids)) + ")"
-
-
 @dataclass
 class Read:
     """Everything that a load read of one account, before dlt sees any of it: its row of
@@ -702,28 +693,6 @@ def staged_rows(read: dict[str, Read], table: str) -> Iterator[dict]:
                 yield json.loads(line)
 
 
-def kept_customers(pipeline, account_ids: list[str]) -> list[dict]:
-    """The rows of customers of the accounts that this load could not read, as the last load that
-    could left them, so that each load replaces the table with every account that a load has seen:
-    an account whose load failed keeps its name, currency and time zone in the model, which its
-    facts join. None before the first load. dlt names the column of a key with __ as it names a
-    nested path (dlt 1.31.0), so a row goes back as the table holds it."""
-    if not account_ids:
-        return []
-    names = list(columns("customers"))
-    # Names of the code, a name that dlt quotes, and IDs of checked digits.
-    wanted = ", ".join(f"'{account_id}'" for account_id in checked(account_ids))
-    try:
-        with pipeline.sql_client() as client:
-            table = client.make_qualified_table_name("customers")
-            rows = client.execute_sql(
-                f"SELECT {', '.join(names)} FROM {table} WHERE customer__id IN ({wanted})"  # noqa: S608
-            )
-    except DatabaseUndefinedRelation:
-        return []
-    return [dict(zip(names, row, strict=True)) for row in rows or ()]
-
-
 def failure_line(failed: dict[str, GoogleAdsError], loaded: int) -> str:
     """The line with which the task fails after a load with failed accounts: how many failed and
     how many loaded, and the original error of each account (ADR-0004)."""
@@ -783,16 +752,11 @@ def load(now: datetime, extensions: Path = EXTENSIONS) -> dict[str, int]:
         resources = []
         if read:
             customers = [account.customer for account in read.values()]
-            customers += kept_customers(pipeline, sorted(failed))
             resources.append(dlt.resource(customers, name="customers", **own(HINTS["customers"])))
             for table in ENTITIES:
-                hints = own(HINTS[table])
-                hints["write_disposition"] = {
-                    **hints["write_disposition"],
-                    "boundary_timestamp": now.isoformat(),
-                    "destination_scope": accounts_scope(read),
-                }
-                resources.append(dlt.resource(staged_rows(read, table), name=table, **hints))
+                resources.append(
+                    dlt.resource(staged_rows(read, table), name=table, **own(HINTS[table]))
+                )
             for table in FACTS:
                 resources.append(
                     dlt.resource(
