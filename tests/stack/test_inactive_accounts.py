@@ -4,7 +4,8 @@ assert_every_account_with_data_is_in_the_settings warns, and an account that the
 again is active again, with its client.
 
 The demo names its accounts in a file of the base package, which a deployment cannot take an
-account out of. So the test takes one account of demo_search and one property of demo_web out of
+account out of. So the test checks that the newest run of the transform ran the new test, which
+found no row, and then takes one account of demo_search and one property of demo_web out of
 raw_settings.account_clients as loader, the owner of raw, and builds dim_account with its tests by
 hand, as the task of the transform builds it. In its finally it puts the two rows back as they were
 and builds dim_account again. If it is killed before that, run the transform: its first task loads
@@ -129,6 +130,15 @@ def test_an_account_that_leaves_the_settings_keeps_its_data_and_is_no_longer_act
         interval=5,
         message="the runs of the transform that earlier tests started did not end",
     )
+    # The transform runs the test, in the task of dim_account: its newest run recorded it, with no
+    # row, as the settings of the demo name every account of the demo.
+    newest = warehouse_output(
+        env,
+        "SELECT status || '|' || failures FROM ops.ops_transform_tests "  # noqa: S608 (constants of this file)
+        f"WHERE airflow_dag_id = '{TRANSFORM}' AND test_type = '{TEST}' "
+        "ORDER BY detected_at DESC LIMIT 1",
+    )
+    assert newest == "pass|0", newest
     before = {key: shown(env, *where, *key).split("|") for key, where in LEAVING.items()}
     for key, (rows, _, clients, active) in before.items():
         assert int(rows) > 0, key
