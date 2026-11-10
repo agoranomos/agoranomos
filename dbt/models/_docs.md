@@ -412,3 +412,7 @@ The first day of the window that the load took for the account, in the time zone
 {% docs window_to %}
 The last day of the window that the load took for the account, in the time zone of the account; none for an account that the load failed.
 {% enddocs %}
+
+{% docs maintenance_run_id %}
+The run of the DAG of maintenance, agoranomos_maintenance, that wrote the row, as the ID of the run in Airflow.
+{% enddocs %}
