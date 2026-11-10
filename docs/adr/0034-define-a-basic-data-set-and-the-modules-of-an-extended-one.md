@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Define a basic data set of the marts and the dashboards, and the modules of an extended one
 
+Superseded in part by [ADR-0038](0038-load-by-copy-and-write-the-core-by-whole-days.md): the first load of "History", which took the last 36 months in one pass. The first load now takes the usual window of the platform, and the history follows in the background, by quarters from new to old, back to the same 36 months. The rest of this record stays accepted.
+
 Superseded in part by [ADR-0036](0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md) and [ADR-0037](0037-serve-the-marts-as-views-over-the-core.md): the facts of ad groups and ads carry the metric of the platform, and the conversions of the primary actions at those levels come with a module. The rest of this record stays accepted.
 
 ## Context and Problem Statement
