@@ -908,10 +908,13 @@ def test_the_pin_copies_each_whole_load_once_and_skips_a_source_without_tables()
     assert "join {{ finished }} as l\n    on l.load_id = j._dlt_load_id and l.status = 0\n" in text
     assert "on conflict (source, load_id, account_id) do nothing" in text
     assert "{%- set loads = pinned_loads_journal() -%}" in text
-    # The rows of the pin and the months of the pinned windows, then one commit; then each
-    # partition in a transaction of its own.
+    # The lock of marts-init, shared, first, then the rows of the pin and the months of the
+    # pinned windows, then one commit; then each partition in a transaction of its own; then the
+    # lock goes, and a last commit (marts_init.sql).
     body = text[text.index("{% macro pin_loads() %}") : text.index("{% endmacro %}")]
-    assert body.count("{%- do adapter.commit() -%}") == 2
+    assert body.count("{%- do adapter.commit() -%}") == 3
+    assert body.index("statement('wait_for_marts_init'") < body.index("statement('pin'")
+    assert body.index("statement('partition'") < body.index("statement('done_with_marts_init'")
     assert body.index("statement('pin'") < body.index("statement('months'")
     assert body.index("statement('months'") < body.index("{%- do adapter.commit() -%}")
     assert "select core.ensure_partition('core.{{ fact }}'::regclass, date '{{ month }}')" in body
