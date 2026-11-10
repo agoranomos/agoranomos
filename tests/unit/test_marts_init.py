@@ -113,7 +113,7 @@ def test_the_job_builds_what_the_state_of_the_warehouse_asks(
     # The lock first, then the state, then dbt, and the lock goes with the connection.
     assert connection.autocommit is True
     assert connection.executed[0] == ("SELECT pg_try_advisory_lock(%s)", (mi.LOCK,))
-    assert connection.executed[1] == (mi.STATE, (list(mi.SNAPSHOTS), 3, "EUR"))
+    assert connection.executed[1] == (mi.STATE, (list(mi.SNAPSHOTS), len(mi.SNAPSHOTS), "EUR"))
     assert connection.closed
     out = capsys.readouterr().out
     assert out.endswith("marts-init: done\n")
@@ -211,9 +211,16 @@ def test_the_key_of_the_lock_is_that_of_the_dbt_project():
     assert pin.count("pg_advisory_unlock_shared({{ marts_init_lock() }})") == 1
 
 
-def test_the_snapshots_are_those_of_the_dbt_project():
-    found = sorted(path.stem for path in (DBT / "snapshots").glob("*.sql"))
-    assert tuple(found) == mi.SNAPSHOTS
+def test_the_snapshots_are_those_that_the_views_of_marts_read():
+    # A build of +marts builds these and no other snapshot, so the next start finds them.
+    snapshots = {path.stem for path in (DBT / "snapshots").glob("*.sql")}
+    read = {
+        name
+        for path in (DBT / "models" / "marts").glob("*.sql")
+        for name in re.findall(r"ref\('(\w+)'\)", path.read_text(encoding="utf-8"))
+        if name in snapshots
+    }
+    assert tuple(sorted(read)) == mi.SNAPSHOTS
 
 
 def test_the_warehouse_is_the_one_of_the_profile_of_dbt():

@@ -11,14 +11,16 @@ network data alone, and writes nothing but the target and the logs of dbt, on a 
 
 What it builds, with the var rebuild_views:
 
-* Where the snapshots of the versions of the core exist, the views of marts alone, dbt run
-  --select marts: they read the core, which no run drops. Their tests run in the next run of the
-  transform, the gate G1 (ADR-0039), as data to fix is no reason to keep the stack from starting.
+* Where the snapshots that the views read exist, the versions of the campaigns of the core that
+  ad_campaign_names reads, the views of marts alone, dbt run --select marts: they read the core,
+  which no run drops. Their tests run in the next run of the transform, the gate G1 (ADR-0039), as
+  data to fix is no reason to keep the stack from starting.
 * Where they do not, as in a new warehouse or one of v0.4, dbt build --select +marts: the seeds,
   the views of staging, the models of the core and the snapshots that the views read, in the order
   of the graph and with their tests (#187), over the loads that the transform has pinned, none in a
-  new warehouse. dbt snapshot alone would fail on a warehouse without the views of staging, and the
-  views of marts without the snapshots.
+  new warehouse, the settings of the deployment and the sources that no load has written yet
+  through empty queries (dbt/macros/relation_or_empty.sql). dbt snapshot alone would fail on a
+  warehouse without the views of staging, and the views of marts without the snapshots.
 * Where core.fx_rates_daily holds rates and none in the reporting currency of .env, as after a
   change of AGORANOMOS_REPORTING_CURRENCY, also core_fx_rates_daily, with the var recompute_rates,
   which computes every day of the rates in the new currency (ADR-0042): the views take the new
@@ -57,13 +59,14 @@ CURRENCY = "AGORANOMOS_REPORTING_CURRENCY"
 # job waits for it: a node of the transform writes for at most 10 minutes, its execution timeout.
 LOCK = 1634168690
 WAIT_FOR_LOCK = "SET lock_timeout = '11min'"
-# The snapshots of the versions of the core (dbt/snapshots), which the views of marts read.
-SNAPSHOTS = ("dim_ad_group_versions", "dim_ad_versions", "dim_campaign_versions")
+# The snapshots of the versions of the core (dbt/snapshots) that the views of marts read, and
+# that a build of +marts builds: the other snapshots wait for the transform.
+SNAPSHOTS = ("dim_campaign_versions",)
 RATES = "core_fx_rates_daily"
 # How long dbt may take: a build of the whole graph over empty tables takes minutes on a slow
 # machine.
 DBT_TIMEOUT = 1800
-# Whether every snapshot exists in core, and whether the rates of the core are of another reporting
+# Whether those snapshots exist in core, and whether the rates of the core are of another reporting
 # currency only. transformer reads the catalog and core.fx_rates_daily, which it writes.
 STATE = (
     "SELECT (SELECT count(*) FROM pg_catalog.pg_class AS c "
@@ -123,8 +126,8 @@ def described(state: State, currency: str) -> str:
         line = "building the views of marts again"
     else:
         line = (
-            "the snapshots of the core do not exist yet: building the views of marts with what "
-            "they read, from the seeds to the snapshots, and their tests"
+            "the snapshots that the views of marts read do not exist yet: building the views "
+            "with what they read, from the seeds to the snapshots, and their tests"
         )
     if state.other_currency:
         line += f", and the rates of the core in {currency}, the new reporting currency"
