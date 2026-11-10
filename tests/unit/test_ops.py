@@ -28,6 +28,7 @@ def test_each_question_reads_only_views_of_ops_that_dbt_builds():
     assert views == {
         "ops_loads",
         "ops_quarantine",
+        "ops_rates",
         "ops_transform_nodes",
         "ops_transform_tests",
         "ops_warehouse_tables",

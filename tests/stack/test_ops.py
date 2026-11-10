@@ -20,7 +20,13 @@ pytestmark = [
 
 TRANSFORM = "agoranomos_demo_transform"
 # The views of ops that metabase_reader may read, and a table of elementary that it may not.
-VIEWS = ("ops_loads", "ops_transform_nodes", "ops_transform_tests", "ops_warehouse_tables")
+VIEWS = (
+    "ops_loads",
+    "ops_rates",
+    "ops_transform_nodes",
+    "ops_transform_tests",
+    "ops_warehouse_tables",
+)
 TABLE_OF_ELEMENTARY = "ops.dbt_run_results"
 
 

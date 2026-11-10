@@ -5609,8 +5609,8 @@ def test_status_warns_while_the_running_warehouse_has_other_shared_buffers_than_
     warning = "the running warehouse-db has shared_buffers 4GB, not the 128MB that .env gives now"
     assert (warning in result.stderr) is warns
     psql_calls = [call for call in compose_calls(cli) if " psql " in call]
-    # One for shared_buffers, and one for the migrations of the core.
-    assert len(psql_calls) == 2
+    # One for shared_buffers, one for the migrations of the core, and one for the rates.
+    assert len(psql_calls) == 3
     [buffers_call] = [call for call in psql_calls if "--set=wanted=" in call]
     assert " exec -T warehouse-db psql " in buffers_call
     assert "--set=wanted=128MB" in buffers_call
@@ -5681,13 +5681,96 @@ def test_status_shows_the_migrations_of_the_core_applied_and_waiting(cli, tmp_pa
     assert lines[3] == line
     assert lines[2].startswith("warehouse-db: memory limit")
     assert result.stderr == ""
-    [call] = [
-        call for call in compose_calls(cli) if " psql " in call and "--set=wanted" not in call
-    ]
-    assert call.startswith(
-        "compose exec -T warehouse-db psql --username=postgres --dbname=warehouse"
+    # The migrations of the core, and the rates after them.
+    calls = [call for call in compose_calls(cli) if " psql " in call and "--set=wanted" not in call]
+    assert len(calls) == 2
+    for call in calls:
+        assert call.startswith(
+            "compose exec -T warehouse-db psql --username=postgres --dbname=warehouse"
+        )
+        assert "--set=ON_ERROR_STOP=1" in call
+
+
+# The lines of the SQL of the rates of the core: built once the transform has built ops.ops_rates,
+# then its row, separated by the unit separator.
+RATES_ROW = "built\necb\x1fUSD\x1f2026-11-09\x1f{age}\x1f{late}"
+
+
+@pytest.mark.parametrize(
+    ("rows", "line", "warning"),
+    [
+        (
+            "",
+            "Rates: none in the core yet; the first run of the transform writes them (ADR-0042).",
+            None,
+        ),
+        (
+            "built",
+            "Rates: the core holds no rate that a source published, so only the accounts in the "
+            "reporting currency enter it (ADR-0042).",
+            None,
+        ),
+        (
+            RATES_ROW.format(age=1, late="f"),
+            "Rates: the last rate of ecb into USD is of 2026-11-09, 1 business day ago (ADR-0042).",
+            None,
+        ),
+        (
+            RATES_ROW.format(age=3, late="f"),
+            "Rates: the last rate of ecb into USD is of 2026-11-09, 3 business days ago "
+            "(ADR-0042).",
+            None,
+        ),
+        (
+            RATES_ROW.format(age=4, late="t"),
+            "Rates: the last rate of ecb into USD is of 2026-11-09, 4 business days ago "
+            "(ADR-0042).",
+            "the last rate of ecb is 4 business days old, more than 3: its loads brought no newer "
+            "one, and the core carries it to each day since. The runs of agoranomos_ecb_daily in "
+            "Airflow say why",
+        ),
+    ],
+    ids=["no view", "no rate", "a day", "three days", "late"],
+)
+def test_status_says_how_old_the_last_rate_of_the_core_is(cli, tmp_path, rows, line, warning):
+    # ADR-0042: the age of the last rate, from the view ops.ops_rates, with a warning after 3
+    # business days, after the migrations of the core and before the backups.
+    cli.run("init")
+    result = cli.run("status", FAKE_PS_FILE=ps_file(tmp_path, STATUS_TABLE), FAKE_RATES_OUTPUT=rows)
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[lines.index(line) - 1].startswith("Migrations of the core:")
+    assert lines[lines.index(line) + 1].startswith("Backups:")
+    if warning is None:
+        assert result.stderr == ""
+    else:
+        assert warning in result.stderr
+
+
+def test_status_names_the_dag_of_the_rates_of_the_demo_when_they_are_late(cli, tmp_path):
+    cli.run("init")
+    rows = "built\ndemo_fx\x1fEUR\x1f2026-11-02\x1f6\x1ft"
+    result = cli.run("status", FAKE_PS_FILE=ps_file(tmp_path, STATUS_TABLE), FAKE_RATES_OUTPUT=rows)
+    assert "Rates: the last rate of demo_fx into EUR is of 2026-11-02, 6 business days ago" in (
+        result.stdout
     )
-    assert "--set=ON_ERROR_STOP=1" in call
+    assert "The runs of agoranomos_demo_daily in Airflow say why" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("table", "fake"),
+    [
+        ("SERVICE   STATE     STATUS\nwarehouse-db   exited   Exited (0) 2 hours ago\n", {}),
+        (STATUS_TABLE, {"FAKE_RATES_EXIT": "2", "FAKE_RATES_OUTPUT": "built"}),
+    ],
+    ids=["stopped", "no answer"],
+)
+def test_status_says_nothing_of_the_rates_when_the_warehouse_cannot(cli, tmp_path, table, fake):
+    cli.run("init")
+    result = cli.run("status", FAKE_PS_FILE=ps_file(tmp_path, table), **fake)
+    assert result.returncode == 0, result.stderr
+    assert "Rates:" not in result.stdout
+    assert result.stderr == ""
 
 
 def test_status_warns_about_an_applied_migration_that_the_checkout_lacks(cli, tmp_path):

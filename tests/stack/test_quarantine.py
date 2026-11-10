@@ -5,13 +5,15 @@ says why. The checks write core.account_quarantine, and int_accounts__current an
 models of the marts leave the accounts of int_g1_failures out (dbt/macros/quarantine.sql).
 
 The test breaks rows of raw as loader, the owner of raw: a currency outside ISO 4217 in the list of
-one account of demo_search, and a spend below zero in a row of the one account of demo_video; it
-renames the other account of demo_search in its list, which a healthy account takes into the core.
-It puts every row back and runs the transform again in its finally, so the demo is as before. If it
-is killed before that, put them back by hand as its finally does, as the superuser of the
-warehouse: UPDATE the currency of 4170000012 in raw_demo_search.customer_clients to EUR and the name
-of 4170000011 to its name in agoranomos_pipelines/demo/world.py, DELETE the rows of
-raw_demo_video.report_campaign_daily whose _dlt_id is stack-test-quarantine, and run the transform.
+one account of demo_search, a currency of ISO 4217 that the rates of the demo do not have in the
+list of one account of demo_social (ADR-0042), and a spend below zero in a row of the one account of
+demo_video; it renames the other account of demo_search in its list, which a healthy account takes
+into the core. It puts every row back and runs the transform again in its finally, so the demo is
+as before. If it is killed before that, put them back by hand as its finally does, as the superuser
+of the warehouse: UPDATE the currency of 4170000012 in raw_demo_search.customer_clients and of
+802000000000002 in raw_demo_social.ad_accounts to EUR and the name of 4170000011 to its name in
+agoranomos_pipelines/demo/world.py, DELETE the rows of raw_demo_video.report_campaign_daily whose
+_dlt_id is stack-test-quarantine, and run the transform.
 
 The assertions print codes, IDs, counts and states, never a secret.
 """
@@ -34,6 +36,12 @@ ASSETS = 5
 # The two accounts of demo_search, one of which the test breaks, and the one of demo_video.
 ACCOUNTS = {account.account_id: account for account in world.ACCOUNTS}
 BAD, GOOD = ACCOUNTS["4170000012"], ACCOUNTS["4170000011"]
+# The account of demo_social whose currency the test changes to one that the rates of the demo, of
+# euros in US dollars, do not have.
+UNRATED = ACCOUNTS["802000000000002"]
+UNRATED_CURRENCY = "GBP"
+LISTED_SOCIAL = "SELECT currency FROM raw_demo_social.ad_accounts WHERE account_id = '{id}'"
+SET_SOCIAL = "UPDATE raw_demo_social.ad_accounts SET currency = '{value}' WHERE account_id = '{id}'"
 [VIDEO] = [account for account in world.ACCOUNTS if account.platform == "demo_video"]
 RENAMED = "Renamed by the test of the quarantine"
 # The rows of the lists of demo_search, which each load replaces.
@@ -104,7 +112,9 @@ def test_an_account_that_fails_its_checks_stays_out_and_the_others_go_on(
 ):
     currency = warehouse_output(env, LISTED.format(column=CURRENCY, id=BAD.account_id))
     name = warehouse_output(env, LISTED.format(column=NAME, id=GOOD.account_id))
-    assert (currency, name) == (BAD.currency, GOOD.name)
+    listed = warehouse_output(env, LISTED_SOCIAL.format(id=UNRATED.account_id))
+    assert (currency, name, listed) == (BAD.currency, GOOD.name, UNRATED.currency)
+    reporting = env.get("AGORANOMOS_REPORTING_CURRENCY") or "USD"
     registered = warehouse_output(env, REGISTERED.format(id=BAD.account_id))
     [load] = rows(
         env,
@@ -116,6 +126,9 @@ def test_an_account_that_fails_its_checks_stays_out_and_the_others_go_on(
     try:
         warehouse_output(env, SET.format(column=CURRENCY, value="ZZZ", id=BAD.account_id), "loader")
         warehouse_output(env, SET.format(column=NAME, value=RENAMED, id=GOOD.account_id), "loader")
+        warehouse_output(
+            env, SET_SOCIAL.format(value=UNRATED_CURRENCY, id=UNRATED.account_id), "loader"
+        )
         warehouse_output(env, NEGATIVE, "loader")
         run = transform(airflow_url, token)
         assert run["state"] == "success", run["state"]
@@ -125,10 +138,13 @@ def test_an_account_that_fails_its_checks_stays_out_and_the_others_go_on(
             t for t, s in states.items() if s != "success"
         )
         # Ops names the accounts and the reasons: the account of demo_search for its currency,
-        # which stops nothing, as it is one of two; the one account of demo_video for its spend,
-        # which stops its source, as one of one is more than half.
+        # and that of demo_social for a currency without a rate, which stop nothing, as each is
+        # one of two; the one account of demo_video for its spend, which stops its source, as one
+        # of one is more than half.
         assert rows(env, QUARANTINED, "metabase_reader") == [
             f"demo_search|{BAD.account_id}|unknown_currency|accounts: ZZZ",
+            f"demo_social|{UNRATED.account_id}|missing_rate|rates: no rate of "
+            f"{UNRATED_CURRENCY} into {reporting} from the source of the rates, demo_fx",
             f"demo_video|{VIDEO.account_id}|negative_measure|campaign_stats: on {first}",
             f"demo_video|{VIDEO.account_id}|source_stopped|source: in quarantine: 1 of the pinned "
             "accounts of the source, 1",
@@ -178,12 +194,13 @@ def test_an_account_that_fails_its_checks_stays_out_and_the_others_go_on(
         )
         assert (status in (200, 202), answer.get("status")) == (True, "completed")
         reasons = sorted(row[2] for row in answer["data"]["rows"])
-        assert reasons == ["negative_measure", "source_stopped", "unknown_currency"]
+        assert reasons == ["missing_rate", "negative_measure", "source_stopped", "unknown_currency"]
     finally:
         warehouse_output(
             env, SET.format(column=CURRENCY, value=currency, id=BAD.account_id), "loader"
         )
         warehouse_output(env, SET.format(column=NAME, value=name, id=GOOD.account_id), "loader")
+        warehouse_output(env, SET_SOCIAL.format(value=listed, id=UNRATED.account_id), "loader")
         warehouse_output(env, REMOVE_NEGATIVE, "loader")
         # The next run, which the tests after this one need, whatever this one found.
         again = transform(airflow_url, token)

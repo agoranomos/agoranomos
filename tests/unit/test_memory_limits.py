@@ -3,6 +3,7 @@ Docker is needed: the defaults agree, and the limits of each variant fit its bud
 (ADR-0022, docs/reference/system-requirements.md). tests/stack/test_variants.py checks what Compose
 makes of them: that every service of both variants has a limit, and no swap."""
 
+import math
 import re
 from pathlib import Path
 from typing import NamedTuple
@@ -169,3 +170,35 @@ def test_the_reference_gives_the_defaults_of_env_example():
     documented = dict(re.findall(r"^\| `([A-Z_]+_MEMORY)` \| `(\d+[mg])` \|", page, re.MULTILINE))
     example = {key: value for key, value in env_example().items() if key.endswith("_MEMORY")}
     assert documented == example
+
+
+# The listener of the alerts runs in the scheduler, and the watcher in the service that runs the
+# tasks, and each imports Apprise for its first send, which takes about 20 MiB in a process
+# (ADR-0045). The highest peaks of the two services, in the table of
+# docs/reference/system-requirements.md: the scheduler of the CeleryExecutor, which runs no task,
+# 422 MiB before the alerts, and the service of the tasks, the scheduler with the LocalExecutor and
+# the worker with the CeleryExecutor, which takes its limit, 976 MiB with Apprise in it already.
+# Apprise counts on top of both.
+APPRISE_MIB = 20
+PEAKS_BEFORE_THE_ALERTS_MIB = {"celery": 422, "local": 976}
+
+
+def formula(peak: int) -> int:
+    """The limit of a service that runs all the time, from its highest peak: 1.25 times it,
+    rounded up to a multiple of 128 MiB, and at least 256 MiB (system-requirements.md)."""
+    return max(256, math.ceil(peak * 1.25 / 128) * 128)
+
+
+def test_the_formula_of_a_limit_is_that_of_the_reference():
+    assert [formula(peak) for peak in (20, 204, 205, 422, 963)] == [256, 256, 384, 640, 1280]
+
+
+@pytest.mark.parametrize("executor", sorted(PEAKS_BEFORE_THE_ALERTS_MIB))
+def test_the_scheduler_has_room_for_apprise_in_each_variant(executor):
+    peak = PEAKS_BEFORE_THE_ALERTS_MIB[executor]
+    limit = variant(executor)["airflow-scheduler"]
+    assert limit >= formula(peak + APPRISE_MIB), f"{executor}: {limit} MiB"
+    if executor == "celery":
+        # The worker runs the task of the watcher, with the limit of the tasks.
+        tasks = variant("local")["airflow-scheduler"]
+        assert variant("celery")["airflow-worker"] == tasks
