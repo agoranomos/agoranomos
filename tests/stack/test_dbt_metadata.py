@@ -95,7 +95,7 @@ SELECT coalesce(json_agg(item), '[]') FROM (
 ) AS comments
 """
 MART_KIND = (
-    "SELECT relkind || '|' || (SELECT count(*) FROM pg_constraint WHERE conrelid = c.oid) "
+    "SELECT relkind::text || '|' || (SELECT count(*) FROM pg_constraint WHERE conrelid = c.oid) "
     "FROM pg_class AS c WHERE c.oid = 'marts.ad_stats_campaign_daily'::regclass"
 )
 # The one expression of the reporting currency in the YAML (docs/reference/describe-the-marts.md),
