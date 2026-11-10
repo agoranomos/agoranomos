@@ -218,7 +218,13 @@ MONEY = frozenset(
     }
 )
 PERCENT = frozenset({"click_through_rate", "engagement_rate"})
-DECIMALS = {"roas": 2, "conversions": 0, "key_events": 0}
+DECIMALS = {
+    "roas": 2,
+    "conversions": 0,
+    "conversions_primary": 0,
+    "all_conversions": 0,
+    "key_events": 0,
+}
 
 
 def where(*filters: str) -> str:
@@ -229,9 +235,15 @@ def where(*filters: str) -> str:
 AD_WHERE = where(*AD_FILTERS)
 WEB_WHERE = where(*WEB_FILTERS)
 # The ratios, as SQL over the sums of the rows of the answer, each null where its divisor is 0.
+# The conversions are those of the primary conversion actions of the deployment,
+# conversions_primary, which every platform has, Meta included (ADR-0037); the value of the
+# conversions is that of the own metric of conversions of each platform, none on Meta.
 CTR = "sum(clicks)::numeric / nullif(sum(impressions), 0) AS click_through_rate"
-CPA = "sum(spend_reporting) / nullif(sum(conversions), 0) AS cost_per_conversion"
+CPA = "sum(spend_reporting) / nullif(sum(conversions_primary), 0) AS cost_per_conversion"
 ROAS = "sum(conversion_value_reporting) / nullif(sum(spend_reporting), 0) AS roas"
+# Every conversion of an action: all_conversions where the platform has the metric, else
+# conversions, as conversions_primary adds them up for the primary actions.
+ALL_CONVERSIONS = "sum(coalesce(all_conversions, conversions)) AS all_conversions"
 ENGAGEMENT = "sum(engaged_sessions)::numeric / nullif(sum(sessions), 0) AS engagement_rate"
 
 
@@ -264,12 +276,17 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "dashboard": ADVERTISING,
         "key": "conversions",
         "name": "Conversions",
-        "description": "The conversions of the primary conversion actions of the ad accounts.",
+        "description": (
+            "The conversions of the primary conversion actions of the deployment in the ad "
+            "accounts."
+        ),
         "display": "scalar",
         "mart": AD_STATS,
-        "columns": ("conversions",),
+        "columns": ("conversions_primary",),
         "query": sql(
-            "SELECT sum(conversions) AS conversions", f"FROM {MART_SCHEMA}.{AD_STATS}", AD_WHERE
+            "SELECT sum(conversions_primary) AS conversions_primary",
+            f"FROM {MART_SCHEMA}.{AD_STATS}",
+            AD_WHERE,
         ),
         "layout": {"row": 0, "col": 6, "size_x": 6, "size_y": 3},
     },
@@ -278,8 +295,8 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "key": "cost-per-conversion",
         "name": "Cost per conversion",
         "description": (
-            "The spend divided by the conversions of the primary conversion actions, in the "
-            "reporting currency."
+            "The spend divided by the conversions of the primary conversion actions of the "
+            "deployment, in the reporting currency."
         ),
         "display": "scalar",
         "mart": AD_STATS,
@@ -292,8 +309,8 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "key": "roas",
         "name": "Return on ad spend",
         "description": (
-            "The conversion value of the primary conversion actions divided by the spend, both in "
-            "the reporting currency."
+            "The value of the conversions in the own metric of conversions of each platform, none "
+            "on Meta, divided by the spend, both in the reporting currency."
         ),
         "display": "scalar",
         "mart": AD_STATS,
@@ -352,7 +369,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "The impressions, clicks, spend and conversions of each platform, with the ratios "
             "between them: the click-through rate, the cost per conversion and the return on ad "
             "spend. Money is in the reporting currency, and the conversions are those of the "
-            "primary conversion actions."
+            "primary conversion actions of the deployment."
         ),
         "display": "table",
         "mart": AD_STATS,
@@ -362,14 +379,14 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "clicks",
             "click_through_rate",
             "spend_reporting",
-            "conversions",
+            "conversions_primary",
             "cost_per_conversion",
             "roas",
         ),
         "query": sql(
             "SELECT platform_name, sum(impressions) AS impressions, sum(clicks) AS clicks,",
             f"  {CTR}, sum(spend_reporting) AS spend_reporting,",
-            f"  sum(conversions) AS conversions, {CPA}, {ROAS}",
+            f"  sum(conversions_primary) AS conversions_primary, {CPA}, {ROAS}",
             f"FROM {MART_SCHEMA}.{AD_STATS}",
             AD_WHERE,
             "GROUP BY platform_name",
@@ -383,7 +400,8 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "name": "Top campaigns by spend",
         "description": (
             "The 20 campaigns with the most spend, with their platform and client, conversions of "
-            "the primary conversion actions, and money in the reporting currency."
+            "the primary conversion actions of the deployment, and money in the reporting "
+            "currency."
         ),
         "display": "table",
         "mart": AD_STATS,
@@ -392,13 +410,14 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "platform_name",
             "client_name",
             "spend_reporting",
-            "conversions",
+            "conversions_primary",
             "cost_per_conversion",
             "roas",
         ),
         "query": sql(
             "SELECT campaign_name, platform_name, client_name,",
-            "  sum(spend_reporting) AS spend_reporting, sum(conversions) AS conversions,",
+            "  sum(spend_reporting) AS spend_reporting,",
+            "  sum(conversions_primary) AS conversions_primary,",
             f"  {CPA}, {ROAS}",
             f"FROM {MART_SCHEMA}.{AD_STATS}",
             AD_WHERE,
@@ -413,8 +432,9 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "key": "conversions-by-action",
         "name": "Conversions by action",
         "description": (
-            "The conversions and the conversion value of each conversion action of each platform, "
-            "with its category and whether it is primary, the value in the reporting currency."
+            "The conversions of each conversion action of each platform, with its category and "
+            "whether it is primary: all of them, and those that the own metric of the platform "
+            "counts, with their value in the reporting currency."
         ),
         "display": "table",
         "mart": CONVERSIONS,
@@ -423,18 +443,19 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "conversion_action_name",
             "conversion_category",
             "is_primary",
+            "all_conversions",
             "conversions",
             "conversion_value_reporting",
         ),
         "query": sql(
             "SELECT platform_name, conversion_action_name, conversion_category, is_primary,",
-            "  sum(conversions) AS conversions,",
+            f"  {ALL_CONVERSIONS}, sum(conversions) AS conversions,",
             "  sum(conversion_value_reporting) AS conversion_value_reporting",
             f"FROM {MART_SCHEMA}.{CONVERSIONS}",
             AD_WHERE,
             "GROUP BY platform, conversion_action_id, platform_name, conversion_action_name,",
             "  conversion_category, is_primary",
-            "ORDER BY is_primary DESC, conversions DESC",
+            "ORDER BY is_primary DESC, all_conversions DESC",
         ),
         "layout": {"row": 22, "col": 0, "size_x": 24, "size_y": 7},
     },
