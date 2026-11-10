@@ -394,11 +394,11 @@ The source, the account and the day of the row in one text, as source|account_id
 {% enddocs %}
 
 {% docs reason %}
-The check of G1 or G1a (ADR-0035) that kept the account out of the core, as a code: load_failed, unknown_account, duplicate_key, missing_key, unknown_currency, unknown_time_zone, too_many_decimals, missing_measure, negative_measure, date_outside_window, empty_window, spend_fall, or source_stopped for an account whose source has more than half of its pinned accounts in quarantine.
+The check of G1 or G1a (ADR-0035) that kept the account out of the core, as a code: load_failed, unknown_account, duplicate_key, missing_key, unknown_currency, unknown_time_zone, missing_rate, too_many_decimals, missing_measure, negative_measure, date_outside_window, empty_window, spend_fall, or source_stopped for an account whose source has more than half of its pinned accounts in quarantine.
 {% enddocs %}
 
 {% docs checked %}
-What the check read: accounts for the lists of accounts and properties, loads for the journal of the loads, a kind of staging, such as campaign_stats, a fact table of raw, such as insights_campaign, or source for the stop of a source.
+What the check read: accounts for the lists of accounts and properties, loads for the journal of the loads, rates for the rates into the reporting currency, a kind of staging, such as campaign_stats, a fact table of raw, such as insights_campaign, or source for the stop of a source.
 {% enddocs %}
 
 {% docs detail %}

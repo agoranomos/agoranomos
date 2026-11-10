@@ -24,6 +24,7 @@
         "{% for source_name in quarantine_raw_tables() %}{{ quarantine_insert(this, quarantine_attributed(quarantine_raw_findings(source_name, ref('stg_loads__newest_days'), source('core', 'loads')), ref('stg_loads__newest_days'), source('core', 'loads'))) }};{% endfor %}",
         "{{ quarantine_insert(this, quarantine_attributed(quarantine_collapse_findings([ref('stg_demo_search__campaign_stats'), ref('stg_demo_social__campaign_stats'), ref('stg_demo_video__campaign_stats'), ref('stg_google_ads__campaign_stats')], ref('stg_loads__newest_days'), source('core', 'dim_account'), source('core', 'ad_stats_campaign_daily')), ref('stg_loads__newest_days'), source('core', 'loads'))) }}",
         "{{ quarantine_insert(this, quarantine_attributed(quarantine_collapse_findings([ref('stg_demo_web__sessions_daily')], ref('stg_loads__newest_days'), source('core', 'dim_account'), source('core', 'web_sessions_daily'), measure='sessions', checked='sessions_daily', account='property_id', fall=false), ref('stg_loads__newest_days'), source('core', 'loads'))) }}",
+        "{{ quarantine_insert(this, quarantine_attributed(quarantine_rate_findings([(ref('stg_demo_search__accounts'), 'account_id'), (ref('stg_demo_social__accounts'), 'account_id'), (ref('stg_demo_video__accounts'), 'account_id'), (ref('stg_google_ads__accounts'), 'account_id'), (ref('stg_demo_web__properties'), 'property_id')], ref('seed_iso_4217_currencies'), ref('stg_loads__newest_days'), ref('stg_ecb__rates_daily'), ref('stg_demo_fx__rates_daily'), source('core', 'fx_rates_daily')), ref('stg_loads__newest_days'), source('core', 'loads'))) }}",
         "{{ quarantine_insert(this, quarantine_attributed(quarantine_stop_findings(this, source('core', 'loads')), ref('stg_loads__newest_days'), source('core', 'loads'))) }}",
         "analyze {{ this }}",
     ],
@@ -57,6 +58,9 @@
 -- depends_on: {{ source('core', 'dim_account') }}
 -- depends_on: {{ source('core', 'ad_stats_campaign_daily') }}
 -- depends_on: {{ source('core', 'web_sessions_daily') }}
+-- depends_on: {{ ref('stg_ecb__rates_daily') }}
+-- depends_on: {{ ref('stg_demo_fx__rates_daily') }}
+-- depends_on: {{ source('core', 'fx_rates_daily') }}
 {{ quarantine_attributed(
     quarantine_account_findings(
         [
