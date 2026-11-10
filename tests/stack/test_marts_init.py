@@ -34,7 +34,8 @@ def views(env) -> dict[str, tuple[str, bool]]:
     found = {}
     for line in warehouse_output(env, VIEWS).splitlines():
         name, oid, described = line.split("|")
-        found[name] = (oid, described == "t")
+        # A boolean joined to a text is true or false.
+        found[name] = (oid, described == "true")
     return found
 
 

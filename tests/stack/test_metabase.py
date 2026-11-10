@@ -384,6 +384,7 @@ def test_the_connection_details_are_encrypted_in_the_application_database(env):
     [
         "metabase",
         "metadata-export",
+        "marts-init",
         "metabase-init",
         pytest.param("demo-init", marks=pytest.mark.demo),
     ],
