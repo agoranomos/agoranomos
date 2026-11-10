@@ -22,7 +22,8 @@ def test_the_package_is_one_dashboard_of_every_question():
 
 
 def test_each_question_reads_only_views_of_ops_that_dbt_builds():
-    # metabase_reader may read these views and no table of elementary (ADR-0029).
+    # metabase_reader may read these views, and the tables that dbt makes for the DAG of
+    # maintenance, and no table of elementary (ADR-0029, ADR-0039).
     views = {path.stem for path in OPS_MODELS.glob("*.sql")}
     assert views == {
         "ops_loads",
@@ -31,6 +32,9 @@ def test_each_question_reads_only_views_of_ops_that_dbt_builds():
         "ops_transform_nodes",
         "ops_transform_tests",
         "ops_warehouse_tables",
+        "ops_maintenance_steps",
+        "ops_disk",
+        "ops_core_totals",
     }
     for question in ops.QUESTIONS:
         read = set(re.findall(r"\bFROM\s+([a-z_]+)\.([a-z_]+)", question["query"]))

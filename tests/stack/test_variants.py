@@ -654,6 +654,37 @@ def test_only_metadata_export_can_write_the_manifest_and_every_airflow_service_r
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
+def test_only_the_scheduler_and_the_tasks_get_the_addresses_of_the_alerts(variant):
+    # The listener of the plugin agoranomos_alerts runs in the scheduler, and the watcher where the
+    # tasks run (ADR-0045); a message leaves through the network default, which reaches the
+    # internet. Names only: the addresses are secrets.
+    services = rendered(variant)
+    holders = {
+        name
+        for name, service in services.items()
+        if "AGORANOMOS_ALERT_URLS" in (service.get("environment") or {})
+    }
+    assert holders == {"airflow-scheduler", TASK_RUNNER[variant]}
+    for name in holders:
+        assert "default" in services[name]["networks"], name
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_only_the_backup_service_writes_the_status_of_the_backups_and_airflow_reads_it(variant):
+    # The backups folder is open to its owner only: the watcher of Airflow reads the status from a
+    # volume of its own, which no Airflow service, which runs the code of the DAGs of the
+    # extensions folder, can change (ADR-0045).
+    readers, writers = set(), set()
+    for name, service in rendered(variant).items():
+        for mount in service.get("volumes") or []:
+            if mount.get("source") == "backup-status":
+                (readers if mount.get("read_only") else writers).add((name, mount["target"]))
+    assert writers == {("backup", "/var/tmp")}  # noqa: S108 (a named volume, not a folder of the host)
+    target = "/opt/agoranomos/backup-status"
+    assert readers == {(name, target) for name in airflow_names(variant)}
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
 def test_the_dag_processor_and_the_tasks_start_after_the_manifest(variant):
     services = rendered(variant)
     runners = ["airflow-dag-processor", "airflow-scheduler"]
@@ -938,7 +969,8 @@ def test_the_proxy_runs_read_only_as_nobody_on_the_default_network(variant):
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_the_backup_service_has_only_what_its_job_needs(variant):
     # The image of the databases, read-only, the data network only, no port, the postgres folder
-    # and the extensions read-only, and the backups folder; its environment holds one secret.
+    # and the extensions read-only, the backups folder, and the status of the backups for the
+    # watcher of Airflow (ADR-0045); its environment holds one secret.
     service = {
         key: value for key, value in rendered(variant)["backup"].items() if key != "environment"
     }
@@ -956,6 +988,7 @@ def test_the_backup_service_has_only_what_its_job_needs(variant):
         ("/opt/agoranomos/postgres", True),
         ("/opt/agoranomos/extensions", True),
         ("/backups", False),
+        ("/var/tmp", False),  # noqa: S108 (the named volume backup-status, not a folder of the host)
     }
     # The probe reads one small file, so it runs every minute: ./agoranomos up sees a service
     # whose last good backup is too old about a minute after the start period.

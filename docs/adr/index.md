@@ -93,3 +93,5 @@ agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0044](0044-keep-the-core-for-good-and-change-it-by-migrations.md) | Keep the core for good, change it by migrations, and back it up before each one | accepted | 2026-10-31 |
 | [0045](0045-send-alerts-from-airflow-through-apprise.md) | Send alerts from Airflow through Apprise | accepted | 2026-10-31 |
 | [0046](0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md) | Pin the loads before the transform, and accept them before the cleanup | accepted | 2026-11-01 |
+| [0047](0047-leave-amcheck-out-of-the-maintenance.md) | Leave amcheck out of the maintenance of the warehouse | accepted | 2026-11-10 |
+| [0048](0048-count-the-one-shot-jobs-that-can-run-at-the-same-time.md) | Count the one-shot jobs that can run at the same time in the memory budget | accepted | 2026-11-10 |
