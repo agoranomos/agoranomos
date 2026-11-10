@@ -158,25 +158,33 @@ def test_the_warehouse_server_reads_a_mart_and_describes_it(warehouse_server, en
 
 
 @pytest.mark.parametrize(
-    "sql",
+    ("sql", "refusal"),
     [
         # A write: the session is read-only, and the role has no grant to write.
-        "CREATE TABLE marts.ai_was_here (n integer)",
-        f"DELETE FROM {MART}",  # noqa: S608 (a constant of this file)
+        ("CREATE TABLE marts.ai_was_here (n integer)", "read-only transaction"),
+        # A mart is a view of a join, which PostgreSQL writes through for no role (ADR-0037), and
+        # it says so before it looks at the session.
+        (f"DELETE FROM {MART}", "cannot delete from view"),  # noqa: S608 (a constant of this file)
         # The schemas that the role does not read: staging, whose views stand over the raw layer
         # (ADR-0043), the core, which the views of marts read as their owner, a raw schema, and
         # ops, which records the runs. A schema that the role may not enter refuses the name of
         # any relation in it, whether the relation exists or not.
-        "SELECT count(*) FROM staging.stg_demo_search__campaign_stats",
-        "SELECT count(*) FROM core.loads",
-        "SELECT count(*) FROM raw_demo_search._dlt_loads",
-        "SELECT count(*) FROM ops.dbt_run_results",
+        (
+            "SELECT count(*) FROM staging.stg_demo_search__campaign_stats",
+            "permission denied for schema staging",
+        ),
+        ("SELECT count(*) FROM core.loads", "permission denied for schema core"),
+        (
+            "SELECT count(*) FROM raw_demo_search._dlt_loads",
+            "permission denied for schema raw_demo_search",
+        ),
+        ("SELECT count(*) FROM ops.dbt_run_results", "permission denied for schema ops"),
     ],
 )
-def test_the_warehouse_server_refuses_what_ai_reader_may_not_do(warehouse_server, sql):
+def test_the_warehouse_server_refuses_what_ai_reader_may_not_do(warehouse_server, sql, refusal):
     failed, text = warehouse_server.call("execute_sql", {"sql": sql})
     assert failed, f"{sql} passed"
-    assert "read-only transaction" in text or "permission denied" in text, text
+    assert refusal in text, text
 
 
 def test_ai_reader_keeps_the_limits_of_the_decision(env):
