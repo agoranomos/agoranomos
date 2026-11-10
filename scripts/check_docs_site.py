@@ -2,7 +2,7 @@
 
 A reader's browser asks only the site itself: the fonts, scripts, style sheets and images are
 files of the site. The script builds the site from a copy of the project in a temporary folder
-(Zensical 0.0.68 has no option for another output folder, and its site_dir must be inside the
+(Zensical 0.1.0 has no option for another output folder, and its site_dir must be inside the
 project), and then reads the built files. It fails when
 
 * a page has a Mermaid diagram (a pre element of the class mermaid, which is what the theme
