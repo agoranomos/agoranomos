@@ -66,6 +66,7 @@ QUARANTINE_REASONS = frozenset(
         "missing_measure",
         "negative_measure",
         "date_outside_window",
+        "totals_differ",
         "empty_window",
         "spend_fall",
         "source_stopped",

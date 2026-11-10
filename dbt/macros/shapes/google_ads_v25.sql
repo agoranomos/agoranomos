@@ -20,8 +20,10 @@
     {%- endif %}
 {%- endmacro %}
 
-{#- The statistics of a level by day: FROM campaign, FROM ad_group or FROM ad_group_ad. -#}
-{% macro google_ads_stats(relation, platform, level='campaign') %}
+{#- The statistics of a level by day: FROM campaign, FROM ad_group or FROM ad_group_ad. The
+    connector of Google Ads reads metrics.all_conversions and its value too (all_conversions), and
+    the demo platform demo_search does not, so it has none of them. -#}
+{% macro google_ads_stats(relation, platform, level='campaign', all_conversions=false) %}
 select
     cast(segments__date as date) as report_date,
     '{{ platform }}' as platform,
@@ -33,7 +35,31 @@ select
     {{ micros_to_number('metrics__cost_micros') }} as spend,
     {#- The own metric of conversions of Google, the actions that the account includes in it. #}
     {{ to_number('metrics__conversions') }} as platform_conversions,
-    {{ to_number('metrics__conversions_value') }} as platform_conversion_value
+    {{ to_number('metrics__conversions_value') }} as platform_conversion_value,
+    {#- Every conversion of the account, of the actions that metrics.conversions leaves out too. #}
+    {%- if all_conversions %}
+    cast(metrics__all_conversions as numeric(18,6)) as all_conversions,
+    {{ to_number('metrics__all_conversions_value') }} as all_conversion_value
+    {%- else %}
+    cast(null as numeric(18,6)) as all_conversions,
+    cast(null as numeric(18,6)) as all_conversion_value
+    {%- endif %}
+from {{ relation }}
+{% endmacro %}
+
+{#- The totals of an account by day, FROM customer, which Google sums over all its campaigns: the
+    platform side of G0a (ADR-0035), for the connector of Google Ads, which reads them in a request
+    of their own; the demo has none. load_id is the load of the row, as core.platform_totals_daily
+    keeps it. -#}
+{% macro google_ads_totals(relation, platform) %}
+select
+    cast(segments__date as date) as report_date,
+    '{{ platform }}' as platform,
+    customer__id as account_id,
+    {{ to_count('metrics__impressions') }} as total_impressions,
+    {{ to_count('metrics__clicks') }} as total_clicks,
+    {{ micros_to_number('metrics__cost_micros') }} as total_spend,
+    _dlt_load_id as load_id
 from {{ relation }}
 {% endmacro %}
 

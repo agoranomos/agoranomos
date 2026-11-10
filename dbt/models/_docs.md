@@ -118,7 +118,7 @@ The value of the conversions of platform_conversions, as the ad platform reports
 {% enddocs %}
 
 {% docs all_conversions %}
-All the conversions of the action of the row, those of the actions that the own metric of conversions of the platform leaves out among them, such as metrics.all_conversions of Google; none where the platform has no such metric, as on Meta and TikTok.
+All the conversions of the row, those of the actions that the own metric of conversions of the platform leaves out among them, such as metrics.all_conversions of Google; in a table by conversion action, those of the action of the row. None where the platform has no such metric, as on Meta and TikTok, and in a table by campaign, ad group or ad of the demo platform demo_search, whose statistics do not mimic it.
 {% enddocs %}
 
 {% docs all_conversion_value %}
@@ -394,7 +394,7 @@ The source, the account and the day of the row in one text, as source|account_id
 {% enddocs %}
 
 {% docs reason %}
-The check of G1 or G1a (ADR-0035) that kept the account out of the core, as a code: load_failed, unknown_account, duplicate_key, missing_key, unknown_currency, unknown_time_zone, missing_rate, too_many_decimals, missing_measure, negative_measure, date_outside_window, empty_window, spend_fall, or source_stopped for an account whose source has more than half of its pinned accounts in quarantine.
+The check of G0a, G1 or G1a (ADR-0035) that kept the account out of the core, as a code: load_failed, unknown_account, duplicate_key, missing_key, unknown_currency, unknown_time_zone, missing_rate, too_many_decimals, missing_measure, negative_measure, date_outside_window, totals_differ, empty_window, spend_fall, or source_stopped for an account whose source has more than half of its pinned accounts in quarantine.
 {% enddocs %}
 
 {% docs checked %}
