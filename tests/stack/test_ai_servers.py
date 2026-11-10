@@ -22,6 +22,11 @@ pytestmark = pytest.mark.skipif(not AI_SERVERS, reason=".env does not list the a
 WAREHOUSE_TOOLS = {"list_tables", "describe_table", "execute_sql"}
 # The mart that the demo fills, which ai_reader reads.
 MART = "marts.ad_stats_campaign_daily"
+# The relations of marts, as the superuser sees them: the views over the core (ADR-0037).
+MARTS = (
+    "SELECT relname FROM pg_class WHERE relnamespace = 'marts'::regnamespace "
+    "AND relkind IN ('r', 'p', 'v', 'm', 'f')"
+)
 
 
 class Session:
@@ -123,9 +128,21 @@ def test_the_warehouse_server_offers_the_tools_of_the_repository(warehouse_serve
     assert warehouse_server.tools() == WAREHOUSE_TOOLS
 
 
-def test_the_warehouse_server_lists_marts_and_staging_and_nothing_else(warehouse_server):
-    schemas = {row["schema_name"] for row in warehouse_server.rows("list_tables", {})}
-    assert schemas == {"marts", "staging"}
+def test_the_warehouse_server_lists_the_marts_and_nothing_else(warehouse_server, env):
+    # ADR-0043: ai_reader reads the views of marts, and not staging, whose views stand over a raw
+    # layer that is to be erased. The default privileges of transformer give it each new view.
+    tables = warehouse_server.rows("list_tables", {})
+    assert {row["schema_name"] for row in tables} == {"marts"}
+    # Sorted here: the collation of the database may sort a _ elsewhere.
+    names = sorted(row["table_name"] for row in tables)
+    assert names == sorted(warehouse_output(env, MARTS).split())
+
+
+def test_the_warehouse_server_reads_every_mart_that_it_lists(warehouse_server):
+    for row in warehouse_server.rows("list_tables", {}):
+        sql = f"SELECT 1 FROM marts.{row['table_name']} LIMIT 1"  # noqa: S608 (names of the warehouse)
+        failed, text = warehouse_server.call("execute_sql", {"sql": sql})
+        assert not failed, f"{sql}: {text}"
 
 
 # The count means something once the mart holds the rows of the demo.
@@ -146,7 +163,12 @@ def test_the_warehouse_server_reads_a_mart_and_describes_it(warehouse_server, en
         # A write: the session is read-only, and the role has no grant to write.
         "CREATE TABLE marts.ai_was_here (n integer)",
         f"DELETE FROM {MART}",  # noqa: S608 (a constant of this file)
-        # The schemas that the role does not read: a raw schema, and ops, which records the runs.
+        # The schemas that the role does not read: staging, whose views stand over the raw layer
+        # (ADR-0043), the core, which the views of marts read as their owner, a raw schema, and
+        # ops, which records the runs. A schema that the role may not enter refuses the name of
+        # any relation in it, whether the relation exists or not.
+        "SELECT count(*) FROM staging.stg_demo_search__campaign_stats",
+        "SELECT count(*) FROM core.loads",
         "SELECT count(*) FROM raw_demo_search._dlt_loads",
         "SELECT count(*) FROM ops.dbt_run_results",
     ],
@@ -167,10 +189,13 @@ def test_ai_reader_keeps_the_limits_of_the_decision(env):
     # It signs in only while the MCP server of the warehouse is on.
     assert can_login == ("t" if switch_on(env, "warehouse") else "f")
     assert connections == "3"
+    # The planner of a question over the views of marts reorders up to 12 relations (ADR-0037).
     assert set(config.split(",")) == {
         "default_transaction_read_only=on",
         "statement_timeout=1min",
         "idle_in_transaction_session_timeout=1min",
+        "from_collapse_limit=12",
+        "join_collapse_limit=12",
     }
 
 
