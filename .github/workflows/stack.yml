@@ -106,9 +106,13 @@ jobs:
     # repository. This job took 57 to 108 minutes in October 2026: in the weekly run of 26 October,
     # 72 minutes on amd64 and 57 on arm64 with the local variant, and 88 and 63 with the celery
     # variant; on the pushes to main of 29 October, 106 and 108 minutes on amd64 with the local
-    # variant. The celery variant took 16 minutes longer on amd64, so 150 minutes leave it room on
-    # a slow runner.
-    timeout-minutes: 150
+    # variant. Since the core of v0.5 (#281, #283), each run of the transform takes about 14
+    # minutes: a pull request, whose second run of the tests leaves out the mark transform, took 87
+    # to 97 minutes on 7 November 2026, and a push to main, which runs it twice, 138 and 139 minutes
+    # on arm64 and reached 150 minutes on amd64 on 7 and 8 November; with 240 minutes, 163 to 216
+    # minutes on main 8bb634e on 9 November, and the facts of the core add about 7 % to each run of
+    # the transform. 300 minutes leave it room, under the 360 that GitHub gives a job.
+    timeout-minutes: 300
     permissions:
       contents: read
     env:
@@ -301,8 +305,12 @@ jobs:
     # 70 seconds and five runs of the transform of the model each, with the hooks of elementary
     # (ADR-0028, ADR-0029), and, from the backups on, the round trip of a backup with two restores:
     # 110 minutes on amd64 on 20 October 2026, of which each run of the stack tests took 45 to 46,
-    # and 69 to 108 minutes on amd64 from 26 to 29 October.
-    timeout-minutes: 140
+    # and 69 to 108 minutes on amd64 from 26 to 29 October. Since the core of v0.5 (#281, #283), a
+    # pull request took 90 and 127 minutes on 7 November 2026, and a push to main, whose second run
+    # of the tests takes the mark transform too, reached 140 minutes on both architectures on 7 and
+    # 8 November; with 240 minutes, 158 and 166 minutes on main 8bb634e on 9 November. 300 minutes
+    # leave it room, under the 360 that GitHub gives a job.
+    timeout-minutes: 300
     permissions:
       contents: read
     env:
@@ -399,7 +407,7 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     # A pull request of a release waits here for the stack of main, up to the timeout of its jobs.
-    timeout-minutes: 160
+    timeout-minutes: 310
     permissions:
       actions: read
     steps:
