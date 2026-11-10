@@ -6,7 +6,7 @@ decision-makers: Andrei Gromov
 
 # Keep four layers of data, and erase the raw layer once the core has accepted a load
 
-Superseded in part by [ADR-0046](0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md): the order of the steps of "The way of a load", as a load is now marked accepted before its rows are deleted. The rest of this record stays accepted.
+Superseded in part by [ADR-0046](0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md): the order of the steps of "The way of a load", as a load is now marked accepted before its rows are deleted, and by [ADR-0047](0047-leave-amcheck-out-of-the-maintenance.md): "the DAG of maintenance runs `amcheck` from contrib" of "The protection of the core", as the maintenance runs no `amcheck`. The rest of this record stays accepted.
 
 ## Context and Problem Statement
 

@@ -11,7 +11,7 @@ How-to guides are short recipes for people who want to get a specific job done w
 - [Connect Google Ads](connect-google-ads.md): load the Google Ads accounts of your business every day, with the reference rates of the ECB, as a service account of your own Google Cloud project. No load has reached a real account yet.
 - [Read the advertising dashboard](read-the-advertising-dashboard.md): what the tabs and the filters of the dashboard Advertising show, and how its numbers are computed.
 - [Talk to your data](talk-to-your-data.md): connect Claude Code, the Claude apps or another AI client to your data through MCP, choose what it may do, and turn it off.
-- [Watch the pipeline](watch-the-pipeline.md): what the dashboard of the Ops collection shows about the loads, the runs of the transform and the warehouse, and where its data comes from.
+- [Watch the pipeline](watch-the-pipeline.md): what the dashboard of the Ops collection shows about the loads, the runs of the transform and the warehouse, where its data comes from, and how to get alerts through Apprise.
 - [Rename a field or add your own definitions](rename-a-field.md): give the tables and fields of the marts names, descriptions and notes of your deployment's own.
 
 ## Planned guides

@@ -130,6 +130,8 @@ The schema `ops` holds the tables of the package elementary, in which its hooks 
 
 A task of the transform runs dbt for one node, so one run of the transform is many runs of dbt, which share `airflow_run_id`. dbt rebuilds the views on each run; elementary keeps the rows of its tables, and nothing removes old rows yet.
 
+The table `ops.alert_state` is not a model of dbt: the DAG `agoranomos_watcher` creates it on its first run and writes it as `transformer`, with one row for each problem that it sees, by kind, subject and reason, and when an alert last named it ([Get alerts](../how-to/watch-the-pipeline.md#get-alerts)). Neither Metabase nor the MCP server of the warehouse reads it.
+
 ## The schema core
 
 !!! note "Filled in v0.5"

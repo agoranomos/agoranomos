@@ -6,7 +6,7 @@ decision-makers: Andrei Gromov
 
 # Run one dbt build in the watcher mode of Cosmos, with a DAG of maintenance
 
-Superseded in part by [ADR-0046](0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md): "the tests of the sources" in the order of "The transform", as no test reads a raw table, and "detaches and" in "The DAG of maintenance", as a month of a journal is dropped with no detach. The rest of this record stays accepted.
+Superseded in part by [ADR-0046](0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md): "the tests of the sources" in the order of "The transform", as no test reads a raw table, and "detaches and" in "The DAG of maintenance", as a month of a journal is dropped with no detach, and by [ADR-0047](0047-leave-amcheck-out-of-the-maintenance.md): "It runs `amcheck`" in "The DAG of maintenance", as the maintenance runs no `amcheck`. The rest of this record stays accepted.
 
 ## Context and Problem Statement
 

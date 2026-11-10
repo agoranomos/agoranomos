@@ -3,4 +3,5 @@
 *
 !requirements.txt
 !dbt-requirements.txt
+!plugins/agoranomos_alerts.py
 !plugins/agoranomos_oom.py

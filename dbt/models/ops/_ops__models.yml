@@ -37,8 +37,7 @@ models:
       - name: reporting_currency
         description: '{{ doc("reporting_currency") }}'
       - name: rate_source
-        description: >-
-          The source of the last rate, ecb for the European Central Bank or demo_fx for the demo.
+        description: '{{ doc("rate_source") }}'
       - name: last_rate_date
         description: >-
           The day of the last rate that the source published, as core.fx_rates_daily holds it.

@@ -107,7 +107,7 @@ Above `off`, the last line of `up` also names the groups of the setup and how ma
 | Setting | Default | What it does |
 |---|---|---|
 | `AGORANOMOS_BACKUP_DIR` | `./backups` | The folder of the backups. The default folder, `backups/`, is ignored by git; another path is not, unless you ignore it yourself. `init` creates it, open to its owner only. A relative path starts at the checkout, `~/` at your home folder; `preflight` stops on a value that is none of these and not absolute, which Compose would read as the name of a volume. By default the folder is on the disk that holds the data of Docker: on a small server put it on another disk, such as `/mnt/backups`, and `./agoranomos status` says how much room the disk has. |
-| `BACKUP_TIME` | `03:00` | With the `ops` profile: the time of the daily backup, as `HH:MM`. A backup that the stack missed, because it was down, comes at its next start. Choose a time when no pipeline runs: a dump holds a shared lock on each table of its database until it ends, and a change of a table by dbt or dlt waits behind it for at most a minute and then fails. No DAG of the base package runs at 03:00 UTC. |
+| `BACKUP_TIME` | `03:00` | With the `ops` profile: the time of the daily backup, as `HH:MM`. A backup that the stack missed, because it was down, comes at its next start. Choose a time when no pipeline runs: a dump holds a shared lock on each table of its database until it ends, and a change of a table by dbt or dlt waits behind it for at most a minute and then fails. No DAG of the base package that changes a table runs at 03:00 UTC: `agoranomos_watcher`, which runs every 15 minutes, reads, and writes the rows of its own table only, which a dump does not hold back ([Alerts](#alerts)). |
 | `BACKUP_TZ` | `UTC` | The time zone of `BACKUP_TIME`, such as `Europe/Berlin`. `preflight` checks the name. |
 | `BACKUP_KEEP_DAILY` | `7` | How many days back the newest scheduled backup of each day stays; at least 1. |
 | `BACKUP_KEEP_WEEKLY` | `4` | How many weeks back, Monday to Sunday, the newest scheduled backup of each week stays. |
@@ -169,6 +169,18 @@ The load of Google Ads signs in as a service account of the Google Cloud project
 |---|---|---|
 | `GOOGLE_ADS_SERVICE_ACCOUNT_KEY` | empty | The key of the service account: the JSON file that Google Cloud makes, as base64 on one line, or as the JSON on one line in single quotes. It reads every Google Ads account that the service account is a user of, so keep it as you keep the other secrets of `.env`. A load without it fails with a line that says so. |
 | `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | empty | The ten digits of the manager account through which the service account reaches the accounts, without hyphens; empty when the service account is a user of each account. `preflight` stops on another value. |
+
+## Alerts
+
+The stack sends an alert through [Apprise](https://github.com/caronc/apprise) when a run of a DAG fails, and when the DAG `agoranomos_watcher`, every 15 minutes, finds an account in quarantine or late, a backup that failed or is late, or a disk with less than 10 GiB free ([ADR-0045](../adr/0045-send-alerts-from-airflow-through-apprise.md), [Get alerts](../how-to/watch-the-pipeline.md#get-alerts)).
+
+| Setting | Default | What it does |
+|---|---|---|
+| `AGORANOMOS_ALERT_URLS` | empty | One or more addresses of Apprise, separated by spaces or commas, such as `tgram://<bot-token>/<chat-id>` for Telegram or `slack://<token-a>/<token-b>/<token-c>/#<channel>` for Slack, in single quotes. Empty, nothing is sent. Only the scheduler and the service that runs the tasks get it; it is commented out in `.env.example`, as its empty settings are the secrets that `init` generates. |
+
+- **Who sends.** The plugin `agoranomos_alerts` of the Airflow image sends the alert of a failed run from a thread of the scheduler, and the task of `agoranomos_watcher` the alerts of its checks; each address waits at most the timeouts of Apprise 1.13.1, 4 seconds to connect and 4 to read, which an address can change with `cto=` and `rto=`. A message leaves through the network `default` of the stack, which reaches the internet; the databases stay on the internal network.
+- **What the watcher keeps.** It connects as `transformer`, which owns the schema `ops`, and keeps what it has seen and sent in the table `ops.alert_state`, which it creates on its first run: one row for each kind, subject and reason, with when the problem began, when an alert last named it, and when it went away while that alert has not gone out. The table holds codes, IDs and times; `metabase_reader` and `ai_reader` cannot read it, and no role gets a new right for it.
+- **The status of the backups.** The `backup` service of the `ops` profile writes, every minute, the time of the check, the start of the service, the result of its last run and the end of its last good backup into `status.json` of the volume `backup-status`, which every user may read and only that service may write; the Airflow services mount it read-only at `/opt/agoranomos/backup-status`. A backup does not hold the volume, which the next minute writes again.
 
 ## Memory limits
 
