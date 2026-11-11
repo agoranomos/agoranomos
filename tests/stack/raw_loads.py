@@ -1,12 +1,14 @@
 """The rows of a fact table of the demo in raw that the next run of the transform reads, as SQL
 that does not use the macros of the model: for each account and day, those of the newest whole
-load whose window in the journal _agoranomos_loads covers the day. The run pins every whole load
-before its tasks of dbt, and its staging reads the newest pinned load of each account and day
+load whose window in the journal _agoranomos_loads covers the day, when the core has not accepted
+it. The run pins every whole load before its tasks of dbt, and its staging reads the newest load
+of each account and day among the pinned and the accepted, when it is a pinned one
 (dbt/macros/pin_loads.sql and newest_load.sql, ADR-0038, ADR-0046), which is this one when no load
 ended after the pin. Each load of the demo appends its rows under its own _dlt_load_id, and a run
 that succeeds accepts the loads that it read and deletes their rows from raw (ADR-0035): so these
 are the rows of the loads that no run has read yet, and a test reads them between a load and the
-run that reads it. The journal and _dlt_loads keep every load.
+run that reads it. A day whose newest load is accepted is the core's, as a day of the history that
+the window of a newer history no longer reaches. The journal and _dlt_loads keep every load.
 
 A test that needs rows in raw for the next run makes a load of its own with load_platform, as a
 daily load does, in the container of the tasks and outside Airflow, so that no asset event starts
@@ -48,7 +50,7 @@ def account_of(fact: platforms.FactTable) -> str | None:
 def newest(code: str, table: str | None = None) -> str:
     """The rows of a fact table of a platform of the demo, its main table by default, that staging
     reads, as a subquery with the alias newest: the columns of the table, and _account and _day,
-    the account and the day of the row."""
+    the account and the day of the row. A day whose newest load the core accepted has none."""
     platform = platforms.PLATFORMS[code]
     [fact] = [f for f in platform.facts if f.table == (table or platform.main_table)]
     account = account_of(fact)
@@ -60,7 +62,14 @@ def newest(code: str, table: str | None = None) -> str:
     if account is not None:
         matched += " AND d.account_id = r._account"
     days = DAYS.format(dataset=platform.dataset)
-    return f"(SELECT r.* FROM ({rows}) AS r JOIN ({days}) AS d ON {matched}) AS newest"  # noqa: S608 (constants of the demo)
+    unread = (
+        "NOT EXISTS (SELECT FROM core.loads AS p "
+        f"WHERE p.source = '{code}' AND p.load_id = d.load_id AND p.account_id = d.account_id "
+        "AND p.status = 'accepted')"
+    )
+    return (
+        f"(SELECT r.* FROM ({rows}) AS r JOIN ({days}) AS d ON {matched} WHERE {unread}) AS newest"  # noqa: S608 (constants of the demo)
+    )
 
 
 # The DAGs of the base package, with agoranomos_pipelines, in the containers of Airflow.

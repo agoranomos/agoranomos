@@ -388,8 +388,9 @@ def test_the_tasks_of_dbt_run_in_their_pool(airflow_url, token, transform_run):
     # The task of the pin and that of elementary run dbt too, so each takes a slot of the pool.
     assert pools.pop(PIN) == DBT_POOL
     assert pools.pop(ELEMENTARY) == DBT_POOL
-    # The last task runs no dbt.
-    assert pools.pop(TRANSFORMED) == "default_pool"
+    # The acceptance, the cleanup of raw and the last task run no dbt.
+    for task in (ACCEPT, CLEAN_RAW, TRANSFORMED):
+        assert pools.pop(task) == "default_pool", task
     assert pools, "the run has no task of dbt"
     assert {task.split(".")[0] for task in pools} == {"dbt"}, sorted(pools)[:5]
     assert set(pools.values()) == {DBT_POOL}, pools
@@ -433,19 +434,28 @@ NO_PARTITION = (
 
 
 def test_the_pin_takes_every_load_that_ended_and_the_run_reads_the_newest_of_each_day(
-    env, transform_run
+    env, pipeline
 ):
     # Every load of the demo had ended before the run, so its pin took each of them, by load and
     # account, and the run read, for each account and day, the newest load that covers it, as
-    # raw_loads.py does in SQL of its own; then it accepted every load, as no account of the demo
-    # is in quarantine (ADR-0046).
+    # raw_loads.py does in SQL of its own: each day of the history, the newest load of its days,
+    # and no day of an older load, which the core accepted; then it accepted every load, as no
+    # account of the demo is in quarantine (ADR-0046).
+    history, _ = pipeline
     for code, platform in platforms.PLATFORMS.items():
         whole = WHOLE.format(dataset=platform.dataset)
         pinned = PINNED.format(source=code)
         missing = warehouse_output(env, f"SELECT count(*) FROM ({whole} EXCEPT {pinned}) AS m")  # noqa: S608 (constants of the demo)
         assert int(missing) == 0, code
         assert int(warehouse_output(env, f"SELECT count(*) FROM ({pinned}) AS p")) > 0, code  # noqa: S608
-        days = DAYS.format(dataset=platform.dataset)
+        loads = (
+            f"SELECT _dlt_load_id FROM {platform.dataset}._agoranomos_loads "  # noqa: S608 (names of the demo)
+            f"WHERE now = TIMESTAMPTZ '{moment(history).isoformat()}'"
+        )
+        days = (
+            f"SELECT * FROM ({DAYS.format(dataset=platform.dataset)}) AS n "  # noqa: S608 (constants of the demo)
+            f"WHERE n.load_id IN ({loads})"
+        )
         read = PIN_DAYS.format(source=code)
         differ = warehouse_output(
             env,
@@ -494,12 +504,23 @@ def test_cosmos_renders_the_transform_from_the_manifest(transform_run):
     assert all("using a dbt manifest" in event for event in events), events
 
 
+# The days that the run read of a platform, {code} in it, as SQL over a row of a mart.
+READ_DAYS = (
+    "(account_id, report_date) IN (SELECT account_id, day FROM staging.stg_loads__newest_days "
+    "WHERE source = '{code}')"
+)
+
+
 @pytest.mark.parametrize("code", sorted(RAW_SUMS))
 def test_the_mart_holds_the_statistics_of_raw(env, raw_read, code):
+    # On the days that the run read: a day of an older history that the window of this one no
+    # longer reaches, as the window ends a day later in the time zone of the account, is the
+    # core's, whose load is accepted and gone from raw.
     raw = [Decimal(value or 0) for value in raw_read[code].split("|")]
     mart = warehouse_output(
         env,
-        f"SELECT sum(impressions), sum(clicks), sum(spend) FROM {MART} WHERE platform = '{code}'",  # noqa: S608 (constants of this file)
+        "SELECT sum(impressions), sum(clicks), sum(spend) "  # noqa: S608 (constants of this file)
+        f"FROM {MART} WHERE platform = '{code}' AND {READ_DAYS.format(code=code)}",
     )
     assert [Decimal(value or 0) for value in mart.split("|")] == raw
     assert raw[0] > 0, f"no statistics of {code} in raw"
@@ -507,7 +528,10 @@ def test_the_mart_holds_the_statistics_of_raw(env, raw_read, code):
 
 def test_the_primary_conversions_of_a_campaign_are_those_of_its_primary_actions(env, raw_read):
     raw = Decimal(raw_read["social_conversions"] or 0)
-    social = f"SELECT sum(conversions_primary) FROM {MART} WHERE platform = 'demo_social'"  # noqa: S608 (constants of this file)
+    social = (
+        f"SELECT sum(conversions_primary) FROM {MART} WHERE platform = 'demo_social' "  # noqa: S608 (constants of this file)
+        f"AND {READ_DAYS.format(code='demo_social')}"
+    )
     assert Decimal(warehouse_output(env, social) or 0) == raw
     assert raw > 0, "no conversion of a primary action of demo_social in raw"
     # conversions is the metric of the platform (ADR-0037), and Meta, which demo_social mimics, has
@@ -669,16 +693,17 @@ def test_the_day_that_the_demo_misses_is_a_warning_and_has_no_row(
     )
 
 
-# The rows of the facts of statistics of the core in a month that the freeze keeps, whose load is
-# not the newest that the run pinned for their account and day, and those whose load is one of
-# the history at {moment}, of the ad platforms of the demo.
+# The rows of the facts of statistics of the core in a month that the freeze keeps, on a day that
+# the run read, whose load is not the newest that the run pinned for their account and day, and
+# those whose load is one of the history at {moment}, of the ad platforms of the demo. A day of an
+# older history that the window of this one no longer reaches keeps its accepted load.
 FROZEN_ROWS = """
 SELECT count(*) FILTER (WHERE l.load_id IS DISTINCT FROM d.load_id),
   count(*) FILTER (WHERE l.load_id IN ({history}))
 FROM core.{fact} AS f
 JOIN core.dim_account AS a ON a.account_sk = f.account_sk
 JOIN core.loads AS l ON l.load_sk = f.load_sk
-LEFT JOIN staging.stg_loads__newest_days AS d
+JOIN staging.stg_loads__newest_days AS d
   ON d.source = a.platform AND d.account_id = a.account_id AND d.day = f.report_date
 WHERE f.report_date < date_trunc('month', current_date - 92)::date
 """
