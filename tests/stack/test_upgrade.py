@@ -78,7 +78,7 @@ SNAPSHOT = "core.dim_campaign_versions"
 # Every table, view and materialized view of the warehouse outside the schemas of PostgreSQL, with
 # its kind and oid; the partitions of a table come with it.
 RELATIONS = (
-    "SELECT n.nspname || '|' || c.relname || '|' || c.relkind || '|' || c.oid "
+    "SELECT concat_ws('|', n.nspname, c.relname, c.relkind, c.oid) "
     "FROM pg_catalog.pg_class AS c JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace "
     "WHERE c.relkind IN ('r', 'p', 'v', 'm') AND NOT c.relispartition "
     "AND n.nspname <> 'information_schema' AND n.nspname !~ '^pg_' ORDER BY 1"
@@ -89,7 +89,7 @@ SCHEMAS = (
 )
 HAS_MIGRATIONS = "SELECT to_regclass('core.schema_migrations') IS NOT NULL"
 APPLIED = (
-    "SELECT version || '|' || name || '|' || checksum || '|' || extract(epoch FROM applied_at) "
+    "SELECT concat_ws('|', version, name, checksum, extract(epoch FROM applied_at)) "
     "FROM core.schema_migrations ORDER BY version"
 )
 MANIFEST = "/opt/agoranomos/manifest/manifest.json"
