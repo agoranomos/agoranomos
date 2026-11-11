@@ -187,11 +187,13 @@ def test_the_cleanup_of_core_loads_takes_old_accepted_rows_that_nothing_reads():
     assert query.startswith("DELETE FROM core.loads AS l WHERE l.source = %(source)s")
     # Never a pinned row: no run has accepted it, and staging reads it.
     assert "AND l.status = 'accepted'" in query
+    # Never a load of the history, from whose windows the next portion is planned (ADR-0038).
+    assert "AND l.kind = 'window'" in query
     assert "l.finished_at < now() - make_interval(months => %(months)s)" in query
-    # Not the newest accepted load of its account with a window.
+    # Not the newest accepted load of the kind window of its account.
     assert (
         "AND EXISTS (SELECT FROM core.loads AS n WHERE n.source = l.source AND n.account_id ="
-        " l.account_id AND n.status = 'accepted' AND n.outcome = 'loaded'"
+        " l.account_id AND n.status = 'accepted' AND n.outcome = 'loaded' AND n.kind = 'window'"
         " AND n.load_id::numeric > l.load_id::numeric)" in query
     )
     # Not one newer than the oldest pinned load of its account, which staging still reads.
