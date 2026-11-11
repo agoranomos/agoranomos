@@ -166,16 +166,23 @@ def no_cache(metabase_url, session):
     timed_call(metabase_url, session, "PUT", "/api/cache", body)
 
 
-def scans(metabase_url, session, database: int, since: str) -> list[dict[str, Any]]:
-    """The entries of the history of the tasks of Metabase for the scan of the values of the
-    warehouse that started at or after since, an ISO time of the server."""
+def tasks(metabase_url, session) -> list[dict[str, Any]]:
+    """The newest entries of the history of the tasks of Metabase, each with its ID, its task, its
+    database, its status, its start and end, and its duration in milliseconds."""
     answer, _ = timed_call(metabase_url, session, "GET", "/api/task?limit=200")
+    return answer["data"]
+
+
+def scans(metabase_url, session, database: int, after: int) -> list[dict[str, Any]]:
+    """The scans of the values of the fields of the warehouse in the history of the tasks, with an
+    ID above after, that have ended."""
     return [
         task
-        for task in answer["data"]
-        if task.get("db_id") == database
+        for task in tasks(metabase_url, session)
+        if task["id"] > after
+        and task.get("db_id") == database
         and task.get("task") == "field values scanning"
-        and task.get("started_at", "") >= since
+        and task.get("ended_at")
     ]
 
 
@@ -184,12 +191,12 @@ def test_the_scan_of_the_values_of_fields_ends(env, metabase_url, session, profi
     # load reads the distinct values of each field that is a list, by a query on its view.
     chosen, found = profile
     database = warehouse_database_id(metabase_url, session)
-    since, _ = timed_call(metabase_url, session, "GET", "/api/util/current_time")
+    after = max((task["id"] for task in tasks(metabase_url, session)), default=0)
     before = load()
     started = time.monotonic()
     timed_call(metabase_url, session, "POST", f"/api/database/{database}/rescan_values")
     [scan] = wait_for(
-        lambda: [t for t in scans(metabase_url, session, database, since) if t.get("ended_at")],
+        lambda: scans(metabase_url, session, database, after),
         3600,
         interval=5,
         message="the scan of the values did not end in an hour",

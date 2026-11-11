@@ -91,6 +91,7 @@ nav = [
     { "ADR-0046: Pin the loads before the transform, and accept them before the cleanup" = "adr/0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md" },
     { "ADR-0047: Leave amcheck out of the maintenance of the warehouse" = "adr/0047-leave-amcheck-out-of-the-maintenance.md" },
     { "ADR-0048: Count the one-shot jobs that can run at the same time in the memory budget" = "adr/0048-count-the-one-shot-jobs-that-can-run-at-the-same-time.md" },
+    { "ADR-0049: Keep JIT off for the transform at the limit of one server" = "adr/0049-keep-jit-off-for-the-transform-at-the-limit-of-one-server.md" },
   ] },
 ]
 

@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Size the stack by profiles, and derive the settings of PostgreSQL from its memory limit
 
+Superseded in part by [ADR-0049](0049-keep-jit-off-for-the-transform-at-the-limit-of-one-server.md), once it is accepted: `jit` stays off for `transformer` at the limit of one server, as for every role. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 [ADR-0022](0022-budget-the-memory-by-variant-and-mode.md) budgets the memory of the stack for a machine of 8 GB, or of 12 GB with the CeleryExecutor. It names no scale of data. The maintainer asked for a limit of one server stated as a number, and for a deployment that an agency can run ([ADR-0041](0041-run-an-agency-as-one-deployment.md)).
