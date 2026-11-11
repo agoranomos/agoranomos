@@ -13,7 +13,7 @@
 --   when the var recompute_rates is true.
 -- * The rates that a day takes: those that staging reads, on the days of the windows of the loads
 --   of the rates, and those that the table holds as published, on the other days, as the raw layer
---   is to keep only the loads that the core has not accepted (ADR-0035). A day without a
+--   keeps only the loads that the core has not accepted (ADR-0035). A day without a
 --   publication takes the last rate published before it, with is_carried_forward; a currency has
 --   no row before the first rate that the source published of it.
 -- * The reporting currency has the rate 1 on every day, whether or not a source publishes rates.

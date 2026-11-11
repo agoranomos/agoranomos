@@ -161,13 +161,17 @@ def test_the_transform_loads_the_settings_of_the_model_before_dbt():
     top = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
     assert not [n for n in top if "settings" in ast.dump(n) or "dlt" in ast.dump(n)]
     # The task comes first, then the pin, the tables of elementary and the task group of dbt,
-    # and last the task that updates the asset of a run that succeeded (ADR-0038).
+    # then the acceptance, and last the task that updates the asset of a run that succeeded
+    # (ADR-0038), beside the cleanup of raw (ADR-0046).
     chains = [
         ast.unparse(node)
         for node in ast.walk(tree)
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.BinOp)
     ]
-    assert chains == ["load_settings() >> pin >> elementary >> dbt >> transformed()"]
+    assert chains == [
+        "load_settings() >> pin >> elementary >> dbt >> accepted >> transformed()",
+        "accepted >> clean_raw()",
+    ]
     assert decorators(path)["transformed"] == ["task(task_id='transformed', outlets=[TRANSFORMED])"]
     assigned = {
         node.targets[0].id: ast.unparse(node.value.func)
@@ -207,6 +211,37 @@ def test_one_task_pins_the_loads_before_every_other_task_of_dbt():
     project = (ROOT / "dbt" / "dbt_project.yml").read_text(encoding="utf-8")
     assert "on-run-start" not in project
     assert "on-run-end" not in project
+
+
+def test_the_core_accepts_the_loads_of_a_run_and_the_raw_layer_loses_them_after_dbt():
+    # ADR-0046: after every task of dbt, by the default rule all_success, which a failed or a
+    # skipped task of dbt stops: the acceptance as transformer, then the cleanup of raw as loader,
+    # each with retries, as each step finds what is left. Neither runs dbt, so neither is in its
+    # pool, and both import their module in the task.
+    path = DAGS / "agoranomos_demo_transform.py"
+    found = decorators(path)
+    assert found["accept"] == [
+        "task(task_id='accept', retries=2, retry_delay=timedelta(minutes=1))"
+    ]
+    assert found["clean_raw"] == [
+        "task(task_id='clean_raw', retries=2, retry_delay=timedelta(minutes=1), "
+        "execution_timeout=timedelta(minutes=30))"
+    ]
+    text = path.read_text(encoding="utf-8")
+    assert "trigger_rule" not in text
+    assert "accepted = accept()" in text
+    tree = ast.parse(text)
+    for name, call in (("accept", "acceptance.accept()"), ("clean_raw", "acceptance.clean_raw()")):
+        [function] = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == name
+        ]
+        assert ast.unparse(function.body[-1]) == f"return {call}", name
+        inner = [node for node in ast.walk(function) if isinstance(node, ast.ImportFrom)]
+        assert [(n.module, [a.name for a in n.names]) for n in inner] == [
+            ("agoranomos_pipelines", ["acceptance"])
+        ]
 
 
 def test_the_transform_builds_elementary_in_one_task_and_records_its_run():

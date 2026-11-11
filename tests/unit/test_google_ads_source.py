@@ -1066,8 +1066,8 @@ def test_the_window_starts_after_the_last_day_that_the_core_accepted(ads):
     # ADR-0038: [min(yesterday + 1 - 90, last accepted day + 1), yesterday], with the last accepted
     # day from core.loads, which loader may read. The first account was accepted up to 1 June, so
     # its window reaches back to the 2nd, by month, though its newest whole load ended on 26
-    # October; the second has no accepted load, as before the acceptance of the transform exists,
-    # and starts after its newest whole load, from 90 days back.
+    # October; the second has no accepted load, as before the first run of the transform that read
+    # one, and starts after its newest whole load, from 90 days back.
     module, state, made, extensions = ads
     state.update(
         loads=2,
