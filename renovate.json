@@ -99,6 +99,13 @@
       "enabled": false
     },
     {
+      "description": "Apprise is pinned in airflow/requirements.txt at the version that the constraints of the Airflow image hold, and a pin that differs from the constraint fails the build: it moves by hand with the base image of airflow/Dockerfile (ADR-0045).",
+      "matchManagers": ["pip_requirements"],
+      "matchFileNames": ["airflow/requirements.txt"],
+      "matchPackageNames": ["apprise"],
+      "enabled": false
+    },
+    {
       "description": "A new minor or major version of dbt is a decision (ADR-0005): dbt Core and dbt-postgres move in step, and dbt 1.12 is the line that bridges to dbt v2.",
       "matchPackageNames": ["dbt-core", "dbt-postgres"],
       "matchUpdateTypes": ["major", "minor"],

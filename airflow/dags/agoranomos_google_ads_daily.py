@@ -3,10 +3,12 @@
 agoranomos_google_ads_daily runs at 10:37 UTC, after midnight in every time zone in use from
 UTC-10 east, and loads with dlt, as the loader role, the accounts of google_ads that
 extensions/model/clients.toml names into raw_google_ads: for each account, the days from the day
-after the last that a load took, or from 90 days back when that is earlier, to yesterday in its
-time zone, and the last 36 months on its first load (agoranomos_pipelines/google_ads.py). It signs
-in with the key of the service account in GOOGLE_ADS_SERVICE_ACCOUNT_KEY. Each load updates the
-asset of its statistics, and the transform runs after it.
+after the last that the core accepted, or from 90 days back when that is earlier, to yesterday in
+its time zone, and the last 36 months on its first load (agoranomos_pipelines/google_ads.py), with
+the totals of each account by day, against which the transform checks its campaigns (G0a of
+ADR-0035). It signs in with the key of the service account in GOOGLE_ADS_SERVICE_ACCOUNT_KEY. Each
+load updates the asset of its statistics, and keeps the watermark of each account in the asset
+state store of that asset, as a cache of the warehouse; the transform runs after it.
 
 The DAG starts paused: a deployment unpauses it once its key and its accounts are in place, and
 the DAG of the rates of the ECB with it ([Connect Google Ads](docs/how-to/connect-google-ads.md)).
@@ -41,9 +43,12 @@ def load_google_ads() -> None:
     # Should anything write a secret into the log, Airflow shows ***.
     mask_secret(loads.credentials()["password"])
     mask_secret(google_ads.key_info()["private_key"])
+    context = get_current_context()
     # The moment of the load is the run's, so a retry loads as of the same moment.
     try:
-        google_ads.load(get_current_context()["dag_run"].run_after)
+        google_ads.load(
+            context["dag_run"].run_after, cache=context["asset_state_store"][RAW_GOOGLE_ADS]
+        )
     except google_ads.AccountsFailed as failed:
         # The load took the other accounts, so a retry would repeat it for nothing, and the next
         # load takes the days that the failed accounts missed. The line lists them (ADR-0004).
@@ -57,11 +62,21 @@ def load_google_ads() -> None:
     catchup=False,
     max_active_runs=1,
     is_paused_upon_creation=True,
+    # A run ends within seven hours, its three tries of up to two hours and the waits between them
+    # included (ADR-0039), so that a load never lives longer than that: the cleanup of the rows of
+    # a load that did not end is to wait at least as long (ADR-0046).
+    dagrun_timeout=timedelta(hours=7),
     default_args={
         # Retries are explicit, as the contract of the sources asks (ADR-0004): those of a request
-        # are in agoranomos_pipelines/google_ads.py, and these retry the task.
+        # are in agoranomos_pipelines/google_ads.py, and these retry the task, also after a new
+        # column of the API waited past the lock timeout of the loader role for a run of the
+        # transform that reads the table (ADR-0046). The wait doubles with each retry, from 10 to
+        # 20 minutes and then from 20 to 40, which max_retry_delay cuts to 20: Airflow 3.3.2 takes
+        # a multiplier here, and True would be 1, no backoff.
         "retries": 2,
         "retry_delay": timedelta(minutes=10),
+        "retry_exponential_backoff": 2.0,
+        "max_retry_delay": timedelta(minutes=20),
         # The first load of many accounts takes their history. The timeout ends a try that runs
         # too long in Python; a statement that waits on a lock is bounded by the lock timeout of
         # the loader role.

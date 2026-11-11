@@ -118,7 +118,7 @@ The value of the conversions of platform_conversions, as the ad platform reports
 {% enddocs %}
 
 {% docs all_conversions %}
-All the conversions of the row, those of the actions that the own metric of conversions of the platform leaves out among them, such as metrics.all_conversions of Google; none where the platform has no such metric, as on Meta and TikTok, and in a table by campaign, ad group or ad, where no connector reads them yet.
+All the conversions of the row, those of the actions that the own metric of conversions of the platform leaves out among them, such as metrics.all_conversions of Google; in a table by conversion action, those of the action of the row. None where the platform has no such metric, as on Meta and TikTok, and in a table by campaign, ad group or ad of the demo platform demo_search, whose statistics do not mimic it.
 {% enddocs %}
 
 {% docs all_conversion_value %}
@@ -354,7 +354,7 @@ The day of the rate.
 {% enddocs %}
 
 {% docs rate %}
-How many units of one currency one unit of another is worth on the day, to eight decimal places. In the rates into the reporting currency, as in int_fx_rates__filled, the value of one unit of currency in reporting_currency, through the reference rates of the euro, such as 1.08320000 from EUR to USD; in the rates of a source, the value of one unit of base_currency in quote_currency.
+How many units of one currency one unit of another is worth on the day, to eight decimal places. In the rates into the reporting currency, as in core.fx_rates_daily, the value of one unit of currency in reporting_currency, through the reference rates of the euro, such as 1.08320000 from EUR to USD; in the rates of a source, the value of one unit of base_currency in quote_currency.
 {% enddocs %}
 
 {% docs rate_into_reporting_currency %}
@@ -418,7 +418,7 @@ The source, the account and the day of the row in one text, as source|account_id
 {% enddocs %}
 
 {% docs reason %}
-The check of G1 or G1a (ADR-0035) that kept the account out of the core, as a code: load_failed, unknown_account, duplicate_key, missing_key, unknown_currency, unknown_time_zone, missing_rate, too_many_decimals, missing_measure, negative_measure, date_outside_window, empty_window, spend_fall, or source_stopped for an account whose source has more than half of its pinned accounts in quarantine.
+The check of G0a, G1 or G1a (ADR-0035) that kept the account out of the core, as a code: load_failed, unknown_account, duplicate_key, missing_key, unknown_currency, unknown_time_zone, missing_rate, too_many_decimals, missing_measure, negative_measure, date_outside_window, totals_differ, empty_window, spend_fall, or source_stopped for an account whose source has more than half of its pinned accounts in quarantine.
 {% enddocs %}
 
 {% docs checked %}
@@ -435,4 +435,8 @@ The first day of the window that the load took for the account, in the time zone
 
 {% docs window_to %}
 The last day of the window that the load took for the account, in the time zone of the account; none for an account that the load failed.
+{% enddocs %}
+
+{% docs maintenance_run_id %}
+The run of the DAG of maintenance, agoranomos_maintenance, that wrote the row, as the ID of the run in Airflow.
 {% enddocs %}

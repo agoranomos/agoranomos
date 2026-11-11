@@ -36,7 +36,9 @@ select
     {{ to_number('spend') }} as spend,
     {#- Meta has no metric of conversions of its own: it counts each action apart. #}
     cast(null as numeric(18,6)) as platform_conversions,
-    cast(null as numeric(18,6)) as platform_conversion_value
+    cast(null as numeric(18,6)) as platform_conversion_value,
+    cast(null as numeric(18,6)) as all_conversions,
+    cast(null as numeric(18,6)) as all_conversion_value
 from {{ relation }}
 {%- endcall %}
 {% endmacro %}

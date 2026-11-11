@@ -6,9 +6,9 @@ site_author = "Andrei Gromov"
 # workflow Docs publishes it from the tag of each release.
 site_url = "https://agoranomos.dev/"
 # The header shows a link to the repository. For a repository on GitHub the theme also asks api.github.com for its
-# stars, forks and latest release, in two requests from the reader's browser. Zensical 0.0.68 has no setting to turn
-# that off while the link stays (its cookie consent form only makes the request opt-in, behind a banner that covers
-# the page), so this is the one request the site makes to another host.
+# stars, forks and latest release, in two requests from the reader's browser. Zensical 0.1.0 (November 2026) has no
+# setting to turn that off while the link stays (its cookie consent form only makes the request opt-in, behind a
+# banner that covers the page), so this is the one request the site makes to another host.
 repo_url = "https://github.com/agoranomos/agoranomos"
 repo_name = "agoranomos/agoranomos"
 copyright = "Copyright &copy; 2026 Andrei Gromov and agoranomos contributors. Apache-2.0."
@@ -89,6 +89,8 @@ nav = [
     { "ADR-0044: Keep the core for good, change it by migrations, and back it up before each one" = "adr/0044-keep-the-core-for-good-and-change-it-by-migrations.md" },
     { "ADR-0045: Send alerts from Airflow through Apprise" = "adr/0045-send-alerts-from-airflow-through-apprise.md" },
     { "ADR-0046: Pin the loads before the transform, and accept them before the cleanup" = "adr/0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md" },
+    { "ADR-0047: Leave amcheck out of the maintenance of the warehouse" = "adr/0047-leave-amcheck-out-of-the-maintenance.md" },
+    { "ADR-0048: Count the one-shot jobs that can run at the same time in the memory budget" = "adr/0048-count-the-one-shot-jobs-that-can-run-at-the-same-time.md" },
   ] },
 ]
 

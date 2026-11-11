@@ -6,7 +6,7 @@
 # The Caddyfile is part of the image: Caddy runs with its admin API off and reads its configuration
 # only when it starts, and ./agoranomos up builds this image on every start, so a changed Caddyfile
 # makes a new image, and Compose recreates the proxy. The image is never pushed to a registry.
-FROM caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+FROM caddy:2.11.9-alpine@sha256:0bbb055bda6793c999bde78b1b5ce3e89f829fb031af2cf50056ea1246559fee
 
 RUN setcap -r /usr/bin/caddy
 COPY Caddyfile /etc/caddy/Caddyfile

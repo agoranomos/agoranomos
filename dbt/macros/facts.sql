@@ -86,9 +86,9 @@ where source in ('{{ fact_sources(fact) | join("', '") }}')) as days
 
 {#- The rows of a fact of statistics of a level, campaign, ad_group or ad, that this run writes:
     those of relations, the staging models of the level of each ad platform, on the days of days,
-    with the own metric of conversions of each platform. No connector reads all_conversions at the
-    level of the statistics, so it is none here; core.ad_conversions_campaign_daily has it by
-    action. -#}
+    with the own metric of conversions of each platform and all its conversions, which the
+    connector of Google Ads reads and the other platforms have none of;
+    core.ad_conversions_campaign_daily has them by action. -#}
 {% macro fact_stats_rows(level, relations, days) -%}
 {%- set ids = {
     'campaign': ['campaign_id'],
@@ -109,7 +109,9 @@ with read as (
         clicks,
         spend,
         platform_conversions,
-        platform_conversion_value
+        platform_conversion_value,
+        all_conversions,
+        all_conversion_value
     from {{ relation }}
     {%- endfor %}
 )
@@ -124,9 +126,9 @@ select
     cast(r.clicks as bigint) as clicks,
     cast(r.spend as numeric(18,6)) as spend,
     cast(r.platform_conversions as numeric(18,6)) as conversions,
-    cast(null as numeric(18,6)) as all_conversions,
+    cast(r.all_conversions as numeric(18,6)) as all_conversions,
     cast(r.platform_conversion_value as numeric(18,6)) as conversion_value,
-    cast(null as numeric(18,6)) as all_conversion_value,
+    cast(r.all_conversion_value as numeric(18,6)) as all_conversion_value,
     cast(d.currency as char(3)) as currency,
     cast(d.load_sk as integer) as load_sk
 from read as r
