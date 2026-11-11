@@ -186,13 +186,36 @@ def scans(metabase_url, session, database: int, after: int) -> list[dict[str, An
     ]
 
 
+def list_fields(metabase_url, session, database: int) -> list[dict[str, Any]]:
+    """The fields of the marts whose values Metabase keeps as a list (has_field_values), which its
+    scan reads (ADR-0037)."""
+    meta, _ = timed_call(metabase_url, session, "GET", f"/api/database/{database}/metadata")
+    return [
+        field
+        for table in meta["tables"]
+        if table.get("schema") == "marts"
+        for field in table["fields"]
+        if field.get("has_field_values") == "list"
+    ]
+
+
 def test_the_scan_of_the_values_of_fields_ends(env, metabase_url, session, profile):
     # Row 29 of the register of the audit: the scan that metabase-init places after the nightly
-    # load reads the distinct values of each field that is a list, by a query on its view.
+    # load reads the distinct values of each field that is a list, by a query on its view. Metabase
+    # 0.64.1 scans only the fields whose values a person has used: on a stack where no filter was
+    # opened, the scan made no query (checked on the test server on 11 November 2026). So the
+    # values of every such field are asked for first, as the filters of the dashboards ask for them
+    # over time, which makes them, and then the scan reads them all again.
     chosen, found = profile
     database = warehouse_database_id(metabase_url, session)
-    after = max((task["id"] for task in tasks(metabase_url, session)), default=0)
+    fields = list_fields(metabase_url, session, database)
+    assert fields, "no field of the marts is a list"
     before = load()
+    started = time.monotonic()
+    for field in fields:
+        timed_call(metabase_url, session, "GET", f"/api/field/{field['id']}/values")
+    first_use = time.monotonic() - started
+    after = max((task["id"] for task in tasks(metabase_url, session)), default=0)
     started = time.monotonic()
     timed_call(metabase_url, session, "POST", f"/api/database/{database}/rescan_values")
     [scan] = wait_for(
@@ -202,15 +225,27 @@ def test_the_scan_of_the_values_of_fields_ends(env, metabase_url, session, profi
         message="the scan of the values did not end in an hour",
     )
     waited = time.monotonic() - started
+    steps = [
+        task
+        for task in tasks(metabase_url, session)
+        if task["id"] > after and task.get("task") == "update-field-values"
+    ]
+    details = (steps[0].get("task_details") or {}) if steps else {}
     report(
         f"The scan of the values of fields, {shape(chosen, found)}",
         [
-            "| In the history of the tasks | Until the history said so | Load before → after |",
-            "|---:|---:|---|",
-            f"| {scan['duration'] / 1000:.1f} s | {waited:.1f} s | {before} → {load()} |",
+            "| Fields that are a list | Their values at first use | The scan, in the history of "
+            "the tasks | Until the history said so | Fields that it probed, updated, queries | "
+            "Load before → after |",
+            "|---:|---:|---:|---:|---|---|",
+            f"| {len(fields)} | {first_use:.1f} s | {scan['duration'] / 1000:.1f} s "
+            f"| {waited:.1f} s | {details.get('probed')}, {details.get('updated')}, "
+            f"{details.get('queries')} | {before} → {load()} |",
         ],
     )
     assert scan.get("status", "success") == "success", scan.get("status")
+    # A scan that read no field measured nothing.
+    assert details.get("queries"), details
 
 
 @pytest.mark.usefixtures("no_cache")
