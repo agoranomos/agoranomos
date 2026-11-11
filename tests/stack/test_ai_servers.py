@@ -154,7 +154,9 @@ def test_the_warehouse_server_reads_a_mart_and_describes_it(warehouse_server, en
 def test_the_warehouse_server_refuses_what_ai_reader_may_not_do(warehouse_server, sql):
     failed, text = warehouse_server.call("execute_sql", {"sql": sql})
     assert failed, f"{sql} passed"
-    assert "read-only transaction" in text or "permission denied" in text, text
+    # A mart is a view of a join, which PostgreSQL writes through for no role (ADR-0037).
+    refusals = ("read-only transaction", "permission denied", "cannot delete from view")
+    assert any(refusal in text for refusal in refusals), text
 
 
 def test_ai_reader_keeps_the_limits_of_the_decision(env):
@@ -171,6 +173,9 @@ def test_ai_reader_keeps_the_limits_of_the_decision(env):
         "default_transaction_read_only=on",
         "statement_timeout=1min",
         "idle_in_transaction_session_timeout=1min",
+        # The planner of a question over the views of marts reorders up to 12 relations (ADR-0037).
+        "from_collapse_limit=12",
+        "join_collapse_limit=12",
     }
 
 

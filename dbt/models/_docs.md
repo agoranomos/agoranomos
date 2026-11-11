@@ -98,11 +98,11 @@ The spend of the row in the reporting currency (see reporting_currency), at the 
 {% enddocs %}
 
 {% docs conversions %}
-The conversions that the ad platform attributes to the campaign, the ad group or the ad of the row on the day: in a table by conversion action, those of the action of the row; in a table by campaign, ad group or ad, those of its primary actions together (is_primary). Attribution can give an ad part of a conversion, so the number can be fractional, and the platform can still change it for recent days. It is the count of the ad platform, which can differ from what web analytics or a CRM records.
+The conversions that the ad platform attributes to the campaign, the ad group or the ad of the row on the day. In the marts, those of the own metric of conversions of the platform, which its account shows as conversions, such as metrics.conversions of Google: in a table by campaign, ad group or ad, none on Meta, which counts each action apart and has no such metric; in a table by conversion action, those of the action of the row, 0 on Google for an action that the metric leaves out (see all_conversions). In the staging models by conversion action, every conversion of the action of the row, those that the metric of the platform leaves out among them. Attribution can give an ad part of a conversion, so the number can be fractional, and the platform can still change it for recent days. It is the count of the ad platform, which can differ from what web analytics or a CRM records.
 {% enddocs %}
 
 {% docs conversion_value %}
-The value of the conversions of the row, as the ad platform reports it, in the currency of the account (see currency): of the action of the row in a table by conversion action, of the primary actions together in a table by campaign, ad group or ad.
+The value of the conversions of the row, as the ad platform reports it, in the currency of the account (see currency): in the marts, of the conversions of the column conversions, none where the platform gives none, as on Meta and for the metric conversion of TikTok in a table by campaign, ad group or ad; in the staging models by conversion action, of every conversion of the action of the row.
 {% enddocs %}
 
 {% docs conversion_value_reporting %}
@@ -125,6 +125,30 @@ All the conversions of the row, those of the actions that the own metric of conv
 The value of the conversions of all_conversions, as the ad platform reports it, in the currency of the account (see currency); none where the platform has no such metric.
 {% enddocs %}
 
+{% docs conversions_primary %}
+The conversions of the primary conversion actions of the deployment (is_primary) of the campaign on the day, added up from ad_conversions_campaign_daily, with all_conversions where the platform has it, so that an action that the own metric of the platform leaves out counts too; 0 for a campaign without any. It is the choice of the deployment in extensions/model/conversion_actions.toml, which can differ from conversions, the metric that the account shows. None in a table by ad group or ad, as the conversions by action of those levels are a module of the extended set that is not built yet.
+{% enddocs %}
+
+{% docs fx_rate_into_reporting_currency %}
+The rate of the day of the row from the currency of the row into the reporting currency, from core.fx_rates_daily, with no rounding: an amount of the row times this rate is the amount of the columns that end in _reporting. The reporting currency has the rate 1; none on a day that has no rate.
+{% enddocs %}
+
+{% docs fx_rate_date %}
+The day on which the source published the rate of the row, the day of the row or, for a rate carried over a day without a publication, the day before it on which the last one was published; none for the reporting currency, whose rate is 1 on every day.
+{% enddocs %}
+
+{% docs is_fx_rate_carried_forward %}
+Whether the rate of the row is the last published one before its day, on a day without a publication, such as a weekend or a holiday.
+{% enddocs %}
+
+{% docs loaded_at %}
+When the load of the ad platform or the web analytics that wrote the row into the core ended, from core.loads; none once the journal of the loads no longer keeps that load.
+{% enddocs %}
+
+{% docs is_account_active %}
+Whether the settings of the model still name the account or the property of the row: one that leaves extensions/model/clients.toml keeps its data and belongs to the client Unassigned, and is no longer active.
+{% enddocs %}
+
 {% docs conversion_action_id %}
 The ID of the conversion action, as the platform names it: the ID of a conversion action of Google, the action type of Meta, such as offsite_conversion.fb_pixel_purchase, or the metric of TikTok, such as complete_payment.
 {% enddocs %}
@@ -142,7 +166,7 @@ The category that the ad platform gives the conversion action, in lower case, su
 {% enddocs %}
 
 {% docs is_primary %}
-Whether the conversion action counts in the conversions of a campaign, an ad group or an ad. For an action of Google Ads it is what the account says of the action, include_in_conversions_metric, with which Google counts it in its own metric of conversions; for an action of another platform the seed of conversion actions of the base package says it. A deployment can override either in extensions/model/conversion_actions.toml, and an action that none of them names does not count. A campaign of Google Ads with conversion goals of its own counts the primary actions of those goals in the account, which can differ from these.
+Whether the conversion action is a primary one of the deployment, whose conversions conversions_primary adds up for a campaign. For an action of Google Ads it is what the account says of the action, include_in_conversions_metric, with which Google counts it in its own metric of conversions; for an action of another platform the seed of conversion actions of the base package says it. A deployment can override either in extensions/model/conversion_actions.toml, and an action that none of them names does not count. A campaign of Google Ads with conversion goals of its own counts the primary actions of those goals in the account, which can differ from these.
 {% enddocs %}
 
 {% docs conversion_action_status %}
@@ -330,7 +354,7 @@ The day of the rate.
 {% enddocs %}
 
 {% docs rate %}
-How many units of one currency one unit of another is worth on the day, to eight decimal places. In the rates into the reporting currency, as in int_fx_rates__filled, the value of one unit of currency in reporting_currency, through the reference rates of the euro, such as 1.08320000 from EUR to USD; in the rates of a source, the value of one unit of base_currency in quote_currency.
+How many units of one currency one unit of another is worth on the day, to eight decimal places. In the rates into the reporting currency, as in core.fx_rates_daily, the value of one unit of currency in reporting_currency, through the reference rates of the euro, such as 1.08320000 from EUR to USD; in the rates of a source, the value of one unit of base_currency in quote_currency.
 {% enddocs %}
 
 {% docs rate_into_reporting_currency %}

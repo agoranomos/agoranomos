@@ -1,35 +1,26 @@
--- The campaigns of every platform, with their current name, status and type, and the days that
--- their statistics cover. The days come down to one row for each campaign before the join: joined
--- with every row of the statistics, PostgreSQL 18.6 ran the views of the statistics once for each
--- campaign, a minute for the 47 campaigns of the demo (checked on the stand, October 2026).
-with stats as (
-    select
-        platform,
-        account_id,
-        campaign_id,
-        min(report_date) as first_report_date,
-        max(report_date) as last_report_date
-    from {{ ref('int_ad_stats__unioned') }}
-    group by platform, account_id, campaign_id
-)
-
+-- The campaigns of every platform, a view over the core (ADR-0037): the rows of core.dim_campaign,
+-- with their current name, status, state and type, whether the platform still lists them, the days
+-- that their statistics cover and how many names they had, which the dimension keeps.
 select
-    c.platform,
+    a.platform,
     p.platform_name,
     a.client_id,
-    a.client_name,
-    c.account_id,
+    c.client_name,
+    a.account_id,
     a.account_name,
-    c.campaign_id,
-    c.campaign_name,
-    c.campaign_status,
-    c.campaign_type,
-    s.first_report_date,
-    s.last_report_date,
-    c.name_count
-from {{ ref('int_ad_campaigns__unioned') }} as c
-join {{ ref('int_ad_platforms__unioned') }} as p on p.platform = c.platform
-left join {{ ref('int_ad_accounts__unioned') }} as a
-    on a.platform = c.platform and a.account_id = c.account_id
-left join stats as s
-    on s.platform = c.platform and s.account_id = c.account_id and s.campaign_id = c.campaign_id
+    m.campaign_id_text as campaign_id,
+    m.campaign_name,
+    m.campaign_status,
+    m.campaign_type,
+    m.first_report_date,
+    m.last_report_date,
+    cast(m.name_count as bigint) as name_count,
+    m.campaign_state,
+    m.is_listed
+from {{ ref('dim_campaign') }} as m
+left join {{ ref('dim_account') }} as a
+    on a.account_sk = m.account_sk
+left join {{ ref('dim_client') }} as c
+    on c.client_id = a.client_id
+left join {{ platforms(ref('seed_ad_platforms')) }}
+    on p.platform = a.platform

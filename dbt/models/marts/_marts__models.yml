@@ -1,13 +1,18 @@
 models:
   - name: ad_stats_campaign_daily
     description: >-
-      Advertising statistics by day and campaign on every platform. One row is one campaign of
-      one ad account on one day, in the time zone of the account: report_date, platform,
-      account_id and campaign_id together are its key. Money is in the currency of the account
-      (currency) and in the reporting currency (reporting_currency); add up money across accounts
-      with the columns that end in _reporting. Conversions are those of the primary conversion
-      actions; ad_conversions_campaign_daily has them by action. Its platforms are those of
-      ad_platforms with the kind ads.
+      Advertising statistics by day and campaign on every platform, a view over
+      core.ad_stats_campaign_daily. One row is one campaign of one ad account on one day, in the
+      time zone of the account: report_date, platform, account_id and campaign_id together are its
+      key. The names, statuses and states are the current ones of the campaign and its account.
+      Money is in the currency of the account (currency) and in the reporting currency
+      (reporting_currency), at the rate of the day of the row (fx_rate_into_reporting_currency); add
+      up money across accounts with the columns that end in _reporting. conversions is the own
+      metric of conversions of the platform, as its account shows it, and none on Meta, which has no
+      such metric; conversions_primary is the sum of the conversions of the primary conversion
+      actions of the deployment, which ad_conversions_campaign_daily has by action. A row whose
+      measures are all zero is not kept. Its platforms are those of ad_platforms with the kind ads.
+      Its tests read the days of the windows that the run of the transform pinned.
     config:
       # The table that dbt builds has exactly these columns, with these types, or the build fails.
       contract:
@@ -54,44 +59,49 @@ models:
             - name: Cost per Conversion
               description: >-
                 Cost per conversion, also called cost per acquisition (CPA): the spend for each
-                conversion of the primary conversion actions, the sum of spend_reporting divided by
-                the sum of conversions, in the reporting currency.
+                conversion in the own metric of conversions of the platform, as its account shows
+                it, the sum of spend_reporting divided by the sum of conversions, in the reporting
+                currency; none on Meta, which has no such metric.
               numerator: spend_reporting
               denominator: conversions
               format: currency
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
             - name: Conversion Rate
               description: >-
-                The conversions of the primary conversion actions for each click to the site, the
-                sum of conversions divided by the sum of clicks. A platform can count more than one
-                conversion for a click, and conversions after a view, so it can exceed 100%.
+                The conversions in the own metric of conversions of the platform for each click to
+                the site, the sum of conversions divided by the sum of clicks. A platform can count
+                more than one conversion for a click, and conversions after a view, so it can
+                exceed 100%.
               numerator: conversions
               denominator: clicks
               format: percent
             - name: ROAS
               description: >-
-                Return on ad spend: the value of the conversions of the primary conversion actions
-                for each unit of spend, the sum of conversion_value_reporting divided by the sum of
-                spend_reporting, both in the reporting currency; 4.2 means 4.20 of value for each
-                1.00 spent.
+                Return on ad spend: the value of the conversions in the own metric of conversions
+                of the platform for each unit of spend, the sum of conversion_value_reporting
+                divided by the sum of spend_reporting, both in the reporting currency; 4.2 means
+                4.20 of value for each 1.00 spent.
               numerator: conversion_value_reporting
               denominator: spend_reporting
               format: number
-    # The key, as a constraint that PostgreSQL enforces. It has no name on purpose: dbt builds the
-    # table under a temporary name and renames it, and the index of the key keeps the name it got,
-    # so a named key would collide with itself on the next run.
-    constraints:
-      - type: primary_key
-        columns: [report_date, platform, account_id, campaign_id]
     data_tests:
       - unique_combination:
           arguments:
             columns: [report_date, platform, account_id, campaign_id]
+          config:
+            where: >-
+              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              and outcome = 'loaded')
     columns:
       - name: report_date
         data_type: date
         description: '{{ doc("report_date") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -101,7 +111,12 @@ models:
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -122,7 +137,12 @@ models:
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -143,7 +163,12 @@ models:
       - name: account_id
         data_type: text
         description: '{{ doc("account_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -162,7 +187,12 @@ models:
       - name: campaign_id
         data_type: text
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -181,7 +211,12 @@ models:
       - name: currency
         data_type: text
         description: '{{ doc("currency") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -210,7 +245,12 @@ models:
         data_type: numeric(18,6)
         description: '{{ doc("spend") }}'
         # Two currencies in the table: a plain number (docs/reference/describe-the-marts.md).
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -242,11 +282,19 @@ models:
         # in _reporting to be money in Metabase. The test has a name of its own, as the name that
         # dbt makes would carry the expression.
         data_tests:
-          - not_null
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
           - accepted_values:
               name: ad_stats_campaign_daily_has_one_reporting_currency
               arguments:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -256,7 +304,12 @@ models:
       - name: spend_reporting
         data_type: numeric(18,6)
         description: '{{ doc("spend_reporting") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -274,35 +327,153 @@ models:
               semantic_type: type/Currency
               has_field_values: none
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
+      - name: time_zone
+        data_type: text
+        description: '{{ doc("time_zone") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Time Zone
+              semantic_type: type/Category
+              has_field_values: list
+      - name: campaign_status
+        data_type: text
+        description: '{{ doc("campaign_status") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Campaign Status
+              semantic_type: type/Category
+              has_field_values: list
+      - name: campaign_state
+        data_type: text
+        description: '{{ doc("campaign_state") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Campaign State
+              semantic_type: type/Category
+              has_field_values: list
+      - name: campaign_type
+        data_type: text
+        description: '{{ doc("campaign_type") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Campaign Type
+              semantic_type: type/Category
+              has_field_values: list
+      - name: is_listed
+        data_type: boolean
+        description: '{{ doc("is_listed") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Is Listed
+              semantic_type: type/Category
+              has_field_values: list
+      - name: all_conversions
+        data_type: numeric(18,6)
+        description: '{{ doc("all_conversions") }}'
+        config:
+          meta:
+            metabase:
+              display_name: All Conversions
+              semantic_type: null
+              has_field_values: none
+      - name: conversions_primary
+        data_type: numeric(18,6)
+        description: '{{ doc("conversions_primary") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Primary Conversions
+              semantic_type: null
+              has_field_values: none
+      - name: fx_rate_into_reporting_currency
+        data_type: numeric
+        description: '{{ doc("fx_rate_into_reporting_currency") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Rate in Reporting Currency
+              semantic_type: null
+              has_field_values: none
+      - name: fx_rate_date
+        data_type: date
+        description: '{{ doc("fx_rate_date") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Rate Date
+              semantic_type: null
+              has_field_values: none
+      - name: is_fx_rate_carried_forward
+        data_type: boolean
+        description: '{{ doc("is_fx_rate_carried_forward") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Rate Is Carried Forward
+              semantic_type: type/Category
+              has_field_values: list
+      - name: loaded_at
+        data_type: timestamp with time zone
+        description: '{{ doc("loaded_at") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Loaded at
+              semantic_type: null
+              has_field_values: none
+      - name: is_account_active
+        data_type: boolean
+        description: '{{ doc("is_account_active") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Account Is Active
+              semantic_type: type/Category
+              has_field_values: list
   - name: ad_conversions_campaign_daily
     description: >-
-      Conversions by day, campaign and conversion action on every platform. One row is one
-      conversion action of one campaign of one ad account on one day, in the time zone of the
-      account, with any conversion: report_date, platform, account_id, campaign_id and
-      conversion_action_id together are its key. Each action has a category (conversion_category)
-      and says whether it counts in the conversions of the campaign (is_primary): the rows of the
-      primary actions add up to the conversions of ad_stats_campaign_daily. Money is in the currency
-      of the account (currency) and in the reporting currency (reporting_currency); add up money
-      across accounts with the columns that end in _reporting. Its platforms are those of
-      ad_platforms with the kind ads.
+      Conversions by day, campaign and conversion action on every platform, a view over
+      core.ad_conversions_campaign_daily. One row is one conversion action of one campaign of one ad
+      account on one day, in the time zone of the account, with any conversion: report_date,
+      platform, account_id, campaign_id and conversion_action_id together are its key. Each action
+      has a category (conversion_category) and says whether it is primary for the deployment
+      (is_primary): the rows of the primary actions add up to conversions_primary of
+      ad_stats_campaign_daily, through all_conversions where the platform has it. conversions is the
+      own metric of conversions of the platform for the action, 0 on Google for an action that the
+      metric leaves out, which all_conversions counts. Money is in the currency of the account
+      (currency) and in the reporting currency (reporting_currency), at the rate of the day of the
+      row (fx_rate_into_reporting_currency); add up money across accounts with the columns that end
+      in _reporting. Its platforms are those of ad_platforms with the kind ads. Its tests read the
+      days of the windows that the run of the transform pinned.
     config:
       contract:
         enforced: true
       meta:
         metabase:
           display_name: Conversions by Campaign, Day and Action
-    constraints:
-      - type: primary_key
-        columns: [report_date, platform, account_id, campaign_id, conversion_action_id]
     data_tests:
       - unique_combination:
           arguments:
             columns: [report_date, platform, account_id, campaign_id, conversion_action_id]
+          config:
+            where: >-
+              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              and outcome = 'loaded')
     columns:
       - name: report_date
         data_type: date
         description: '{{ doc("report_date") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -410,6 +581,10 @@ models:
           - accepted_values:
               arguments:
                 values: ["purchase", "lead", "sign_up", "add_to_cart", "app_install", "other"]
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -437,7 +612,12 @@ models:
       - name: currency
         data_type: text
         description: '{{ doc("currency") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -466,11 +646,19 @@ models:
         data_type: text
         description: '{{ doc("reporting_currency") }}'
         data_tests:
-          - not_null
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
           - accepted_values:
               name: ad_conversions_campaign_daily_has_one_reporting_currency
               arguments:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -487,29 +675,104 @@ models:
               semantic_type: type/Currency
               has_field_values: none
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
+      - name: time_zone
+        data_type: text
+        description: '{{ doc("time_zone") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Time Zone
+              semantic_type: type/Category
+              has_field_values: list
+      - name: all_conversions
+        data_type: numeric(18,6)
+        description: '{{ doc("all_conversions") }}'
+        config:
+          meta:
+            metabase:
+              display_name: All Conversions
+              semantic_type: null
+              has_field_values: none
+      - name: all_conversion_value
+        data_type: numeric(18,6)
+        description: '{{ doc("all_conversion_value") }}'
+        config:
+          meta:
+            metabase:
+              display_name: All Conversion Value
+              semantic_type: null
+              has_field_values: none
+      - name: fx_rate_into_reporting_currency
+        data_type: numeric
+        description: '{{ doc("fx_rate_into_reporting_currency") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Rate in Reporting Currency
+              semantic_type: null
+              has_field_values: none
+      - name: fx_rate_date
+        data_type: date
+        description: '{{ doc("fx_rate_date") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Rate Date
+              semantic_type: null
+              has_field_values: none
+      - name: is_fx_rate_carried_forward
+        data_type: boolean
+        description: '{{ doc("is_fx_rate_carried_forward") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Rate Is Carried Forward
+              semantic_type: type/Category
+              has_field_values: list
+      - name: loaded_at
+        data_type: timestamp with time zone
+        description: '{{ doc("loaded_at") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Loaded at
+              semantic_type: null
+              has_field_values: none
+      - name: is_account_active
+        data_type: boolean
+        description: '{{ doc("is_account_active") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Account Is Active
+              semantic_type: type/Category
+              has_field_values: list
   - name: web_sessions_daily
     description: >-
-      Sessions of web analytics by day, property, source, medium and campaign. One row is the
-      sessions of one property on one day, in the time zone of the property, with one source,
-      medium and campaign: report_date, property_id, session_source, session_medium,
-      session_campaign_name and session_campaign_id together are its key. ad_platform and
-      ad_account_id name the ad campaign whose ID the links carried, when exactly one campaign of
-      the data has it. Revenue is in the currency of the property (currency) and in the reporting
-      currency (reporting_currency). Today it holds the fictional web analytics of the demo; the
-      sources of real web analytics are planned.
+      Sessions of web analytics by day, property, source, medium and campaign, a view over
+      core.web_sessions_daily. One row is one combination of source, medium and campaign of one
+      property on one day, in the time zone of the property: report_date, property_id,
+      session_source, session_medium, session_campaign_name and session_campaign_id together are its
+      key. A session whose links carried the ID of exactly one ad campaign of the core in utm_id
+      names its platform and account (ad_platform, ad_account_id). Revenue is in the currency of the
+      property (currency) and in the reporting currency (reporting_currency), at the rate of the day
+      of the row; add up revenue across properties with total_revenue_reporting. Its platforms are
+      those of ad_platforms with the kind web_analytics. Its tests read the days of the windows that
+      the run of the transform pinned.
     config:
       contract:
         enforced: true
       meta:
         metabase:
           display_name: Web Sessions by Day
-    constraints:
-      - type: primary_key
-        columns: [report_date, property_id, session_source, session_medium, session_campaign_name, session_campaign_id]
     data_tests:
       - unique_combination:
           arguments:
             columns: [report_date, property_id, session_source, session_medium, session_campaign_name, session_campaign_id]
+          config:
+            where: >-
+              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              and outcome = 'loaded')
     columns:
       - name: report_date
         data_type: date
@@ -690,11 +953,19 @@ models:
         data_type: text
         description: '{{ doc("reporting_currency") }}'
         data_tests:
-          - not_null
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
           - accepted_values:
               name: web_sessions_daily_has_one_reporting_currency
               arguments:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -711,22 +982,74 @@ models:
               semantic_type: type/Currency
               has_field_values: none
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
+      - name: time_zone
+        data_type: text
+        description: '{{ doc("time_zone") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Time Zone
+              semantic_type: type/Category
+              has_field_values: list
+      - name: fx_rate_into_reporting_currency
+        data_type: numeric
+        description: '{{ doc("fx_rate_into_reporting_currency") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Rate in Reporting Currency
+              semantic_type: null
+              has_field_values: none
+      - name: fx_rate_date
+        data_type: date
+        description: '{{ doc("fx_rate_date") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Rate Date
+              semantic_type: null
+              has_field_values: none
+      - name: is_fx_rate_carried_forward
+        data_type: boolean
+        description: '{{ doc("is_fx_rate_carried_forward") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Rate Is Carried Forward
+              semantic_type: type/Category
+              has_field_values: list
+      - name: loaded_at
+        data_type: timestamp with time zone
+        description: '{{ doc("loaded_at") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Loaded at
+              semantic_type: null
+              has_field_values: none
+      - name: is_account_active
+        data_type: boolean
+        description: '{{ doc("is_account_active") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Account Is Active
+              semantic_type: type/Category
+              has_field_values: list
   - name: ad_platforms
     description: >-
-      The platforms of the model, one row each: the ad platforms, the web analytics and the
-      sources of exchange rates whose data the marts hold, with the kind of data that each gives.
-      platform is its key; the marts that name a platform take its name from here. It lists the
-      sources of the connectors, Google Ads and the European Central Bank, and the fictional
-      platforms of the demo, which is_demo marks.
+      The platforms of the model, one row each: the ad platforms, the web analytics and the sources
+      of exchange rates whose data the marts hold, with the kind of data that each gives. platform
+      is its key; the marts that name a platform take its name from here. It lists the sources of
+      the connectors, Google Ads and the European Central Bank, and the fictional platforms of the
+      demo, which is_demo marks. A view whose rows are those of the seed of the platforms of the
+      base package, written into the view when it is built.
     config:
       contract:
         enforced: true
       meta:
         metabase:
           display_name: Ad Platforms
-    constraints:
-      - type: primary_key
-        columns: [platform]
     data_tests:
       - unique_combination:
           arguments:
@@ -779,20 +1102,19 @@ models:
               has_field_values: list
   - name: ad_accounts
     description: >-
-      The ad accounts of every ad platform, one row each, with their client, currency and time
-      zone, and the first and last days that their statistics in ad_stats_campaign_daily cover.
-      platform and account_id together are its key. The client of an account is the one that the
-      settings of the deployment name for it, else the one of the demo, else Unassigned. Its
-      platforms are those of ad_platforms with the kind ads.
+      The ad accounts of every ad platform, one row each, a view over core.dim_account, with their
+      client, currency and time zone, the first and last days that the statistics of their campaigns
+      in the core cover, and whether the settings still name them (is_account_active). platform and
+      account_id together are its key. The client of an account is the one that the settings of the
+      deployment name for it, else the one of the demo, else Unassigned. An account that leaves the
+      settings keeps its row and its data. Its platforms are those of ad_platforms with the kind
+      ads.
     config:
       contract:
         enforced: true
       meta:
         metabase:
           display_name: Ad Accounts
-    constraints:
-      - type: primary_key
-        columns: [platform, account_id]
     data_tests:
       - unique_combination:
           arguments:
@@ -910,21 +1232,27 @@ models:
               display_name: Last Report Date
               semantic_type: null
               has_field_values: none
+      - name: is_account_active
+        data_type: boolean
+        description: '{{ doc("is_account_active") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Account Is Active
+              semantic_type: type/Category
+              has_field_values: list
   - name: clients
     description: >-
-      The clients of the business, such as brands, shops or legal entities, one row each: those
-      that the settings of the deployment name, those of the demo while an account or a property
-      of the demo is in the data, and the default client Unassigned, which holds the accounts
-      that no setting names. client_id is its key, and the other marts name a client by it.
+      The clients of the business, one row each, a view over core.dim_client: the default client
+      Unassigned, and each client that an account or a property of the core belongs to. client_id is
+      its key. A client that the settings name with no account yet, and a client of the demo in a
+      deployment without the demo, are not here.
     config:
       contract:
         enforced: true
       meta:
         metabase:
           display_name: Clients
-    constraints:
-      - type: primary_key
-        columns: [client_id]
     data_tests:
       - unique_combination:
           arguments:
@@ -959,20 +1287,18 @@ models:
               has_field_values: list
   - name: ad_campaigns
     description: >-
-      The campaigns of every ad platform, one row each, as their newest version has them,
-      whether the platform still lists them or not: the current name, status and type, the first
-      and last days that their statistics in ad_stats_campaign_daily cover, and how many names
-      each had, which ad_campaign_names lists. platform, account_id and campaign_id together are
-      its key. Its platforms are those of ad_platforms with the kind ads.
+      The campaigns of every ad platform, one row each, a view over core.dim_campaign, with their
+      current name, status, state and type, whether the platform still lists them (is_listed), the
+      first and last days that their statistics in the core cover, and how many names they had.
+      platform, account_id and campaign_id together are its key. A campaign that the platform no
+      longer lists, or that only the statistics name, stays, as its spend counts. Its platforms are
+      those of ad_platforms with the kind ads.
     config:
       contract:
         enforced: true
       meta:
         metabase:
           display_name: Ad Campaigns
-    constraints:
-      - type: primary_key
-        columns: [platform, account_id, campaign_id]
     data_tests:
       - unique_combination:
           arguments:
@@ -1099,23 +1425,38 @@ models:
               display_name: Name Count
               semantic_type: type/Quantity
               has_field_values: none
+      - name: campaign_state
+        data_type: text
+        description: '{{ doc("campaign_state") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Campaign State
+              semantic_type: type/Category
+              has_field_values: list
+      - name: is_listed
+        data_type: boolean
+        description: '{{ doc("is_listed") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Is Listed
+              semantic_type: type/Category
+              has_field_values: list
   - name: ad_campaign_names
     description: >-
-      The names that the campaigns of every ad platform had, as the loads saw them: one row for
-      each campaign and each period in which it kept one name, from valid_from until valid_to,
-      and is_current on the name that it has now. Versions of a campaign that differ in another
-      field only, such as the status, are one period. platform, account_id, campaign_id and
-      valid_from together are its key. Its platforms are those of ad_platforms with the kind
-      ads.
+      The names that each campaign had, one row for each period of a name, a view over
+      core.dim_campaign_versions: the name, from when and until when the campaign had it, and
+      whether it has it now. platform, account_id, campaign_id and valid_from together are its key.
+      A period starts when a run of the transform first saw the name, so a campaign has the names
+      that the runs saw, from its first run on. Join it on the day of a fact to name a campaign as
+      it was named on that day.
     config:
       contract:
         enforced: true
       meta:
         metabase:
           display_name: Ad Campaign Names
-    constraints:
-      - type: primary_key
-        columns: [platform, account_id, campaign_id, valid_from]
     data_tests:
       - unique_combination:
           arguments:
@@ -1188,23 +1529,17 @@ models:
               has_field_values: list
   - name: fx_rates_daily
     description: >-
-      The exchange rates into the reporting currency, one row for each day and each currency of
-      the data: the rates at which the columns that end in _reporting convert the money of each
-      day, through the reference rates of the euro, each the last one published on or before the
-      day. rate_date, currency and reporting_currency together are its key. The reporting
-      currency has the rate 1 on every day; another currency has rows from the first day on which
-      the source published a rate for it. The rates are those of the European Central Bank once
-      its load has run; the fictional source of the demo, which covers USD and EUR, gives them
-      only while the warehouse has none of the bank. rate_source names the source of each row.
+      The rate of each currency of the data into the reporting currency on each day, a view over
+      core.fx_rates_daily: one row for each day and currency, through the reference rates of the
+      euro, the last published one carried over a day without a publication (is_carried_forward).
+      rate_date, currency and reporting_currency together are its key, and it holds the one
+      reporting currency of the deployment.
     config:
       contract:
         enforced: true
       meta:
         metabase:
           display_name: Exchange Rates by Day
-    constraints:
-      - type: primary_key
-        columns: [rate_date, currency, reporting_currency]
     data_tests:
       - unique_combination:
           arguments:
@@ -1272,14 +1607,19 @@ models:
               has_field_values: list
   - name: ad_stats_ad_group_daily
     description: >-
-      Advertising statistics by day and ad group on every platform. One row is one ad group of one
-      ad account on one day, in the time zone of the account: report_date, platform, account_id and
-      ad_group_id together are its key. Money is in the currency of the account (currency) and in
-      the reporting currency (reporting_currency); add up money across accounts with the columns
-      that end in _reporting. Conversions are those of the primary conversion actions only;
-      ad_conversions_campaign_daily has the conversions by action, at the grain of campaigns. A
-      Performance Max campaign of Google has no ad groups, so the ad groups of an account can add up
-      to less than its campaigns in ad_stats_campaign_daily; elsewhere they add up to them.
+      Advertising statistics by day and ad group on every platform, ad sets of Meta among them, a
+      view over core.ad_stats_ad_group_daily. One row is one ad group of one ad account on one day,
+      in the time zone of the account: report_date, platform, account_id and ad_group_id together
+      are its key. The names, statuses and states are the current ones of the ad group, its campaign
+      and its account. Money is in the currency of the account (currency) and in the reporting
+      currency (reporting_currency), at the rate of the day of the row
+      (fx_rate_into_reporting_currency); add up money across accounts with the columns that end in
+      _reporting. conversions is the own metric of conversions of the platform, and none on Meta;
+      conversions_primary is none at this level, as the conversions by action of ad groups are a
+      module. The ad groups of a campaign can add up to less than ad_stats_campaign_daily, as a
+      campaign of Performance Max has none. A row whose measures are all zero is not kept. Its
+      platforms are those of ad_platforms with the kind ads. Its tests read the days of the windows
+      that the run of the transform pinned.
     config:
       # The table that dbt builds has exactly these columns, with these types, or the build fails.
       contract:
@@ -1293,21 +1633,24 @@ models:
             Over the statistics of the ad groups, which leave out Performance Max campaigns, as
             they have no ad groups.
           metrics: *kpis
-    # The key, as a constraint that PostgreSQL enforces. It has no name on purpose: dbt builds the
-    # table under a temporary name and renames it, and the index of the key keeps the name it got,
-    # so a named key would collide with itself on the next run.
-    constraints:
-      - type: primary_key
-        columns: [report_date, platform, account_id, ad_group_id]
     data_tests:
       - unique_combination:
           arguments:
             columns: [report_date, platform, account_id, ad_group_id]
+          config:
+            where: >-
+              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              and outcome = 'loaded')
     columns:
       - name: report_date
         data_type: date
         description: '{{ doc("report_date") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1317,7 +1660,12 @@ models:
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1338,7 +1686,12 @@ models:
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1359,7 +1712,12 @@ models:
       - name: account_id
         data_type: text
         description: '{{ doc("account_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1378,7 +1736,12 @@ models:
       - name: campaign_id
         data_type: text
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1397,7 +1760,12 @@ models:
       - name: ad_group_id
         data_type: text
         description: '{{ doc("ad_group_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1416,7 +1784,12 @@ models:
       - name: currency
         data_type: text
         description: '{{ doc("currency") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1445,7 +1818,12 @@ models:
         data_type: numeric(18,6)
         description: '{{ doc("spend") }}'
         # Two currencies in the table: a plain number (docs/reference/describe-the-marts.md).
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1477,11 +1855,19 @@ models:
         # in _reporting to be money in Metabase. The test has a name of its own, as the name that
         # dbt makes would carry the expression.
         data_tests:
-          - not_null
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
           - accepted_values:
               name: ad_stats_ad_group_daily_has_one_reporting_currency
               arguments:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1491,7 +1877,12 @@ models:
       - name: spend_reporting
         data_type: numeric(18,6)
         description: '{{ doc("spend_reporting") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1509,16 +1900,127 @@ models:
               semantic_type: type/Currency
               has_field_values: none
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
+      - name: time_zone
+        data_type: text
+        description: '{{ doc("time_zone") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Time Zone
+              semantic_type: type/Category
+              has_field_values: list
+      - name: ad_group_status
+        data_type: text
+        description: '{{ doc("ad_group_status") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Ad Group Status
+              semantic_type: type/Category
+              has_field_values: list
+      - name: ad_group_state
+        data_type: text
+        description: '{{ doc("ad_group_state") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Ad Group State
+              semantic_type: type/Category
+              has_field_values: list
+      - name: ad_group_type
+        data_type: text
+        description: '{{ doc("ad_group_type") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Ad Group Type
+              semantic_type: type/Category
+              has_field_values: list
+      - name: is_listed
+        data_type: boolean
+        description: '{{ doc("is_listed") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Is Listed
+              semantic_type: type/Category
+              has_field_values: list
+      - name: all_conversions
+        data_type: numeric(18,6)
+        description: '{{ doc("all_conversions") }}'
+        config:
+          meta:
+            metabase:
+              display_name: All Conversions
+              semantic_type: null
+              has_field_values: none
+      - name: conversions_primary
+        data_type: numeric(18,6)
+        description: '{{ doc("conversions_primary") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Primary Conversions
+              semantic_type: null
+              has_field_values: none
+      - name: fx_rate_into_reporting_currency
+        data_type: numeric
+        description: '{{ doc("fx_rate_into_reporting_currency") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Rate in Reporting Currency
+              semantic_type: null
+              has_field_values: none
+      - name: fx_rate_date
+        data_type: date
+        description: '{{ doc("fx_rate_date") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Rate Date
+              semantic_type: null
+              has_field_values: none
+      - name: is_fx_rate_carried_forward
+        data_type: boolean
+        description: '{{ doc("is_fx_rate_carried_forward") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Rate Is Carried Forward
+              semantic_type: type/Category
+              has_field_values: list
+      - name: loaded_at
+        data_type: timestamp with time zone
+        description: '{{ doc("loaded_at") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Loaded at
+              semantic_type: null
+              has_field_values: none
+      - name: is_account_active
+        data_type: boolean
+        description: '{{ doc("is_account_active") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Account Is Active
+              semantic_type: type/Category
+              has_field_values: list
   - name: ad_stats_ad_daily
     description: >-
-      Advertising statistics by day and ad on every platform. One row is one ad of one ad account on
-      one day, in the time zone of the account: report_date, platform, account_id, ad_group_id and
-      ad_id together are its key. Money is in the currency of the account (currency) and in the
-      reporting currency (reporting_currency); add up money across accounts with the columns that
-      end in _reporting. Conversions are those of the primary conversion actions only;
-      ad_conversions_campaign_daily has the conversions by action, at the grain of campaigns. An ad
-      of a type that has no name on its platform, such as a responsive search ad of Google, has its
-      ID as its name.
+      Advertising statistics by day and ad on every platform, a view over core.ad_stats_ad_daily.
+      One row is one ad of one ad group of one ad account on one day, in the time zone of the
+      account: report_date, platform, account_id, ad_group_id and ad_id together are its key, as an
+      ad is defined only inside its ad group. The names, statuses and states are the current ones of
+      the ad, its ad group, its campaign and its account. Money is in the currency of the account
+      (currency) and in the reporting currency (reporting_currency), at the rate of the day of the
+      row (fx_rate_into_reporting_currency); add up money across accounts with the columns that end
+      in _reporting. conversions is the own metric of conversions of the platform, and none on Meta;
+      conversions_primary is none at this level, as the conversions by action of ads are a module. A
+      row whose measures are all zero is not kept. Its platforms are those of ad_platforms with the
+      kind ads. Its tests read the days of the windows that the run of the transform pinned.
     config:
       # The table that dbt builds has exactly these columns, with these types, or the build fails.
       contract:
@@ -1532,21 +2034,24 @@ models:
             Over the statistics of the ads, which leave out Performance Max campaigns, as they have
             no ads.
           metrics: *kpis
-    # The key, as a constraint that PostgreSQL enforces. It has no name on purpose: dbt builds the
-    # table under a temporary name and renames it, and the index of the key keeps the name it got,
-    # so a named key would collide with itself on the next run.
-    constraints:
-      - type: primary_key
-        columns: [report_date, platform, account_id, ad_group_id, ad_id]
     data_tests:
       - unique_combination:
           arguments:
             columns: [report_date, platform, account_id, ad_group_id, ad_id]
+          config:
+            where: >-
+              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              and outcome = 'loaded')
     columns:
       - name: report_date
         data_type: date
         description: '{{ doc("report_date") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1556,7 +2061,12 @@ models:
       - name: platform
         data_type: text
         description: '{{ doc("platform") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1577,7 +2087,12 @@ models:
       - name: client_id
         data_type: text
         description: '{{ doc("client_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1598,7 +2113,12 @@ models:
       - name: account_id
         data_type: text
         description: '{{ doc("account_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1617,7 +2137,12 @@ models:
       - name: campaign_id
         data_type: text
         description: '{{ doc("campaign_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1636,7 +2161,12 @@ models:
       - name: ad_group_id
         data_type: text
         description: '{{ doc("ad_group_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1655,7 +2185,12 @@ models:
       - name: ad_id
         data_type: text
         description: '{{ doc("ad_id") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1674,7 +2209,12 @@ models:
       - name: currency
         data_type: text
         description: '{{ doc("currency") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1703,7 +2243,12 @@ models:
         data_type: numeric(18,6)
         description: '{{ doc("spend") }}'
         # Two currencies in the table: a plain number (docs/reference/describe-the-marts.md).
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1735,11 +2280,19 @@ models:
         # in _reporting to be money in Metabase. The test has a name of its own, as the name that
         # dbt makes would carry the expression.
         data_tests:
-          - not_null
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
           - accepted_values:
               name: ad_stats_ad_daily_has_one_reporting_currency
               arguments:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1749,7 +2302,12 @@ models:
       - name: spend_reporting
         data_type: numeric(18,6)
         description: '{{ doc("spend_reporting") }}'
-        data_tests: [not_null]
+        data_tests:
+          - not_null:
+              config:
+                where: >-
+                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  and outcome = 'loaded')
         config:
           meta:
             metabase:
@@ -1767,22 +2325,127 @@ models:
               semantic_type: type/Currency
               has_field_values: none
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
+      - name: time_zone
+        data_type: text
+        description: '{{ doc("time_zone") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Time Zone
+              semantic_type: type/Category
+              has_field_values: list
+      - name: ad_status
+        data_type: text
+        description: '{{ doc("ad_status") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Ad Status
+              semantic_type: type/Category
+              has_field_values: list
+      - name: ad_state
+        data_type: text
+        description: '{{ doc("ad_state") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Ad State
+              semantic_type: type/Category
+              has_field_values: list
+      - name: ad_type
+        data_type: text
+        description: '{{ doc("ad_type") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Ad Type
+              semantic_type: type/Category
+              has_field_values: list
+      - name: is_listed
+        data_type: boolean
+        description: '{{ doc("is_listed") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Is Listed
+              semantic_type: type/Category
+              has_field_values: list
+      - name: all_conversions
+        data_type: numeric(18,6)
+        description: '{{ doc("all_conversions") }}'
+        config:
+          meta:
+            metabase:
+              display_name: All Conversions
+              semantic_type: null
+              has_field_values: none
+      - name: conversions_primary
+        data_type: numeric(18,6)
+        description: '{{ doc("conversions_primary") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Primary Conversions
+              semantic_type: null
+              has_field_values: none
+      - name: fx_rate_into_reporting_currency
+        data_type: numeric
+        description: '{{ doc("fx_rate_into_reporting_currency") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Rate in Reporting Currency
+              semantic_type: null
+              has_field_values: none
+      - name: fx_rate_date
+        data_type: date
+        description: '{{ doc("fx_rate_date") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Rate Date
+              semantic_type: null
+              has_field_values: none
+      - name: is_fx_rate_carried_forward
+        data_type: boolean
+        description: '{{ doc("is_fx_rate_carried_forward") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Rate Is Carried Forward
+              semantic_type: type/Category
+              has_field_values: list
+      - name: loaded_at
+        data_type: timestamp with time zone
+        description: '{{ doc("loaded_at") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Loaded at
+              semantic_type: null
+              has_field_values: none
+      - name: is_account_active
+        data_type: boolean
+        description: '{{ doc("is_account_active") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Account Is Active
+              semantic_type: type/Category
+              has_field_values: list
   - name: ad_groups
     description: >-
-      The ad groups of every ad platform, the ad sets of Meta among them, one row each, as their
-      newest version has them, whether the platform still lists them or not: their campaign, their
-      current name, status and type, and the first and last days that their statistics in
-      ad_stats_ad_group_daily cover. platform, account_id and ad_group_id together are its key. A
-      Performance Max campaign of Google has none.
+      The ad groups of every ad platform, ad sets of Meta among them, one row each, a view over
+      core.dim_ad_group, with their campaign, their current name, status, state and type, whether
+      the platform still lists them (is_listed), and the first and last days that their statistics
+      in the core cover. platform, account_id and ad_group_id together are its key. Its platforms
+      are those of ad_platforms with the kind ads.
     config:
       contract:
         enforced: true
       meta:
         metabase:
           display_name: Ad Groups
-    constraints:
-      - type: primary_key
-        columns: [platform, account_id, ad_group_id]
     data_tests:
       - unique_combination:
           arguments:
@@ -1918,22 +2581,38 @@ models:
               display_name: Last Report Date
               semantic_type: null
               has_field_values: none
+      - name: ad_group_state
+        data_type: text
+        description: '{{ doc("ad_group_state") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Ad Group State
+              semantic_type: type/Category
+              has_field_values: list
+      - name: is_listed
+        data_type: boolean
+        description: '{{ doc("is_listed") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Is Listed
+              semantic_type: type/Category
+              has_field_values: list
   - name: ads
     description: >-
-      The ads of every ad platform, one row each, as their newest version has them, whether the
-      platform still lists them or not: their campaign and ad group, their current name, status and
-      type, and the first and last days that their statistics in ad_stats_ad_daily cover. platform,
-      account_id, ad_group_id and ad_id together are its key. An ad of a type that has no name on
-      its platform, such as a responsive search ad of Google, has its ID as its name.
+      The ads of every ad platform, one row each, a view over core.dim_ad, with their campaign and
+      ad group, their current name, status, state and type, whether the platform still lists them
+      (is_listed), and the first and last days that their statistics in the core cover. platform,
+      account_id, ad_group_id and ad_id together are its key, as an ad is defined only inside its ad
+      group. An ad without a name on its platform shows its ID. Its platforms are those of
+      ad_platforms with the kind ads.
     config:
       contract:
         enforced: true
       meta:
         metabase:
           display_name: Ads
-    constraints:
-      - type: primary_key
-        columns: [platform, account_id, ad_group_id, ad_id]
     data_tests:
       - unique_combination:
           arguments:
@@ -2087,3 +2766,127 @@ models:
               display_name: Last Report Date
               semantic_type: null
               has_field_values: none
+      - name: ad_state
+        data_type: text
+        description: '{{ doc("ad_state") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Ad State
+              semantic_type: type/Category
+              has_field_values: list
+      - name: is_listed
+        data_type: boolean
+        description: '{{ doc("is_listed") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Is Listed
+              semantic_type: type/Category
+              has_field_values: list
+  - name: conversion_actions
+    description: >-
+      The conversion actions of every ad platform, one row each, a view over
+      core.dim_conversion_action, with the category of each action, what the platform says of it,
+      and whether it is primary for the deployment (is_primary), that is whether it counts in
+      conversions_primary of ad_stats_campaign_daily. platform and conversion_action_id together are
+      its key. An action is primary as extensions/model/conversion_actions.toml says where it names
+      the action, else as the platform counts it in its own metric of conversions, else as the seed
+      of conversion actions of the base package says.
+    config:
+      contract:
+        enforced: true
+      meta:
+        metabase:
+          display_name: Conversion Actions
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, conversion_action_id]
+    columns:
+      - name: platform
+        data_type: text
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+        config:
+          meta:
+            metabase:
+              display_name: Platform Code
+              semantic_type: type/FK
+              has_field_values: list
+              fk_target_table: marts.ad_platforms
+              fk_target_field: platform
+      - name: platform_name
+        data_type: text
+        description: '{{ doc("platform_name") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Platform
+              semantic_type: type/Category
+              has_field_values: list
+      - name: conversion_action_id
+        data_type: text
+        description: '{{ doc("conversion_action_id") }}'
+        data_tests: [not_null]
+        config:
+          meta:
+            metabase:
+              display_name: Conversion Action ID
+              semantic_type: type/Category
+              has_field_values: none
+      - name: conversion_action_name
+        data_type: text
+        description: '{{ doc("conversion_action_name") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Conversion Action
+              semantic_type: type/Name
+              has_field_values: search
+      - name: conversion_action_status
+        data_type: text
+        description: '{{ doc("conversion_action_status") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Conversion Action Status
+              semantic_type: type/Category
+              has_field_values: list
+      - name: platform_category
+        data_type: text
+        description: '{{ doc("platform_category") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Platform Category
+              semantic_type: type/Category
+              has_field_values: list
+      - name: conversion_category
+        data_type: text
+        description: '{{ doc("conversion_category") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Conversion Category
+              semantic_type: type/Category
+              has_field_values: list
+      - name: include_in_conversions_metric
+        data_type: boolean
+        description: '{{ doc("include_in_conversions_metric") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Counts in the Metric of the Platform
+              semantic_type: type/Category
+              has_field_values: list
+      - name: is_primary
+        data_type: boolean
+        description: '{{ doc("is_primary") }}'
+        data_tests: [not_null]
+        config:
+          meta:
+            metabase:
+              display_name: Is Primary
+              semantic_type: type/Category
+              has_field_values: list

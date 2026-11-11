@@ -74,6 +74,20 @@ MARTS = (
     "ad_stats_ad_daily",
     "ad_groups",
     "ads",
+    "conversion_actions",
+)
+# The views of the facts and their facts in the core, with a measure of each (ADR-0037).
+FACT_VIEWS = {
+    "ad_stats_campaign_daily": "spend",
+    "ad_stats_ad_group_daily": "spend",
+    "ad_stats_ad_daily": "spend",
+    "ad_conversions_campaign_daily": "conversions",
+    "web_sessions_daily": "sessions",
+}
+# The oid of each view of marts, which a run of the transform keeps (ADR-0039).
+VIEW_OIDS = (
+    "SELECT string_agg(relname || ':' || oid, ' ' ORDER BY relname) FROM pg_class "
+    "WHERE relnamespace = 'marts'::regnamespace AND relkind = 'v'"
 )
 # The task of the mart: each model and each seed is one task, dbt build (ADR-0028).
 MART_BUILD = "dbt.ad_stats_campaign_daily_model_build"
@@ -112,12 +126,14 @@ RAW_SOCIAL_CONVERSIONS = (
     "WHERE a.action_type "
     "IN ('offsite_conversion.fb_pixel_purchase', 'offsite_conversion.fb_pixel_lead')"
 )
-# The versions of the names of the campaigns, as staging has them from the versions that dlt keeps
-# (scd2), and the periods of the names of the mart: platform, account, campaign, name, from, to.
-CAMPAIGN_VERSIONS = " UNION ALL ".join(
-    "SELECT platform, account_id, campaign_id, observed_name, valid_from, valid_to "  # noqa: S608 (constants of this file)
-    f"FROM staging.stg_{code}__campaigns"
-    for code in ("demo_search", "demo_social", "demo_video")
+# The versions of the campaigns that the core keeps (ADR-0036), and the periods of the names of the
+# mart: platform, account, campaign, name, from, to, in UTC, and none for the one that holds.
+CAMPAIGN_VERSIONS = (
+    "SELECT a.platform, a.account_id, c.campaign_id_text, v.campaign_name, "
+    "v.dbt_valid_from AT TIME ZONE 'UTC', "
+    "nullif(v.dbt_valid_to, TIMESTAMP '9999-12-31 00:00:00') AT TIME ZONE 'UTC' "
+    "FROM core.dim_campaign_versions AS v JOIN core.dim_account AS a USING (account_sk) "
+    "JOIN core.dim_campaign AS c USING (account_sk, campaign_id)"
 )
 NAME_PERIODS = (
     "SELECT platform, account_id, campaign_id, observed_name, valid_from, valid_to "
@@ -446,11 +462,45 @@ def test_the_mart_holds_the_statistics_of_raw(env, transform_run, code):
     assert raw[0] > 0, f"no statistics of {code} in raw"
 
 
-def test_the_conversions_of_a_campaign_are_those_of_its_primary_actions(env, transform_run):
+def test_the_primary_conversions_of_a_campaign_are_those_of_its_primary_actions(env, transform_run):
     raw = Decimal(warehouse_output(env, RAW_SOCIAL_CONVERSIONS) or 0)
-    social = f"SELECT sum(conversions) FROM {MART} WHERE platform = 'demo_social'"  # noqa: S608 (constants of this file)
+    social = f"SELECT sum(conversions_primary) FROM {MART} WHERE platform = 'demo_social'"  # noqa: S608 (constants of this file)
     assert Decimal(warehouse_output(env, social) or 0) == raw
     assert raw > 0, "no conversion of a primary action of demo_social in raw"
+    # conversions is the metric of the platform (ADR-0037), and Meta, which demo_social mimics, has
+    # none: it counts each action apart.
+    metric = f"SELECT count(conversions) FROM {MART} WHERE platform = 'demo_social'"  # noqa: S608 (constants of this file)
+    assert warehouse_output(env, metric) == "0"
+
+
+@pytest.mark.parametrize("view", sorted(FACT_VIEWS))
+def test_a_view_of_a_fact_holds_its_rows_and_a_sum_by_days_is_the_total(env, transform_run, view):
+    # A row of a view is a row of its fact: each dimension joins on its unique key, so no row
+    # doubles or goes (ADR-0037). The amounts are not rounded in a row beyond those of the fact, so
+    # the sums of the days add up to the total, in the currency of the account and for reporting.
+    measure = FACT_VIEWS[view]
+    amount, reporting = {
+        "ad_conversions_campaign_daily": ("conversion_value", "conversion_value_reporting"),
+        "web_sessions_daily": ("total_revenue", "total_revenue_reporting"),
+    }.get(view, ("spend", "spend_reporting"))
+    core = warehouse_output(env, f"SELECT count(*), sum({measure}) FROM core.{view}")  # noqa: S608 (constants of this file)
+    shown = warehouse_output(env, f"SELECT count(*), sum({measure}) FROM marts.{view}")  # noqa: S608 (constants of this file)
+    assert shown == core
+    assert int(shown.split("|")[0]) > 0, view
+    by_days = warehouse_output(
+        env,
+        f"SELECT sum(m), sum(r) FROM (SELECT report_date, sum({measure}) AS m, "  # noqa: S608 (constants of this file)
+        f"sum({reporting}) AS r FROM marts.{view} GROUP BY report_date) AS d",
+    )
+    total = warehouse_output(env, f"SELECT sum({measure}), sum({reporting}) FROM marts.{view}")  # noqa: S608 (constants of this file)
+    assert by_days == total
+    # Every row has its account, its client and a rate of its day.
+    missing = warehouse_output(
+        env,
+        f"SELECT count(*) FROM marts.{view} WHERE platform IS NULL OR client_name IS NULL "  # noqa: S608 (constants of this file)
+        f"OR ({reporting} IS NULL AND {amount} IS NOT NULL)",
+    )
+    assert missing == "0", view
 
 
 def test_the_rates_of_the_mart_are_those_of_the_generator(env, transform_run):
@@ -516,12 +566,16 @@ def test_every_day_of_a_campaign_has_its_current_name(env, transform_run):
 def test_the_names_of_a_campaign_are_the_periods_of_its_versions(env, transform_run):
     # The versions of one name in a row, as a change of status makes them, are one period, open
     # while its last version is: a period of each version, or a closed period of an open name,
-    # would show a name twice or no current name.
+    # would show a name twice or no current name. The versions are those of the core, from the
+    # first run of the transform on (ADR-0036).
     expected = name_periods(rows_of(env, CAMPAIGN_VERSIONS))
     assert sorted(rows_of(env, NAME_PERIODS)) == expected
-    versions = int(warehouse_output(env, f"SELECT count(*) FROM ({CAMPAIGN_VERSIONS}) AS v"))  # noqa: S608 (constants of this file)
-    assert len(expected) < versions, "no campaign has two versions of one name in a row"
-    assert any(period[5] == "" for period in expected), "no campaign has a current name"
+    campaigns = int(warehouse_output(env, "SELECT count(*) FROM core.dim_campaign"))
+    assert len({period[:3] for period in expected}) == campaigns
+    assert all(
+        any(period[:3] == key and period[5] == "" for period in expected)
+        for key in {period[:3] for period in expected}
+    ), "a campaign has no current name"
 
 
 def test_the_accounts_of_the_demo_belong_to_its_clients(env, transform_run):
@@ -558,13 +612,13 @@ def test_the_day_that_the_demo_misses_is_a_warning_and_has_no_row(
         f"AND f.report_date = DATE '{day.isoformat()}'",
     )
     assert int(held) == 0
-    [tests] = [
-        i
-        for i in task_instances(airflow_url, token, run)
-        if i["task_id"] == "dbt.int_ad_stats__unioned_model_build"
-    ]
+    # The singular test of the missing days reads the view of campaigns alone, so it runs in the
+    # task of that view.
+    [tests] = [i for i in task_instances(airflow_url, token, run) if i["task_id"] == MART_BUILD]
     assert tests["state"] == "success", "a warning failed the task"
-    assert logged(task_log(airflow_url, token, tests), "int_ad_stats__unioned_has_no_missing_day")
+    assert logged(
+        task_log(airflow_url, token, tests), "assert_every_day_of_an_account_has_statistics"
+    )
 
 
 # The rows of the facts of statistics of the core in a month that the freeze keeps, whose load is
@@ -615,16 +669,20 @@ def test_cosmos_emits_the_asset_of_the_mart(airflow_url, token, transform_run):
 
 @pytest.mark.parametrize("mart", MARTS)
 def test_metabase_reader_reads_every_mart(env, transform_run, mart):
-    # dbt creates the tables as transformer, and the default privileges of transformer give
-    # metabase_reader the new tables of marts.
+    # dbt creates the views as transformer, the default privileges of transformer give
+    # metabase_reader the new views of marts, and a view reads the core with the rights of its
+    # owner (ADR-0037).
     rows = warehouse_output(env, f"SELECT count(*) FROM marts.{mart}", "metabase_reader")  # noqa: S608 (constants of this file)
     assert int(rows) > 0, mart
+    kind = f"SELECT relkind FROM pg_class WHERE oid = 'marts.{mart}'::regclass"  # noqa: S608 (constants of this file)
+    assert warehouse_output(env, kind) == "v", mart
 
 
-def test_metabase_reader_reads_no_layer_below_the_marts(env, transform_run):
-    result = warehouse(
-        env, "SELECT 1 FROM staging.int_ad_stats__unioned LIMIT 1", "metabase_reader"
-    )
+@pytest.mark.parametrize(
+    "relation", ["staging.stg_demo_search__campaign_stats", "core.ad_stats_campaign_daily"]
+)
+def test_metabase_reader_reads_no_layer_below_the_marts(env, transform_run, relation):
+    result = warehouse(env, f"SELECT 1 FROM {relation} LIMIT 1", "metabase_reader")  # noqa: S608 (constants of this file)
     assert result.returncode != 0
     assert "permission denied" in result.stderr
 
@@ -644,10 +702,16 @@ def put_back(env, airflow_url, token, transform_run):
     end. One run of the transform after the last of them puts the marts back as the demo makes
     them, and checks it: a run takes minutes on a runner of CI, so the tests share it."""
     before = totals(env, MART)
+    # The views of marts read the core alone, which no run drops, and the override of the
+    # materialization view keeps a view that exists (ADR-0039): through the failed runs below and
+    # this one, each keeps its oid, so a long query of Metabase never waits for a run.
+    oids = warehouse_output(env, VIEW_OIDS)
+    assert len(oids.split()) == len(MARTS), oids
     yield
     run = transform(airflow_url, token)
     assert run["state"] == "success", run["state"]
     assert totals(env, MART) == before
+    assert warehouse_output(env, VIEW_OIDS) == oids
     clients = warehouse_output(env, "SELECT client_id || ' ' || client_name FROM marts.clients")
     assert "acme" not in clients.split()
     assert "tarnwick Tarnwick Outfitters" in clients.splitlines()

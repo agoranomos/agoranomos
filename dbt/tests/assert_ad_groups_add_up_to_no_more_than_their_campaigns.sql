@@ -14,13 +14,14 @@ with ad_groups as (
         sum(impressions) as impressions,
         sum(clicks) as clicks,
         sum(spend) as spend
-    from {{ ref('int_ad_stats_ad_group__unioned') }}
+    from {{ ref('ad_stats_ad_group_daily') }}
+    where report_date >= {{ window_start() }}
     group by report_date, platform, account_id, campaign_id
 )
 
 select g.report_date, g.platform, g.account_id, g.campaign_id
 from ad_groups as g
-left join {{ ref('int_ad_stats__unioned') }} as c
+left join {{ ref('ad_stats_campaign_daily') }} as c
     on c.report_date = g.report_date and c.platform = g.platform
     and c.account_id = g.account_id and c.campaign_id = g.campaign_id
 where g.impressions > coalesce(c.impressions, 0)
