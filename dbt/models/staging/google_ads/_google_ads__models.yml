@@ -31,6 +31,10 @@ models:
         description: '{{ doc("platform_conversions") }}'
       - name: platform_conversion_value
         description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
   - name: stg_google_ads__campaign_conversions
     description: >-
       The conversions of the campaigns of the Google Ads accounts of the deployment by conversion
@@ -169,6 +173,10 @@ models:
         description: '{{ doc("platform_conversions") }}'
       - name: platform_conversion_value
         description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
   - name: stg_google_ads__ad_group_conversions
     description: >-
       The conversions of the ad groups of the Google Ads accounts of the deployment by conversion
@@ -250,6 +258,10 @@ models:
         description: '{{ doc("platform_conversions") }}'
       - name: platform_conversion_value
         description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
   - name: stg_google_ads__ad_conversions
     description: >-
       The conversions of the ads of the Google Ads accounts of the deployment by conversion action,
@@ -416,3 +428,38 @@ models:
         data_tests: [not_null]
       - name: valid_to
         description: '{{ doc("valid_to") }}'
+  - name: stg_google_ads__account_totals
+    description: >-
+      The totals of the Google Ads accounts of the deployment by day, one row for each account and
+      day with a metric, as the customer resource of each account sums its impressions, clicks and
+      cost over all its campaigns in a request of its own: the side of the platform of G0a
+      (ADR-0035). Money in units, from the micros of the API, and the load of each row. It is empty
+      until the first load. report_date, platform and account_id are its key. int_g1_failures
+      compares the statistics of the campaigns of each account and day with them, and holds an
+      account whose campaigns do not add up to them out of the core and the marts, and
+      core.platform_totals_daily keeps them. Its tests guard the marts: when one of them fails, dbt
+      does not rebuild the models that read this one.
+    columns:
+      - name: report_date
+        description: '{{ doc("report_date") }}'
+        data_tests: [not_null]
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: total_impressions
+        description: >-
+          How many times the ads of the account were shown on the day, as Google totals them for
+          the account, over all its campaigns.
+      - name: total_clicks
+        description: >-
+          How many times the ads of the account were clicked on the day, as Google totals them for
+          the account, over all its campaigns.
+      - name: total_spend
+        description: >-
+          What the ads of the account cost on the day, as Google totals it for the account over all
+          its campaigns, in the currency of the account, exact to six decimal places.
+      - name: load_id
+        description: '{{ doc("load_id") }}'

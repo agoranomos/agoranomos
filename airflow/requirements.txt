@@ -2,6 +2,10 @@
 # constraints of the base image. dbt is not here: it has an environment of its own.
 dlt[postgres]==1.32.0
 astronomer-cosmos==1.16.0
+# Apprise sends the alerts (ADR-0045), at the version that the constraints of Airflow 3.3.2 hold
+# (constraints-3.13.txt of the tag constraints-3.3.2, as of November 2026): a pin that differs from
+# the constraint fails the build. It moves with the base image, by hand, and Renovate leaves it.
+apprise==1.13.1
 
 # Dependencies of dlt that the constraints of Airflow leave open. They are pinned so that every
 # machine builds the same image, and so that Renovate moves them.

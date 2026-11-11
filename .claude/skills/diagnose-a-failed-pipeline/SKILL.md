@@ -1,6 +1,6 @@
 ---
 name: diagnose-a-failed-pipeline
-description: Finds why a pipeline of a local agoranomos stack failed or why its data is late, through the read-only MCP server of Airflow and the logs of the stack, and proposes a fix. Use when a DAG run or a task failed, a dashboard shows old data or misses an account, Pipeline health shows late accounts, accounts in quarantine or failed models or tests, or the user asks why the data did not update.
+description: Finds why a pipeline of a local agoranomos stack failed or why its data is late, through the read-only MCP server of Airflow and the logs of the stack, and proposes a fix. Use when a DAG run or a task failed, a dashboard shows old data or misses an account, Pipeline health shows late accounts, accounts in quarantine or failed models or tests, an alert of agoranomos names a failed run or a problem, or the user asks why the data did not update.
 ---
 
 # Diagnose a failed pipeline
@@ -13,6 +13,7 @@ Find the run and the task that failed, read why from its log, and propose a fix.
 - `agoranomos_demo_transform` runs once each of the five platforms has loaded since its last run, and after each load of the rates of the ECB or of Google Ads ([What starts the transform](../../../docs/how-to/watch-the-pipeline.md#what-starts-the-transform)). Its first task, `load_settings`, loads the files of `extensions/model/`. Then the task `elementary`, and then one task for each model, seed and test of dbt, run as `dbt build` through Cosmos ([ADR-0028](../../../docs/adr/0028-build-each-node-of-dbt-with-its-tests-in-one-task.md)).
 - `agoranomos_selfcheck` only checks that the scheduler and the executor work.
 - The DAGs of the bundle `extensions` are the deployment's own, in `extensions/dags/`.
+- `agoranomos_watcher` checks every 15 minutes the accounts in quarantine and the late accounts, the backups and the disk, and sends an alert of what changes; the plugin `agoranomos_alerts` of the scheduler sends one for each failed run. An alert names a code, a DAG or an account, and a time, and the lines that it can hold are in [Get alerts](../../../docs/how-to/watch-the-pipeline.md#get-alerts): start from the DAG or the account that it names. It holds no address of its channel, and you never ask for one.
 
 The docstring at the top of each file of `airflow/dags/` says what its DAG does.
 

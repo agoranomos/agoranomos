@@ -197,11 +197,11 @@ def test_ai_reader_keeps_the_limits_of_the_decision(env):
     # It signs in only while the MCP server of the warehouse is on.
     assert can_login == ("t" if switch_on(env, "warehouse") else "f")
     assert connections == "3"
-    # The planner of a question over the views of marts reorders up to 12 relations (ADR-0037).
     assert set(config.split(",")) == {
         "default_transaction_read_only=on",
         "statement_timeout=1min",
         "idle_in_transaction_session_timeout=1min",
+        # The planner of a question over the views of marts reorders up to 12 relations (ADR-0037).
         "from_collapse_limit=12",
         "join_collapse_limit=12",
     }

@@ -46,7 +46,7 @@
 	# which reaches the whole REST API of Metabase, reaches nothing else through the proxy. A public
 	# client, which has no secret, gets its tokens at /oauth/token; one that sends its secret in that
 	# header does not. The * matches the header with any value, and only when it is there
-	# (matchHeaders in modules/caddyhttp/matchers.go of Caddy 2.11.7).
+	# (matchHeaders in modules/caddyhttp/matchers.go of Caddy 2.11.9).
 	@token {
 		header Authorization *
 		not path /api/mcp
@@ -55,9 +55,10 @@
 
 	# Metabase sets its own security headers, such as its Content-Security-Policy and
 	# X-Frame-Options. These fill in only what a response lacks (the ? prefix), for the answers of
-	# Metabase and of this file alike. One directive for each header: Caddy applies the defaults of
-	# one header block only when the response lacks all of them (as of Caddy 2.11.7, October 2026),
-	# and Metabase sends two of the three.
+	# Metabase and of this file alike, and Metabase sends two of the three. One directive for each
+	# header: Caddy 2.11.8 and later check each default of a header block on its own, but up to
+	# 2.11.7 a block applied its defaults only when the response lacked all of them
+	# (caddyserver/caddy#8217).
 	header ?Strict-Transport-Security "max-age=31536000"
 	header ?X-Content-Type-Options "nosniff"
 	header ?Referrer-Policy "strict-origin-when-cross-origin"

@@ -4,6 +4,7 @@
     'ad_group__resource_name': 'text', 'ad_group__id': 'text', 'ad_group__name': 'text',
     'metrics__impressions': 'text', 'metrics__clicks': 'text', 'metrics__cost_micros': 'text',
     'metrics__conversions': 'double precision', 'metrics__conversions_value': 'text',
+    'metrics__all_conversions': 'double precision', 'metrics__all_conversions_value': 'text',
     'segments__date': 'date',
     '_dlt_load_id': 'text',
-}), 'raw_google_ads', ref('stg_loads__newest_days')), 'google_ads', 'ad_group') }}
+}), 'raw_google_ads', ref('stg_loads__newest_days')), 'google_ads', 'ad_group', all_conversions=true) }}

@@ -269,10 +269,21 @@ def test_the_tasks_of_the_maintenance_do_not_wait_for_each_other():
         for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef) and node.name == "agoranomos_maintenance"
     ]
+    # One statement for each task, and no >> or set_downstream between them; the tasks of the core
+    # are in tests/unit/test_maintenance.py.
     assert [ast.unparse(statement) for statement in function.body] == [
         "BashOperator(task_id='clean_airflow_logs', "
         "bash_command=maintenance.clean_logs_command(), do_xcom_push=False)",
         "clean_ops()",
+        "clean_dlt_loads()",
+        "clean_core_loads()",
+        "drop_old_journal_months()",
+        "clean_cosmos_variables()",
+        "make_partitions()",
+        "analyze_the_facts()",
+        "freeze_old_months()",
+        "record_the_disk()",
+        "compare_with_platform_totals()",
     ]
 
 
