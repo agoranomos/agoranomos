@@ -59,6 +59,7 @@ def test_a_variant_has_the_services_it_needs(variant):
         "db-init",
         "demo-init",
         "metadata-export",
+        "marts-init",
         "proxy",
         "backup",
         "ai",
@@ -208,15 +209,18 @@ def test_airflow_services_mount_the_settings_of_the_model_read_only(variant):
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_dbt_gets_the_reporting_currency_wherever_it_runs_and_no_other_service_does(env, variant):
     # ADR-0025: dbt reads the reporting currency with env_var() in the tasks and in the DAG
-    # processor of every Airflow service, and in metadata-export, which writes it into the currency
-    # of the fields of Metabase. It is no secret, so a failed assertion may print it.
+    # processor of every Airflow service, in metadata-export, which writes it into the currency of
+    # the fields of Metabase, and in marts-init, which builds the views of marts with it and
+    # computes the rates of the core in it. It is no secret, so a failed assertion may print it.
     wanted = env.get("AGORANOMOS_REPORTING_CURRENCY") or "USD"
     holders = {
         name: service["environment"]["AGORANOMOS_REPORTING_CURRENCY"]
         for name, service in rendered(variant).items()
         if "AGORANOMOS_REPORTING_CURRENCY" in (service.get("environment") or {})
     }
-    assert holders == dict.fromkeys(airflow_names(variant) | {"metadata-export"}, wanted)
+    assert holders == dict.fromkeys(
+        airflow_names(variant) | {"metadata-export", "marts-init"}, wanted
+    )
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
@@ -336,6 +340,8 @@ def expected_holders(variant: str) -> dict[str, set[str]]:
     - The container ai holds the passwords of the accounts of its two MCP servers, ai_reader in the
       warehouse, which db-init sets up, and the Airflow user ai, which airflow-init keeps, and no
       other (ADR-0030).
+    - marts-init holds the password of transformer, as which dbt builds the views of marts at every
+      start, and no other (ADR-0039).
     """
     airflow = airflow_names(variant)
     runner = TASK_RUNNER[variant]
@@ -349,7 +355,7 @@ def expected_holders(variant: str) -> dict[str, set[str]]:
         "METABASE_DB_PASSWORD": {"db-init", "metabase"},
         "METABASE_READER_PASSWORD": {"db-init", "metabase-init"},
         "WAREHOUSE_LOADER_PASSWORD": {"db-init", runner},
-        "WAREHOUSE_TRANSFORMER_PASSWORD": {"db-init", runner},
+        "WAREHOUSE_TRANSFORMER_PASSWORD": {"db-init", runner, "marts-init"},
         "BACKUP_DB_PASSWORD": {"db-init", "backup"},
         "VALKEY_PASSWORD": {"broker", *celery_queue} if variant == "celery" else set(),
         "CELERY_RESULTS_DB_PASSWORD": {"db-init", *celery_queue},
@@ -576,6 +582,48 @@ def test_metadata_export_holds_no_secret_and_has_no_network(variant):
         ("metadata-export", "/opt/agoranomos/metadata", False),
         ("dbt-manifest", "/opt/agoranomos/manifest", False),
     }
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_marts_init_reaches_the_warehouse_alone_and_holds_one_secret(env, variant):
+    # It builds the views of marts as transformer on the network data, after the migrations of
+    # db-init (ADR-0039, ADR-0044): nobody, no new privileges, no port, the dbt project and its own
+    # code read-only, a tmpfs for dbt, and no DBT_JOB_RUN_ID, so that its nodes do not wait for the
+    # lock that it holds itself. Its environment holds a secret, so it is compared by name, and the
+    # password as a flag.
+    service = rendered(variant)["marts-init"]
+    assert service["image"] == "agoranomos-airflow:local"
+    assert service["pull_policy"] == "never"
+    assert service["profiles"] == ["core"]
+    assert service["restart"] == "no"
+    assert service["user"] == "65534:65534"
+    assert service["read_only"] is True
+    assert service["tmpfs"] == ["/tmp"]  # noqa: S108 (a tmpfs in the container, for dbt)
+    assert set(service["networks"]) == {"data"}
+    assert "ports" not in service
+    assert service["security_opt"] == ["no-new-privileges:true"]
+    assert service["entrypoint"] == [
+        "/opt/airflow/dbt_venv/bin/python",
+        "/opt/agoranomos/metabase/marts_init.py",
+    ]
+    conditions = {name: needed["condition"] for name, needed in service["depends_on"].items()}
+    assert conditions == {"db-init": "service_completed_successfully"}
+    mounts = {(m["source"], m["target"], bool(m.get("read_only"))) for m in service["volumes"]}
+    assert mounts == {
+        (str(REPO_ROOT / "dbt"), "/opt/agoranomos/dbt", True),
+        (str(REPO_ROOT / "metabase"), "/opt/agoranomos/metabase", True),
+    }
+    environment = service["environment"]
+    assert sorted(environment) == [
+        "AGORANOMOS_REPORTING_CURRENCY",
+        "DBT_ENGINE_SEND_ANONYMOUS_USAGE_STATS",
+        "DBT_ENV_SECRET_WAREHOUSE_PASSWORD",
+        "DO_NOT_TRACK",
+        "PYTHONDONTWRITEBYTECODE",
+    ]
+    password = secrets(env)["WAREHOUSE_TRANSFORMER_PASSWORD"]
+    holds_transformer = environment["DBT_ENV_SECRET_WAREHOUSE_PASSWORD"] == password
+    assert holds_transformer, "DBT_ENV_SECRET_WAREHOUSE_PASSWORD is not the password of transformer"
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
@@ -977,6 +1025,7 @@ def test_metabase_init_keeps_the_constraints_of_a_one_shot_job(variant):
     assert conditions == {
         "metabase": "service_healthy",
         "metadata-export": "service_completed_successfully",
+        "marts-init": "service_completed_successfully",
     }
 
 

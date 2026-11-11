@@ -5,9 +5,10 @@ keeps in the collection agoranomos / Ops as the code says, on every start, with 
 Its questions are native SQL on the views of the schema ops that the transform builds
 (dbt/models/ops): the accounts that the checks of the last run kept out of the core (ADR-0035), the
 last load of each account, the runs of the transform with their models and tests, as the hooks of
-elementary record them, and the size of the tables of the warehouse; and on the tables of ops that
-the DAG of maintenance fills and the transform creates (ADR-0039): the disk, the steps of the
-maintenance, and the monthly comparison of the core with the totals of the platforms.
+elementary record them, the size of the tables of the warehouse, and how far back the loads of each
+account reach, with the portions of its history (ADR-0038); and on the tables of ops that the DAG
+of maintenance fills and the transform creates (ADR-0039): the disk, the steps of the maintenance,
+and the monthly comparison of the core with the totals of the platforms.
 Metabase reads them as metabase_reader, which may read these views and tables and no table of
 elementary. The connection shows only the schema marts in Metabase, and a native question reads any
 schema that its role may read. Until the first run of the transform has built them, the questions
@@ -25,8 +26,8 @@ OPS_KEY = "ops"
 OPS_NAME = "Ops"
 OPS_DESCRIPTION = (
     "The pipeline of agoranomos itself: the accounts in quarantine, the loads of each account, the "
-    "runs of the transform with their models and tests, the size of the warehouse, the disk, and "
-    "the maintenance of the core."
+    "runs of the transform with their models and tests, the size of the warehouse, the disk, the "
+    "maintenance of the core, and the history of each account."
 )
 PIPELINE = "pipeline"
 PIPELINE_NAME = "Pipeline health"
@@ -34,8 +35,8 @@ PIPELINE_DESCRIPTION = (
     "The state of the pipeline: which accounts the last run of the transform kept out of the core "
     "and why, when each account was last loaded, how the last runs of the transform went, which "
     "models failed and which tests warned or failed, the largest tables of the warehouse, the free "
-    "disk, what the daily maintenance did, and how the core compares with the totals of the "
-    "platforms."
+    "disk, what the daily maintenance did, how the core compares with the totals of the platforms, "
+    "and how far back the loads of each account reach."
 )
 
 # The types that Metabase 0.64.1 gives the columns of the answers, and the semantic types that it
@@ -98,6 +99,9 @@ COLUMN_TYPES = {
     "core_clicks": COUNT,
     "platform_impressions": COUNT,
     "core_impressions": COUNT,
+    "first_day_loaded": ("type/Date", "date"),
+    "portions": COUNT,
+    "last_portion_at": MOMENT,
 }
 SEMANTIC_TYPES = {
     "started_at": "type/CreationTimestamp",
@@ -158,6 +162,9 @@ TITLES = {
     "core_clicks": "Clicks, Core",
     "platform_impressions": "Impressions, Platform",
     "core_impressions": "Impressions, Core",
+    "first_day_loaded": "First Day Loaded",
+    "portions": "Portions of History",
+    "last_portion_at": "Last Portion",
 }
 # The columns shown with one decimal; the others as Metabase shows them.
 ONE_DECIMAL = frozenset(
@@ -542,6 +549,23 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "ORDER BY days_differing DESC, platform, account_id",
         ),
         "layout": {"row": 52, "col": 0, "size_x": 24, "size_y": 5},
+    },
+    {
+        "key": "history",
+        "name": "History of each account",
+        "description": (
+            "The first day that a load took for each account of each platform, and how many loads "
+            "of its history have come, which follow its usual window in portions by quarter, from "
+            "the newest to the oldest, and when the last one ended (ADR-0038)."
+        ),
+        "display": "table",
+        "columns": ("platform", "account_id", "first_day_loaded", "portions", "last_portion_at"),
+        "query": sql(
+            "SELECT platform, account_id, first_day_loaded, portions, last_portion_at",
+            "FROM ops.ops_history",
+            "ORDER BY platform, account_id",
+        ),
+        "layout": {"row": 57, "col": 0, "size_x": 24, "size_y": 6},
     },
 )
 

@@ -263,12 +263,21 @@ def test_the_staging_of_the_settings_selects_the_columns_that_the_load_writes(so
     module, _ = source
     found = {path.name for path in STAGING.glob("*.sql")}
     assert found == {f"stg_settings__{table}.sql" for table in module.COLUMNS}
+    # The table goes through relation_or_empty, with the type of each column of the load, so that
+    # the model builds before the first run of the transform loads the settings, as marts-init
+    # does on a new warehouse (docs/reference/configuration.md#the-views-of-the-marts).
+    types = {"text": "text", "bool": "boolean"}
     for table, columns in module.COLUMNS.items():
         path = STAGING / f"stg_settings__{table}.sql"
-        comment, *body = path.read_text(encoding="utf-8").splitlines()
-        assert comment.startswith(f"-- {path.name}: "), path.name
+        lines = path.read_text(encoding="utf-8").splitlines()
+        assert lines[0].startswith(f"-- {path.name}: "), path.name
+        body = " ".join(line.strip() for line in lines if not line.startswith("--"))
         select = ", ".join(columns)
-        assert body == [f"select {select}", f"from {{{{ source('raw_settings', '{table}') }}}}"]
+        empty = ", ".join(f"'{c}': '{types[hint['data_type']]}'" for c, hint in columns.items())
+        assert body == (
+            f"select {select} from {{{{ relation_or_empty(source('raw_settings', '{table}'), {{ "  # noqa: S608
+            f"{empty}, }}) }}}}"
+        ), path.name
 
 
 def blocks(text: str, indent: int) -> dict[str, str]:

@@ -25,13 +25,16 @@ models:
           # metric_scope and then the description of the KPI, and as terms of its glossary, one
           # for each KPI (ADR-0034, docs/reference/describe-the-marts.md#metrics). Each is the sum
           # of numerator over the sum of denominator, times scale, over the rows that a question
-          # selects. The marts of ad groups and ads take the same KPIs (*kpis).
+          # selects. The marts of ad groups and ads take the first six, each by its anchor; the
+          # two of the primary conversion actions are of this level alone, as conversions_primary
+          # is none at the levels of ad groups and ads (ADR-0037).
           metric_level: Campaigns
           metric_scope: >-
             Over the statistics of every campaign, Performance Max included: the total of the
             accounts.
-          metrics: &kpis
-            - name: CTR
+          metrics:
+            - &ctr
+              name: CTR
               description: >-
                 Click-through rate: the share of the impressions that led to a click to the site,
                 the sum of clicks divided by the sum of impressions over the same rows, not an
@@ -39,7 +42,8 @@ models:
               numerator: clicks
               denominator: impressions
               format: percent
-            - name: CPC
+            - &cpc
+              name: CPC
               description: >-
                 Cost per click: the spend for each click to the site, the sum of spend_reporting
                 divided by the sum of clicks, in the reporting currency.
@@ -47,7 +51,8 @@ models:
               denominator: clicks
               format: currency
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
-            - name: CPM
+            - &cpm
+              name: CPM
               description: >-
                 Cost per mille: the spend for a thousand impressions, the sum of spend_reporting
                 divided by the sum of impressions, times 1,000, in the reporting currency.
@@ -56,7 +61,8 @@ models:
               scale: 1000
               format: currency
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
-            - name: Cost per Conversion
+            - &cost_per_conversion
+              name: Cost per Conversion
               description: >-
                 Cost per conversion, also called cost per acquisition (CPA): the spend for each
                 conversion in the own metric of conversions of the platform, as its account shows
@@ -66,7 +72,8 @@ models:
               denominator: conversions
               format: currency
               currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
-            - name: Conversion Rate
+            - &conversion_rate
+              name: Conversion Rate
               description: >-
                 The conversions in the own metric of conversions of the platform for each click to
                 the site, the sum of conversions divided by the sum of clicks. A platform can count
@@ -75,7 +82,8 @@ models:
               numerator: conversions
               denominator: clicks
               format: percent
-            - name: ROAS
+            - &roas
+              name: ROAS
               description: >-
                 Return on ad spend: the value of the conversions in the own metric of conversions
                 of the platform for each unit of spend, the sum of conversion_value_reporting
@@ -84,6 +92,26 @@ models:
               numerator: conversion_value_reporting
               denominator: spend_reporting
               format: number
+            - name: Cost per Primary Conversion
+              description: >-
+                The spend for each conversion of the primary conversion actions of the deployment,
+                the sum of spend_reporting divided by the sum of conversions_primary, in the
+                reporting currency. The primary actions are the choice of the deployment, so this
+                can differ from the cost per conversion that the account shows; it has a value on
+                every platform, Meta included.
+              numerator: spend_reporting
+              denominator: conversions_primary
+              format: currency
+              currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
+            - name: Primary Conversion Rate
+              description: >-
+                The conversions of the primary conversion actions of the deployment for each click
+                to the site, the sum of conversions_primary divided by the sum of clicks. A
+                platform can count more than one conversion for a click, and conversions after a
+                view, so it can exceed 100%.
+              numerator: conversions_primary
+              denominator: clicks
+              format: percent
     data_tests:
       - unique_combination:
           arguments:
@@ -1632,7 +1660,7 @@ models:
           metric_scope: >-
             Over the statistics of the ad groups, which leave out Performance Max campaigns, as
             they have no ad groups.
-          metrics: *kpis
+          metrics: [*ctr, *cpc, *cpm, *cost_per_conversion, *conversion_rate, *roas]
     data_tests:
       - unique_combination:
           arguments:
@@ -2033,7 +2061,7 @@ models:
           metric_scope: >-
             Over the statistics of the ads, which leave out Performance Max campaigns, as they have
             no ads.
-          metrics: *kpis
+          metrics: [*ctr, *cpc, *cpm, *cost_per_conversion, *conversion_rate, *roas]
     data_tests:
       - unique_combination:
           arguments:

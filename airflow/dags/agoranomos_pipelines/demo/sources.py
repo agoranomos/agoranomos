@@ -37,11 +37,13 @@ from agoranomos_pipelines.loads import (
     APPEND,
     DATE,
     DLT_SETTINGS,
+    HISTORY,
     LOAD_HINTS,
     LOADED,
     LOADS,
     OLD_JOURNAL,
     TEXT,
+    WINDOW,
     credentials,  # noqa: F401 (the DAGs of the demo mask the password of loader through it)
     destination,
     has_loads,
@@ -216,11 +218,16 @@ TABLE_HINTS: dict[tuple[str, str], dict] = {
 
 
 def journal(
-    code: str, now: datetime, first: Callable[[Account], date] | None = None
+    code: str,
+    now: datetime,
+    first: Callable[[Account], date] | None = None,
+    history: frozenset[str] | None = None,
 ) -> list[dict[str, object]]:
-    """The rows of _agoranomos_loads of a load at now: the window of each account, and the day of
-    now in the time zone of the account. A load of the demo fails whole or not at all, so every row
-    is one of a loaded account."""
+    """The rows of _agoranomos_loads of a load at now: the window of each account, the day of now
+    in the time zone of the account, and the kind of the load of the account: history for an
+    account that takes its history, every account without first, or those of history with it,
+    and window for the others (ADR-0038). A load of the demo fails whole or not at all, so every
+    row is one of a loaded account."""
     platform = PLATFORMS[code]
     zones = {account.account_id: account.time_zone for account in platform.module.accounts()}
     loaded_at = datetime.now(UTC)
@@ -233,6 +240,7 @@ def journal(
             "now": now,
             "loaded_at": loaded_at,
             "status": LOADED,
+            "kind": HISTORY if first is None or account_id in (history or ()) else WINDOW,
         }
         for account_id, (start, end) in sorted(platform.module.windows(now, first).items())
     ]
@@ -357,10 +365,12 @@ def load(
     now: datetime,
     *,
     first: Callable[[Account], date] | None = None,
+    history: frozenset[str] | None = None,
     skip: frozenset[tuple[str, date]] = frozenset(),
 ) -> dict[str, int]:
     """Load a platform as of now, from first(account) to yesterday of each account, with the list
-    of the entities of each account, record the window of each account in _agoranomos_loads, and
+    of the entities of each account, record the window of each account in _agoranomos_loads, with
+    the kind history for the accounts of history, or every account without first (journal), and
     return the rows of each table of the platform that dlt reports, not those of dlt nor the
     journal. A dataset that a release before v0.5 loaded is dropped first (start_over)."""
     platform = PLATFORMS[code]
@@ -371,7 +381,9 @@ def load(
         resources = build(code, now, first=first, skip=skip)
         # In the same run as the facts and the lists, so under the same _dlt_load_id: a load that
         # does not end whole has no row in _dlt_loads, and its window is read by nobody.
-        resources.append(dlt.resource(journal(code, now, first), name=LOADS, **own(LOAD_HINTS)))
+        resources.append(
+            dlt.resource(journal(code, now, first, history), name=LOADS, **own(LOAD_HINTS))
+        )
         run(pipeline, resources)
         counts = row_counts(pipeline)
     for table, rows in sorted(counts.items()):
@@ -406,4 +418,6 @@ def load_daily(code: str, now: datetime) -> dict[str, int]:
             return start
         return min(last[account.account_id][1] + timedelta(days=1), end - reload_days)
 
-    return load(code, now, first=first)
+    # An account that no load has recorded takes the days of the history, as a load of history.
+    new = frozenset(account_id for account_id in history if account_id not in last)
+    return load(code, now, first=first, history=new)

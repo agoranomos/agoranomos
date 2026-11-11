@@ -8,8 +8,10 @@
 
     In one transaction, the macro copies into core.loads, for each source whose journal and
     _dlt_loads exist, the rows of the journal of every whole load, which _dlt_loads has with status
-    0, that core.loads does not hold yet: the window or the error of each account of the load, and
-    the moment when the load ended. A source that no load has written is passed over, as a
+    0, that core.loads does not hold yet: the window or the error of each account of the load, its
+    kind, window for the usual window of the account or history for a load of the days before it
+    (ADR-0038), which a journal without the column, or a row without it, gives as window, and the
+    moment when the load ended. A source that no load has written is passed over, as a
     deployment without the demo never loads the sources of the demo. The ID of the call of dbt
     records which pin took a row. Then it creates, through core.ensure_partition, the partitions of
     the facts that each source is to write, for every month of the windows that are pinned, and
@@ -17,6 +19,9 @@
     the models of the facts write with the moment of their transaction, each in a transaction of
     its own and outside any model: a hook before_begin of a model breaks the transaction of the
     model (#191). The rows stay pinned until the core accepts their loads.
+    The pin holds the lock of marts-init (marts_init.sql), shared, from its first statement to its
+    last, so that marts-init never reads a window that is pinned before its partitions exist; dbt
+    closes the connection when the macro fails, which lets go of the lock.
     transformer runs it, with its rights on core.loads and on core.ensure_partition. -#}
 {% macro pin_loads() %}
     {%- if env_var('DBT_JOB_RUN_ID', '') == '' -%}
@@ -25,6 +30,11 @@
             ~ 'DBT_JOB_RUN_ID: dbt by hand reads the loads that a run pinned'
         ) -}}
     {%- endif -%}
+    {%- call statement('wait_for_marts_init', fetch_result=false) -%}
+set lock_timeout = '10min';
+select pg_advisory_lock_shared({{ marts_init_lock() }});
+set lock_timeout to default
+    {%- endcall -%}
     {%- set loads = pinned_loads_journal() -%}
     {%- set pinned = [] -%}
     {%- for source_name in newest_load_sources() -%}
@@ -36,13 +46,19 @@
             database=target.database, schema=source_name, identifier='_dlt_loads'
         ) -%}
         {%- if journal is not none and finished is not none -%}
+            {#- A journal gets the column kind with the first load that writes it, and the journal
+                of a source that does not write it has none. -#}
+            {%- set kinds = adapter.get_columns_in_relation(journal)
+                | selectattr('name', 'equalto', 'kind') | list -%}
             {%- call statement('pin', fetch_result=false) -%}
 insert into {{ loads }} (
-    source, load_id, account_id, window_from, window_to, outcome, error, finished_at, invocation_id
+    source, load_id, account_id, window_from, window_to, outcome, error, finished_at, invocation_id,
+    kind
 )
 select
     '{{ source }}', j._dlt_load_id, j.account_id, j.window_from, j.window_to, j.status, j.error,
-    l.inserted_at, '{{ invocation_id }}'::uuid
+    l.inserted_at, '{{ invocation_id }}'::uuid,
+    {% if kinds %}case when j.kind = 'history' then 'history' else 'window' end{% else %}'window'{% endif %}
 from {{ journal }} as j
 join {{ finished }} as l
     on l.load_id = j._dlt_load_id and l.status = 0
@@ -102,6 +118,10 @@ select core.ensure_partition('core.{{ fact }}'::regclass, date '{{ month }}')
             {%- do created.append(fact) -%}
         {%- endif -%}
     {%- endfor -%}
+    {%- call statement('done_with_marts_init', fetch_result=false) -%}
+select pg_advisory_unlock_shared({{ marts_init_lock() }})
+    {%- endcall -%}
+    {%- do adapter.commit() -%}
     {{- log(
         'Pinned the new rows of the journals of the loads: ' ~ ((pinned | join(', ')) or 'none')
         ~ '. The pinned windows and the journals take ' ~ (months | length)

@@ -1,7 +1,7 @@
 # The tools of MCP Toolbox for Databases, the MCP server of the warehouse (ADR-0007, ADR-0030), in the
 # flat format of Toolbox 1.15.0: one resource in each YAML document. Toolbox signs in as ai_reader,
-# which reads marts and staging only, in read-only sessions with a time limit
-# (postgres/warehouse.sql): that role is the limit of every tool here, execute_sql included.
+# which reads marts only, in read-only sessions with a time limit (postgres/warehouse.sql,
+# ADR-0043): that role is the limit of every tool here, execute_sql included.
 # Toolbox replaces ${AI_READER_PASSWORD} with the variable of the container ai.
 kind: source
 name: warehouse
@@ -15,16 +15,17 @@ connectTimeout: 5
 queryParams:
   application_name: agoranomos-toolbox
 ---
-# information_schema shows only the tables and views that ai_reader may read. dbt writes the
-# description of each model into the comment of its table or view (dbt/dbt_project.yml).
+# information_schema shows only the tables and views that ai_reader may read, those of the catalog
+# of PostgreSQL among them, which every role reads, so the statement keeps to marts. dbt writes the
+# description of each model into the comment of its view (dbt/dbt_project.yml).
 kind: tool
 name: list_tables
 type: postgres-sql
 source: warehouse
 description: >-
-  Lists the tables and views of the agoranomos warehouse that this server can read: the marts, which
-  hold the reporting data, and the staging views and seeds below them, each with the description
-  that the dbt project gives it.
+  Lists the marts of the agoranomos warehouse, the only views that this server can read, which hold
+  the reporting data of the advertising and of web analytics, each with the description that the
+  dbt project gives it.
 statement: |
   SELECT
     table_schema AS schema_name,
@@ -32,23 +33,23 @@ statement: |
     CASE table_type WHEN 'VIEW' THEN 'view' ELSE 'table' END AS table_type,
     obj_description(format('%I.%I', table_schema, table_name)::regclass, 'pg_class') AS description
   FROM information_schema.tables
-  WHERE table_schema IN ('marts', 'staging')
-  ORDER BY table_schema, table_name
+  WHERE table_schema = 'marts'
+  ORDER BY table_name
 ---
 kind: tool
 name: describe_table
 type: postgres-sql
 source: warehouse
 description: >-
-  Lists the columns of one table or view of the agoranomos warehouse, as list_tables names it: the
-  name, the data type, whether it may be null, and the description that the dbt project gives it.
+  Lists the columns of one view of the agoranomos warehouse, as list_tables names it: the name, the
+  data type, whether it may be null, and the description that the dbt project gives it.
 parameters:
   - name: schema_name
     type: string
-    description: The schema of the table or view, marts or staging.
+    description: The schema of the view, marts, the only one that this server reads.
   - name: table_name
     type: string
-    description: The name of the table or view, without its schema.
+    description: The name of the view, without its schema.
 statement: |
   SELECT
     column_name,
@@ -67,5 +68,5 @@ type: postgres-execute-sql
 source: warehouse
 description: >-
   Runs one SQL statement on the agoranomos warehouse, in PostgreSQL 18, and returns its rows. It can
-  read the tables and views that list_tables shows and nothing else: the session is read-only, and a
+  read the views of marts that list_tables shows and nothing else: the session is read-only, and a
   statement that runs longer than a minute is canceled.

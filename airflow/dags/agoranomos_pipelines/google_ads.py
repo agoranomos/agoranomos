@@ -27,22 +27,29 @@ extensions/model/conversion_actions.toml does not name it, and primary_for_goal,
 of conversion goals of Google names in its place, so that a real account can show whether the two
 differ. The days of each account run from the day after the last day that the core accepted for it
 (window), or from 90 days back when that is earlier, as conversions keep coming for up to 90 days
-after a click; the first load of an account takes the last 36 months, as Google Ads keeps data by
-day for 37 only (ADR-0034), a calendar month in each request. All end yesterday in the time zone
-of the account. A request counts as one operation of the daily quota, whatever its rows, so a
-daily load costs twelve operations for each account, and the first about 260. Each load appends the
-lists and the facts of each account under its own _dlt_load_id and records the window of each
-account in _agoranomos_loads in the same run, and the staging models read, of the loads that the run
-of the transform pinned, the lists of the newest load of each account, and, for each account and
-day, the rows of the newest load whose window covers the day, so the days of a window are replaced
-whole, empty or not (ADR-0038, ADR-0046). A dataset that a release before v0.5 loaded has no
-_agoranomos_loads, so the next load of each account takes its history again, and the rows of the
-earlier loads stay unread.
+after a click; the first load of an account takes these 90 days too, so that a dashboard fills in
+minutes. All end yesterday in the time zone of the account. The history comes after it, in the
+background (ADR-0038, "The first load"): the DAG agoranomos_google_ads_history plans, after each
+run of the transform that succeeded, the next portion of the days that no whole load of an account
+holds, back to the first day of the month 36 months before yesterday, as Google Ads keeps data by
+day for 37 only (ADR-0034): the newest calendar quarter that an account lacks, for every account
+that lacks days of it (next_portion), and starts the DAG of the load with its accounts and days as
+the parameters of the run, a portion, which takes the totals and the facts of those days alone,
+with the kind history in the journal. A request counts as one operation of the daily quota,
+whatever its rows, so a daily load costs twelve operations for each account, and a portion eight,
+its customer and its seven tables of facts. Each load appends the facts of each account, and the
+usual window its lists too, under its own _dlt_load_id and records the window of each account in
+_agoranomos_loads in the same run, and the staging models read, of the loads that the run of the
+transform pinned, the lists of the newest load of each account, and, for each account and day, the
+rows of the newest load whose window covers the day, so the days of a window are replaced whole,
+empty or not (ADR-0038, ADR-0046). A dataset that a release before v0.5 loaded has no
+_agoranomos_loads, so the next load of each account takes its usual window, the history follows,
+and the rows of the earlier loads stay unread.
 
 The last day that the core accepted for an account is the end of its newest accepted load in
 core.loads, which loader may read (ADR-0038). While the core has accepted no load of the account,
 as before the acceptance of the transform exists, it is the end of its newest whole load in
-_agoranomos_loads; with neither, the load takes its history. A load keeps the watermark of each
+_agoranomos_loads; with neither, the load takes its usual window. A load keeps the watermark of each
 account that it loaded, the last day of its window, in the asset state store of Airflow 3.3, as a
 cache of the warehouse, which stays the truth: the cache never moves a window, as after a restore
 of the warehouse alone it would be newer than the data, and a load says in its log when the two
@@ -91,10 +98,12 @@ from agoranomos_pipelines.loads import (
     DATE,
     DLT_SETTINGS,
     FAILED,
+    HISTORY,
     LOAD_HINTS,
     LOADED,
     LOADS,
     TEXT,
+    WINDOW,
     destination,
     has_loads,
     or_marker,
@@ -373,8 +382,8 @@ def yesterday(now: datetime, time_zone: str) -> date:
 
 
 def history_start(last: date) -> date:
-    """The first day of the first load of an account whose last day is last: the first day of
-    the month HISTORY_MONTHS before it."""
+    """The first day of the history of an account whose last day is last: the first day of the
+    month HISTORY_MONTHS before it."""
     months = last.year * 12 + last.month - 1 - HISTORY_MONTHS
     return date(months // 12, months % 12 + 1, 1)
 
@@ -382,12 +391,13 @@ def history_start(last: date) -> date:
 def window(last: date, last_end: date | None) -> tuple[date, date]:
     """The days of a load of an account whose last day is last, as ADR-0038 gives them,
     [min(last + 1 - WINDOW_DAYS, last_end + 1), last], where last_end is the last day that the
-    core accepted for the account (last_day): the history when none is known yet, else the days
-    from the day after it, or from the first of the last WINDOW_DAYS when that is earlier, so that
-    a stop of any length closes by itself."""
+    core accepted for the account (last_day): the last WINDOW_DAYS when none is known yet, as the
+    history comes after them in portions, else the days from the day after it, or from the first
+    of the last WINDOW_DAYS when that is earlier, so that a stop of any length closes by itself."""
+    usual = last - timedelta(days=WINDOW_DAYS - 1)
     if last_end is None:
-        return history_start(last), last
-    return min(last_end + timedelta(days=1), last - timedelta(days=WINDOW_DAYS - 1)), last
+        return usual, last
+    return min(last_end + timedelta(days=1), usual), last
 
 
 def accepted(pipeline, account_ids: Iterable[str]) -> dict[str, date]:
@@ -414,7 +424,7 @@ def last_day(
     """The day after which the window of an account starts: the last that the core accepted for
     it, or, while the core has accepted no load of the account, as before the acceptance of the
     transform exists, the last day of its newest whole load in the journal; none when neither
-    knows the account, which then takes its history."""
+    knows the account, which then takes its usual window."""
     if account_id in core:
         return core[account_id]
     if account_id in journal:
@@ -486,6 +496,203 @@ def chunks(first: date, last: date) -> list[tuple[date, date]]:
         parts.append((start, end))
         start = end + timedelta(days=1)
     return parts
+
+
+@dataclass(frozen=True)
+class Portion:
+    """A load of the history (ADR-0038, "The first load"): the days from first to last of some
+    accounts, which a run of the DAG of the load takes from its parameters, with the totals and the
+    facts of those days alone, and the kind history in the journal. No accounts are every account
+    of the deployment."""
+
+    accounts: tuple[str, ...]
+    first: date
+    last: date
+
+    def conf(self) -> dict[str, object]:
+        """The parameters of the run of the DAG of the load that takes the portion."""
+        return {
+            "accounts": list(self.accounts),
+            "window_from": self.first.isoformat(),
+            "window_to": self.last.isoformat(),
+        }
+
+
+def portion_of(
+    account_ids: Iterable[str] | None, first: str | None, last: str | None
+) -> Portion | None:
+    """The portion that the parameters of a run of the DAG of the load name: accounts, as ten
+    digits each, or none for every account, and the first and last day, as ISO dates; none when
+    the run names no days, as a scheduled run does, which takes the usual window of each
+    account."""
+    account_ids = list(account_ids or ())
+    if first is None and last is None:
+        if account_ids:
+            raise GoogleAdsError(
+                "a run of some accounts names the days of their history too: window_from and "
+                "window_to"
+            )
+        return None
+    if first is None or last is None:
+        raise GoogleAdsError("a run of the history names both window_from and window_to")
+    try:
+        days = date.fromisoformat(first), date.fromisoformat(last)
+    except (TypeError, ValueError):
+        raise GoogleAdsError("window_from and window_to are dates, such as 2026-07-01") from None
+    if days[0] > days[1]:
+        raise GoogleAdsError(f"window_from {first} is after window_to {last}")
+    wrong = [account_id for account_id in account_ids if not ACCOUNT_ID.fullmatch(account_id)]
+    if wrong:
+        raise GoogleAdsError(
+            f"an account of a run is ten digits without hyphens, such as 1234567890, not "
+            f"{wrong[0]!r}"
+        )
+    return Portion(tuple(sorted(set(account_ids))), *days)
+
+
+def quarter(day: date) -> tuple[date, date]:
+    """The first and the last day of the calendar quarter of a day."""
+    first = date(day.year, (day.month - 1) // 3 * 3 + 1, 1)
+    following = date(first.year + first.month // 10, (first.month + 2) % 12 + 1, 1)
+    return first, following - timedelta(days=1)
+
+
+def missing(windows: Iterable[tuple[date, date]], limit: date) -> list[tuple[date, date]]:
+    """The days of the history of an account that no window of its whole loads holds, from limit
+    to the last day that they reach, as runs of days from the oldest; none before its first load,
+    whose usual window comes first."""
+    held = sorted(windows)
+    if not held:
+        return []
+    gaps, start = [], limit
+    for first, last in held:
+        if first > start:
+            gaps.append((start, first - timedelta(days=1)))
+        start = max(start, last + timedelta(days=1))
+    return gaps
+
+
+def next_portion(known: dict[str, list[tuple[date, date]]], limit: date) -> Portion | None:
+    """The next load of the history, from the windows of the whole loads of each account, known:
+    the newest calendar quarter that an account lacks days of, back to limit, for every account
+    that lacks days of it, from the first to the last of those days, so that a portion takes one
+    quarter across all the new accounts and the history goes from the new quarters to the old
+    ones (ADR-0038). An account whose days of the quarter are fewer takes the others again, which
+    the newest load replaces whole. None once no account lacks a day."""
+    lacking = {account_id: missing(windows, limit) for account_id, windows in known.items()}
+    ends = [gap[1] for gaps in lacking.values() for gap in gaps]
+    if not ends:
+        return None
+    start, end = quarter(max(ends))
+    taken = {
+        account_id: [(max(first, start), min(last, end)) for first, last in gaps]
+        for account_id, gaps in lacking.items()
+    }
+    taken = {
+        account_id: [(first, last) for first, last in days if first <= last]
+        for account_id, days in taken.items()
+    }
+    taken = {account_id: days for account_id, days in taken.items() if days}
+    return Portion(
+        tuple(sorted(taken)),
+        min(first for days in taken.values() for first, _ in days),
+        max(last for days in taken.values() for _, last in days),
+    )
+
+
+def known_windows(pipeline, account_ids: Iterable[str]) -> dict[str, list[tuple[date, date]]]:
+    """The windows of the whole loads of each account, those that _dlt_loads marks whole in the
+    journal and those that core.loads holds, which loader may read, of every kind; an empty list
+    for an account that no whole load took yet."""
+    wanted = checked(account_ids)
+    found: dict[str, list[tuple[date, date]]] = {account_id: [] for account_id in wanted}
+    # IDs of checked digits, and constants of this module.
+    listed = ", ".join(f"'{account_id}'" for account_id in wanted)
+    queries = [
+        "SELECT account_id, window_from, window_to FROM core.loads "  # noqa: S608
+        f"WHERE source = '{CODE}' AND outcome = '{LOADED}' AND account_id IN ({listed})"
+    ]
+    journaled = has_loads(pipeline)
+    with pipeline.sql_client() as client:
+        if journaled:
+            journal = client.make_qualified_table_name(LOADS)
+            loads = client.make_qualified_table_name("_dlt_loads")
+            # Names that dlt quotes, IDs of checked digits, and constants of this module.
+            queries.append(
+                "SELECT j.account_id, j.window_from, j.window_to "  # noqa: S608
+                f"FROM {journal} AS j JOIN {loads} AS l "
+                "ON l.load_id = j._dlt_load_id AND l.status = 0 "
+                f"WHERE j.status = '{LOADED}' AND j.account_id IN ({listed})"
+            )
+        for sql in queries:
+            try:
+                rows = client.execute_sql(sql)
+            except DatabaseUndefinedRelation:
+                continue
+            for account_id, first, last in rows or ():
+                if first is not None and last is not None:
+                    found[account_id].append((first, last))
+    return found
+
+
+def waiting(pipeline) -> int:
+    """How many whole loads of the accounts of the journal no run of the transform has pinned yet,
+    as core.loads holds none of their rows: the next portion of the history waits for the run of
+    the transform that reads them."""
+    if not has_loads(pipeline):
+        return 0
+    try:
+        with pipeline.sql_client() as client:
+            journal = client.make_qualified_table_name(LOADS)
+            loads = client.make_qualified_table_name("_dlt_loads")
+            # Names that dlt quotes, and constants of this module.
+            rows = client.execute_sql(
+                "SELECT count(DISTINCT j._dlt_load_id) "  # noqa: S608
+                f"FROM {journal} AS j JOIN {loads} AS l "
+                "ON l.load_id = j._dlt_load_id AND l.status = 0 "
+                "WHERE NOT EXISTS (SELECT FROM core.loads AS p "
+                f"WHERE p.source = '{CODE}' AND p.load_id = j._dlt_load_id "
+                "AND p.account_id = j.account_id)"
+            )
+    except DatabaseUndefinedRelation:
+        # A dataset of a release before v0.5, without the journal: no load of it is pinned.
+        return 0
+    return int(rows[0][0]) if rows else 0
+
+
+def plan(now: datetime, extensions: Path = EXTENSIONS) -> Portion | None:
+    """The next portion of the history of the accounts of the deployment as of now, back to the
+    first day of the month HISTORY_MONTHS before yesterday in UTC, or none: when every account
+    holds its history, when no account has had its usual window yet, or while a whole load waits
+    for the run of the transform that pins it, so that each portion goes from raw to the core
+    before the next one starts (ADR-0038)."""
+    wanted = accounts(extensions)
+    limit = history_start(now.astimezone(UTC).date() - timedelta(days=1))
+    with open_pipeline() as pipeline:
+        pending = waiting(pipeline)
+        if pending:
+            log.info(
+                "%d whole loads of Google Ads wait for the run of the transform that pins them: "
+                "the history waits for it",
+                pending,
+            )
+            return None
+        known = known_windows(pipeline, wanted)
+    portion = next_portion(known, limit)
+    if portion is None:
+        log.info(
+            "Every account of Google Ads that has had its usual window holds its days back to %s",
+            limit.isoformat(),
+        )
+    else:
+        log.info(
+            "The next portion of the history: %s to %s of %d accounts (%s)",
+            portion.first.isoformat(),
+            portion.last.isoformat(),
+            len(portion.accounts),
+            ", ".join(portion.accounts),
+        )
+    return portion
 
 
 def query(table: str, days: tuple[date, date] | None = None) -> str:
@@ -762,12 +969,19 @@ def written(api: Api, account_id: str, gaql: str, file: TextIO) -> None:
 
 
 def read_account(
-    api: Api, account_id: str, now: datetime, last_end: date | None, staging: Path
+    api: Api,
+    account_id: str,
+    now: datetime,
+    last_end: date | None,
+    staging: Path,
+    days: tuple[date, date] | None = None,
 ) -> Read:
     """Read an account whole: its customer, which gives its time zone and so its window, then its
     campaigns, ad groups, ads and conversion actions and the facts of its window, each table into a
     file in the folder of the account under staging, on disk, a row at a time as each answer
     arrives, so that the load holds a row of an answer in memory and not the answer (ADR-0038).
+    With days, a portion of the history, the window is those days, up to yesterday of the account,
+    and the load takes its customer and its facts alone, as the usual window brings the entities.
     An answer that breaks off is asked again (retried). An error of the API on any request, an
     answer that is not whole JSON, or one that breaks off at each attempt, raises GoogleAdsError
     and leaves nothing of the account: a window replaces whole days, and a part of one would lose
@@ -782,13 +996,24 @@ def read_account(
     if not rows:
         raise GoogleAdsError(f"Google Ads account {account_id}: the API returned no customer")
     customer = rows[0]
-    first, last = window(yesterday(now, customer["customer"]["timeZone"]), last_end)
+    last_day_of_account = yesterday(now, customer["customer"]["timeZone"])
+    if days is None:
+        first, last = window(last_day_of_account, last_end)
+        tables = (*ENTITIES, *FACTS)
+    else:
+        first, last = days[0], min(days[1], last_day_of_account)
+        tables = FACTS
+        if first > last:
+            raise GoogleAdsError(
+                f"Google Ads account {account_id}: the days of the history start on "
+                f"{first.isoformat()}, after its yesterday, {last_day_of_account.isoformat()}"
+            )
     # The ID is checked digits.
     folder = staging / account_id
     folder.mkdir()
     files = {}
     try:
-        for table in (*ENTITIES, *FACTS):
+        for table in tables:
             path = folder / f"{table}.jsonl"
             with path.open("w", encoding="utf-8") as file:
                 for days in chunks(first, last) if table in FACTS else [None]:
@@ -843,28 +1068,46 @@ def warn_of_the_sunset(now: datetime) -> None:
         )
 
 
-def load(now: datetime, extensions: Path = EXTENSIONS, cache=None) -> dict[str, int]:
+def load(
+    now: datetime, extensions: Path = EXTENSIONS, cache=None, portion: Portion | None = None
+) -> dict[str, int]:
     """Load the accounts of the deployment as of now, each read whole before dlt sees any of it,
     record each account in _agoranomos_loads, loaded with its window or failed with its error,
     and return the rows of each table that dlt reports. cache is the asset state store of the
     asset of the load, or None, in which the load keeps the watermark of each account that it
-    took. When an account failed, the load takes the other accounts and raises AccountsFailed at
-    the end; when every account failed, it writes the journal alone."""
+    took. With a portion, the load takes the days of the portion of its accounts, which
+    clients.toml names, or of every account, with the kind history, and leaves the entities and
+    the watermarks as they were (ADR-0038, "The first load"). When an account failed, the load
+    takes the other accounts and raises AccountsFailed at the end; when every account failed, it
+    writes the journal alone."""
     warn_of_the_sunset(now)
-    wanted = accounts(extensions)
+    named = accounts(extensions)
+    wanted = named
+    if portion is not None and portion.accounts:
+        unnamed = sorted(set(portion.accounts) - set(named))
+        if unnamed:
+            raise GoogleAdsError(
+                "extensions/model/clients.toml names no account of google_ads "
+                + ", ".join(unnamed)
+                + ": a run of the history takes the accounts of the deployment only"
+            )
+        wanted = list(portion.accounts)
+    kind = WINDOW if portion is None else HISTORY
     api = Api(sign_in(), login_customer_id())
     os.environ.update(DLT_SETTINGS)
     with open_pipeline() as pipeline, tempfile.TemporaryDirectory(prefix="google-ads-") as staging:
         journal = recorded(pipeline) if has_loads(pipeline) else {}
         core = accepted(pipeline, wanted)
         cached = watermarks(cache)
+        days = None if portion is None else (portion.first, portion.last)
         read: dict[str, Read] = {}
         failed: dict[str, GoogleAdsError] = {}
         for account_id in wanted:
-            check_watermark(account_id, cached, core, journal)
+            if portion is None:
+                check_watermark(account_id, cached, core, journal)
             last_end = last_day(account_id, core, journal)
             try:
-                read[account_id] = read_account(api, account_id, now, last_end, Path(staging))
+                read[account_id] = read_account(api, account_id, now, last_end, Path(staging), days)
             except GoogleAdsError as error:
                 log.error("%s; the load goes on with the other accounts", error)
                 failed[account_id] = error
@@ -872,7 +1115,7 @@ def load(now: datetime, extensions: Path = EXTENSIONS, cache=None) -> dict[str, 
         if read:
             customers = [account.customer for account in read.values()]
             resources.append(dlt.resource(customers, name="customers", **own(HINTS["customers"])))
-            for table in ENTITIES:
+            for table in ENTITIES if portion is None else ():
                 resources.append(
                     dlt.resource(staged_rows(read, table), name=table, **own(HINTS[table]))
                 )
@@ -886,13 +1129,17 @@ def load(now: datetime, extensions: Path = EXTENSIONS, cache=None) -> dict[str, 
         record = [
             {
                 "account_id": account_id,
-                "as_of": account.window[1] + timedelta(days=1),
+                # The day of the load in the time zone of the account, also for a portion of the
+                # history, whose window ends long before it.
+                "as_of": yesterday(now, account.customer["customer"]["timeZone"])
+                + timedelta(days=1),
                 "window_from": account.window[0],
                 "window_to": account.window[1],
                 "now": now,
                 "loaded_at": loaded_at,
                 "status": LOADED,
                 "error": None,
+                "kind": kind,
             }
             for account_id, account in read.items()
         ] + [
@@ -908,6 +1155,7 @@ def load(now: datetime, extensions: Path = EXTENSIONS, cache=None) -> dict[str, 
                 "loaded_at": None,
                 "status": FAILED,
                 "error": str(error),
+                "kind": kind,
             }
             for account_id, error in failed.items()
         ]
@@ -917,8 +1165,10 @@ def load(now: datetime, extensions: Path = EXTENSIONS, cache=None) -> dict[str, 
         resources.append(dlt.resource(record, name=LOADS, **own(LOAD_HINTS)))
         run(pipeline, resources)
         counts = row_counts(pipeline)
-        # The load is whole: its row is in _dlt_loads.
-        remember(cache, cached, read)
+        # The load is whole: its row is in _dlt_loads. A portion of the history moves no
+        # watermark, the last day of the usual window of an account.
+        if portion is None:
+            remember(cache, cached, read)
     for table, rows in sorted(counts.items()):
         log.info("Loaded %d rows into %s.%s, as of %s", rows, DATASET, table, now.isoformat())
     log.info("%d requests to the Google Ads API for %d accounts", api.requests, len(wanted))

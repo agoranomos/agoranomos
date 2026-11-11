@@ -2,7 +2,7 @@
 -- loader is for dlt, which is to load the raw_<source> schemas (ADR-0004), transformer for dbt,
 -- which is to read them and build staging, marts and ops (ADR-0005, ADR-0029), metabase_reader
 -- reads marts and the views of the Ops collection in ops, and ai_reader, the role of MCP Toolbox,
--- reads marts and staging (ADR-0007, ADR-0030). migrator owns the schema core, whose tables the
+-- reads marts only (ADR-0007, ADR-0030, ADR-0043). migrator owns the schema core, whose tables the
 -- migrations of postgres/migrations create (ADR-0035, ADR-0044). No role but the superuser can create a
 -- schema, so this file creates every schema that the pipelines are to write. db-init runs it on every start, so each statement is safe to repeat.
 
@@ -240,13 +240,12 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA marts REVOKE SELECT ON TABL
 -- it builds them (the grants of models/ops in dbt_project.yml), and on no table of elementary.
 GRANT USAGE ON SCHEMA ops TO metabase_reader;
 
--- MCP Toolbox reads marts and staging as ai_reader, and neither the raw schemas nor ops (ADR-0007,
--- ADR-0030): the views of staging read the raw schemas as their owner, transformer, so the role
--- sees the data that they show and no more. Its sessions start read-only, a statement that runs
--- longer than a minute is canceled, so is a transaction left open for a minute, and it holds at
--- most three connections: an AI client sends one statement at a time, and the pipelines keep
--- theirs. As for metabase_reader, the barrier itself is that the role has no write grant, and
--- these lines run on every start.
+-- MCP Toolbox reads marts as ai_reader, and no other schema (ADR-0007, ADR-0030, ADR-0043): the
+-- views of marts read the core as their owner, transformer, so the role sees the data that they
+-- show and no more. Its sessions start read-only, a statement that runs longer than a minute is
+-- canceled, so is a transaction left open for a minute, and it holds at most three connections: an
+-- AI client sends one statement at a time, and the pipelines keep theirs. As for metabase_reader,
+-- the barrier itself is that the role has no write grant, and these lines run on every start.
 ALTER ROLE ai_reader SET default_transaction_read_only = on;
 ALTER ROLE ai_reader SET statement_timeout = '1min';
 ALTER ROLE ai_reader SET idle_in_transaction_session_timeout = '1min';
@@ -255,8 +254,14 @@ ALTER ROLE ai_reader CONNECTION LIMIT 3;
 -- relations (ADR-0037).
 ALTER ROLE ai_reader SET from_collapse_limit = 12;
 ALTER ROLE ai_reader SET join_collapse_limit = 12;
-GRANT USAGE ON SCHEMA marts, staging TO ai_reader;
+GRANT USAGE ON SCHEMA marts TO ai_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA marts TO ai_reader;
-GRANT SELECT ON ALL TABLES IN SCHEMA staging TO ai_reader;
 ALTER DEFAULT PRIVILEGES FOR ROLE transformer IN SCHEMA marts GRANT SELECT ON TABLES TO ai_reader;
-ALTER DEFAULT PRIVILEGES FOR ROLE transformer IN SCHEMA staging GRANT SELECT ON TABLES TO ai_reader;
+-- An earlier version of this file let the role read staging too, whose views stand over a raw
+-- layer that is to be erased after each acceptance, so that an agent would read empty tables
+-- (ADR-0043). An upgraded warehouse loses what it gave there: the schema, the tables and views in
+-- it, and the default privileges of transformer; and every start takes back such a grant given by
+-- hand.
+REVOKE ALL ON SCHEMA staging FROM ai_reader;
+REVOKE ALL ON ALL TABLES IN SCHEMA staging FROM ai_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE transformer IN SCHEMA staging REVOKE ALL ON TABLES FROM ai_reader;

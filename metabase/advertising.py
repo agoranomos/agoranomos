@@ -7,15 +7,21 @@ Its questions are native SQL on the marts, each with the filters of the dashboar
 has: the period, the time grouping of a chart over time, the client, and, on the marts of the ad
 platforms, the platform, the account and the campaign, which the client, the platform and the
 account limit as linked filters, on the fields of the statistics of the campaigns in every
-question.
-The time grouping changes how a question groups its days, as a
-template tag of the type temporal-unit, and filters nothing. A KPI is the ratio of sums that the
-marts declare for the metrics of Metabase (metrics.py), written into the SQL from the same
-declaration, so every card computes it as the metric does. The overview leads with the KPIs,
-each compared with the period before by the grouping of time, then the trend, the platforms, the
-clients and the top campaigns; a click on a campaign opens the tab of ad groups and ads with the
-filter of the campaign set. Its card of the loads reads the view ops.ops_loads, as the Ops
-collection does (ops.py).
+question, and, on the statistics of the campaigns, the state of the campaign, which limits the
+campaigns that the filter of the campaign offers (ADR-0037). The time grouping changes how a
+question groups its days, as a template tag of the type temporal-unit, and filters nothing. A KPI
+is the ratio of sums that the marts declare for the metrics of Metabase (metrics.py), written into
+the SQL from the same declaration, so every card computes it as the metric does. The overview
+leads with the KPIs, each compared with the period before by the grouping of time, then the trend,
+the platforms, the clients and the top campaigns; a click on a campaign opens the tab of ad groups
+and ads with the filter of the campaign set. Its card of the loads reads the view ops.ops_loads, as
+the Ops collection does (ops.py).
+
+The conversions of the statistics of the campaigns are those of the primary conversion actions of
+the deployment, conversions_primary, which every platform has, Meta included, and the tab of the
+platforms shows beside them the own metric of conversions of each platform, conversions, as its
+account shows it. The statistics of the ad groups and of the ads have only the metric of the
+platform: their conversions of the primary actions are a module (ADR-0036).
 
 The questions need the fields of the marts for their filters: until Metabase shows the marts,
 before the first run of the transform, the dashboard waits, and a later start makes it.
@@ -62,7 +68,16 @@ WEB_SESSIONS = "web_sessions_daily"
 # The mart whose metrics give the KPIs, and their slugs: the marts of ad groups and of ads declare
 # the same ones.
 KPI_MART = AD_STATS
-KPIS = ("ctr", "cpc", "cpm", "cost_per_conversion", "conversion_rate", "roas")
+KPIS = (
+    "ctr",
+    "cpc",
+    "cpm",
+    "cost_per_conversion",
+    "conversion_rate",
+    "roas",
+    "cost_per_primary_conversion",
+    "primary_conversion_rate",
+)
 
 # The filters of the questions, by the names of their template tags: their display names, the type
 # of their widget, and the column of the mart that each is on. A dashboard filter of the same slug
@@ -74,11 +89,15 @@ FILTERS = {
     "platform": ("Platform", "string/=", "platform_name"),
     "account": ("Account", "string/=", "account_name"),
     "campaign": ("Campaign", "string/=", "campaign_name"),
+    "state": ("Campaign state", "string/=", "campaign_state"),
 }
 # The filters of the dashboard. The period starts as the 12 weeks before this one and the grouping
 # as the week, which starts on Monday (metabase_init.WEEK_START): each KPI then compares the last
 # whole week with the one before. The account offers the accounts of the client and the platform
-# that the filters name, and the campaign those of the account too.
+# that the filters name, and the campaign those of the account and of the state too. The state of a
+# campaign, active, paused, removed or other, is the same word on every platform, which says its
+# status in words of its own (ADR-0036); it has no value until a person picks one, so the spend of
+# a removed campaign counts in every total.
 DASHBOARD_FILTERS = (
     content.DashboardFilter("period", "Period", "date/all-options", "date", "past12weeks"),
     content.DashboardFilter(
@@ -89,15 +108,22 @@ DASHBOARD_FILTERS = (
     content.DashboardFilter(
         "account", "Account", "string/=", "string", filtering=("client", "platform")
     ),
+    content.DashboardFilter("state", "Campaign state", "string/=", "string"),
     content.DashboardFilter(
-        "campaign", "Campaign", "string/=", "string", filtering=("client", "platform", "account")
+        "campaign",
+        "Campaign",
+        "string/=",
+        "string",
+        filtering=("client", "platform", "account", "state"),
     ),
 )
 # The filters that the rows of each mart can take. The sessions of web analytics have a client,
-# but no platform, account or campaign of an ad platform of their own.
+# but no platform, account or campaign of an ad platform of their own; the state of a campaign is
+# a column of the statistics of the campaigns alone, so the questions of the other marts do not
+# take it, and Metabase shows the filter only on the tabs of the questions that do.
 AD_FILTERS = ("period", "client", "platform", "account", "campaign")
 MART_FILTERS = {
-    AD_STATS: AD_FILTERS,
+    AD_STATS: (*AD_FILTERS, "state"),
     AD_GROUP_STATS: AD_FILTERS,
     AD_STATS_OF_ADS: AD_FILTERS,
     AD_CONVERSIONS: AD_FILTERS,
@@ -132,6 +158,9 @@ COLUMN_TYPES = {
             "campaign_name",
             "ad_group_name",
             "ad_name",
+            "campaign_state",
+            "ad_group_state",
+            "ad_state",
             "conversion_action_name",
             "conversion_category",
             "attribution_setting",
@@ -144,7 +173,12 @@ COLUMN_TYPES = {
 # The semantic types that Metabase 0.64.1 gives the columns of the answers by their names
 # (src/metabase/analyze/classifiers/name.clj at the tag v0.64.1): a decimal whose name ends in rate
 # is a share, and one whose name has cost is a cost.
-SEMANTIC_TYPES = {"conversion_rate": "type/Share", "cost_per_conversion": "type/Cost"}
+SEMANTIC_TYPES = {
+    "conversion_rate": "type/Share",
+    "cost_per_conversion": "type/Cost",
+    "primary_conversion_rate": "type/Share",
+    "cost_per_primary_conversion": "type/Cost",
+}
 # The titles of the columns that no mart has: those of the loads, as the Ops collection gives them.
 OTHER_TITLES = {
     name: ops.TITLES[name] for name in ("account_id", "last_day_loaded", "last_loaded_at")
@@ -152,28 +186,41 @@ OTHER_TITLES = {
 OTHER_TITLES["platform"] = "Platform Code"
 # Money in the reporting currency, and the decimals of the other numbers of the marts.
 MONEY = frozenset({"spend_reporting", "conversion_value_reporting"})
-DECIMALS = {"conversions": 0, "key_events": 0}
+DECIMALS = {"conversions": 0, "conversions_primary": 0, "all_conversions": 0, "key_events": 0}
 
 # The texts of the cards of text, as facts for people and AI clients.
 ABOUT = (
     "**About these numbers.** Money is in the reporting currency. The platforms still change the "
     "statistics of the last days, above all the conversions, which they date by the click, so a "
     "recent day can rise after it first shows. The conversions are those of the primary conversion "
-    "actions, as each platform counts them, so a sum across platforms can count one conversion "
-    "more than once. The key events come from web analytics, which dates each by its event and "
-    "credits it to one source, so they differ from the conversions of the platforms."
+    "actions of this deployment, as each platform counts them, so a sum across platforms can count "
+    "one conversion more than once; the tab Platforms shows beside them the conversions in the own "
+    "metric of each platform, as its account shows them. The value of the conversions, and so "
+    "ROAS, is that of the own metric of each platform, none on Meta. The key events come from web "
+    "analytics, which dates each by its event and credits it to one source, so they differ from "
+    "the conversions of the platforms."
 )
 WITHOUT_PERFORMANCE_MAX = (
     "The ad groups and the ads come from reports of their own of each platform. Performance Max "
     "campaigns of Google have neither, so the totals of this tab leave them out and can be lower "
-    "than those of the campaigns."
+    "than those of the campaigns. Their conversions are the own metric of conversions of each "
+    "platform, as its account shows them, and none on Meta: the conversions of the primary actions "
+    "at these levels are a module that is not built yet."
 )
 ATTRIBUTION = (
     "**How the conversions are attributed.** Each platform credits a conversion to its own ads, "
     "by the attribution setting of the conversion action, and dates it by the click or the view "
     "that led to it. The totals of the dashboard count the primary actions only; this table shows "
-    "every action, primary or not."
+    "every action, primary or not: its conversions are those that the own metric of the platform "
+    "counts, 0 on Google for an action that the metric leaves out, and all of them are those of "
+    "every conversion of the action, which the primary conversions add up."
 )
+
+
+# Every conversion of an action: all_conversions, where the platform has the metric, and else
+# conversions, which then counts every conversion of the action, as conversions_primary adds them
+# up for the primary actions (dbt/models/marts/ad_stats_campaign_daily.sql).
+ALL_CONVERSIONS = "sum(coalesce(all_conversions, conversions)) AS all_conversions"
 
 
 def sql(*lines: str) -> str:
@@ -232,10 +279,34 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
     The descriptions say what each counts, as facts for people and AI clients."""
     ctr, cpc, cpm = kpis["ctr"], kpis["cpc"], kpis["cpm"]
     cpa, rate, roas = kpis["cost_per_conversion"], kpis["conversion_rate"], kpis["roas"]
-    results = [*totals("spend_reporting", "impressions", "clicks", "conversions")]
-    kpi_columns = ("ctr", "cpc", "cost_per_conversion", "roas")
-    kpi_sql = [ratio(k) for k in (ctr, cpc, cpa, roas)]
-    measures = ("spend_reporting", "impressions", "clicks", "conversions", *kpi_columns)
+    # The KPIs of the primary actions, of the statistics of the campaigns alone.
+    cpp, prate = kpis["cost_per_primary_conversion"], kpis["primary_conversion_rate"]
+    # The statistics of the campaigns, with the conversions of the primary actions, and those of
+    # the ad groups and the ads, with the metric of the platform.
+    results = [*totals("spend_reporting", "impressions", "clicks", "conversions_primary")]
+    measures = (
+        "spend_reporting",
+        "impressions",
+        "clicks",
+        "conversions_primary",
+        "ctr",
+        "cpc",
+        cpp.slug,
+        "roas",
+    )
+    kpi_sql = [ratio(k) for k in (ctr, cpc, cpp, roas)]
+    lower_results = [*totals("spend_reporting", "impressions", "clicks", "conversions")]
+    lower_measures = (
+        "spend_reporting",
+        "impressions",
+        "clicks",
+        "conversions",
+        "ctr",
+        "cpc",
+        cpa.slug,
+        "roas",
+    )
+    lower_kpi_sql = [ratio(k) for k in (ctr, cpc, cpa, roas)]
 
     def trend(key: str, name: str, description: str, mart: str, column: str, select: str, at: int):
         return {
@@ -264,19 +335,20 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
         trend(
             "conversions",
             "Conversions",
-            "The conversions of the primary conversion actions, as the platforms count them.",
+            "The conversions of the primary conversion actions of the deployment, as the "
+            "platforms count them.",
             AD_STATS,
-            "conversions",
-            "sum(conversions) AS conversions",
+            "conversions_primary",
+            "sum(conversions_primary) AS conversions_primary",
             1,
         ),
         trend(
             "cost-per-conversion",
             "Cost per conversion",
-            cpa.description,
+            cpp.description,
             AD_STATS,
-            cpa.slug,
-            ratio(cpa),
+            cpp.slug,
+            ratio(cpp),
             2,
         ),
         trend("roas", "ROAS", roas.description, AD_STATS, roas.slug, ratio(roas), 3),
@@ -307,20 +379,20 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
             "name": "Spend and conversions over time",
             "description": (
                 "The spend, in the reporting currency, and the conversions of the primary "
-                "conversion actions, by the time grouping."
+                "conversion actions of the deployment, by the time grouping."
             ),
             "display": "combo",
             "mart": AD_STATS,
-            "columns": ("report_date", "spend_reporting", "conversions"),
+            "columns": ("report_date", "spend_reporting", "conversions_primary"),
             "visualization_settings": {
                 "graph.dimensions": ["report_date"],
-                "graph.metrics": ["spend_reporting", "conversions"],
+                "graph.metrics": ["spend_reporting", "conversions_primary"],
                 "series_settings": {
                     "spend_reporting": {"display": "bar", "color": content.SERIES_COLOR},
-                    "conversions": {"display": "line", "axis": "right"},
+                    "conversions_primary": {"display": "line", "axis": "right"},
                 },
             },
-            "query": over_time(AD_STATS, *totals("spend_reporting", "conversions")),
+            "query": over_time(AD_STATS, *totals("spend_reporting", "conversions_primary")),
             "layout": {"row": 6, "col": 0, "size_x": 16, "size_y": 6},
         },
         {"tab": OVERVIEW, "text": ABOUT, "layout": {"row": 6, "col": 16, "size_x": 8, "size_y": 6}},
@@ -328,14 +400,23 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
             "tab": OVERVIEW,
             "key": "platforms",
             "name": "Platforms",
-            "description": "The spend, the conversions and their KPIs on each platform.",
+            "description": (
+                "The spend, the conversions of the primary conversion actions and their KPIs on "
+                "each platform."
+            ),
             "display": "table",
             "mart": AD_STATS,
-            "columns": ("platform_name", "spend_reporting", "conversions", cpa.slug, roas.slug),
+            "columns": (
+                "platform_name",
+                "spend_reporting",
+                "conversions_primary",
+                cpp.slug,
+                roas.slug,
+            ),
             "query": grouped(
                 AD_STATS,
                 ("platform_name",),
-                [*totals("spend_reporting", "conversions"), ratio(cpa), ratio(roas)],
+                [*totals("spend_reporting", "conversions_primary"), ratio(cpp), ratio(roas)],
                 "spend_reporting DESC",
             ),
             "layout": {"row": 12, "col": 0, "size_x": 12, "size_y": 6},
@@ -364,8 +445,8 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
             "key": "top-campaigns",
             "name": "Top campaigns by spend",
             "description": (
-                "The ten campaigns with the most spend, with their conversions and KPIs. A click "
-                "on a campaign opens its ad groups and ads."
+                "The ten campaigns with the most spend, with their conversions of the primary "
+                "conversion actions and KPIs. A click on a campaign opens its ad groups and ads."
             ),
             "display": "table",
             "mart": AD_STATS,
@@ -373,14 +454,14 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
                 "campaign_name",
                 "platform_name",
                 "spend_reporting",
-                "conversions",
-                cpa.slug,
+                "conversions_primary",
+                cpp.slug,
                 roas.slug,
             ),
             "query": grouped(
                 AD_STATS,
                 ("campaign_name", "platform_name"),
-                [*totals("spend_reporting", "conversions"), ratio(cpa), ratio(roas)],
+                [*totals("spend_reporting", "conversions_primary"), ratio(cpp), ratio(roas)],
                 "spend_reporting DESC",
                 limit=10,
             ),
@@ -409,7 +490,11 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
             "tab": PLATFORMS,
             "key": "by-platform",
             "name": "Results by platform",
-            "description": "The statistics and every KPI of each platform.",
+            "description": (
+                "The statistics and every KPI of each platform: the conversions of the primary "
+                "conversion actions of the deployment, and the conversions in the own metric of "
+                "the platform, as its account shows them, none on Meta, with the KPIs of each."
+            ),
             "display": "table",
             "mart": AD_STATS,
             "columns": (
@@ -417,17 +502,18 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
                 "spend_reporting",
                 "impressions",
                 "clicks",
+                "conversions_primary",
                 "conversions",
                 "conversion_value_reporting",
-                *(k.slug for k in (ctr, cpc, cpm, cpa, rate, roas)),
+                *(k.slug for k in (ctr, cpc, cpm, cpp, prate, cpa, rate, roas)),
             ),
             "query": grouped(
                 AD_STATS,
                 ("platform_name",),
                 [
                     *results,
-                    *totals("conversion_value_reporting"),
-                    *(ratio(k) for k in (ctr, cpc, cpm, cpa, rate, roas)),
+                    *totals("conversions", "conversion_value_reporting"),
+                    *(ratio(k) for k in (ctr, cpc, cpm, cpp, prate, cpa, rate, roas)),
                 ],
                 "spend_reporting DESC",
             ),
@@ -456,17 +542,17 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
             "key": "conversions-by-platform",
             "name": "Conversions by platform over time",
             "description": (
-                "The conversions of the primary conversion actions of each platform, by the time "
-                "grouping."
+                "The conversions of the primary conversion actions of the deployment on each "
+                "platform, by the time grouping."
             ),
             "display": "line",
             "mart": AD_STATS,
-            "columns": ("report_date", "platform_name", "conversions"),
+            "columns": ("report_date", "platform_name", "conversions_primary"),
             "visualization_settings": {
                 "graph.dimensions": ["report_date", "platform_name"],
-                "graph.metrics": ["conversions"],
+                "graph.metrics": ["conversions_primary"],
             },
-            "query": over_time(AD_STATS, *totals("conversions"), by="platform_name"),
+            "query": over_time(AD_STATS, *totals("conversions_primary"), by="platform_name"),
             "layout": {"row": 5, "col": 12, "size_x": 12, "size_y": 6},
         },
         {
@@ -474,15 +560,22 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
             "key": "campaigns",
             "name": "Campaigns",
             "description": (
-                "Every campaign with its statistics and KPIs, by platform and account. A click on "
-                "a campaign opens its ad groups and ads."
+                "Every campaign with its state, its statistics, the conversions of the primary "
+                "conversion actions and KPIs, by platform and account. A click on a campaign opens "
+                "its ad groups and ads."
             ),
             "display": "table",
             "mart": AD_STATS,
-            "columns": ("platform_name", "account_name", "campaign_name", *measures),
+            "columns": (
+                "platform_name",
+                "account_name",
+                "campaign_name",
+                "campaign_state",
+                *measures,
+            ),
             "query": grouped(
                 AD_STATS,
-                ("platform_name", "account_name", "campaign_name"),
+                ("platform_name", "account_name", "campaign_name", "campaign_state"),
                 [*results, *kpi_sql],
                 "spend_reporting DESC",
             ),
@@ -498,14 +591,23 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
             "tab": AD_GROUPS_AND_ADS,
             "key": "ad-groups",
             "name": "Ad groups",
-            "description": "Every ad group with its statistics and KPIs, by platform and campaign.",
+            "description": (
+                "Every ad group with its state, its statistics and KPIs, by platform and "
+                "campaign, with the conversions in the own metric of the platform."
+            ),
             "display": "table",
             "mart": AD_GROUP_STATS,
-            "columns": ("platform_name", "campaign_name", "ad_group_name", *measures),
+            "columns": (
+                "platform_name",
+                "campaign_name",
+                "ad_group_name",
+                "ad_group_state",
+                *lower_measures,
+            ),
             "query": grouped(
                 AD_GROUP_STATS,
-                ("platform_name", "campaign_name", "ad_group_name"),
-                [*results, *kpi_sql],
+                ("platform_name", "campaign_name", "ad_group_name", "ad_group_state"),
+                [*lower_results, *lower_kpi_sql],
                 "spend_reporting DESC",
             ),
             "layout": {"row": 2, "col": 0, "size_x": 24, "size_y": 8},
@@ -514,14 +616,17 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
             "tab": AD_GROUPS_AND_ADS,
             "key": "ads",
             "name": "Ads",
-            "description": "Every ad with its statistics and KPIs, by campaign and ad group.",
+            "description": (
+                "Every ad with its state, its statistics and KPIs, by campaign and ad group, with "
+                "the conversions in the own metric of the platform."
+            ),
             "display": "table",
             "mart": AD_STATS_OF_ADS,
-            "columns": ("campaign_name", "ad_group_name", "ad_name", *measures),
+            "columns": ("campaign_name", "ad_group_name", "ad_name", "ad_state", *lower_measures),
             "query": grouped(
                 AD_STATS_OF_ADS,
-                ("campaign_name", "ad_group_name", "ad_name"),
-                [*results, *kpi_sql],
+                ("campaign_name", "ad_group_name", "ad_name", "ad_state"),
+                [*lower_results, *lower_kpi_sql],
                 "spend_reporting DESC",
             ),
             "layout": {"row": 10, "col": 0, "size_x": 24, "size_y": 8},
@@ -531,8 +636,9 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
             "key": "by-action",
             "name": "Conversions by action",
             "description": (
-                "The conversions and the conversion value of each conversion action, primary or "
-                "not, with its category and the attribution setting of its platform."
+                "The conversions of each conversion action, primary or not, with its category "
+                "and the attribution setting of its platform: all of them, and those that the own "
+                "metric of the platform counts, with their value."
             ),
             "display": "table",
             "mart": AD_CONVERSIONS,
@@ -542,6 +648,7 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
                 "conversion_category",
                 "is_primary",
                 "attribution_setting",
+                "all_conversions",
                 "conversions",
                 "conversion_value_reporting",
             ),
@@ -554,8 +661,8 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
                     "is_primary",
                     "attribution_setting",
                 ),
-                totals("conversions", "conversion_value_reporting"),
-                "conversions DESC",
+                [ALL_CONVERSIONS, *totals("conversions", "conversion_value_reporting")],
+                "all_conversions DESC",
             ),
             "layout": {"row": 0, "col": 0, "size_x": 16, "size_y": 8},
         },
@@ -569,18 +676,18 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
             "key": "by-category",
             "name": "Conversions by category over time",
             "description": (
-                "The conversions of every conversion action, primary or not, by its category and "
-                "the time grouping."
+                "Every conversion of every conversion action, primary or not, by its category "
+                "and the time grouping."
             ),
             "display": "bar",
             "mart": AD_CONVERSIONS,
-            "columns": ("report_date", "conversion_category", "conversions"),
+            "columns": ("report_date", "conversion_category", "all_conversions"),
             "visualization_settings": {
                 "graph.dimensions": ["report_date", "conversion_category"],
-                "graph.metrics": ["conversions"],
+                "graph.metrics": ["all_conversions"],
                 "stackable.stack_type": "stacked",
             },
-            "query": over_time(AD_CONVERSIONS, *totals("conversions"), by="conversion_category"),
+            "query": over_time(AD_CONVERSIONS, ALL_CONVERSIONS, by="conversion_category"),
             "layout": {"row": 8, "col": 0, "size_x": 12, "size_y": 6},
         },
         {

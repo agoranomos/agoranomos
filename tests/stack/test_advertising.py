@@ -1,8 +1,9 @@
 """Stack tests of the dashboard Advertising (metabase/advertising.py, ADR-0034): the API of Metabase
 is not versioned, so after an upgrade the dashboard must keep its tabs, every card must answer with
 the filters of the dashboard, also with a client and a campaign set, a KPI must be the ratio that
-SQL gives over the mart, the linked filters must limit their values with no join, and a click on a
-campaign must open the tab of ad groups and ads.
+SQL gives over the mart, the linked filters must limit their values with no join, the state of a
+campaign must limit the campaigns and the statistics, and a click on a campaign must open the tab of
+ad groups and ads.
 
 The assertions print names, counts and statuses, never a secret.
 """
@@ -118,12 +119,18 @@ def test_a_kpi_of_the_dashboard_is_the_ratio_of_sql_over_the_mart(
     shown = {row[0]: dict(zip(names, row, strict=True)) for row in data["rows"]}
     sql = (
         "SELECT platform_name, round(sum(clicks)::numeric / nullif(sum(impressions), 0), 6), "
-        "round(sum(spend_reporting) / nullif(sum(conversions), 0), 6) "
+        "round(sum(spend_reporting) / nullif(sum(conversions), 0), 6), "
+        "round(sum(spend_reporting) / nullif(sum(conversions_primary), 0), 6), "
+        "sum(conversions_primary) "
         "FROM marts.ad_stats_campaign_daily GROUP BY platform_name"
     )
     for line in warehouse_output(env, sql).splitlines():
-        platform, ctr, cpa = line.split("|")
+        platform, ctr, cpa, primary_cpa, primary = line.split("|")
         assert abs(Decimal(str(shown[platform]["ctr"])) - Decimal(ctr)) <= TOLERANCE, platform
+        # The conversions of the primary actions, which every platform has, Meta included.
+        assert Decimal(str(shown[platform]["conversions_primary"])) == Decimal(primary), platform
+        cost = Decimal(str(shown[platform]["cost_per_primary_conversion"]))
+        assert abs(cost - Decimal(primary_cpa)) <= TOLERANCE, platform
         # conversions is the metric of the platform, which Meta, and so demo_social, has none of
         # (ADR-0037): its cost per conversion is none.
         if cpa == "":
@@ -152,6 +159,36 @@ def test_the_linked_filters_offer_the_values_of_the_filters_that_limit_them(
         assert 0 < len(of_client) < len(every), client
         counted += len(of_client)
     assert counted == len(every)
+
+
+def test_the_state_of_a_campaign_limits_the_campaigns_and_the_statistics(
+    metabase_url, session, board
+):
+    # The filter of the state is on campaign_state of the statistics of the campaigns, the table of
+    # the linked filters, so the campaigns that it limits come with no join (ADR-0037).
+    [state_field] = board["param_fields"]["state"]
+    [campaign_field] = board["param_fields"]["campaign"]
+    assert state_field["name"] == "campaign_state"
+    assert state_field["table_id"] == campaign_field["table_id"]
+    path = f"/api/dashboard/{board['id']}/params"
+    states = [v[0] for v in call(metabase_url, session, "GET", f"{path}/state/values")["values"]]
+    assert states, "the filter of the state offers no value"
+    assert set(states) <= {"active", "paused", "removed", "other"}, states
+    every = {v[0] for v in call(metabase_url, session, "GET", f"{path}/campaign/values")["values"]}
+    offered = set()
+    for state in states:
+        query = urllib.parse.urlencode({"state": state})
+        found = call(metabase_url, session, "GET", f"{path}/campaign/values?{query}")["values"]
+        assert found, state
+        offered |= {v[0] for v in found}
+    assert offered == every
+    # The table of the campaigns answers with a state, and every row has it.
+    [dashcard] = [d for d in board["dashcards"] if d.get("card", {}).get("name") == "Campaigns"]
+    data = answer(metabase_url, session, board, dashcard)
+    names = [c["name"] for c in data["cols"]]
+    state = data["rows"][0][names.index("campaign_state")]
+    data = answer(metabase_url, session, board, dashcard, state=[state])
+    assert {row[names.index("campaign_state")] for row in data["rows"]} == {state}
 
 
 def test_a_click_on_a_campaign_opens_the_tab_of_its_ad_groups_and_ads(board):

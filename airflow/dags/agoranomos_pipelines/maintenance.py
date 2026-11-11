@@ -3,9 +3,9 @@ safe to repeat, so that a step that fails leaves its work to the next run:
 
 - the retention of ADR-0044: the logs of Airflow older than 30 days, the rows of the runs of dbt in
   the schema ops older than 90 days, the rows of _dlt_loads older than 90 days that no load, no
-  state of dlt and no pin needs any more, the accepted rows of core.loads older than 13 months, the
-  months of the journals of restatements older than 13 months, and the Variables that the watcher
-  mode of Cosmos leaves behind for a run older than 90 days;
+  state of dlt and no pin needs any more, the accepted rows of the kind window of core.loads older
+  than 13 months, the months of the journals of restatements older than 13 months, and the
+  Variables that the watcher mode of Cosmos leaves behind for a run older than 90 days;
 - the upkeep of the partitions of the core (ADR-0036, ADR-0039): the partitions of the current
   month and the two after it, ANALYZE ONLY of the parents of the facts, which autovacuum does not
   analyze, and VACUUM (FREEZE) of the months of the facts that have left the window of
@@ -691,24 +691,29 @@ def clean_dlt_loads(run_id: str, days: int = DLT_LOADS_DAYS) -> dict[str, int]:
 
 
 def core_loads_delete(raw_loads: str | None) -> str:
-    """The DELETE of the accepted rows of core.loads of the source %(source)s that finished more
-    than LOADS_MONTHS months ago, as %(months)s, but those that a run or a load still reads:
+    """The DELETE of the accepted rows of the kind window of core.loads of the source %(source)s
+    that finished more than LOADS_MONTHS months ago, as %(months)s, but those that a run or a load
+    still reads:
 
-    - the newest accepted load of each account with a window, from whose last day a load is to
-      start the next window of the account (ADR-0038);
+    - the newest accepted load of the kind window of each account, from whose last day a load is
+      to start the next window of the account (ADR-0038);
     - each accepted load newer than the oldest pinned load of its account, which can still win a
       day of a pinned one in staging (pinned_loads in newest_load.sql);
     - a load whose row _dlt_loads of its raw schema, raw_loads, still holds, as the next pin would
       take it again as a new load: the cleanup of _dlt_loads removes that row first (ADR-0046).
 
-    A pinned row stays whatever its age: no run has accepted it, and staging reads its rows."""
+    A pinned row stays whatever its age: no run has accepted it, and staging reads its rows. A row
+    of the kind history stays too: the history of Google Ads plans its next portion from the
+    windows that core.loads holds, and ops.ops_history counts its portions (ADR-0038)."""
     query = (
         "DELETE FROM core.loads AS l\n"
         "WHERE l.source = %(source)s\n"
         "    AND l.status = 'accepted'\n"
+        "    AND l.kind = 'window'\n"
         "    AND l.finished_at < now() - make_interval(months => %(months)s)\n"
         "    AND EXISTS (SELECT FROM core.loads AS n WHERE n.source = l.source"
         " AND n.account_id = l.account_id AND n.status = 'accepted' AND n.outcome = 'loaded'"
+        " AND n.kind = 'window'"
         " AND n.load_id::numeric > l.load_id::numeric)\n"
         "    AND NOT EXISTS (SELECT FROM core.loads AS p WHERE p.source = l.source"
         " AND p.account_id = l.account_id AND p.status = 'pinned' AND p.outcome = 'loaded'"
@@ -720,10 +725,11 @@ def core_loads_delete(raw_loads: str | None) -> str:
 
 
 def clean_core_loads(run_id: str, months: int = LOADS_MONTHS) -> dict[str, int]:
-    """Delete the accepted rows of core.loads older than months that core_loads_delete does not
-    keep, as transformer, each source in a transaction of its own, and return how many rows each
-    lost. A source whose raw schema has a table _dlt_loads that transformer may not read keeps its
-    rows: the cleanup cannot tell whether a pin would take them again."""
+    """Delete the accepted rows of the kind window of core.loads older than months that
+    core_loads_delete does not keep, as transformer, each source in a transaction of its own, and
+    return how many rows each lost. A source whose raw schema has a table _dlt_loads that
+    transformer may not read keeps its rows: the cleanup cannot tell whether a pin would take them
+    again."""
     deleted: dict[str, int] = {}
     steps: list[Step] = []
     with connected(transformer_credentials()) as connection:

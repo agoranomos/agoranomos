@@ -31,6 +31,12 @@ RAW_ECB = Asset("postgres://warehouse-db:5432/warehouse/raw_ecb/rates_daily")
 # updates.
 RAW_GOOGLE_ADS = Asset("postgres://warehouse-db:5432/warehouse/raw_google_ads/campaign_stats")
 
+# The asset of a run of the transform in which every task succeeded, which the last task of the
+# transform updates: the history of Google Ads plans its next portion after it, so that each
+# portion goes from raw to the core before the next one starts (ADR-0038, "The first load"). It is
+# no table, so it has a name and no address of PostgreSQL.
+TRANSFORMED = Asset("agoranomos_transformed")
+
 # The condition on which the transform runs (ADR-0039): the demo has loaded, or the rates have, or
 # Google Ads has. A source that joins the model adds its asset here. The transform allows one run
 # at a time: while a run is queued or running, Airflow keeps the events that come, and starts one

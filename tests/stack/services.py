@@ -29,7 +29,7 @@ SERVER_LONG_RUNNING = {"proxy"}
 OPS_LONG_RUNNING = {"backup"}
 # The services that the ai profile adds: the container of the MCP servers.
 AI_LONG_RUNNING = {"ai"}
-BASE_ONE_SHOT = {"db-init", "airflow-init", "metadata-export", "metabase-init"}
+BASE_ONE_SHOT = {"db-init", "airflow-init", "metadata-export", "marts-init", "metabase-init"}
 # The Airflow services of the base stack: airflow-init, a one-shot job, and the four that stay up.
 BASE_AIRFLOW = {
     "airflow-init",

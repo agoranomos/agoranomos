@@ -916,16 +916,26 @@ def test_the_pin_copies_each_whole_load_once_and_skips_a_source_without_tables()
     assert "insert into {{ loads }} (\n" in text
     assert (
         "    source, load_id, account_id, window_from, window_to, outcome, error, finished_at, "
-        "invocation_id\n"
+        "invocation_id,\n    kind\n"
     ) in text
-    assert "    l.inserted_at, '{{ invocation_id }}'::uuid\n" in text
+    assert "    l.inserted_at, '{{ invocation_id }}'::uuid,\n" in text
+    # The kind of the load, window or history (ADR-0038), from a journal that has the column, and
+    # window from one that does not, or from a row without it.
+    assert (
+        "{% if kinds %}case when j.kind = 'history' then 'history' else 'window' end"
+        "{% else %}'window'{% endif %}"
+    ) in text
+    assert "adapter.get_columns_in_relation(journal)" in text
     assert "join {{ finished }} as l\n    on l.load_id = j._dlt_load_id and l.status = 0\n" in text
     assert "on conflict (source, load_id, account_id) do nothing" in text
     assert "{%- set loads = pinned_loads_journal() -%}" in text
-    # The rows of the pin and the months of the pinned windows, then one commit; then each
-    # partition in a transaction of its own.
+    # The lock of marts-init, shared, first, then the rows of the pin and the months of the
+    # pinned windows, then one commit; then each partition in a transaction of its own; then the
+    # lock goes, and a last commit (marts_init.sql).
     body = text[text.index("{% macro pin_loads() %}") : text.index("{% endmacro %}")]
-    assert body.count("{%- do adapter.commit() -%}") == 2
+    assert body.count("{%- do adapter.commit() -%}") == 3
+    assert body.index("statement('wait_for_marts_init'") < body.index("statement('pin'")
+    assert body.index("statement('partition'") < body.index("statement('done_with_marts_init'")
     assert body.index("statement('pin'") < body.index("statement('months'")
     assert body.index("statement('months'") < body.index("{%- do adapter.commit() -%}")
     assert "select core.ensure_partition('core.{{ fact }}'::regclass, date '{{ month }}')" in body
@@ -1283,6 +1293,17 @@ def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
         # and Ops shows them, as a test at error would stop the healthy accounts too (#188).
         "assert_no_account_is_in_quarantine": ({"int_g1_failures"}, True),
         "assert_no_source_is_stopped": ({"int_g1_failures"}, True),
+        # An account that leaves the settings keeps its data (ADR-0044): it warns, with the
+        # registry that sets the activity, over the facts as the runs before left them, which are
+        # ancestors of the registry through G1a, so it runs in the task of dim_account.
+        "assert_every_account_with_data_is_in_the_settings": (
+            {
+                "dim_account",
+                "source:core.ad_stats_campaign_daily",
+                "source:core.web_sessions_daily",
+            },
+            True,
+        ),
         # G3 (ADR-0035, ADR-0042): a day of the windows of the facts without a rate in the core
         # would have no amount in the reporting currency.
         "assert_the_core_has_a_rate_for_every_day_of_the_windows": (

@@ -68,10 +68,13 @@ TEXT, DATE, TIMESTAMP = {"data_type": "text"}, {"data_type": "date"}, {"data_typ
 # (ADR-0035), has the status failed, the text of the error as the source gives it, which names no
 # secret, the moment of the attempt (now), and no day and no loaded_at: it loaded nothing, so the
 # staging models and the next load pass it over, and the Ops collection shows the last load that
-# was. A load is whole once _dlt_loads has its row with status 0, which dlt writes after the last
-# table of the load. The journal of the releases before v0.5, _agoranomos_reloads, went with their
-# merges: a dataset that holds it was loaded in their shape (OLD_JOURNAL). dlt writes a timestamp as
-# a timestamp with time zone in PostgreSQL.
+# was. Each row has the kind of its load too: window for the usual window of the account, history
+# for a load of the days before it (ADR-0038, "The first load"), which the pin copies into
+# core.loads, where a row without it, of a source that does not write it, takes window. A load is
+# whole once _dlt_loads has its row with status 0, which dlt writes after the last table of the
+# load. The journal of the releases before v0.5, _agoranomos_reloads, went with their merges: a
+# dataset that holds it was loaded in their shape (OLD_JOURNAL). dlt writes a timestamp as a
+# timestamp with time zone in PostgreSQL.
 LOADS = "_agoranomos_loads"
 OLD_JOURNAL = "_agoranomos_reloads"
 LOAD_HINTS = {
@@ -85,9 +88,11 @@ LOAD_HINTS = {
         "loaded_at": TIMESTAMP,
         "status": TEXT,
         "error": TEXT,
+        "kind": TEXT,
     },
 }
 LOADED, FAILED = "loaded", "failed"
+WINDOW, HISTORY = "window", "history"
 
 
 def own(hints: dict) -> dict:
