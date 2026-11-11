@@ -22,6 +22,11 @@ pytestmark = pytest.mark.skipif(not AI_SERVERS, reason=".env does not list the a
 WAREHOUSE_TOOLS = {"list_tables", "describe_table", "execute_sql"}
 # The mart that the demo fills, which ai_reader reads.
 MART = "marts.ad_stats_campaign_daily"
+# The relations of marts, as the superuser sees them: the views over the core (ADR-0037).
+MARTS = (
+    "SELECT relname FROM pg_class WHERE relnamespace = 'marts'::regnamespace "
+    "AND relkind IN ('r', 'p', 'v', 'm', 'f')"
+)
 
 
 class Session:
@@ -123,9 +128,21 @@ def test_the_warehouse_server_offers_the_tools_of_the_repository(warehouse_serve
     assert warehouse_server.tools() == WAREHOUSE_TOOLS
 
 
-def test_the_warehouse_server_lists_marts_and_staging_and_nothing_else(warehouse_server):
-    schemas = {row["schema_name"] for row in warehouse_server.rows("list_tables", {})}
-    assert schemas == {"marts", "staging"}
+def test_the_warehouse_server_lists_the_marts_and_nothing_else(warehouse_server, env):
+    # ADR-0043: ai_reader reads the views of marts, and not staging, whose views stand over a raw
+    # layer that is to be erased. The default privileges of transformer give it each new view.
+    tables = warehouse_server.rows("list_tables", {})
+    assert {row["schema_name"] for row in tables} == {"marts"}
+    # Sorted here: the collation of the database may sort a _ elsewhere.
+    names = sorted(row["table_name"] for row in tables)
+    assert names == sorted(warehouse_output(env, MARTS).split())
+
+
+def test_the_warehouse_server_reads_every_mart_that_it_lists(warehouse_server):
+    for row in warehouse_server.rows("list_tables", {}):
+        sql = f"SELECT 1 FROM marts.{row['table_name']} LIMIT 1"  # noqa: S608 (names of the warehouse)
+        failed, text = warehouse_server.call("execute_sql", {"sql": sql})
+        assert not failed, f"{sql}: {text}"
 
 
 # The count means something once the mart holds the rows of the demo.
@@ -141,22 +158,33 @@ def test_the_warehouse_server_reads_a_mart_and_describes_it(warehouse_server, en
 
 
 @pytest.mark.parametrize(
-    "sql",
+    ("sql", "refusal"),
     [
         # A write: the session is read-only, and the role has no grant to write.
-        "CREATE TABLE marts.ai_was_here (n integer)",
-        f"DELETE FROM {MART}",  # noqa: S608 (a constant of this file)
-        # The schemas that the role does not read: a raw schema, and ops, which records the runs.
-        "SELECT count(*) FROM raw_demo_search._dlt_loads",
-        "SELECT count(*) FROM ops.dbt_run_results",
+        ("CREATE TABLE marts.ai_was_here (n integer)", "read-only transaction"),
+        # A mart is a view of a join, which PostgreSQL writes through for no role (ADR-0037), and
+        # it says so before it looks at the session.
+        (f"DELETE FROM {MART}", "cannot delete from view"),  # noqa: S608 (a constant of this file)
+        # The schemas that the role does not read: staging, whose views stand over the raw layer
+        # (ADR-0043), the core, which the views of marts read as their owner, a raw schema, and
+        # ops, which records the runs. A schema that the role may not enter refuses the name of
+        # any relation in it, whether the relation exists or not.
+        (
+            "SELECT count(*) FROM staging.stg_demo_search__campaign_stats",
+            "permission denied for schema staging",
+        ),
+        ("SELECT count(*) FROM core.loads", "permission denied for schema core"),
+        (
+            "SELECT count(*) FROM raw_demo_search._dlt_loads",
+            "permission denied for schema raw_demo_search",
+        ),
+        ("SELECT count(*) FROM ops.dbt_run_results", "permission denied for schema ops"),
     ],
 )
-def test_the_warehouse_server_refuses_what_ai_reader_may_not_do(warehouse_server, sql):
+def test_the_warehouse_server_refuses_what_ai_reader_may_not_do(warehouse_server, sql, refusal):
     failed, text = warehouse_server.call("execute_sql", {"sql": sql})
     assert failed, f"{sql} passed"
-    # A mart is a view of a join, which PostgreSQL writes through for no role (ADR-0037).
-    refusals = ("read-only transaction", "permission denied", "cannot delete from view")
-    assert any(refusal in text for refusal in refusals), text
+    assert refusal in text, text
 
 
 def test_ai_reader_keeps_the_limits_of_the_decision(env):

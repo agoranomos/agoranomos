@@ -264,6 +264,12 @@ SCHEMA_PRIVILEGES = {
 # the queries below.
 LAYER_SCHEMAS = tuple(dict.fromkeys(schema for _, schema in SCHEMA_PRIVILEGES))
 LAYER_SCHEMA_LITERALS = ", ".join(f"'{schema}'" for schema in LAYER_SCHEMAS)
+# ai_reader, the role of MCP Toolbox, enters marts and no other schema of the layers: neither
+# staging, whose views stand over a raw layer that is to be erased, nor the core, which the views of
+# marts read as their owner (ADR-0043).
+AI_READER_PRIVILEGES = {
+    ("ai_reader", schema): (schema == "marts", False) for schema in LAYER_SCHEMAS
+}
 
 
 def test_each_schema_of_the_layers_has_its_owner(env):
@@ -303,7 +309,7 @@ def test_each_role_has_exactly_its_privileges_on_the_schemas_of_the_layers(env):
         env,
         "SELECT r, s, has_schema_privilege(r, s, 'USAGE'), "  # noqa: S608 (constants of this file)
         "has_schema_privilege(r, s, 'CREATE') "
-        "FROM unnest(ARRAY['loader', 'transformer', 'metabase_reader']) AS r, "
+        "FROM unnest(ARRAY['loader', 'transformer', 'metabase_reader', 'ai_reader']) AS r, "
         f"unnest(ARRAY[{LAYER_SCHEMA_LITERALS}]) AS s",
     )
     assert result.returncode == 0, result.stderr
@@ -311,7 +317,7 @@ def test_each_role_has_exactly_its_privileges_on_the_schemas_of_the_layers(env):
     for line in result.stdout.split():
         role, schema, usage, create = line.split("|")
         found[(role, schema)] = (usage == "t", create == "t")
-    assert found == SCHEMA_PRIVILEGES
+    assert found == SCHEMA_PRIVILEGES | AI_READER_PRIVILEGES
 
 
 def test_the_default_privileges_are_those_of_the_roles_that_create_the_tables(env):
@@ -336,7 +342,6 @@ def test_the_default_privileges_are_those_of_the_roles_that_create_the_tables(en
         "loader:raw_google_ads:r:{transformer=r/loader}",
         "loader:raw_settings:r:{transformer=r/loader}",
         "transformer:marts:r:{metabase_reader=r/transformer,ai_reader=r/transformer}",
-        "transformer:staging:r:{ai_reader=r/transformer}",
     ]
 
 
@@ -513,14 +518,70 @@ def test_migrator_cannot_sign_in_and_has_no_power_but_its_ownership(env):
     assert found == "f|f|f|f|f|f|t|0|f|f|f"
 
 
-def test_ai_reader_gets_nothing_in_core(env):
-    # It reads marts and staging only (ADR-0030); the views of v0.5 read the core as their owner.
-    privileges = warehouse_output(
+# What ai_reader may do with the relations of the warehouse, by schema and privilege, leaving out
+# those of the catalog of PostgreSQL, which every role reads.
+AI_READER_ON_RELATIONS = (
+    "SELECT DISTINCT n.nspname || ':' || p.privilege "
+    "FROM pg_class AS c JOIN pg_namespace AS n ON n.oid = c.relnamespace, "
+    "unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', "
+    "'MAINTAIN']) AS p (privilege) "
+    "WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S') AND n.nspname <> 'information_schema' "
+    "AND left(n.nspname, 3) <> 'pg_' AND has_table_privilege('ai_reader', c.oid, p.privilege)"
+)
+
+
+def test_ai_reader_may_only_read_the_relations_of_marts(env):
+    # It reads the views of marts, which read the core as their owner, and nothing else (ADR-0043).
+    assert warehouse_output(env, AI_READER_ON_RELATIONS).split() == ["marts:SELECT"]
+    unread = warehouse_output(
         env,
-        "SELECT has_schema_privilege('ai_reader', 'core', 'USAGE') "
-        "OR has_schema_privilege('ai_reader', 'core', 'CREATE')",
+        "SELECT count(*) FROM pg_class WHERE relnamespace = 'marts'::regnamespace "
+        "AND relkind IN ('r', 'p', 'v', 'm', 'f') AND NOT has_table_privilege('ai_reader', oid, "
+        "'SELECT')",
     )
-    assert privileges == "f"
+    assert unread == "0"
+
+
+# What an earlier warehouse.sql gave ai_reader in staging: the schema, its tables and views, and the
+# default privileges of transformer there; and what is left of it, counted.
+AI_READER_IN_STAGING = (
+    "GRANT USAGE ON SCHEMA staging TO ai_reader",
+    "GRANT SELECT ON ALL TABLES IN SCHEMA staging TO ai_reader",
+    "ALTER DEFAULT PRIVILEGES FOR ROLE transformer IN SCHEMA staging "
+    "GRANT SELECT ON TABLES TO ai_reader",
+)
+AI_READER_STAGING_LEFT = (
+    "SELECT has_schema_privilege('ai_reader', 'staging', 'USAGE')::integer || ' ' || "
+    "(SELECT count(*) FROM pg_class WHERE relnamespace = 'staging'::regnamespace "
+    "AND has_table_privilege('ai_reader', oid, 'SELECT')) || ' ' || "
+    "(SELECT count(*) FROM pg_default_acl WHERE defaclnamespace = 'staging'::regnamespace "
+    "AND defaclacl::text LIKE '%ai_reader=%')"
+)
+# What warehouse.sql runs to take it back, which the test below runs too when db-init fails.
+AI_READER_OUT_OF_STAGING = (
+    "REVOKE ALL ON SCHEMA staging FROM ai_reader",
+    "REVOKE ALL ON ALL TABLES IN SCHEMA staging FROM ai_reader",
+    "ALTER DEFAULT PRIVILEGES FOR ROLE transformer IN SCHEMA staging "
+    "REVOKE ALL ON TABLES FROM ai_reader",
+)
+
+
+def test_db_init_takes_back_what_an_earlier_version_gave_ai_reader_in_staging(env):
+    # Until v0.5, ai_reader read staging too (ADR-0043): a warehouse set up by such a version, or
+    # given the same by hand, loses it on the next start. The grants are taken back in the end,
+    # whatever db-init did, so that the tests after this one find the role as a start leaves it.
+    try:
+        for sql in AI_READER_IN_STAGING:
+            warehouse_output(env, sql)
+        usage, relations, defaults = warehouse_output(env, AI_READER_STAGING_LEFT).split()
+        assert (usage, defaults) == ("1", "1")
+        assert int(relations) > 0, "staging has no relation for this test to check"
+        result = compose("run", "--rm", "--no-deps", "db-init", check=False)
+        assert result.returncode == 0, job_failed("db-init", result)
+        assert warehouse_output(env, AI_READER_STAGING_LEFT) == "0 0 0"
+    finally:
+        for sql in AI_READER_OUT_OF_STAGING:
+            warehouse(env, sql)
 
 
 # What transformer meets in the schema core when it reaches beyond the tables of its snapshots: it

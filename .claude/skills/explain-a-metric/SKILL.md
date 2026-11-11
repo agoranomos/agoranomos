@@ -11,7 +11,7 @@ Answer from the definition in the code, then show it in the data. Say where each
 
 - [The data model](../../../docs/reference/data-model.md): the marts, their keys, and the rules for clients, conversions, currencies, days and time zones, and the names of campaigns.
 - `dbt/models/marts/_marts__models.yml`: the description of each mart and column. A column that more than one model has takes its text from the doc block of its name in `dbt/models/_docs.md`.
-- The SQL of the chain, from the mart back to the source. A mart reads an `int_<entity>__<verb>` model of `dbt/models/intermediate/`, which unions the `stg_<platform>__<table>` views of `dbt/models/staging/`. Each view calls the macro of its API shape in `dbt/macros/shapes/`, where the rules of a platform are: which field of the API becomes the column, and how it is cast and converted.
+- The SQL of the chain, from the mart back to the source. A mart of `dbt/models/marts/` is a view over the tables of the core, which the models of `dbt/models/core/` fill from the `int_<entity>__<verb>` models of `dbt/models/intermediate/` and the `stg_<platform>__<table>` views of `dbt/models/staging/`. Each staging view calls the macro of its API shape in `dbt/macros/shapes/`, where the rules of a platform are: which field of the API becomes the column, and how it is cast and converted.
 - `extensions/model/conversion_actions.toml`, then, for Google Ads, the flag `include_in_conversions_metric` of each action of the account (`stg_google_ads__conversion_actions`), then `dbt/seeds/seed_conversion_actions.csv` decide which conversion actions are primary, in `int_conversion_actions__resolved`.
 - `extensions/metadata/overrides.toml`, when it exists, holds the deployment's own names and definitions of the fields in Metabase ([Rename a field](../../../docs/how-to/rename-a-field.md)).
 
@@ -31,7 +31,7 @@ Answer from the definition in the code, then show it in the data. Say where each
     - use `list_tables` and `describe_table` for the columns that the warehouse has;
     - use `execute_sql` for one read-only query that shows the metric, such as the sums of one account over one week.
 
-    Keep queries small, with a `where` on `report_date` and a `limit`. Statements stop after a minute, and the server holds the whole answer in memory. It reads `marts` and `staging` only.
+    Keep queries small, with a `where` on `report_date` and a `limit`. Statements stop after a minute, and the server holds the whole answer in memory. It reads the views of `marts` only: the layers below them, `staging` and the core, are for the code, not for a query.
 3. If the server is not there, `./agoranomos ai` shows whether the switch `WAREHOUSE_MCP` is on. Turning it on changes `.env`, so ask the user first. You can still answer from the code, and say that you did not check the data.
 4. Answer in this order:
     - the definition in one or two sentences;
