@@ -5,25 +5,30 @@ quarantine stops, the run stays green, and Ops says why. The checks write core.a
 and int_accounts__current and int_window_days leave the accounts of int_g1_failures out
 (dbt/macros/quarantine.sql).
 
-The test breaks rows of raw as loader, the owner of raw: a currency outside ISO 4217 in the list of
-one account of demo_search, a currency of ISO 4217 that the rates of the demo do not have in the
-list of one account of demo_social (ADR-0042), and a spend below zero in a row of the one account of
-demo_video; it renames the other account of demo_search in its list, which a healthy account takes
-into the core. It puts every row back and runs the transform again in its finally, so the demo is
-as before. If it is killed before that, put them back by hand as its finally does, as the superuser
-of the warehouse: UPDATE the currency of 4170000012 in raw_demo_search.customer_clients and of
-802000000000002 in raw_demo_social.ad_accounts to EUR and the name of 4170000011 to its name in
+The test makes a load of its own of the last days of demo_search, demo_social and demo_video, as of
+the newest load of each, which the next run reads, as a run that succeeds accepts its loads and
+deletes their rows from raw (ADR-0046). It breaks their rows as loader, the owner of raw: a
+currency outside ISO 4217 in the list of one account of demo_search, a currency of ISO 4217 that
+the rates of the demo do not have in the list of one account of demo_social (ADR-0042), and a spend
+below zero in a row of the one account of demo_video; it renames the other account of demo_search
+in its list, which a healthy account takes into the core. It puts every row back and runs the
+transform again in its finally, so the demo is as before. If it is killed before that, put them
+back by hand as its finally does, as the superuser of the warehouse: UPDATE the currency of
+4170000012 in raw_demo_search.customer_clients and of 802000000000002 in
+raw_demo_social.ad_accounts to EUR and the name of 4170000011 to its name in
 agoranomos_pipelines/demo/world.py, DELETE the rows of raw_demo_video.report_campaign_daily whose
 _dlt_id is stack-test-quarantine, and run the transform.
 
 The assertions print codes, IDs, counts and states, never a secret.
 """
 
+from datetime import timedelta
+
 import pytest
 from agoranomos_pipelines.demo import world
 from airflow_api import is_busy, task_instances, trigger, unpause, wait_for_dag, wait_for_run
 from metabase_content import item, registry
-from raw_loads import DAYS
+from raw_loads import DAYS, last_moment, load_platform
 from stack_helpers import http_json, wait_for, warehouse_output
 
 pytestmark = [
@@ -61,8 +66,8 @@ SET = (
 CURRENCY = "customer_client__currency_code"
 NAME = "customer_client__descriptive_name"
 # A row of the statistics of a campaign that the demo does not have, of the one account of
-# demo_video, with a spend below zero, on the first day of its newest whole load, so that staging
-# reads it.
+# demo_video, with a spend below zero, on the first day of the load of the test, {load}, so that
+# staging reads it.
 NEGATIVE = (
     "INSERT INTO raw_demo_video.report_campaign_daily (advertiser_id, dimensions__campaign_id, "  # noqa: S608 (constants of the demo)
     "dimensions__stat_time_day, metrics__campaign_name, metrics__spend, metrics__impressions, "
@@ -71,7 +76,7 @@ NEGATIVE = (
     f"SELECT '{VIDEO.account_id}', '1799999999999999998', d.day::text || ' 00:00:00', "
     "'Broken by a test', '-1.00', '10', '1', '0', '0', '0', d.load_id, 'stack-test-quarantine' "
     f"FROM ({DAYS.format(dataset='raw_demo_video')}) AS d "
-    f"WHERE d.account_id = '{VIDEO.account_id}' ORDER BY d.day LIMIT 1"
+    f"WHERE d.account_id = '{VIDEO.account_id}' AND d.load_id = '{{load}}' ORDER BY d.day LIMIT 1"
 )
 REMOVE_NEGATIVE = (
     "DELETE FROM raw_demo_video.report_campaign_daily WHERE _dlt_id = 'stack-test-quarantine'"
@@ -120,8 +125,20 @@ def idle(env, airflow_url, token):
     assert rows(env, QUARANTINED, "metabase_reader") == [], "an account is in quarantine already"
 
 
+@pytest.fixture(scope="module")
+def loads(env, idle):
+    """A load of the last days of demo_search, demo_social and demo_video, as of the newest load of
+    each, so that each holds the rows of the demo for those days, which the next run reads: the
+    run before accepted the loads that it read, and raw holds no row of them."""
+    made = []
+    for code in ("demo_search", "demo_social", "demo_video"):
+        now = last_moment(env, code)
+        made.append(load_platform(env, code, now, (now - timedelta(days=4)).date()))
+    return made
+
+
 def test_an_account_that_fails_its_checks_stays_out_and_the_others_go_on(
-    env, airflow_url, token, idle, metabase_url, session
+    env, airflow_url, token, idle, loads, metabase_url, session
 ):
     currency = warehouse_output(env, LISTED.format(column=CURRENCY, id=BAD.account_id))
     name = warehouse_output(env, LISTED.format(column=NAME, id=GOOD.account_id))
@@ -129,13 +146,9 @@ def test_an_account_that_fails_its_checks_stays_out_and_the_others_go_on(
     assert (currency, name, listed) == (BAD.currency, GOOD.name, UNRATED.currency)
     reporting = env.get("AGORANOMOS_REPORTING_CURRENCY") or "USD"
     registered = warehouse_output(env, REGISTERED.format(id=BAD.account_id))
-    [load] = rows(
-        env,
-        "SELECT max(load_id::numeric)::text FROM staging.stg_loads__newest_days "  # noqa: S608 (an ID of the demo)
-        f"WHERE source = 'demo_search' AND account_id = '{BAD.account_id}'",
-    )
+    load, _, video_load = loads
     days = DAYS.format(dataset="raw_demo_video")
-    [first] = rows(env, f"SELECT min(day) FROM ({days}) AS d")  # noqa: S608 (constants of the demo)
+    [first] = rows(env, f"SELECT min(day) FROM ({days}) AS d WHERE d.load_id = '{video_load}'")  # noqa: S608 (constants of the demo)
     video = warehouse_output(env, VIDEO_SHOWN)
     try:
         warehouse_output(env, SET.format(column=CURRENCY, value="ZZZ", id=BAD.account_id), "loader")
@@ -143,7 +156,7 @@ def test_an_account_that_fails_its_checks_stays_out_and_the_others_go_on(
         warehouse_output(
             env, SET_SOCIAL.format(value=UNRATED_CURRENCY, id=UNRATED.account_id), "loader"
         )
-        warehouse_output(env, NEGATIVE, "loader")
+        warehouse_output(env, NEGATIVE.format(load=video_load), "loader")
         run = transform(airflow_url, token)
         assert run["state"] == "success", run["state"]
         # A green run: every task of dbt built its node, the checks, the core and the marts.
