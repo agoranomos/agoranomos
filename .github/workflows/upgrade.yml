@@ -14,7 +14,7 @@ name: Upgrade
 # none of its own workflow files. The job runs every week, on Wednesday, away from the weekly run
 # of the Stack workflow and from 09:17 UTC, when the daily load of the demo is due, and by hand,
 # with the tag of another release to upgrade from if need be. It runs on no pull request: one run
-# takes two stacks, one after the other, and about two hours. The secrets of the stack are
+# takes two stacks, one after the other, and an hour or more. The secrets of the stack are
 # generated anew in every run, so the logs uploaded on failure hold nothing that lives on.
 on:
   schedule:
@@ -36,13 +36,15 @@ jobs:
   upgrade:
     name: Upgrade from the previous release
     runs-on: ubuntu-24.04
-    # Two cold builds of the Airflow image, the first start of the previous release with its
-    # transform of the demo, the upgrade, whose first start of the current code runs the history of
-    # the demo again and the transform after it when the raw tables have the shape of a release
-    # before v0.5, and the checks, with a daily load and one more run of the transform: on the test
-    # server of the project, with 4 CPUs like a runner, the two stacks took about two hours in
-    # November 2026. An estimate until the first runs here measure it.
-    timeout-minutes: 300
+    # Two builds of the Airflow image, the first start of the previous release with its transform
+    # of the demo, the upgrade, whose first start of the current code runs the history of the demo
+    # again and the transform after it when the raw tables have the shape of a release before v0.5,
+    # and the checks, with a daily load and one more run of the transform. On the test server of
+    # the project, with 4 CPUs like a runner and both images built from its cache, on 11 November
+    # 2026: 16 minutes for the first start of v0.4.5, 18 for the upgrade and 13 for the checks of
+    # test_upgrade.py. A runner builds both images cold, so the job gets 180 minutes, an estimate
+    # until the first runs here measure it.
+    timeout-minutes: 180
     permissions:
       contents: read
     env:
