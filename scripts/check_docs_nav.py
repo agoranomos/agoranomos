@@ -2,7 +2,7 @@
 
 Every navigation entry must point at an existing page, every page in docs/ must be in the
 navigation, and no page may appear twice. The strict Zensical build does not check this
-(as of Zensical 0.0.67), so this script runs as a prek hook.
+(as of Zensical 0.1.0), so this script runs as a prek hook.
 
 Usage: python scripts/check_docs_nav.py [repository root]
 """

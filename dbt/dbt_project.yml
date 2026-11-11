@@ -117,6 +117,16 @@ vars:
   # share. Half leaves room for the restatements of a small account on a short window. Not checked
   # yet on a live account: the stand of #217 sets it.
   quarantine_spend_fall: 0.5
+  # The share by which the impressions, the clicks or the spend of the rows of the campaigns of an
+  # account on a day may differ from the totals that its platform gives for the account in the
+  # same load before G0a puts the account in quarantine (macros/quarantine.sql, ADR-0035), for each
+  # platform whose loads bring such totals; a platform that it does not name has zero. Zero for
+  # Google, whose two sides are whole counts and whole micros of cost, so that a difference is no
+  # rounding; a platform that rounds each row, such as Yandex, or cuts decimal places, such as
+  # TikTok, is to get a share of its own. Not checked yet on a live account: the stand of #217
+  # sets it.
+  platform_totals_tolerance:
+    google_ads: 0
   # The share of the rows of a fact of the core in the windows of a run whose entity, a campaign, an
   # ad group or an ad, has no row in its dimension, above which G2 fails the run
   # (tests/generic/few_without_a_dimension.sql, ADR-0035). Each entity that the statistics name gets

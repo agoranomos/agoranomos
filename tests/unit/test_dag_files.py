@@ -402,28 +402,50 @@ def test_the_load_of_google_ads_starts_paused_and_masks_the_key():
     assert 'mask_secret(google_ads.key_info()["private_key"])' in text
 
 
+def test_the_load_of_google_ads_keeps_its_watermarks_in_the_state_of_its_asset():
+    # The asset state store of Airflow 3.3 as a cache of the watermark of each account (ADR-0038):
+    # the task reads and writes that of the asset that it updates, RAW_GOOGLE_ADS, which is a
+    # concrete outlet of the task, as the store needs.
+    text = GOOGLE_ADS_DAILY.read_text(encoding="utf-8")
+    assert decorators(GOOGLE_ADS_DAILY)["load_google_ads"] == [
+        "task(task_id='load_google_ads', outlets=[RAW_GOOGLE_ADS])"
+    ]
+    assert 'cache=context["asset_state_store"][RAW_GOOGLE_ADS]' in text
+
+
+TEN_MINUTES = "timedelta(minutes=10)"
+
+
 @pytest.mark.parametrize(
-    ("name", "retry_delay", "max_retry_delay"),
+    ("name", "retry_delay", "max_retry_delay", "execution_timeout", "dagrun_timeout"),
     [
-        ("agoranomos_demo_history.py", "timedelta(minutes=1)", None),
-        ("agoranomos_demo_daily.py", "timedelta(minutes=1)", None),
-        ("agoranomos_ecb_daily.py", "timedelta(minutes=5)", "timedelta(minutes=10)"),
+        ("agoranomos_demo_history.py", "timedelta(minutes=1)", None, TEN_MINUTES, "hours=1"),
+        ("agoranomos_demo_daily.py", "timedelta(minutes=1)", None, TEN_MINUTES, "hours=1"),
+        ("agoranomos_ecb_daily.py", "timedelta(minutes=5)", TEN_MINUTES, TEN_MINUTES, "hours=1"),
+        (
+            "agoranomos_google_ads_daily.py",
+            TEN_MINUTES,
+            "timedelta(minutes=20)",
+            "timedelta(hours=2)",
+            "hours=7",
+        ),
     ],
 )
-def test_the_loads_retry_with_a_growing_wait_and_end_within_an_hour(
-    name, retry_delay, max_retry_delay
+def test_the_loads_retry_with_a_growing_wait_and_end_within_their_timeout(
+    name, retry_delay, max_retry_delay, execution_timeout, dagrun_timeout
 ):
     # ADR-0039: the DAGs of the loads retry with an exponential backoff, also after a new column
     # waited past the lock timeout of loader for a run of the transform (ADR-0046), and a run ends
-    # within an hour, so that a load never lives longer: the cleanup of the rows of a load that did
-    # not end is to wait at least that long. Airflow 3.3.2 takes a multiplier for the backoff, so
-    # True would be 1, a constant wait.
+    # within its timeout, an hour, and for Google Ads, whose first load of many accounts takes
+    # their history, its three tries of two hours and the waits between them, so that a load never
+    # lives longer: the cleanup of the rows of a load that did not end is to wait at least that
+    # long. Airflow 3.3.2 takes a multiplier for the backoff, so True would be 1, a constant wait.
     keywords = {
         node.arg: node.value
         for node in ast.walk(ast.parse((DAGS / name).read_text(encoding="utf-8")))
         if isinstance(node, ast.keyword)
     }
-    assert ast.unparse(keywords["dagrun_timeout"]) == "timedelta(hours=1)"
+    assert ast.unparse(keywords["dagrun_timeout"]) == f"timedelta({dagrun_timeout})"
     arguments = keywords["default_args"]
     assert isinstance(arguments, ast.Dict)
     found = {
@@ -434,4 +456,4 @@ def test_the_loads_retry_with_a_growing_wait_and_end_within_an_hour(
     assert found["retry_exponential_backoff"] == "2.0"
     assert found["retry_delay"] == retry_delay
     assert found.get("max_retry_delay") == max_retry_delay
-    assert found["execution_timeout"] == "timedelta(minutes=10)"
+    assert found["execution_timeout"] == execution_timeout

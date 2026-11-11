@@ -24,13 +24,13 @@ Sign in to Metabase as [Run agoranomos locally](run-locally.md#sign-in) says and
 - **Largest tables of the warehouse**: the 20 tables that take the most room, with the rows that PostgreSQL estimates for each.
 - **Free disk, GB**, and **Disk and warehouse, last 30 days**: the room left on the disk of the volumes of Docker, the warehouse among them, as the daily maintenance measured it, the size of that disk, the megabytes of the warehouse, those of the partitions of the facts of the window of restatements, and an estimate of the room inside them that no row fills ([The daily maintenance](#the-daily-maintenance)). `./agoranomos up` stops below 10 GB free, so a number that falls towards 10 asks for room.
 - **Maintenance of the core, last 30 days**: each step of the daily maintenance on a table, with its seconds: the partitions that it made, the facts that it analyzed, the old months that it froze, the months of the journals that it dropped, and the rows that it deleted from `_dlt_loads` and `core.loads`.
-- **The core against the totals of the platforms**: the last monthly comparison of the core with the totals that a platform gives for each account and day: for each account, the days that differ in impressions, clicks or spend over 90 days, and the sums of both. It stays empty until a source gives such totals; no connector of today does.
+- **The core against the totals of the platforms**: the last monthly comparison of the core with the totals that a platform gives for each account and day: for each account, the days that differ in impressions, clicks or spend over 90 days, and the sums of both. It stays empty until a source gives such totals: the connector of Google Ads does, and the demo gives none.
 
 A test records its status and the number of rows that it found, never the rows: to see them, run the test in a shell of the scheduler, or open its log in Airflow.
 
 ## When an account is in quarantine
 
-Before it writes the core, each run of the transform checks the data of each account that it reads, the checks G1 and G1a of [ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md). An account that fails one stays out of that run, in quarantine, and the other accounts go on: the run stays green, as one account with bad data must not stop the rest.
+Before it writes the core, each run of the transform checks the data of each account that it reads, the checks G0a, G1 and G1a of [ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md). An account that fails one stays out of that run, in quarantine, and the other accounts go on: the run stays green, as one account with bad data must not stop the rest.
 
 - **The core** keeps the data of the account as it was: its row of `core.dim_account`, its entities, their versions and the days of its facts do not change. The raw layer keeps the rows of its loads.
 - **The marts**, which the transform still builds from staging, leave the account out for that run, so its rows are missing from the dashboards until it is back.
@@ -51,6 +51,7 @@ Before it writes the core, each run of the transform checks the data of each acc
 | `missing_measure` | A count or an amount that a row needs is missing. |
 | `negative_measure` | A count or an amount is below zero. |
 | `date_outside_window` | A load holds rows of days outside the window that it recorded for the account. |
+| `totals_differ` | On a day of a load, the impressions, clicks or spend of the campaigns of the account do not add up to the totals that its platform gave for the account in the same load, as when a read of the API lost a part of the account. Only Google Ads loads such totals, and its share of tolerance, `platform_totals_tolerance` in the `vars` of `dbt/dbt_project.yml`, is 0. |
 | `empty_window` | A load has no row on the days of its window while the core holds spend on them, or, for web analytics, sessions, as a lost token gives. |
 | `spend_fall` | The spend of a load fell by more than half of what the core holds on the same days. The share is `quarantine_spend_fall` in the `vars` of `dbt/dbt_project.yml`, 0.5. |
 | `source_stopped` | More than half of the pinned accounts of the source are in quarantine. |
