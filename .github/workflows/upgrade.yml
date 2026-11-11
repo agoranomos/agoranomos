@@ -1,0 +1,145 @@
+name: Upgrade
+
+# Tests the upgrade from the previous release, on which the promise rests that a user only updates
+# (ADR-0044): the job starts the stack of the tag of the newest release with the demo, as a user of
+# that release runs it, lets its first start load and transform the demo, then checks out the
+# current code in the same checkout, on the same volumes, and runs ./agoranomos up, as the guide
+# Update to a new release says. tests/stack/test_upgrade.py records the stack before, and checks it
+# after: the migrations of the core applied and recorded, the backup that up takes before them,
+# the views of the marts that marts-init builds, the cards of the dashboards of the package and the
+# metadata of the marts in Metabase, the raw tables of the demo, and the demo going on. The stack
+# tests that check what an upgrade changes in Metabase follow it, and the summary of the job gives
+# the time of the upgrade, the memory of the stack during it, and what it left of the release.
+# Only the steps of this file run: the checkout of the tag brings the files of that release, and
+# none of its own workflow files. The job runs every week, on Wednesday, away from the weekly run
+# of the Stack workflow and from 09:17 UTC, when the daily load of the demo is due, and by hand,
+# with the tag of another release to upgrade from if need be. It runs on no pull request: one run
+# takes two stacks, one after the other, and about two hours. The secrets of the stack are
+# generated anew in every run, so the logs uploaded on failure hold nothing that lives on.
+on:
+  schedule:
+    - cron: "41 3 * * 3" # Wednesday 03:41 UTC
+  workflow_dispatch:
+    inputs:
+      from:
+        description: The tag of the release to upgrade from, such as v0.4.5; the newest release when empty.
+        required: false
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  upgrade:
+    name: Upgrade from the previous release
+    runs-on: ubuntu-24.04
+    # Two cold builds of the Airflow image, the first start of the previous release with its
+    # transform of the demo, the upgrade, whose first start of the current code runs the history of
+    # the demo again and the transform after it when the raw tables have the shape of a release
+    # before v0.5, and the checks, with a daily load and one more run of the transform: on the test
+    # server of the project, with 4 CPUs like a runner, the two stacks took about two hours in
+    # November 2026. An estimate until the first runs here measure it.
+    timeout-minutes: 300
+    permissions:
+      contents: read
+    env:
+      # renovate: datasource=github-releases depName=docker/compose
+      COMPOSE_VERSION: v5.7.0
+    steps:
+      # Every tag, to check out the release to upgrade from.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # As in the Stack workflow: the Docker Compose of the runner image loses the digest of an image
+      # that it builds (docker/compose#13047).
+      - uses: docker/setup-compose-action@54042514f505b273907334ae2b9cdbb9a0213c1a # v2.4.0
+        with:
+          version: ${{ env.COMPOSE_VERSION }}
+          cache-binary: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+      # The newest release that GitHub lists, which is neither a draft nor a pre-release, or the
+      # tag that a run by hand names.
+      - name: Find the release to upgrade from
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FROM: ${{ inputs.from }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          tag=${FROM:-$(gh release view --repo "$REPOSITORY" --json tagName --jq .tagName)}
+          if ! git rev-parse --verify --quiet "refs/tags/$tag^{commit}" > /dev/null; then
+            echo "::error::$tag is no tag of this repository"
+            exit 1
+          fi
+          echo "tag=$tag" | tee -a "$GITHUB_OUTPUT"
+          echo "current=$(git rev-parse HEAD)" | tee -a "$GITHUB_OUTPUT"
+      # The images of two releases take several GB, and ./agoranomos up stops below 10 GB of free
+      # disk for Docker. The runner has toolchains that the stack does not use.
+      - name: Free disk space on the runner
+        run: |
+          df -h /var/lib/docker
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /var/lib/docker
+      - name: Start the stack of the previous release
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          git checkout --detach "$TAG"
+          ./agoranomos init
+          docker compose pull --quiet --ignore-buildable
+          ./agoranomos up
+      - name: Check out the current code
+        env:
+          CURRENT: ${{ steps.release.outputs.current }}
+        run: |
+          git checkout --detach "$CURRENT"
+          uv sync --locked
+      - name: Record the stack of the previous release
+        env:
+          AGORANOMOS_UPGRADE: before
+          AGORANOMOS_UPGRADE_FILE: ${{ runner.temp }}/upgrade.json
+        run: uv run pytest tests/stack/test_upgrade.py -v
+      - name: Pull the images of the current code
+        run: docker compose pull --quiet --ignore-buildable
+      # The upgrade itself: the time of ./agoranomos up, with the build of the Airflow image, the
+      # backup, the migrations, the views and, with the demo, the history and the transform, and
+      # the memory of each service while it runs.
+      - name: Upgrade
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          started=$(date +%s)
+          uv run python scripts/memory_report.py --title "The upgrade from $TAG" --output "$GITHUB_STEP_SUMMARY" -- ./agoranomos up
+          seconds=$(($(date +%s) - started))
+          printf '### The upgrade from %s\n\n./agoranomos up took %d min %d s.\n\n' \
+            "$TAG" $((seconds / 60)) $((seconds % 60)) | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Check the upgrade
+        env:
+          AGORANOMOS_UPGRADE: after
+          AGORANOMOS_UPGRADE_FILE: ${{ runner.temp }}/upgrade.json
+        run: AGORANOMOS_UPGRADE_SUMMARY="$GITHUB_STEP_SUMMARY" uv run pytest tests/stack/test_upgrade.py -v
+      - name: Stack tests of what an upgrade changes in Metabase
+        run: >-
+          uv run pytest -v
+          tests/stack/test_marts_init.py
+          tests/stack/test_metabase_metadata.py
+          tests/stack/test_advertising.py
+          tests/stack/test_metrics.py
+      - name: Collect the logs
+        if: ${{ failure() }}
+        run: |
+          docker compose ps --all > stack-logs.txt 2>&1 || true
+          docker compose logs --no-color --timestamps >> stack-logs.txt 2>&1 || true
+      - name: Upload the logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: upgrade-logs
+          path: stack-logs.txt
+          retention-days: 3
