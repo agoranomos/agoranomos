@@ -437,9 +437,12 @@ def test_every_load_records_the_window_and_the_day_of_each_account(sources):
         "loaded_at",
         "status",
         "error",
+        "kind",
     }
     recorded = {r["account_id"]: r for r in rows[module.LOADS]}
     assert set(recorded) == {a.account_id for a in social.accounts()}
+    # A load from a first day takes the usual window of each account (ADR-0038).
+    assert {r["kind"] for r in recorded.values()} == {"window"}
     for account in social.accounts():
         row = recorded[account.account_id]
         assert row["as_of"] == common.local_today(late, account.time_zone)

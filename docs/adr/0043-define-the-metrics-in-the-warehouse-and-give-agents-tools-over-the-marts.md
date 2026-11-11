@@ -71,7 +71,7 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** `ai_reader` on `marts` only is planned for v0.5, with the erasing of the raw layer. `metric_definitions`, `list_metrics` and `stats_by` are planned for v0.8. Today Toolbox has the three tools of `ai/tools.yaml`, and `ai_reader` reads `marts` and `staging`.
+* **Implementation status, as of November 2026:** `ai_reader` reads `marts` only, and the next start of a warehouse of an earlier release takes `staging` from it; `list_tables` of Toolbox lists the views of `marts` only, and the skills and the guides say so. `metric_definitions`, `list_metrics` and `stats_by` are planned for v0.8. Today Toolbox has the three tools of `ai/tools.yaml`.
 * The facts behind this record, read on 30 and 31 October 2026:
     * Toolbox: `postgres-sql` takes parameters with `allowedValues`, `postgres-list-tables` returns the comments of tables and columns ([tools](https://mcp-toolbox.dev/integrations/postgres/tools/postgres-sql/), [list tables](https://mcp-toolbox.dev/integrations/postgres/tools/postgres-list-tables/)).
     * Few tools with clear descriptions, a short and a long format, and limits by default come from [Writing effective tools for agents](https://www.anthropic.com/engineering/writing-tools-for-agents); annotations from the [MCP specification](https://modelcontextprotocol.io/specification/2025-11-25/server/tools).

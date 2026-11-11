@@ -26,6 +26,7 @@ def test_each_question_reads_only_views_of_ops_that_dbt_builds():
     # maintenance, and no table of elementary (ADR-0029, ADR-0039).
     views = {path.stem for path in OPS_MODELS.glob("*.sql")}
     assert views == {
+        "ops_history",
         "ops_loads",
         "ops_quarantine",
         "ops_rates",

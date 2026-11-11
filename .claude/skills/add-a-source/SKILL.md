@@ -61,7 +61,7 @@ uv run zensical build --strict
 uv run pytest tests/stack
 ```
 
-After `./agoranomos up`, the user triggers the load in the Airflow UI. Check the result with the MCP server `agoranomos-warehouse`, whose `list_tables` must show the new staging views. `ai_reader` cannot read the raw schemas.
+After `./agoranomos up`, the user triggers the load in the Airflow UI. Check the result with the MCP server `agoranomos-warehouse` once a run of the transform has followed the load: the marts must hold rows of the new platform, such as `select count(*) from marts.ad_stats_campaign_daily where platform = '<platform>'`. `ai_reader` reads only the views of `marts`, and neither `staging`, the core nor the raw schemas.
 
 ## Rules
 

@@ -56,6 +56,9 @@ PIN = "pin"
 # The task that builds the tables of elementary, after the pin and before the tasks of dbt
 # (ADR-0029).
 ELEMENTARY = "elementary"
+# The last task, which updates the asset of a run in which every task succeeded, on which the
+# history of Google Ads runs (ADR-0038).
+TRANSFORMED = "transformed"
 MART = "marts.ad_stats_campaign_daily"
 MARTS = (
     "ad_stats_campaign_daily",
@@ -307,8 +310,13 @@ def test_the_settings_load_first_then_the_pin_and_each_node_is_built_with_its_te
             if following not in reached:
                 reached.add(following)
                 todo.append(following)
-    built = [task for task in downstream if task not in (SETTINGS, PIN, ELEMENTARY)]
-    assert reached == set(built), "a task of dbt does not wait for the tables of elementary"
+    built = [task for task in downstream if task not in (SETTINGS, PIN, ELEMENTARY, TRANSFORMED)]
+    assert reached == {*built, TRANSFORMED}, (
+        "a task of dbt does not wait for the tables of elementary"
+    )
+    # The last task, after every task of dbt, updates the asset of a run that succeeded (ADR-0038).
+    assert downstream[TRANSFORMED] == []
+    assert not [task for task in built if not downstream[task]], "a task of dbt ends the run"
     assert MART_BUILD in built, sorted(built)[:5]
     # One task of dbt build for each model, each seed and each snapshot of the versions of the core
     # (ADR-0036): no task runs a node or its tests alone.
@@ -338,6 +346,8 @@ def test_the_tasks_of_dbt_run_in_their_pool(airflow_url, token, transform_run):
     # The task of the pin and that of elementary run dbt too, so each takes a slot of the pool.
     assert pools.pop(PIN) == DBT_POOL
     assert pools.pop(ELEMENTARY) == DBT_POOL
+    # The last task runs no dbt.
+    assert pools.pop(TRANSFORMED) == "default_pool"
     assert pools, "the run has no task of dbt"
     assert {task.split(".")[0] for task in pools} == {"dbt"}, sorted(pools)[:5]
     assert set(pools.values()) == {DBT_POOL}, pools

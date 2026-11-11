@@ -74,6 +74,14 @@ class StandInClient:
 
     def execute_sql(self, sql):
         self.pipeline.queries.append(sql)
+        # The queries of the plan of the history: the windows of core.loads and of the journal,
+        # and the whole loads that no pin took yet.
+        if sql.startswith("SELECT account_id, window_from, window_to FROM core.loads "):
+            return self.pipeline.state["core_windows"]
+        if sql.startswith("SELECT count(DISTINCT j._dlt_load_id) "):
+            return [(self.pipeline.state["waiting"],)]
+        if sql.startswith("SELECT j.account_id, j.window_from, j.window_to "):
+            return self.pipeline.state["windows"]
         if " FROM core.loads " in sql:
             return self.pipeline.state["accepted"]
         if self.pipeline.state["loads"] is None:
@@ -254,8 +262,10 @@ def ads(monkeypatch, tmp_path):
     """The module with stand-ins, and what it made and was asked: the pipelines, the requests to
     the API and their answers. state["loads"] is how many complete loads the dataset holds (None:
     none yet), state["reloads"] what the journal of its whole loads gives, state["accepted"] what
-    core.loads gives as the last accepted day of each account, state["customers"] the rows of its
-    table customers, state["failing"] the accounts whose every request fails,
+    core.loads gives as the last accepted day of each account, state["windows"] and
+    state["core_windows"] the windows of the whole loads of each account in the journal and in
+    core.loads, state["waiting"] how many whole loads no pin took yet, state["customers"] the rows
+    of its table customers, state["failing"] the accounts whose every request fails,
     state["failing_at"] the text of the GAQL at which the request of an account fails, and
     state["broken_at"] the text of the GAQL and the kind of broken() of the answer that breaks for
     an account, and how many of its answers break, if not every one. made["waits"] holds the waits
@@ -264,6 +274,9 @@ def ads(monkeypatch, tmp_path):
         "loads": None,
         "reloads": [],
         "accepted": [],
+        "windows": [],
+        "core_windows": [],
+        "waiting": 0,
         "customers": [],
         "failing": set(),
         "failing_at": {},
@@ -427,12 +440,242 @@ def test_the_days_end_yesterday_in_the_time_zone_of_each_account(ads):
     assert module.yesterday(NOW, "Europe/Berlin") == date(2026, 10, 28)
 
 
-def test_the_first_load_takes_36_months_and_a_later_one_at_least_90_days(ads):
+def test_the_first_load_takes_90_days_and_a_later_one_at_least_90_days(ads):
+    # ADR-0038, "The first load": the usual window first, so that a dashboard fills in minutes,
+    # and the history after it, back to the first day of the month 36 months before yesterday.
     module, _, _, _ = ads
     last = date(2026, 10, 28)
-    assert module.window(last, None) == (date(2023, 10, 1), last)
+    assert module.window(last, None) == (date(2026, 7, 31), last)
+    assert module.history_start(last) == date(2023, 10, 1)
     assert module.window(last, date(2026, 10, 27)) == (date(2026, 7, 31), last)
     assert module.window(last, date(2026, 6, 1)) == (date(2026, 6, 2), last)
+
+
+def test_a_quarter_runs_from_its_first_to_its_last_day(ads):
+    module, _, _, _ = ads
+    assert module.quarter(date(2026, 1, 1)) == (date(2026, 1, 1), date(2026, 3, 31))
+    assert module.quarter(date(2026, 5, 17)) == (date(2026, 4, 1), date(2026, 6, 30))
+    assert module.quarter(date(2026, 9, 30)) == (date(2026, 7, 1), date(2026, 9, 30))
+    assert module.quarter(date(2026, 12, 31)) == (date(2026, 10, 1), date(2026, 12, 31))
+
+
+def test_the_missing_days_run_from_the_limit_to_the_windows_of_the_whole_loads(ads):
+    module, _, _, _ = ads
+    limit = date(2023, 10, 1)
+    # None before the first load, whose usual window comes first.
+    assert module.missing([], limit) == []
+    usual = (date(2026, 7, 31), date(2026, 10, 28))
+    assert module.missing([usual], limit) == [(limit, date(2026, 7, 30))]
+    # A portion taken by hand in the middle leaves the days on each side of it.
+    by_hand = (date(2025, 1, 1), date(2025, 3, 31))
+    assert module.missing([usual, by_hand], limit) == [
+        (limit, date(2024, 12, 31)),
+        (date(2025, 4, 1), date(2026, 7, 30)),
+    ]
+    # Windows that overlap, or reach before the limit, leave nothing between them.
+    assert module.missing([(date(2023, 1, 1), date(2026, 8, 31)), usual], limit) == []
+
+
+def test_the_history_goes_by_quarters_from_the_newest_across_the_accounts_that_lack_it(ads):
+    # ADR-0038: a portion is one quarter across all the new accounts of a source, from the new
+    # quarters to the old ones; an account with fewer days of the quarter takes the others again,
+    # and one without a load waits for its usual window.
+    module, _, _, _ = ads
+    limit = date(2023, 10, 1)
+    known = {
+        "1111111111": [(date(2026, 7, 30), date(2026, 10, 27))],
+        "2222222222": [(date(2026, 7, 31), date(2026, 10, 28))],
+        "3333333333": [],
+    }
+    assert module.next_portion(known, limit) == module.Portion(
+        ("1111111111", "2222222222"), date(2026, 7, 1), date(2026, 7, 30)
+    )
+    portions = []
+    while (portion := module.next_portion(known, limit)) is not None:
+        portions.append(portion)
+        for account_id in portion.accounts:
+            known[account_id].append((portion.first, portion.last))
+        assert len(portions) < 20, "the history never ends"
+    # The days of the newest quarter that the usual window leaves, then the eleven whole quarters
+    # before it, the newest first, each in one quarter and so in one request for each table of
+    # facts.
+    assert len(portions) == 12
+    assert [p.first for p in portions] == sorted((p.first for p in portions), reverse=True)
+    for portion in portions:
+        assert module.quarter(portion.first) == module.quarter(portion.last)
+        assert module.chunks(portion.first, portion.last) == [(portion.first, portion.last)]
+        assert portion.accounts == ("1111111111", "2222222222")
+    assert portions[-1].first == limit
+    assert portions[-1].last == date(2023, 12, 31)
+    assert module.next_portion({"1111111111": [(limit, date(2026, 10, 27))]}, limit) is None
+    assert module.next_portion({"3333333333": []}, limit) is None
+
+
+def test_the_parameters_of_a_run_name_a_portion_or_none(ads):
+    module, _, _, _ = ads
+    assert module.portion_of([], None, None) is None
+    assert module.portion_of(None, None, None) is None
+    portion = module.portion_of(
+        ["2222222222", "1111111111", "2222222222"], "2026-01-01", "2026-03-31"
+    )
+    assert portion == module.Portion(
+        ("1111111111", "2222222222"), date(2026, 1, 1), date(2026, 3, 31)
+    )
+    assert portion.conf() == {
+        "accounts": ["1111111111", "2222222222"],
+        "window_from": "2026-01-01",
+        "window_to": "2026-03-31",
+    }
+    assert module.portion_of([], "2026-01-01", "2026-01-01").accounts == ()
+    for accounts, first, last, message in [
+        (["1111111111"], None, None, "names the days of their history too"),
+        ([], "2026-01-01", None, "both window_from and window_to"),
+        ([], None, "2026-01-01", "both window_from and window_to"),
+        ([], "2026-02-30", "2026-03-31", "are dates"),
+        ([], "2026-04-01", "2026-03-31", "is after window_to"),
+        (["111-111-1111"], "2026-01-01", "2026-03-31", "ten digits without hyphens"),
+    ]:
+        with pytest.raises(module.GoogleAdsError, match=message):
+            module.portion_of(accounts, first, last)
+
+
+def test_a_portion_takes_the_totals_and_the_facts_of_its_days_as_a_load_of_history(ads):
+    # The customer of each account and its seven tables of facts, eight requests, in one request
+    # each for a quarter; the entities, the watermarks and the customers of the other accounts
+    # stay as they were.
+    module, state, made, extensions = ads
+    state.update(
+        loads=1,
+        reloads=[("2222222222", date(2026, 10, 29), date(2026, 10, 28))],
+        customers=[("customers/1111111111", "1111111111", "Kept", "USD", "UTC", False, "ENABLED")],
+    )
+    cache = StandInCache({"watermarks": {"2222222222": "2026-10-28"}})
+    portion = module.Portion(("2222222222",), date(2026, 4, 1), date(2026, 6, 30))
+    counts = module.load(NOW, extensions, cache=cache, portion=portion)
+    assert requested(made) == ["2222222222"] * 8
+    gaql = [q for _, q, _ in made["requests"]]
+    assert gaql[0].endswith("FROM customer")
+    assert all(
+        q.endswith("WHERE segments.date BETWEEN '2026-04-01' AND '2026-06-30'") for q in gaql[1:]
+    )
+    assert [q.split(" FROM ")[1].split(" WHERE ")[0] for q in gaql[1:]] == [
+        "customer",
+        *("campaign", "campaign", "ad_group", "ad_group", "ad_group_ad", "ad_group_ad"),
+    ]
+    [(rows, _)] = made["pipelines"][0].runs
+    assert not set(module.ENTITIES) & set(rows)
+    assert counts == {"customers": 2, **{table: 1 for table in module.FACTS}}
+    # The table of customers is replaced with every account of the deployment.
+    assert sorted(
+        row["customer__id"] if "customer__id" in row else row["customer"]["id"]
+        for row in rows["customers"]
+    ) == ["1111111111", "2222222222"]
+    [record] = rows["_agoranomos_loads"]
+    assert (record["account_id"], record["window_from"], record["window_to"]) == (
+        "2222222222",
+        date(2026, 4, 1),
+        date(2026, 6, 30),
+    )
+    # The day of the load in Berlin, as for any load.
+    assert (record["kind"], record["status"], record["as_of"]) == (
+        "history",
+        "loaded",
+        date(2026, 10, 29),
+    )
+    assert cache.writes == []
+
+
+def test_a_portion_of_every_account_ends_yesterday_and_names_only_their_accounts(ads):
+    module, _, made, extensions = ads
+    portion = module.Portion((), date(2026, 10, 1), date(2026, 12, 31))
+    module.load(NOW, extensions, portion=portion)
+    [(rows, _)] = made["pipelines"][0].runs
+    windows = {
+        row["account_id"]: (row["window_from"], row["window_to"])
+        for row in rows["_agoranomos_loads"]
+    }
+    assert windows == {
+        "1111111111": (date(2026, 10, 1), date(2026, 10, 27)),
+        "2222222222": (date(2026, 10, 1), date(2026, 10, 28)),
+    }
+    made["requests"].clear()
+    unnamed = module.Portion(("1111111111", "4444444444"), date(2026, 1, 1), date(2026, 3, 31))
+    with pytest.raises(module.GoogleAdsError, match="names no account of google_ads 4444444444"):
+        module.load(NOW, extensions, portion=unnamed)
+    assert made["requests"] == []
+    # Days that start after yesterday of an account fail that account, as an error of the API
+    # would, and the load takes the other.
+    late = module.Portion((), date(2026, 10, 28), date(2026, 10, 28))
+    with pytest.raises(module.AccountsFailed, match="1111111111: the days of the history start"):
+        module.load(NOW, extensions, portion=late)
+
+
+def test_the_plan_waits_for_a_load_that_no_run_of_the_transform_pinned(ads, caplog):
+    module, state, made, extensions = ads
+    state.update(
+        loads=2,
+        waiting=1,
+        windows=[("1111111111", date(2026, 7, 30), date(2026, 10, 27))],
+    )
+    with caplog.at_level("INFO"):
+        assert module.plan(NOW, extensions) is None
+    assert "1 whole loads of Google Ads wait for the run of the transform" in caplog.text
+    assert made["requests"] == []
+    [query] = [q for q in made["pipelines"][0].queries if q.startswith("SELECT count(DISTINCT")]
+    assert query == (
+        "SELECT count(DISTINCT j._dlt_load_id) "
+        'FROM "raw_google_ads"."_agoranomos_loads" AS j '
+        'JOIN "raw_google_ads"."_dlt_loads" AS l '
+        "ON l.load_id = j._dlt_load_id AND l.status = 0 "
+        "WHERE NOT EXISTS (SELECT FROM core.loads AS p "
+        "WHERE p.source = 'google_ads' AND p.load_id = j._dlt_load_id "
+        "AND p.account_id = j.account_id)"
+    )
+
+
+def test_the_plan_takes_the_windows_of_the_journal_and_of_the_core(ads, caplog):
+    # The history goes back to the first day of the month 36 months before yesterday in UTC, from
+    # the windows of the whole loads of every kind; the core holds those of the loads that the
+    # cleanup of raw will have removed.
+    module, state, made, extensions = ads
+    state.update(
+        loads=2,
+        windows=[
+            ("1111111111", date(2026, 7, 30), date(2026, 10, 27)),
+            ("1111111111", None, None),
+            ("2222222222", date(2026, 7, 31), date(2026, 10, 28)),
+        ],
+        core_windows=[("2222222222", date(2026, 4, 1), date(2026, 7, 30))],
+    )
+    with caplog.at_level("INFO"):
+        portion = module.plan(NOW, extensions)
+    assert portion == module.Portion(("1111111111",), date(2026, 7, 1), date(2026, 7, 29))
+    assert "The next portion of the history: 2026-07-01 to 2026-07-29 of 1 accounts" in caplog.text
+    queries = made["pipelines"][0].queries
+    assert (
+        "SELECT account_id, window_from, window_to FROM core.loads "
+        "WHERE source = 'google_ads' AND outcome = 'loaded' "
+        "AND account_id IN ('1111111111', '2222222222')"
+    ) in queries
+    assert (
+        "SELECT j.account_id, j.window_from, j.window_to "
+        'FROM "raw_google_ads"."_agoranomos_loads" AS j '
+        'JOIN "raw_google_ads"."_dlt_loads" AS l '
+        "ON l.load_id = j._dlt_load_id AND l.status = 0 "
+        "WHERE j.status = 'loaded' AND j.account_id IN ('1111111111', '2222222222')"
+    ) in queries
+    assert made["requests"] == []
+    # Once every account holds its days back to the limit, nothing.
+    state.update(
+        windows=[
+            ("1111111111", date(2023, 10, 1), date(2026, 10, 27)),
+            ("2222222222", date(2023, 10, 1), date(2026, 10, 28)),
+        ],
+        core_windows=[],
+    )
+    with caplog.at_level("INFO"):
+        assert module.plan(NOW, extensions) is None
+    assert "holds its days back to 2023-10-01" in caplog.text
 
 
 def test_a_long_window_goes_in_a_request_for_each_calendar_month(ads):
@@ -499,14 +742,14 @@ def test_a_load_asks_v26_for_each_account_as_the_service_account(ads, monkeypatc
 def test_a_load_keeps_the_rows_as_the_api_gives_them_and_appends_the_facts(ads):
     module, _, made, extensions = ads
     counts = module.load(NOW, extensions)
-    # The first load of each account: a row in each of the 37 calendar months of its history, in
-    # each fact table.
+    # The first load of each account takes its usual window, the last 90 days, in one request for
+    # each fact table, whose stand-in answers with a row of the first day.
     assert counts == {
         "customers": 2,
         **{table: 2 for table in module.ENTITIES},
-        **{table: 74 for table in module.FACTS},
+        **{table: 2 for table in module.FACTS},
     }
-    assert len(made["requests"]) == 2 * (1 + 4 + 7 * 37)
+    assert len(made["requests"]) == 2 * (1 + 4 + 7)
     [pipeline] = made["pipelines"]
     assert pipeline.options["dataset_name"] == "raw_google_ads"
     [(rows, hints)] = pipeline.runs
@@ -524,9 +767,10 @@ def test_a_load_keeps_the_rows_as_the_api_gives_them_and_appends_the_facts(ads):
         for row in rows["_agoranomos_loads"]
     }
     assert windows == {
-        "1111111111": (date(2023, 10, 1), date(2026, 10, 27)),
-        "2222222222": (date(2023, 10, 1), date(2026, 10, 28)),
+        "1111111111": (date(2026, 7, 30), date(2026, 10, 27)),
+        "2222222222": (date(2026, 7, 31), date(2026, 10, 28)),
     }
+    assert {row["kind"] for row in rows["_agoranomos_loads"]} == {"window"}
     # dlt 1.31.0 retires the versions that a load lacks within its destination scope only, so the
     # entities of an account that a load could not read keep their versions.
     for table in ("campaigns", "ad_groups", "ads", "conversion_actions"):
@@ -651,7 +895,7 @@ def test_a_load_records_the_window_of_each_account_on_its_own_day(ads):
     assert record["1111111111"]["as_of"] == date(2026, 10, 28)
     assert record["1111111111"]["window_to"] == date(2026, 10, 27)
     assert record["2222222222"]["as_of"] == date(2026, 10, 29)
-    assert record["2222222222"]["window_from"] == date(2023, 10, 1)
+    assert record["2222222222"]["window_from"] == date(2026, 7, 31)
     assert {(row["status"], row["error"]) for row in record.values()} == {("loaded", None)}
 
 
@@ -673,7 +917,7 @@ def test_an_error_of_the_api_on_one_account_does_not_stop_its_neighbor(ads):
     assert str(raised.value) == f"1 of 2 Google Ads accounts failed, the other 1 is loaded: {ERROR}"
     # One request to the failed account, its customer, and the whole load of its neighbor.
     assert requested(made).count("2222222222") == 1
-    assert requested(made).count("1111111111") == 1 + 4 + 7 * 37
+    assert requested(made).count("1111111111") == 1 + 4 + 7
     [pipeline] = made["pipelines"]
     [(rows, hints)] = pipeline.runs
     for table in ("customers", *module.ENTITIES, *module.FACTS):
@@ -684,8 +928,10 @@ def test_an_error_of_the_api_on_one_account_does_not_stop_its_neighbor(ads):
         ), table
     record = {row["account_id"]: row for row in rows["_agoranomos_loads"]}
     assert (record["1111111111"]["status"], record["1111111111"]["error"]) == ("loaded", None)
-    assert record["1111111111"]["window_from"] == date(2023, 10, 1)
+    assert record["1111111111"]["window_from"] == date(2026, 7, 30)
     assert (record["2222222222"]["status"], record["2222222222"]["error"]) == ("failed", ERROR)
+    # A failed account keeps the kind of the load, as the pin copies each row.
+    assert {row["kind"] for row in record.values()} == {"window"}
 
 
 def test_a_failed_account_has_no_day_and_no_moment_of_a_load_in_the_journal(ads):
@@ -708,6 +954,7 @@ def test_a_failed_account_has_no_day_and_no_moment_of_a_load_in_the_journal(ads)
         "loaded_at": None,
         "status": "failed",
         "error": ERROR,
+        "kind": "window",
     }
 
 
@@ -793,7 +1040,7 @@ def test_a_load_whose_every_account_failed_writes_the_journal_alone(ads):
     ]
 
 
-def test_an_account_whose_loads_all_failed_takes_its_history(ads):
+def test_an_account_whose_loads_all_failed_takes_its_usual_window(ads):
     # Its rows of the journal have no window, so the journal of the loads has none for it.
     module, state, made, extensions = ads
     state.update(
@@ -810,7 +1057,7 @@ def test_an_account_whose_loads_all_failed_takes_its_history(ads):
         for row in rows["_agoranomos_loads"]
     }
     assert windows == {
-        "1111111111": (date(2023, 10, 1), date(2026, 10, 27)),
+        "1111111111": (date(2026, 7, 30), date(2026, 10, 27)),
         "2222222222": (date(2026, 7, 31), date(2026, 10, 28)),
     }
     # The journal counts the loads that dlt finished, with their row in _dlt_loads: the days of a
@@ -825,14 +1072,18 @@ def test_an_account_whose_loads_all_failed_takes_its_history(ads):
     )
 
 
-def test_a_dataset_of_a_release_before_v0_5_takes_the_history_of_each_account_again(ads):
+def test_a_dataset_of_a_release_before_v0_5_takes_the_usual_window_of_each_account_again(ads):
     # Its loads have no row in _agoranomos_loads, which a release before v0.5 did not write: each
-    # account takes its history, and the rows of the earlier loads stay unread by staging.
+    # account takes its usual window, its history follows, and the rows of the earlier loads stay
+    # unread by staging.
     module, state, made, extensions = ads
     state.update(loads=3, reloads=[])
     module.load(NOW, extensions)
     [(rows, _)] = made["pipelines"][0].runs
-    assert {row["window_from"] for row in rows["_agoranomos_loads"]} == {date(2023, 10, 1)}
+    assert {row["window_from"] for row in rows["_agoranomos_loads"]} == {
+        date(2026, 7, 30),
+        date(2026, 7, 31),
+    }
 
 
 def test_the_window_starts_after_the_last_day_that_the_core_accepted(ads):
@@ -873,7 +1124,7 @@ def test_the_window_starts_after_the_last_day_that_the_core_accepted(ads):
     )
 
 
-def test_the_last_accepted_day_wins_over_the_journal_and_none_takes_the_history(ads):
+def test_the_last_accepted_day_wins_over_the_journal_and_none_takes_the_usual_window(ads):
     module, _, _, _ = ads
     journal = {"1111111111": (date(2026, 10, 28), date(2026, 10, 27))}
     core = {"1111111111": date(2026, 10, 20), "3333333333": date(2026, 9, 1)}
@@ -927,8 +1178,8 @@ def test_the_cache_never_moves_a_window_and_the_log_says_when_it_differs(ads, ca
     [(rows, _)] = made["pipelines"][0].runs
     windows = {row["account_id"]: row["window_from"] for row in rows["_agoranomos_loads"]}
     # The first account starts after the end of March in the journal, the second, which neither
-    # the journal nor the core knows, takes its history.
-    assert windows == {"1111111111": date(2026, 4, 1), "2222222222": date(2023, 10, 1)}
+    # the journal nor the core knows, takes its usual window.
+    assert windows == {"1111111111": date(2026, 4, 1), "2222222222": date(2026, 7, 31)}
     assert (
         "Google Ads account 1111111111: Airflow keeps 2026-10-26 as the last day of its newest "
         "load, the warehouse 2026-03-31; the window follows the warehouse"

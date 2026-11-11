@@ -7,7 +7,7 @@ Ask an AI client about your advertising and web analytics: the Claude apps, Clau
 | Server | For | Mode | What it can do |
 |---|---|---|---|
 | `agoranomos-metabase`, built into Metabase | Everyone: questions, charts and dashboards | Local and server | What the level of AI access lets the person's own account do in Metabase ([AI access in Metabase](../reference/configuration.md#ai-access-in-metabase)) |
-| `agoranomos-warehouse`, MCP Toolbox | Engineers and analysts on the same machine: tables, columns and read-only SQL | Local | Read `marts` and `staging` as the role `ai_reader`, one statement at a time, for at most a minute |
+| `agoranomos-warehouse`, MCP Toolbox | Engineers and analysts on the same machine: tables, columns and read-only SQL | Local | Read the views of `marts` as the role `ai_reader`, one statement at a time, for at most a minute |
 | `agoranomos-airflow`, astro-airflow-mcp | Engineers on the same machine: DAGs, runs and logs | Local | Read as the Airflow user `ai`, with the role Viewer; it refuses every tool that writes |
 
 In server mode, only the server of Metabase runs, over HTTPS. The server of dbt is planned for a later release ([ADR-0030](../adr/0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md)).
@@ -123,4 +123,4 @@ Each answer is as good as the definitions behind it, which [The data model](../r
 - **`./agoranomos mcp` refuses.** It says why: server mode, a switch that is off, or the container `ai` not running. `./agoranomos ai` shows the switches.
 - **`mcp.sh: no such file or directory`.** The container `ai` mounts the folder `ai/` of the checkout. When that folder is deleted and created again, as a switch between git branches can do, the container keeps the old one. Run `./agoranomos down` and `./agoranomos up`.
 - **A call is refused for lack of permission.** That is the level of the account. An admin adds the person to the group of a higher level, up to the level of the deployment.
-- **The warehouse server stops a query.** A statement stops after a minute, and `ai_reader` reads only `marts` and `staging`. Ask for less: a shorter period, sums instead of rows.
+- **The warehouse server stops a query.** A statement stops after a minute, and `ai_reader` reads only the views of `marts`. Ask for less: a shorter period, sums instead of rows.

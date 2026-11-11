@@ -13,14 +13,17 @@ platforms share, the dimensions of the core with the snapshots of the versions o
 and the views of the Ops collection. A failed critical test stops the models that read
 it, and the marts keep their data. Before them, one task builds the tables of elementary in the
 schema ops, into which the hooks of elementary in every task of dbt write the results of its models
-and tests (ADR-0029). The DAG runs when each of the five platforms of the demo has loaded since its
-last run, each load updating the asset of its main table, after each load of the rates of the ECB,
-and after each load of Google Ads (ADR-0032, ADR-0039), one run at a time: a run takes the events of
-the loads that ended while the run before it ran. A repeat is safe: the settings are loaded again,
-and dbt rebuilds the models. The DAG starts paused. With the demo profile, the one-shot demo-init
-job unpauses it and runs agoranomos_demo_history on the first start; without it, unpause this DAG in
-the Airflow UI before you trigger a load. The DAG keeps the word demo in its id for now, as the Ops
-collection and the demo name it; a change of its own is to rename it.
+and tests (ADR-0029). A run in which every task succeeded ends with the task transformed, which
+updates the asset TRANSFORMED, after which the history of Google Ads takes its next portion
+(agoranomos_google_ads_history, ADR-0038). The DAG runs when each of the five platforms of the
+demo has loaded since its last run, each load updating the asset of its main table, after each
+load of the rates of the ECB, and after each load of Google Ads (ADR-0032, ADR-0039), one run at a
+time: a run takes the events of the loads that ended while the run before it ran. A repeat is
+safe: the settings are loaded again, and dbt rebuilds the models. The DAG starts paused. With the
+demo profile, the one-shot demo-init job unpauses it and runs agoranomos_demo_history on the first
+start; without it, unpause this DAG in the Airflow UI before you trigger a load. The DAG keeps the
+word demo in its id for now, as the Ops collection and the demo name it; a change of its own is to
+rename it.
 
 Cosmos renders its tasks from the manifest that metadata-export writes on every start (ADR-0027),
 so a change of the dbt project reaches the DAG at the next ./agoranomos up; its tasks of dbt run at
@@ -32,7 +35,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from agoranomos_pipelines.assets import LOADED
+from agoranomos_pipelines.assets import LOADED, TRANSFORMED
 from airflow.sdk import dag, task
 from airflow.sdk.log import mask_secret
 from cosmos import (
@@ -177,8 +180,16 @@ def agoranomos_demo_transform():
         # Only the tasks of dbt go into its pool.
         default_args={"pool": DBT_POOL},
     )
+
+    # The last task, once every task of dbt has succeeded: its event of TRANSFORMED tells the
+    # history of Google Ads that the loads of the pin are in the core (ADR-0038). A run with a
+    # failed task ends without it.
+    @task(task_id="transformed", outlets=[TRANSFORMED])
+    def transformed() -> None:
+        pass
+
     # Every task of dbt comes after the settings, the pin and the tables of elementary.
-    load_settings() >> pin >> elementary >> dbt
+    load_settings() >> pin >> elementary >> dbt >> transformed()
 
 
 agoranomos_demo_transform()
