@@ -10,7 +10,7 @@ decision-makers: Andrei Gromov
 
 [ADR-0040](0040-size-the-stack-by-profiles-and-derive-the-settings-of-postgresql.md) ("What does not depend on the limit") keeps `jit` off for the database `warehouse`, as `postgres/warehouse.sql` sets it, and turns it on for `transformer` at the limit of one server, and off for the roles that read. That line rested on no measurement of the transform: JIT compiles the expressions of a long query to machine code, which pays when a statement reads millions of rows, such as the write of a window of the facts, and costs memory and time on a short one.
 
-R5 (#191) measured a real `dbt build` at the density of the limit on 1 and 3 November 2026: the three facts with their journals, G1, the dimensions, the versions, the tests by window and elementary, with eight readers, on PostgreSQL 18.6 with a limit of 4 GiB and the settings of ADR-0040. Two runs of a window of 90 days with `jit` on for `transformer` took 252 and 269 seconds, against 221 to 252 seconds in four runs without it, and the private memory of all the processes of PostgreSQL grew by a third, from 360 to 394 MiB to 508 to 512 MiB; its largest process, the query of G1, from 258 to 316 MiB to 402 to 406 MiB.
+R5 (#191) measured a real `dbt build` at the density of the limit on 1 and 3 November 2026: the three facts with their journals, G1, the dimensions, the versions, the tests by window and elementary, with eight readers, on PostgreSQL 18.6 with a limit of 4 GiB and the settings of ADR-0040. Two runs of a window of 90 days with `jit` on for `transformer` took 252 and 269 seconds, against 221 to 252 seconds in five runs without it, and the private memory of all the processes of PostgreSQL grew by a third, from 360 to 394 MiB to 508 to 512 MiB; its largest process, the query of G1, from 258 to 316 MiB to 402 to 406 MiB.
 
 Does the profile of the limit turn JIT on for the transform?
 
@@ -41,11 +41,11 @@ Chosen option: "Keep `jit` off for every role, at every limit", because the meas
 
 * Good, because the write of a window reads millions of rows, where JIT can pay in principle.
 * Bad, because the measured runs were not faster: 252 and 269 seconds against 221 to 252.
-* Bad, because the private memory of PostgreSQL grew by a third, and the largest process by about 90 MiB, which the readers beside the transform lose.
+* Bad, because the private memory of PostgreSQL grew by a third, and the largest process by 90 to 140 MiB, which the readers beside the transform lose.
 
 ## More Information
 
 * **Implementation status, as of November 2026:** in place: `jit` is off for the database `warehouse` (`postgres/warehouse.sql`), and no role or profile turns it on. The line of ADR-0040 that this record replaces was never built: no setting of `./agoranomos` or of `.env.example` turns `jit` on for a role.
-* The measurement: the report of R5 (#191) and the table of ADR-0040 under "Measured on 1 and 3 November 2026", the line with `jit` on for `transformer`. Each variant had two runs at most, on the NVMe of a Mac, with 4 months of data; a cloud disk and the full 36 months are R6 (#192), not run yet.
+* The measurement: the report of R5 (#191) and the table of ADR-0040 under "Measured on 1 and 3 November 2026", the line with `jit` on for `transformer`. The runs with JIT were two and those without it five, on the NVMe of a Mac, with 4 months of data; a cloud disk and the full 36 months are R6 (#192), not run yet.
 * Related decisions: at acceptance this record replaces "and at the limit of one server it is on for `transformer` and off for the roles that read" in "What does not depend on the limit" of [ADR-0040](0040-size-the-stack-by-profiles-and-derive-the-settings-of-postgresql.md). The rest of ADR-0040 stays.
 * Revisit this record when a measurement on the full 36 months or on a cloud disk shows a query of the transform that JIT makes faster within the memory of its profile.
