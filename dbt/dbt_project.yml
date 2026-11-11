@@ -1,5 +1,6 @@
-# The dbt project of agoranomos (ADR-0005): the model of advertising statistics (ADR-0025), from the
-# raw data of each platform through staging and the intermediate models to the marts. Airflow runs
+# The dbt project of agoranomos (ADR-0005): the model of advertising statistics (ADR-0036,
+# ADR-0037), from the raw data of each platform through staging and the intermediate models to the
+# core, and the marts as views over the core. Airflow runs
 # it through Cosmos, in the DAG agoranomos_demo_transform, as the transformer role. The project is
 # mounted read-only: Cosmos runs dbt in a temporary folder that links to the project, where dbt
 # writes its target and logs folders.
@@ -37,9 +38,13 @@ models:
     intermediate:
       +schema: staging
       +materialized: view
+    # The marts (ADR-0037): views over the core, which read nothing else, as a view over a model
+    # that a run rebuilds would go with it. A run of the transform builds a view that does not
+    # exist, and leaves one that exists as it is, with its tests (macros/marts_view.sql); a build
+    # with the var rebuild_views builds them all again.
     marts:
       +schema: marts
-      +materialized: table
+      +materialized: view
     # The dimensions and the registries of the core (ADR-0036, ADR-0038): incremental models that
     # merge their rows into the tables that the migrations of postgres/migrations create, own and
     # describe, so that transformer can neither drop nor change a table (ADR-0035). Never a full

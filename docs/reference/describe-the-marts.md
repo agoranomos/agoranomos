@@ -97,7 +97,7 @@ The jobs that apply the metadata never send a display name of `null`, which the 
 
 | Kind of column | `has_field_values` | What a filter does | In the demo |
 |---|---|---|---|
-| The platform, a status, the type of a thing, a currency, or another code from a short list, and a yes or no | `list` | Offers the values, which the daily scan keeps ([Configuration](configuration.md#the-scan-the-sync-and-the-cache-of-metabase)) | `platform_name`, `campaign_status`, `campaign_type`, `currency`, `session_medium`, `is_primary` |
+| The platform, a status, a state, the type of a thing, a currency, or another code from a short list, and a yes or no | `list` | Offers the values, which the daily scan keeps ([Configuration](configuration.md#the-scan-the-sync-and-the-cache-of-metabase)) | `platform_name`, `campaign_status`, `campaign_state`, `campaign_type`, `currency`, `session_medium`, `is_primary` |
 | The name of something, and other text that anyone can write | `search` | Takes what a person types, and asks the warehouse for the values that match it | `client_name`, `account_name`, `campaign_name`, `session_source` |
 | An identifier, a date or a time, and a measure | `none` | Takes what a person types, and offers nothing | `campaign_id`, `report_date`, `impressions`, `spend` |
 
@@ -171,15 +171,20 @@ Two marts may declare a KPI only with one description, as the glossary holds one
 
 ## The contract of a mart
 
-A mart has an enforced dbt contract, `contract: enforced: true` in its `config`, and a `data_type` for each column. Before dbt builds the table, it checks that the model makes exactly these columns with these types, and the build fails otherwise, so the marts that dashboards read do not change by accident. The key of a mart is a `primary_key` constraint, which PostgreSQL enforces:
+A mart is a view over the core ([ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md)), with an enforced dbt contract, `contract: enforced: true` in its `config`, and a `data_type` for each column. Before dbt builds the view, it checks that the model makes exactly these columns with these types, and the build fails otherwise, so the marts that dashboards read do not change by accident. Add a column at the end of a mart: a card of Metabase reads the columns by name, and the columns of v0.4 come first, in their order. A view has no constraint in PostgreSQL: the key of a mart is the key of the table of the core under it, and the test `unique_combination` of the mart checks it:
 
 ```yaml
-    constraints:
-      - type: primary_key
-        columns: [report_date, platform, account_id, campaign_id]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [report_date, platform, account_id, campaign_id]
+          config:
+            where: >-
+              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              and outcome = 'loaded')
 ```
 
-The constraint has no `name`. dbt builds a table under a temporary name and then renames it, and an index keeps the name that it got: a named key would collide with itself on the next build (`relation "…" already exists`), and PostgreSQL gives an unnamed key a free name each time.
+Each test of a view of a fact reads the days of the windows that the run of the transform pinned, with the same `where`, as a test of the whole view would read every partition of its fact. `type/PK` for Metabase stays in `meta`.
 
 ## Comments in the warehouse
 
@@ -193,8 +198,8 @@ A deployment can override the display name and the description of a table or a f
 
 ## How the rules are checked
 
-- `tests/unit/test_dbt_project.py` reads the files: `persist_docs` is on, every description over several lines is `>-`, every seed and each of its columns has a description, every mart has its contract, its key and a test of its key, every `client_id` and `platform` of a mart is a foreign key of the key of one column that it names, and no other column is a key in Metabase, every column of a mart has the `has_field_values` of its kind, no primary key has a name, in whatever order its keys are written, and the columns of the staging and intermediate models take the doc blocks of their names.
-- `tests/stack/test_dbt_metadata.py` asks dbt itself, with `dbt ls` in the Airflow image, which resolves the doc blocks and the configs as dbt does: every model, seed, column and source table has a description, every mart has a display name and each of its columns a display name, a semantic type and `has_field_values`, columns of one name have one description, money has its tests of one currency and no NULL, the names follow the style, and every mart has its contract. It also checks the warehouse after a build: each table and view that dbt builds in `staging` and `marts` has exactly the columns that dbt declares, it and each of them carry the description as their comment, and the key of the mart is a primary key in PostgreSQL.
+- `tests/unit/test_dbt_project.py` reads the files: `persist_docs` is on, every description over several lines is `>-`, every seed and each of its columns has a description, every mart has its contract and a test of its key, the tests of the views of facts read the days of the windows, the views read the core alone, every `client_id` and `platform` of a mart is a foreign key of the key of one column that it names, and no other column is a key in Metabase, every column of a mart has the `has_field_values` of its kind, no model declares a constraint, and the columns of the staging and intermediate models take the doc blocks of their names.
+- `tests/stack/test_dbt_metadata.py` asks dbt itself, with `dbt ls` in the Airflow image, which resolves the doc blocks and the configs as dbt does: every model, seed, column and source table has a description, every mart has a display name and each of its columns a display name, a semantic type and `has_field_values`, columns of one name have one description, money has its tests of one currency and no NULL, the names follow the style, and every mart has its contract. It also checks the warehouse after a build: each table and view that dbt builds in `staging` and `marts` has exactly the columns that dbt declares, it and each of them carry the description as their comment, and the mart is a view with no constraint.
 - `tests/stack/test_metabase_metadata.py` checks Metabase after a start: every table and field of the marts shows the display name, the description and the semantic type of the code, also a semantic type of none, the values of a field, the currency of money, and the target of a foreign key; an edit in the Metabase UI is reverted at the next start, and a field that someone hid stays hidden.
 
 CI runs the first on every pull request, and the other two on every pull request that changes the stack, such as `dbt/` or `metabase/`.

@@ -417,8 +417,8 @@ def assert_one_transaction(env, sk, load, new, day):
 
 
 def assert_the_core_holds_what_the_marts_hold(env):
-    """The facts of the core and the marts, which staging builds alike, add up to the same by
-    platform and account: no day of an account was lost or doubled."""
+    """The facts of the core and the views of the marts over them add up to the same by platform
+    and account: no join of a view lost or doubled a row (ADR-0037)."""
     for mart, measures in (
         ("ad_stats_campaign_daily", "impressions, clicks, spend"),
         ("ad_stats_ad_group_daily", "impressions, clicks, spend"),

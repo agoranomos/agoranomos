@@ -12,6 +12,7 @@ from {{ relation }}
 {% endmacro %}
 
 {% macro ga4_sessions_daily(relation, platform) %}
+{%- call nonzero(['sessions', 'engaged_sessions', 'key_events', 'total_revenue']) %}
 select
     to_date(cast("date" as text), 'YYYYMMDD') as report_date,
     '{{ platform }}' as platform,
@@ -26,4 +27,5 @@ select
     {{ to_number('key_events') }} as key_events,
     {{ to_number('total_revenue') }} as total_revenue
 from {{ relation }}
+{%- endcall %}
 {% endmacro %}

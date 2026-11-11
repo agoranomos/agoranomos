@@ -214,8 +214,8 @@ DROP SCHEMA IF EXISTS raw_demo_staging CASCADE;
 DROP SCHEMA IF EXISTS raw_demo CASCADE;
 
 -- Metabase reads marts, and in ops the views of the Ops collection. Its sessions start read-only,
--- against accidental writes; the barrier itself is that the role has no write grant. dbt creates the tables of marts as transformer, so the
--- default privileges that give Metabase the new tables are those of transformer.
+-- against accidental writes; the barrier itself is that the role has no write grant. dbt creates the views of marts as transformer, so the
+-- default privileges that give Metabase the new views, which those on tables cover, are those of transformer.
 ALTER ROLE metabase_reader SET default_transaction_read_only = on;
 -- A query of Metabase that runs longer than five minutes is canceled, so that a dashboard or a
 -- question cannot hold the warehouse, and Metabase holds at most 20 connections: more than the 15
@@ -224,6 +224,13 @@ ALTER ROLE metabase_reader SET default_transaction_read_only = on;
 -- role gets them, and a value changed by hand goes back.
 ALTER ROLE metabase_reader SET statement_timeout = '5min';
 ALTER ROLE metabase_reader CONNECTION LIMIT 20;
+-- The marts are views over the core, each a plain join that PostgreSQL flattens into a query, so
+-- that a filter reaches the index of a fact (ADR-0037). A view of ads joins nine relations, and a
+-- question that joins two views has more than the 8 that the planner reorders by default; above
+-- the limit it plans each view apart, in the order of its text. The roles that read the marts get
+-- 12, the setting of ADR-0037; it changes how a query is planned, and no right.
+ALTER ROLE metabase_reader SET from_collapse_limit = 12;
+ALTER ROLE metabase_reader SET join_collapse_limit = 12;
 GRANT USAGE ON SCHEMA marts TO metabase_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA marts TO metabase_reader;
 ALTER DEFAULT PRIVILEGES FOR ROLE transformer IN SCHEMA marts GRANT SELECT ON TABLES TO metabase_reader;
@@ -244,6 +251,10 @@ ALTER ROLE ai_reader SET default_transaction_read_only = on;
 ALTER ROLE ai_reader SET statement_timeout = '1min';
 ALTER ROLE ai_reader SET idle_in_transaction_session_timeout = '1min';
 ALTER ROLE ai_reader CONNECTION LIMIT 3;
+-- As for metabase_reader, the planner of a question over the views of the marts reorders up to 12
+-- relations (ADR-0037).
+ALTER ROLE ai_reader SET from_collapse_limit = 12;
+ALTER ROLE ai_reader SET join_collapse_limit = 12;
 GRANT USAGE ON SCHEMA marts, staging TO ai_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA marts TO ai_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA staging TO ai_reader;

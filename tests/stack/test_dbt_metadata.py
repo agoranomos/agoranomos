@@ -94,9 +94,9 @@ SELECT coalesce(json_agg(item), '[]') FROM (
   WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND c.relkind IN ('r', 'v')
 ) AS comments
 """
-PRIMARY_KEY = (
-    "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
-    "WHERE conrelid = 'marts.ad_stats_campaign_daily'::regclass AND contype = 'p'"
+MART_KIND = (
+    "SELECT relkind::text || '|' || (SELECT count(*) FROM pg_constraint WHERE conrelid = c.oid) "
+    "FROM pg_class AS c WHERE c.oid = 'marts.ad_stats_campaign_daily'::regclass"
 )
 # The one expression of the reporting currency in the YAML (docs/reference/describe-the-marts.md),
 # which dbt keeps unrendered in the arguments of a test.
@@ -573,9 +573,10 @@ def test_the_checks_find_what_they_look_for():
 @pytest.fixture(scope="module")
 def fresh_build(airflow_url, token):
     """A run of the transform that succeeded now: dbt writes the comments when it builds a model,
-    so the warehouse then holds those of the checkout. With the demo the mart exists before the
-    run, so the run also rebuilds it by the swap of tables, with its primary key. Without the demo
-    no run comes with the start, and the first of these runs builds the empty model: the job of CI
+    so the warehouse then holds those of the checkout. With the demo the views of the marts exist
+    before the run, which keeps them as they are, with the comments of their build (ADR-0039).
+    Without the demo no run comes with the start, and the first of these runs builds the empty
+    model: the job of CI
     without the demo runs these tests, and then the stack again, before the other stack tests,
     which then find the marts (stack.yml), and the run after rebuilds the model."""
     for dag_id in (LOAD, TRANSFORM):
@@ -614,7 +615,6 @@ def test_the_comments_of_the_warehouse_are_the_descriptions_of_dbt(env, nodes, f
 
 
 @pytest.mark.transform
-def test_the_key_of_the_mart_is_a_primary_key_after_a_rebuild(env, fresh_build):
-    definition = warehouse_output(env, PRIMARY_KEY)
-    expected = "PRIMARY KEY (report_date, platform, account_id, campaign_id)"
-    assert definition == expected, definition
+def test_the_mart_is_a_view_with_no_constraint_after_a_run(env, fresh_build):
+    # A view of the core (ADR-0037): its key is that of the fact, a constraint of the core.
+    assert warehouse_output(env, MART_KIND) == "v|0"

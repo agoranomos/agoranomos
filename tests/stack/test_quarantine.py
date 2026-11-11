@@ -1,8 +1,9 @@
 """The quarantine of an account (ADR-0035): the checks of G1 and G1a hold an account whose data
-fails them out of the core and the marts for a run of the transform, the other accounts go on, a
-source with more than half of its pinned accounts in quarantine stops, the run stays green, and Ops
-says why. The checks write core.account_quarantine, and int_accounts__current and the intermediate
-models of the marts leave the accounts of int_g1_failures out (dbt/macros/quarantine.sql).
+fails them out of the core for a run of the transform, the views of the marts go on showing what
+the core held, the other accounts go on, a source with more than half of its pinned accounts in
+quarantine stops, the run stays green, and Ops says why. The checks write core.account_quarantine,
+and int_accounts__current and int_window_days leave the accounts of int_g1_failures out
+(dbt/macros/quarantine.sql).
 
 The test breaks rows of raw as loader, the owner of raw: a currency outside ISO 4217 in the list of
 one account of demo_search, a currency of ISO 4217 that the rates of the demo do not have in the
@@ -73,6 +74,11 @@ QUARANTINED = (
     "SELECT platform || '|' || account_id || '|' || reason || '|' || detail "
     "FROM ops.ops_quarantine ORDER BY 1"
 )
+# What the view of campaigns shows of the one account of demo_video.
+VIDEO_SHOWN = (
+    "SELECT count(*) || '|' || sum(spend) FROM marts.ad_stats_campaign_daily "  # noqa: S608 (an ID of the demo)
+    f"WHERE platform = 'demo_video' AND account_id = '{VIDEO.account_id}'"
+)
 # A row of the registry of accounts, with the transaction that last wrote it.
 REGISTERED = (
     "SELECT xmin::text || '|' || account_name || '|' || currency FROM core.dim_account "
@@ -123,6 +129,7 @@ def test_an_account_that_fails_its_checks_stays_out_and_the_others_go_on(
     )
     days = DAYS.format(dataset="raw_demo_video")
     [first] = rows(env, f"SELECT min(day) FROM ({days}) AS d")  # noqa: S608 (constants of the demo)
+    video = warehouse_output(env, VIDEO_SHOWN)
     try:
         warehouse_output(env, SET.format(column=CURRENCY, value="ZZZ", id=BAD.account_id), "loader")
         warehouse_output(env, SET.format(column=NAME, value=RENAMED, id=GOOD.account_id), "loader")
@@ -161,17 +168,15 @@ def test_an_account_that_fails_its_checks_stays_out_and_the_others_go_on(
         assert warehouse_output(env, REGISTERED.format(id=BAD.account_id)) == registered
         good = warehouse_output(env, REGISTERED.format(id=GOOD.account_id)).split("|")
         assert good[1:] == [RENAMED, GOOD.currency]
-        # The marts leave out the accounts in quarantine and take the healthy one.
+        # The views of the marts show the core (ADR-0037): the accounts in quarantine as the core
+        # keeps them, with the days that it held before, and the healthy one renamed.
         shown = rows(
             env,
             "SELECT platform || '|' || account_id || '|' || account_name FROM marts.ad_accounts",
         )
         assert f"demo_search|{GOOD.account_id}|{RENAMED}" in shown
-        assert not [
-            line
-            for line in shown
-            if line.startswith((f"demo_search|{BAD.account_id}|", "demo_video|"))
-        ]
+        assert f"demo_search|{BAD.account_id}|{registered.split('|')[1]}" in shown
+        assert warehouse_output(env, VIDEO_SHOWN) == video
         social = warehouse_output(
             env, "SELECT count(*) FROM marts.ad_stats_campaign_daily WHERE platform = 'demo_social'"
         )

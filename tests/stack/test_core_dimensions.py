@@ -270,12 +270,12 @@ def test_the_dimensions_and_their_versions_keep_their_rules(env, built):
 
 
 @pytest.mark.demo
-def test_the_dimensions_hold_what_the_marts_of_the_old_path_hold(env, built):
-    # The marts still read the old path (#201 switches them): the dimensions of the core hold the
-    # same accounts, campaigns, ad groups, ads and clients, with the same names, statuses, types,
-    # days of statistics and counts of names. An ad that its platform gives no name has none in
-    # the core and its ID in the mart. A client that has left the settings, as the one that
-    # test_demo_transform.py names for a run, keeps its row in the core and leaves the mart, and no
+def test_the_views_of_the_dimensions_show_the_dimensions_of_the_core(env, built):
+    # The marts of the dimensions are views over the core (ADR-0037): they show the same accounts,
+    # campaigns, ad groups, ads and clients, with the same names, statuses, types, days of
+    # statistics and counts of names. An ad that its platform gives no name has none in the core
+    # and its ID in the view. A client that has left the settings, as the one that
+    # test_demo_transform.py names for a run, keeps its row in the core and leaves the view, and no
     # account of the core is its any more.
     pairs = {
         "accounts": (

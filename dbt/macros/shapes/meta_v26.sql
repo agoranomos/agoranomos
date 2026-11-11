@@ -23,6 +23,7 @@
 {%- endmacro %}
 
 {% macro meta_stats(relation, platform, level='campaign') %}
+{%- call nonzero(['impressions', 'clicks', 'spend', 'platform_conversions', 'platform_conversion_value']) %}
 select
     cast(date_start as date) as report_date,
     '{{ platform }}' as platform,
@@ -39,11 +40,13 @@ select
     cast(null as numeric(18,6)) as all_conversions,
     cast(null as numeric(18,6)) as all_conversion_value
 from {{ relation }}
+{%- endcall %}
 {% endmacro %}
 
 {#- Each action of each row, with the count and the value of the default attribution of the
     account, which value holds. -#}
 {% macro meta_conversions(insights, actions, action_values, platform, level='campaign') %}
+{%- call nonzero(['conversions', 'conversion_value', 'platform_conversions', 'platform_conversion_value', 'all_conversions', 'all_conversion_value']) %}
 with counted as (
     select _dlt_parent_id as parent_id, action_type, {{ to_number('value') }} as conversions
     from {{ actions }}
@@ -84,6 +87,7 @@ select
     cast(null as numeric(18,6)) as all_conversion_value
 from joined as j
 join (select * from {{ insights }}) as i on i._dlt_id = j.parent_id
+{%- endcall %}
 {% endmacro %}
 
 {% macro meta_accounts(relation, platform) %}
