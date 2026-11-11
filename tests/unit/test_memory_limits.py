@@ -266,6 +266,7 @@ def test_the_services_of_the_variants_are_the_ones_that_have_limits():
         "airflow-triggerer",
         "db-init",
         "demo-init",
+        "marts-init",
         "metabase",
         "metabase-init",
         "metadata-export",
@@ -288,6 +289,7 @@ def test_the_one_shot_jobs_that_can_run_at_the_same_time():
         "airflow-init",
         "db-init",
         "demo-init",
+        "marts-init",
         "metabase-init",
         "metadata-export",
     }
@@ -299,10 +301,17 @@ def test_the_one_shot_jobs_that_can_run_at_the_same_time():
     resets = [line for line in overlay if "!reset" in line and not line.lstrip().startswith("#")]
     assert all(re.match(r"^ +[A-Z][A-Z0-9_]*: !reset ", line) for line in resets), resets
     jobs = {s: limit for s, limit in variant("local").items() if s in one_shot_jobs()}
-    assert largest_group(jobs) == (frozenset({"airflow-init", "metadata-export"}), 640)
+    group = frozenset({"airflow-init", "marts-init", "metadata-export"})
+    assert largest_group(jobs) == (group, 1024)
     # Compose starts the jobs in this order: each waits for those before it to complete.
     waiting = waits()
-    assert started_after("db-init", waiting) >= {"airflow-init", "metabase-init", "demo-init"}
+    assert started_after("db-init", waiting) >= {
+        "airflow-init",
+        "marts-init",
+        "metabase-init",
+        "demo-init",
+    }
+    assert started_after("marts-init", waiting) >= {"metabase-init", "demo-init"}
     assert started_after("airflow-init", waiting) >= {"airflow-scheduler", "demo-init"}
     assert started_after("metadata-export", waiting) >= {"metabase-init", "demo-init"}
     assert started_after("metabase-init", waiting) >= {"demo-init", "proxy"}

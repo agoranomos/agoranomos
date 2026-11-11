@@ -83,33 +83,48 @@ def metabase():
     server.server_close()
 
 
+# The six KPIs of ADR-0034 by their anchors in the YAML, which the marts of ad groups and ads
+# take, in order.
+SHARED = ("ctr", "cpc", "cpm", "cost_per_conversion", "conversion_rate", "roas")
+
+
 def test_the_campaign_mart_declares_the_kpis_of_adr_0034_and_the_others_take_them():
     # The six KPIs, each the sum of one column over the sum of another, money in the reporting
     # currency (docs/reference/describe-the-marts.md), declared once and taken by the marts of
-    # ad groups and ads at their own levels.
+    # ad groups and ads at their own levels; the two of the primary conversion actions are of the
+    # campaigns alone, as conversions_primary is none below them (ADR-0037).
     text = MARTS_YAML.read_text(encoding="utf-8")
-    block = text.split("          metrics: &kpis\n", 1)[1].split("    config:", 1)[0]
+    block = text.split("          metric_level: Campaigns\n", 1)[1].split("    data_tests:", 1)[0]
     found = [
-        (m.group(1), m.group(2), m.group(3), m.group(4))
+        (m.group(1), m.group(2), m.group(3), m.group(4), m.group(5))
         for m in re.finditer(
-            r"- name: (.+)\n(?:.*\n)*?\s+numerator: (\w+)\n\s+denominator: (\w+)\n"
-            r"(?:\s+scale: \d+\n)?\s+format: (\w+)",
+            r"- (?:&(\w+)\n\s+)?name: (.+)\n(?:.*\n)*?\s+numerator: (\w+)\n"
+            r"\s+denominator: (\w+)\n(?:\s+scale: \d+\n)?\s+format: (\w+)",
             block,
         )
     ]
     assert found == [
-        ("CTR", "clicks", "impressions", "percent"),
-        ("CPC", "spend_reporting", "clicks", "currency"),
-        ("CPM", "spend_reporting", "impressions", "currency"),
-        ("Cost per Conversion", "spend_reporting", "conversions", "currency"),
-        ("Conversion Rate", "conversions", "clicks", "percent"),
-        ("ROAS", "conversion_value_reporting", "spend_reporting", "number"),
+        ("ctr", "CTR", "clicks", "impressions", "percent"),
+        ("cpc", "CPC", "spend_reporting", "clicks", "currency"),
+        ("cpm", "CPM", "spend_reporting", "impressions", "currency"),
+        (
+            "cost_per_conversion",
+            "Cost per Conversion",
+            "spend_reporting",
+            "conversions",
+            "currency",
+        ),
+        ("conversion_rate", "Conversion Rate", "conversions", "clicks", "percent"),
+        ("roas", "ROAS", "conversion_value_reporting", "spend_reporting", "number"),
+        (None, "Cost per Primary Conversion", "spend_reporting", "conversions_primary", "currency"),
+        (None, "Primary Conversion Rate", "conversions_primary", "clicks", "percent"),
     ]
-    assert block.count(f'currency: "{CURRENCY}"') == 3
+    assert block.count(f'currency: "{CURRENCY}"') == 4
     assert "scale: 1000" in block
     levels = re.findall(r"^          metric_level: (.+)\n          metric_scope: >-\n", text, re.M)
     assert levels == ["Campaigns", "Ad Groups", "Ads"]
-    assert text.count("          metrics: *kpis\n") == 2
+    shared = "          metrics: [" + ", ".join(f"*{a}" for a in SHARED) + "]\n"
+    assert text.count(shared) == 2
 
 
 def test_a_metric_names_two_columns_of_its_mart_and_a_format():

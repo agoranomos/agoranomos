@@ -22,6 +22,8 @@ KPIS = (
     ("Cost per Conversion", "spend_reporting", "conversions", 1, "currency"),
     ("Conversion Rate", "conversions", "clicks", 1, "percent"),
     ("ROAS", "conversion_value_reporting", "spend_reporting", 1, "number"),
+    ("Cost per Primary Conversion", "spend_reporting", "conversions_primary", 1, "currency"),
+    ("Primary Conversion Rate", "conversions_primary", "clicks", 1, "percent"),
 )
 # The columns of the marts that the questions read or filter on.
 COLUMNS = {
@@ -31,9 +33,11 @@ COLUMNS = {
         "client_name",
         "account_name",
         "campaign_name",
+        "campaign_state",
         "impressions",
         "clicks",
         "conversions",
+        "conversions_primary",
         "spend_reporting",
         "conversion_value_reporting",
     ),
@@ -172,11 +176,13 @@ def test_the_filters_of_the_dashboard_and_the_linked_ones():
         ("client", "string/=", None),
         ("platform", "string/=", None),
         ("account", "string/=", None),
+        ("state", "string/=", None),
         ("campaign", "string/=", None),
     ]
     assert shapes[4]["filteringParameters"] == ["client", "platform"]
-    assert shapes[5]["filteringParameters"] == ["client", "platform", "account"]
+    assert shapes[6]["filteringParameters"] == ["client", "platform", "account", "state"]
     assert "filteringParameters" not in shapes[2]
+    assert "filteringParameters" not in shapes[5]
 
 
 def test_each_question_takes_the_filters_of_its_mart():
@@ -193,6 +199,8 @@ def test_each_question_takes_the_filters_of_its_mart():
             assert set(names) <= {"period", "unit", "client"}, question.key
         else:
             assert {"period", "client", "platform", "account", "campaign"} <= set(names)
+            # The state of a campaign is a column of the statistics of the campaigns alone.
+            assert ("state" in names) == (mart == ad.AD_STATS), question.key
         for f in question.filters:
             column = ad.FILTERS[f.name][2]
             if f.name in ad.LINKED_FILTERS:
@@ -252,6 +260,29 @@ def test_a_kpi_of_a_question_is_the_ratio_of_its_metric():
         "number_style": "percent",
     }
     assert settings['["name","cpc"]']["currency"] == CURRENCY
+
+
+def test_the_campaigns_count_the_primary_actions_and_the_lower_levels_the_platform():
+    # ADR-0037: conversions is the metric of the platform, none on Meta, and conversions_primary
+    # the choice of the deployment, which only the statistics of the campaigns have; their cards
+    # lead with it, and the tab of the platforms shows both.
+    by_key = {q["key"]: q for q in ad.questions(ad.kpis_of(export())) if "key" in q}
+    for key, question in by_key.items():
+        columns = set(question["columns"])
+        if question["mart"] == ad.AD_STATS:
+            assert "conversions_primary" in columns or "conversions" not in columns, key
+            assert "cost_per_conversion" not in columns or key == "by-platform", key
+        elif question["mart"] in (ad.AD_GROUP_STATS, ad.AD_STATS_OF_ADS):
+            assert "conversions_primary" not in columns, key
+            assert {"conversions", "cost_per_conversion"} <= columns, key
+    assert {"conversions_primary", "conversions"} <= set(by_key["by-platform"]["columns"])
+    assert by_key["conversions"]["columns"] == ("report_date", "conversions_primary")
+    # The states of the campaigns, the ad groups and the ads in the tables of each.
+    assert "campaign_state" in by_key["campaigns"]["columns"]
+    assert "ad_group_state" in by_key["ad-groups"]["columns"]
+    assert "ad_state" in by_key["ads"]["columns"]
+    # The table of the actions counts every conversion of each, as the primary ones add up.
+    assert ad.ALL_CONVERSIONS in by_key["by-action"]["query"]
 
 
 def test_a_chart_of_two_metrics_names_each_and_gives_its_y_axis_no_title():
@@ -366,8 +397,8 @@ def test_the_dashboard_comes_once_with_its_tabs_and_an_edit_goes_back(stand):
     edits = []
     ensure(edits.append)
     assert edits == [
-        "revert of an edit: dashboard advertising/advertising cards: 25 cards, 6 filters and 5 "
-        "tabs (not as the code says) -> 25 cards and 6 filters on 5 tabs"
+        "revert of an edit: dashboard advertising/advertising cards: 25 cards, 7 filters and 5 "
+        "tabs (not as the code says) -> 25 cards and 7 filters on 5 tabs"
     ]
     tabs = {tab["name"]: tab["id"] for tab in board["tabs"]}
     assert list(tabs) == list(ad.TABS)

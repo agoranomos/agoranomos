@@ -30,6 +30,10 @@ models:
     +persist_docs:
       relation: true
       columns: true
+    # In a run of the transform, a node waits while the one-shot job marts-init builds the views
+    # at ./agoranomos up, and marts-init waits for the nodes that write when it starts: the lock
+    # of macros/marts_init.sql, in the transaction of the node. Seeds and snapshots take it too.
+    +pre-hook: "{{ wait_for_marts_init() }}"
     staging:
       +schema: staging
       +materialized: view
@@ -89,6 +93,7 @@ snapshots:
     +persist_docs:
       relation: true
       columns: true
+    +pre-hook: "{{ wait_for_marts_init() }}"
 
 vars:
   # The settings of elementary (ADR-0029). No rows of the data that a test finds: the result of a
@@ -161,3 +166,4 @@ seeds:
       relation: true
       columns: true
     +quote_columns: false
+    +pre-hook: "{{ wait_for_marts_init() }}"
