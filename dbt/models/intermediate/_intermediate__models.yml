@@ -948,11 +948,13 @@ models:
       rows share or that miss a part, and for measures that are missing or below zero; the lists of
       accounts and properties for an account listed twice, a currency outside ISO 4217 and a time
       zone outside IANA; the journal of the loads for an account whose newest pinned load failed,
-      and for an account that the loads name and no list gives; and the fact tables of raw for rows
-      outside the window of their load and a spend with more than six decimal places. G0a compares
-      the impressions, clicks and spend of the campaigns of each account and day with the totals
-      that its platform gives for the account in the same load, where its loads bring them, as
-      those of Google Ads do, within the share of var('platform_totals_tolerance'). G1a compares
+      and for an account that the loads name and no list gives; the rates for an account whose
+      currency has no rate into the reporting currency, neither in the loads of the rates that this
+      run reads nor in core.fx_rates_daily; and the fact tables of raw for rows outside the window
+      of their load and a spend with more than six decimal places. G0a compares the impressions,
+      clicks and spend of the campaigns of each account and day with the totals that its platform
+      gives for the account in the same load, where its loads bring them, as those of Google Ads
+      do, within the share of var('platform_totals_tolerance'). G1a compares
       the spend of the campaigns of each load, and the sessions of each load of web analytics, with
       what the core holds on the same days. A source with more than half of its pinned accounts
       here stops, and its other pinned accounts get the reason source_stopped. A table that each
@@ -984,7 +986,7 @@ models:
               config: {tags: [critical]}
           - accepted_values:
               arguments:
-                values: ["load_failed", "unknown_account", "duplicate_key", "missing_key", "unknown_currency", "unknown_time_zone", "too_many_decimals", "missing_measure", "negative_measure", "date_outside_window", "totals_differ", "empty_window", "spend_fall", "source_stopped"]
+                values: ["load_failed", "unknown_account", "duplicate_key", "missing_key", "unknown_currency", "unknown_time_zone", "missing_rate", "too_many_decimals", "missing_measure", "negative_measure", "date_outside_window", "totals_differ", "empty_window", "spend_fall", "source_stopped"]
               config: {tags: [critical]}
       - name: checked
         description: '{{ doc("checked") }}'

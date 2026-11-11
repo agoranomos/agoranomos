@@ -134,12 +134,15 @@ DLT_DEPENDENCIES = {"giturlparse", "pathvalidate", "requirements-parser", "semve
 OVERRIDES = {"certifi": (2026, 10, 18)}
 
 
-def test_airflow_gets_dlt_and_cosmos_under_its_constraints():
-    # Renovate updates their versions: the test fixes the names, and pins() requires the ==.
+def test_airflow_gets_dlt_cosmos_and_apprise_under_its_constraints():
+    # Renovate updates their versions, but that of Apprise, which follows the constraints: the test
+    # fixes the names, and pins() requires the ==.
     requirements = AIRFLOW / "requirements.txt"
-    assert set(pins(requirements)) == {"dlt", "astronomer-cosmos"} | DLT_DEPENDENCIES | set(
-        OVERRIDES
-    )
+    assert set(pins(requirements)) == {
+        "dlt",
+        "astronomer-cosmos",
+        "apprise",
+    } | DLT_DEPENDENCIES | set(OVERRIDES)
     # dlt keeps the extra that its postgres destination needs.
     extra = r"^dlt\[[^\]]*\bpostgres\b[^\]]*\]=="
     assert re.search(extra, requirements.read_text(encoding="utf-8"), flags=re.MULTILINE)
@@ -216,6 +219,7 @@ def test_the_build_context_holds_only_what_the_dockerfile_copies():
         "*",
         "!requirements.txt",
         "!dbt-requirements.txt",
+        "!plugins/agoranomos_alerts.py",
         "!plugins/agoranomos_oom.py",
     ]
     # The files of the build context of the folder; the context dbt is the dbt project.
@@ -223,6 +227,7 @@ def test_the_build_context_holds_only_what_the_dockerfile_copies():
     copied = re.findall(r"^COPY\s+(?:--\S+\s+)*(\S+)\s", "\n".join(own), flags=re.MULTILINE)
     assert sorted(copied) == [
         "dbt-requirements.txt",
+        "plugins/agoranomos_alerts.py",
         "plugins/agoranomos_oom.py",
         "requirements.txt",
     ]
@@ -275,7 +280,7 @@ def test_the_image_installs_the_plugins_where_only_root_may_write_them():
     # makes writable by the group: so each plugin is copied with the mode 0644 set. The folder of
     # the official image, /opt/airflow/plugins, is not used: its parent is writable by that group.
     plugins = sorted(path.name for path in (AIRFLOW / "plugins").glob("*.py"))
-    assert plugins == ["agoranomos_oom.py"]
+    assert plugins == ["agoranomos_alerts.py", "agoranomos_oom.py"]
     found = instructions(dockerfile())
     # COPY --chmod gives a folder that it has to create the mode of the file, 0644, and nobody could
     # enter /opt/agoranomos, where the DAGs and the dbt project are mounted: so root makes the
@@ -287,3 +292,18 @@ def test_the_image_installs_the_plugins_where_only_root_may_write_them():
         assert copy in found
         assert found.index(folder) < found.index(copy)
     assert environment(dockerfile())["AIRFLOW__CORE__PLUGINS_FOLDER"] == "/opt/agoranomos/plugins"
+
+
+def test_renovate_leaves_the_pin_of_apprise_to_the_constraints():
+    # A pin of Apprise that differs from the constraints of the base image fails the build
+    # (ADR-0045): it moves by hand with the base image.
+    import json
+
+    rules = json.loads((ROOT / "renovate.json").read_text(encoding="utf-8"))["packageRules"]
+    off = [
+        rule
+        for rule in rules
+        if rule.get("matchPackageNames") == ["apprise"]
+        and rule.get("matchFileNames") == ["airflow/requirements.txt"]
+    ]
+    assert [rule["enabled"] for rule in off] == [False]

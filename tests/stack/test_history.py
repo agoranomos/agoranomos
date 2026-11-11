@@ -123,8 +123,9 @@ def test_ops_shows_how_far_back_the_loads_of_each_account_reach(env, transform_r
     }
     for code, platform in platforms.PLATFORMS.items():
         for account in platform.module.accounts():
-            first, portions, last = shown[(code, account.account_id)]
-            assert portions >= 1 and last, (code, account.account_id)
+            _, portions, last = shown[(code, account.account_id)]
+            assert portions >= 1, (code, account.account_id)
+            assert last, (code, account.account_id)
     result = warehouse(env, "SELECT count(*) FROM ops.ops_history", "metabase_reader")
     assert result.returncode == 0, result.stderr
 
@@ -171,9 +172,7 @@ def test_the_load_of_google_ads_takes_the_parameters_of_a_run_of_the_history(air
     assert details["max_active_runs"] == 1
 
 
-def test_the_history_of_google_ads_starts_nothing_before_the_usual_window(
-    env, airflow_url, token
-):
+def test_the_history_of_google_ads_starts_nothing_before_the_usual_window(env, airflow_url, token):
     # An account that no load has taken waits for its usual window, which the daily load takes:
     # the plan reads the journal and core.loads as loader, finds no window, and the task that
     # would start the load of a portion is skipped. No run of the load starts.

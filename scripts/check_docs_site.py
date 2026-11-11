@@ -2,7 +2,7 @@
 
 A reader's browser asks only the site itself: the fonts, scripts, style sheets and images are
 files of the site. The script builds the site from a copy of the project in a temporary folder
-(Zensical 0.0.68 has no option for another output folder, and its site_dir must be inside the
+(Zensical 0.1.0 has no option for another output folder, and its site_dir must be inside the
 project), and then reads the built files. It fails when
 
 * a page has a Mermaid diagram (a pre element of the class mermaid, which is what the theme
@@ -15,10 +15,11 @@ project), and then reads the built files. It fails when
   site_url when the configuration sets one. Links (a href) are not fetched and are not checked.
 
 It does not read the JavaScript files. The theme's bundle holds the addresses of unpkg.com for
-features that this site does not use (the lightbox for images, Pyodide for Python in code blocks,
-a polyfill for browsers without ResizeObserver), and of api.github.com for the statistics of the
-repository in the header, which the theme requests whenever repo_url is a GitHub address and has
-no setting to stop. The Mermaid script holds URLs in its license notes and messages.
+features that this site does not use (the lightbox for images, Pyodide and the Ace editor for
+Python that runs in code blocks, a polyfill for browsers without ResizeObserver; as of Zensical
+0.1.0), and of api.github.com for the statistics of the repository in the header, which the theme
+requests whenever repo_url is a GitHub address and has no setting to stop. The Mermaid script holds
+URLs in its license notes and messages.
 
 Usage: python scripts/check_docs_site.py [repository root]
 It needs zensical, so the prek hook installs it, and in the project environment it is the one

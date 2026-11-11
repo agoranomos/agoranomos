@@ -162,12 +162,13 @@ def test_the_first_load_takes_37_months_one_before_the_history_of_google_ads(ecb
     assert module.history_start(datetime(2026, 12, 31, 12, tzinfo=UTC)) == date(2023, 11, 1)
 
 
-def test_a_later_load_takes_the_new_days_and_at_least_the_last_seven(ecb):
+def test_a_later_load_takes_the_new_days_and_at_least_the_last_fourteen(ecb):
     module, _, _ = ecb
-    # The day after the last loaded, when that is earlier than the last seven days.
+    # The day after the last loaded, when that is earlier than the last fourteen days.
     assert module.window(NOW, date(2026, 10, 10)) == (date(2026, 10, 11), date(2026, 10, 28))
-    # The last seven days, when a load took them already, so that a corrected rate comes again.
-    assert module.window(NOW, date(2026, 10, 28)) == (date(2026, 10, 22), date(2026, 10, 28))
+    # The last fourteen days, when a load took them already, so that a corrected rate, or one that
+    # a load missed, comes again (ADR-0042).
+    assert module.window(NOW, date(2026, 10, 28)) == (date(2026, 10, 15), date(2026, 10, 28))
 
 
 def test_a_load_asks_the_ecb_for_the_data_of_its_window_with_explicit_retries(ecb):
@@ -180,7 +181,7 @@ def test_a_load_asks_the_ecb_for_the_data_of_its_window_with_explicit_retries(ec
             {
                 "format": "csvdata",
                 "detail": "dataonly",
-                "startPeriod": "2026-10-22",
+                "startPeriod": "2026-10-15",
                 "endPeriod": "2026-10-28",
             },
         )
@@ -242,15 +243,15 @@ def test_a_load_records_its_window_in_the_same_run(ecb):
 
 
 def test_a_window_without_a_rate_still_replaces_its_days(ecb):
-    # The ECB answers a weekend with an empty body: the marker makes dlt make the table, and the
-    # journal holds the window, whose days staging then reads as empty.
+    # The ECB answers days without a rate, such as a weekend, with an empty body: the marker makes
+    # dlt make the table, and the journal holds the window, whose days staging then reads as empty.
     module, state, made = ecb
     state.update(csv="", loads=1, reloads=[("EUR", date(2026, 10, 25), date(2026, 10, 24))])
     assert module.load(datetime(2026, 10, 26, 6, 47, tzinfo=UTC)) == 0
     [(rows, _)] = made["pipelines"][0].runs
     assert rows["rates_daily"] == [MARKER]
     [record] = rows["_agoranomos_loads"]
-    assert (record["window_from"], record["window_to"]) == (date(2026, 10, 19), date(2026, 10, 25))
+    assert (record["window_from"], record["window_to"]) == (date(2026, 10, 12), date(2026, 10, 25))
 
 
 def test_a_window_starts_after_the_last_whole_load(ecb):

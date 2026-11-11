@@ -6,11 +6,13 @@ Its questions are native SQL on the views of the schema ops that the transform b
 (dbt/models/ops): the accounts that the checks of the last run kept out of the core (ADR-0035), the
 last load of each account, the runs of the transform with their models and tests, as the hooks of
 elementary record them, the size of the tables of the warehouse, and how far back the loads of each
-account reach, with the portions of its history (ADR-0038).
-Metabase reads them as metabase_reader, which may read these views and no table of elementary. The
-connection shows only the schema marts in Metabase, and a native question reads any schema that its
-role may read. Until the first run of the transform has built the views, the questions show the
-error of PostgreSQL that the relation does not exist.
+account reach, with the portions of its history (ADR-0038); and on the tables of ops that the DAG
+of maintenance fills and the transform creates (ADR-0039): the disk, the steps of the maintenance,
+and the monthly comparison of the core with the totals of the platforms.
+Metabase reads them as metabase_reader, which may read these views and tables and no table of
+elementary. The connection shows only the schema marts in Metabase, and a native question reads any
+schema that its role may read. Until the first run of the transform has built them, the questions
+show the error of PostgreSQL that the relation does not exist.
 """
 
 from __future__ import annotations
@@ -24,16 +26,17 @@ OPS_KEY = "ops"
 OPS_NAME = "Ops"
 OPS_DESCRIPTION = (
     "The pipeline of agoranomos itself: the accounts in quarantine, the loads of each account, the "
-    "runs of the transform with their models and tests, the size of the warehouse, and the "
-    "history of each account."
+    "runs of the transform with their models and tests, the size of the warehouse, the disk, the "
+    "maintenance of the core, and the history of each account."
 )
 PIPELINE = "pipeline"
 PIPELINE_NAME = "Pipeline health"
 PIPELINE_DESCRIPTION = (
     "The state of the pipeline: which accounts the last run of the transform kept out of the core "
     "and why, when each account was last loaded, how the last runs of the transform went, which "
-    "models failed and which tests warned or failed, the largest tables of the warehouse, and how "
-    "far back the loads of each account reach."
+    "models failed and which tests warned or failed, the largest tables of the warehouse, the free "
+    "disk, what the daily maintenance did, how the core compares with the totals of the platforms, "
+    "and how far back the loads of each account reach."
 )
 
 # The types that Metabase 0.64.1 gives the columns of the answers, and the semantic types that it
@@ -76,6 +79,26 @@ COLUMN_TYPES = {
     "reason": TEXT,
     "since": MOMENT,
     "detail": TEXT,
+    "gigabytes": NUMBER,
+    "measured_at": MOMENT,
+    "free_gigabytes": NUMBER,
+    "disk_gigabytes": NUMBER,
+    "warehouse_megabytes": NUMBER,
+    "window_megabytes": NUMBER,
+    "window_free_megabytes": NUMBER,
+    "finished_at": MOMENT,
+    "task": TEXT,
+    "target": TEXT,
+    "rows_deleted": COUNT,
+    "checked_at": MOMENT,
+    "days": COUNT,
+    "days_differing": COUNT,
+    "platform_spend": NUMBER,
+    "core_spend": NUMBER,
+    "platform_clicks": COUNT,
+    "core_clicks": COUNT,
+    "platform_impressions": COUNT,
+    "core_impressions": COUNT,
     "first_day_loaded": ("type/Date", "date"),
     "portions": COUNT,
     "last_portion_at": MOMENT,
@@ -119,12 +142,45 @@ TITLES = {
     "reason": "Reason",
     "since": "In Quarantine Since",
     "detail": "What the Check Found",
+    "gigabytes": "Free, GB",
+    "measured_at": "Measured",
+    "free_gigabytes": "Free, GB",
+    "disk_gigabytes": "Disk, GB",
+    "warehouse_megabytes": "Warehouse, MB",
+    "window_megabytes": "Window of Restatements, MB",
+    "window_free_megabytes": "Free in the Window, MB (Estimate)",
+    "finished_at": "Ended",
+    "task": "Task",
+    "target": "Table",
+    "rows_deleted": "Rows Deleted",
+    "checked_at": "Compared",
+    "days": "Days",
+    "days_differing": "Days That Differ",
+    "platform_spend": "Spend, Platform",
+    "core_spend": "Spend, Core",
+    "platform_clicks": "Clicks, Platform",
+    "core_clicks": "Clicks, Core",
+    "platform_impressions": "Impressions, Platform",
+    "core_impressions": "Impressions, Core",
     "first_day_loaded": "First Day Loaded",
     "portions": "Portions of History",
     "last_portion_at": "Last Portion",
 }
 # The columns shown with one decimal; the others as Metabase shows them.
-ONE_DECIMAL = frozenset({"megabytes", "hours_since_load", "minutes", "seconds"})
+ONE_DECIMAL = frozenset(
+    {
+        "megabytes",
+        "hours_since_load",
+        "minutes",
+        "seconds",
+        "gigabytes",
+        "free_gigabytes",
+        "disk_gigabytes",
+        "warehouse_megabytes",
+        "window_megabytes",
+        "window_free_megabytes",
+    }
+)
 # An account is late when its last load is older than this, in hours: the daily load runs once a
 # day, so a day and a half leaves room for a run that took long or was retried.
 LATE_HOURS = 36
@@ -383,6 +439,118 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "layout": {"row": 34, "col": 0, "size_x": 24, "size_y": 6},
     },
     {
+        "key": "free-disk",
+        "name": "Free disk, GB",
+        "description": (
+            "The gigabytes still free on the disk of the volumes of Docker, the warehouse among "
+            "them, when the daily maintenance last measured it."
+        ),
+        "display": "scalar",
+        "columns": ("gigabytes",),
+        "query": sql(
+            "SELECT round(disk_free_bytes / 1073741824.0, 1) AS gigabytes",
+            "FROM ops.ops_disk",
+            "ORDER BY measured_at DESC",
+            "LIMIT 1",
+        ),
+        "layout": {"row": 40, "col": 0, "size_x": 6, "size_y": 3},
+    },
+    {
+        "key": "disk",
+        "name": "Disk and warehouse, last 30 days",
+        "description": (
+            "For each day that the daily maintenance measured them in the last 30 days, the free "
+            "space and the size of the disk of the volumes of Docker, the megabytes of the "
+            "warehouse, those of the partitions of the facts of the window of restatements, which "
+            "each run of the transform writes again, and an estimate of the room inside them that "
+            "no row fills, newest first."
+        ),
+        "display": "table",
+        "columns": (
+            "measured_at",
+            "free_gigabytes",
+            "disk_gigabytes",
+            "warehouse_megabytes",
+            "window_megabytes",
+            "window_free_megabytes",
+        ),
+        "query": sql(
+            "SELECT",
+            "    measured_at,",
+            "    round(disk_free_bytes / 1073741824.0, 1) AS free_gigabytes,",
+            "    round(disk_bytes / 1073741824.0, 1) AS disk_gigabytes,",
+            "    round(warehouse_bytes / 1048576.0, 1) AS warehouse_megabytes,",
+            "    round(window_bytes / 1048576.0, 1) AS window_megabytes,",
+            "    round(window_free_bytes / 1048576.0, 1) AS window_free_megabytes",
+            "FROM ops.ops_disk",
+            "WHERE measured_at >= now() - interval '30 days'",
+            "ORDER BY measured_at DESC",
+        ),
+        "layout": {"row": 40, "col": 6, "size_x": 18, "size_y": 6},
+    },
+    {
+        "key": "maintenance",
+        "name": "Maintenance of the core, last 30 days",
+        "description": (
+            "The 300 newest steps of the daily maintenance on a table in the last 30 days: the "
+            "partitions that it made, the facts that it analyzed, the old months that it froze "
+            "and the months of the journals that it dropped, with the seconds of each, and the "
+            "rows that it deleted from _dlt_loads and core.loads, newest first."
+        ),
+        "display": "table",
+        "columns": ("finished_at", "task", "target", "seconds", "rows_deleted"),
+        "query": sql(
+            "SELECT finished_at, task, target, seconds, rows_deleted",
+            "FROM ops.ops_maintenance_steps",
+            "WHERE finished_at >= now() - interval '30 days'",
+            "ORDER BY finished_at DESC",
+            "LIMIT 300",
+        ),
+        "layout": {"row": 46, "col": 0, "size_x": 24, "size_y": 6},
+    },
+    {
+        "key": "core-totals",
+        "name": "The core against the totals of the platforms",
+        "description": (
+            "The last monthly comparison of the core with the totals that the platforms give for "
+            "each account and day, over the 90 days before it: for each account, the days with "
+            "totals, those on which the impressions, the clicks or the spend of its campaigns in "
+            "the core differ, and the sums of both. Empty until a source gives such totals."
+        ),
+        "display": "table",
+        "columns": (
+            "checked_at",
+            "platform",
+            "account_id",
+            "days",
+            "days_differing",
+            "platform_spend",
+            "core_spend",
+            "platform_clicks",
+            "core_clicks",
+            "platform_impressions",
+            "core_impressions",
+        ),
+        "query": sql(
+            "SELECT",
+            "    checked_at,",
+            "    platform,",
+            "    account_id::varchar AS account_id,",
+            "    days,",
+            "    days_differing,",
+            "    platform_spend,",
+            "    core_spend,",
+            "    platform_clicks,",
+            "    core_clicks,",
+            "    platform_impressions,",
+            "    core_impressions",
+            "FROM ops.ops_core_totals",
+            "WHERE checked_at = (SELECT max(checked_at) FROM ops.ops_core_totals)",
+            "ORDER BY days_differing DESC, platform, account_id",
+        ),
+        "layout": {"row": 52, "col": 0, "size_x": 24, "size_y": 5},
+    },
+    {
         "key": "history",
         "name": "History of each account",
         "description": (
@@ -397,7 +565,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "FROM ops.ops_history",
             "ORDER BY platform, account_id",
         ),
-        "layout": {"row": 40, "col": 0, "size_x": 24, "size_y": 6},
+        "layout": {"row": 57, "col": 0, "size_x": 24, "size_y": 6},
     },
 )
 
