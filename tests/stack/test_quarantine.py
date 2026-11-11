@@ -227,6 +227,10 @@ def test_an_account_that_fails_its_checks_stays_out_and_the_others_go_on(
         warehouse_output(env, SET.format(column=NAME, value=name, id=GOOD.account_id), "loader")
         warehouse_output(env, SET_SOCIAL.format(value=listed, id=UNRATED.account_id), "loader")
         warehouse_output(env, REMOVE_NEGATIVE, "loader")
+        # The run accepted the load of the healthy account with its new name and deleted its rows
+        # from raw, so a new load of demo_search brings the name of the demo back to the core.
+        now = last_moment(env, "demo_search")
+        load_platform(env, "demo_search", now, (now - timedelta(days=4)).date())
         # The next run, which the tests after this one need, whatever this one found.
         again = transform(airflow_url, token)
     # It finds the data whole: no account is in quarantine, the core takes each again, and the
