@@ -43,11 +43,11 @@ jobs:
   measure:
     name: Profile ${{ inputs.profile || 'agency' }} (amd64)
     runs-on: ubuntu-24.04
-    # A cold build of the Airflow image and a start, about 25 minutes on a runner, a build of the
-    # empty model and a start after it, about 20, the generator, which took 1 to 3 minutes for the
-    # agency on the test server of the project (an Intel Core i5-3230M with 2 cores and 4 threads),
-    # the measurements of Metabase, and a run of the transform, about 15. An estimate until the
-    # first runs measure it.
+    # On the test server of the project, an Intel Core i5-3230M with 2 cores and 4 threads, on 11
+    # November 2026, the profile agency took 6 minutes for a start with the image built, 13.5 for
+    # the build of the empty model, 5 for the generator, 3 for the measurements of Metabase and 13
+    # for the run of the transform. A runner builds the image first, as the jobs of the workflow
+    # Stack do; the time of a runner is an estimate until the first runs measure it.
     timeout-minutes: 180
     permissions:
       contents: read
