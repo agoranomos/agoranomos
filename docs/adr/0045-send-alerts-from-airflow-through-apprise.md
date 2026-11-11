@@ -76,7 +76,7 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** planned for v0.5, with the cleanup of the logs of Airflow, so that the first long-running deployment sends alerts from the start. None of it is built.
+* **Implementation status, as of November 2026:** built for v0.5: the plugin `airflow/plugins/agoranomos_alerts.py` with the listener `on_dag_run_failed` and Apprise 1.13.1, the DAG `agoranomos_watcher` every 15 minutes with its state in `ops.alert_state`, the status of the backups in the volume `backup-status`, and `AGORANOMOS_ALERT_URLS` in `.env`, with the stack tests of both variants ([Get alerts](../how-to/watch-the-pipeline.md#get-alerts)). The cleanup of the logs of Airflow came before, in the DAG `agoranomos_maintenance`.
 * The facts behind this record, run on 31 October 2026 on the image of the stack, Airflow 3.3.2, with one task that raises an exception, one killed by signal 9 and one that succeeds:
 
     | Mechanism | Exception in a task | Process of a task killed | Runs in |
@@ -88,8 +88,8 @@ The other options were not chosen for these reasons:
 
     * A send through Apprise 1.13.1 from `on_dag_run_failed`, in a background thread: the listener returned in 0.7 ms, a message with Cyrillic reached a local address, an unreachable address took 2 s with a timeout of `cto=2`, and the scheduler went on. The constraints of Airflow 3.3.2 hold Apprise 1.13.1 ([constraints](https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.13.txt)), under BSD-2-Clause ([Apprise](https://github.com/caronc/apprise)).
     * Airflow on [listeners](https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/listeners.html), [callbacks](https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/callbacks.html) and [notifications](https://airflow.apache.org/docs/apache-airflow/stable/howto/notifications.html). Metabase on [webhooks](https://www.metabase.com/docs/latest/configuring-metabase/webhooks) and [alerts](https://www.metabase.com/docs/latest/questions/alerts); its body of a webhook is in `src/metabase/channel/impl/http.clj` at the tag v0.64.1.
-* Not checked yet, and to be checked with the code:
-    * A real send to Telegram and Slack: only a local address was used.
-    * The listener on the CeleryExecutor: only the LocalExecutor was run.
+* Not checked yet:
+    * A real send to Telegram and Slack: only a local address was used, by the stack tests too.
+* Checked with the code, on 7 November 2026, on a Mac (Docker Desktop, arm64): the listener on the CeleryExecutor sent the alert of a task that the worker ran and that killed itself with signal 9, from the scheduler, as on the LocalExecutor; the scheduler of the CeleryExecutor peaked at 322 MiB of its 640 MiB in those stack tests, with Apprise imported.
 * Related decisions: [ADR-0021](0021-leave-the-outgoing-traffic-of-metabase-open.md) does not change, as alerts leave from Airflow and not from Metabase. Quarantine is in [ADR-0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md), and the plugins in `airflow/plugins/` follow the base package ([ADR-0013](0013-keep-extensions-apart-from-the-base-package.md)).
 * Revisit this record when a deployment needs an outside check of liveness, or when Airflow offers a built-in channel for every provider.

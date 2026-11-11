@@ -43,7 +43,10 @@ select
     {#- The conversions of the optimization event, the metric conversion of TikTok, which has no
         value of its own. #}
     {{ to_number('metrics__conversion') }} as platform_conversions,
-    cast(null as numeric(18,6)) as platform_conversion_value
+    cast(null as numeric(18,6)) as platform_conversion_value,
+    {#- TikTok has no count of all its conversions. #}
+    cast(null as numeric(18,6)) as all_conversions,
+    cast(null as numeric(18,6)) as all_conversion_value
 from {{ relation }}
 {%- endcall %}
 {% endmacro %}

@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Budget the memory by variant and mode
 
+Superseded in part by [ADR-0048](0048-count-the-one-shot-jobs-that-can-run-at-the-same-time.md): the one-shot jobs of "What counts", which count with the largest group of them that can run at the same time, and no longer each at its limit. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 [ADR-0010](0010-multi-arch-and-memory-budget.md) set one memory budget for the stack: every service at its limit, at the same time, fits 8 GB of memory as Docker reports it, 7,680 MiB. The limits come from measurements and a formula ([System requirements](../reference/system-requirements.md#memory-limits)). The CeleryExecutor variant ([ADR-0015](0015-run-localexecutor-by-default.md)) uses that budget to the last MiB, and the formula, applied to the measurements of CI in October 2026, asks 128 MiB more for its worker and 128 MiB more for its scheduler. Server mode adds two services that run all the time, the proxy ([ADR-0019](0019-open-only-metabase-in-server-mode.md)) and the backups ([ADR-0020](0020-back-up-the-databases-every-day.md)), both planned for v0.1.0, at the floor of the formula, 256 MiB each. The reference server of the project, a Hetzner CAX21, has 8 GB.

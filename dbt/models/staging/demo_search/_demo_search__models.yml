@@ -30,6 +30,10 @@ models:
         description: '{{ doc("platform_conversions") }}'
       - name: platform_conversion_value
         description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
   - name: stg_demo_search__campaign_conversions
     description: >-
       The conversions of the campaigns of demo_search by conversion action, one row for each
@@ -165,6 +169,10 @@ models:
         description: '{{ doc("platform_conversions") }}'
       - name: platform_conversion_value
         description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
   - name: stg_demo_search__ad_group_conversions
     description: >-
       The conversions of the ad groups of demo_search by conversion action, one row for each ad
@@ -245,6 +253,10 @@ models:
         description: '{{ doc("platform_conversions") }}'
       - name: platform_conversion_value
         description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
   - name: stg_demo_search__ad_conversions
     description: >-
       The conversions of the ads of demo_search by conversion action, one row for each ad, day and

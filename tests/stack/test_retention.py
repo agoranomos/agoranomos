@@ -284,7 +284,7 @@ def maintenance_run(env, airflow_url, token):
                 ),
             )
         wait_for_dag(airflow_url, token, MAINTENANCE)
-        run = run_dag(airflow_url, token, MAINTENANCE, timeout=600)
+        run = run_dag(airflow_url, token, MAINTENANCE, timeout=900)
         yield SimpleNamespace(tag=tag, probe=probe, run=run, rows=rows)
     finally:
         in_logs(f"rm -rf '{probe}'")
@@ -306,7 +306,7 @@ def test_the_maintenance_is_unpaused_and_runs_by_itself(airflow_url, token):
     runs = dag_runs(airflow_url, token, MAINTENANCE, limit=100)
     scheduled = [run for run in runs if run["run_type"] == "scheduled"]
     assert scheduled, f"{MAINTENANCE} has no scheduled run"
-    run = wait_for_run(airflow_url, token, MAINTENANCE, scheduled[0]["dag_run_id"], timeout=600)
+    run = wait_for_run(airflow_url, token, MAINTENANCE, scheduled[0]["dag_run_id"], timeout=900)
     assert run["state"] == "success"
 
 

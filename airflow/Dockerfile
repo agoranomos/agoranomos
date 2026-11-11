@@ -24,8 +24,9 @@ ENV PROVIDERS__ENABLE_AIRFLOW_SECRETS=false
 ENV AIRFLOW__COSMOS__ENABLE_CACHE_DBT_LS=False \
     AIRFLOW__COSMOS__ENABLE_CACHE_DBT_YAML_SELECTORS=False
 
-# dlt and Cosmos go into Airflow's environment, under the constraints that the base image was built
-# with, and with apache-airflow in the same command, so that pip fails instead of moving Airflow.
+# dlt, Cosmos and Apprise go into Airflow's environment, under the constraints that the base image
+# was built with, and with apache-airflow in the same command, so that pip fails instead of moving
+# Airflow.
 # requirements.txt also pins the dependencies of dlt that the constraints leave open, and certifi
 # above the version of the constraints, for a security fix: its line is taken out of them.
 COPY requirements.txt /tmp/agoranomos/requirements.txt
@@ -64,15 +65,17 @@ RUN install -d -o 65534 -g 65534 -m 0755 /opt/agoranomos/metadata /opt/agoranomo
 RUN install -d -m 0755 /opt/agoranomos/plugins
 USER ${AIRFLOW_UID}
 
-# The plugins of agoranomos: agoranomos_oom.py makes each task process the first that the kernel
-# stops when its container reaches its memory limit, before the scheduler or the worker, and
-# serve-logs and the health check of the scheduler the next, on a host whose kernel restricts
-# ptrace with Yama (the docstring of the plugin says why). Airflow
+# The plugins of agoranomos: agoranomos_alerts.py sends an alert through Apprise when a run of a DAG
+# fails, and holds the code of sending of the watcher (ADR-0045); agoranomos_oom.py makes each task
+# process the first that the kernel stops when its container reaches its memory limit, before the
+# scheduler or the worker, and serve-logs and the health check of the scheduler the next, on a host
+# whose kernel restricts ptrace with Yama (the docstring of each plugin says why). Airflow
 # imports every file of its plugins folder in each of its processes, so the folder and the plugins
 # belong to root, and only root may write them: the Airflow services run as 50000 in the group root,
 # COPY would keep a mode of the checkout that the group may write, and the default folder,
 # /opt/airflow/plugins, would be in a folder that the group may write. The folder is made above and
 # not by COPY: with --chmod, COPY gives a folder that it creates the mode of the file, 0644, and the
 # Airflow services could not enter /opt/agoranomos, where the DAGs and the dbt project are mounted.
+COPY --chmod=0644 plugins/agoranomos_alerts.py /opt/agoranomos/plugins/agoranomos_alerts.py
 COPY --chmod=0644 plugins/agoranomos_oom.py /opt/agoranomos/plugins/agoranomos_oom.py
 ENV AIRFLOW__CORE__PLUGINS_FOLDER=/opt/agoranomos/plugins

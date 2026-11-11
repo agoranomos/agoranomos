@@ -74,6 +74,8 @@ class StandInClient:
 
     def execute_sql(self, sql):
         self.pipeline.queries.append(sql)
+        if " FROM core.loads " in sql:
+            return self.pipeline.state["accepted"]
         if self.pipeline.state["loads"] is None:
             raise UndefinedRelation(sql)
         if '"_agoranomos_loads"' in sql:
@@ -223,6 +225,16 @@ def answer(
         action = {"resourceName": f"customers/{account_id}/conversionActions/77", **ACTION}
         return [{"results": [{"customer": {"id": account_id}, "conversionAction": action}]}]
     day = gaql.split("BETWEEN '")[1][:10]
+    if " FROM customer WHERE " in gaql:
+        # The totals of the account by day, which name no campaign.
+        metrics = {"impressions": "10", "clicks": "2", "costMicros": "1500000"}
+        return [
+            {
+                "results": [
+                    {"customer": {"id": account_id}, "metrics": metrics, "segments": {"date": day}}
+                ]
+            }
+        ]
     row = {
         "customer": {"id": account_id},
         "campaign": campaign,
@@ -241,15 +253,17 @@ def answer(
 def ads(monkeypatch, tmp_path):
     """The module with stand-ins, and what it made and was asked: the pipelines, the requests to
     the API and their answers. state["loads"] is how many complete loads the dataset holds (None:
-    none yet), state["reloads"] what the journal of its whole loads gives, state["customers"] the
-    rows of its table
-    customers, state["failing"] the accounts whose every request fails, state["failing_at"] the
-    text of the GAQL at which the request of an account fails, and state["broken_at"] the text of
-    the GAQL and the kind of broken() of the answer that breaks for an account, and how many of its
-    answers break, if not every one. made["waits"] holds the waits before each retry."""
+    none yet), state["reloads"] what the journal of its whole loads gives, state["accepted"] what
+    core.loads gives as the last accepted day of each account, state["customers"] the rows of its
+    table customers, state["failing"] the accounts whose every request fails,
+    state["failing_at"] the text of the GAQL at which the request of an account fails, and
+    state["broken_at"] the text of the GAQL and the kind of broken() of the answer that breaks for
+    an account, and how many of its answers break, if not every one. made["waits"] holds the waits
+    before each retry."""
     state = {
         "loads": None,
         "reloads": [],
+        "accepted": [],
         "customers": [],
         "failing": set(),
         "failing_at": {},
@@ -451,9 +465,9 @@ def test_a_load_asks_v26_for_each_account_as_the_service_account(ads, monkeypatc
         f"https://googleads.googleapis.com/v26/customers/{account_id}/googleAds:searchStream"
         for account_id in ZONES
     }
-    # A customer of each account, its campaigns, ad groups, ads and conversion actions, and the
-    # statistics and the conversions of each of the three levels.
-    assert len(made["requests"]) == 22
+    # A customer of each account, its campaigns, ad groups, ads and conversion actions, the totals
+    # of the account by day, and the statistics and the conversions of each of the three levels.
+    assert len(made["requests"]) == 24
     assert all(
         headers == {"Authorization": "Bearer access-token", "login-customer-id": "9999999999"}
         for _, _, headers in made["requests"]
@@ -466,15 +480,16 @@ def test_a_load_asks_v26_for_each_account_as_the_service_account(ads, monkeypatc
         "ad_group",
         "ad_group_ad",
         "conversion_action",
+        "customer",
         *("campaign", "campaign", "ad_group", "ad_group", "ad_group_ad", "ad_group_ad"),
     ]
-    assert queries[5].endswith(
+    assert queries[6].endswith(
         "FROM campaign WHERE segments.date BETWEEN '2026-07-30' AND '2026-10-27'"
     )
-    for conversions in queries[6::2]:
+    for conversions in queries[7::2]:
         assert "segments.conversion_action, " in conversions
         assert "metrics.cost_micros" not in conversions
-    for stats in queries[5::2]:
+    for stats in queries[6::2]:
         assert "metrics.cost_micros" in stats
     assert made["clients"] == [
         {"request_timeout": 120, "request_max_attempts": 5, "request_backoff_factor": 2}
@@ -491,7 +506,7 @@ def test_a_load_keeps_the_rows_as_the_api_gives_them_and_appends_the_facts(ads):
         **{table: 2 for table in module.ENTITIES},
         **{table: 74 for table in module.FACTS},
     }
-    assert len(made["requests"]) == 2 * (1 + 4 + 6 * 37)
+    assert len(made["requests"]) == 2 * (1 + 4 + 7 * 37)
     [pipeline] = made["pipelines"]
     assert pipeline.options["dataset_name"] == "raw_google_ads"
     [(rows, hints)] = pipeline.runs
@@ -562,6 +577,67 @@ def test_a_load_keeps_the_conversion_actions_with_the_flag_of_the_conversions_of
         assert columns[name]["data_type"] == "text", name
 
 
+def test_a_load_asks_the_totals_of_each_account_by_day_right_before_its_campaigns(ads):
+    # G0a of ADR-0035: a request of its own at the level of the account, FROM customer, whose
+    # impressions, clicks and cost the transform checks the rows of the campaigns against; right
+    # before the statistics of the campaigns, so that the two see the account as near the same
+    # moment as they can. Its rows are a fact table, appended under the id of the load.
+    module, state, made, extensions = ads
+    state.update(
+        loads=1,
+        reloads=[
+            ("1111111111", date(2026, 10, 28), date(2026, 10, 26)),
+            ("2222222222", date(2026, 10, 28), date(2026, 10, 27)),
+        ],
+    )
+    counts = module.load(NOW, extensions)
+    queries = [gaql for url, gaql, _ in made["requests"] if "1111111111" in url]
+    totals = queries.index(
+        "SELECT customer.id, metrics.impressions, metrics.clicks, metrics.cost_micros, "
+        "segments.date FROM customer WHERE segments.date BETWEEN '2026-07-30' AND '2026-10-27'"
+    )
+    assert queries[totals + 1].startswith("SELECT customer.id, campaign.resource_name")
+    assert " FROM campaign WHERE " in queries[totals + 1]
+    [(rows, hints)] = made["pipelines"][0].runs
+    assert counts["customer_stats"] == 2
+    assert rows["customer_stats"][0] == {
+        "customer": {"id": "1111111111"},
+        "metrics": {"impressions": "10", "clicks": "2", "costMicros": "1500000"},
+        "segments": {"date": "2026-07-30"},
+    }
+    assert hints["customer_stats"]["write_disposition"] == "append"
+    columns = hints["customer_stats"]["columns"]
+    assert {name: column["data_type"] for name, column in columns.items()} == {
+        "customer__id": "text",
+        "metrics__impressions": "text",
+        "metrics__clicks": "text",
+        "metrics__cost_micros": "text",
+        "segments__date": "date",
+    }
+    assert module.FACTS.index("customer_stats") + 1 == module.FACTS.index("campaign_stats")
+
+
+def test_the_statistics_carry_the_conversions_of_the_platform_and_all_its_conversions(ads):
+    # metrics.conversions, which counts the actions that the account includes in it, and
+    # metrics.all_conversions, which counts every action, with their values, at each of the three
+    # levels: the facts of the core take both, as the account shows them.
+    module, _, made, extensions = ads
+    module.load(NOW, extensions)
+    [(_, hints)] = made["pipelines"][0].runs
+    for table in ("campaign_stats", "ad_group_stats", "ad_stats"):
+        fields = module.FIELDS[table].split(", ")
+        for field in (
+            "metrics.conversions",
+            "metrics.conversions_value",
+            "metrics.all_conversions",
+            "metrics.all_conversions_value",
+        ):
+            assert field in fields, (table, field)
+        columns = hints[table]["columns"]
+        assert columns["metrics__all_conversions"]["data_type"] == "double", table
+        assert columns["metrics__all_conversions_value"]["data_type"] == "text", table
+
+
 def test_a_load_records_the_window_of_each_account_on_its_own_day(ads):
     module, _, made, extensions = ads
     module.load(NOW, extensions)
@@ -592,7 +668,7 @@ def test_an_error_of_the_api_on_one_account_does_not_stop_its_neighbor(ads):
     assert str(raised.value) == f"1 of 2 Google Ads accounts failed, the other 1 is loaded: {ERROR}"
     # One request to the failed account, its customer, and the whole load of its neighbor.
     assert requested(made).count("2222222222") == 1
-    assert requested(made).count("1111111111") == 1 + 4 + 6 * 37
+    assert requested(made).count("1111111111") == 1 + 4 + 7 * 37
     [pipeline] = made["pipelines"]
     [(rows, hints)] = pipeline.runs
     for table in ("customers", *module.ENTITIES, *module.FACTS):
@@ -628,10 +704,10 @@ def test_a_failed_account_has_no_day_and_no_moment_of_a_load_in_the_journal(ads)
 
 
 def test_an_error_in_the_middle_of_an_account_leaves_nothing_of_it_in_the_load(ads):
-    # The ads of the second account fail after its customer, its entities and the statistics of
-    # its campaigns and ad groups answered: none of its rows reaches dlt, as a window replaces
-    # whole days. Its customer and its lists stay as the last load that took it left them, as
-    # staging reads those of the newest load of each account whose row of the journal is loaded:
+    # The ads of the second account fail after its customer, its entities, its totals and the
+    # statistics of its campaigns and ad groups answered: none of its rows reaches dlt, as a window
+    # replaces whole days. Its customer and its lists stay as the last load that took it left them,
+    # as staging reads those of the newest load of each account whose row of the journal is loaded:
     # the load reads nothing back from raw.
     module, state, made, extensions = ads
     state.update(
@@ -644,8 +720,8 @@ def test_an_error_in_the_middle_of_an_account_leaves_nothing_of_it_in_the_load(a
     )
     with pytest.raises(module.AccountsFailed, match=f"the other 1 is loaded: {ERROR[:35]}"):
         module.load(NOW, extensions)
-    assert requested(made).count("2222222222") == 1 + 4 + 4 + 1
-    assert requested(made).count("1111111111") == 1 + 4 + 6
+    assert requested(made).count("2222222222") == 1 + 4 + 5 + 1
+    assert requested(made).count("1111111111") == 1 + 4 + 7
     [(rows, hints)] = made["pipelines"][0].runs
     for table in (*module.ENTITIES, *module.FACTS):
         assert {row["customer"]["id"] for row in rows[table]} == {"1111111111"}, table
@@ -728,6 +804,118 @@ def test_a_dataset_of_a_release_before_v0_5_takes_the_history_of_each_account_ag
     module.load(NOW, extensions)
     [(rows, _)] = made["pipelines"][0].runs
     assert {row["window_from"] for row in rows["_agoranomos_loads"]} == {date(2023, 10, 1)}
+
+
+def test_the_window_starts_after_the_last_day_that_the_core_accepted(ads):
+    # ADR-0038: [min(yesterday + 1 - 90, last accepted day + 1), yesterday], with the last accepted
+    # day from core.loads, which loader may read. The first account was accepted up to 1 June, so
+    # its window reaches back to the 2nd, by month, though its newest whole load ended on 26
+    # October; the second has no accepted load, as before the acceptance of the transform exists,
+    # and starts after its newest whole load, from 90 days back.
+    module, state, made, extensions = ads
+    state.update(
+        loads=2,
+        reloads=[
+            ("1111111111", date(2026, 10, 28), date(2026, 10, 26)),
+            ("2222222222", date(2026, 10, 28), date(2026, 10, 27)),
+        ],
+        accepted=[("1111111111", date(2026, 6, 1))],
+    )
+    module.load(NOW, extensions)
+    [(rows, _)] = made["pipelines"][0].runs
+    windows = {
+        row["account_id"]: (row["window_from"], row["window_to"])
+        for row in rows["_agoranomos_loads"]
+    }
+    assert windows == {
+        "1111111111": (date(2026, 6, 2), date(2026, 10, 27)),
+        "2222222222": (date(2026, 7, 31), date(2026, 10, 28)),
+    }
+    # The longer window goes in a request for each calendar month, June to October.
+    gaql = [
+        q for url, q, _ in made["requests"] if "1111111111" in url and " FROM customer WHERE " in q
+    ]
+    assert len(gaql) == 5
+    [query] = [q for q in made["pipelines"][0].queries if "core.loads" in q]
+    assert query == (
+        "SELECT account_id, max(window_to) FROM core.loads "
+        "WHERE source = 'google_ads' AND status = 'accepted' AND outcome = 'loaded' "
+        "AND account_id IN ('1111111111', '2222222222') GROUP BY account_id"
+    )
+
+
+def test_the_last_accepted_day_wins_over_the_journal_and_none_takes_the_history(ads):
+    module, _, _, _ = ads
+    journal = {"1111111111": (date(2026, 10, 28), date(2026, 10, 27))}
+    core = {"1111111111": date(2026, 10, 20), "3333333333": date(2026, 9, 1)}
+    assert module.last_day("1111111111", core, journal) == date(2026, 10, 20)
+    assert module.last_day("1111111111", {}, journal) == date(2026, 10, 27)
+    assert module.last_day("3333333333", core, journal) == date(2026, 9, 1)
+    assert module.last_day("2222222222", core, journal) is None
+
+
+class StandInCache:
+    """The asset state store of the asset of the load, as Airflow 3.3.2 gives it: get with a
+    default and set of a JSON value, which may not be None."""
+
+    def __init__(self, values=None):
+        self.values, self.writes = dict(values or {}), []
+
+    def get(self, key, default=None):
+        return self.values.get(key, default)
+
+    def set(self, key, value):
+        assert value is not None
+        json.dumps(value)
+        self.values[key] = value
+        self.writes.append((key, value))
+
+
+def test_a_load_keeps_the_watermark_of_each_account_that_it_took_in_the_cache(ads):
+    # The last day of the window of each account, once the load is whole; an account whose load
+    # failed keeps the watermark that it had.
+    module, state, _, extensions = ads
+    state["failing"] = {"2222222222"}
+    cache = StandInCache({"watermarks": {"2222222222": "2026-10-20"}})
+    with pytest.raises(module.AccountsFailed):
+        module.load(NOW, extensions, cache=cache)
+    assert cache.writes == [
+        ("watermarks", {"1111111111": "2026-10-27", "2222222222": "2026-10-20"})
+    ]
+
+
+def test_the_cache_never_moves_a_window_and_the_log_says_when_it_differs(ads, caplog):
+    # The warehouse is the truth (ADR-0038): after a restore of the warehouse alone, the cache of
+    # Airflow would be newer than the data, and a window from it would skip the days in between.
+    module, state, made, extensions = ads
+    state.update(
+        loads=1,
+        reloads=[("1111111111", date(2026, 10, 28), date(2026, 3, 31))],
+    )
+    cache = StandInCache({"watermarks": {"1111111111": "2026-10-26", "2222222222": "not a date"}})
+    with caplog.at_level("WARNING"):
+        module.load(NOW, extensions, cache=cache)
+    [(rows, _)] = made["pipelines"][0].runs
+    windows = {row["account_id"]: row["window_from"] for row in rows["_agoranomos_loads"]}
+    # The first account starts after the end of March in the journal, the second, which neither
+    # the journal nor the core knows, takes its history.
+    assert windows == {"1111111111": date(2026, 4, 1), "2222222222": date(2023, 10, 1)}
+    assert (
+        "Google Ads account 1111111111: Airflow keeps 2026-10-26 as the last day of its newest "
+        "load, the warehouse 2026-03-31; the window follows the warehouse"
+    ) in caplog.text
+    assert "The watermark of Google Ads account 2222222222 is not a date" in caplog.text
+    assert cache.writes == [
+        ("watermarks", {"1111111111": "2026-10-27", "2222222222": "2026-10-28"})
+    ]
+
+
+def test_a_load_without_a_cache_writes_none(ads):
+    # As when the load runs by hand, outside a task of Airflow.
+    module, _, _, extensions = ads
+    assert module.watermarks(None) == {}
+    module.load(NOW, extensions)
+    module.remember(None, {}, {"1111111111": None})
 
 
 def test_the_ids_of_a_query_are_checked_account_ids_only(ads):
@@ -909,8 +1097,8 @@ def test_a_value_longer_than_any_row_breaks_the_answer(ads, monkeypatch):
 
 
 def test_an_answer_that_breaks_leaves_no_file_of_its_account(ads, tmp_path):
-    # The answers of its customer, its entities and the statistics of its campaigns and ad groups
-    # were written to their files before the statistics of its ads broke.
+    # The answers of its customer, its entities, its totals and the statistics of its campaigns
+    # and ad groups were written to their files before the statistics of its ads broke.
     module, state, made, _ = ads
     state["broken_at"] = {"2222222222": ("FROM ad_group_ad WHERE", "cut")}
     api = module.Api(module.sign_in(), None)
@@ -918,7 +1106,7 @@ def test_an_answer_that_breaks_leaves_no_file_of_its_account(ads, tmp_path):
     staging.mkdir()
     with pytest.raises(module.GoogleAdsError, match="the answer ends before its array does"):
         module.read_account(api, "2222222222", NOW, date(2026, 10, 27), staging)
-    assert requested(made) == ["2222222222"] * (1 + 4 + 4 + 1)
+    assert requested(made) == ["2222222222"] * (1 + 4 + 5 + 1)
     assert list(staging.iterdir()) == []
     assert all(response.closed for response in made["responses"])
 
@@ -961,7 +1149,7 @@ def test_an_answer_that_breaks_in_the_middle_of_an_account_leaves_nothing_of_it(
     assert record["2222222222"]["window_to"] is None
     assert all(response.closed for response in made["responses"])
     attempts = 3 if kind == "connection" else 1
-    assert requested(made).count("2222222222") == 1 + 4 + 4 + attempts
+    assert requested(made).count("2222222222") == 1 + 4 + 5 + attempts
     assert made["waits"] == ([2, 4] if kind == "connection" else [])
     assert record["2222222222"]["error"].endswith(
         "(attempt 3 of 3)" if kind == "connection" else ""
@@ -978,8 +1166,8 @@ def test_an_answer_that_breaks_off_once_is_asked_again_and_gives_its_rows_once(a
     staging = tmp_path / "staging"
     staging.mkdir()
     read = module.read_account(api, "2222222222", NOW, date(2026, 10, 27), staging)
-    assert requested(made) == ["2222222222"] * (1 + 4 + 4 + 2 + 1)
-    assert api.requests == 12
+    assert requested(made) == ["2222222222"] * (1 + 4 + 5 + 2 + 1)
+    assert api.requests == 13
     assert made["waits"] == [2]
     # The broken answer gave two rows before the connection broke, more than the whole one has.
     [cut] = [response for response in made["responses"] if response.broken_off]
@@ -990,6 +1178,7 @@ def test_an_answer_that_breaks_off_once_is_asked_again_and_gives_its_rows_once(a
 
 
 def test_the_request_of_the_customer_is_asked_again_too(ads, tmp_path):
+    # Its first two answers break off; the request of the totals, FROM customer too, then answers.
     module, state, made, _ = ads
     state["broken_at"] = {"2222222222": ("FROM customer", "connection", 2)}
     staging = tmp_path / "staging"
@@ -998,7 +1187,7 @@ def test_the_request_of_the_customer_is_asked_again_too(ads, tmp_path):
         module.Api(module.sign_in(), None), "2222222222", NOW, date(2026, 10, 27), staging
     )
     assert read.customer["customer"]["timeZone"] == "Europe/Berlin"
-    assert requested(made) == ["2222222222"] * (3 + 4 + 6)
+    assert requested(made) == ["2222222222"] * (3 + 4 + 7)
     assert made["waits"] == [2, 4]
 
 

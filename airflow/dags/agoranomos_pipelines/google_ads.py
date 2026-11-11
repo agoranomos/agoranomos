@@ -12,26 +12,41 @@ objects joined by __: the shape that demo_search mimics, which the macros of
 dbt/macros/shapes/google_ads_v25.sql read (none of their fields changed in v26).
 
 A load first reads each account (customer), then its campaigns, its ad groups, its ads and its
-conversion actions, the full lists of the account, and then the statistics and the conversions by
-conversion action of each of the three levels, by day, in a request of their own, as
-segments.conversion_action cannot be selected with metrics.cost_micros (ADR-0034). A Performance
-Max campaign has no ad groups. A conversion action carries include_in_conversions_metric, whether
-Google counts it in metrics.conversions, which the model takes for whether the action is primary
-where extensions/model/conversion_actions.toml does not name it, and primary_for_goal, which the
-guide of conversion goals of Google names in its place, so that a real account can show whether
-the two differ. The days of each account run from the day after the last that a load took, or from
-90 days back when that is earlier, as conversions keep coming for up to 90 days after a click; the
-first load of an account takes the last 36 months, as Google Ads keeps data by day for 37 only
-(ADR-0034), a calendar month in each request. All end yesterday in the time zone of the account. A
-request counts as one operation of the daily quota, whatever its rows, so a daily load costs eleven
-operations for each account, and the first about 230. Each load appends the lists and the facts
-of each account under its own _dlt_load_id and records the window of each account in
-_agoranomos_loads in the same run, and the staging models read, of the loads that the run of the
-transform pinned, the lists of the newest load of each account, and, for each account and day, the
-rows of the newest load whose window covers the day, so the days of a window are replaced whole,
-empty or not (ADR-0038, ADR-0046). A
-dataset that a release before v0.5 loaded has no _agoranomos_loads, so the next load of each account
-takes its history again, and the rows of the earlier loads stay unread.
+conversion actions, the full lists of the account, and then, by day, the totals of the account
+(customer_stats) and the statistics and the conversions by conversion action of each of the three
+levels, each in a request of its own, as segments.conversion_action cannot be selected with
+metrics.cost_micros (ADR-0034). The statistics carry the conversions of the platform,
+metrics.conversions, and all its conversions, metrics.all_conversions, with their values. The
+totals are the impressions, clicks and cost of the account as Google sums them, against which the
+transform checks the sum of the rows of its campaigns before the core takes its window (G0a of
+ADR-0035); they come in the request right before the statistics of the campaigns, so that the two
+see the account as near the same moment as they can. A Performance Max campaign has no ad groups. A
+conversion action carries include_in_conversions_metric, whether Google counts it in
+metrics.conversions, which the model takes for whether the action is primary where
+extensions/model/conversion_actions.toml does not name it, and primary_for_goal, which the guide
+of conversion goals of Google names in its place, so that a real account can show whether the two
+differ. The days of each account run from the day after the last day that the core accepted for it
+(window), or from 90 days back when that is earlier, as conversions keep coming for up to 90 days
+after a click; the first load of an account takes the last 36 months, as Google Ads keeps data by
+day for 37 only (ADR-0034), a calendar month in each request. All end yesterday in the time zone
+of the account. A request counts as one operation of the daily quota, whatever its rows, so a
+daily load costs twelve operations for each account, and the first about 260. Each load appends the
+lists and the facts of each account under its own _dlt_load_id and records the window of each
+account in _agoranomos_loads in the same run, and the staging models read, of the loads that the run
+of the transform pinned, the lists of the newest load of each account, and, for each account and
+day, the rows of the newest load whose window covers the day, so the days of a window are replaced
+whole, empty or not (ADR-0038, ADR-0046). A dataset that a release before v0.5 loaded has no
+_agoranomos_loads, so the next load of each account takes its history again, and the rows of the
+earlier loads stay unread.
+
+The last day that the core accepted for an account is the end of its newest accepted load in
+core.loads, which loader may read (ADR-0038). While the core has accepted no load of the account,
+as before the acceptance of the transform exists, it is the end of its newest whole load in
+_agoranomos_loads; with neither, the load takes its history. A load keeps the watermark of each
+account that it loaded, the last day of its window, in the asset state store of Airflow 3.3, as a
+cache of the warehouse, which stays the truth: the cache never moves a window, as after a restore
+of the warehouse alone it would be newer than the data, and a load says in its log when the two
+differ (watermarks).
 
 A load reads each account whole before dlt sees any of it, into a file for each table on disk, and
 reads each answer of the API as it arrives, a row at a time, so that a task holds a row and a piece
@@ -66,6 +81,7 @@ from typing import TextIO
 from zoneinfo import ZoneInfo
 
 import dlt
+from dlt.destinations.exceptions import DatabaseUndefinedRelation
 from dlt.sources.helpers.requests import Client, HTTPError, RequestException
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
@@ -155,10 +171,17 @@ FIELDS = {
         "customer.id, campaign.resource_name, campaign.id, campaign.name, campaign.status, "
         "campaign.advertising_channel_type"
     ),
+    # The totals of the account by day: the metrics and the segment that the reference of the
+    # resource customer of v26 lists among those that can be put in the same SELECT clause as its
+    # fields (https://developers.google.com/google-ads/api/fields/v26/customer, read on 10
+    # November 2026).
+    "customer_stats": (
+        "customer.id, metrics.impressions, metrics.clicks, metrics.cost_micros, segments.date"
+    ),
     "campaign_stats": (
         "customer.id, campaign.resource_name, campaign.id, campaign.name, metrics.impressions, "
         "metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.conversions_value, "
-        "segments.date"
+        "metrics.all_conversions, metrics.all_conversions_value, segments.date"
     ),
     "campaign_conversions": (
         "customer.id, campaign.resource_name, campaign.id, campaign.name, segments.date, "
@@ -173,7 +196,8 @@ FIELDS = {
     "ad_group_stats": (
         "customer.id, campaign.resource_name, campaign.id, ad_group.resource_name, ad_group.id, "
         "ad_group.name, metrics.impressions, metrics.clicks, metrics.cost_micros, "
-        "metrics.conversions, metrics.conversions_value, segments.date"
+        "metrics.conversions, metrics.conversions_value, metrics.all_conversions, "
+        "metrics.all_conversions_value, segments.date"
     ),
     "ad_group_conversions": (
         "customer.id, campaign.resource_name, campaign.id, ad_group.resource_name, ad_group.id, "
@@ -191,7 +215,8 @@ FIELDS = {
         "customer.id, campaign.resource_name, campaign.id, ad_group.resource_name, ad_group.id, "
         "ad_group_ad.resource_name, ad_group_ad.ad.resource_name, ad_group_ad.ad.id, "
         "ad_group_ad.ad.name, metrics.impressions, metrics.clicks, metrics.cost_micros, "
-        "metrics.conversions, metrics.conversions_value, segments.date"
+        "metrics.conversions, metrics.conversions_value, metrics.all_conversions, "
+        "metrics.all_conversions_value, segments.date"
     ),
     "ad_conversions": (
         "customer.id, campaign.resource_name, campaign.id, ad_group.resource_name, ad_group.id, "
@@ -209,6 +234,7 @@ FIELDS = {
 }
 RESOURCES = {
     "customers": "customer",
+    "customer_stats": "customer",
     "campaigns": "campaign",
     "campaign_stats": "campaign",
     "campaign_conversions": "campaign",
@@ -220,9 +246,12 @@ RESOURCES = {
     "ad_conversions": "ad_group_ad",
     "conversion_actions": "conversion_action",
 }
-# The tables of the lists of each account, and the fact tables: each load appends its rows to both.
+# The tables of the lists of each account, and the fact tables: each load appends its rows to both,
+# in the order of their requests: the totals of the account right before the statistics of its
+# campaigns, which G0a checks against them.
 ENTITIES = ("campaigns", "ad_groups", "ads", "conversion_actions")
 FACTS = (
+    "customer_stats",
     "campaign_stats",
     "campaign_conversions",
     "ad_group_stats",
@@ -351,12 +380,98 @@ def history_start(last: date) -> date:
 
 
 def window(last: date, last_end: date | None) -> tuple[date, date]:
-    """The days of a load of an account whose last day is last: the history when no load has
-    taken a day of it yet, else the days from the day after the last loaded, or from the first of
-    the last WINDOW_DAYS when that is earlier."""
+    """The days of a load of an account whose last day is last, as ADR-0038 gives them,
+    [min(last + 1 - WINDOW_DAYS, last_end + 1), last], where last_end is the last day that the
+    core accepted for the account (last_day): the history when none is known yet, else the days
+    from the day after it, or from the first of the last WINDOW_DAYS when that is earlier, so that
+    a stop of any length closes by itself."""
     if last_end is None:
         return history_start(last), last
     return min(last_end + timedelta(days=1), last - timedelta(days=WINDOW_DAYS - 1)), last
+
+
+def accepted(pipeline, account_ids: Iterable[str]) -> dict[str, date]:
+    """The last day that the core accepted for each account: the end of the window of its newest
+    accepted load in core.loads, which loader may read (ADR-0038); none for an account of which
+    the core accepted no load."""
+    # IDs of checked digits, and constants of this module.
+    wanted = ", ".join(f"'{account_id}'" for account_id in checked(account_ids))
+    try:
+        with pipeline.sql_client() as client:
+            rows = client.execute_sql(
+                "SELECT account_id, max(window_to) FROM core.loads "  # noqa: S608
+                f"WHERE source = '{CODE}' AND status = 'accepted' AND outcome = '{LOADED}' "
+                f"AND account_id IN ({wanted}) GROUP BY account_id"
+            )
+    except DatabaseUndefinedRelation:
+        return {}
+    return {account_id: end for account_id, end in rows or () if end is not None}
+
+
+def last_day(
+    account_id: str, core: dict[str, date], journal: dict[str, tuple[date, date]]
+) -> date | None:
+    """The day after which the window of an account starts: the last that the core accepted for
+    it, or, while the core has accepted no load of the account, as before the acceptance of the
+    transform exists, the last day of its newest whole load in the journal; none when neither
+    knows the account, which then takes its history."""
+    if account_id in core:
+        return core[account_id]
+    if account_id in journal:
+        return journal[account_id][1]
+    return None
+
+
+# The key of the watermarks of the accounts in the asset state store of the asset of the load.
+WATERMARKS = "watermarks"
+
+
+def watermarks(cache) -> dict[str, date]:
+    """The watermark of each account that the asset state store of Airflow 3.3 holds, cache, the
+    last day of its newest load as the load that made it saw it: a cache of the warehouse, as a
+    JSON object of account IDs and ISO dates. None without a cache, as when the load runs by hand,
+    and a value that is not a date is passed over."""
+    found = cache.get(WATERMARKS, {}) if cache is not None else {}
+    marks = {}
+    for account_id, value in found.items() if isinstance(found, dict) else ():
+        try:
+            marks[account_id] = date.fromisoformat(value)
+        except (TypeError, ValueError):
+            log.warning("The watermark of Google Ads account %s is not a date", account_id)
+    return marks
+
+
+def check_watermark(
+    account_id: str,
+    cached: dict[str, date],
+    core: dict[str, date],
+    journal: dict[str, tuple[date, date]],
+) -> None:
+    """A warning when the watermark of the cache of an account differs from the last day of its
+    newest load that the warehouse knows, whole in the journal or accepted in the core, which the
+    window follows: one of the two was restored, or the dataset was dropped, and the window may
+    take more days than usual."""
+    known = [day for day in (core.get(account_id), journal.get(account_id, (None, None))[1]) if day]
+    held = max(known) if known else None
+    if account_id in cached and cached[account_id] != held:
+        log.warning(
+            "Google Ads account %s: Airflow keeps %s as the last day of its newest load, the "
+            "warehouse %s; the window follows the warehouse",
+            account_id,
+            cached[account_id].isoformat(),
+            held.isoformat() if held is not None else "none",
+        )
+
+
+def remember(cache, cached: dict[str, date], read: dict) -> None:
+    """Keep in the cache the watermark of each account that the load took, the last day of its
+    window, and those of the others as they were, once the load is whole."""
+    if cache is None or not read:
+        return
+    marks = {**cached, **{account_id: account.window[1] for account_id, account in read.items()}}
+    cache.set(
+        WATERMARKS, {account_id: day.isoformat() for account_id, day in sorted(marks.items())}
+    )
 
 
 def chunks(first: date, last: date) -> list[tuple[date, date]]:
@@ -728,22 +843,26 @@ def warn_of_the_sunset(now: datetime) -> None:
         )
 
 
-def load(now: datetime, extensions: Path = EXTENSIONS) -> dict[str, int]:
+def load(now: datetime, extensions: Path = EXTENSIONS, cache=None) -> dict[str, int]:
     """Load the accounts of the deployment as of now, each read whole before dlt sees any of it,
     record each account in _agoranomos_loads, loaded with its window or failed with its error,
-    and return the rows of each table that dlt reports. When an account failed, the load takes the
-    other accounts and raises AccountsFailed at the end; when every account failed, it writes the
-    journal alone."""
+    and return the rows of each table that dlt reports. cache is the asset state store of the
+    asset of the load, or None, in which the load keeps the watermark of each account that it
+    took. When an account failed, the load takes the other accounts and raises AccountsFailed at
+    the end; when every account failed, it writes the journal alone."""
     warn_of_the_sunset(now)
     wanted = accounts(extensions)
     api = Api(sign_in(), login_customer_id())
     os.environ.update(DLT_SETTINGS)
     with open_pipeline() as pipeline, tempfile.TemporaryDirectory(prefix="google-ads-") as staging:
-        last = recorded(pipeline) if has_loads(pipeline) else {}
+        journal = recorded(pipeline) if has_loads(pipeline) else {}
+        core = accepted(pipeline, wanted)
+        cached = watermarks(cache)
         read: dict[str, Read] = {}
         failed: dict[str, GoogleAdsError] = {}
         for account_id in wanted:
-            last_end = last[account_id][1] if account_id in last else None
+            check_watermark(account_id, cached, core, journal)
+            last_end = last_day(account_id, core, journal)
             try:
                 read[account_id] = read_account(api, account_id, now, last_end, Path(staging))
             except GoogleAdsError as error:
@@ -798,6 +917,8 @@ def load(now: datetime, extensions: Path = EXTENSIONS) -> dict[str, int]:
         resources.append(dlt.resource(record, name=LOADS, **own(LOAD_HINTS)))
         run(pipeline, resources)
         counts = row_counts(pipeline)
+        # The load is whole: its row is in _dlt_loads.
+        remember(cache, cached, read)
     for table, rows in sorted(counts.items()):
         log.info("Loaded %d rows into %s.%s, as of %s", rows, DATASET, table, now.isoformat())
     log.info("%d requests to the Google Ads API for %d accounts", api.requests, len(wanted))

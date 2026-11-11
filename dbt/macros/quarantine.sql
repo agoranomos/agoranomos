@@ -1,5 +1,5 @@
-{#- The checks of G1 and G1a of ADR-0035, which each run of the transform makes on the data of each
-    account that it reads, before it writes the core: the model int_g1_failures runs them, one
+{#- The checks of G0a, G1 and G1a of ADR-0035, which each run of the transform makes on the data of
+    each account that it reads, before it writes the core: the model int_g1_failures runs them, one
     statement for each kind of data, and holds a row for each load, account, reason and kind of
     data that failed. An account with a row there stays out of the core in that run: its window
     is not written, its dimensions and its facts keep what they held, and core.account_quarantine
@@ -11,15 +11,18 @@
     a list gives the account twice; a row misses a part of its key; the currency of the account is
     not one of ISO 4217; its time zone is not one of IANA; the source of the rates has no rate of
     its currency into the reporting currency (ADR-0042); a spend has more than six decimal places;
-    a measure is missing or below zero; a load holds rows outside its window; a load has no row on
-    the days of its window while the core holds spend on them (G1a); the spend of a load fell by
-    more than var('quarantine_spend_fall') against the core (G1a); more than half of the pinned
-    accounts of the source are in quarantine, so the source stops. -#}
+    a measure is missing or below zero; a load holds rows outside its window; the rows of the
+    campaigns of a load do not add up to the totals of the account that the platform gives in the
+    same load (G0a); a load has no row on the days of its window while the core holds spend on
+    them (G1a); the spend of a load fell by more than var('quarantine_spend_fall') against the core
+    (G1a); more than half of the pinned accounts of the source are in quarantine, so the source
+    stops. -#}
 {% macro quarantine_reasons() -%}
 {{- return([
     'load_failed', 'unknown_account', 'duplicate_key', 'missing_key', 'unknown_currency',
     'unknown_time_zone', 'missing_rate', 'too_many_decimals', 'missing_measure',
-    'negative_measure', 'date_outside_window', 'empty_window', 'spend_fall', 'source_stopped',
+    'negative_measure', 'date_outside_window', 'totals_differ', 'empty_window', 'spend_fall',
+    'source_stopped',
 ]) -}}
 {%- endmacro %}
 
@@ -47,6 +50,7 @@
 {%- set metrics = ['impressions', 'clicks', 'spend'] -%}
 {%- set counted = [
     'impressions', 'clicks', 'spend', 'platform_conversions', 'platform_conversion_value',
+    'all_conversions', 'all_conversion_value',
 ] -%}
 {%- set converted = ['conversions', 'conversion_value', 'platform_conversions'] -%}
 {%- set valued = [
@@ -81,7 +85,8 @@
 {#- The fact tables of raw that each source appends by load, which the checks of the windows and
     of the decimal places read as they are: each table with the column of its spend as text, and
     whether that spend is in micros, as cost_micros of Google is. A table of conversions or of
-    sessions has no spend. The account and the day of a row are those of newest_load_sources. -#}
+    sessions has no spend. The account and the day of a row are those of newest_load_sources. The
+    connector of Google Ads also loads the totals of each account, which demo_search does not. -#}
 {% macro quarantine_raw_tables() -%}
 {%- set google = [
     ('campaign_stats', 'metrics__cost_micros', true),
@@ -104,7 +109,15 @@
         ('report_ad_daily', 'metrics__spend', false),
     ],
     'raw_demo_web': [('report_sessions_daily', none, false)],
-    'raw_google_ads': google,
+    'raw_google_ads': [
+        ('campaign_stats', 'metrics__cost_micros', true),
+        ('campaign_conversions', none, false),
+        ('ad_group_stats', 'metrics__cost_micros', true),
+        ('ad_group_conversions', none, false),
+        ('ad_stats', 'metrics__cost_micros', true),
+        ('ad_conversions', none, false),
+        ('customer_stats', 'metrics__cost_micros', true),
+    ],
 }) -}}
 {%- endmacro %}
 
@@ -464,6 +477,127 @@ cross join lateral (
         )
 ) as c (reason, failed, detail)
 where c.failed
+{%- endmacro %}
+
+{#- G0a, against the platform (ADR-0035): for each load that this run reads for an account of a
+    source whose loads bring the totals of each account by day, as the connector of Google Ads does,
+    the impressions, the clicks and the spend of the rows of its campaigns, summed by day, against
+    the totals that the platform gives for the account in the same load, on each day of the
+    windows that the load gives the account; a day that the load holds no row of on one side
+    counts as zero there. A sum that differs from its total by more than the share of the
+    platform in var('platform_totals_tolerance'), zero for one that it does not name, is
+    totals_differ: a read of the API that lost part of an account, which no check inside the
+    warehouse can see. A load that holds no totals at all, as one of a connector before the
+    totals came, is not checked. pairs gives, for each such source, its staging model of the
+    statistics of campaigns and that of the totals. -#}
+{% macro quarantine_totals_findings(pairs, days) -%}
+{%- set tolerances = var('platform_totals_tolerance', {}) -%}
+with totals as (
+    {%- for _, relation in pairs %}
+    {%- if not loop.first %}
+    union all
+    {%- endif %}
+    select
+        platform as source,
+        account_id,
+        report_date,
+        load_id,
+        total_impressions as impressions,
+        total_clicks as clicks,
+        total_spend as spend
+    from {{ relation }}
+    {%- endfor %}
+),
+
+totalled as (
+    select distinct source, load_id
+    from totals
+),
+
+window_days as (
+    select d.source, d.account_id, d.day, d.load_id
+    from {{ days }} as d
+    join totalled as t
+        on t.source = d.source and t.load_id = d.load_id
+),
+
+campaigns as (
+    select
+        source,
+        account_id,
+        report_date as day,
+        sum(impressions) as impressions,
+        sum(clicks) as clicks,
+        sum(spend) as spend
+    from (
+        {%- for relation, _ in pairs %}
+        {%- if not loop.first %}
+        union all
+        {%- endif %}
+        select platform as source, account_id, report_date, impressions, clicks, spend
+        from {{ relation }}
+        {%- endfor %}
+    ) as r
+    group by source, account_id, report_date
+),
+
+account_days as (
+    select
+        source,
+        account_id,
+        report_date as day,
+        sum(impressions) as impressions,
+        sum(clicks) as clicks,
+        sum(spend) as spend
+    from totals
+    group by source, account_id, report_date
+),
+
+compared as (
+    select
+        w.source,
+        w.account_id,
+        w.load_id,
+        w.day,
+        coalesce(c.impressions, 0) as campaign_impressions,
+        coalesce(c.clicks, 0) as campaign_clicks,
+        coalesce(c.spend, 0) as campaign_spend,
+        coalesce(a.impressions, 0) as total_impressions,
+        coalesce(a.clicks, 0) as total_clicks,
+        coalesce(a.spend, 0) as total_spend,
+        {%- if tolerances %}
+        case
+            {%- for platform, share in tolerances.items() %}
+            when w.source = '{{ platform }}' then {{ share | float }}
+            {%- endfor %}
+            else 0
+        end as share
+        {%- else %}
+        0 as share
+        {%- endif %}
+    from window_days as w
+    left join campaigns as c
+        on c.source = w.source and c.account_id = w.account_id and c.day = w.day
+    left join account_days as a
+        on a.source = w.source and a.account_id = w.account_id and a.day = w.day
+)
+
+select
+    source,
+    account_id,
+    load_id,
+    'totals_differ' as reason,
+    'account_totals' as checked,
+    {{ quarantine_days('day') }} || ': impressions ' || sum(campaign_impressions) || ', clicks '
+        || sum(campaign_clicks) || ' and spend ' || sum(campaign_spend)
+        || ' in the campaigns, against ' || sum(total_impressions) || ', '
+        || sum(total_clicks) || ' and ' || sum(total_spend) || ' in the totals of the account'
+        as detail
+from compared
+where abs(campaign_impressions - total_impressions) > share * abs(total_impressions)
+    or abs(campaign_clicks - total_clicks) > share * abs(total_clicks)
+    or abs(campaign_spend - total_spend) > share * abs(total_spend)
+group by source, account_id, load_id
 {%- endmacro %}
 
 {#- G1a, against a collapse (ADR-0035): for each load that this run reads for an account, a measure
