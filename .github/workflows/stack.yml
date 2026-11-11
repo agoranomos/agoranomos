@@ -111,8 +111,12 @@ jobs:
     # to 97 minutes on 7 November 2026, and a push to main, which runs it twice, 138 and 139 minutes
     # on arm64 and reached 150 minutes on amd64 on 7 and 8 November; with 240 minutes, 163 to 216
     # minutes on main 8bb634e on 9 November, and the facts of the core add about 7 % to each run of
-    # the transform. 300 minutes leave it room, under the 360 that GitHub gives a job.
-    timeout-minutes: 300
+    # the transform. With 300 minutes, the celery variant on amd64 reached the limit on main 94c9758
+    # on 10 November: its two runs of the tests took 146 and 138 minutes, where each run of the
+    # other jobs took 79 to 110. The job gets the 360 minutes that GitHub gives a job at most. Each
+    # task of the transform runs a process of dbt for its node; one dbt build in the watcher mode
+    # of Cosmos (ADR-0039) is to replace them, and is not built yet.
+    timeout-minutes: 360
     permissions:
       contents: read
     env:
@@ -318,9 +322,10 @@ jobs:
     # and 69 to 108 minutes on amd64 from 26 to 29 October. Since the core of v0.5 (#281, #283), a
     # pull request took 90 and 127 minutes on 7 November 2026, and a push to main, whose second run
     # of the tests takes the mark transform too, reached 140 minutes on both architectures on 7 and
-    # 8 November; with 240 minutes, 158 and 166 minutes on main 8bb634e on 9 November. 300 minutes
-    # leave it room, under the 360 that GitHub gives a job.
-    timeout-minutes: 300
+    # 8 November; with 240 minutes, 158 and 166 minutes on main 8bb634e on 9 November; with 300
+    # minutes, 192 minutes on amd64 and 221 on arm64 on main 94c9758 on 10 November. The job gets
+    # the 360 minutes that GitHub gives a job at most, as the jobs of local mode do.
+    timeout-minutes: 360
     permissions:
       contents: read
     env:

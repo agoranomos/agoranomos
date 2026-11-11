@@ -334,6 +334,32 @@ def test_transformer_may_enter_core_and_create_its_snapshots_there_and_loader_ma
     assert not re.search(r"DEFAULT PRIVILEGES[^;]*\bcore\b", text, re.IGNORECASE)
 
 
+def test_ai_reader_reads_marts_only_and_loses_what_it_had_in_staging():
+    # ADR-0043: the role of MCP Toolbox enters marts and reads its views, which read the core as
+    # their owner, and no other schema. An earlier version of the file also gave it staging, whose
+    # views stand over a raw layer that is to be erased: the file takes that back on every start.
+    text = normalized("warehouse.sql")
+    granted = re.findall(r"\bGRANT\b[^;]*\bai_reader\b[^;]*;", text, re.IGNORECASE)
+    assert granted == [
+        "GRANT CONNECT ON DATABASE warehouse TO loader, transformer, metabase_reader, ai_reader;",
+        "GRANT USAGE ON SCHEMA marts TO ai_reader;",
+        "GRANT SELECT ON ALL TABLES IN SCHEMA marts TO ai_reader;",
+        "GRANT SELECT ON TABLES TO ai_reader;",
+    ]
+    assert runs(
+        text,
+        "ALTER DEFAULT PRIVILEGES FOR ROLE transformer IN SCHEMA marts "
+        "GRANT SELECT ON TABLES TO ai_reader;",
+    )
+    for statement in (
+        "REVOKE ALL ON SCHEMA staging FROM ai_reader;",
+        "REVOKE ALL ON ALL TABLES IN SCHEMA staging FROM ai_reader;",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE transformer IN SCHEMA staging "
+        "REVOKE ALL ON TABLES FROM ai_reader;",
+    ):
+        assert runs(text, statement), f"warehouse.sql must also run {statement}"
+
+
 def test_metabase_reader_gets_its_limits_on_every_start():
     # A query of Metabase that runs longer than five minutes is canceled, so that a dashboard or
     # a question cannot hold the warehouse, and Metabase holds at most 20 connections, more than

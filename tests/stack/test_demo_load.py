@@ -396,7 +396,8 @@ def test_loader_owns_the_tables_of_the_history(env, history_run):
 
 # The columns of _agoranomos_loads and the types that PostgreSQL reports for them: dlt writes its
 # type text as varchar and its timestamp with a time zone. The hints of the journal, which every
-# source shares, make the columns of the status and of the error also where no row fills them.
+# source shares, make the columns of the status, of the error and of the kind of the load also
+# where no row fills them.
 LOAD_COLUMNS = {
     "account_id": "character varying",
     "as_of": "date",
@@ -406,6 +407,7 @@ LOAD_COLUMNS = {
     "loaded_at": "timestamp with time zone",
     "status": "character varying",
     "error": "character varying",
+    "kind": "character varying",
 }
 
 

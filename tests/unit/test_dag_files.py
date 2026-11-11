@@ -43,6 +43,7 @@ def test_no_dag_file_imports_another():
         "agoranomos_demo_transform",
         "agoranomos_ecb_daily",
         "agoranomos_google_ads_daily",
+        "agoranomos_google_ads_history",
         "agoranomos_selfcheck",
     } <= stems
     for path in DAG_FILES:
@@ -67,7 +68,7 @@ def test_the_transform_runs_when_the_demo_the_rates_or_google_ads_have_loaded():
     assert "schedule=LOADED" in text
     assert "max_active_runs=1" in text
     found = imports(DAGS / "agoranomos_demo_transform.py")
-    assert ("agoranomos_pipelines.assets", ["LOADED"]) in found
+    assert ("agoranomos_pipelines.assets", ["LOADED", "TRANSFORMED"]) in found
     assert ("airflow.sdk", ["Asset", "AssetAll", "AssetAny"]) in imports(ASSETS)
     assets = ASSETS.read_text(encoding="utf-8")
     assert "DEMO_LOADED = AssetAll(*RAW_DEMO_PLATFORMS.values())" in assets
@@ -159,13 +160,15 @@ def test_the_transform_loads_the_settings_of_the_model_before_dbt():
     assert "source.load()" in calls
     top = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
     assert not [n for n in top if "settings" in ast.dump(n) or "dlt" in ast.dump(n)]
-    # The task comes first, then the pin, the tables of elementary and the task group of dbt.
+    # The task comes first, then the pin, the tables of elementary and the task group of dbt,
+    # and last the task that updates the asset of a run that succeeded (ADR-0038).
     chains = [
         ast.unparse(node)
         for node in ast.walk(tree)
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.BinOp)
     ]
-    assert chains == ["load_settings() >> pin >> elementary >> dbt"]
+    assert chains == ["load_settings() >> pin >> elementary >> dbt >> transformed()"]
+    assert decorators(path)["transformed"] == ["task(task_id='transformed', outlets=[TRANSFORMED])"]
     assigned = {
         node.targets[0].id: ast.unparse(node.value.func)
         for node in ast.walk(tree)
@@ -413,6 +416,86 @@ def test_the_load_of_google_ads_keeps_its_watermarks_in_the_state_of_its_asset()
     assert 'cache=context["asset_state_store"][RAW_GOOGLE_ADS]' in text
 
 
+def test_a_run_of_the_load_of_google_ads_takes_a_portion_of_the_history_from_its_parameters():
+    # ADR-0038, "The first load": a parameterized run takes accounts, a start and an end, as runs
+    # on an asset have no logical date and backfills of Airflow need a schedule by time. A
+    # scheduled run has the defaults, no days, and takes the usual window.
+    text = GOOGLE_ADS_DAILY.read_text(encoding="utf-8")
+    assert (
+        "airflow.sdk",
+        ["CronTriggerTimetable", "Param", "dag", "get_current_context", "task"],
+    ) in (imports(GOOGLE_ADS_DAILY))
+    assert "    params=PARAMS,\n" in text
+    tree = ast.parse(text)
+    [params] = [
+        node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign) and ast.unparse(node.targets[0]) == "PARAMS"
+    ]
+    assert isinstance(params, ast.Dict)
+    found = {
+        ast.literal_eval(key): {k.arg: ast.literal_eval(k.value) for k in value.keywords}
+        | {"default": ast.literal_eval(value.args[0])}
+        for key, value in zip(params.keys, params.values, strict=True)
+    }
+    assert set(found) == {"accounts", "window_from", "window_to"}
+    assert found["accounts"]["default"] == []
+    assert found["accounts"]["items"] == {"type": "string", "pattern": "^[0-9]{10}$"}
+    for day in ("window_from", "window_to"):
+        assert found[day]["default"] is None
+        assert (found[day]["type"], found[day]["format"]) == (["null", "string"], "date")
+    calls = [ast.unparse(node) for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    assert (
+        "google_ads.portion_of(params['accounts'], params['window_from'], params['window_to'])"
+    ) in calls
+    assert any("portion=portion" in call for call in calls if call.startswith("google_ads.load("))
+
+
+GOOGLE_ADS_HISTORY = DAGS / "agoranomos_google_ads_history.py"
+
+
+def test_the_history_of_google_ads_plans_a_portion_after_each_transform_that_succeeded():
+    # ADR-0038: the portions start one by one after a run of the transform that succeeded, whose
+    # last task updates TRANSFORMED; a portion is a run of the load of Google Ads with its
+    # parameters, which the plan gives, and which starts nothing while a run of the load is
+    # queued or running. The DAG starts paused, as the load does, and imports dlt in its task.
+    text = GOOGLE_ADS_HISTORY.read_text(encoding="utf-8")
+    found = imports(GOOGLE_ADS_HISTORY)
+    assert ("agoranomos_pipelines.assets", ["TRANSFORMED"]) in found
+    assert (
+        "airflow.providers.standard.operators.trigger_dagrun",
+        ["TriggerDagRunOperator"],
+    ) in found
+    assert [module for module, _ in found if module.split(".")[0] == "cosmos"] == []
+    tree = ast.parse(text)
+    top = [
+        node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert not [m for m in top if m.split(".")[0] == "dlt" or m.endswith((".google_ads", ".loads"))]
+    keywords = {
+        node.arg: ast.unparse(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.keyword)
+    }
+    assert keywords["schedule"] == "TRANSFORMED"
+    assert keywords["max_active_runs"] == "1"
+    assert keywords["is_paused_upon_creation"] == "True"
+    assert keywords["catchup"] == "False"
+    assert keywords["trigger_dag_id"] == "LOAD"
+    assert 'LOAD = "agoranomos_google_ads_daily"' in text
+    assert keywords["conf"] == "plan()"
+    assert keywords["fail_when_dag_is_paused"] == "True"
+    assert keywords["openlineage_inject_parent_info"] == "False"
+    assert decorators(GOOGLE_ADS_HISTORY)["plan"] == ["task.short_circuit(task_id='plan')"]
+    assert 'context["ti"].get_dr_count(dag_id=LOAD, states=["queued", "running"])' in text
+    assert 'google_ads.plan(context["dag_run"].run_after)' in text
+    assert "return None if portion is None else portion.conf()" in text
+    assets = ASSETS.read_text(encoding="utf-8")
+    assert 'TRANSFORMED = Asset("agoranomos_transformed")' in assets
+
+
 TEN_MINUTES = "timedelta(minutes=10)"
 
 
@@ -436,10 +519,11 @@ def test_the_loads_retry_with_a_growing_wait_and_end_within_their_timeout(
 ):
     # ADR-0039: the DAGs of the loads retry with an exponential backoff, also after a new column
     # waited past the lock timeout of loader for a run of the transform (ADR-0046), and a run ends
-    # within its timeout, an hour, and for Google Ads, whose first load of many accounts takes
-    # their history, its three tries of two hours and the waits between them, so that a load never
-    # lives longer: the cleanup of the rows of a load that did not end is to wait at least that
-    # long. Airflow 3.3.2 takes a multiplier for the backoff, so True would be 1, a constant wait.
+    # within its timeout, an hour, and for Google Ads, whose load of many accounts, or whose window
+    # after a long stop, takes long, its three tries of two hours and the waits between them, so
+    # that a load never lives longer: the cleanup of the rows of a load that did not end is to wait
+    # at least that long. Airflow 3.3.2 takes a multiplier for the backoff, so True would be 1, a
+    # constant wait.
     keywords = {
         node.arg: node.value
         for node in ast.walk(ast.parse((DAGS / name).read_text(encoding="utf-8")))
