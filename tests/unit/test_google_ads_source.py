@@ -539,37 +539,42 @@ def test_the_parameters_of_a_run_name_a_portion_or_none(ads):
             module.portion_of(accounts, first, last)
 
 
-def test_a_portion_takes_the_totals_and_the_facts_of_its_days_as_a_load_of_history(ads):
-    # The customer of each account and its seven tables of facts, eight requests, in one request
-    # each for a quarter; the entities, the watermarks and the customers of the other accounts
-    # stay as they were.
+def test_a_portion_takes_the_lists_and_the_facts_of_its_days_as_a_load_of_history(ads):
+    # The customer of each account, its four lists, as every load takes them, and its seven tables
+    # of facts, twelve requests, in one request each for a quarter; the watermarks stay as they
+    # were. Staging reads the lists of the newest load of an account, which a portion is after
+    # each run of the transform: without them, it would list no entity of the account.
     module, state, made, extensions = ads
-    state.update(
-        loads=1,
-        reloads=[("2222222222", date(2026, 10, 29), date(2026, 10, 28))],
-        customers=[("customers/1111111111", "1111111111", "Kept", "USD", "UTC", False, "ENABLED")],
-    )
+    state.update(loads=1, reloads=[("2222222222", date(2026, 10, 29), date(2026, 10, 28))])
     cache = StandInCache({"watermarks": {"2222222222": "2026-10-28"}})
     portion = module.Portion(("2222222222",), date(2026, 4, 1), date(2026, 6, 30))
     counts = module.load(NOW, extensions, cache=cache, portion=portion)
-    assert requested(made) == ["2222222222"] * 8
+    assert requested(made) == ["2222222222"] * 12
     gaql = [q for _, q, _ in made["requests"]]
     assert gaql[0].endswith("FROM customer")
+    assert [q.split(" FROM ")[1] for q in gaql[1:5]] == [
+        "campaign",
+        "ad_group",
+        "ad_group_ad",
+        "conversion_action",
+    ]
     assert all(
-        q.endswith("WHERE segments.date BETWEEN '2026-04-01' AND '2026-06-30'") for q in gaql[1:]
+        q.endswith("WHERE segments.date BETWEEN '2026-04-01' AND '2026-06-30'") for q in gaql[5:]
     )
-    assert [q.split(" FROM ")[1].split(" WHERE ")[0] for q in gaql[1:]] == [
+    assert [q.split(" FROM ")[1].split(" WHERE ")[0] for q in gaql[5:]] == [
         "customer",
         *("campaign", "campaign", "ad_group", "ad_group", "ad_group_ad", "ad_group_ad"),
     ]
     [(rows, _)] = made["pipelines"][0].runs
-    assert not set(module.ENTITIES) & set(rows)
-    assert counts == {"customers": 2, **{table: 1 for table in module.FACTS}}
-    # The table of customers is replaced with every account of the deployment.
-    assert sorted(
-        row["customer__id"] if "customer__id" in row else row["customer"]["id"]
-        for row in rows["customers"]
-    ) == ["1111111111", "2222222222"]
+    assert counts == {
+        "customers": 1,
+        **{table: 1 for table in module.ENTITIES},
+        **{table: 1 for table in module.FACTS},
+    }
+    # The rows of the account of the portion alone: the other keeps the lists of its own newest
+    # load.
+    for table in ("customers", *module.ENTITIES):
+        assert {row["customer"]["id"] for row in rows[table]} == {"2222222222"}, table
     [record] = rows["_agoranomos_loads"]
     assert (record["account_id"], record["window_from"], record["window_to"]) == (
         "2222222222",

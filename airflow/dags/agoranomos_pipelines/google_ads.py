@@ -34,15 +34,16 @@ run of the transform that succeeded, the next portion of the days that no whole 
 holds, back to the first day of the month 36 months before yesterday, as Google Ads keeps data by
 day for 37 only (ADR-0034): the newest calendar quarter that an account lacks, for every account
 that lacks days of it (next_portion), and starts the DAG of the load with its accounts and days as
-the parameters of the run, a portion, which takes the totals and the facts of those days alone,
-with the kind history in the journal. A request counts as one operation of the daily quota,
-whatever its rows, so a daily load costs twelve operations for each account, and a portion eight,
-its customer and its seven tables of facts. Each load appends the facts of each account, and the
-usual window its lists too, under its own _dlt_load_id and records the window of each account in
-_agoranomos_loads in the same run, and the staging models read, of the loads that the run of the
-transform pinned, the lists of the newest load of each account, and, for each account and day, the
-rows of the newest load whose window covers the day, so the days of a window are replaced whole,
-empty or not (ADR-0038, ADR-0046). A dataset that a release before v0.5 loaded has no
+the parameters of the run, a portion, which takes the lists of each account, as every load does,
+and the totals and the facts of those days, with the kind history in the journal. A request counts
+as one operation of the daily quota, whatever its rows, so a load costs twelve operations for each
+account, its customer, its four lists and its seven tables of facts, a portion too, as it asks for
+its quarter in one request a table. Each load appends the lists and the facts of each account under
+its own _dlt_load_id and records the window of each account in _agoranomos_loads in the same run,
+and the staging models read, of the loads that the run of the transform pinned, the lists of the
+newest load of each account, and, for each account and day, the rows of the newest load whose
+window covers the day, so the days of a window are replaced whole, empty or not (ADR-0038,
+ADR-0046). A dataset that a release before v0.5 loaded has no
 _agoranomos_loads, so the next load of each account takes its usual window, the history follows,
 and the rows of the earlier loads stay unread.
 
@@ -981,7 +982,8 @@ def read_account(
     file in the folder of the account under staging, on disk, a row at a time as each answer
     arrives, so that the load holds a row of an answer in memory and not the answer (ADR-0038).
     With days, a portion of the history, the window is those days, up to yesterday of the account,
-    and the load takes its customer and its facts alone, as the usual window brings the entities.
+    and the lists come too: staging reads the lists of the newest load of an account, so a load
+    without them would list no entity of it (newest_list).
     An answer that breaks off is asked again (retried). An error of the API on any request, an
     answer that is not whole JSON, or one that breaks off at each attempt, raises GoogleAdsError
     and leaves nothing of the account: a window replaces whole days, and a part of one would lose
@@ -999,10 +1001,8 @@ def read_account(
     last_day_of_account = yesterday(now, customer["customer"]["timeZone"])
     if days is None:
         first, last = window(last_day_of_account, last_end)
-        tables = (*ENTITIES, *FACTS)
     else:
         first, last = days[0], min(days[1], last_day_of_account)
-        tables = FACTS
         if first > last:
             raise GoogleAdsError(
                 f"Google Ads account {account_id}: the days of the history start on "
@@ -1013,7 +1013,7 @@ def read_account(
     folder.mkdir()
     files = {}
     try:
-        for table in tables:
+        for table in (*ENTITIES, *FACTS):
             path = folder / f"{table}.jsonl"
             with path.open("w", encoding="utf-8") as file:
                 for days in chunks(first, last) if table in FACTS else [None]:
@@ -1076,8 +1076,8 @@ def load(
     and return the rows of each table that dlt reports. cache is the asset state store of the
     asset of the load, or None, in which the load keeps the watermark of each account that it
     took. With a portion, the load takes the days of the portion of its accounts, which
-    clients.toml names, or of every account, with the kind history, and leaves the entities and
-    the watermarks as they were (ADR-0038, "The first load"). When an account failed, the load
+    clients.toml names, or of every account, with the kind history, and leaves the watermarks as
+    they were (ADR-0038, "The first load"). When an account failed, the load
     takes the other accounts and raises AccountsFailed at the end; when every account failed, it
     writes the journal alone."""
     warn_of_the_sunset(now)
@@ -1115,7 +1115,7 @@ def load(
         if read:
             customers = [account.customer for account in read.values()]
             resources.append(dlt.resource(customers, name="customers", **own(HINTS["customers"])))
-            for table in ENTITIES if portion is None else ():
+            for table in ENTITIES:
                 resources.append(
                     dlt.resource(staged_rows(read, table), name=table, **own(HINTS[table]))
                 )
