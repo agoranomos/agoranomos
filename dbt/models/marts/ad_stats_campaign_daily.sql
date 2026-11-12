@@ -5,9 +5,14 @@
 -- the fact; each dimension joins on its unique key with LEFT JOIN, so that the planner leaves out
 -- those that a question does not read. The IDs are the text of the dimensions, as a cast of the
 -- fact would keep a filter on them from its index. The conversions of the primary actions are a
--- subquery of the conversions by action, which runs only for a question that reads them. The
--- columns of v0.4 come first, in their order, and the later ones after them. Metabase reads the
--- marts layer only.
+-- LEFT JOIN LATERAL to the conversions by action of the row: one lookup in the key of that fact
+-- for each row that a question reads, however often the question names the column, and none for
+-- a question that does not read it, as the planner leaves out the join of an aggregate of one
+-- row. A subquery in the select list ran once for each mention, and a join to the conversions
+-- grouped by the key of the row would sum the whole history for every question, as PostgreSQL
+-- carries no filter of a period across a join (B16). The primary actions are an array that the
+-- query reads once, so that the lookup is a condition of the index. The columns of v0.4 come
+-- first, in their order, and the later ones after them. Metabase reads the marts layer only.
 -- The test of the primary actions reads the view of the conversions by action, which dbt orders
 -- before it: depends_on: {{ ref('ad_conversions_campaign_daily') }}
 select
@@ -36,16 +41,7 @@ select
     m.campaign_type,
     m.is_listed,
     f.all_conversions,
-    cast(coalesce((
-        select sum(coalesce(x.all_conversions, x.conversions))
-        from {{ ref('core_ad_conversions_campaign_daily') }} as x
-        join {{ ref('dim_conversion_action') }} as k
-            on k.conversion_action_sk = x.conversion_action_sk
-        where x.account_sk = f.account_sk
-            and x.campaign_id = f.campaign_id
-            and x.report_date = f.report_date
-            and k.is_primary
-    ), 0) as numeric(18,6)) as conversions_primary,
+    cast(coalesce(q.conversions_primary, 0) as numeric(18,6)) as conversions_primary,
     r.rate_into_reporting_currency as fx_rate_into_reporting_currency,
     r.published_on as fx_rate_date,
     r.is_carried_forward as is_fx_rate_carried_forward,
@@ -65,3 +61,16 @@ left join {{ ref('core_fx_rates_daily') }} as r
     and r.reporting_currency = {{ reporting_currency() }}
 left join {{ source('core', 'loads') }} as l
     on l.load_sk = f.load_sk
+left join lateral (
+    select sum(coalesce(x.all_conversions, x.conversions)) as conversions_primary
+    from {{ ref('core_ad_conversions_campaign_daily') }} as x
+    where x.account_sk = f.account_sk
+        and x.campaign_id = f.campaign_id
+        and x.report_date = f.report_date
+        and x.conversion_action_sk = any(array(
+            select k.conversion_action_sk
+            from {{ ref('dim_conversion_action') }} as k
+            where k.is_primary
+        ))
+) as q
+    on true
