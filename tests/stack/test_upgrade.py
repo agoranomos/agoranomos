@@ -501,8 +501,9 @@ def test_the_raw_tables_of_the_demo_are_loaded_anew_and_what_stays_is_listed(env
                 for name in sorted(set(saved["rows"]) | set(rows))
             ),
             "",
-            "The relations that kept their oid, which the dbt project of the current code builds "
-            "or reads: " + (", ".join(f"`{k}`" for k in kept if k in used) or "none") + ".",
+            "The relations that kept their oid, which the current code builds or reads: "
+            + (", ".join(f"`{k}`" for k in kept if k in used) or "none")
+            + ".",
             "",
             "The relations that kept their oid, which the current code neither builds nor reads: "
             + (", ".join(f"`{k}`" for k in kept if k not in used) or "none")
