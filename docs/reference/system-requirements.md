@@ -125,7 +125,7 @@ The same stack, on the same server and with the same limits, `WAREHOUSE_DB_MEMOR
 | Conversions | Conversions by category over time | 1.75 s | 1.74 s |
 | Conversions | Key events of web analytics over time | 0.12 s | 0.09 s |
 
-Thirteen of the 22 cards are above 2 seconds in both series. The causes are those of the agency, with 5.3 times the rows: each mention of `conversions_primary` costs about 8 seconds over the 504,000 rows of campaigns of the 12 weeks, and the card Ads groups 6.7 million rows of ads. The values of the linked filters at their first use took 0.20 to 0.83 seconds. The first use of the values of the 96 fields that are a list took 81.1 seconds, and the scan after it 78.0 seconds, which probed 84 fields in 12 queries, with the load of the host at 5.7 before it, two minutes after a start. Metabase peaked at 1,330 MiB and `warehouse-db` at 926 MiB, with no process stopped at a limit.
+Eleven of the 22 cards are above 2 seconds in both series. The causes are those of the agency, with 5.3 times the rows: each mention of `conversions_primary` costs about 8 seconds over the 504,000 rows of campaigns of the 12 weeks, and the card Ads groups 6.7 million rows of ads. The values of the linked filters at their first use took 0.20 to 0.83 seconds. The first use of the values of the 96 fields that are a list took 81.1 seconds, and the scan after it 78.0 seconds, which probed 84 fields in 12 queries, with the load of the host at 5.7 before it, two minutes after a start. Metabase peaked at 1,330 MiB and `warehouse-db` at 926 MiB, with no process stopped at a limit.
 
 ### The disk of the limit
 
