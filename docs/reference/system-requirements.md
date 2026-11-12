@@ -19,6 +19,124 @@ On macOS, Docker Desktop sets the memory, CPUs and disk of its virtual machine i
 
 The CeleryExecutor variant needs more: its broker and its worker come on top of the services of the default variant, and 12 GB of memory for Docker is recommended for it, which `preflight` checks ([ADR-0022](../adr/0022-budget-the-memory-by-variant-and-mode.md)); the minimum stays 6 GB.
 
+## Profiles
+
+The resources above and the defaults of `.env.example` are those of one business. [ADR-0040](../adr/0040-size-the-stack-by-profiles-and-derive-the-settings-of-postgresql.md) names two larger scales, an agency and the limit of one server, each with its server and its limit of `warehouse-db`, from which `./agoranomos` derives the settings of PostgreSQL ([Configuration](configuration.md#the-settings-of-postgresql-of-the-warehouse)). The block "Agency profile" of `.env.example` holds the limits of an agency, commented out: set each of its lines in `.env` in place of the same setting, and run `./agoranomos up`.
+
+| Profile | Accounts | Rows of ads a day | Data over 36 months | Active queries | Server | `WAREHOUSE_DB_MEMORY` | Limits in server mode | How it is known |
+|---|---|---:|---:|---:|---|---:|---:|---|
+| One business, the defaults | 10 to 20 | Up to 6,400 | 1.6 GB, measured | 8 | 8 GB, 4 vCPUs | 384 MiB | 7,552 MiB | Measured: the defaults of `.env.example`, from the demo and the stack tests, and the warehouse on synthetic data (ADR-0040) |
+| Agency | About 25 active a day, up to 200 in all | 15,000 | 5.2 GB, by proportion from 1.9 GB over 400 days | 20 | 16 GB, 8 vCPUs | 3 GiB | 10,240 MiB | Measured on synthetic data over 400 days, on a server of 2 cores and 4 threads (below); a server of 8 vCPUs is not measured |
+| The limit of one server | 200 active | 80,000 | 30 to 35 GB of data, estimated, and the disk below | 20 | 32 GB, 8 vCPUs | 16 GiB | About 24 GiB, estimated | An estimate: the transform was measured at this density on 24 months (R5, #191), the cards over 100 days (below), and the full 36 months on a server with a cloud disk are not measured (R6, #192) |
+
+The sum of the limits counts every service of server mode at its limit and the largest group of one-shot jobs that can run at the same time, as the budget of each variant does ([Memory limits](#memory-limits)): the agency adds 2,688 MiB of `warehouse-db` to the 7,552 MiB of one business. A unit test checks that the block "Agency profile" raises only settings of `.env.example`, and that its limits fit the 16 GB of its server, less the 512 MiB that Docker keeps, in both variants and in local and server mode.
+
+### The agency on synthetic data
+
+`tests/stack/synthetic.py` writes the core of a running stack at the density of a profile, and `tests/stack/test_profile.py` measures it through the API of Metabase ([How to measure](#how-to-measure)). The data of the agency: 200 accounts, of which 25 have statistics on every day, each with 45 campaigns, 225 ad groups and 600 ads, and three conversion actions a day on each campaign, so 15,000 rows of ads, 5,625 of ad groups, 1,125 of campaigns and 3,375 of conversions a day; over the 400 days to 11 November 2026, 6.0 million rows of ads, and 1.9 GB of warehouse. The generator wrote it in 289 seconds. The dashboard Advertising reads its default filters, the 12 weeks before this one by week.
+
+It ran on the test server of the project, an Intel Core i5-3230M of 2012 with 2 cores and 4 threads (x86-64, Ubuntu 24.04, 7.6 GiB, Docker Engine 29.0.2), on 11 November 2026, in local mode without the demo, with the LocalExecutor, `WAREHOUSE_DB_MEMORY=3g` and the other limits at their defaults. The load of the host over a minute was 0.6 to 2.3 before each measurement of Metabase, and 4.2 before the run of the transform, which came right after a start, with nothing else in Docker but a database of another project that stood idle.
+
+**The cards.** Each of the 22 cards of questions ran four times with the default filters and the cache of Metabase off, so that each run queried the warehouse, in two series, before and after a start of the stack again; the table gives the median of each card, the time of the call to the API of Metabase. Five cards are above the threshold of 2 seconds of [ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md) in both series, in bold:
+
+| Tab | Card | Median, first series | Median, second series |
+|---|---|---:|---:|
+| Overview | Spend | 0.36 s | 0.31 s |
+| Overview | Conversions | 1.88 s | 1.74 s |
+| Overview | Cost per conversion | 1.92 s | 1.79 s |
+| Overview | ROAS | 0.26 s | 0.29 s |
+| Overview | Clicks | 0.19 s | 0.20 s |
+| Overview | CTR | 0.18 s | 0.21 s |
+| Overview | CPC | 0.24 s | 0.26 s |
+| Overview | Key events of web analytics | 0.10 s | 0.12 s |
+| Overview | Spend and conversions over time | 1.93 s | 1.78 s |
+| Overview | Platforms | **3.46 s** | **3.16 s** |
+| Overview | Spend by client | 0.20 s | 0.21 s |
+| Overview | Top campaigns by spend | **4.04 s** | **3.70 s** |
+| Overview | Last loads | 0.08 s | 0.07 s |
+| Platforms | Results by platform | **5.09 s** | **4.88 s** |
+| Platforms | Spend by platform over time | 0.27 s | 0.31 s |
+| Platforms | Conversions by platform over time | 1.83 s | 1.70 s |
+| Campaigns | Campaigns | **4.11 s** | **3.72 s** |
+| Ad groups and ads | Ad groups | 1.55 s | 1.56 s |
+| Ad groups and ads | Ads | **4.03 s** | **4.01 s** |
+| Conversions | Conversions by action | 0.59 s | 0.61 s |
+| Conversions | Conversions by category over time | 0.43 s | 0.43 s |
+| Conversions | Key events of web analytics over time | 0.10 s | 0.12 s |
+
+Two causes make the five, as `EXPLAIN ANALYZE` of the queries shows:
+
+- **The conversions of the primary actions.** `conversions_primary` of the view of the campaigns is a subquery of the conversions by action, which PostgreSQL runs for each row of the view that a question reads, and again for each place where the question names the column ([ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md)): the 12 weeks of the agency are 94,500 rows of campaigns, and each mention of the column took about 1.6 seconds on this server: the spend by platform took 93 milliseconds, with the column once 1.7 seconds, and with it twice 3.3 seconds. The cards that name it once take 1.7 to 1.9 seconds, close to the threshold, those that name it twice, Platforms, Top campaigns by spend and Campaigns, 3.2 to 4.1, and Results by platform, which names it three times, 4.9 to 5.1.
+- **The grain of the ads.** The card Ads groups the 1.26 million rows of ads of the 12 weeks by ad, with no filter required, as ADR-0037 expected: 4.0 seconds.
+
+A card above the threshold moves to an aggregate by ADR-0037, and the stack test of the cards fails on it: the change of the view or of the cards is a decision of its own, which this measurement does not make. These times come from a CPU of 2012 with four threads, and those of a server of 8 vCPUs are not measured.
+
+**The other measurements**, in the same two series:
+
+| What | First series | Second series |
+|---|---|---|
+| The values of the linked filters of the campaigns and of the accounts, at their first use, with no filter and with each of five clients | 0.20 to 0.54 s | 0.21 to 0.61 s |
+| 20 clients at once, each opening the overview three times for a client, 780 queries with the cache of Metabase: median, 95th percentile and longest query | 0.82, 3.09 and 4.55 s, no failure | 0.98, 2.57 and 5.50 s, no failure |
+| The same: an overview of 13 cards, one after another, median and longest | 12.4 and 24.9 s | 13.4 and 23.4 s |
+
+During the 20 clients the load of the host rose from 1.6 to 11, which those clients made on its four threads.
+
+**The scan of the values of fields.** Metabase 0.64.1 scans only the fields whose values it holds already, which it makes when a filter first asks for them, and skips the others (`src/metabase/sync/field_values.clj` at the tag v0.64.1). On these stacks no filter of such a field had been opened, so the scans of the two series made no query, and their 1.1 and 1.8 seconds measured nothing. The test therefore first asks for the values of every field of the marts that is a list, 96 fields ([Describe the marts](describe-the-marts.md)), as the filters of the dashboards ask for them over time, and then runs the scan, which reads the fields of each mart in one query. In a third run, on 12 November 2026, at the density of the agency and with the load of the host at 1.5 before it, the scan took 68.0 seconds and probed 84 fields in 12 queries, one for each mart that has such fields; their values were there already, from a run at the density of the limit just before, so asking for them took 3.0 seconds and was no first use. The scan reads every row of each view, so its time follows the rows of the whole history and not those of a day: by proportion, about 3 minutes for the 36 months of an agency and about 14 minutes for those of the limit, both estimates.
+
+**A run of the transform** beside the core of the agency took 789 seconds, and succeeded, against 812 seconds for the first run on the empty model before the generator: the raw layer held no load, so the run wrote no window of the profile, and its time does not grow with the core. R5 (#191) measured the write of windows at the density of the limit.
+
+**The memory**, the peaks of `scripts/memory_report.py` over the measurements:
+
+| Service | Limit | The generator | Metabase, first series | The transform | Metabase, second series |
+|---|---:|---:|---:|---:|---:|
+| `warehouse-db` | 3,072 MiB | 918 MiB | 980 MiB | 165 MiB | 596 MiB |
+| `metabase` | 2,176 MiB | 1,328 MiB | 1,345 MiB | 1,496 MiB | 1,531 MiB |
+| `airflow-scheduler`, the tasks | 1,280 MiB | 439 MiB | 428 MiB | 943 MiB | 431 MiB |
+| Every running service | 8,704 MiB | 3,817 MiB | 3,938 MiB | 3,697 MiB | 3,695 MiB |
+
+No process was stopped at a limit and no container restarted. So the profile raises only `WAREHOUSE_DB_MEMORY`: Metabase with 20 clients at once peaked at 1,531 MiB, which the formula of [Memory limits](#memory-limits) turns into 1,920 MiB, below its default of 2,176 MiB, where [ADR-0040](../adr/0040-size-the-stack-by-profiles-and-derive-the-settings-of-postgresql.md) had estimated 3 GiB, and the tasks peaked at 943 MiB of their 1,280 MiB. A larger limit of the database is the decision of ADR-0040, which these numbers do not test: at 980 MiB the warehouse of 1.9 GB used a third of it, and the 36 months of an agency, 5.2 GB by proportion, would use more of its cache.
+
+### The density of the limit on synthetic data
+
+The same stack, on the same server and with the same limits, `WAREHOUSE_DB_MEMORY=3g` among them, held the density of the limit: 200 accounts with statistics on every day, each with 30 campaigns, 150 ad groups and 400 ads, so 80,000 rows of ads a day, over the 100 days to 11 November 2026, 8.0 million rows of ads and 2.5 GB of warehouse, which the generator wrote in 389 seconds. The limit asks for 16 GiB of `warehouse-db` and a server of 32 GB, which the server of 7.6 GiB cannot give, so these times are those of the density of the limit with the memory of an agency. The cards ran as for the agency, in two series, before and after a start of the stack again, the load of the host 1.6 to 1.7 before them:
+
+| Tab | Card | Median, first series | Median, second series |
+|---|---|---:|---:|
+| Overview | Spend | 0.95 s | 0.77 s |
+| Overview | Conversions | **9.02 s** | **8.98 s** |
+| Overview | Cost per conversion | **9.40 s** | **9.35 s** |
+| Overview | ROAS | 0.96 s | 0.85 s |
+| Overview | Clicks | 0.50 s | 0.48 s |
+| Overview | CTR | 0.53 s | 0.49 s |
+| Overview | CPC | 0.80 s | 0.79 s |
+| Overview | Key events of web analytics | 0.10 s | 0.10 s |
+| Overview | Spend and conversions over time | **9.31 s** | **9.43 s** |
+| Overview | Platforms | **16.74 s** | **16.78 s** |
+| Overview | Spend by client | 0.60 s | 0.56 s |
+| Overview | Top campaigns by spend | **19.98 s** | **20.04 s** |
+| Overview | Last loads | 0.07 s | 0.07 s |
+| Platforms | Results by platform | **24.60 s** | **24.43 s** |
+| Platforms | Spend by platform over time | 0.93 s | 0.88 s |
+| Platforms | Conversions by platform over time | **9.04 s** | **9.18 s** |
+| Campaigns | Campaigns | **19.92 s** | **20.11 s** |
+| Ad groups and ads | Ad groups | **8.87 s** | **8.74 s** |
+| Ad groups and ads | Ads | **29.50 s** | **27.08 s** |
+| Conversions | Conversions by action | **2.87 s** | **2.74 s** |
+| Conversions | Conversions by category over time | 1.75 s | 1.74 s |
+| Conversions | Key events of web analytics over time | 0.12 s | 0.09 s |
+
+Eleven of the 22 cards are above 2 seconds in both series. The causes are those of the agency, with 5.3 times the rows: each mention of `conversions_primary` costs about 8 seconds over the 504,000 rows of campaigns of the 12 weeks, and the card Ads groups 6.7 million rows of ads. The values of the linked filters at their first use took 0.20 to 0.83 seconds. The first use of the values of the 96 fields that are a list took 81.1 seconds, and the scan after it 78.0 seconds, which probed 84 fields in 12 queries, with the load of the host at 5.7 before it, two minutes after a start. Metabase peaked at 1,330 MiB and `warehouse-db` at 926 MiB, with no process stopped at a limit.
+
+### The disk of the limit
+
+The estimate of 30 to 35 GB of data at the limit leaves out what a run of the transform needs on the disk beside the data. R5 (#191) measured a real `dbt build` of a window of 90 days at the density of the limit, on 24 months of data with a limit of 4 GiB, on the NVMe of a Mac, on 1 and 3 November 2026:
+
+- **The WAL.** A window of 90 days wrote 9.3 to 12.0 GiB of WAL, 1.3 to 3.4 GiB of it for the tests and the temporary tables that only read, as the checksums of the pages make the first read of a page after a write write it to the WAL. `pg_wal` therefore fills up to `max_wal_size` between checkpoints, a soft limit that a heavy write can pass: 8 GB at the limit of 16 GiB ([Configuration](configuration.md#the-settings-of-postgresql-of-the-warehouse)).
+- **The temporary files.** 8.1 to 9.1 GiB in a run, up to 2.6 GiB at once.
+- **The free space of the partitions of the window.** About 1.3 GB, which the partitions keep until the next run rewrites them.
+
+So the warehouse at the limit takes about 30 to 35 GB of data, 8 GB of WAL, 2.6 GiB of temporary files at once and 1.3 GB of free space, about 42 to 47 GB, before the backups, which [Back up and restore](../how-to/back-up-and-restore.md) counts at about 82 GB at the limit. The full 36 months, 147 million rows of ads, and a cloud disk are not measured: all these numbers come from 24 months on an NVMe.
+
 ## Memory limits
 
 Every service has a memory limit, with no swap ([Configuration](configuration.md#memory-limits)). On the recommended memory, 8 GB or 12 GB for the CeleryExecutor variant, a limit keeps a service that runs short of memory from taking it from the others: the kernel stops a process of that service when the service reaches its limit, and the other services go on. On the minimum of 6 GB the limits do less, as the end of this section says.
@@ -277,3 +395,17 @@ uv run python scripts/memory_report.py --title "Local, idle" --seconds 600
 CI does the same in every run of the stack tests, and adds the table to the summary of the job.
 
 In the table, `n/a` means that there is nothing to read: a one-shot job that has exited, or a machine without cgroup v2. `unread` means that `docker inspect` or `docker exec` failed for that container, for example because it stopped while the table was made, as a container that the kernel stopped at its limit can: the rest of the table still comes out, and when the limit of a running service is `unread`, so is the total of the limits. A line of `docker stats` that cannot be read is left out, and a note under the table says how many were, such as `1 line of docker stats could not be read and was left out.` The peaks then come from fewer samples, so they can be a little lower than the real ones.
+
+To measure a profile, start a stack without the demo, `COMPOSE_PROFILES=core` in `.env`, with the limits of the profile, and build the model and start it again as the job without the demo of the workflow Stack does, so that Metabase shows the marts and the dashboard Advertising. Then write the synthetic data and measure, in the root of the checkout:
+
+```bash
+uv run python tests/stack/synthetic.py generate agency        # or limit; --days for another period
+AGORANOMOS_PROFILE=agency AGORANOMOS_PROFILE_REPORT=profile.md \
+    uv run python scripts/memory_report.py --title "Agency, Metabase" \
+    -- uv run pytest tests/stack/test_profile.py -m "not transform"
+AGORANOMOS_PROFILE=agency uv run python scripts/memory_report.py --title "Agency, the transform" \
+    -- uv run pytest tests/stack/test_profile.py -m transform
+uv run python tests/stack/synthetic.py remove
+```
+
+The tests append their tables to the file of `AGORANOMOS_PROFILE_REPORT`. The test of the cards fails when the median of a card is above 2 seconds, the threshold of [ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md). The cache of Metabase is off while the cards run, and back to its policy after. The run of the transform gives every account the client of the settings of the model, and the test gives the synthetic accounts theirs back. `remove` deletes every row that the generator wrote, and the partitions that it made. The workflow Profile does all of this but the removal on a runner of GitHub, which it then throws away, every Wednesday, and by hand with a profile and a number of days, and adds the tables to the summary of its job (`.github/workflows/profile.yml`).

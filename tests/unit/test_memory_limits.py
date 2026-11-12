@@ -181,10 +181,11 @@ def largest_group(jobs: dict[str, int]) -> tuple[frozenset[str], int]:
     return best
 
 
-def budgeted(executor: str, mode: str = "local") -> int:
+def budgeted(executor: str, mode: str = "local", settings: dict[str, int] | None = None) -> int:
     """What the limits of a variant in a mode add up to by ADR-0022 and ADR-0048: every service that
-    runs all the time, and the largest group of one-shot jobs that can run at the same time."""
-    chosen = variant(executor, mode)
+    runs all the time, and the largest group of one-shot jobs that can run at the same time.
+    settings gives limits in MiB by their settings of .env, in place of the defaults."""
+    chosen = variant(executor, mode, settings)
     jobs = one_shot_jobs()
     running = sum(limit for service, limit in chosen.items() if service not in jobs)
     _, at_once = largest_group({s: limit for s, limit in chosen.items() if s in jobs})
@@ -196,22 +197,30 @@ def env_example() -> dict[str, str]:
     return dict(line.split("=", 1) for line in lines if line and not line.startswith("#"))
 
 
-def variant(executor: str, mode: str = "local") -> dict[str, int]:
-    """The limit of each service of a variant in a mode, in MiB, with the defaults: the services
-    of the profiles of the mode. The Celery overlay sets the limits of the services that it adds and
-    of the scheduler, which runs no task there; the worker extends the scheduler of compose.yaml,
-    and takes its limit, that of the tasks."""
+def variant(
+    executor: str, mode: str = "local", settings: dict[str, int] | None = None
+) -> dict[str, int]:
+    """The limit of each service of a variant in a mode, in MiB, with the defaults, or with the
+    values of settings for the settings of .env that it names: the services of the profiles of the
+    mode. The Celery overlay sets the limits of the services that it adds and of the scheduler,
+    which runs no task there; the worker extends the scheduler of compose.yaml, and takes its
+    limit, that of the tasks."""
+    values = settings or {}
+
+    def value(limit: Limit) -> int:
+        return values.get(limit.setting or "", limit.default)
+
     active = MODES[mode]
     base = limits("compose.yaml")
-    chosen = {service: limit.default for service, limit in base.items() if limit.profiles & active}
+    chosen = {service: value(limit) for service, limit in base.items() if limit.profiles & active}
     if executor == "local":
         return chosen
     overlay = {
-        service: limit.default
+        service: value(limit)
         for service, limit in limits("compose.celery.yaml").items()
         if limit.profiles & active
     }
-    return {**chosen, "airflow-worker": base["airflow-scheduler"].default, **overlay}
+    return {**chosen, "airflow-worker": value(base["airflow-scheduler"]), **overlay}
 
 
 def test_every_limit_is_also_the_limit_of_swap():
@@ -328,6 +337,46 @@ def test_a_merge_key_brings_in_what_an_anchor_waits_for():
         "airflow-init": COMPLETED,
         "metadata-export": COMPLETED,
     }
+
+
+# The block "Agency profile" of .env.example (ADR-0040): each limit that the profile of an agency
+# raises, on a line of its own, commented out with three spaces after the #, so that
+# ./agoranomos init copies none of them into .env, the defaults stay those of one business, and
+# env_example() reads none of them.
+AGENCY_LIMIT = re.compile(r"^#   ([A-Z_]+_MEMORY)=(\d+[mg])$")
+# The server of the profile of an agency, 16 GB (ADR-0040), with the 512 MiB below it that
+# ADR-0022 leaves to what Docker reports, as preflight counts 8 GB as 7,680 MiB.
+AGENCY_BUDGET_MIB = 16 * 1024 - 512
+
+
+def agency_profile() -> dict[str, int]:
+    """The limits of the block Agency profile of .env.example, in MiB, by setting."""
+    lines = (REPO_ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
+    return {m.group(1): mib(m.group(2)) for line in lines if (m := AGENCY_LIMIT.match(line))}
+
+
+def test_the_agency_profile_raises_limits_of_env_example():
+    profile = agency_profile()
+    assert profile, 'no line of the block "Agency profile" in .env.example'
+    example = env_example()
+    for setting, value in profile.items():
+        assert setting in example, setting
+        assert value > mib(example[setting]), setting
+
+
+@pytest.mark.parametrize("mode", sorted(MODES))
+@pytest.mark.parametrize("executor", sorted(BUDGET_MIB))
+def test_the_agency_profile_fits_its_server_in_each_mode(executor, mode):
+    total = budgeted(executor, mode, agency_profile())
+    assert total <= AGENCY_BUDGET_MIB, f"the agency in {executor}, {mode} mode: {total} MiB"
+
+
+def test_the_reference_gives_the_sum_of_the_agency_profile():
+    # The table of the profiles of docs/reference/system-requirements.md states the sum of the
+    # limits of the agency with the LocalExecutor in server mode, as an agency runs on a server.
+    page = (REPO_ROOT / "docs" / "reference" / "system-requirements.md").read_text(encoding="utf-8")
+    total = budgeted("local", "server", agency_profile())
+    assert f"{total:,} MiB" in page.split("## Profiles", 1)[1].split("\n## ", 1)[0]
 
 
 def test_the_reference_gives_the_defaults_of_env_example():
