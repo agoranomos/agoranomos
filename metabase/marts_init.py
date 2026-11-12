@@ -23,8 +23,12 @@ What it builds, with the var rebuild_views:
   warehouse without the views of staging, and the views of marts without the snapshots.
 * Where core.fx_rates_daily holds rates and none in the reporting currency of .env, as after a
   change of AGORANOMOS_REPORTING_CURRENCY, also core_fx_rates_daily, with the var recompute_rates,
-  which computes every day of the rates in the new currency (ADR-0042): the views take the new
-  currency as they are built again.
+  which computes every day of the rates in the new currency from what the core holds (ADR-0042),
+  and the view ops.ops_rates: the views take the new currency as they are built again. The job
+  then reads ops.ops_rates, and when the core cannot give the rates of some days in the new
+  currency, as the raw layer has lost the loads of the rates that the core accepted, it says so in
+  a line of warning, which ./agoranomos up shows: the next load of the rates takes their history
+  again (agoranomos_pipelines/rates.py).
 
 The job takes the advisory lock of dbt/macros/marts_init.sql first, exclusive, on a connection of
 its own, and keeps it until dbt ends: the nodes of a run of the transform that write take it,
@@ -63,6 +67,9 @@ WAIT_FOR_LOCK = "SET lock_timeout = '11min'"
 # that a build of +marts builds: the other snapshots wait for the transform.
 SNAPSHOTS = ("dim_campaign_versions",)
 RATES = "core_fx_rates_daily"
+# The view of Ops of the rates, which names the days without a rate in the reporting currency.
+OPS_RATES = "ops_rates"
+GAPS = "SELECT first_day_without_rate, days_without_rate FROM ops.ops_rates"
 # How long dbt may take: a build of the whole graph over empty tables takes minutes on a slow
 # machine.
 DBT_TIMEOUT = 1800
@@ -101,6 +108,7 @@ def command(state: State, dbt: str = DBT, project: str = PROJECT, work: str = WO
         variables["recompute_rates"] = True
         if state.snapshots:
             selected.append(RATES)
+        selected.append(OPS_RATES)
     return [
         dbt,
         "--no-use-colors",
@@ -132,6 +140,24 @@ def described(state: State, currency: str) -> str:
     if state.other_currency:
         line += f", and the rates of the core in {currency}, the new reporting currency"
     return line
+
+
+def gaps_line(connection: Any, currency: str) -> str | None:
+    """The warning about the days whose rates the core cannot give in the reporting currency, as
+    ops.ops_rates names them, or None when it names none."""
+    with connection.cursor() as cursor:
+        cursor.execute(GAPS)
+        row = cursor.fetchone()
+    if row is None or not row[1]:
+        return None
+    first, days = row
+    return (
+        f"warning: the core holds no rate into {currency} on {days} days from {first} on, of the "
+        "currencies of the accounts, as their loads of the rates are accepted and have left the "
+        "raw layer: the next load of the rates takes their history again, agoranomos_ecb_daily "
+        "or with the demo alone agoranomos_demo_daily, and until the transform reads it, the "
+        f"amounts of those days in {currency} are empty (ADR-0042)"
+    )
 
 
 def first_line(error: BaseException) -> str:
@@ -225,6 +251,15 @@ def main(
                 file=sys.stderr,
             )
             return result.returncode if result.returncode > 0 else 1
+        if state.other_currency:
+            # A line to read, not a failure: the stack starts, and the loads of the rates close
+            # the days.
+            try:
+                line = gaps_line(connection, currency)
+            except Exception as error:
+                line = f"warning: cannot read ops.ops_rates: {first_line(error)}"
+            if line:
+                log(line)
         log("done")
         return 0
     finally:

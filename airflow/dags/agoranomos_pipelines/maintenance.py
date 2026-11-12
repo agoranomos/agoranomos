@@ -232,16 +232,22 @@ def loader_credentials() -> dict[str, object]:
 
 
 @contextmanager
-def connected(credentials: dict[str, object], *, autocommit: bool = False) -> Iterator:
-    """A connection to the warehouse, closed at the end. With autocommit, each statement commits by
-    itself, as VACUUM, which runs in no transaction, needs, and a view of the statistics is read
-    anew for each statement. The warnings of the server, such as those of a VACUUM or an ANALYZE
-    that skips a table, go to the log."""
+def connected(
+    credentials: dict[str, object],
+    *,
+    autocommit: bool = False,
+    application_name: str = "agoranomos_maintenance",
+) -> Iterator:
+    """A connection to the warehouse, closed at the end, with the name of its application, which
+    pg_stat_activity shows. With autocommit, each statement commits by itself, as VACUUM, which
+    runs in no transaction, needs, and a view of the statistics is read anew for each statement.
+    The warnings of the server, such as those of a VACUUM or an ANALYZE that skips a table, go to
+    the log."""
     # Imported here and not at the top: the DAG processor parses the file of the DAG often.
     import psycopg2
 
     connection = psycopg2.connect(
-        **credentials, connect_timeout=10, application_name="agoranomos_maintenance"
+        **credentials, connect_timeout=10, application_name=application_name
     )
     connection.autocommit = autocommit
     with closing(connection):

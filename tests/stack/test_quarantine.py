@@ -43,9 +43,9 @@ ASSETS = 5
 ACCOUNTS = {account.account_id: account for account in world.ACCOUNTS}
 BAD, GOOD = ACCOUNTS["4170000012"], ACCOUNTS["4170000011"]
 # The account of demo_social whose currency the test changes to one that the rates of the demo, of
-# euros in US dollars, do not have.
+# euros in US dollars and pounds sterling, do not have.
 UNRATED = ACCOUNTS["802000000000002"]
-UNRATED_CURRENCY = "GBP"
+UNRATED_CURRENCY = "JPY"
 LISTED_SOCIAL = (
     "SELECT currency FROM raw_demo_social.ad_accounts WHERE account_id = '{id}' "
     "ORDER BY _dlt_load_id::numeric DESC LIMIT 1"

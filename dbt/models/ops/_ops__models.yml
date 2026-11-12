@@ -26,13 +26,18 @@ models:
         description: How many loads of the account the journal holds, the first load among them.
   - name: ops_rates
     description: >-
-      The age of the last rate into the reporting currency that the source of the rates published,
-      as core.fx_rates_daily holds it (ADR-0042): one row once the core holds a published rate, with
-      the source, the day of the last rate, how many business days, Monday to Friday, have passed
-      since that day up to the day on which the view is read, and whether that is more than 3. The
-      ECB publishes on the working days of TARGET, and its daily load takes the days up to
+      The rates of the core into the reporting currency, in one row (ADR-0042). The age of the last
+      rate that the source of the rates published, as core.fx_rates_daily holds it, once it holds
+      one: the source, the day of the last rate, how many business days, Monday to Friday, have
+      passed since that day up to the day on which the view is read, and whether that is more than
+      3. The ECB publishes on the working days of TARGET, and its daily load takes the days up to
       yesterday, so the last rate is usually 1 business day old; a closing day of TARGET counts as a
-      business day. ./agoranomos status warns when it is late.
+      business day. And the days without a rate: from the first to the last day of the facts of the
+      accounts of each currency but the reporting currency, the days on which the core holds no
+      rate of the currency into the reporting currency, as after a change of the reporting currency
+      to one whose older rates the core cannot take from its own rows, the first of them and how
+      many. The next load of the rates takes their history again. ./agoranomos status warns when
+      the rate is late, and when a day has no rate.
     columns:
       - name: reporting_currency
         description: '{{ doc("reporting_currency") }}'
@@ -40,7 +45,8 @@ models:
         description: '{{ doc("rate_source") }}'
       - name: last_rate_date
         description: >-
-          The day of the last rate that the source published, as core.fx_rates_daily holds it.
+          The day of the last rate that the source published, as core.fx_rates_daily holds it;
+          none while it holds no such rate into the reporting currency.
       - name: business_days_since_rate
         description: >-
           How many days, Monday to Friday, there are after last_rate_date up to the day on which
@@ -49,6 +55,16 @@ models:
         description: >-
           Whether business_days_since_rate is more than 3: the loads of the rates brought no newer
           rate for more than 3 business days.
+      - name: first_day_without_rate
+        description: >-
+          The first day, from the first day of the facts of the accounts of each currency but the
+          reporting currency, on which the core holds no rate of that currency into the reporting
+          currency; none when every such day has one.
+      - name: days_without_rate
+        description: >-
+          How many calendar days, from the first to the last day of the facts of the accounts of
+          each currency but the reporting currency, have no rate of that currency into the
+          reporting currency in the core: 0 when each of them has one.
   - name: ops_history
     description: >-
       How far back the loads of each account of each platform reach, one row each, from the loads

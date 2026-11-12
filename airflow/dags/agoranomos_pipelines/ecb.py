@@ -17,7 +17,11 @@ the first day of the month 37 months back, one month before the history of Googl
 so that its first day has a rate; a later one, the days from the day after the last that a whole
 load took, or from 14 days back when that is earlier, so that a rate that the ECB corrects, or that
 an earlier load missed, comes again and replaces a carried one in core.fx_rates_daily (ADR-0042).
-Both end yesterday in Frankfurt, where the ECB publishes."""
+When the core lacks rates into the reporting currency on days whose loads it has accepted, as
+after a change of AGORANOMOS_REPORTING_CURRENCY, a load takes the history again from the first of
+those days, or earlier (agoranomos_pipelines/rates.py). All end yesterday in Frankfurt, where the
+ECB publishes. The journal gives the first load and a load of the history the kind history, and a
+later load the kind window (ADR-0038)."""
 
 from __future__ import annotations
 
@@ -34,13 +38,16 @@ from zoneinfo import ZoneInfo
 import dlt
 from dlt.sources.helpers.requests import Client
 
+from agoranomos_pipelines import rates
 from agoranomos_pipelines.loads import (
     APPEND,
     DLT_SETTINGS,
+    HISTORY,
     LOAD_HINTS,
     LOADED,
     LOADS,
     TEXT,
+    WINDOW,
     destination,
     has_loads,
     or_marker,
@@ -98,14 +105,21 @@ def history_start(now: datetime) -> date:
     return date(months // 12, months % 12 + 1, 1)
 
 
-def window(now: datetime, last_end: date | None) -> tuple[date, date]:
-    """The days of a load at now: the history when no load has taken a day yet, else the days
-    from the day after the last loaded, or from the first of the last WINDOW_DAYS when that is
-    earlier, to yesterday."""
+def window(
+    now: datetime, last_end: date | None, history: date | None = None
+) -> tuple[date, date, str]:
+    """The days of a load at now and its kind: the history when no load has taken a day yet, from
+    history when the core needs it earlier (rates.history_from), else the days from the day after
+    the last loaded, or from the first of the last WINDOW_DAYS when that is earlier, to yesterday,
+    and those from history, as a load of the history, when it is earlier still."""
     end = yesterday(now)
     if last_end is None:
-        return history_start(now), end
-    return min(last_end + timedelta(days=1), end - timedelta(days=WINDOW_DAYS - 1)), end
+        first = history_start(now)
+        return (first if history is None else min(first, history)), end, HISTORY
+    usual = min(last_end + timedelta(days=1), end - timedelta(days=WINDOW_DAYS - 1))
+    if history is not None and history < usual:
+        return history, end, HISTORY
+    return usual, end, WINDOW
 
 
 def fetch(first: date, last: date) -> str:
@@ -128,9 +142,9 @@ def rows(text: str) -> Iterator[dict[str, str]]:
     yield from csv.DictReader(io.StringIO(text))
 
 
-def journal(now: datetime, first: date, last: date) -> list[dict[str, object]]:
-    """The row of _agoranomos_loads of a load at now: a load of the rates fails whole or not at
-    all, so the row is always one of a loaded account."""
+def journal(now: datetime, first: date, last: date, kind: str) -> list[dict[str, object]]:
+    """The row of _agoranomos_loads of a load at now, with its kind: a load of the rates fails
+    whole or not at all, so the row is always one of a loaded account."""
     return [
         {
             "account_id": ACCOUNT,
@@ -140,6 +154,7 @@ def journal(now: datetime, first: date, last: date) -> list[dict[str, object]]:
             "now": now,
             "loaded_at": datetime.now(UTC),
             "status": LOADED,
+            "kind": kind,
         }
     ]
 
@@ -166,37 +181,42 @@ def last_end(pipeline) -> date | None:
 
 
 def due(now: datetime) -> bool:
-    """Whether a load at now brings anything: no load has taken the day of now in Frankfurt yet.
-    Another load on the same day asks for the same days."""
+    """Whether a load at now brings anything: no load has taken the day of now in Frankfurt yet,
+    or the core needs the history of the rates again (rates.history_from). Another load on the
+    same day asks for the same days."""
+    today = now.astimezone(TIME_ZONE).date()
     with open_pipeline() as pipeline:
         found = recorded(pipeline).get(ACCOUNT) if has_loads(pipeline) else None
-    today = now.astimezone(TIME_ZONE).date()
-    if found and found[0] >= today:
-        log.info("The rates have a load of %s already: nothing to load", today.isoformat())
-        return False
-    return True
+        if not found or found[0] < today:
+            return True
+        if rates.history_from(pipeline, CODE) is not None:
+            return True
+    log.info("The rates have a load of %s already: nothing to load", today.isoformat())
+    return False
 
 
 def load(now: datetime) -> int:
-    """Load the rates of the window of now (window()), record it in _agoranomos_loads, and return
-    the rows of rates_daily that dlt reports."""
+    """Load the rates of the window of now (window()), with the history that the core needs
+    (rates.history_from), record it in _agoranomos_loads with its kind, and return the rows of
+    rates_daily that dlt reports."""
     os.environ.update(DLT_SETTINGS)
     with open_pipeline() as pipeline:
-        first, last = window(now, last_end(pipeline))
+        first, last, kind = window(now, last_end(pipeline), rates.history_from(pipeline, CODE))
         resources = [
             dlt.resource(or_marker(rows(fetch(first, last))), name=TABLE, **own(HINTS)),
             # In the same run as the rates, so under the same _dlt_load_id: a load that does not
             # end whole has no row in _dlt_loads, and its window is read by nobody.
-            dlt.resource(journal(now, first, last), name=LOADS, **own(LOAD_HINTS)),
+            dlt.resource(journal(now, first, last, kind), name=LOADS, **own(LOAD_HINTS)),
         ]
         run(pipeline, resources)
         loaded = row_counts(pipeline).get(TABLE, 0)
     log.info(
-        "Loaded %d rows into %s.%s, the days from %s to %s",
+        "Loaded %d rows into %s.%s, the days from %s to %s, as a load of the kind %s",
         loaded,
         DATASET,
         TABLE,
         first.isoformat(),
         last.isoformat(),
+        kind,
     )
     return loaded

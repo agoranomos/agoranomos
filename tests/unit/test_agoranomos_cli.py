@@ -5222,9 +5222,36 @@ def test_up_shows_the_warnings_of_metabase_init_and_the_groups_of_the_setup(cli,
     )
     logs = [call for call in cli.docker_calls() if call.startswith("compose logs")]
     assert logs == [
-        "compose logs --no-log-prefix --no-color --since 2026-10-21T15:00:00.123456789Z "
-        "metabase-init"
+        f"compose logs --no-log-prefix --no-color --since 2026-10-21T15:00:00.123456789Z {job}"
+        for job in ("marts-init", "metabase-init")
     ]
+
+
+def test_up_shows_the_warnings_of_marts_init(cli, tmp_path):
+    # After a change of the reporting currency, the days whose rates the core cannot give in the
+    # new one (ADR-0042): a warning, and the start goes on.
+    cli.run("init")
+    warning = (
+        "the core holds no rate into GBP on 548 days from 2025-05-14 on, of the currencies of the "
+        "accounts"
+    )
+    result = cli.run(
+        "up",
+        FAKE_PS_FILE=ps_file(tmp_path, HEALTHY_PS),
+        FAKE_RUNNING="0123abcd",
+        FAKE_INSPECT="2026-10-21T15:00:00.123456789Z",
+        FAKE_LOGS="\n".join(
+            [
+                "marts-init: building the views of marts again, and the rates of the core in GBP",
+                f"marts-init: warning: {warning}",
+                "marts-init: done",
+            ]
+        ),
+        **QUICK,
+    )
+    assert result.returncode == 0, result.stderr
+    assert f"warning: {warning}" in result.stderr
+    assert "building the views" not in result.stderr
 
 
 # The OAuth clients of the MCP server of Metabase (ADR-0031): ai connect registers one through
@@ -5692,8 +5719,17 @@ def test_status_shows_the_migrations_of_the_core_applied_and_waiting(cli, tmp_pa
 
 
 # The lines of the SQL of the rates of the core: built once the transform has built ops.ops_rates,
-# then its row, separated by the unit separator.
+# then its row, separated by the unit separator, as the view of a release before this one has it,
+# without the days without a rate.
 RATES_ROW = "built\necb\x1fUSD\x1f2026-11-09\x1f{age}\x1f{late}"
+# The row of this release, with the first day without a rate and how many there are.
+GAPS_ROW = "built\n{source}\x1fGBP\x1f{day}\x1f{age}\x1f{late}\x1f{first}\x1f{days}"
+GAPS_WARNING = (
+    "the core holds no rate into GBP on {days} of the facts from 2025-05-14 on, as after a change "
+    "of AGORANOMOS_REPORTING_CURRENCY, so the amounts of those days in GBP are empty. The next "
+    "load of the rates takes their history again: trigger agoranomos_ecb_daily, or with the demo "
+    "alone agoranomos_demo_daily, in Airflow to take it now (ADR-0042)"
+)
 
 
 @pytest.mark.parametrize(
@@ -5745,6 +5781,61 @@ def test_status_says_how_old_the_last_rate_of_the_core_is(cli, tmp_path, rows, l
         assert result.stderr == ""
     else:
         assert warning in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("rows", "line", "warnings"),
+    [
+        (
+            # Every day of the facts has a rate into the reporting currency.
+            GAPS_ROW.format(source="ecb", day="2026-11-09", age=1, late="f", first="", days=0),
+            "Rates: the last rate of ecb into GBP is of 2026-11-09, 1 business day ago (ADR-0042).",
+            [],
+        ),
+        (
+            # Right after a change to a currency whose older rates the core cannot give, and no
+            # load of the rates in raw: no published rate into it yet.
+            GAPS_ROW.format(source="", day="", age="", late="", first="2025-05-14", days=548),
+            "Rates: the core holds no rate that a source published, so only the accounts in the "
+            "reporting currency enter it (ADR-0042).",
+            [GAPS_WARNING.format(days="548 days")],
+        ),
+        (
+            GAPS_ROW.format(
+                source="ecb", day="2026-11-03", age=5, late="t", first="2025-05-14", days=1
+            ),
+            "Rates: the last rate of ecb into GBP is of 2026-11-03, 5 business days ago "
+            "(ADR-0042).",
+            [
+                "the last rate of ecb is 5 business days old, more than 3",
+                GAPS_WARNING.format(days="1 day"),
+            ],
+        ),
+    ],
+    ids=["no gap", "after a change", "late and a day"],
+)
+def test_status_warns_about_the_days_without_a_rate(cli, tmp_path, rows, line, warnings):
+    # ADR-0042: ops.ops_rates names the days of the facts without a rate into the reporting
+    # currency, which the next load of the rates takes again.
+    cli.run("init")
+    result = cli.run("status", FAKE_PS_FILE=ps_file(tmp_path, STATUS_TABLE), FAKE_RATES_OUTPUT=rows)
+    assert result.returncode == 0, result.stderr
+    assert line in result.stdout.splitlines()
+    for warning in warnings:
+        assert warning in result.stderr
+    if not warnings:
+        assert result.stderr == ""
+
+
+def test_status_reads_the_days_without_a_rate_only_from_a_view_that_has_them():
+    # The view of a release before this one has no such columns, until the first run of the
+    # transform of this release builds it again.
+    script = (REPO_ROOT / "agoranomos").read_text(encoding="utf-8")
+    sql = script.split("\nrates_sql() {\n", 1)[1].split("\n}\n", 1)[0]
+    assert "attname = 'days_without_rate'" in sql
+    [with_gaps, without] = sql.split("\\else\n")
+    assert "first_day_without_rate, days_without_rate" in with_gaps
+    assert "days_without_rate" not in without
 
 
 def test_status_names_the_dag_of_the_rates_of_the_demo_when_they_are_late(cli, tmp_path):

@@ -57,6 +57,9 @@ class StandInClient:
             pipeline.dropped.append(sql)
             pipeline.earlier, pipeline.loads, pipeline.reloads = False, None, None
             return None
+        if "to_jsonb(j)" in sql or sql.startswith("SELECT count(*) FROM core.loads"):
+            # How many loads of the history of the rates wait for the core (rates.waiting_sql).
+            return [(pipeline.waiting,)]
         found = pipeline.reloads if '"_agoranomos_loads"' in sql else pipeline.loads
         if found is None:
             raise UndefinedRelation(sql)
@@ -73,6 +76,7 @@ class StandInPipeline:
         # Whether a release before v0.5 loaded the dataset, and what a load dropped of it.
         self.earlier, self.dropped, self.transactions = earlier, [], 0
         self.last_trace = None
+        self.waiting = 0
 
     def sql_client(self):
         return StandInClient(self)
@@ -117,9 +121,10 @@ def resource(data, name, **hints):
 def sources(monkeypatch):
     """The module with a stand-in for dlt, the pipelines that it makes, and how many loads each
     dataset holds (None: no table _dlt_loads yet), with what the whole loads of each dataset
-    recorded of each account in "reloads", by dataset (none: no table _agoranomos_loads yet), and
-    the datasets that a release before v0.5 loaded in "earlier"."""
-    pipelines, loads = [], {"value": None, "reloads": {}, "earlier": set()}
+    recorded of each account in "reloads", by dataset (none: no table _agoranomos_loads yet), the
+    datasets that a release before v0.5 loaded in "earlier", and what the core says of its rates
+    in "core", as rates.read_core reads it as transformer (None: no view yet)."""
+    pipelines, loads = [], {"value": None, "reloads": {}, "earlier": set(), "core": None}
     dlt = types.ModuleType("dlt")
     dlt.resource = resource
     dlt.mark = types.SimpleNamespace(materialize_table_schema=lambda: MARKER)
@@ -157,6 +162,8 @@ def sources(monkeypatch):
     for name in names:
         sys.modules.pop(name, None)
     module = importlib.import_module("agoranomos_pipelines.demo.sources")
+    monkeypatch.setattr(module.rates, "read_core", lambda: loads["core"])
+    monkeypatch.setenv("AGORANOMOS_REPORTING_CURRENCY", "GBP")
     yield module, pipelines, loads
     for name in names:
         sys.modules.pop(name, None)
@@ -627,6 +634,78 @@ def test_a_daily_load_is_due_when_an_account_has_no_load_of_its_day(sources, cap
     loaded(loads, "demo_video", 0)
     loads["reloads"].pop("raw_demo_web")
     assert module.due(NOW) is True
+
+
+def lacking(module, first_without, first_day, holds_ecb=False):
+    """What the core says after a change of the reporting currency to GBP, which no account of the
+    demo has, once the cleanup has deleted the loads of the rates that it accepted."""
+    return module.rates.CoreRates("GBP", first_without, 548, first_day, holds_ecb)
+
+
+def test_the_rates_take_their_history_again_when_the_core_lacks_the_new_currency(sources):
+    # The facts begin on 6 April 2025, and the rates of the core a week before them: the load of
+    # demo_fx takes the days from there to yesterday, as a load of the history (ADR-0042).
+    module, pipelines, loads = sources
+    from agoranomos_pipelines.demo import common, world
+
+    loaded(loads, "demo_fx", 1)
+    loads["core"] = lacking(module, date(2025, 4, 6), date(2025, 3, 30))
+    module.load_daily("demo_fx", NOW)
+    [row] = pipelines[-1].runs[-1][0][module.LOADS]
+    yesterday = common.last_final_day(NOW, world.RATES.time_zone)
+    assert (row["account_id"], row["window_from"], row["window_to"], row["kind"]) == (
+        "EUR",
+        date(2025, 3, 30),
+        yesterday,
+        "history",
+    )
+    rates = pipelines[-1].runs[-1][0]["rates_daily"]
+    assert min(r["rate_date"] for r in rates) == "2025-03-31"
+    assert {r["quote"] for r in rates} == {"USD", "GBP"}
+    # The other platforms ask nothing of the core.
+    loaded(loads, "demo_search", 1)
+    module.load_daily("demo_search", NOW)
+    assert {row["kind"] for row in pipelines[-1].runs[-1][0][module.LOADS]} == {"window"}
+
+
+def test_the_rates_of_the_demo_take_no_history_without_a_gap_or_with_the_ecb(sources):
+    module, pipelines, loads = sources
+    loaded(loads, "demo_fx", 1)
+    for core in (
+        None,
+        module.rates.CoreRates("GBP", None, 0, date(2025, 3, 30), False),
+        lacking(module, date(2025, 4, 6), date(2025, 3, 30), holds_ecb=True),
+    ):
+        loads["core"] = core
+        module.load_daily("demo_fx", NOW)
+        [row] = pipelines[-1].runs[-1][0][module.LOADS]
+        assert (row["window_to"] - row["window_from"]).days + 1 == 7, core
+        assert row["kind"] == "window", core
+
+
+def test_a_daily_load_is_due_while_the_core_needs_the_history_of_the_rates(sources):
+    module, _, loads = sources
+    from agoranomos_pipelines.demo import platforms
+
+    for code in platforms.LOAD_ORDER:
+        loaded(loads, code, 0)
+    assert module.due(NOW) is False
+    loads["core"] = lacking(module, date(2025, 4, 6), date(2025, 3, 30))
+    assert module.due(NOW) is True
+    # Not while a load of the history of the rates waits for the core.
+    original = module.open_pipeline
+
+    @contextmanager
+    def waiting(code):
+        with original(code) as pipeline:
+            pipeline.waiting = 1
+            yield pipeline
+
+    module.open_pipeline = waiting
+    try:
+        assert module.due(NOW) is False
+    finally:
+        module.open_pipeline = original
 
 
 def test_whether_a_load_is_due_depends_on_the_day_of_each_account(sources):
