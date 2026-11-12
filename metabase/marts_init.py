@@ -26,11 +26,18 @@ What it builds, with the var rebuild_views:
   which computes every day of the rates in the new currency (ADR-0042): the views take the new
   currency as they are built again.
 
+Once dbt has ended well, the job drops the relations of earlier releases in LEFTOVERS that the
+warehouse holds, each by its name and its kind, and names each in its log: no model of this
+release builds or reads them, and no build of dbt takes them with it. On a warehouse of v0.4 the
+build has by then built the views of staging again, and the views of v0.4 that read those
+relations went with the views that they read. A drop that fails, as for a view of a deployment
+over one of them, is a warning, and the relation stays until a start that can drop it.
+
 The job takes the advisory lock of dbt/macros/marts_init.sql first, exclusive, on a connection of
-its own, and keeps it until dbt ends: the nodes of a run of the transform that write take it,
-shared, so the job waits for those that write when it starts, and the nodes that come after wait
-for the job, as max_active_runs of the DAG does not reach a service outside Airflow. dbt runs
-without DBT_JOB_RUN_ID, so its own nodes do not take the lock.
+its own, and keeps it until dbt ends and the drops are done: the nodes of a run of the transform
+that write take it, shared, so the job waits for those that write when it starts, and the nodes
+that come after wait for the job, as max_active_runs of the DAG does not reach a service outside
+Airflow. dbt runs without DBT_JOB_RUN_ID, so its own nodes do not take the lock.
 
 The file uses the standard library, and psycopg2 of the virtual environment of dbt, whose Python
 runs it. Its own problems are one line that names the step, and the exit code is that of dbt.
@@ -74,6 +81,26 @@ STATE = (
     "WHERE n.nspname = 'core' AND c.relname = ANY(%s)) = %s, "
     "EXISTS (SELECT FROM core.fx_rates_daily) "
     "AND NOT EXISTS (SELECT FROM core.fx_rates_daily WHERE reporting_currency = %s)"
+)
+# The relations of earlier releases that no model, seed or snapshot of this release builds or
+# reads, and that an upgrade would otherwise leave, by name and kind; never a pattern, so that
+# nothing of a deployment or of this release goes with them. v0.4 built the statistics of the ads
+# and of the ad groups in staging as tables, which hold a copy of them, and the platforms as a view
+# over a seed, which dbt fills again in place. Its other models were views over the views of
+# staging: dbt builds a view again under its name and drops the old one with cascade, which takes
+# the views of v0.4 over it. transformer owns all three, as it ran dbt in v0.4 too.
+LEFTOVERS = (
+    ("staging.int_ad_stats_ad__unioned", "TABLE"),
+    ("staging.int_ad_stats_ad_group__unioned", "TABLE"),
+    ("staging.int_ad_platforms__unioned", "VIEW"),
+)
+# The relkind of pg_class for each kind: DROP TABLE and DROP VIEW fail on a relation of the other
+# kind, so a relation of the name and of another kind, which a person made, stays.
+RELKINDS = {"TABLE": "r", "VIEW": "v"}
+# The relkind of each name of LEFTOVERS, or NULL when the warehouse has no such relation.
+KINDS = (
+    "SELECT name, (SELECT c.relkind::text FROM pg_catalog.pg_class AS c "
+    "WHERE c.oid = to_regclass(name)) FROM unnest(%s::text[]) AS name"
 )
 
 Connect = Callable[..., Any]
@@ -174,6 +201,36 @@ def lock_and_read(connection: Any, currency: str, log: Callable[[str], None]) ->
     return State(snapshots=bool(snapshots), other_currency=bool(other_currency))
 
 
+def drop_statement(name: str, kind: str) -> str:
+    """The statement that drops a relation of LEFTOVERS: without CASCADE, so that a view of a
+    deployment over it, and the relation with it, stay."""
+    return f"DROP {kind} IF EXISTS {name}"
+
+
+def drop_leftovers(connection: Any, log: Callable[[str], None]) -> None:
+    """Drop each relation of LEFTOVERS that the warehouse holds with its kind, one line for each,
+    and a warning for one that does not go, such as one that a view depends on or that a reader
+    holds for longer than the lock_timeout of transformer."""
+    with connection.cursor() as cursor:
+        cursor.execute(KINDS, ([name for name, _ in LEFTOVERS],))
+        found = dict(cursor.fetchall())
+        for name, kind in LEFTOVERS:
+            if found.get(name) != RELKINDS[kind]:
+                continue
+            try:
+                cursor.execute(drop_statement(name, kind))
+            except Exception as error:  # any failure of psycopg2 is one line
+                log(
+                    f"warning: cannot drop the {kind.lower()} {name} of an earlier release, which "
+                    f"no model builds or reads, so it stays: {first_line(error)}"
+                )
+            else:
+                log(
+                    f"dropped the {kind.lower()} {name} of an earlier release, which no model "
+                    "builds or reads"
+                )
+
+
 def main(
     argv: Sequence[str],
     environ: Mapping[str, str] = os.environ,
@@ -225,6 +282,14 @@ def main(
                 file=sys.stderr,
             )
             return result.returncode if result.returncode > 0 else 1
+        try:
+            drop_leftovers(connection, log)
+        except Exception as error:
+            # The views are built: what is left of an earlier release waits for the next start.
+            log(
+                "warning: cannot read which relations of earlier releases are left: "
+                f"{first_line(error)}"
+            )
         log("done")
         return 0
     finally:

@@ -7,10 +7,12 @@ the relations of the warehouse with their oids, the migrations of the core that 
 the backups, the rows of the marts, the dashboards of the package and the tables and fields of the
 marts as Metabase knows them. AGORANOMOS_UPGRADE=after, once ./agoranomos up has upgraded the
 stack, checks what the upgrade must do: db-init applied and recorded every migration that waited,
-up took a backup before them whose manifest names them, marts-init built the views of the marts,
-every card of the dashboards of the package answers, on the same tables and fields of Metabase,
-the metadata of the marts is applied, the raw tables of the demo are in the shape of the current
-code, and the demo goes on, with a daily load and a run of the transform. AGORANOMOS_UPGRADE_FILE
+up took a backup before them whose manifest names them, marts-init built the views of the marts
+and dropped the relations of the release that no model builds or reads, every card of the
+dashboards of the package answers, on the same tables and fields of Metabase, the metadata of the
+marts is applied, the raw tables of the demo are in the shape of the current code, no relation of
+the release stays that the current code neither builds nor reads, and the demo goes on, with a
+daily load and a run of the transform. AGORANOMOS_UPGRADE_FILE
 names the file in which the first step leaves what it found for the second. With
 AGORANOMOS_UPGRADE_SUMMARY, the second step appends to that file, such as the summary of a job of
 CI, the rows of the marts before and after, and the relations of the previous release that the
@@ -25,12 +27,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import marts_init
 import metadata
 import pytest
 from agoranomos_pipelines.demo import platforms
@@ -93,6 +97,25 @@ APPLIED = (
     "FROM core.schema_migrations ORDER BY version"
 )
 MANIFEST = "/opt/agoranomos/manifest/manifest.json"
+# The tables that dlt keeps beside those of a source in each dataset that it loads: the record of
+# its loads, the state of its pipeline and the versions of its schema (dlt.common.schema.typing of
+# dlt 1.32.0, as of November 2026).
+DLT_TABLES = ("_dlt_loads", "_dlt_pipeline_state", "_dlt_version")
+# The extensions that db-init creates in the warehouse on every start, such as pg_stat_statements,
+# and the relations of each extension of the warehouse, by extension.
+EXTENSIONS = re.findall(
+    r"^CREATE EXTENSION IF NOT EXISTS (\w+);$",
+    (REPO_ROOT / "postgres" / "warehouse.sql").read_text(encoding="utf-8"),
+    flags=re.MULTILINE,
+)
+OF_EXTENSIONS = (
+    "SELECT concat_ws('|', e.extname, n.nspname, c.relname) FROM pg_catalog.pg_depend AS d "
+    "JOIN pg_catalog.pg_extension AS e ON e.oid = d.refobjid "
+    "JOIN pg_catalog.pg_class AS c ON c.oid = d.objid "
+    "JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace "
+    "WHERE d.classid = 'pg_catalog.pg_class'::regclass "
+    "AND d.refclassid = 'pg_catalog.pg_extension'::regclass AND d.deptype = 'e' ORDER BY 1"
+)
 
 
 def relations(env) -> dict[str, tuple[str, int]]:
@@ -225,10 +248,11 @@ def started(run: dict[str, Any]) -> float:
     return datetime.fromisoformat(moment.replace("Z", "+00:00")).timestamp()
 
 
-def built_by_the_code() -> set[str]:
-    """The relations that the dbt project of the checkout builds or reads, as schema.name: its
-    models, seeds and snapshots of every package, and its sources, from the manifest that
-    metadata-export writes for Airflow."""
+def built_by_the_code(env) -> set[str]:
+    """The relations that the current code builds or reads, as schema.name: the models, seeds and
+    snapshots of every package of the dbt project of the checkout, and its sources, from the
+    manifest that metadata-export writes for Airflow; the tables of dlt in the dataset of each
+    source, a raw schema; and the relations of the extensions that db-init creates."""
     result = compose("exec", "-T", "airflow-scheduler", "cat", MANIFEST, check=False)
     assert result.returncode == 0, f"cannot read {MANIFEST}: exit code {result.returncode}"
     found = json.loads(result.stdout)
@@ -238,7 +262,18 @@ def built_by_the_code() -> set[str]:
         if node["resource_type"] in ("model", "seed", "snapshot")
         and node["config"].get("materialized") != "ephemeral"
     }
-    return names | {f"{s['schema']}.{s['identifier']}" for s in found["sources"].values()}
+    sources = {(s["schema"], s["identifier"]) for s in found["sources"].values()}
+    names |= {f"{schema}.{table}" for schema, table in sources}
+    names |= {
+        f"{schema}.{table}"
+        for schema in {schema for schema, _ in sources if schema.startswith("raw_")}
+        for table in DLT_TABLES
+    }
+    for line in warehouse_output(env, OF_EXTENSIONS).splitlines():
+        extension, schema, name = line.split("|")
+        if extension in EXTENSIONS:
+            names.add(f"{schema}.{name}")
+    return names
 
 
 def recorded() -> dict[str, Any]:
@@ -359,6 +394,28 @@ def test_marts_init_built_the_views_of_the_marts_in_place_of_those_of_the_releas
 
 
 @after_only
+def test_marts_init_dropped_the_relations_of_the_release_that_no_model_builds_or_reads(env):
+    saved = recorded()
+    logs = compose("logs", "--no-log-prefix", "--no-color", "marts-init").stdout
+    # Those that the release built, as v0.4 built all of them: the upgrade dropped each, with a
+    # line of the log that names it.
+    left = [
+        (name, kind)
+        for name, kind in marts_init.LEFTOVERS
+        if saved["relations"].get(name, ("", 0))[0] == marts_init.RELKINDS[kind]
+    ]
+    missing = [
+        name
+        for name, kind in left
+        if f"marts-init: dropped the {kind.lower()} {name} of an earlier release" not in logs
+    ]
+    assert missing == []
+    assert "marts-init: warning:" not in logs
+    found = relations(env)
+    assert [name for name, _ in marts_init.LEFTOVERS if name in found] == []
+
+
+@after_only
 @pytest.mark.usefixtures("daily_load_paused")
 def test_every_card_of_the_dashboards_of_the_package_answers_on_the_same_tables(
     metabase_url, session
@@ -415,7 +472,7 @@ def test_the_raw_tables_of_the_demo_are_loaded_anew_and_what_stays_is_listed(env
     in_the_old_shape = [d for d in DATASETS if f"{d}.{OLD_JOURNAL}" in old]
     # What the upgrade left as it was: a relation of the release with the same oid.
     kept = sorted(key for key, value in old.items() if tuple(found.get(key, ())) == tuple(value))
-    used = built_by_the_code()
+    used = built_by_the_code(env)
     empty = sorted(
         schema
         for schema in warehouse_output(env, SCHEMAS).split()
@@ -469,6 +526,9 @@ def test_the_raw_tables_of_the_demo_are_loaded_anew_and_what_stays_is_listed(env
     ] == []
     # The marts are views that marts-init built, and no table of the release stays there.
     assert [key for key in kept if key.startswith("marts.")] == []
+    # What stays of the release with its oid, the current code builds or reads: marts-init dropped
+    # the rest.
+    assert [key for key in kept if key not in used] == []
     # The demo shows its data again.
     assert rows["ad_stats_campaign_daily"] > 0
     assert rows["web_sessions_daily"] > 0
