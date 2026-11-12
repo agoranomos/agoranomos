@@ -12,6 +12,14 @@ deletes their rows from raw (ADR-0046), so the module first loads the last 60 da
 the demo again, as of their newest load, which gives the same rates, and runs the transform with
 its acceptance skipped, which leaves the load pinned and its rows in raw. The next run accepts it.
 
+The last test changes the reporting currency to GBP, which no account of the demo has, after a run
+that accepted every load of the rates and cleaned raw: marts-init in GBP, the load of the rates of
+the demo as its task makes it in GBP, a run of the transform that pins that load and keeps it, and
+dbt in GBP by hand as a run in GBP would. It then deletes the rows of GBP from core.fx_rates_daily
+and builds ops.ops_rates and the views of the marts again in the reporting currency of the stack.
+If it is killed before that, run DELETE FROM core.fx_rates_daily WHERE reporting_currency = 'GBP'
+as postgres, dbt run --select ops_rates in the container of the tasks, and marts-init.
+
 The assertions print counts, days and codes of currencies, never a secret.
 """
 
@@ -20,10 +28,18 @@ import subprocess
 from datetime import date, timedelta
 
 import pytest
+from agoranomos_pipelines import rates
 from agoranomos_pipelines.demo import platforms
-from airflow_api import is_busy, wait_for_dag
-from raw_loads import last_moment, load_platform, transform_keeping_raw
-from stack_helpers import REPO_ROOT, active_variant, compose, wait_for, warehouse_output
+from airflow_api import is_busy, trigger, unpause, wait_for_dag, wait_for_run
+from raw_loads import last_moment, load_platform, run_in_tasks, transform_keeping_raw
+from stack_helpers import (
+    REPO_ROOT,
+    active_variant,
+    compose,
+    job_failed,
+    wait_for,
+    warehouse_output,
+)
 
 pytestmark = [
     pytest.mark.demo,
@@ -373,3 +389,177 @@ def test_a_recompute_of_every_day_writes_what_the_core_holds(env, core_rates):
     sql = compiled_rates("recompute", dbt_vars="{recompute_rates: true}")
     assert "when true\n" in sql, "the var did not reach the SQL"
     assert warehouse_output(env, f"SELECT count(*) FROM ({sql}) AS w") == "0"  # noqa: S608 (the SQL of dbt)
+
+
+# A reporting currency that is neither a currency of an account of the demo nor that of the stack,
+# whose rates the demo publishes (agoranomos_pipelines/demo/fx.py).
+NEW_CURRENCY = "GBP"
+# The daily load of a platform of the demo as its task makes it, in the reporting currency of the
+# environment, as of a moment.
+LOAD_DAILY = """
+import sys
+from datetime import datetime
+
+from agoranomos_pipelines.demo import sources
+
+sources.load_daily(sys.argv[2], datetime.fromisoformat(sys.argv[1]))
+"""
+# The newest whole load of the rates of the demo, as its journal records it.
+NEWEST_RATES = (
+    "SELECT j._dlt_load_id, j.window_from, j.window_to, j.kind "
+    "FROM raw_demo_fx._agoranomos_loads AS j "
+    "JOIN raw_demo_fx._dlt_loads AS l ON l.load_id = j._dlt_load_id AND l.status = 0 "
+    "ORDER BY j._dlt_load_id::numeric DESC LIMIT 1"
+)
+# The facts of the migrations, whose days ops.ops_rates reads.
+FACTS = (
+    "ad_stats_campaign_daily",
+    "ad_stats_ad_group_daily",
+    "ad_stats_ad_daily",
+    "ad_conversions_campaign_daily",
+    "web_sessions_daily",
+)
+# The first day of the facts of the core, of every account.
+FIRST_FACT = "SELECT least({})".format(
+    ", ".join(f"(SELECT min(report_date) FROM core.{fact})" for fact in FACTS)  # noqa: S608
+)
+# The rows of the facts of the campaigns whose day has no rate of the currency of their account
+# into a reporting currency, {currency}.
+UNRATED_FACTS = (
+    "SELECT count(*) FROM core.ad_stats_campaign_daily AS f "
+    "JOIN core.dim_account AS a USING (account_sk) "
+    "WHERE a.currency <> '{currency}' AND NOT EXISTS (SELECT FROM core.fx_rates_daily AS r "
+    "WHERE r.rate_date = f.report_date AND r.currency = a.currency "
+    "AND r.reporting_currency = '{currency}')"
+)
+GAPS = (
+    "SELECT reporting_currency, coalesce(first_day_without_rate::text, ''), days_without_rate "
+    "FROM ops.ops_rates"
+)
+
+
+def dbt_run(name, currency, *nodes):
+    """dbt run of some nodes in the container of the tasks, in a reporting currency, as transformer,
+    as a run of the transform in that currency would build them."""
+    work = f"{WORK}-{name}"
+    command = ["exec", "-T", "-e", f"AGORANOMOS_REPORTING_CURRENCY={currency}", task_service()]
+    command += [DBT, "--quiet", "--no-use-colors", "run", "--select", *nodes]
+    command += ["--project-dir", PROJECT, "--profiles-dir", PROJECT]
+    command += ["--target-path", f"{work}/target", "--log-path", f"{work}/logs"]
+    result = compose(*command, check=False)
+    assert result.returncode == 0, f"dbt run of {nodes} in {currency} exited {result.returncode}"
+
+
+def marts_init(currency=None):
+    """The job marts-init, in another reporting currency when one is given, and what it printed."""
+    command = ["run", "--rm", "--no-deps", "-T"]
+    if currency:
+        command += ["-e", f"AGORANOMOS_REPORTING_CURRENCY={currency}"]
+    result = compose(*command, "marts-init", check=False)
+    assert result.returncode == 0, job_failed("marts-init", result)
+    return result.stdout
+
+
+@pytest.fixture(scope="module")
+def cleaned(env, airflow_url, token, built):
+    """The rates after a run of the transform that accepted every load that it read and deleted
+    their rows from raw (ADR-0046), as on a deployment some days after its first start: raw holds no
+    row of a load of the rates that the core has accepted."""
+    unpause(airflow_url, token, TRANSFORM)
+    run = trigger(airflow_url, token, TRANSFORM)
+    run = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=1800)
+    assert run["state"] == "success", run["state"]
+    left = warehouse_output(
+        env,
+        "SELECT count(*) FILTER (WHERE l.status = 'accepted') || '|' || count(*) "
+        "FROM raw_demo_fx.rates_daily AS r LEFT JOIN core.loads AS l "
+        "ON l.source = 'demo_fx' AND l.load_id = r._dlt_load_id",
+    )
+    assert left.split("|")[0] == "0", left
+
+
+def test_a_new_reporting_currency_takes_the_history_of_the_rates_again(
+    env, airflow_url, token, cleaned
+):
+    # ADR-0042 and the decision of 12 November 2026: a reporting currency that the core cannot give
+    # from its own rows, once the cleanup has deleted the loads of the rates that it accepted, takes
+    # the history of the rates again from the source, and a rate for every day of the facts.
+    currency = reporting(env)
+    accounts = warehouse_output(
+        env, "SELECT string_agg(DISTINCT currency, ',') FROM core.dim_account"
+    ).split(",")
+    assert currency != NEW_CURRENCY, currency
+    assert NEW_CURRENCY not in accounts, accounts
+    held = warehouse_output(
+        env,
+        f"SELECT count(*) FROM {CORE_RATES} WHERE reporting_currency = '{NEW_CURRENCY}'",  # noqa: S608 (constants of this file)
+    )
+    assert held == "0", f"{CORE_RATES} holds rates into {NEW_CURRENCY}: see the docstring"
+    first_fact = date.fromisoformat(warehouse_output(env, FIRST_FACT))
+    try:
+        # The up after the change: marts-init computes the rates in GBP from what the core holds,
+        # which gives none of the older days, builds ops.ops_rates in GBP, and warns.
+        output = marts_init(NEW_CURRENCY)
+        assert f"marts-init: warning: the core holds no rate into {NEW_CURRENCY} on " in output
+        [[shown, first_without, days]] = table(env, GAPS)
+        assert (shown, first_without) == (NEW_CURRENCY, str(first_fact)), (shown, first_without)
+        assert int(days) > 0
+        assert int(warehouse_output(env, UNRATED_FACTS.format(currency=NEW_CURRENCY))) > 0
+        # The views of the marts go back to the currency of the stack at once, so that the run of
+        # the transform below, in that currency, tests them as they are; ops.ops_rates stays in GBP.
+        marts_init()
+        # The next load of the rates of the demo, as its task makes it in GBP, reads ops.ops_rates
+        # as transformer and takes the history again, from a week before the first day without a
+        # rate or from the first day of the table, with the kind history.
+        first_day = date.fromisoformat(
+            warehouse_output(env, f"SELECT min(rate_date) FROM {CORE_RATES}")  # noqa: S608 (constants of this file)
+        )
+        start = min(first_fact - timedelta(days=rates.LEAD_DAYS), first_day)
+        now = last_moment(env, "demo_fx")
+        run_in_tasks(
+            env,
+            LOAD_DAILY,
+            now.isoformat(),
+            "demo_fx",
+            environment={"AGORANOMOS_REPORTING_CURRENCY": NEW_CURRENCY},
+        )
+        [[load_id, window_from, window_to, kind]] = table(env, NEWEST_RATES)
+        assert (window_from, kind) == (str(start), "history"), (window_from, kind)
+        # The transform pins it, with its kind, and reads it; the acceptance is skipped, so its
+        # rows stay in raw for the run in GBP below, as for a run in GBP itself.
+        transform_keeping_raw(airflow_url, token)
+        [pinned] = table(
+            env,
+            "SELECT kind, status, window_from, window_to FROM core.loads "  # noqa: S608 (an ID of dlt)
+            f"WHERE source = 'demo_fx' AND load_id = '{load_id}'",
+        )
+        assert pinned == ["history", "pinned", window_from, window_to], pinned
+        # A run in GBP: every day of the facts has a rate into GBP, and Ops names none without.
+        dbt_run("history", NEW_CURRENCY, CORE_MODEL, "ops_rates")
+        assert table(env, GAPS) == [[NEW_CURRENCY, "", "0"]]
+        assert warehouse_output(env, UNRATED_FACTS.format(currency=NEW_CURRENCY)) == "0"
+        # The rates of the source on the days that it published, through the euro, as for the
+        # reporting currency of the stack.
+        [[rows, wrong]] = table(
+            env,
+            f"WITH published AS ({PUBLISHED_RATES}) "  # noqa: S608 (constants of this file)
+            "SELECT count(*), count(*) FILTER (WHERE r.rate_into_reporting_currency "
+            "<> pr.rate / pc.rate OR r.rate_source <> 'demo_fx') "
+            f"FROM {CORE_RATES} AS r JOIN published AS pc "
+            "ON pc.rate_date = r.rate_date AND pc.currency = r.currency "
+            "JOIN published AS pr ON pr.rate_date = r.rate_date "
+            f"AND pr.currency = '{NEW_CURRENCY}' "
+            f"WHERE r.reporting_currency = '{NEW_CURRENCY}' AND NOT r.is_carried_forward "
+            f"AND r.currency <> '{NEW_CURRENCY}'",
+        )
+        assert int(rows) > 0, rows
+        assert wrong == "0", (rows, wrong)
+    finally:
+        warehouse_output(
+            env,
+            f"DELETE FROM {CORE_RATES} WHERE reporting_currency = '{NEW_CURRENCY}'",  # noqa: S608 (constants of this file)
+        )
+        dbt_run("back", currency, "ops_rates")
+        marts_init()
+    [[shown, _, _]] = table(env, GAPS)
+    assert shown == currency
