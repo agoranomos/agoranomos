@@ -76,11 +76,12 @@ A card above the threshold moves to an aggregate by ADR-0037, and the stack test
 | What | First series | Second series |
 |---|---|---|
 | The values of the linked filters of the campaigns and of the accounts, at their first use, with no filter and with each of five clients | 0.20 to 0.54 s | 0.21 to 0.61 s |
-| The scan of the values of the fields, by the history of the tasks of Metabase | 1.1 s | 1.8 s |
 | 20 clients at once, each opening the overview three times for a client, 780 queries with the cache of Metabase: median, 95th percentile and longest query | 0.82, 3.09 and 4.55 s, no failure | 0.98, 2.57 and 5.50 s, no failure |
 | The same: an overview of 13 cards, one after another, median and longest | 12.4 and 24.9 s | 13.4 and 23.4 s |
 
-The scan reads only the fields whose values the code of the marts lists, a few columns of states, types and currencies ([Describe the marts](describe-the-marts.md)). During the 20 clients the load of the host rose from 1.6 to 11, which those clients made on its four threads.
+During the 20 clients the load of the host rose from 1.6 to 11, which those clients made on its four threads.
+
+**The scan of the values of fields.** Metabase 0.64.1 scans only the fields whose values it holds already, which it makes when a filter first asks for them, and skips the others (`src/metabase/sync/field_values.clj` at the tag v0.64.1). On these stacks no filter of such a field had been opened, so the scans of the two series made no query, and their 1.1 and 1.8 seconds measured nothing. The test therefore first asks for the values of every field of the marts that is a list, 96 fields ([Describe the marts](describe-the-marts.md)), as the filters of the dashboards ask for them over time, and then runs the scan, which reads the fields of each mart in one query. In a third run, on 12 November 2026, at the density of the agency and with the load of the host at 1.5 before it, the scan took 68.0 seconds and probed 84 fields in 12 queries, one for each mart that has such fields; their values were there already, from a run at the density of the limit just before, so asking for them took 3.0 seconds and was no first use. The scan reads every row of each view, so its time follows the rows of the whole history and not those of a day: by proportion, about 3 minutes for the 36 months of an agency and about 14 minutes for those of the limit, both estimates.
 
 **A run of the transform** beside the core of the agency took 789 seconds, and succeeded, against 812 seconds for the first run on the empty model before the generator: the raw layer held no load, so the run wrote no window of the profile, and its time does not grow with the core. R5 (#191) measured the write of windows at the density of the limit.
 
@@ -94,6 +95,37 @@ The scan reads only the fields whose values the code of the marts lists, a few c
 | Every running service | 8,704 MiB | 3,817 MiB | 3,938 MiB | 3,697 MiB | 3,695 MiB |
 
 No process was stopped at a limit and no container restarted. So the profile raises only `WAREHOUSE_DB_MEMORY`: Metabase with 20 clients at once peaked at 1,531 MiB, which the formula of [Memory limits](#memory-limits) turns into 1,920 MiB, below its default of 2,176 MiB, where [ADR-0040](../adr/0040-size-the-stack-by-profiles-and-derive-the-settings-of-postgresql.md) had estimated 3 GiB, and the tasks peaked at 943 MiB of their 1,280 MiB. A larger limit of the database is the decision of ADR-0040, which these numbers do not test: at 980 MiB the warehouse of 1.9 GB used a third of it, and the 36 months of an agency, 5.2 GB by proportion, would use more of its cache.
+
+### The density of the limit on synthetic data
+
+The same stack, on the same server and with the same limits, `WAREHOUSE_DB_MEMORY=3g` among them, held the density of the limit: 200 accounts with statistics on every day, each with 30 campaigns, 150 ad groups and 400 ads, so 80,000 rows of ads a day, over the 100 days to 11 November 2026, 8.0 million rows of ads and 2.5 GB of warehouse, which the generator wrote in 389 seconds. The limit asks for 16 GiB of `warehouse-db` and a server of 32 GB, which the server of 7.6 GiB cannot give, so these times are those of the density of the limit with the memory of an agency. The cards ran as for the agency, in two series, before and after a start of the stack again, the load of the host 1.6 to 1.7 before them:
+
+| Tab | Card | Median, first series | Median, second series |
+|---|---|---:|---:|
+| Overview | Spend | 0.95 s | 0.77 s |
+| Overview | Conversions | **9.02 s** | **8.98 s** |
+| Overview | Cost per conversion | **9.40 s** | **9.35 s** |
+| Overview | ROAS | 0.96 s | 0.85 s |
+| Overview | Clicks | 0.50 s | 0.48 s |
+| Overview | CTR | 0.53 s | 0.49 s |
+| Overview | CPC | 0.80 s | 0.79 s |
+| Overview | Key events of web analytics | 0.10 s | 0.10 s |
+| Overview | Spend and conversions over time | **9.31 s** | **9.43 s** |
+| Overview | Platforms | **16.74 s** | **16.78 s** |
+| Overview | Spend by client | 0.60 s | 0.56 s |
+| Overview | Top campaigns by spend | **19.98 s** | **20.04 s** |
+| Overview | Last loads | 0.07 s | 0.07 s |
+| Platforms | Results by platform | **24.60 s** | **24.43 s** |
+| Platforms | Spend by platform over time | 0.93 s | 0.88 s |
+| Platforms | Conversions by platform over time | **9.04 s** | **9.18 s** |
+| Campaigns | Campaigns | **19.92 s** | **20.11 s** |
+| Ad groups and ads | Ad groups | **8.87 s** | **8.74 s** |
+| Ad groups and ads | Ads | **29.50 s** | **27.08 s** |
+| Conversions | Conversions by action | **2.87 s** | **2.74 s** |
+| Conversions | Conversions by category over time | 1.75 s | 1.74 s |
+| Conversions | Key events of web analytics over time | 0.12 s | 0.09 s |
+
+Thirteen of the 22 cards are above 2 seconds in both series. The causes are those of the agency, with 5.3 times the rows: each mention of `conversions_primary` costs about 8 seconds over the 504,000 rows of campaigns of the 12 weeks, and the card Ads groups 6.7 million rows of ads. The values of the linked filters at their first use took 0.20 to 0.83 seconds. The first use of the values of the 96 fields that are a list took 81.1 seconds, and the scan after it 78.0 seconds, which probed 84 fields in 12 queries, with the load of the host at 5.7 before it, two minutes after a start. Metabase peaked at 1,330 MiB and `warehouse-db` at 926 MiB, with no process stopped at a limit.
 
 ### The disk of the limit
 
