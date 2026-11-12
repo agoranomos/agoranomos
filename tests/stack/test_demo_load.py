@@ -252,29 +252,59 @@ def test_a_repeated_history_changes_no_row_that_staging_reads(env, airflow_url, 
         assert int(loads) == loads_before[code] + 1, code
 
 
-def test_the_names_of_campaigns_have_their_versions(env, history_run):
-    # The first history replayed the names of the campaigns into the empty dataset, as versions of
-    # scd2; the later runs of the history replay none.
-    text = warehouse_output(
-        env,
-        "SELECT campaign__name || '|' || _dlt_valid_from::date || '|' "
-        "|| coalesce(_dlt_valid_to::date::text, '') FROM raw_demo_search.campaigns "
-        "WHERE campaign__id = '21000000102' ORDER BY _dlt_valid_from",
+# The whole loads of demo_search and the accounts that each took, from its journal.
+WHOLE_LOADS = (
+    "SELECT j._dlt_load_id, j.account_id FROM raw_demo_search._agoranomos_loads AS j "
+    "JOIN raw_demo_search._dlt_loads AS l ON l.load_id = j._dlt_load_id AND l.status = 0 "
+    "WHERE j.status = 'loaded'"
+)
+
+
+def test_each_load_appends_the_list_of_the_entities_of_each_account(env, history_run):
+    # Every load appends the full list of the campaigns of each account that it took under its own
+    # _dlt_load_id, in the same run as its facts, with no versions of dlt (scd2): a list names a
+    # campaign once, every account of every whole load has its list, and the newest list of each
+    # account names each campaign as the generator does at the moment of the load, which staging
+    # reads (ADR-0036, ADR-0038). The history replays no names of earlier moments.
+    for table in ("customer_clients", "campaigns", "ad_groups", "ads"):
+        columns = (
+            "SELECT count(*) FROM information_schema.columns WHERE table_schema = "  # noqa: S608 (constants of this file)
+            f"'raw_demo_search' AND table_name = '{table}' AND column_name LIKE '\\_dlt\\_valid%'"
+        )
+        assert warehouse_output(env, columns) == "0", table
+    twice = (
+        "SELECT count(*) FROM (SELECT _dlt_load_id, customer__id, campaign__id "
+        "FROM raw_demo_search.campaigns GROUP BY 1, 2, 3 HAVING count(*) > 1) AS twice"
     )
-    versions = [line.split("|") for line in text.splitlines()]
-    assert len(versions) >= 3, "the half-yearly renames of the history are not versions"
-    assert versions[-1][2] == "", "the newest version is not the current one"
-    assert len({valid_from for _, valid_from, _ in versions}) == len(versions), "a replayed version"
-    names = {name for name, _, _ in versions}
-    assert names == {"Prospecting - Spring Range", "Prospecting - Autumn Range"}
+    unlisted = (
+        f"SELECT count(*) FROM ({WHOLE_LOADS} EXCEPT SELECT DISTINCT _dlt_load_id, customer__id "  # noqa: S608 (constants of this file)
+        "FROM raw_demo_search.campaigns) AS unlisted"
+    )
+    unloaded = "SELECT count(*) FROM raw_demo_search.campaigns WHERE _dlt_load_id IS NULL"
+    problems = warehouse_output(env, f"SELECT ({twice}), ({unlisted}), ({unloaded})")
+    assert problems == "0|0|0", problems
+    now = moment(history_run)
+    named = {
+        row["campaign"]["id"]: row["campaign"]["name"]
+        for row in platforms.PLATFORMS["demo_search"].module.records(now)["campaigns"]
+    }
+    newest_name = (
+        "SELECT c.campaign__name FROM raw_demo_search.campaigns AS c "  # noqa: S608 (constants of this file)
+        f"JOIN ({WHOLE_LOADS}) AS w ON w._dlt_load_id = c._dlt_load_id "
+        "AND w.account_id = c.customer__id WHERE c.campaign__id = '21000000102' "
+        "ORDER BY c._dlt_load_id::numeric DESC LIMIT 1"
+    )
+    newest_name = warehouse_output(env, newest_name)
+    assert newest_name == named["21000000102"]
 
 
 # The columns of raw that staging reads, with the types that the hints of the resources give and
-# that dlt 1.32.0 writes: the day of each fact table and the id of its load, the money of Google as
-# a string of micros or of units, and the windows of the actions of Meta in its child tables, which
-# follow their row by _dlt_parent_id, as dlt names them. dlt writes its type text as varchar, which
-# PostgreSQL reports as character varying. The unit tests load with a stand-in of dlt, so only a
-# load with dlt itself shows that each hint reaches its column.
+# that dlt 1.32.0 writes: the day of each fact table and the id of its load, that of each list of
+# entities, the money of Google as a string of micros or of units, and the windows of the actions
+# of Meta in its child tables, which follow their row by _dlt_parent_id, as dlt names them. dlt
+# writes its type text as varchar, which PostgreSQL reports as character varying. The unit tests
+# load with a stand-in of dlt, so only a load with dlt itself shows that each hint reaches its
+# column.
 RAW_COLUMNS = (
     "raw_demo_fx.rates_daily.rate_date:date",
     "raw_demo_search.campaign_conversions.metrics__all_conversions_value:character varying",
@@ -283,6 +313,8 @@ RAW_COLUMNS = (
     "raw_demo_search.campaign_stats.metrics__conversions_value:character varying",
     "raw_demo_search.campaign_stats.metrics__cost_micros:character varying",
     "raw_demo_search.campaign_stats.segments__date:date",
+    "raw_demo_search.campaigns._dlt_load_id:character varying",
+    "raw_demo_search.customer_clients._dlt_load_id:character varying",
     "raw_demo_social.insights_campaign.date_start:date",
     "raw_demo_social.insights_campaign__action_values._7d_click:character varying",
     "raw_demo_social.insights_campaign__actions._1d_click:character varying",
@@ -290,6 +322,7 @@ RAW_COLUMNS = (
     "raw_demo_social.insights_campaign__actions._7d_click:character varying",
     "raw_demo_social.insights_campaign__actions._dlt_parent_id:character varying",
     "raw_demo_video.report_campaign_daily.dimensions__stat_time_day:character varying",
+    "raw_demo_web.properties._dlt_load_id:character varying",
     "raw_demo_web.report_sessions_daily.date:character varying",
 )
 

@@ -1,2 +1,2 @@
--- stg_demo_social__campaigns.sql: the versions of its campaigns.
-{{ meta_campaigns(demo_source('raw_demo_social', 'campaigns'), 'demo_social') }}
+-- stg_demo_social__campaigns.sql: its campaigns, as the newest list of each account gives them.
+{{ meta_campaigns(newest_list(demo_source('raw_demo_social', 'campaigns'), 'raw_demo_social', source('core', 'loads')), 'demo_social') }}

@@ -128,6 +128,7 @@ from {{ relation }}
     end
 {%- endmacro %}
 
+{#- The campaigns of the newest list of each account (newest_list), with the load of the list. -#}
 {% macro tiktok_campaigns(relation, platform) %}
 select
     '{{ platform }}' as platform,
@@ -137,12 +138,12 @@ select
     operation_status as campaign_status,
     {{ tiktok_state('operation_status') }} as campaign_state,
     objective_type as campaign_type,
-    _dlt_valid_from as valid_from,
-    _dlt_valid_to as valid_to
+    _dlt_load_id as load_id
 from {{ relation }}
 {% endmacro %}
 
-{#- The versions of the ad groups that dlt keeps (scd2). Their type is their optimization goal. -#}
+{#- The ad groups of the newest list of each account (newest_list), with the load of the list.
+    Their type is their optimization goal. -#}
 {% macro tiktok_ad_groups(relation, platform) %}
 select
     '{{ platform }}' as platform,
@@ -153,12 +154,12 @@ select
     operation_status as ad_group_status,
     {{ tiktok_state('operation_status') }} as ad_group_state,
     optimization_goal as ad_group_type,
-    _dlt_valid_from as valid_from,
-    _dlt_valid_to as valid_to
+    _dlt_load_id as load_id
 from {{ relation }}
 {% endmacro %}
 
-{#- The versions of the ads that dlt keeps (scd2). Their type is their format. -#}
+{#- The ads of the newest list of each account (newest_list), with the load of the list. Their
+    type is their format. -#}
 {% macro tiktok_ads(relation, platform) %}
 select
     '{{ platform }}' as platform,
@@ -170,7 +171,6 @@ select
     operation_status as ad_status,
     {{ tiktok_state('operation_status') }} as ad_state,
     ad_format as ad_type,
-    _dlt_valid_from as valid_from,
-    _dlt_valid_to as valid_to
+    _dlt_load_id as load_id
 from {{ relation }}
 {% endmacro %}

@@ -4,13 +4,15 @@ the journals of restatements, and does it in one transaction with the write, or 
 
 The test of a changed day makes a load of its own in raw_demo_search as loader, the owner of raw:
 the rows of five days of one account, copied from the load that staging reads, with one campaign
-changed and one removed on the first day, and none on the last. It deletes that load from raw, and
-its row from core.loads as the superuser, and runs the transform again in its finally, so that the
-demo is as before; the journals keep their rows, as they keep every restatement. If it is killed
-before that, delete by hand, as its finally does: the rows of the six fact tables of
-raw_demo_search, of _dlt_loads and of _agoranomos_loads whose load is that of the test, the one
-journal row whose _dlt_id is stack-test-facts, and that load from core.loads, then run the
-transform; and end the session of PostgreSQL whose application_name is stack-test-facts-lock.
+changed and one removed on the first day, and none on the last, and the lists of the entities of
+the account, copied from its newest load, as a load appends them in the same run as its facts. It
+deletes that load from raw, and its row from core.loads as the superuser, and runs the transform
+again in its finally, so that the demo is as before; the journals keep their rows, as they keep
+every restatement. If it is killed before that, delete by hand, as its finally does: the rows of
+the six fact tables and the four tables of lists of raw_demo_search, of _dlt_loads and of
+_agoranomos_loads whose load is that of the test, the one journal row whose _dlt_id is
+stack-test-facts, and that load from core.loads, then run the transform; and end the session of
+PostgreSQL whose application_name is stack-test-facts-lock.
 
 The assertions print IDs, days, counts and sums, never a secret.
 """
@@ -43,6 +45,15 @@ TABLES = (
     "ad_stats",
     "ad_conversions",
 )
+# The tables of the lists of the entities of raw_demo_search, with the column that names the
+# account: each load appends the lists of each account that it took in the same run as its facts,
+# and staging reads those of the newest pinned load of the account (ADR-0038, newest_list).
+LISTS = {
+    "customer_clients": "customer_client__id",
+    "campaigns": "customer__id",
+    "ad_groups": "customer__id",
+    "ads": "customer__id",
+}
 # The facts of the core, by the table of raw whose rows each takes from demo_search.
 FACTS = {
     "ad_stats_campaign_daily": "campaign_stats",
@@ -57,6 +68,12 @@ LOCK = "stack-test-facts-lock"
 DBT = "/opt/airflow/dbt_venv/bin/dbt"
 PROJECT = "/opt/agoranomos/dbt"
 WORK = f"/tmp/{MARK}"  # noqa: S108 (a folder in the container, not on this host)
+# The newest pinned load of the account, whose lists staging reads.
+LISTED = (
+    f"SELECT load_id FROM core.loads WHERE source = '{SOURCE}' "  # noqa: S608 (constants)
+    f"AND account_id = '{ACCOUNT}' AND outcome = 'loaded' AND status = 'pinned' "
+    "ORDER BY load_id::numeric DESC LIMIT 1"
+)
 # The days of the account that staging reads, with the load of each, and its surrogate.
 DAYS = (
     "SELECT d.day, d.load_id FROM staging.stg_loads__newest_days AS d "  # noqa: S608 (constants)
@@ -115,20 +132,39 @@ def dbt(*args: str):
     )
 
 
+def columns_of(env, table):
+    """The columns of a table of raw_demo_search but the load and the row id, which dlt gives."""
+    return warehouse_output(
+        env,
+        "SELECT string_agg(column_name, ', ' ORDER BY ordinal_position) "  # noqa: S608 (names of the demo)
+        "FROM information_schema.columns WHERE table_schema = 'raw_demo_search' "
+        f"AND table_name = '{table}' AND column_name NOT IN ('_dlt_load_id', '_dlt_id')",
+        "loader",
+    )
+
+
 def copy_load(env, load, days):
     """The rows of the load that staging reads for the account on days, in each fact table of
-    raw_demo_search, under the load of the test, as loader, which may not read staging: the days
-    and their loads go in as values."""
+    raw_demo_search, and the lists of the account of its newest load, in each table of lists, under
+    the load of the test, as loader, which may not read staging: the days and their loads go in as
+    values. A real load appends both in one run (ADR-0038): without its lists, the load of the test
+    would be the newest of the account and list no entity of it, nor the account."""
     read = dict(rows(env, DAYS))
     listed = ", ".join(f"(DATE '{day}', '{read[day]}')" for day in days)
-    for table in TABLES:
-        columns = warehouse_output(
+    newest = warehouse_output(env, LISTED)
+    assert newest, "the account has no pinned load"
+    for table, account in LISTS.items():
+        columns = columns_of(env, table)
+        warehouse_output(
             env,
-            "SELECT string_agg(column_name, ', ' ORDER BY ordinal_position) "  # noqa: S608 (names of the demo)
-            "FROM information_schema.columns WHERE table_schema = 'raw_demo_search' "
-            f"AND table_name = '{table}' AND column_name NOT IN ('_dlt_load_id', '_dlt_id')",
+            f"INSERT INTO raw_demo_search.{table} ({columns}, _dlt_load_id, _dlt_id) "  # noqa: S608 (names of the demo)
+            f"SELECT {columns}, '{load}', '{MARK}-' || md5(random()::text) "
+            f"FROM raw_demo_search.{table} WHERE _dlt_load_id = '{newest}' "
+            f"AND {account} = '{ACCOUNT}'",
             "loader",
         )
+    for table in TABLES:
+        columns = columns_of(env, table)
         warehouse_output(
             env,
             f"INSERT INTO raw_demo_search.{table} ({columns}, _dlt_load_id, _dlt_id) "  # noqa: S608 (names of the demo)
@@ -142,7 +178,7 @@ def copy_load(env, load, days):
 
 def remove_load(env, load):
     """The load of the test out of raw and out of core.loads."""
-    for table in (*TABLES, "_agoranomos_loads"):
+    for table in (*TABLES, *LISTS, "_agoranomos_loads"):
         warehouse_output(
             env,
             f"DELETE FROM raw_demo_search.{table} WHERE _dlt_load_id = '{load}'",  # noqa: S608

@@ -226,8 +226,9 @@ RESOLVED = REPO / "dbt" / "models" / "intermediate" / "int_conversion_actions__r
 
 def test_the_file_overrides_the_flag_of_google_ads_which_overrides_the_seed():
     # Whether an action is primary: the settings of the deployment first, then, for an action of
-    # Google Ads, include_in_conversions_metric of the newest version of the action in the
-    # accounts, the flag with which metrics.conversions counts it, then the seed, then not.
+    # Google Ads, include_in_conversions_metric of the action in the newest lists of the accounts,
+    # or as the core holds it for an action that no list of the run names, the flag with which
+    # metrics.conversions counts it, then the seed, then not.
     text = RESOLVED.read_text(encoding="utf-8")
     assert (
         "    coalesce(\n"
@@ -239,15 +240,17 @@ def test_the_file_overrides_the_flag_of_google_ads_which_overrides_the_seed():
     ) in text
     assert "left join {{ ref('stg_settings__conversion_actions') }} as x\n" in text
     assert "left join {{ ref('seed_conversion_actions') }} as s\n" in text
-    # The newest version of each action of each account; an action that two accounts list counts
-    # when one of them counts it, and one that an account lists without the flag does not.
+    # The newest list of each account, which staging gives; an action that two accounts list
+    # counts when one of them counts it, and one that an account lists without the flag does not.
     assert "    from {{ ref('stg_google_ads__conversion_actions') }}\n" in text
-    newest = "partition by platform, account_id, conversion_action_id order by valid_from desc"
-    assert newest in text
-    assert "    where recency = 1\n" in text
+    assert "valid_from" not in text
     assert (
         "coalesce(bool_or(include_in_conversions_metric), false) as include_in_conversions_metric"
     ) in text
+    # An action that no newest list names keeps the flag that the core holds, which only a list
+    # gives.
+    assert "from {{ source('core', 'dim_conversion_action') }} as k\n" in text
+    assert "    where k.include_in_conversions_metric is not null\n" in text
     # An action that the accounts list counts, as one with conversions does.
     assert "    select platform, conversion_action_id from listed\n" in text
     seed = (REPO / "dbt" / "seeds" / "seed_conversion_actions.csv").read_text(encoding="utf-8")

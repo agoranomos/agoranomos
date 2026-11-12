@@ -158,3 +158,55 @@ where d.status = 'pinned'
 {%- endif -%}
 {{- return(sources[source_name]) -}}
 {%- endmacro %}
+
+{#- The rows of a table of the entities of a source in raw that its staging model reads: the list
+    of each account in the newest load of the account that a run pinned (ADR-0038). Each load of a
+    source appends the full list of each account that it took, of its accounts, campaigns, ad
+    groups, ads or conversion actions, under its own _dlt_load_id, in the same run as its facts
+    and its journal, so a list is whole once its load is, and staging reads, for each account, the
+    rows of the newest load that took it (newest_lists): an account that failed in a load keeps the
+    list of the load before, and an entity that the newest list no longer names is not read, so
+    that the dimension of the core can say that the platform no longer lists it. relation is the
+    table, through demo_source or relation_or_empty, with its column _dlt_load_id, source_name its
+    source, loads the relation of core.loads, which the model passes as source('core', 'loads'),
+    so that its dependency is in its text, and account how its rows, r, name the account as the
+    journal does, as SQL: by default as newest_load_keys gives it for the facts of the source. The
+    result is a subquery with an alias, as relation_or_empty gives one. -#}
+{% macro newest_list(relation, source_name, loads, account=none) -%}
+    {%- set account = newest_load_keys(source_name)[0] if account is none else account -%}
+(select r.*
+from (select * from {{ relation }}) as r
+join ({{ newest_lists(source_name, loads) }}) as l
+    on l.load_id = r._dlt_load_id and l.account_id = {{ account }}
+) as newest_list
+{%- endmacro %}
+
+{#- For each account of a source, the newest load whose lists staging reads, from loads, the
+    relation of core.loads, with the moment when it ended: the source, the account, the load and
+    finished_at.
+    * The newest load is the one with the largest load id among the pinned and the accepted loads
+      that took the account, and its lists are read only when it is a pinned one, as the core
+      holds those of an accepted load: so an older load that ends after a newer one was accepted
+      does not bring back an older list.
+    * Of the accepted loads, only those newer than the oldest pinned load of the account count, as
+      only such a load can be newer than every pinned one (pinned_loads).
+    * A failed account has no list in its load, and its row is passed over.
+    Nothing accepts a load yet, so it is the newest pinned load of each account. -#}
+{% macro newest_lists(source_name, loads) -%}
+    {%- set source = source_name[4:] -%}
+select n.source, n.account_id, n.load_id, n.finished_at
+from (
+    select distinct on (l.account_id) l.source, l.account_id, l.load_id, l.finished_at, l.status
+    from {{ loads }} as l
+    join (
+        select account_id, min(load_id::numeric) as load_number
+        from {{ loads }}
+        where source = '{{ source }}' and status = 'pinned' and outcome = 'loaded'
+        group by account_id
+    ) as oldest
+        on oldest.account_id = l.account_id and l.load_id::numeric >= oldest.load_number
+    where l.source = '{{ source }}' and l.outcome = 'loaded'
+    order by l.account_id, l.load_id::numeric desc
+) as n
+where n.status = 'pinned'
+{%- endmacro %}

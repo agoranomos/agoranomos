@@ -1,11 +1,12 @@
 models:
   - name: stg_demo_web__properties
     description: >-
-      The properties of web analytics of demo_web, one row each, with the time zone of their days
-      and the currency of their revenue. platform and property_id are its key. int_g1_failures
-      checks each account for its key, its currency and its time zone, and holds one that fails out
-      of the core and the marts (ADR-0035). Its tests guard the marts: when one of them fails, dbt
-      does not rebuild the models that read this one.
+      The properties of web analytics of demo_web, one row each, from the newest load of the
+      property that a run pinned, with the time zone of their days and the currency of their
+      revenue. platform and property_id are its key. int_g1_failures checks each account for its
+      key, its currency and its time zone, and holds one that fails out of the core and the marts
+      (ADR-0035). Its tests guard the marts: when one of them fails, dbt does not rebuild the models
+      that read this one.
     columns:
       - name: platform
         description: '{{ doc("platform") }}'

@@ -539,37 +539,42 @@ def test_the_parameters_of_a_run_name_a_portion_or_none(ads):
             module.portion_of(accounts, first, last)
 
 
-def test_a_portion_takes_the_totals_and_the_facts_of_its_days_as_a_load_of_history(ads):
-    # The customer of each account and its seven tables of facts, eight requests, in one request
-    # each for a quarter; the entities, the watermarks and the customers of the other accounts
-    # stay as they were.
+def test_a_portion_takes_the_lists_and_the_facts_of_its_days_as_a_load_of_history(ads):
+    # The customer of each account, its four lists, as every load takes them, and its seven tables
+    # of facts, twelve requests, in one request each for a quarter; the watermarks stay as they
+    # were. Staging reads the lists of the newest load of an account, which a portion is after
+    # each run of the transform: without them, it would list no entity of the account.
     module, state, made, extensions = ads
-    state.update(
-        loads=1,
-        reloads=[("2222222222", date(2026, 10, 29), date(2026, 10, 28))],
-        customers=[("customers/1111111111", "1111111111", "Kept", "USD", "UTC", False, "ENABLED")],
-    )
+    state.update(loads=1, reloads=[("2222222222", date(2026, 10, 29), date(2026, 10, 28))])
     cache = StandInCache({"watermarks": {"2222222222": "2026-10-28"}})
     portion = module.Portion(("2222222222",), date(2026, 4, 1), date(2026, 6, 30))
     counts = module.load(NOW, extensions, cache=cache, portion=portion)
-    assert requested(made) == ["2222222222"] * 8
+    assert requested(made) == ["2222222222"] * 12
     gaql = [q for _, q, _ in made["requests"]]
     assert gaql[0].endswith("FROM customer")
+    assert [q.split(" FROM ")[1] for q in gaql[1:5]] == [
+        "campaign",
+        "ad_group",
+        "ad_group_ad",
+        "conversion_action",
+    ]
     assert all(
-        q.endswith("WHERE segments.date BETWEEN '2026-04-01' AND '2026-06-30'") for q in gaql[1:]
+        q.endswith("WHERE segments.date BETWEEN '2026-04-01' AND '2026-06-30'") for q in gaql[5:]
     )
-    assert [q.split(" FROM ")[1].split(" WHERE ")[0] for q in gaql[1:]] == [
+    assert [q.split(" FROM ")[1].split(" WHERE ")[0] for q in gaql[5:]] == [
         "customer",
         *("campaign", "campaign", "ad_group", "ad_group", "ad_group_ad", "ad_group_ad"),
     ]
     [(rows, _)] = made["pipelines"][0].runs
-    assert not set(module.ENTITIES) & set(rows)
-    assert counts == {"customers": 2, **{table: 1 for table in module.FACTS}}
-    # The table of customers is replaced with every account of the deployment.
-    assert sorted(
-        row["customer__id"] if "customer__id" in row else row["customer"]["id"]
-        for row in rows["customers"]
-    ) == ["1111111111", "2222222222"]
+    assert counts == {
+        "customers": 1,
+        **{table: 1 for table in module.ENTITIES},
+        **{table: 1 for table in module.FACTS},
+    }
+    # The rows of the account of the portion alone: the other keeps the lists of its own newest
+    # load.
+    for table in ("customers", *module.ENTITIES):
+        assert {row["customer"]["id"] for row in rows[table]} == {"2222222222"}, table
     [record] = rows["_agoranomos_loads"]
     assert (record["account_id"], record["window_from"], record["window_to"]) == (
         "2222222222",
@@ -771,16 +776,11 @@ def test_a_load_keeps_the_rows_as_the_api_gives_them_and_appends_the_facts(ads):
         "2222222222": (date(2026, 7, 31), date(2026, 10, 28)),
     }
     assert {row["kind"] for row in rows["_agoranomos_loads"]} == {"window"}
-    # dlt 1.31.0 retires the versions that a load lacks within its destination scope only, so the
-    # entities of an account that a load could not read keep their versions.
-    for table in ("campaigns", "ad_groups", "ads", "conversion_actions"):
-        assert hints[table]["write_disposition"] == {
-            "disposition": "merge",
-            "strategy": "scd2",
-            "boundary_timestamp": NOW.isoformat(),
-            "destination_scope": "customer__id IN ('1111111111', '2222222222')",
-        }
-    assert hints["customers"]["write_disposition"] == "replace"
+    # The customer and the lists of the entities of each account append too, under the same
+    # _dlt_load_id, and staging reads those of the newest load of each account (ADR-0038).
+    for table in ("customers", "campaigns", "ad_groups", "ads", "conversion_actions"):
+        assert hints[table]["write_disposition"] == "append", table
+    assert not hasattr(module, "SCD2")
     # Every field of each query has a hint of its own, so that dlt makes every column, as text
     # unless it is a date, a count that can have a fraction, or a flag. Money is text, whether the
     # API writes it as a string of micros or as a JSON number (ADR-0038).
@@ -922,10 +922,7 @@ def test_an_error_of_the_api_on_one_account_does_not_stop_its_neighbor(ads):
     [(rows, hints)] = pipeline.runs
     for table in ("customers", *module.ENTITIES, *module.FACTS):
         assert {row["customer"]["id"] for row in rows[table]} == {"1111111111"}, table
-    for table in module.ENTITIES:
-        assert hints[table]["write_disposition"]["destination_scope"] == (
-            "customer__id IN ('1111111111')"
-        ), table
+        assert hints[table]["write_disposition"] == "append", table
     record = {row["account_id"]: row for row in rows["_agoranomos_loads"]}
     assert (record["1111111111"]["status"], record["1111111111"]["error"]) == ("loaded", None)
     assert record["1111111111"]["window_from"] == date(2026, 7, 30)
@@ -961,26 +958,15 @@ def test_a_failed_account_has_no_day_and_no_moment_of_a_load_in_the_journal(ads)
 def test_an_error_in_the_middle_of_an_account_leaves_nothing_of_it_in_the_load(ads):
     # The ads of the second account fail after its customer, its entities, its totals and the
     # statistics of its campaigns and ad groups answered: none of its rows reaches dlt, as a window
-    # replaces
-    # whole days; its row of customers stays as the last load saw it, and its entities keep their
-    # versions, as the scope of each table of entities names the accounts that the load read.
+    # replaces whole days. Its customer and its lists stay as the last load that took it left them,
+    # as staging reads those of the newest load of each account whose row of the journal is loaded:
+    # the load reads nothing back from raw.
     module, state, made, extensions = ads
     state.update(
         loads=1,
         reloads=[
             ("1111111111", date(2026, 10, 28), date(2026, 10, 26)),
             ("2222222222", date(2026, 10, 28), date(2026, 10, 27)),
-        ],
-        customers=[
-            (
-                "customers/2222222222",
-                "2222222222",
-                "Acme DE",
-                "EUR",
-                "Europe/Berlin",
-                False,
-                "ENABLED",
-            )
         ],
         failing_at={"2222222222": "FROM ad_group_ad WHERE"},
     )
@@ -1000,20 +986,10 @@ def test_an_error_in_the_middle_of_an_account_leaves_nothing_of_it_in_the_load(a
                 "currencyCode": "USD",
                 "manager": False,
             }
-        },
-        {
-            "customer__resource_name": "customers/2222222222",
-            "customer__id": "2222222222",
-            "customer__descriptive_name": "Acme DE",
-            "customer__currency_code": "EUR",
-            "customer__time_zone": "Europe/Berlin",
-            "customer__manager": False,
-            "customer__status": "ENABLED",
-        },
+        }
     ]
-    assert (
-        hints["ads"]["write_disposition"]["destination_scope"] == "customer__id IN ('1111111111')"
-    )
+    assert hints["ads"]["write_disposition"] == "append"
+    assert not [query for query in made["pipelines"][0].queries if '"customers"' in query]
     record = {row["account_id"]: row for row in rows["_agoranomos_loads"]}
     assert (record["2222222222"]["status"], record["2222222222"]["window_to"]) == ("failed", None)
     assert (
@@ -1198,15 +1174,14 @@ def test_a_load_without_a_cache_writes_none(ads):
     module.remember(None, {}, {"1111111111": None})
 
 
-def test_a_scope_takes_checked_account_ids_only(ads):
+def test_the_ids_of_a_query_are_checked_account_ids_only(ads):
     module, _, _, _ = ads
     for account_ids in ([], ["111-111-1111"], ["1111111111' OR true --"]):
         with pytest.raises(ValueError, match="ten digits"):
-            module.accounts_scope(account_ids)
-    assert not hasattr(module, "scope"), "the facts are appended, with no scope"
-    assert module.accounts_scope(["2222222222", "1111111111"]) == (
-        "customer__id IN ('1111111111', '2222222222')"
-    )
+            module.checked(account_ids)
+    assert not hasattr(module, "scope"), "every table is appended, with no scope"
+    assert not hasattr(module, "accounts_scope"), "the lists are appended, with no scope"
+    assert module.checked(["2222222222", "1111111111"]) == ["1111111111", "2222222222"]
 
 
 # A recorded answer of searchStream to a query of the statistics of campaigns, in the shape of the

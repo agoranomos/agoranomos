@@ -16,13 +16,18 @@ from datetime import date
 import dlt
 from dlt.destinations.exceptions import DatabaseUndefinedRelation
 
-# The write of a fact table: each load appends its rows under its own _dlt_load_id, with no keys and
-# no merge, and the staging models read, for each account and day, the rows of the newest load whose
-# window in the journal covers the day, of the whole loads that the run of the transform pinned into
-# core.loads (dbt/macros/pin_loads.sql and newest_load.sql, ADR-0038, ADR-0046). So a load replaces
-# the days of its window whole, and a row that a platform no longer sends goes, as the newest load
-# does not hold it. The rows of the earlier loads stay in raw until the core accepts them
-# (ADR-0035): until then, raw grows by a window with each load.
+# The write of every table of a load: each load appends its rows under its own _dlt_load_id, with no
+# keys, no merge and no versions of dlt, and the staging models read the rows of the whole loads
+# that the run of the transform pinned into core.loads (dbt/macros/pin_loads.sql and
+# newest_load.sql, ADR-0038, ADR-0046). For a fact table, they read, for each account and day, the
+# rows of the newest load whose window in the journal covers the day, so a load replaces the days of
+# its window whole, and a row that a platform no longer sends goes, as the newest load does not hold
+# it. A table of entities, the accounts, campaigns, ad groups, ads and conversion actions, holds the
+# full list of each account that a load took, and staging reads the list of the newest load of
+# each account, so an entity that the list no longer names goes from staging, and its dimension in
+# the core says that the platform no longer lists it. The rows of the earlier loads stay in raw
+# until the core accepts them (ADR-0035): until then, raw grows by a window and a list with each
+# load.
 APPEND = "append"
 # The contract of the schema of every load of a source: a new table or column reaches raw, and a
 # value whose type differs from that of its column stops the load, before any of it is written,
@@ -39,8 +44,10 @@ SCHEMA_CONTRACT = {"tables": "evolve", "columns": "evolve", "data_type": "freeze
 FILE_FORMAT = "csv"
 # The settings of dlt 1.32.0 that every load sets, as environment variables of its configuration:
 DLT_SETTINGS = {
-    # The versions of the entities go through the staging dataset (scd2), which keeps the rows of
-    # the last load unless dlt is told to empty it.
+    # dlt asks for the staging dataset of the source after each load, raw_<source>_staging, to
+    # empty the tables that went through it. Since every table appends, none does, and the schema
+    # stays empty; postgres/warehouse.sql still creates it, and without it dlt would log a failure
+    # of that each time (dlt 1.32.0, Load._maybe_truncate_staging_dataset).
     "LOAD__TRUNCATE_STAGING_DATASET": "true",
     # Two jobs at a time, a COPY of a file or a merge of a table, each on a backend of warehouse-db,
     # and not the 20 of dlt.

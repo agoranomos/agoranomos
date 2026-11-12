@@ -26,8 +26,9 @@ sources:
           run of the transform takes whole loads only.
       - name: properties
         description: >-
-          The properties of demo_web, one row each, with the time zone of their days and the
-          currency of their revenue; each load replaces them.
+          The properties of demo_web, with the time zone of their days and the currency of their
+          revenue. Each load appends the list under its own _dlt_load_id, and staging reads the row
+          of each property of the newest pinned load of the property.
       - name: report_sessions_daily
         description: >-
           The sessions of the properties of demo_web, one row for each property, day, source,

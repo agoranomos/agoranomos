@@ -1,9 +1,10 @@
 -- core.dim_ad, the ads with their campaign, their ad group and their current attributes
--- (ADR-0036): one row for each ad of int_ads__current, the newest list of its account or, for a
--- stub, its newest row of statistics, with its ID as bigint and as text; an ad is defined only
--- inside its ad group, which is part of its key. The model merges into the table of the migrations
--- (dbt_project.yml), and only the rows that are new or that changed. last_seen_at and the first
--- and the last day of statistics only move forward or widen, as in core.dim_campaign.
+-- (ADR-0036): one row for each ad of int_ads__current, the newest list of its account, the core for
+-- one that the list no longer names, or, for a stub, its newest row of statistics, with its ID as
+-- bigint and as text; an ad is defined only inside its ad group, which is part of its key. The
+-- model merges into the table of the migrations (dbt_project.yml), and only the rows that are new
+-- or that changed. last_seen_at and the first and the last day of statistics only move forward or
+-- widen, as in core.dim_campaign.
 {{ config(unique_key=['account_sk', 'ad_group_id', 'ad_id']) }}
 with existing as (
     select * from {{ this }}

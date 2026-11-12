@@ -118,14 +118,10 @@ def test_two_campaigns_change_their_names_at_the_start_of_a_half_year_or_a_year(
         if c.names.changes(date(2025, 1, 1), date(2026, 12, 31))
     }
     assert renamed == {"21000000102", "120200000000102"}
-    moments = world.name_versions("demo_search", NOW)
-    first = min(
-        common.history_first_day(NOW, a.time_zone) for a in world.accounts_of("demo_search")
-    )
-    assert moments[0].date() == first
-    assert [m.date() for m in moments[1:]] == [date(2025, 7, 1), date(2026, 1, 1), date(2026, 7, 1)]
-    assert all(m.tzinfo is UTC and m < NOW for m in moments)
-    assert world.name_versions("demo_video", NOW) == []
+    [half_year] = [c for c in world.CAMPAIGNS if c.campaign_id == "21000000102"]
+    changes = half_year.names.changes(date(2025, 4, 1), date(2026, 10, 11))
+    assert changes == [date(2025, 7, 1), date(2026, 1, 1), date(2026, 7, 1)]
+    assert half_year.name_at(date(2026, 6, 30)) != half_year.name_at(date(2026, 7, 1))
 
 
 def test_a_final_day_is_deterministic_and_plausible():

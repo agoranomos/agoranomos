@@ -66,11 +66,11 @@ The name of the campaign that the row carried when it was loaded. A platform giv
 {% enddocs %}
 
 {% docs observed_name %}
-A name that the campaign, the ad group or the ad had, from valid_from until valid_to, as the loads saw it; none for an ad of a type that has no name on its platform, such as a responsive search ad of Google.
+A name that the campaign, the ad group or the ad had, as a list of its account gave it: in staging, the name in the newest list of its account; in ad_campaign_names, a name of the campaign from valid_from until valid_to. None for an ad of a type that has no name on its platform, such as a responsive search ad of Google.
 {% enddocs %}
 
 {% docs current_name %}
-The name of the campaign, the ad group or the ad of the row as its newest version in the lists of its account has it, or, for one that only the statistics name, as its newest row of statistics carries it; none for an ad of a type that has no name on its platform, such as a responsive search ad of Google.
+The name of the campaign, the ad group or the ad of the row as the newest list of its account gives it, or, for one that the list no longer names, as its dimension in the core holds it, or, for one that only the statistics name, as its newest row of statistics carries it; none for an ad of a type that has no name on its platform, such as a responsive search ad of Google.
 {% enddocs %}
 
 {% docs currency %}
@@ -258,11 +258,11 @@ The type of the ad as the ad platform gives it: the type of Google, such as RESP
 {% enddocs %}
 
 {% docs valid_from %}
-The moment from which the row held, as the loads saw it: for a version of a campaign, an ad group, an ad or a conversion action, its values, as a change of any of its fields, such as its name or its status, starts a new version; for a name of a campaign, as in ad_campaign_names, the name. It is the moment of the load that first saw it, or, for the versions that the first load of the demo replays, 00:00 UTC of the day on which a name changed, or of the first day of the history for the first of them.
+The moment, in UTC, from which the campaign had the name: the start of the first of its versions in the core with the name, when a run of the transform first saw it (core.dim_campaign_versions).
 {% enddocs %}
 
 {% docs valid_to %}
-The moment until which the row held: that of the load that saw the campaign, the ad group, the ad or the conversion action change, or no longer saw it; none while the row holds, as for the current version or name of a campaign.
+The moment, in UTC, until which the campaign had the name: the start of its version with another name; none while the campaign has it.
 {% enddocs %}
 
 {% docs is_current %}
@@ -278,7 +278,7 @@ The last day that the advertising statistics hold for the account, the campaign,
 {% enddocs %}
 
 {% docs name_count %}
-How many different names the campaign had, as the loads saw them.
+How many different names the campaign had, as the versions of the core keep them, from the first run of the transform that saw the campaign (core.dim_campaign_versions).
 {% enddocs %}
 
 {% docs is_listed %}
@@ -286,7 +286,7 @@ Whether the newest list of its account that the loads gave names the campaign, t
 {% enddocs %}
 
 {% docs last_seen_at %}
-When a list of its account last named the campaign, the ad group or the ad of the row, as this run of the transform sees it: for one that the newest list names, when the newest load of the account that the runs pinned ended, or the start of its newest version when that is later; for one that the platform no longer lists, the start of its newest version; none for one that only the statistics name.
+When a list of its account last named the campaign, the ad group or the ad of the row, as this run of the transform sees it: for one that the newest list of its account names, when the load of that list ended; for one that the platform no longer lists, the moment that its dimension in the core holds; none for one that only the statistics name.
 {% enddocs %}
 
 {% docs is_stub %}

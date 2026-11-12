@@ -675,8 +675,8 @@ CHECKED = {
     ),
     "accounts": (ACCOUNT_KEY, [*ACCOUNT_KEY, "currency", "time_zone"], []),
     "campaigns": (
-        [*ACCOUNT_KEY, "campaign_id", "valid_from"],
-        [*ACCOUNT_KEY, "campaign_id", "valid_from", "observed_name"],
+        [*ACCOUNT_KEY, "campaign_id"],
+        [*ACCOUNT_KEY, "campaign_id", "load_id", "observed_name"],
         [],
     ),
     "ad_group_stats": (AD_GROUP_KEY, [*AD_GROUP_KEY, "campaign_id", *METRICS], METRICS),
@@ -692,13 +692,13 @@ CHECKED = {
         CONVERTED,
     ),
     "ad_groups": (
-        [*ACCOUNT_KEY, "ad_group_id", "valid_from"],
-        [*ACCOUNT_KEY, "campaign_id", "ad_group_id", "valid_from", "observed_name"],
+        [*ACCOUNT_KEY, "ad_group_id"],
+        [*ACCOUNT_KEY, "campaign_id", "ad_group_id", "load_id", "observed_name"],
         [],
     ),
     "ads": (
-        [*ACCOUNT_KEY, "ad_group_id", "ad_id", "valid_from"],
-        [*ACCOUNT_KEY, "campaign_id", "ad_group_id", "ad_id", "valid_from"],
+        [*ACCOUNT_KEY, "ad_group_id", "ad_id"],
+        [*ACCOUNT_KEY, "campaign_id", "ad_group_id", "ad_id", "load_id"],
         [],
     ),
     "properties": (
@@ -733,8 +733,8 @@ CHECKED = {
     ),
 }
 # The kinds whose data G1 checks for each account: the facts and the lists of accounts and of
-# properties. The lists of the entities, whose versions dlt keeps, and the rates, which name no
-# account, keep their tests in staging.
+# properties. The lists of the entities, which staging reads from the newest load of each account,
+# and the rates, which name no account, keep their tests in staging.
 BY_ACCOUNT = {
     "campaign_stats",
     "campaign_conversions",
@@ -792,7 +792,8 @@ def column_tests(block: str) -> set[str]:
 
 # The kinds of staging models that read a fact table of raw, whose loads each append their rows:
 # each reads its table through newest_load, the rows of the newest whole load of each account and
-# day (ADR-0038), and the other kinds read their tables as they are.
+# day (ADR-0038), and the other kinds, the lists of the entities, through newest_list, the rows of
+# the newest whole load of each account.
 BY_LOAD = {
     "campaign_stats",
     "campaign_conversions",
@@ -803,6 +804,13 @@ BY_LOAD = {
     "sessions_daily",
     "rates_daily",
     "account_totals",
+}
+# How the rows of a list of a platform of the demo name the account, where not as the facts of
+# its source do (newest_load_sources): the list of accounts of the manager of demo_search, and the
+# properties of demo_web, whose name holds the ID after properties/.
+LIST_ACCOUNTS = {
+    ("demo_search", "accounts"): "'r.customer_client__id'",
+    ("demo_web", "properties"): "\"split_part(r.name, '/', 2)\"",
 }
 
 
@@ -824,11 +832,16 @@ def test_each_staging_model_of_a_platform_is_one_call_of_the_shape_of_its_api():
             path = STAGING / code / f"stg_{code}__{model}.sql"
             comment, *body = path.read_text(encoding="utf-8").splitlines()
             relations = [f"demo_source('{dataset}', '{table}')" for table in tables]
+            facts = {fact.table for fact in platforms.PLATFORMS[code].facts}
             if model in BY_LOAD:
-                facts = {fact.table for fact in platforms.PLATFORMS[code].facts}
                 assert tables[0] in facts, (code, model)
                 days = "ref('stg_loads__newest_days')"
                 relations[0] = f"newest_load({relations[0]}, '{dataset}', {days})"
+            else:
+                assert tables[0] not in facts, (code, model)
+                account = LIST_ACCOUNTS.get((code, model))
+                loads = "source('core', 'loads')" + (f", {account}" if account else "")
+                relations[0] = f"newest_list({relations[0]}, '{dataset}', {loads})"
             relations = ", ".join(relations)
             arguments = ", ".join([relations, f"'{code}'", *(f"'{name}'" for name in level)])
             assert comment.startswith(f"-- {path.name}: "), path.name
@@ -1413,8 +1426,6 @@ GOOGLE_ADS_MODELS = {
     "conversion_actions": ("google_ads_conversion_actions", "conversion_actions"),
     "account_totals": ("google_ads_totals", "customer_stats"),
 }
-# The tables of entities of Google Ads, whose versions dlt keeps (scd2).
-GOOGLE_ADS_VERSIONED = ("campaigns", "ad_groups", "ads", "conversion_actions")
 
 
 def test_each_staging_model_of_google_ads_is_one_call_of_the_shape_that_the_demo_shares():
@@ -1425,18 +1436,14 @@ def test_each_staging_model_of_google_ads_is_one_call_of_the_shape_that_the_demo
         assert text.startswith(f"-- stg_google_ads__{model}.sql: "), model
         relation = f"relation_or_empty(source('raw_google_ads', '{table}'), {{"
         by_load = model in BY_LOAD
-        call = f"{{{{ {macro}(newest_load({relation}" if by_load else f"{{{{ {macro}({relation}"
-        assert text.count(call) == 1, model
+        reader = "newest_load" if by_load else "newest_list"
+        assert text.count(f"{{{{ {macro}({reader}({relation}") == 1, model
         # The statistics of the connector carry all the conversions of Google, which those of
         # demo_search do not.
         everything = ["all_conversions=true"] if model.endswith("_stats") else []
         arguments = ", ".join(["'google_ads'", *(f"'{name}'" for name in level), *everything])
-        days = "ref('stg_loads__newest_days')"
-        end = (
-            f"}}), 'raw_google_ads', {days}), {arguments}) }}}}"
-            if by_load
-            else f"}}), {arguments}) }}}}"
-        )
+        loads = "ref('stg_loads__newest_days')" if by_load else "source('core', 'loads')"
+        end = f"}}), 'raw_google_ads', {loads}), {arguments}) }}}}"
         assert text.rstrip().endswith(end), model
         # No model names a seed, as none of the demo does: the checks of int_g1_failures read them.
         assert "depends_on" not in text, model
@@ -1464,9 +1471,8 @@ def test_the_columns_of_the_empty_tables_of_google_ads_are_the_fields_of_its_que
         text = (GOOGLE_ADS / f"stg_google_ads__{model}.sql").read_text(encoding="utf-8")
         columns = set(re.findall(r"'(\w+)': '[\w ]+'", text))
         hinted = {field.strip().replace(".", "__") for field in fields[table].split(",")}
-        scd2 = {"_dlt_valid_from", "_dlt_valid_to"} if table in GOOGLE_ADS_VERSIONED else set()
-        load = {"_dlt_load_id"} if model in BY_LOAD else set()
-        wanted = hinted | scd2 | load
+        # Every table appends, and staging reads each by its load.
+        wanted = hinted | {"_dlt_load_id"}
         assert columns == wanted, (model, sorted(columns ^ wanted))
 
 
@@ -1546,6 +1552,10 @@ def test_every_union_of_the_platforms_reads_google_ads_and_the_loads_show_it():
     # And the conversion actions that the accounts list, which say which of them are primary.
     resolved = (INTERMEDIATE / "int_conversion_actions__resolved.sql").read_text(encoding="utf-8")
     assert "from {{ ref('stg_google_ads__conversion_actions') }}" in resolved
+    # And what the core holds of an action that a list named before and that no list of this run
+    # names, so that it does not lose its flag when it leaves the lists.
+    assert "from {{ source('core', 'dim_conversion_action') }} as k" in resolved
+    assert "where k.include_in_conversions_metric is not null" in resolved
     loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
     assert "('raw_google_ads', 'google_ads')," in loads
 
@@ -1876,7 +1886,12 @@ def test_the_views_of_the_core_take_their_accounts_from_one_place():
         text = (INTERMEDIATE / f"{view}.sql").read_text(encoding="utf-8")
         assert "from {{ ref('int_accounts__current') }} as a" in text, view
         assert "join {{ ref('dim_account') }} as d" in text, view
-        assert "from {{ source('core', 'loads') }}" in text, view
+        # The accounts whose newest list this run reads, of every platform of the ads, and the
+        # entities of the core that such a list no longer names (ADR-0036).
+        for source in ("raw_demo_search", "raw_demo_social", "raw_demo_video", "raw_google_ads"):
+            assert f"{{{{ newest_lists('{source}', source('core', 'loads')) }}}}" in text, view
+        assert f"from {{{{ source('core', '{dimension}') }}}} as k" in text, view
+        assert "when l.account_id is not null then false" in text, view
         model = (CORE / f"{dimension}.sql").read_text(encoding="utf-8")
         assert f"from {{{{ ref('{view}') }}}}" in model, dimension
 
@@ -2254,6 +2269,10 @@ def test_g1a_and_the_stop_of_a_source_follow_adr_0035():
     assert tables == [
         "loads",
         "dim_account",
+        "dim_campaign",
+        "dim_ad_group",
+        "dim_ad",
+        "dim_conversion_action",
         "ad_stats_campaign_daily",
         "web_sessions_daily",
         "fx_rates_daily",

@@ -79,13 +79,13 @@ models:
         description: '{{ doc("all_conversion_value") }}'
   - name: stg_google_ads__accounts
     description: >-
-      The Google Ads accounts that extensions/model/clients.toml names, one row each, as the
-      customer resource of each account gives it: a manager account, which has no statistics, is
-      left out, and manager_account_id is empty, as each account is read on its own. It is empty
-      until the first load. platform and account_id are its key. int_g1_failures checks each account
-      for its key, its currency and its time zone, and holds one that fails out of the core and the
-      marts (ADR-0035). Its tests guard the marts: when one of them fails, dbt does not rebuild the
-      models that read this one.
+      The Google Ads accounts that extensions/model/clients.toml names, one row each, from the
+      newest load of the account that a run pinned, as the customer resource of each account gives
+      it: a manager account, which has no statistics, is left out, and manager_account_id is empty,
+      as each account is read on its own. It is empty until the first load. platform and account_id
+      are its key. int_g1_failures checks each account for its key, its currency and its time zone,
+      and holds one that fails out of the core and the marts (ADR-0035). Its tests guard the marts:
+      when one of them fails, dbt does not rebuild the models that read this one.
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
@@ -105,15 +105,17 @@ models:
         description: '{{ doc("account_status") }}'
   - name: stg_google_ads__campaigns
     description: >-
-      The versions of the campaigns of the Google Ads accounts of the deployment, one row for each
-      version that the loads saw, from valid_from until valid_to: a change of any of its fields, such as the name or the status,
-      starts a new version, and a campaign that a load no longer lists has no current one. platform,
-      account_id, campaign_id and valid_from are its key. Its tests guard the marts: when one of
+      The campaigns of the Google Ads accounts of the deployment, the removed ones too, one row for
+      each campaign that the newest list of its account names, from the newest load of the account
+      that a run pinned, whose ID is load_id: an account that failed in a load keeps the list of the
+      load before, and a campaign that the newest list no longer names is not here, so that its
+      dimension in the core says that the platform no longer lists it. It is empty until the first
+      load. platform, account_id and campaign_id are its key. Its tests guard the marts: when one of
       them fails, dbt does not rebuild the models that read this one.
     data_tests:
       - unique_combination:
           arguments:
-            columns: [platform, account_id, campaign_id, valid_from]
+            columns: [platform, account_id, campaign_id]
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
@@ -133,11 +135,9 @@ models:
         description: '{{ doc("campaign_state") }}'
       - name: campaign_type
         description: '{{ doc("campaign_type") }}'
-      - name: valid_from
-        description: '{{ doc("valid_from") }}'
+      - name: load_id
+        description: '{{ doc("load_id") }}'
         data_tests: [not_null]
-      - name: valid_to
-        description: '{{ doc("valid_to") }}'
   - name: stg_google_ads__ad_group_stats
     description: >-
       The statistics of the ad groups of the Google Ads accounts of the deployment, one row for each
@@ -309,16 +309,17 @@ models:
         description: '{{ doc("all_conversion_value") }}'
   - name: stg_google_ads__ad_groups
     description: >-
-      The versions of the ad groups of the Google Ads accounts of the deployment, one row for each
-      version that the loads saw, from valid_from until valid_to: a change of any of its fields,
-      such as the name or the status, starts a new version, and an ad group that a load no longer
-      lists has no current one. It is empty until the first load. platform, account_id, ad_group_id
-      and valid_from are its key. Its tests guard the marts: when one of them fails, dbt does not
-      rebuild the models that read this one.
+      The ad groups of the Google Ads accounts of the deployment, the removed ones too, one row for
+      each ad group that the newest list of its account names, from the newest load of the account
+      that a run pinned, whose ID is load_id: an account that failed in a load keeps the list of the
+      load before, and an ad group that the newest list no longer names is not here, so that its
+      dimension in the core says that the platform no longer lists it. It is empty until the first
+      load. platform, account_id and ad_group_id are its key. Its tests guard the marts: when one of
+      them fails, dbt does not rebuild the models that read this one.
     data_tests:
       - unique_combination:
           arguments:
-            columns: [platform, account_id, ad_group_id, valid_from]
+            columns: [platform, account_id, ad_group_id]
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
@@ -341,24 +342,23 @@ models:
         description: '{{ doc("ad_group_state") }}'
       - name: ad_group_type
         description: '{{ doc("ad_group_type") }}'
-      - name: valid_from
-        description: '{{ doc("valid_from") }}'
+      - name: load_id
+        description: '{{ doc("load_id") }}'
         data_tests: [not_null]
-      - name: valid_to
-        description: '{{ doc("valid_to") }}'
   - name: stg_google_ads__ads
     description: >-
-      The versions of the ads of the Google Ads accounts of the deployment in their ad groups, one
-      row for each version that the loads saw, from valid_from until valid_to: a change of any of
-      its fields, such as the status, starts a new version, and an ad that a load no longer lists
-      has no current one. It is empty until the first load. A type of ad that has no name on Google,
-      such as a responsive search ad, has none here. platform, account_id, ad_group_id, ad_id and
-      valid_from are its key. Its tests guard the marts: when one of them fails, dbt does not
-      rebuild the models that read this one.
+      The ads of the Google Ads accounts of the deployment, the removed ones too, one row for each
+      ad that the newest list of its account names, from the newest load of the account that a run
+      pinned, whose ID is load_id: an account that failed in a load keeps the list of the load
+      before, and an ad that the newest list no longer names is not here, so that its dimension in
+      the core says that the platform no longer lists it. A type of ad that has no name on Google,
+      such as a responsive search ad, has none here. platform, account_id, ad_group_id and ad_id are
+      its key. Its tests guard the marts: when one of them fails, dbt does not rebuild the models
+      that read this one.
     data_tests:
       - unique_combination:
           arguments:
-            columns: [platform, account_id, ad_group_id, ad_id, valid_from]
+            columns: [platform, account_id, ad_group_id, ad_id]
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
@@ -383,26 +383,26 @@ models:
         description: '{{ doc("ad_state") }}'
       - name: ad_type
         description: '{{ doc("ad_type") }}'
-      - name: valid_from
-        description: '{{ doc("valid_from") }}'
+      - name: load_id
+        description: '{{ doc("load_id") }}'
         data_tests: [not_null]
-      - name: valid_to
-        description: '{{ doc("valid_to") }}'
   - name: stg_google_ads__conversion_actions
     description: >-
-      The versions of the conversion actions of the Google Ads accounts of the deployment, one row
-      for each version that the loads saw, from valid_from until valid_to: a change of any of its
-      fields, such as the name or include_in_conversions_metric, starts a new version, and an action
-      that a load no longer lists has no current one. It is empty until the first load. An action
-      that a manager account owns has a row for each account that lists it. The newest version of
-      each action says whether it is primary in the model, where the settings of the deployment do
-      not name it (int_conversion_actions__resolved). platform, account_id, conversion_action_id
-      and valid_from are its key. Its tests guard the marts: when one of them fails, dbt does not
-      rebuild the models that read this one.
+      The conversion actions of the Google Ads accounts of the deployment, one row for each
+      conversion action that the newest list of its account names, from the newest load of the
+      account that a run pinned, whose ID is load_id: an account that failed in a load keeps the
+      list of the load before, and an action that the newest list no longer names is not here, so
+      that its dimension in the core says that the platform no longer lists it. It is empty until
+      the first load. An action that a manager account owns has a row for each account that lists
+      it. The newest list says whether an action is primary in the model, where the settings of the
+      deployment do not name it, and the core keeps what a list said of an action that no newer list
+      names (int_conversion_actions__resolved). platform, account_id and conversion_action_id are
+      its key. Its tests guard the marts: when one of them fails, dbt does not rebuild the models
+      that read this one.
     data_tests:
       - unique_combination:
           arguments:
-            columns: [platform, account_id, conversion_action_id, valid_from]
+            columns: [platform, account_id, conversion_action_id]
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
@@ -423,11 +423,9 @@ models:
         description: '{{ doc("include_in_conversions_metric") }}'
       - name: primary_for_goal
         description: '{{ doc("primary_for_goal") }}'
-      - name: valid_from
-        description: '{{ doc("valid_from") }}'
+      - name: load_id
+        description: '{{ doc("load_id") }}'
         data_tests: [not_null]
-      - name: valid_to
-        description: '{{ doc("valid_to") }}'
   - name: stg_google_ads__account_totals
     description: >-
       The totals of the Google Ads accounts of the deployment by day, one row for each account and

@@ -1,10 +1,12 @@
 -- core.dim_campaign, the campaigns with their current attributes (ADR-0036): one row for each
--- campaign of int_campaigns__current, the newest list of its account or, for a stub, its newest row
--- of statistics, with its ID as bigint and as text. The model merges into the table of the
--- migrations (dbt_project.yml), and only the rows that are new or that changed.
--- * name_count counts the names of the versions of the campaign that the lists keep and of those
---   of the core (dim_campaign_versions), which the snapshot of this run has just taken, so that a
---   name from the statistics of a stub counts too.
+-- campaign of int_campaigns__current, the newest list of its account, the core for one that the
+-- list no longer names, or, for a stub, its newest row of statistics, with its ID as bigint and as
+-- text. The model merges into the table of the migrations (dbt_project.yml), and only the rows
+-- that are new or that changed.
+-- * name_count counts the names of the versions of the campaign in the core
+--   (dim_campaign_versions), which the snapshot of this run has just taken from the same view, so
+--   that the current name and a name from the statistics of a stub count too. The versions start
+--   at the first run that saw the campaign, so it counts the names that the runs saw.
 -- * last_seen_at and the first and the last day of statistics only move forward or widen: this run
 --   reads the loads that the core has not accepted (ADR-0035), and a list that no longer names a
 --   campaign leaves the moment when one last did.
@@ -14,33 +16,9 @@ with existing as (
     select * from {{ this }}
 ),
 
-listed_names as (
-    select platform, account_id, campaign_id, observed_name
-    from {{ ref('stg_demo_search__campaigns') }}
-    union all
-    select platform, account_id, campaign_id, observed_name
-    from {{ ref('stg_demo_social__campaigns') }}
-    union all
-    select platform, account_id, campaign_id, observed_name
-    from {{ ref('stg_demo_video__campaigns') }}
-    union all
-    select platform, account_id, campaign_id, observed_name
-    from {{ ref('stg_google_ads__campaigns') }}
-),
-
-names as (
-    select a.account_sk, n.campaign_id::bigint as campaign_id, n.observed_name as name
-    from listed_names as n
-    join {{ ref('dim_account') }} as a
-        on a.platform = n.platform and a.account_id = n.account_id
-    union
-    select account_sk, campaign_id, campaign_name
-    from {{ ref('dim_campaign_versions') }}
-),
-
 counted as (
-    select account_sk, campaign_id, count(distinct name)::integer as name_count
-    from names
+    select account_sk, campaign_id, count(distinct campaign_name)::integer as name_count
+    from {{ ref('dim_campaign_versions') }}
     group by account_sk, campaign_id
 ),
 
