@@ -64,7 +64,8 @@ join (
       as only such a load can win a day of a pinned one: the accepted loads of 13 months would
       otherwise unroll about 180 windows of 90 days for each account (#191).
     * A failed account has no window, and its row is passed over.
-    Nothing accepts a load yet, so every load that a run has pinned counts. -#}
+    A run that succeeds accepts the loads that it read (agoranomos_pipelines/acceptance.py), so
+    the next run reads only the loads pinned since, and those of an account in quarantine. -#}
 {% macro pinned_loads(source_name, loads) -%}
     {%- set account, _ = newest_load_keys(source_name) -%}
     {%- set source = source_name[4:] -%}
@@ -191,7 +192,8 @@ join ({{ newest_lists(source_name, loads) }}) as l
     * Of the accepted loads, only those newer than the oldest pinned load of the account count, as
       only such a load can be newer than every pinned one (pinned_loads).
     * A failed account has no list in its load, and its row is passed over.
-    Nothing accepts a load yet, so it is the newest pinned load of each account. -#}
+    An account whose newest load is accepted has no list here, and its dimensions keep what the
+    core holds. -#}
 {% macro newest_lists(source_name, loads) -%}
     {%- set source = source_name[4:] -%}
 select n.source, n.account_id, n.load_id, n.finished_at

@@ -252,11 +252,15 @@ def test_a_repeated_history_changes_no_row_that_staging_reads(env, airflow_url, 
         assert int(loads) == loads_before[code] + 1, code
 
 
-# The whole loads of demo_search and the accounts that each took, from its journal.
+# The whole loads of demo_search and the accounts that each took, from its journal, but those
+# that the core accepted: the cleanup of raw deleted their rows, and the journal keeps them
+# (ADR-0046). The transform is paused here, so the loads of these tests stay.
 WHOLE_LOADS = (
     "SELECT j._dlt_load_id, j.account_id FROM raw_demo_search._agoranomos_loads AS j "
     "JOIN raw_demo_search._dlt_loads AS l ON l.load_id = j._dlt_load_id AND l.status = 0 "
-    "WHERE j.status = 'loaded'"
+    "WHERE j.status = 'loaded' AND NOT EXISTS (SELECT FROM core.loads AS c "
+    "WHERE c.source = 'demo_search' AND c.load_id = j._dlt_load_id "
+    "AND c.account_id = j.account_id AND c.status = 'accepted')"
 )
 
 

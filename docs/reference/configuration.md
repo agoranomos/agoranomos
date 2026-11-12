@@ -134,6 +134,7 @@ The service data that grows with each run leaves by itself after a time ([ADR-00
 | The logs of Airflow, those of the tasks and of the DAG processor, in the volume `airflow-logs` | 30 days | The task `clean_airflow_logs` of the DAG `agoranomos_maintenance`, every day at 04:23 UTC |
 | The results of the runs of dbt that elementary records in the schema `ops` | 90 days | The task `clean_ops` of the same DAG, as the role `transformer` |
 | The rows of `_dlt_loads` of each raw schema, but those that a load, dlt or the next pin still reads | 90 days | The task `clean_dlt_loads` of the same DAG, as the role `loader` |
+| The rows of the loads in the tables of each raw schema, but the journal `_agoranomos_loads` and the tables of dlt | Until a run of the transform accepts their load and account, and a day for a load that did not end | The task `clean_raw` of the DAG `agoranomos_demo_transform`, as `loader`, after each run whose tasks of dbt all succeeded ([Watch the pipeline](../how-to/watch-the-pipeline.md#when-a-run-ends-the-acceptance-and-the-cleanup)) |
 | The accepted rows of the kind `window` of `core.loads`, but those that a run or a load still reads | 13 months | The task `clean_core_loads` of the same DAG, as `transformer` |
 | The journals of restatements of the core, by month | 13 to 14 months | The task `drop_old_journal_months` of the same DAG, through `core.drop_partition` |
 | The Airflow Variables `cosmos_xcom_backup__…` that the watcher mode of Cosmos leaves | 90 days after their run | The task `clean_cosmos_variables` of the same DAG |

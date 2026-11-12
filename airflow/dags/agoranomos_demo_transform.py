@@ -13,16 +13,22 @@ platforms share, the dimensions of the core with the snapshots of the versions o
 and the views of the Ops collection. A failed critical test stops the models that read
 it, and the marts keep their data. Before them, one task builds the tables of elementary in the
 schema ops, into which the hooks of elementary in every task of dbt write the results of its models
-and tests (ADR-0029). A run in which every task succeeded ends with the task transformed, which
-updates the asset TRANSFORMED, after which the history of Google Ads takes its next portion
-(agoranomos_google_ads_history, ADR-0038). The DAG runs when each of the five platforms of the
-demo has loaded since its last run, each load updating the asset of its main table, after each
-load of the rates of the ECB, and after each load of Google Ads (ADR-0032, ADR-0039), one run at a
-time: a run takes the events of the loads that ended while the run before it ran. A repeat is
-safe: the settings are loaded again, and dbt rebuilds the models. The DAG starts paused. With the
-demo profile, the one-shot demo-init job unpauses it and runs agoranomos_demo_history on the first
-start; without it, unpause this DAG in the Airflow UI before you trigger a load. The DAG keeps the
-word demo in its id for now, as the Ops collection and the demo name it; a change of its own is to
+and tests (ADR-0029). Once every task of dbt has succeeded, the task accept marks as accepted in
+core.loads, as transformer, the loads that the run read, but those of the accounts that the checks
+of the run held in quarantine, and then the task transformed updates the asset TRANSFORMED, after
+which the history of Google Ads takes its next portion (agoranomos_google_ads_history, ADR-0038),
+while the task clean_raw deletes, as loader, the rows of the accepted loads from the raw layer, and
+those of a load that did not end and began more than a day ago (ADR-0035, ADR-0046,
+agoranomos_pipelines/acceptance.py). A run with a failed or a skipped task of dbt accepts nothing
+and cleans nothing, and the next run reads its loads again. The DAG runs when each of the five
+platforms of the demo has loaded since its last run, each load updating the asset of its main
+table, after each load of the rates of the ECB, and after each load of Google Ads (ADR-0032,
+ADR-0039), one run at a time: a run takes the events of the loads that ended while the run before
+it ran. A repeat is safe: the settings are loaded again, dbt rebuilds the models, and the
+acceptance and the cleanup find what is left to do. The DAG starts paused. With the demo profile,
+the one-shot demo-init job unpauses it and runs agoranomos_demo_history on the first start;
+without it, unpause this DAG in the Airflow UI before you trigger a load. The DAG keeps the word
+demo in its id for now, as the Ops collection and the demo name it; a change of its own is to
 rename it.
 
 Cosmos renders its tasks from the manifest that metadata-export writes on every start (ADR-0027),
@@ -181,15 +187,43 @@ def agoranomos_demo_transform():
         default_args={"pool": DBT_POOL},
     )
 
-    # The last task, once every task of dbt has succeeded: its event of TRANSFORMED tells the
-    # history of Google Ads that the loads of the pin are in the core (ADR-0038). A run with a
-    # failed task ends without it.
+    # Once every task of dbt has succeeded, the default rule all_success, which a failed or a
+    # skipped task of dbt stops: the core accepts what the run read, as transformer, by load and
+    # account, but the accounts that the checks of the run held (ADR-0046). One statement, so a
+    # retry finds what is left; it waits for no lock but those of the rows of core.loads.
+    @task(task_id="accept", retries=2, retry_delay=timedelta(minutes=1))
+    def accept() -> dict[str, int]:
+        from agoranomos_pipelines import acceptance
+
+        return acceptance.accept()
+
+    # Then the rows of the accepted loads leave the raw layer, as loader, the owner of raw, table by
+    # table, each in a transaction of its own, so a retry finds what is left (ADR-0046). The first
+    # cleanup after an update can have much to delete, so it may take longer than a task of dbt.
+    @task(
+        task_id="clean_raw",
+        retries=2,
+        retry_delay=timedelta(minutes=1),
+        execution_timeout=timedelta(minutes=30),
+    )
+    def clean_raw() -> dict[str, int]:
+        from agoranomos_pipelines import acceptance
+
+        return acceptance.clean_raw()
+
+    # Once the core has accepted the loads of the run: its event of TRANSFORMED tells the history
+    # of Google Ads that the loads of the pin are in the core (ADR-0038). A run with a failed task
+    # ends without it. The cleanup goes on beside it, and a load that the event starts writes
+    # beside the cleanup, which takes only the rows of accepted loads.
     @task(task_id="transformed", outlets=[TRANSFORMED])
     def transformed() -> None:
         pass
 
-    # Every task of dbt comes after the settings, the pin and the tables of elementary.
-    load_settings() >> pin >> elementary >> dbt >> transformed()
+    # Every task of dbt comes after the settings, the pin and the tables of elementary, and the
+    # acceptance after every task of dbt.
+    accepted = accept()
+    load_settings() >> pin >> elementary >> dbt >> accepted >> transformed()
+    accepted >> clean_raw()
 
 
 agoranomos_demo_transform()

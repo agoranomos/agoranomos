@@ -1,7 +1,10 @@
 """The transform, agoranomos_demo_transform: the five assets of the history start it, it loads the
 settings of the model, pins the loads that have ended, and dbt builds the model from them; a load
 that ends between two tasks of dbt waits for the next run, and a failed critical test, or a mistake
-in a settings file, keeps the marts as they were.
+in a settings file, keeps the marts as they were. A run that succeeds accepts its loads and
+deletes their rows from raw (tests/stack/test_raw_cleanup.py), so the tests read the rows of raw
+of a history before its run of the transform ends, and a test that breaks a row of raw makes a load
+of its own first.
 
 The assertions print counts, sums, states and names, never a secret.
 """
@@ -26,10 +29,9 @@ from airflow_api import (
     wait_for_dag,
     wait_for_run,
 )
-from raw_loads import DAYS, newest
+from raw_loads import DAYS, last_moment, load_platform, newest
 from stack_helpers import (
     REPO_ROOT,
-    active_variant,
     compose,
     containers,
     docker,
@@ -59,6 +61,9 @@ ELEMENTARY = "elementary"
 # The last task, which updates the asset of a run in which every task succeeded, on which the
 # history of Google Ads runs (ADR-0038).
 TRANSFORMED = "transformed"
+# The acceptance of the loads of a run and the cleanup of raw, after every task of dbt (ADR-0046).
+ACCEPT = "accept"
+CLEAN_RAW = "clean_raw"
 MART = "marts.ad_stats_campaign_daily"
 MARTS = (
     "ad_stats_campaign_daily",
@@ -140,17 +145,17 @@ NAME_PERIODS = (
     "FROM marts.ad_campaign_names"
 )
 # The row that breaks a critical test of staging: a campaign with no name in the list of an account,
-# which no check of an account covers, of a campaign that the demo does not have, under the newest
-# whole load of demo_search, whose list staging reads. A row of statistics that breaks a check, such
-# as negative clicks, puts its account in quarantine instead, and the run goes on
-# (test_quarantine.py).
+# which no check of an account covers, of a campaign that the demo does not have, under a load of
+# demo_search that no run has read, {load}, whose list staging reads. A row of statistics that
+# breaks a check, such as negative clicks, puts its account in quarantine instead, and the run goes
+# on (test_quarantine.py).
 BROKEN_ROW = (
     "INSERT INTO raw_demo_search.campaigns (customer__id, campaign__id, "
     "campaign__resource_name, campaign__name, campaign__status, "
     "campaign__advertising_channel_type, _dlt_load_id, _dlt_id) "
-    "SELECT '4170000011', '21099999998', "
-    "'customers/4170000011/campaigns/21099999998', NULL, 'ENABLED', 'SEARCH', max(load_id), "
-    "'stack-test-broken-row' FROM raw_demo_search._dlt_loads WHERE status = 0"
+    "VALUES ('4170000011', '21099999998', "
+    "'customers/4170000011/campaigns/21099999998', NULL, 'ENABLED', 'SEARCH', '{load}', "
+    "'stack-test-broken-row')"
 )
 REMOVE_BROKEN_ROW = "DELETE FROM raw_demo_search.campaigns WHERE _dlt_id = 'stack-test-broken-row'"
 BROKEN_TEST = "not_null_stg_demo_search__campaigns_observed_name"
@@ -211,9 +216,20 @@ def assert_no_secret_in_the_logs(env, airflow_url, token, run):
         assert not found, f"the log of {instance['task_id']} holds the values of {found}"
 
 
+# The name of a campaign that the demo renames every half-year in the newest whole list of its
+# account, which the history gives.
+CURRENT_NAME = (
+    "SELECT c.campaign__name FROM raw_demo_search.campaigns AS c "
+    "JOIN raw_demo_search._dlt_loads AS l ON l.load_id = c._dlt_load_id AND l.status = 0 "
+    "WHERE c.campaign__id = '21000000102' ORDER BY c._dlt_load_id::numeric DESC LIMIT 1"
+)
+
+
 @pytest.fixture(scope="module")
-def pipeline(env, airflow_url, token):
-    """A run of the history, and the run of the transform that its five asset events started."""
+def history_read(env, airflow_url, token):
+    """A run of the history, the rows of raw that its run of the transform is to read, as they are
+    before that run ends and deletes them, and the ID of the run of the transform that its five
+    asset events started, which may still be running."""
     for dag_id in (HISTORY, TRANSFORM):
         wait_for_dag(airflow_url, token, dag_id)
     warehouse_output(env, REMOVE_BROKEN_ROW)  # left behind by a test that was stopped
@@ -233,6 +249,11 @@ def pipeline(env, airflow_url, token):
     )
     history = run_dag(airflow_url, token, HISTORY, timeout=900)
     assert history["state"] == "success", history["state"]
+    # The run of the transform deletes the rows of its loads from raw at its end, once every task
+    # of dbt has built its node: minutes after the history, long after these reads.
+    read = {code: warehouse_output(env, sql) for code, sql in RAW_SUMS.items()}
+    read["social_conversions"] = warehouse_output(env, RAW_SOCIAL_CONVERSIONS)
+    read["current_name"] = warehouse_output(env, CURRENT_NAME)
     last = platforms.asset_uri(platforms.PLATFORMS[platforms.LOAD_ORDER[-1]])
 
     def started_by_the_history():
@@ -248,7 +269,21 @@ def pipeline(env, airflow_url, token):
         interval=5,
         message="the five assets of the history started no run of the transform",
     )
-    return history, wait_for_run(airflow_url, token, TRANSFORM, started["run_id"], timeout=1200)
+    return history, read, started["run_id"]
+
+
+@pytest.fixture(scope="module")
+def pipeline(airflow_url, token, history_read):
+    """The run of the history, and the run of the transform that its five asset events started,
+    once it has ended."""
+    history, _, run_id = history_read
+    return history, wait_for_run(airflow_url, token, TRANSFORM, run_id, timeout=1200)
+
+
+@pytest.fixture(scope="module")
+def raw_read(history_read, pipeline):
+    """What raw held of the history for its run of the transform, which has ended."""
+    return history_read[1]
 
 
 @pytest.fixture(scope="module")
@@ -311,13 +346,19 @@ def test_the_settings_load_first_then_the_pin_and_each_node_is_built_with_its_te
             if following not in reached:
                 reached.add(following)
                 todo.append(following)
-    built = [task for task in downstream if task not in (SETTINGS, PIN, ELEMENTARY, TRANSFORMED)]
-    assert reached == {*built, TRANSFORMED}, (
+    after = (SETTINGS, PIN, ELEMENTARY, ACCEPT, CLEAN_RAW, TRANSFORMED)
+    built = [task for task in downstream if task not in after]
+    assert reached == {*built, ACCEPT, CLEAN_RAW, TRANSFORMED}, (
         "a task of dbt does not wait for the tables of elementary"
     )
-    # The last task, after every task of dbt, updates the asset of a run that succeeded (ADR-0038).
-    assert downstream[TRANSFORMED] == []
+    # After every task of dbt, the acceptance, and then the task that updates the asset of a run
+    # that succeeded (ADR-0038) and the cleanup of raw (ADR-0046), which end the run.
+    assert downstream[ACCEPT] == sorted([CLEAN_RAW, TRANSFORMED])
+    assert downstream[TRANSFORMED] == downstream[CLEAN_RAW] == []
     assert not [task for task in built if not downstream[task]], "a task of dbt ends the run"
+    assert {ACCEPT} == {
+        following for task in built for following in downstream[task] if following not in built
+    }
     assert MART_BUILD in built, sorted(built)[:5]
     # One task of dbt build for each model, each seed and each snapshot of the versions of the core
     # (ADR-0036): no task runs a node or its tests alone.
@@ -347,8 +388,9 @@ def test_the_tasks_of_dbt_run_in_their_pool(airflow_url, token, transform_run):
     # The task of the pin and that of elementary run dbt too, so each takes a slot of the pool.
     assert pools.pop(PIN) == DBT_POOL
     assert pools.pop(ELEMENTARY) == DBT_POOL
-    # The last task runs no dbt.
-    assert pools.pop(TRANSFORMED) == "default_pool"
+    # The acceptance, the cleanup of raw and the last task run no dbt.
+    for task in (ACCEPT, CLEAN_RAW, TRANSFORMED):
+        assert pools.pop(task) == "default_pool", task
     assert pools, "the run has no task of dbt"
     assert {task.split(".")[0] for task in pools} == {"dbt"}, sorted(pools)[:5]
     assert set(pools.values()) == {DBT_POOL}, pools
@@ -392,18 +434,28 @@ NO_PARTITION = (
 
 
 def test_the_pin_takes_every_load_that_ended_and_the_run_reads_the_newest_of_each_day(
-    env, transform_run
+    env, pipeline
 ):
     # Every load of the demo had ended before the run, so its pin took each of them, by load and
     # account, and the run read, for each account and day, the newest load that covers it, as
-    # raw_loads.py does in SQL of its own; nothing accepts a load yet (ADR-0046).
+    # raw_loads.py does in SQL of its own: each day of the history, the newest load of its days,
+    # and no day of an older load, which the core accepted; then it accepted every load, as no
+    # account of the demo is in quarantine (ADR-0046).
+    history, _ = pipeline
     for code, platform in platforms.PLATFORMS.items():
         whole = WHOLE.format(dataset=platform.dataset)
         pinned = PINNED.format(source=code)
         missing = warehouse_output(env, f"SELECT count(*) FROM ({whole} EXCEPT {pinned}) AS m")  # noqa: S608 (constants of the demo)
         assert int(missing) == 0, code
         assert int(warehouse_output(env, f"SELECT count(*) FROM ({pinned}) AS p")) > 0, code  # noqa: S608
-        days = DAYS.format(dataset=platform.dataset)
+        loads = (
+            f"SELECT _dlt_load_id FROM {platform.dataset}._agoranomos_loads "  # noqa: S608 (names of the demo)
+            f"WHERE now = TIMESTAMPTZ '{moment(history).isoformat()}'"
+        )
+        days = (
+            f"SELECT * FROM ({DAYS.format(dataset=platform.dataset)}) AS n "  # noqa: S608 (constants of the demo)
+            f"WHERE n.load_id IN ({loads})"
+        )
         read = PIN_DAYS.format(source=code)
         differ = warehouse_output(
             env,
@@ -412,7 +464,7 @@ def test_the_pin_takes_every_load_that_ended_and_the_run_reads_the_newest_of_eac
         )
         assert int(differ) == 0, code
     states = warehouse_output(env, "SELECT DISTINCT status FROM core.loads")
-    assert states.split() == ["pinned"]
+    assert states.split() == ["accepted"]
 
 
 @pytest.mark.parametrize("code", sorted(FACTS_OF))
@@ -452,20 +504,34 @@ def test_cosmos_renders_the_transform_from_the_manifest(transform_run):
     assert all("using a dbt manifest" in event for event in events), events
 
 
+# The days that the run read of a platform, {code} in it, as SQL over a row of a mart.
+READ_DAYS = (
+    "(account_id, report_date) IN (SELECT account_id, day FROM staging.stg_loads__newest_days "
+    "WHERE source = '{code}')"
+)
+
+
 @pytest.mark.parametrize("code", sorted(RAW_SUMS))
-def test_the_mart_holds_the_statistics_of_raw(env, transform_run, code):
-    raw = [Decimal(value or 0) for value in warehouse_output(env, RAW_SUMS[code]).split("|")]
+def test_the_mart_holds_the_statistics_of_raw(env, raw_read, code):
+    # On the days that the run read: a day of an older history that the window of this one no
+    # longer reaches, as the window ends a day later in the time zone of the account, is the
+    # core's, whose load is accepted and gone from raw.
+    raw = [Decimal(value or 0) for value in raw_read[code].split("|")]
     mart = warehouse_output(
         env,
-        f"SELECT sum(impressions), sum(clicks), sum(spend) FROM {MART} WHERE platform = '{code}'",  # noqa: S608 (constants of this file)
+        "SELECT sum(impressions), sum(clicks), sum(spend) "  # noqa: S608 (constants of this file)
+        f"FROM {MART} WHERE platform = '{code}' AND {READ_DAYS.format(code=code)}",
     )
     assert [Decimal(value or 0) for value in mart.split("|")] == raw
     assert raw[0] > 0, f"no statistics of {code} in raw"
 
 
-def test_the_primary_conversions_of_a_campaign_are_those_of_its_primary_actions(env, transform_run):
-    raw = Decimal(warehouse_output(env, RAW_SOCIAL_CONVERSIONS) or 0)
-    social = f"SELECT sum(conversions_primary) FROM {MART} WHERE platform = 'demo_social'"  # noqa: S608 (constants of this file)
+def test_the_primary_conversions_of_a_campaign_are_those_of_its_primary_actions(env, raw_read):
+    raw = Decimal(raw_read["social_conversions"] or 0)
+    social = (
+        f"SELECT sum(conversions_primary) FROM {MART} WHERE platform = 'demo_social' "  # noqa: S608 (constants of this file)
+        f"AND {READ_DAYS.format(code='demo_social')}"
+    )
     assert Decimal(warehouse_output(env, social) or 0) == raw
     assert raw > 0, "no conversion of a primary action of demo_social in raw"
     # conversions is the metric of the platform (ADR-0037), and Meta, which demo_social mimics, has
@@ -538,7 +604,7 @@ def test_spend_in_the_reporting_currency_is_spend_at_the_rate_of_its_day(env, tr
     assert {row[1] for row in rows} == {"USD", "EUR"}
 
 
-def test_every_day_of_a_campaign_has_its_current_name(env, transform_run):
+def test_every_day_of_a_campaign_has_its_current_name(env, raw_read):
     split = warehouse_output(
         env,
         f"SELECT count(*) FROM (SELECT 1 FROM {MART} GROUP BY platform, account_id, campaign_id "  # noqa: S608 (constants of this file)
@@ -546,15 +612,10 @@ def test_every_day_of_a_campaign_has_its_current_name(env, transform_run):
     )
     assert int(split) == 0
     # A campaign that the demo renames every half-year: the name in the newest list of its account
-    # that the runs pinned, and as many names as its versions in the core have had, from the first
+    # that the run read, and as many names as its versions in the core have had, from the first
     # run of the transform on (ADR-0036).
-    current = warehouse_output(
-        env,
-        "SELECT c.campaign__name FROM raw_demo_search.campaigns AS c JOIN core.loads AS l "
-        "ON l.source = 'demo_search' AND l.load_id = c._dlt_load_id "
-        "AND l.account_id = c.customer__id AND l.outcome = 'loaded' "
-        "WHERE c.campaign__id = '21000000102' ORDER BY c._dlt_load_id::numeric DESC LIMIT 1",
-    )
+    current = raw_read["current_name"]
+    assert current, "no list of the campaign in raw"
     names = warehouse_output(
         env,
         "SELECT count(DISTINCT observed_name) FROM marts.ad_campaign_names "
@@ -632,16 +693,17 @@ def test_the_day_that_the_demo_misses_is_a_warning_and_has_no_row(
     )
 
 
-# The rows of the facts of statistics of the core in a month that the freeze keeps, whose load is
-# not the newest that the run pinned for their account and day, and those whose load is one of
-# the history at {moment}, of the ad platforms of the demo.
+# The rows of the facts of statistics of the core in a month that the freeze keeps, on a day that
+# the run read, whose load is not the newest that the run pinned for their account and day, and
+# those whose load is one of the history at {moment}, of the ad platforms of the demo. A day of an
+# older history that the window of this one no longer reaches keeps its accepted load.
 FROZEN_ROWS = """
 SELECT count(*) FILTER (WHERE l.load_id IS DISTINCT FROM d.load_id),
   count(*) FILTER (WHERE l.load_id IN ({history}))
 FROM core.{fact} AS f
 JOIN core.dim_account AS a ON a.account_sk = f.account_sk
 JOIN core.loads AS l ON l.load_sk = f.load_sk
-LEFT JOIN staging.stg_loads__newest_days AS d
+JOIN staging.stg_loads__newest_days AS d
   ON d.source = a.platform AND d.account_id = a.account_id AND d.day = f.report_date
 WHERE f.report_date < date_trunc('month', current_date - 92)::date
 """
@@ -735,8 +797,12 @@ def test_a_failed_critical_test_keeps_the_marts(env, airflow_url, token, transfo
     before = totals(env, MART)
     held = totals(env, "core.ad_stats_campaign_daily")
     warehouse_output(env, REMOVE_BROKEN_ROW)  # left behind by a test that was stopped
+    # A load of the last days of demo_search, as of its newest load, which the run reads: the run
+    # before accepted the history, and staging reads no list of an accepted load.
+    now = last_moment(env, "demo_search")
+    load = load_platform(env, "demo_search", now, (now - timedelta(days=4)).date())
     try:
-        warehouse_output(env, BROKEN_ROW)
+        warehouse_output(env, BROKEN_ROW.format(load=load))
         run = transform(airflow_url, token)
         assert run["state"] == "failed", run["state"]
         instances = task_instances(airflow_url, token, run)
@@ -816,53 +882,11 @@ def test_a_broken_settings_file_stops_the_transform_and_keeps_the_marts(
         path.unlink(missing_ok=True)
 
 
-# A load of demo_social as of a moment, from a first day to yesterday of each account, as a daily
-# load writes it, in the container of the tasks and outside Airflow, so that no asset event starts
-# a run of the transform; with skip, it leaves out the day that the history leaves out. dlt reads
-# the password of loader from the environment of the container, and the script prints nothing.
-LOAD = """
-import sys
-from datetime import date, datetime
-
-from agoranomos_pipelines.demo import platforms, sources
-
-now = datetime.fromisoformat(sys.argv[1])
-first = date.fromisoformat(sys.argv[2])
-skip = platforms.gap(now) if sys.argv[3] == "skip" else frozenset()
-sources.load("demo_social", now, first=lambda account: first, skip=skip)
-"""
-# The DAGs of the base package, with agoranomos_pipelines, in the containers of Airflow.
-DAGS = "/opt/agoranomos/dags"
-# The newest whole load of demo_social.
-NEWEST_SOCIAL_LOAD = (
-    "SELECT j._dlt_load_id FROM raw_demo_social._agoranomos_loads AS j "
-    "JOIN raw_demo_social._dlt_loads AS l ON l.load_id = j._dlt_load_id AND l.status = 0 "
-    "ORDER BY j._dlt_load_id::numeric DESC LIMIT 1"
-)
-
-
 def load_social(env, now, first, skip):
-    """Load demo_social as LOAD says, and return the id of the load."""
-    service = "airflow-worker" if active_variant() == "celery" else "airflow-scheduler"
-    result = compose(
-        "exec",
-        "-T",
-        "-e",
-        f"PYTHONPATH={DAGS}",
-        service,
-        "python",
-        "-c",
-        LOAD,
-        now.isoformat(),
-        first.isoformat(),
-        "skip" if skip else "keep",
-        check=False,
-    )
-    output = f"{result.stdout}\n{result.stderr}"
-    # The last lines say why a load failed, unless they hold a secret.
-    shown = [] if leaked(secrets(env), output) else output.strip().splitlines()[-5:]
-    assert result.returncode == 0, f"the load exited with {result.returncode}: {shown}"
-    return warehouse_output(env, NEWEST_SOCIAL_LOAD)
+    """Load demo_social as of now, from first to yesterday of each account, as a daily load does,
+    outside Airflow, so that no asset event starts a run of the transform; with skip, without the
+    day that the history leaves out. Returns the id of the load."""
+    return load_platform(env, "demo_social", now, first, skip=skip)
 
 
 def test_a_load_between_two_tasks_of_dbt_waits_for_the_next_run(
@@ -917,18 +941,19 @@ def test_a_load_between_two_tasks_of_dbt_waits_for_the_next_run(
         assert warehouse_output(env, read) == "0"
         assert warehouse_output(env, gap).split("|")[0] == "0"
         assert totals(env, MART) == before
-        # The next run pins the load for each account and reads it: the day has its rows.
-        following = transform(airflow_url, token)
-        assert following["state"] == "success", following["state"]
-        accounts = len(list(platforms.PLATFORMS["demo_social"].module.accounts()))
-        assert int(warehouse_output(env, pinned)) == accounts
-        assert int(warehouse_output(env, read)) > 0
+        # The rows of the load of the day, which the next run reads and then deletes from raw.
         raw = warehouse_output(
             env,
             "SELECT sum(impressions::bigint), sum(inline_link_clicks::bigint), "  # noqa: S608 (constants of the demo)
             f"sum(spend::numeric) FROM {newest('demo_social')} "
             f"WHERE account_id = '{account}' AND date_start = DATE '{day.isoformat()}'",
         )
+        # The next run pins the load for each account and reads it: the day has its rows.
+        following = transform(airflow_url, token)
+        assert following["state"] == "success", following["state"]
+        accounts = len(list(platforms.PLATFORMS["demo_social"].module.accounts()))
+        assert int(warehouse_output(env, pinned)) == accounts
+        assert int(warehouse_output(env, read)) > 0
         rows, *sums = warehouse_output(env, gap).split("|")
         assert int(rows) > 0, "the next run did not read the load"
         assert [Decimal(value) for value in sums] == [Decimal(value) for value in raw.split("|")]

@@ -258,7 +258,7 @@ GRANT USAGE ON SCHEMA marts TO ai_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA marts TO ai_reader;
 ALTER DEFAULT PRIVILEGES FOR ROLE transformer IN SCHEMA marts GRANT SELECT ON TABLES TO ai_reader;
 -- An earlier version of this file let the role read staging too, whose views stand over a raw
--- layer that is to be erased after each acceptance, so that an agent would read empty tables
+-- layer that is erased after each acceptance, so that an agent would read empty tables
 -- (ADR-0043). An upgraded warehouse loses what it gave there: the schema, the tables and views in
 -- it, and the default privileges of transformer; and every start takes back such a grant given by
 -- hand.

@@ -91,6 +91,23 @@ def clear(airflow_url, token, run, task_ids, include_downstream=False):
     return sorted({instance["task_id"] for instance in cleared["task_instances"]})
 
 
+def skip(airflow_url, token, run, task_id, timeout=120):
+    """Mark a task of a run that has not run yet as skipped, as soon as the run has made it, so
+    that the task and those after it by the rule all_success do not run."""
+    path = (
+        f"/api/v2/dags/{run['dag_id']}/dagRuns/{quote(run['dag_run_id'], safe='')}"
+        f"/taskInstances/{task_id}"
+    )
+
+    def made():
+        status, _ = api(airflow_url, token, "GET", path)
+        return status == 200
+
+    wait_for(made, timeout, interval=1, message=f"the run made no task {task_id}")
+    status, body = api(airflow_url, token, "PATCH", path, {"new_state": "skipped"})
+    assert status == 200, body
+
+
 def dag_runs(airflow_url, token, dag_id, limit=20):
     """The latest runs of a DAG, the newest first."""
     path = f"/api/v2/dags/{dag_id}/dagRuns?order_by=-run_after&limit={limit}"
