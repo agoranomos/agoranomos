@@ -6,7 +6,7 @@ decision-makers: Andrei Gromov
 
 # Size the stack by profiles, and derive the settings of PostgreSQL from its memory limit
 
-Superseded in part by [ADR-0049](0049-keep-jit-off-for-the-transform-at-the-limit-of-one-server.md), once it is accepted: `jit` stays off for `transformer` at the limit of one server, as for every role. The rest of this record stays accepted.
+Superseded in part by [ADR-0049](0049-keep-jit-off-for-the-transform-at-the-limit-of-one-server.md): `jit` stays off for `transformer` at the limit of one server, as for every role. The rest of this record stays accepted.
 
 ## Context and Problem Statement
 

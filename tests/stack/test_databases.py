@@ -882,9 +882,11 @@ BACKUP_TABLE_TARGETS = [
     for service, database in BACKUP_TARGETS
 ]
 # A table that another role owns in each of those databases, with its owner: tables that a fresh
-# stack has, with rows in them (that of the warehouse, with the demo profile).
+# stack has, with rows in them (that of the warehouse, with the demo profile). That of the
+# warehouse is the journal of dlt of a raw schema, which the cleanup of raw leaves as it deletes
+# the rows of the loads that the core accepted (ADR-0046).
 BACKUP_TABLES = {
-    "warehouse": ("raw_demo_search.campaign_stats", "loader"),
+    "warehouse": ("raw_demo_search._dlt_loads", "loader"),
     "airflow": ("public.dag", "airflow"),
     "metabase": ("public.metabase_database", "metabase"),
 }

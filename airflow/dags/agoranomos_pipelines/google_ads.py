@@ -49,7 +49,7 @@ and the rows of the earlier loads stay unread.
 
 The last day that the core accepted for an account is the end of its newest accepted load in
 core.loads, which loader may read (ADR-0038). While the core has accepted no load of the account,
-as before the acceptance of the transform exists, it is the end of its newest whole load in
+as before the first run of the transform that read one, it is the end of its newest whole load in
 _agoranomos_loads; with neither, the load takes its usual window. A load keeps the watermark of each
 account that it loaded, the last day of its window, in the asset state store of Airflow 3.3, as a
 cache of the warehouse, which stays the truth: the cache never moves a window, as after a restore
@@ -423,8 +423,8 @@ def last_day(
     account_id: str, core: dict[str, date], journal: dict[str, tuple[date, date]]
 ) -> date | None:
     """The day after which the window of an account starts: the last that the core accepted for
-    it, or, while the core has accepted no load of the account, as before the acceptance of the
-    transform exists, the last day of its newest whole load in the journal; none when neither
+    it, or, while the core has accepted no load of the account, as before the first run of the
+    transform that read one, the last day of its newest whole load in the journal; none when neither
     knows the account, which then takes its usual window."""
     if account_id in core:
         return core[account_id]
