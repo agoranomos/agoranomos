@@ -7,10 +7,14 @@ demo, and loads the five platforms of agoranomos_demo_history, as the loader rol
 another: for each account, the days from the day after the last that a load took, or from the first
 day of the reload window of the platform if that is earlier, to yesterday in the time zone of the
 account (ADR-0025). The window is 90 days on demo_search, 28 on demo_social and demo_video, 14 on
-demo_web and 7 on demo_fx. A platform that holds no load yet gets its history. The first task, due,
-skips the run when every account has a load of its day already, as another load on the same day
-would bring the same numbers: so does the run that the DAG makes at once, for the last time of its
-schedule, when it is unpaused after the history. Each load updates the asset of its main table, so
+demo_web and 7 on demo_fx. A platform that holds no load yet gets its history. The rates of demo_fx
+take their history again, with the kind history, when the core lacks rates into the reporting
+currency on days whose loads it has accepted, as after a change of AGORANOMOS_REPORTING_CURRENCY,
+which ops.ops_rates names, read as the transformer role (agoranomos_pipelines/rates.py). The first
+task, due, skips the run when every account has a load of its day already and the core needs no
+history of the rates, as another load on the same day would bring the same numbers: so does the run
+that the DAG makes at once, for the last time of its schedule, when it is unpaused after the
+history. Each load updates the asset of its main table, so
 the transform runs after the five. A repeat is safe: each load replaces the days of each account
 that it covers. The loads of this DAG and of the history run one at a time, in the pool demo_load.
 The DAG starts paused: with the demo profile, the one-shot demo-init job unpauses it after the
@@ -38,19 +42,24 @@ LOAD_POOL = "demo_load"
 @task.short_circuit(task_id="due")
 def due() -> bool:
     # dlt is imported here and not at the top: the DAG processor parses this file often.
+    from agoranomos_pipelines import rates
     from agoranomos_pipelines.demo import sources
 
-    # Should anything write the password of the loader into the log, Airflow shows ***.
+    # Should anything write the passwords of the loader, or of the transformer, which reads what
+    # the core lacks of the rates, into the log, Airflow shows ***.
     mask_secret(sources.credentials()["password"])
+    mask_secret(rates.transformer_password())
     return sources.due(get_current_context()["dag_run"].run_after)
 
 
 def load_task(code: str):
     @task(task_id=f"load_{code}", outlets=[RAW_DEMO_PLATFORMS[code]], pool=LOAD_POOL)
     def load() -> None:
+        from agoranomos_pipelines import rates
         from agoranomos_pipelines.demo import sources
 
         mask_secret(sources.credentials()["password"])
+        mask_secret(rates.transformer_password())
         # The moment of the load is the run's, so a retry loads as of the same moment.
         sources.load_daily(code, get_current_context()["dag_run"].run_after)
 

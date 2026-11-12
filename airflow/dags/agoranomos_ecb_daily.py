@@ -3,10 +3,14 @@
 agoranomos_ecb_daily runs at 06:47 UTC, after midnight in Frankfurt, and loads with dlt, as the
 loader role, the rates of the ECB into raw_ecb: on the first run, those of the last 37 months, and
 then the days from the day after the last that a load took, or from 14 days back when that is
-earlier, to yesterday in Frankfurt (agoranomos_pipelines/ecb.py, ADR-0042). The first task, due,
-skips the run when a load has taken the day already. Each load updates the asset of the rates, and
-the transform runs after it (ADR-0039); where the ECB and the demo both have a rate for a day, it
-takes the rate of the ECB.
+earlier, to yesterday in Frankfurt (agoranomos_pipelines/ecb.py, ADR-0042). When the core lacks
+rates into the reporting currency on days whose loads it has accepted, as after a change of
+AGORANOMOS_REPORTING_CURRENCY, which ops.ops_rates names, a load takes the history of the rates
+again from those days, with the kind history, after reading the core as the transformer role
+(agoranomos_pipelines/rates.py). The first task, due, skips the run when a load has taken the day
+already and the core needs no history. Each load updates the asset of the rates, and the transform
+runs after it (ADR-0039); where the ECB and the demo both have a rate for a day, it takes the rate
+of the ECB.
 
 The DAG starts paused: the demo keeps its own rates and asks the ECB nothing, so a deployment with
 the demo alone, and the stack tests, need no network. A deployment with a real source unpauses it,
@@ -30,18 +34,21 @@ SCHEDULE = CronTriggerTimetable("47 6 * * *", timezone="UTC")
 @task.short_circuit(task_id="due")
 def due() -> bool:
     # dlt is imported here and not at the top: the DAG processor parses this file often.
-    from agoranomos_pipelines import ecb, loads
+    from agoranomos_pipelines import ecb, loads, rates
 
-    # Should anything write the password of the loader into the log, Airflow shows ***.
+    # Should anything write the passwords of the loader, or of the transformer, which reads what
+    # the core lacks, into the log, Airflow shows ***.
     mask_secret(loads.credentials()["password"])
+    mask_secret(rates.transformer_password())
     return ecb.due(get_current_context()["dag_run"].run_after)
 
 
 @task(task_id="load_ecb", outlets=[RAW_ECB])
 def load_ecb() -> None:
-    from agoranomos_pipelines import ecb, loads
+    from agoranomos_pipelines import ecb, loads, rates
 
     mask_secret(loads.credentials()["password"])
+    mask_secret(rates.transformer_password())
     # The moment of the load is the run's, so a retry loads as of the same moment.
     ecb.load(get_current_context()["dag_run"].run_after)
 
