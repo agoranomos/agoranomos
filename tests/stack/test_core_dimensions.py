@@ -12,10 +12,12 @@ The assertions print counts, names of tables and states, never a secret.
 """
 
 import json
+from datetime import timedelta
 
 import pytest
 from agoranomos_pipelines.demo import platforms
 from airflow_api import is_busy, trigger, unpause, wait_for_dag, wait_for_run
+from raw_loads import last_moment, load_platform, transform_keeping_raw
 from stack_helpers import active_variant, compose, psql, wait_for, warehouse_output
 
 pytestmark = pytest.mark.usefixtures("daily_load_paused")
@@ -363,13 +365,23 @@ CURRENT_CAMPAIGN = (
 
 
 @pytest.mark.demo
-def test_the_views_of_the_entities_read_the_newest_list_of_each_account(env, built):
+@pytest.mark.transform
+def test_the_views_of_the_entities_read_the_newest_list_of_each_account(
+    env, airflow_url, token, built
+):
     # Each load appends the full list of the entities of each account, and staging reads the list
     # of the newest load of the account that the runs pinned (ADR-0038). A campaign that the newest
     # list no longer names keeps the attributes that the core holds, and is no longer listed; a
     # change in the newest list is what the view gives, with the end of its load as last_seen_at.
-    # The test takes one campaign out of the newest list and renames another, as loader, and puts
-    # both back in a finally; it reads the views and runs no transform, so the core stays as it is.
+    # A run that succeeds accepts its loads and deletes their rows from raw (ADR-0046), so the test
+    # loads the last days of demo_search again, as of its newest load, which gives the same lists,
+    # and runs the transform with its acceptance skipped, which leaves the load pinned and its rows
+    # in raw. Then it takes one campaign out of the newest list and renames another, as loader, and
+    # puts both back in a finally; it reads the views and runs no transform after that, so the core
+    # stays as it is. The next run reads the load again and accepts it.
+    now = last_moment(env, "demo_search")
+    load_platform(env, "demo_search", now, (now - timedelta(days=4)).date())
+    transform_keeping_raw(airflow_url, token)
     load_id, finished_at = warehouse_output(env, NEWEST_LIST).split("|")
     listed = [
         line.split("|")

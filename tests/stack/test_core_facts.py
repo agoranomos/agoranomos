@@ -2,12 +2,17 @@
 windows that it pinned whole, by account and day, keeps the rows that a load changed or removed in
 the journals of restatements, and does it in one transaction with the write, or not at all.
 
-The test of a changed day makes a load of its own in raw_demo_search as loader, the owner of raw:
-the rows of five days of one account, copied from the load that staging reads, with one campaign
-changed and one removed on the first day, and none on the last, and the lists of the entities of
-the account, copied from its newest load, as a load appends them in the same run as its facts. It
-deletes that load from raw, and its row from core.loads as the superuser, and runs the transform
-again in its finally, so that the demo is as before; the journals keep their rows, as they keep
+A run that succeeds accepts its loads and deletes their rows from raw (ADR-0046), so the tests
+first load the last 30 days of demo_search again, as of its newest load, which gives the same rows,
+and run the transform with its acceptance skipped, which leaves that load pinned and its rows in
+raw. The test of a changed day makes a load of its own in raw_demo_search as loader, the owner of
+raw: the rows of five days of one account, copied from the load that staging reads, with one
+campaign changed and one removed on the first day, and none on the last, and the lists of the
+entities of the account, copied from its newest load, as a load appends them in the same run as
+its facts. Its run of the transform skips the acceptance too, so that dbt by hand reads the load
+after it. The test deletes that load from raw, and its row from core.loads as the superuser, and
+runs the transform again in its finally, which reads the load of the last 30 days again and
+accepts it, so that the demo is as before; the journals keep their rows, as they keep
 every restatement. If it is killed before that, delete by hand, as its finally does: the rows of
 the six fact tables and the four tables of lists of raw_demo_search, of _dlt_loads and of
 _agoranomos_loads whose load is that of the test, the one journal row whose _dlt_id is
@@ -19,10 +24,12 @@ The assertions print IDs, days, counts and sums, never a secret.
 
 import subprocess
 import time
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from airflow_api import is_busy, trigger, unpause, wait_for_dag, wait_for_run
+from raw_loads import last_moment, load_platform, transform_keeping_raw
 from stack_helpers import REPO_ROOT, active_variant, compose, wait_for, warehouse_output
 
 pytestmark = [
@@ -209,7 +216,8 @@ def end_the_lock(env):
 
 @pytest.fixture(scope="module")
 def idle(env, airflow_url, token):
-    """No run of the transform is queued or running, and one has written the facts."""
+    """No run of the transform is queued or running, and a run has written the facts from a new
+    load of the last 30 days of demo_search, which it left pinned, with its rows in raw."""
     wait_for_dag(airflow_url, token, TRANSFORM)
     wait_for(
         lambda: not is_busy(airflow_url, token, TRANSFORM, assets=ASSETS),
@@ -220,6 +228,9 @@ def idle(env, airflow_url, token):
     end_the_lock(env)  # left behind by a test that was stopped
     found = warehouse_output(env, "SELECT to_regclass('staging.int_window_days') IS NOT NULL")
     assert found == "t", "staging.int_window_days does not exist: no transform has run here"
+    now = last_moment(env, SOURCE)
+    load_platform(env, SOURCE, now, (now - timedelta(days=30)).date())
+    transform_keeping_raw(airflow_url, token)
 
 
 @pytest.mark.parametrize(
@@ -309,7 +320,7 @@ def test_a_changed_day_goes_into_the_journal_and_the_fact_whole_or_not_at_all(
             f"'loaded', '{load}', '{MARK}')",
             "loader",
         )
-        run = transform(airflow_url, token)
+        run = transform_keeping_raw(airflow_url, token)
         assert run["state"] == "success", run["state"]
         assert rows(env, "SELECT reason FROM ops.ops_quarantine", "metabase_reader") == []
         [(new,)] = rows(
@@ -366,9 +377,11 @@ def test_a_changed_day_goes_into_the_journal_and_the_fact_whole_or_not_at_all(
         remove_load(env, load)
         # The next run, which the tests after this one need, whatever this one found.
         again = transform(airflow_url, token)
-    # It writes the five days from the load that staging reads again, and the core holds what the
-    # marts hold.
+    # It writes the five days from the load that staging reads again, accepts it, and the core
+    # holds what the marts hold.
     assert again["state"] == "success", again["state"]
+    pinned = f"SELECT count(*) FROM core.loads WHERE source = '{SOURCE}' AND status = 'pinned'"  # noqa: S608 (a constant)
+    assert warehouse_output(env, pinned) == "0"
     restored = rows(env, CAMPAIGNS.format(sk=sk, first=first, last=last))
     assert [r[:5] for r in restored] == [r[:5] for r in before]
     assert_the_core_holds_what_the_marts_hold(env)

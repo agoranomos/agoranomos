@@ -135,15 +135,17 @@ def test_ops_shows_how_far_back_the_loads_of_each_account_reach(env, transform_r
 def test_a_run_of_the_transform_that_succeeded_ends_by_updating_its_asset(
     airflow_url, token, transform_run
 ):
-    # The task transformed comes after every other task of the run, and its event is that of the
-    # run, on which the history of Google Ads runs.
+    # The task transformed comes after every other task of the run but clean_raw, which runs beside
+    # it after accept, so that the cleanup of raw holds back no event (ADR-0046); its event is
+    # that of the run, on which the history of Google Ads runs.
     downstream = downstream_task_ids(airflow_url, token, TRANSFORM)
     assert downstream["transformed"] == []
+    assert downstream["accept"] == ["clean_raw", "transformed"]
     pointing = {task for task, following in downstream.items() if "transformed" in following}
     leaves = {
         task for task, following in downstream.items() if task != "transformed" and not following
     }
-    assert not leaves, sorted(leaves)[:5]
+    assert leaves == {"clean_raw"}, sorted(leaves)[:5]
     assert pointing, "no task comes before transformed"
     states = {i["task_id"]: i["state"] for i in task_instances(airflow_url, token, transform_run)}
     assert states["transformed"] == "success"

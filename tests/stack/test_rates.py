@@ -7,7 +7,10 @@ is, and the views of the marts convert an amount by a join with it at the rate o
 row (ADR-0037). The checks of a run that reads only the last window of the rates, of one that
 brings a later day of the facts, and of another reporting currency compute the rows that the model
 would write from the SQL that dbt compiles, in a transaction that ends in ROLLBACK, so the core is
-as before.
+as before. They read the rates that staging reads: a run that succeeds accepts its loads and
+deletes their rows from raw (ADR-0046), so the module first loads the last 60 days of the rates of
+the demo again, as of their newest load, which gives the same rates, and runs the transform with
+its acceptance skipped, which leaves the load pinned and its rows in raw. The next run accepts it.
 
 The assertions print counts, days and codes of currencies, never a secret.
 """
@@ -19,11 +22,13 @@ from datetime import date, timedelta
 import pytest
 from agoranomos_pipelines.demo import platforms
 from airflow_api import is_busy, wait_for_dag
+from raw_loads import last_moment, load_platform, transform_keeping_raw
 from stack_helpers import REPO_ROOT, active_variant, compose, wait_for, warehouse_output
 
 pytestmark = [
     pytest.mark.demo,
     pytest.mark.usefixtures("daily_load_paused"),
+    pytest.mark.transform,
 ]
 
 TRANSFORM = "agoranomos_demo_transform"
@@ -36,8 +41,9 @@ WORK = "/tmp/agoranomos-stack-test-rates"  # noqa: S108 (a folder in the contain
 
 @pytest.fixture(scope="module")
 def built(env, airflow_url, token):
-    """The rates of the core and the views of the marts as the last run of the transform left
-    them."""
+    """The rates of the core and the views of the marts as a run of the transform left them that
+    read a new load of the last 60 days of the rates of the demo, and kept it pinned, with its rows
+    in raw."""
     wait_for_dag(airflow_url, token, TRANSFORM)
     wait_for(
         lambda: not is_busy(airflow_url, token, TRANSFORM, assets=len(platforms.PLATFORMS)),
@@ -47,6 +53,9 @@ def built(env, airflow_url, token):
     )
     found = warehouse_output(env, "SELECT to_regclass('marts.fx_rates_daily') IS NOT NULL")
     assert found == "t", "marts.fx_rates_daily does not exist: the transform has not run here"
+    now = last_moment(env, "demo_fx")
+    load_platform(env, "demo_fx", now, (now - timedelta(days=60)).date())
+    transform_keeping_raw(airflow_url, token)
 
 
 def test_the_view_of_the_rates_shows_the_rates_of_the_core_into_the_reporting_currency(env, built):
@@ -149,8 +158,9 @@ def core_rates_sql(core_rates):
 
 def test_the_core_has_a_rate_for_every_day_of_each_currency_of_the_accounts(env, core_rates):
     # ADR-0042: every calendar day from the first rate of a currency to the last day of the table,
-    # with no gap, and each day of the windows of the facts with a rate of the currency of its
-    # account, as the test of G3 checks.
+    # with no gap, and each day of the facts of the core with a rate of the currency of its
+    # account, as the test of G3 checks for the days of the windows of a run: once the run has
+    # accepted its loads, it has no window left (ADR-0046).
     currency = reporting(env)
     rates = f"SELECT * FROM {CORE_RATES} WHERE reporting_currency = '{currency}'"  # noqa: S608 (constants of this file and a code of .env)
     spans = table(
@@ -166,9 +176,10 @@ def test_the_core_has_a_rate_for_every_day_of_each_currency_of_the_accounts(env,
     assert all(row[1] == row[2] and row[3] == "t" for row in spans), spans
     missing = warehouse_output(
         env,
-        f"WITH r AS ({rates}) SELECT count(*) FROM staging.int_window_days AS w "  # noqa: S608 (constants of this file)
-        "WHERE NOT EXISTS (SELECT FROM r WHERE r.rate_date = w.report_date "
-        "AND r.currency = w.currency)",
+        f"WITH r AS ({rates}) SELECT count(*) FROM core.ad_stats_campaign_daily AS f "  # noqa: S608 (constants of this file)
+        "JOIN core.dim_account AS a USING (account_sk) "
+        "WHERE NOT EXISTS (SELECT FROM r WHERE r.rate_date = f.report_date "
+        "AND r.currency = a.currency)",
     )
     assert int(missing) == 0, missing
 
@@ -217,13 +228,15 @@ def test_a_day_without_a_publication_carries_the_last_rate_with_its_flag(env, co
 def test_the_rate_goes_through_the_euro_with_no_rounding(env, core_rates):
     # ADR-0042 and Regulation (EC) 1103/97: one unit of a currency is worth the rate of the
     # reporting currency over the rate of the currency, both against the euro as the source
-    # published them, with no rounding on the way, and the row keeps the rate of the currency.
+    # published them, with no rounding on the way, and the row keeps the rate of the currency. On
+    # the days of the rates that staging reads: raw holds no older load, as the core accepted it.
     currency, other = reporting(env), other_currency(env)
     [counts] = table(
         env,
         f"WITH published AS ({PUBLISHED_RATES}), "  # noqa: S608 (constants of this file and codes of .env)
         f"r AS (SELECT * FROM {CORE_RATES} WHERE reporting_currency = '{currency}' "
-        f"AND currency = '{other}' AND NOT is_carried_forward) "
+        f"AND currency = '{other}' AND NOT is_carried_forward "
+        "AND rate_date IN (SELECT rate_date FROM published)) "
         "SELECT count(*), "
         "count(*) FILTER (WHERE r.rate_into_reporting_currency <> pr.rate / pc.rate "
         "OR r.base_rate <> pc.rate OR r.base_currency <> 'EUR' OR r.rate_source <> 'demo_fx'), "
@@ -310,8 +323,9 @@ def test_a_later_day_of_the_facts_takes_the_last_rate_that_the_core_holds(env, c
         f"BEGIN; DELETE FROM {RATE_DAYS}; "  # noqa: S608 (constants of this file and codes of .env)
         "INSERT INTO staging.int_window_days "
         "(source, account_id, account_sk, currency, report_date, load_sk, day_key) "
-        f"SELECT source, account_id, account_sk, currency, date '{days[-1]}', load_sk, day_key "
-        f"FROM staging.int_window_days WHERE currency = '{other}' LIMIT 1; "
+        f"SELECT platform, account_id, account_sk, currency, date '{days[-1]}', 0, "
+        f"platform || '|' || account_id || '|' || (date '{days[-1]}' - date '2000-01-01')::text "
+        f"FROM core.dim_account WHERE currency = '{other}' LIMIT 1; "
         "SELECT 'written|' || rate_date || '|' || currency || '|' || rate_into_reporting_currency "
         "|| '|' || coalesce(published_on::text, '') || '|' || is_carried_forward || '|' "
         f"|| rate_source FROM ({core_rates_sql}) AS w ORDER BY currency <> '{currency}', "
