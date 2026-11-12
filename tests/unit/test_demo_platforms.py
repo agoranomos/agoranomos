@@ -34,12 +34,17 @@ FACT_TABLES = {
 # The checksums of the full history as of NOW, one for each platform: a change of the generator
 # shows here. They come from a first run of the generator, checked by a person.
 GOLDEN = {
-    "demo_fx": "5abc425fd6176c725d9a5de32d69121604b951fb96972781cd64cfa59e2643fb",
+    "demo_fx": "8937659b7b74917f0b76b70a53b8fd33ce414297073a4c1022066542cf82d22d",
     "demo_search": "08748d3f1515f5aeb44489c96d277382b6e2973c5fefd789b530c69ff9ee34cc",
     "demo_social": "8e69473975db3205d4ae87493fa65da6eff3c3abd87bb983ebc544e59ea3b5e8",
     "demo_video": "81ee94ee5b8ac0f78abdfe555b52e6f53b4bd68f69d81ce78a09efd70d974b6d",
     "demo_web": "335d391844f7585e98d451db4c2b997fe878fe05a6d416e10fc9079879102eb4",
 }
+
+
+# The checksum of the rates of US dollars alone, as the demo gave them before the pound came: a
+# deployment of an earlier release keeps the same rates.
+GOLDEN_USD = "5abc425fd6176c725d9a5de32d69121604b951fb96972781cd64cfa59e2643fb"
 
 
 # Moments at which the time zones of the demo disagree on the day: at 23:30 UTC Berlin has begun
@@ -109,6 +114,16 @@ def test_the_history_has_its_golden_checksum(module):
     assert checksum(all_records(module)) == GOLDEN[module.PLATFORM]
 
 
+def test_the_rates_of_the_us_dollar_stay_those_of_the_releases_before_the_pound():
+    records = all_records(fx)
+    dollars = {table: [r for r in rows if r["quote"] == "USD"] for table, rows in records.items()}
+    assert checksum(dollars) == GOLDEN_USD
+    assert {r["quote"] for r in records["rates_daily"]} == {"USD", "GBP"}
+    pounds = [Decimal(r["rate"]) for r in records["rates_daily"] if r["quote"] == "GBP"]
+    assert Decimal("0.8000") < min(pounds)
+    assert max(pounds) < Decimal("0.9200")
+
+
 WINDOW_FIELDS = {
     # The numbers of a record that mature, by platform, as functions of a record.
     "demo_search": lambda r: (
@@ -142,7 +157,7 @@ WINDOW_KEYS = {
         r["sessionCampaignId"],
         r["sessionCampaignName"],
     ),
-    "demo_fx": lambda r: (r["rate_date"],),
+    "demo_fx": lambda r: (r["rate_date"], r["quote"]),
 }
 
 
@@ -333,8 +348,11 @@ def test_the_rates_cover_every_day_of_every_account_at_the_edges(now):
     [(first, last)] = fx.windows(now).values()
     assert last == max(common.last_final_day(now, a.time_zone) for a in world.ACCOUNTS)
     assert first <= min(common.history_first_day(now, a.time_zone) for a in world.ACCOUNTS)
-    days = [date.fromisoformat(r["rate_date"]) for r in fx.records(now)["rates_daily"]]
-    assert days == [day for day in common.days(first, last) if fx.published(day)]
+    rows = list(fx.records(now)["rates_daily"])
+    days = [date.fromisoformat(r["rate_date"]) for r in rows]
+    # Each day of publication lists the US dollar and the pound, in this order.
+    assert days == [day for day in common.days(first, last) if fx.published(day) for _ in fx.QUOTES]
+    assert [r["quote"] for r in rows[:2]] == ["USD", "GBP"]
 
 
 # Names of products of the ad platforms that the demo mimics, which no name of the fictional

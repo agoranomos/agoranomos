@@ -102,15 +102,19 @@ LAST_MOMENT = (
 )
 
 
-def run_in_tasks(env: dict[str, str], script: str, *arguments: str):
-    """Run a Python script in the container that runs the tasks, with the package of the DAGs,
-    and return the result; a failure shows its last lines, unless they hold a secret."""
+def run_in_tasks(
+    env: dict[str, str], script: str, *arguments: str, environment: dict[str, str] | None = None
+):
+    """Run a Python script in the container that runs the tasks, with the package of the DAGs and
+    the variables of environment, such as another reporting currency, and return the result; a
+    failure shows its last lines, unless they hold a secret."""
     service = "airflow-worker" if active_variant() == "celery" else "airflow-scheduler"
+    variables = [f"PYTHONPATH={DAGS}"]
+    variables += [f"{name}={value}" for name, value in (environment or {}).items()]
     result = compose(
         "exec",
         "-T",
-        "-e",
-        f"PYTHONPATH={DAGS}",
+        *(item for variable in variables for item in ("-e", variable)),
         service,
         "python",
         "-c",

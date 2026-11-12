@@ -41,6 +41,9 @@ class StandInClient:
 
     def execute_sql(self, sql):
         self.pipeline.queries.append(sql)
+        if "to_jsonb(j)" in sql or sql.startswith("SELECT count(*) FROM core.loads"):
+            # How many loads of the history wait for the core (rates.waiting_sql).
+            return [(self.pipeline.state["waiting"],)]
         if self.pipeline.state["loads"] is None:
             raise UndefinedRelation(sql)
         if '"_agoranomos_loads"' in sql:
@@ -96,8 +99,10 @@ def ecb(monkeypatch):
     """The module with a stand-in for dlt, and what it made and was asked: the pipelines, the
     clients with their settings, and the requests. state["loads"] is how many complete loads the
     dataset holds (None: no table _dlt_loads yet), state["reloads"] the rows that the journal of
-    the whole loads gives, and state["csv"] what the ECB answers."""
-    state = {"loads": None, "reloads": [], "csv": CSV}
+    the whole loads gives, and state["csv"] what the ECB answers. state["core"] is what the core
+    says of its rates, as rates.read_core reads it as transformer (None: no view yet), and
+    state["waiting"] how many loads of the history wait for the core."""
+    state = {"loads": None, "reloads": [], "csv": CSV, "core": None, "waiting": 0}
     made = {"pipelines": [], "clients": [], "requests": []}
 
     class Client:
@@ -142,6 +147,8 @@ def ecb(monkeypatch):
     for name in names:
         sys.modules.pop(name, None)
     module = importlib.import_module("agoranomos_pipelines.ecb")
+    monkeypatch.setattr(module.rates, "read_core", lambda: state["core"])
+    monkeypatch.setenv("AGORANOMOS_REPORTING_CURRENCY", "GBP")
     yield module, state, made
     for name in names:
         sys.modules.pop(name, None)
@@ -157,7 +164,8 @@ def test_a_load_ends_yesterday_in_frankfurt(ecb):
 
 def test_the_first_load_takes_37_months_one_before_the_history_of_google_ads(ecb):
     module, _, _ = ecb
-    assert module.window(NOW, None) == (date(2023, 9, 1), date(2026, 10, 28))
+    # A load of the history (ADR-0038).
+    assert module.window(NOW, None) == (date(2023, 9, 1), date(2026, 10, 28), "history")
     assert module.history_start(datetime(2026, 1, 15, 12, tzinfo=UTC)) == date(2022, 12, 1)
     assert module.history_start(datetime(2026, 12, 31, 12, tzinfo=UTC)) == date(2023, 11, 1)
 
@@ -165,10 +173,31 @@ def test_the_first_load_takes_37_months_one_before_the_history_of_google_ads(ecb
 def test_a_later_load_takes_the_new_days_and_at_least_the_last_fourteen(ecb):
     module, _, _ = ecb
     # The day after the last loaded, when that is earlier than the last fourteen days.
-    assert module.window(NOW, date(2026, 10, 10)) == (date(2026, 10, 11), date(2026, 10, 28))
+    assert module.window(NOW, date(2026, 10, 10)) == (
+        date(2026, 10, 11),
+        date(2026, 10, 28),
+        "window",
+    )
     # The last fourteen days, when a load took them already, so that a corrected rate, or one that
     # a load missed, comes again (ADR-0042).
-    assert module.window(NOW, date(2026, 10, 28)) == (date(2026, 10, 15), date(2026, 10, 28))
+    assert module.window(NOW, date(2026, 10, 28)) == (
+        date(2026, 10, 15),
+        date(2026, 10, 28),
+        "window",
+    )
+
+
+def test_a_load_takes_the_history_again_from_the_day_that_the_core_needs(ecb):
+    # rates.history_from gives the first day of the history that the core needs again, as after a
+    # change of the reporting currency: earlier than the usual window, the load takes it, as a load
+    # of the history; within it, the usual window covers it.
+    module, _, _ = ecb
+    last = date(2026, 10, 28)
+    assert module.window(NOW, last, date(2023, 9, 1)) == (date(2023, 9, 1), last, "history")
+    assert module.window(NOW, last, date(2026, 10, 20)) == (date(2026, 10, 15), last, "window")
+    # The first load starts at the earlier of the two.
+    assert module.window(NOW, None, date(2022, 1, 1)) == (date(2022, 1, 1), last, "history")
+    assert module.window(NOW, None, date(2024, 1, 1)) == (date(2023, 9, 1), last, "history")
 
 
 def test_a_load_asks_the_ecb_for_the_data_of_its_window_with_explicit_retries(ecb):
@@ -236,10 +265,10 @@ def test_a_load_records_its_window_in_the_same_run(ecb):
     }
     assert record["now"] == NOW
     assert record["status"] == "loaded"
+    # The first load is a load of the history, and the pin copies its kind (ADR-0038).
+    assert record["kind"] == "history"
     assert hints["_agoranomos_loads"]["write_disposition"] == "append"
-    # The kind of a load is a column of every journal, which the rates leave empty: the pin
-    # gives such a row the kind window (ADR-0038).
-    assert set(hints["_agoranomos_loads"]["columns"]) == {*record, "error", "kind"}
+    assert set(hints["_agoranomos_loads"]["columns"]) == {*record, "error"}
 
 
 def test_a_window_without_a_rate_still_replaces_its_days(ecb):
@@ -287,3 +316,57 @@ def test_a_load_is_due_until_one_has_taken_the_day_in_frankfurt(ecb):
     assert module.due(NOW)
     state.update(reloads=[("EUR", date(2026, 10, 29), date(2026, 10, 28))])
     assert not module.due(NOW)
+
+
+# What the core says after a change of the reporting currency to GBP, which no account has, once
+# the cleanup has deleted the loads of the rates that it accepted (rates.read_core).
+CHANGED_TO_GBP = {
+    "view_currency": "GBP",
+    "first_without": date(2025, 5, 14),
+    "days_without": 548,
+    "first_day": date(2023, 9, 1),
+    "holds_preferred": True,
+}
+
+
+def test_a_load_takes_the_history_again_when_the_core_lacks_the_rates_of_the_new_currency(ecb):
+    module, state, made = ecb
+    state.update(
+        loads=1,
+        reloads=[("EUR", date(2026, 10, 28), date(2026, 10, 27))],
+        core=module.rates.CoreRates(**CHANGED_TO_GBP),
+    )
+    module.load(NOW)
+    [(rows, _)] = made["pipelines"][0].runs
+    [record] = rows["_agoranomos_loads"]
+    # From the first day of the table, to yesterday, as a load of the history.
+    assert (record["window_from"], record["window_to"], record["kind"]) == (
+        date(2023, 9, 1),
+        date(2026, 10, 28),
+        "history",
+    )
+    assert made["requests"][0][1]["startPeriod"] == "2023-09-01"
+    # A load of the day already taken is still due while the core needs the history.
+    state.update(reloads=[("EUR", date(2026, 10, 29), date(2026, 10, 28))])
+    assert module.due(NOW)
+    # And it is not while a load of the history waits for the core, or once the core holds every
+    # day, as the view then names none.
+    state.update(waiting=1)
+    assert not module.due(NOW)
+    state.update(waiting=0, core=module.rates.CoreRates("GBP", None, 0, date(2023, 9, 1), True))
+    assert not module.due(NOW)
+
+
+def test_a_view_of_the_reporting_currency_before_takes_no_history(ecb):
+    # The view of ops was built in USD: a load does not trust its days for GBP.
+    module, state, made = ecb
+    stale = {**CHANGED_TO_GBP, "view_currency": "USD"}
+    state.update(
+        loads=1,
+        reloads=[("EUR", date(2026, 10, 28), date(2026, 10, 27))],
+        core=module.rates.CoreRates(**stale),
+    )
+    module.load(NOW)
+    [(rows, _)] = made["pipelines"][0].runs
+    [record] = rows["_agoranomos_loads"]
+    assert (record["window_from"], record["kind"]) == (date(2026, 10, 15), "window")

@@ -15,9 +15,12 @@ not. The keys are checked in dbt. dlt keeps the state of each pipeline in its da
 working folder is a temporary one. The names of the campaigns are those of the moment of each load,
 and the versions of the core start at the first run of the transform that sees them (ADR-0036).
 The daily load reads the journal: it takes, for each account, the days after the last that a whole
-load took, and at least the reload window of the platform. A dataset that a release before v0.5
-loaded, with its merges and its journal _agoranomos_reloads, is dropped by the next load, which
-loads the history again (start_over)."""
+load took, and at least the reload window of the platform. The rates of demo_fx also take their
+history again, with the kind history, when the core lacks rates into the reporting currency on days
+whose loads it has accepted, as after a change of AGORANOMOS_REPORTING_CURRENCY
+(agoranomos_pipelines/rates.py). A dataset that a release before v0.5 loaded, with its merges and
+its journal _agoranomos_reloads, is dropped by the next load, which loads the history again
+(start_over)."""
 
 from __future__ import annotations
 
@@ -30,6 +33,8 @@ from datetime import UTC, date, datetime, timedelta
 
 import dlt
 
+from agoranomos_pipelines import rates
+from agoranomos_pipelines.demo import fx
 from agoranomos_pipelines.demo.common import local_today
 from agoranomos_pipelines.demo.platforms import LOAD_ORDER, PLATFORMS, gap
 from agoranomos_pipelines.demo.world import Account
@@ -56,6 +61,9 @@ from agoranomos_pipelines.loads import (
 
 log = logging.getLogger(__name__)
 
+# The platform of the rates of the demo, whose loads take the history of the rates again when the
+# core needs it (rates_history).
+RATES = fx.PLATFORM
 # The IDs of the tables of the ad groups and of the ads of demo_search.
 SEARCH_AD_GROUP = {"customer__id": TEXT, "campaign__id": TEXT, "ad_group__id": TEXT}
 SEARCH_AD = {**SEARCH_AD_GROUP, "ad_group_ad__ad__id": TEXT, "ad_group_ad__ad__name": TEXT}
@@ -341,10 +349,22 @@ def behind(code: str, now: datetime) -> list[str]:
     ]
 
 
+def rates_history(code: str) -> date | None:
+    """The first day of the history of the rates that the core needs again, for the platform of
+    the rates, demo_fx, or None (rates.history_from); None for every other platform."""
+    if code != RATES:
+        return None
+    with open_pipeline(code) as pipeline:
+        if in_earlier_shape(pipeline):
+            return None
+        return rates.history_from(pipeline, code)
+
+
 def due(now: datetime) -> bool:
     """Whether a daily load at now brings anything: an account of a platform that no load has
-    taken on its day of now. Another load on the same day brings the same numbers, which change
-    with the age of their day only (common.matured)."""
+    taken on its day of now, or a history of the rates that the core needs again (rates_history).
+    Another load on the same day brings the same numbers, which change with the age of their day
+    only (common.matured)."""
     late = {code: behind(code, now) for code in LOAD_ORDER}
     for code, accounts in late.items():
         if accounts:
@@ -355,9 +375,12 @@ def due(now: datetime) -> bool:
                 len(PLATFORMS[code].module.accounts()),
                 now.isoformat(),
             )
-    if not any(late.values()):
-        log.info("Every account has a load of its day at %s: nothing to load", now.isoformat())
-    return any(late.values())
+    if any(late.values()):
+        return True
+    if rates_history(RATES) is not None:
+        return True
+    log.info("Every account has a load of its day at %s: nothing to load", now.isoformat())
+    return False
 
 
 def load(
@@ -404,20 +427,31 @@ def load_daily(code: str, now: datetime) -> dict[str, int]:
     last that a whole load took, or from the first day of the reload window of the platform when
     that is earlier, to yesterday of the account. A platform whose dataset holds no load yet, or was
     loaded by a release before v0.5, gets its history, and an account that no load has recorded,
-    the days of the history."""
+    the days of the history. The rates of demo_fx start earlier still, as a load of history, when
+    the core needs their history again (rates_history)."""
     platform = PLATFORMS[code]
     last = last_loads(code)
     if last is None:
         return load_history(code, now)
     history = platform.module.windows(now)
     reload_days = timedelta(days=platform.window_days - 1)
+    again = rates_history(code)
+
+    def usual(account_id: str) -> date:
+        start, end = history[account_id]
+        if account_id not in last:
+            return start
+        return min(last[account_id][1] + timedelta(days=1), end - reload_days)
 
     def first(account: Account) -> date:
-        start, end = history[account.account_id]
-        if account.account_id not in last:
-            return start
-        return min(last[account.account_id][1] + timedelta(days=1), end - reload_days)
+        start = usual(account.account_id)
+        return start if again is None else min(start, again)
 
-    # An account that no load has recorded takes the days of the history, as a load of history.
-    new = frozenset(account_id for account_id in history if account_id not in last)
+    # An account that no load has recorded takes the days of the history, as a load of history,
+    # and so do the rates whose history the core needs again.
+    new = frozenset(
+        account_id
+        for account_id in history
+        if account_id not in last or (again is not None and again < usual(account_id))
+    )
     return load(code, now, first=first, history=new)

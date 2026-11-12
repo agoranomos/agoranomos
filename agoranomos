@@ -1137,8 +1137,8 @@ EOF
     fi
   done
   # The reporting currency (ADR-0025, ADR-0032): EUR, or a currency of the reference rates of the
-  # ECB as of October 2026. The rates of the demo cover USD and EUR only, and another currency needs
-  # those of the ECB, which the DAG agoranomos_ecb_daily loads once it is unpaused.
+  # ECB as of October 2026. The rates of the demo cover USD, EUR and GBP only, and another currency
+  # needs those of the ECB, which the DAG agoranomos_ecb_daily loads once it is unpaused.
   case "$(setting AGORANOMOS_REPORTING_CURRENCY USD)" in
     EUR | AUD | BRL | CAD | CHF | CNY | CZK | DKK | GBP | HKD | HUF | IDR | ILS | INR | ISK | JPY | KRW | MXN | MYR | NOK | NZD | PHP | PLN | RON | SEK | SGD | THB | TRY | USD | ZAR) ;;
     *) problem "AGORANOMOS_REPORTING_CURRENCY in .env must be EUR or a currency of the reference rates of the ECB, such as USD or GBP" ;;
@@ -1644,6 +1644,16 @@ stop_for_changed_network() {
     die "docker compose could not stop the stack to change its network; the error above names the cause"
 }
 
+# The log of a one-shot job ($1) since it started this time, by the clock of Docker, or nothing:
+# its container keeps the logs of earlier starts.
+job_log() {
+  job_id=$(compose ps --all --quiet "$1" 2> /dev/null | head -n 1) || job_id=""
+  [ -n "$job_id" ] || return 0
+  job_started=$(docker inspect --format '{{.State.StartedAt}}' "$job_id" 2> /dev/null) || job_started=""
+  [ -n "$job_started" ] || return 0
+  compose logs --no-log-prefix --no-color --since "$job_started" "$1" 2> /dev/null || true
+}
+
 cmd_up() {
   # Check the options before init writes .env: an option that preflight would refuse must not leave
   # a .env behind.
@@ -1672,17 +1682,13 @@ cmd_up() {
   # still fails, so that a start that is not complete never passes as one.
   [ "$demo_failed" -eq 0 ] || die "the stack is up, but the demo is not ready"
   say "$(paint ok 'The stack is up.' 1) ./agoranomos status shows every service."
-  # What metabase-init warns about, and the groups of the setup (ADR-0017): the warnings do not
-  # stop the start. Its container keeps the logs of earlier starts, so only those since it started
-  # this time count, by the clock of Docker.
-  job_lines=""
-  job_id=$(compose ps --all --quiet metabase-init 2> /dev/null | head -n 1) || job_id=""
-  if [ -n "$job_id" ]; then
-    job_started=$(docker inspect --format '{{.State.StartedAt}}' "$job_id" 2> /dev/null) || job_started=""
-    if [ -n "$job_started" ]; then
-      job_lines=$(compose logs --no-log-prefix --no-color --since "$job_started" metabase-init 2> /dev/null) || job_lines=""
-    fi
-  fi
+  # What marts-init warns about, such as the days whose rates the core cannot give in a new
+  # reporting currency (ADR-0042), and what metabase-init warns about, with the groups of the setup
+  # (ADR-0017): the warnings do not stop the start.
+  job_log marts-init | sed -n 's/^marts-init: warning: //p' | while IFS= read -r job_warning; do
+    warn "$job_warning"
+  done
+  job_lines=$(job_log metabase-init)
   printf '%s\n' "$job_lines" | sed -n 's/^metabase-init: warning: //p' | while IFS= read -r job_warning; do
     warn "$job_warning"
   done
@@ -1863,18 +1869,30 @@ migrations_status() {
   migrations_summary "$checkout_migrations" "$applied_rows"
 }
 
-# The SQL of the age of the rates of the core (ADR-0042), which status runs as postgres: a line
-# built once the transform has built the view ops.ops_rates, then its row, if the core holds a
-# published rate: the source, the reporting currency, the day of the last rate, how many business
-# days ago, and t when that is more than 3. A warehouse that no run of the transform has reached
-# has no view and gives no line.
+# The SQL of the rates of the core (ADR-0042), which status runs as postgres: a line built once
+# the transform has built the view ops.ops_rates, then its row: the source, the reporting currency,
+# the day of the last rate, how many business days ago, t when that is more than 3, the first day
+# without a rate into the reporting currency and how many such days there are. The view of a
+# release before this one has neither of the last two, and no row while the core holds no
+# published rate. A warehouse that no run of the transform has reached has no view and gives no
+# line.
 rates_sql() {
   cat << 'SQL'
 SELECT to_regclass('ops.ops_rates') IS NOT NULL AS built \gset
 \if :built
 SELECT 'built';
+SELECT EXISTS (
+  SELECT FROM pg_attribute
+  WHERE attrelid = 'ops.ops_rates'::regclass AND attname = 'days_without_rate' AND NOT attisdropped
+) AS gaps \gset
+\if :gaps
+SELECT rate_source, reporting_currency, last_rate_date, business_days_since_rate, is_late,
+  first_day_without_rate, days_without_rate
+FROM ops.ops_rates;
+\else
 SELECT rate_source, reporting_currency, last_rate_date, business_days_since_rate, is_late
 FROM ops.ops_rates;
+\endif
 \endif
 SQL
 }
@@ -1882,7 +1900,9 @@ SQL
 # What status says of the rates of the core, from the lines of rates_sql ($1): the day of the last
 # rate that the source published into the reporting currency and how many business days ago, with a
 # warning when that is more than 3, as the view ops.ops_rates says (ADR-0042), and the DAG of the
-# loads of the source; or that the core holds none yet.
+# loads of the source, or that the core holds none yet; and a warning when days of the facts have
+# no rate into the reporting currency, as after a change of it, which the next load of the rates
+# takes again.
 rates_summary() {
   case "$1" in
     built*) ;;
@@ -1892,22 +1912,27 @@ rates_summary() {
       ;;
   esac
   rate_line=$(printf '%s\n' "$1" | awk -v separator="$FIELD_SEPARATOR" 'index($0, separator) { print; exit }')
-  if [ -z "$rate_line" ]; then
-    say "Rates: the core holds no rate that a source published, so only the accounts in the reporting currency enter it (ADR-0042)."
-    return 0
-  fi
-  IFS=$FIELD_SEPARATOR read -r rate_source rate_currency rate_day rate_age rate_late << EOF
+  rate_source="" rate_currency="" rate_day="" rate_age="" rate_late="" rate_gap_day="" rate_gap_days=""
+  IFS=$FIELD_SEPARATOR read -r rate_source rate_currency rate_day rate_age rate_late rate_gap_day rate_gap_days << EOF
 $rate_line
 EOF
-  case "$rate_age" in 1) rate_days="1 business day" ;; *) rate_days="$rate_age business days" ;; esac
-  say "Rates: the last rate of $rate_source into $rate_currency is of $rate_day, $rate_days ago (ADR-0042)."
-  [ "$rate_late" = t ] || return 0
-  case "$rate_source" in
-    ecb) rate_dag=agoranomos_ecb_daily ;;
-    demo_fx) rate_dag=agoranomos_demo_daily ;;
-    *) rate_dag="the DAG of its loads" ;;
-  esac
-  warn "the last rate of $rate_source is $rate_days old, more than 3: its loads brought no newer one, and the core carries it to each day since. The runs of $rate_dag in Airflow say why"
+  if [ -z "$rate_source" ]; then
+    say "Rates: the core holds no rate that a source published, so only the accounts in the reporting currency enter it (ADR-0042)."
+  else
+    case "$rate_age" in 1) rate_days="1 business day" ;; *) rate_days="$rate_age business days" ;; esac
+    say "Rates: the last rate of $rate_source into $rate_currency is of $rate_day, $rate_days ago (ADR-0042)."
+    if [ "$rate_late" = t ]; then
+      case "$rate_source" in
+        ecb) rate_dag=agoranomos_ecb_daily ;;
+        demo_fx) rate_dag=agoranomos_demo_daily ;;
+        *) rate_dag="the DAG of its loads" ;;
+      esac
+      warn "the last rate of $rate_source is $rate_days old, more than 3: its loads brought no newer one, and the core carries it to each day since. The runs of $rate_dag in Airflow say why"
+    fi
+  fi
+  case "$rate_gap_days" in '' | 0) return 0 ;; esac
+  case "$rate_gap_days" in 1) rate_gap="1 day" ;; *) rate_gap="$rate_gap_days days" ;; esac
+  warn "the core holds no rate into $rate_currency on $rate_gap of the facts from $rate_gap_day on, as after a change of AGORANOMOS_REPORTING_CURRENCY, so the amounts of those days in $rate_currency are empty. The next load of the rates takes their history again: trigger agoranomos_ecb_daily, or with the demo alone agoranomos_demo_daily, in Airflow to take it now (ADR-0042)"
 }
 
 # What status says of the rates of the core (ADR-0042), while warehouse-db runs, by the table that

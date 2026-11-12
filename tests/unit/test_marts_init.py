@@ -102,16 +102,23 @@ def selected(argv: list[str]) -> tuple[str, list[str], dict]:
             True,
             True,
             "run",
-            ["marts", "core_fx_rates_daily"],
+            ["marts", "core_fx_rates_daily", "ops_rates"],
             {"rebuild_views": True, "recompute_rates": True},
         ),
-        (False, True, "build", ["+marts"], {"rebuild_views": True, "recompute_rates": True}),
+        (
+            False,
+            True,
+            "build",
+            ["+marts", "ops_rates"],
+            {"rebuild_views": True, "recompute_rates": True},
+        ),
     ],
 )
 def test_the_job_builds_what_the_state_of_the_warehouse_asks(
     capsys, snapshots, other, verb, nodes, variables
 ):
-    code, connection, dbt = run_job([(True,), (snapshots, other)])
+    # After a change of the reporting currency, the job reads the days without a rate: none here.
+    code, connection, dbt = run_job([(True,), (snapshots, other)] + [(None, 0)] * other)
     assert code == 0
     [argv] = dbt.calls
     assert argv[0] == mi.DBT
@@ -129,6 +136,40 @@ def test_the_job_builds_what_the_state_of_the_warehouse_asks(
     out = capsys.readouterr().out
     assert out.endswith("marts-init: done\n")
     assert ("in EUR, the new reporting currency" in out) == other
+
+
+def test_a_new_reporting_currency_without_older_rates_is_a_warning_and_no_failure(capsys):
+    # The core cannot give the rates of the days whose loads it accepted in the new currency:
+    # ops.ops_rates names them, and the job says so, in a line that ./agoranomos up shows.
+    code, connection, _ = run_job([(True,), (True, True), ("2025-05-14", 548)])
+    assert code == 0
+    assert connection.executed[-1] == (mi.GAPS, ())
+    out = capsys.readouterr().out
+    assert (
+        "marts-init: warning: the core holds no rate into EUR on 548 days from 2025-05-14 on, of "
+        "the currencies of the accounts, as their loads of the rates are accepted and have left "
+        "the raw layer: the next load of the rates takes their history again, "
+        "agoranomos_ecb_daily or with the demo alone agoranomos_demo_daily, and until the "
+        "transform reads it, the amounts of those days in EUR are empty (ADR-0042)\n"
+    ) in out
+    assert out.endswith("marts-init: done\n")
+    # A view that cannot be read is a warning too.
+    code, _, _ = run_job([(True,), (True, True)], fail_on=mi.GAPS)
+    assert code == 0
+    assert (
+        "marts-init: warning: cannot read ops.ops_rates: RuntimeError: canceling statement due to "
+        "lock timeout\n"
+    ) in capsys.readouterr().out
+    # The same start without a change of the currency reads nothing more.
+    _, connection, _ = run_job([(True,), (True, False)])
+    assert mi.GAPS not in [sql for sql, _ in connection.executed]
+
+
+def test_the_view_of_the_rates_has_the_columns_that_the_job_reads():
+    view = (DBT / "models" / "ops" / f"{mi.OPS_RATES}.sql").read_text(encoding="utf-8")
+    for column in ("first_day_without_rate", "days_without_rate"):
+        assert re.search(rf" as {column}\b", view), column
+        assert column in mi.GAPS
 
 
 def test_the_job_waits_for_the_nodes_of_the_transform_that_write(capsys):
