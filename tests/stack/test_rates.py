@@ -228,13 +228,15 @@ def test_a_day_without_a_publication_carries_the_last_rate_with_its_flag(env, co
 def test_the_rate_goes_through_the_euro_with_no_rounding(env, core_rates):
     # ADR-0042 and Regulation (EC) 1103/97: one unit of a currency is worth the rate of the
     # reporting currency over the rate of the currency, both against the euro as the source
-    # published them, with no rounding on the way, and the row keeps the rate of the currency.
+    # published them, with no rounding on the way, and the row keeps the rate of the currency. On
+    # the days of the rates that staging reads: raw holds no older load, as the core accepted it.
     currency, other = reporting(env), other_currency(env)
     [counts] = table(
         env,
         f"WITH published AS ({PUBLISHED_RATES}), "  # noqa: S608 (constants of this file and codes of .env)
         f"r AS (SELECT * FROM {CORE_RATES} WHERE reporting_currency = '{currency}' "
-        f"AND currency = '{other}' AND NOT is_carried_forward) "
+        f"AND currency = '{other}' AND NOT is_carried_forward "
+        "AND rate_date IN (SELECT rate_date FROM published)) "
         "SELECT count(*), "
         "count(*) FILTER (WHERE r.rate_into_reporting_currency <> pr.rate / pc.rate "
         "OR r.base_rate <> pc.rate OR r.base_currency <> 'EUR' OR r.rate_source <> 'demo_fx'), "

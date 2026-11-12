@@ -97,18 +97,52 @@ read_rates as (
     {{ rates_into_reporting('published') }}
 ),
 
+-- The rates that the table holds as published, as rates_published gives them, on the days that
+-- this run does not read: the core accepts the loads of the rates that a run read, and the raw
+-- layer then deletes them, so these are the rates of every older day. A row keeps the rate of
+-- its currency against the base as the source published it, and the row of the base currency
+-- itself, at 1, keeps in its rate into its reporting currency the rate of that currency as
+-- published: so the rows of any reporting currency give the rates of those days in another one,
+-- as after a change of AGORANOMOS_REPORTING_CURRENCY, with no division on the way back. A currency
+-- that no row names, neither of an account nor the reporting currency before beside a row of the
+-- base currency, has no rate of those days.
+held_published as (
+    select distinct on (p.rate_date, p.quote_currency)
+        p.rate_date,
+        p.base_currency,
+        p.quote_currency,
+        p.rate,
+        p.rate_source
+    from (
+        select
+            h.published_on as rate_date,
+            h.base_currency::text as base_currency,
+            h.currency::text as quote_currency,
+            h.base_rate as rate,
+            h.rate_source
+        from {{ this }} as h
+        where not h.is_carried_forward and h.base_rate is not null
+        union all
+        select
+            h.published_on,
+            h.base_currency::text,
+            h.reporting_currency::text,
+            h.rate_into_reporting_currency,
+            h.rate_source
+        from {{ this }} as h
+        where not h.is_carried_forward and h.currency = h.base_currency
+        union all
+        select h.published_on, h.base_currency::text, h.base_currency::text, 1, h.rate_source
+        from {{ this }} as h
+        where not h.is_carried_forward and h.base_rate is not null
+    ) as p
+    where p.rate_source = {{ rates_source(ref('stg_ecb__rates_daily'), this) }}
+        and not exists (select from read_days as d where d.day = p.rate_date)
+    order by p.rate_date, p.quote_currency
+),
+
 held_rates as (
-    select
-        e.published_on,
-        e.currency::text as currency,
-        e.base_currency::text as base_currency,
-        e.base_rate,
-        e.rate_into_reporting_currency,
-        e.rate_source
-    from existing as e
-    where not e.is_carried_forward
-        and e.rate_source = {{ rates_source(ref('stg_ecb__rates_daily'), this) }}
-        and not exists (select from read_days as d where d.day = e.rate_date)
+    {{ rates_into_reporting('held_published') }}
 ),
 
 known as (
