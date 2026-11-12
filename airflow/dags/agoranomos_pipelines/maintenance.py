@@ -648,8 +648,8 @@ def clean_dlt_loads(run_id: str, days: int = DLT_LOADS_DAYS) -> dict[str, int]:
     """Delete the rows of _dlt_loads older than days in each raw schema of loader, but those that
     dlt_loads_delete keeps, as loader, each schema in a transaction of its own, and return how many
     rows each lost. A delete takes ROW EXCLUSIVE, which the insert of a load does not wait for. The
-    journal and the facts of raw keep their rows, which the cleanup of raw after the acceptance of
-    a load removes (ADR-0046)."""
+    journal keeps its rows, and the other tables of raw keep theirs until the run of the transform
+    that accepts their load deletes them (acceptance.py, ADR-0046)."""
     deleted: dict[str, int] = {}
     steps: list[Step] = []
     with connected(loader_credentials()) as connection:

@@ -65,8 +65,11 @@ def test_elementary_records_each_model_and_seed_of_a_run(env, airflow_url, token
         "SELECT DISTINCT status FROM ops.ops_transform_tests "  # noqa: S608 (an ID of Airflow, quoted)
         f"WHERE airflow_run_id = '{run_id}'",
     )
-    # The demo leaves one day of one account out, which a warning test finds.
-    assert set(tests.split()) == {"pass", "warn"}, tests
+    # The demo leaves one day of one account out, which a warning test finds when the windows of
+    # the run reach it: those of a history do, those of a daily load do not, as the core accepted
+    # the loads before it (test_demo_transform.py checks the warning).
+    assert "pass" in tests.split(), tests
+    assert set(tests.split()) <= {"pass", "warn"}, tests
 
 
 def test_the_tests_record_no_row_that_they_found(env, transform_run):
