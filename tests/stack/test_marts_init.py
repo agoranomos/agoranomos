@@ -1,7 +1,8 @@
 """Stack tests of the one-shot job marts-init (metabase/marts_init.py, ADR-0039, ADR-0044): every
 start builds the views of marts again, before metabase-init, as transformer; a view keeps its
-grants and its comment; and the job waits for a node of the transform that writes, through the lock
-of dbt/macros/marts_init.sql. They need no demo: the views exist over an empty core too."""
+grants and its comment; the job waits for a node of the transform that writes, through the lock
+of dbt/macros/marts_init.sql; and it drops the relations of earlier releases that no model builds
+or reads, but one that a view needs. They need no demo: the views exist over an empty core too."""
 
 from __future__ import annotations
 
@@ -27,6 +28,12 @@ LOCKS = (
 )
 # How long the stand-in of a node of the transform holds the lock, in seconds.
 HOLD = 20
+# The relations of staging, as schema.name.
+STAGING = (
+    "SELECT n.nspname || '.' || c.relname FROM pg_catalog.pg_class AS c "
+    "JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace "
+    "WHERE n.nspname = 'staging' ORDER BY c.relname"
+)
 
 
 def views(env) -> dict[str, tuple[str, bool]]:
@@ -138,3 +145,41 @@ def test_every_view_of_marts_belongs_to_transformer(env):
     assert dict(line.split("|") for line in owners.splitlines()) == dict.fromkeys(
         MARTS, "transformer"
     )
+
+
+def test_marts_init_drops_the_relations_left_of_earlier_releases(env):
+    # Stand-ins of the relations of v0.4 that the job drops (marts_init.LEFTOVERS), made as
+    # transformer in the kind in which v0.4 made them, and a view of a deployment over one of them,
+    # which keeps that one: the job drops nothing with cascade.
+    names = [name for name, _ in marts_init.LEFTOVERS]
+    kept = "staging.int_ad_stats_ad_group__unioned"
+    reader = "staging.test_reads_a_leftover"
+    made = [
+        f"CREATE TABLE {name} (n integer)" if kind == "TABLE" else f"CREATE VIEW {name} AS SELECT 1"
+        for name, kind in marts_init.LEFTOVERS
+    ]
+    warehouse_output(
+        env,
+        "; ".join([*made, f"CREATE VIEW {reader} AS SELECT n FROM {kept}"]),  # noqa: S608 (names of the code)
+        role="transformer",
+    )
+    try:
+        result = compose("run", "--rm", "--no-deps", "-T", "marts-init", check=False)
+        assert result.returncode == 0, job_failed("marts-init", result)
+        in_staging = warehouse_output(env, STAGING).splitlines()
+    finally:
+        drops = [marts_init.drop_statement(name, kind) for name, kind in marts_init.LEFTOVERS]
+        warehouse_output(env, "; ".join([f"DROP VIEW IF EXISTS {reader}", *drops]), "transformer")
+    assert [name for name in in_staging if name in [*names, reader]] == [kept, reader]
+    lines = [line for line in result.stdout.splitlines() if "earlier release" in line]
+    assert lines == [
+        "marts-init: dropped the table staging.int_ad_stats_ad__unioned of an earlier release, "
+        "which no model builds or reads",
+        "marts-init: warning: cannot drop the table staging.int_ad_stats_ad_group__unioned of an "
+        "earlier release, which no model builds or reads, so it stays: "
+        "DependentObjectsStillExist: cannot drop table staging.int_ad_stats_ad_group__unioned "
+        "because other objects depend on it",
+        "marts-init: dropped the view staging.int_ad_platforms__unioned of an earlier release, "
+        "which no model builds or reads",
+    ]
+    assert "marts-init: done" in result.stdout

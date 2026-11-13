@@ -713,10 +713,11 @@ services:
   # Builds the views of marts on every start, after db-init has applied the migrations of the core
   # and before metabase-init applies their metadata (ADR-0039, ADR-0044): a run of the transform
   # leaves a view that exists as it is, so a release that changes a view, or a new reporting
-  # currency, which it also computes the rates of the core in, reaches the warehouse here. It runs
-  # dbt of the Airflow image as transformer, the one secret that it holds, on the network data
-  # alone, as nobody, with neither the entrypoint of Airflow nor its settings, and waits for the
-  # nodes of a run of the transform that write, which wait for it in turn
+  # currency, which it also computes the rates of the core in, reaches the warehouse here; after
+  # the build it drops by name the relations of an earlier release that no model builds or reads.
+  # It runs dbt of the Airflow image as transformer, the one secret that it holds, on the network
+  # data alone, as nobody, with neither the entrypoint of Airflow nor its settings, and waits for
+  # the nodes of a run of the transform that write, which wait for it in turn
   # (metabase/marts_init.py).
   marts-init:
     image: agoranomos-airflow:local
