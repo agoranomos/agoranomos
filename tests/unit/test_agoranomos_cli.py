@@ -1224,7 +1224,7 @@ def test_the_check_of_the_memory_limits_names_each_setting_and_no_value(cli):
     # Every *_MEMORY setting of .env, also one that .env.example does not have, on one line each.
     cli.run("init")
     names = [key for key in cli.read_env() if key.endswith("_MEMORY")]
-    assert len(names) == 12
+    assert len(names) == 13
     values = {name: f"4242{index}" for index, name in enumerate(names)}
     set_env(cli, **values)
     with cli.env_path.open("a", encoding="utf-8") as env:
