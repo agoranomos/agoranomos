@@ -12,7 +12,7 @@ apprise==1.13.1
 giturlparse==0.16.0
 pathvalidate==3.3.1
 requirements-parser==0.13.1
-semver==3.1.0
+semver==3.1.1
 simplejson==4.2.0
 
 # Packages pinned above the constraints of Airflow, for a security fix that the constraints of the
