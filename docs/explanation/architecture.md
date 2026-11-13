@@ -7,7 +7,7 @@
 Marketing data moves through agoranomos in one direction, from ad platforms to dashboards and AI clients, and every step is code that runs on infrastructure you control.
 
 1. **Load.** dlt pulls data from ad platform APIs, web analytics, CRM systems and files into PostgreSQL.
-2. **Transform.** dbt turns the raw tables into one unified model of advertising statistics.
+2. **Transform.** dbt turns the raw tables into one unified model of advertising statistics, which a permanent core keeps.
 3. **Orchestrate.** Apache Airflow schedules the loads and the dbt build, and refreshes Metabase afterwards.
 4. **Explore.** Metabase serves ready-made dashboards, metrics and a glossary from the final layer of the warehouse.
 5. **Ask.** AI clients reach the same data through MCP servers with least-privilege defaults.
@@ -16,17 +16,19 @@ Marketing data moves through agoranomos in one direction, from ad platforms to d
 
 ```mermaid
 flowchart TB
-    sources["<b>Sources</b><br/>ad platform APIs, GA4, CRM, files,<br/>demo generator of fictional platforms"]
+    sources["<b>Sources</b><br/>Google Ads, the rates of the ECB,<br/>demo generator of fictional platforms<br/>planned: more ad platforms, GA4, CRM, files"]
     dlt["<b>dlt</b><br/>incremental load"]
-    airflow["<b>Apache Airflow</b><br/>schedules loads,<br/>dbt builds and<br/>Metabase refreshes"]
+    airflow["<b>Apache Airflow</b><br/>schedules loads,<br/>dbt builds and<br/>the daily maintenance"]
 
     subgraph warehouse["PostgreSQL warehouse"]
         direction TB
-        raw["raw_#lt;source#gt;"] -->|dbt| staging --> intermediate --> marts
+        raw["<b>raw_#lt;source#gt;</b><br/>each load until the core accepts it"] -->|dbt| staging["<b>staging</b><br/>views and the checks of each account"]
+        staging -->|dbt| core["<b>core</b><br/>facts, dimensions, versions,<br/>rates and journals, kept for good"]
+        core --> marts["<b>marts</b><br/>views over the core"]
     end
 
     metabase["<b>Metabase</b><br/>dashboards, metrics, glossary"]
-    mcp["<b>MCP servers</b><br/>Metabase, Airflow, warehouse, dbt<br/>least privilege by default"]
+    mcp["<b>MCP servers</b><br/>Metabase, Airflow, warehouse<br/>planned: dbt<br/>least privilege by default"]
     clients["<b>AI clients</b><br/>Claude apps, Claude Code<br/>planned: ChatGPT,<br/>Gemini, Kimi"]
 
     sources --> dlt --> warehouse
@@ -37,10 +39,10 @@ flowchart TB
     mcp --> clients
     airflow -.-> dlt
     airflow -.->|dbt build| warehouse
-    airflow -.->|refresh| metabase
+    airflow -.->|"refresh (planned)"| metabase
 ```
 
-Solid arrows show how data moves. Dotted arrows show what Airflow runs.
+Solid arrows show how data moves. Dotted arrows show what Airflow runs, and the refresh of Metabase after a build is planned. Inside the warehouse, dbt reads the raw tables through the views of `staging`, writes what passes the checks into the permanent schema `core`, and the marts are views over it ([ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md)).
 
 ## Components
 
@@ -57,7 +59,7 @@ Solid arrows show how data moves. Dotted arrows show what Airflow runs.
 | BI | Metabase OSS | Dashboards, metrics, glossary and a built-in MCP server | 0.64 | [0006](../adr/0006-metabase-as-bi.md) |
 | AI access | astro-airflow-mcp | MCP server for Airflow, read-only | 0.9 | [0007](../adr/0007-ai-access-via-mcp-read-only.md), [0030](../adr/0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md) |
 | | MCP Toolbox for Databases | SQL tools for the warehouse, as a read-only role | 1.15 | [0007](../adr/0007-ai-access-via-mcp-read-only.md), [0030](../adr/0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md) |
-| | dbt-mcp | Lineage, docs, compile and test on a dev target | 2.10 | [0007](../adr/0007-ai-access-via-mcp-read-only.md) |
+| | dbt-mcp | Lineage, docs, compile and test on a dev target; planned | 2.10 | [0007](../adr/0007-ai-access-via-mcp-read-only.md) |
 
 ## Load: dlt
 
@@ -93,11 +95,12 @@ Inside the warehouse, data moves through layers, each in its own schema:
 
 | Schema | Holds |
 |---|---|
-| `raw_<source>` | Data as loaded, one schema per source |
+| `raw_<source>` | Data as loaded, one schema per source, each load until the core accepts it |
 | `raw_<source>_staging` | Nothing since v0.5, as every table of a load appends; dlt asks for it after each load, to empty it. `loader` owns it, and no other role reads it |
 | `staging` | Standardized source data, one view for each table of each source, and the seeds of the base package; for now also the shared steps |
 | `intermediate` (planned) | Shared transformation steps. [ADR-0025](../adr/0025-model-advertising-statistics-once.md) planned this schema for Phase 3, and v0.3.0 kept the intermediate models, `int_<entity>__<verb>`, as views in `staging`; the schema does not exist yet |
-| `marts` | Final models for dashboards and AI access |
+| `core` | The data for good: narrow facts by day, partitioned by month, the dimensions with the versions of the campaigns, ad groups and ads, the rates of each day, and the journals of the loads, of the quarantine and of the restatements, in tables that the migrations of `postgres/migrations` create ([The schema core](../reference/data-model.md#the-schema-core)) |
+| `marts` | Final models for dashboards and AI access: views over the core |
 | `ops` | Operational data: the tables in which elementary records each run of dbt and its tests, and the views of the Ops collection over them and over the record of the loads ([ADR-0029](../adr/0029-record-the-runs-of-dbt-with-elementary-and-show-them-in-ops.md)) |
 
 Access is split by role. dlt loads the `raw_<source>` schemas and `raw_settings` as the `loader` role, and dbt builds `staging`, `marts` and `ops`, and `intermediate` once that schema exists, as the `transformer` role. Metabase connects as the `metabase_reader` role, which sees `marts` and, in `ops`, the views of the Ops collection only, and the warehouse MCP server connects as the `ai_reader` role, which reads `marts` only, in read-only sessions with a statement timeout ([ADR-0043](../adr/0043-define-the-metrics-in-the-warehouse-and-give-agents-tools-over-the-marts.md)).
@@ -118,7 +121,7 @@ Decision records: [ADR-0003: Run two PostgreSQL instances](../adr/0003-two-postg
 
 ### The permanent core of v0.5
 
-[ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) to [ADR-0045](../adr/0045-send-alerts-from-airflow-through-apprise.md) decide the data architecture of v0.5, one of them still proposed. Of it, the schema `core` is built, with the role `migrator` that owns it, the numbered migrations that `db-init` applies once each, and the tables that they create, of which each run of the transform fills the journal of loads, `core.loads`, into which it pins the loads that it reads, and the dimensions and the registries, beside the versions of the campaigns, ad groups and ads, which dbt keeps there, and the journal of quarantine, `core.account_quarantine`, of the accounts whose data fails the checks of the run and which the run keeps out of the core, the facts, which each run writes by whole days of the windows that it pins, and the rates; and the marts are views over the core under the names and with the columns of v0.4 ([The schema core](../reference/data-model.md#the-schema-core)). The raw layer keeps only the loads that the warehouse has not accepted, the schema `core` keeps narrow facts by month and dimensions with their versions for good, a load passes checks before it reaches the core, and an account that fails them waits in quarantine while the others go on. The acceptance of the loads, the cleanup of the raw layer and one build of dbt are planned, and until they land, the raw layer keeps every load.
+[ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) to [ADR-0045](../adr/0045-send-alerts-from-airflow-through-apprise.md) decide the data architecture of v0.5, one of them still proposed. Of it, the schema `core` is built, with the role `migrator` that owns it, the numbered migrations that `db-init` applies once each, and the tables that they create, of which each run of the transform fills the journal of loads, `core.loads`, into which it pins the loads that it reads, and the dimensions and the registries, beside the versions of the campaigns, ad groups and ads, which dbt keeps there, and the journal of quarantine, `core.account_quarantine`, of the accounts whose data fails the checks of the run and which the run keeps out of the core, the facts, which each run writes by whole days of the windows that it pins, and the rates; and the marts are views over the core under the names and with the columns of v0.4 ([The schema core](../reference/data-model.md#the-schema-core)). The raw layer keeps only the loads that the warehouse has not accepted, the schema `core` keeps narrow facts by month and dimensions with their versions for good, a load passes checks before it reaches the core, and an account that fails them waits in quarantine while the others go on. Once every task of dbt of a run has succeeded, the run accepts the loads that it read, but those of the accounts in quarantine, and deletes their rows from the raw layer ([ADR-0046](../adr/0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md)). The transform still runs one task of dbt for each node: one build of dbt in the watcher mode of Cosmos is deferred to v0.6.0 ([ADR-0039](../adr/0039-run-one-dbt-build-in-the-watcher-mode.md), [#203](https://github.com/agoranomos/agoranomos/issues/203)).
 
 ## Orchestrate: Apache Airflow
 
