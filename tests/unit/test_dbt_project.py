@@ -417,11 +417,44 @@ def test_the_views_of_the_marts_read_the_core_alone():
             body = "\n".join(line for line in body.splitlines() if not line.startswith("--"))
             for word in ("distinct", " over (", "limit ", "with "):
                 assert word not in body.lower(), (path.stem, word)
+            # No subquery in the select list: PostgreSQL runs one for each row that a question
+            # reads and again for each mention of its column (B16), and a join runs once a row.
+            columns = body.lower().split("\nfrom ", 1)[0]
+            assert columns.count("select") == 1, path.stem
             # The one grouping is a subquery of one row for each ID, which the planner leaves out.
             assert body.lower().count("group by") == int(path.stem == "web_sessions_daily"), path
             assert "left join {{ ref('dim_account') }} as a\n" in text, path.stem
     project = PROJECT_FILE.read_text(encoding="utf-8")
     assert "    marts:\n      +schema: marts\n      +materialized: view\n" in project
+
+
+def test_the_primary_conversions_of_a_campaign_are_a_lateral_join_of_one_row():
+    # B16: the conversions of the primary actions are looked up once for each row of a question
+    # by the key of the fact of the conversions by action, and the join is left out of a question
+    # that does not read them, as an aggregate with no GROUP BY returns one row. The primary
+    # actions are an array that the query reads once, a condition of the index of that key.
+    text = (DBT / "models" / "marts" / "ad_stats_campaign_daily.sql").read_text(encoding="utf-8")
+    column = (
+        "    cast(coalesce(q.conversions_primary, 0) as numeric(18,6)) as conversions_primary,\n"
+    )
+    assert column in text
+    # Only the column reads the join, so that the planner can leave it out.
+    assert re.findall(r"\bq\.\w+", text) == ["q.conversions_primary"]
+    assert text.endswith(
+        "left join lateral (\n"
+        "    select sum(coalesce(x.all_conversions, x.conversions)) as conversions_primary\n"
+        "    from {{ ref('core_ad_conversions_campaign_daily') }} as x\n"
+        "    where x.account_sk = f.account_sk\n"
+        "        and x.campaign_id = f.campaign_id\n"
+        "        and x.report_date = f.report_date\n"
+        "        and x.conversion_action_sk = any(array(\n"
+        "            select k.conversion_action_sk\n"
+        "            from {{ ref('dim_conversion_action') }} as k\n"
+        "            where k.is_primary\n"
+        "        ))\n"
+        ") as q\n"
+        "    on true\n"
+    )
 
 
 def test_a_run_keeps_a_view_of_the_marts_that_exists():
