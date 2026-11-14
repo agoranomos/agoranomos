@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.5.0](https://github.com/agoranomos/agoranomos/compare/v0.4.5...v0.5.0) (2026-11-14)
+
+
+### Features
+
+* **ai:** read the marts only ([#302](https://github.com/agoranomos/agoranomos/issues/302)) ([19f7662](https://github.com/agoranomos/agoranomos/commit/19f7662025c3392e4ba2d51ae91c24e0ea92911a))
+* **airflow:** accept the loads and clean the raw layer ([#314](https://github.com/agoranomos/agoranomos/issues/314)) ([ea31b90](https://github.com/agoranomos/agoranomos/commit/ea31b907a9456157162be09d89a27372ab09c0de))
+* **airflow:** maintain the core once a day ([#294](https://github.com/agoranomos/agoranomos/issues/294)) ([3a878cc](https://github.com/agoranomos/agoranomos/commit/3a878ccc0dc2c9946bbf08e01c095332a4bb01a9))
+* **airflow:** send alerts through Apprise ([#284](https://github.com/agoranomos/agoranomos/issues/284)) ([a7430fc](https://github.com/agoranomos/agoranomos/commit/a7430fc96ecf1476de1c27d75ba032b2420c788e))
+* **backup:** take a backup before a migration of the core ([#269](https://github.com/agoranomos/agoranomos/issues/269)) ([f89301e](https://github.com/agoranomos/agoranomos/commit/f89301e9289fc9c263c264448fcb5509e5610d5b))
+* **dbt:** keep a rate for every day and currency ([#293](https://github.com/agoranomos/agoranomos/issues/293)) ([7ee85ad](https://github.com/agoranomos/agoranomos/commit/7ee85adb6ffce883273e63bdcd8ed4fbf95d71e0))
+* **dbt:** keep the data of an account that leaves the settings ([#303](https://github.com/agoranomos/agoranomos/issues/303)) ([3953502](https://github.com/agoranomos/agoranomos/commit/3953502052535b53128414fa4ed18a890c8acbe3))
+* **dbt:** keep the dimensions of the core with their versions ([#281](https://github.com/agoranomos/agoranomos/issues/281)) ([7872c99](https://github.com/agoranomos/agoranomos/commit/7872c999a74d8d02b9cfba0eb84bc609d0bbcce8))
+* **dbt:** put an account that fails its checks in quarantine ([#283](https://github.com/agoranomos/agoranomos/issues/283)) ([2bee19f](https://github.com/agoranomos/agoranomos/commit/2bee19f025fee7ebb0c314e0d0651c238b1867bf))
+* **dbt:** read only the loads that a run has pinned ([#279](https://github.com/agoranomos/agoranomos/issues/279)) ([7ce1403](https://github.com/agoranomos/agoranomos/commit/7ce14031019f4f0a487cdb031a15a2d6099c66fe))
+* **dbt:** serve the marts as views over the core ([#298](https://github.com/agoranomos/agoranomos/issues/298)) ([8638a64](https://github.com/agoranomos/agoranomos/commit/8638a64a7d1df88f9abacbd5e49102942ee07603))
+* **dbt:** write the facts of the core by whole days ([#285](https://github.com/agoranomos/agoranomos/issues/285)) ([a95c5e6](https://github.com/agoranomos/agoranomos/commit/a95c5e62c83d1ef43a5a6d23c9639dfbe003241f))
+* **dlt:** append each load under its own id ([#273](https://github.com/agoranomos/agoranomos/issues/273)) ([ecae16c](https://github.com/agoranomos/agoranomos/commit/ecae16c5aac0d00b85ab8121330cf3b23ab1339e))
+* **dlt:** append the lists of the entities of each load ([#304](https://github.com/agoranomos/agoranomos/issues/304)) ([af4de39](https://github.com/agoranomos/agoranomos/commit/af4de39b4bfe5183880ae23ce74c886e01bbae2e))
+* **google-ads:** load into the new raw layer and check the totals of the account ([#295](https://github.com/agoranomos/agoranomos/issues/295)) ([94c9758](https://github.com/agoranomos/agoranomos/commit/94c9758e7f70b8d27a7c1dcf52a442664cef934f))
+* **google-ads:** load the history by quarters in the background ([#299](https://github.com/agoranomos/agoranomos/issues/299)) ([894fa03](https://github.com/agoranomos/agoranomos/commit/894fa035cd531d00f112d9bf7ba986f6c887a2f4))
+* **metabase:** draw the charts in the orange of the site ([#289](https://github.com/agoranomos/agoranomos/issues/289)) ([b9e1798](https://github.com/agoranomos/agoranomos/commit/b9e17987781e216d9a09b213a8d7d9c74678c717))
+* **metabase:** point Metabase at the views and build them at up ([#307](https://github.com/agoranomos/agoranomos/issues/307)) ([6a0557b](https://github.com/agoranomos/agoranomos/commit/6a0557b2c53f083b3269f77afa3e6fc966a8f167))
+* **stack:** add the profile of an agency with its measurement ([#313](https://github.com/agoranomos/agoranomos/issues/313)) ([0de5934](https://github.com/agoranomos/agoranomos/commit/0de5934ef2750400ae157db26f0677f0e37ce3ac))
+* **stack:** clean the service databases by retention ([#271](https://github.com/agoranomos/agoranomos/issues/271)) ([a3b3be1](https://github.com/agoranomos/agoranomos/commit/a3b3be15909260d192e303c2a5d8d5e02654b754))
+* **stack:** load the rates again for a new reporting currency ([#318](https://github.com/agoranomos/agoranomos/issues/318)) ([d212dfc](https://github.com/agoranomos/agoranomos/commit/d212dfcd4e80f825a5c59cb150caa4ac0e68a1e7))
+* **warehouse:** apply the migrations of the core once ([#267](https://github.com/agoranomos/agoranomos/issues/267)) ([a83147d](https://github.com/agoranomos/agoranomos/commit/a83147d6fa9c98050a8e6951ebcfefceaacb8cd3))
+* **warehouse:** create the tables of the core by migrations ([#268](https://github.com/agoranomos/agoranomos/issues/268)) ([2954b06](https://github.com/agoranomos/agoranomos/commit/2954b06415a1c9e94a1519fddf240b04a4e9cbb8))
+
+
+### Bug Fixes
+
+* **airflow:** give the DAG processor 640 MiB ([#274](https://github.com/agoranomos/agoranomos/issues/274)) ([2df1014](https://github.com/agoranomos/agoranomos/commit/2df101448f17830e55e99779277052f4a178ba1f))
+* **dbt:** build the campaign statistics as a table ([#296](https://github.com/agoranomos/agoranomos/issues/296)) ([c6c9b3d](https://github.com/agoranomos/agoranomos/commit/c6c9b3d2dc8cd5bb17b72860ff78b4ef6ed88bed))
+* **stack:** drop the relations of v0.4 at the upgrade ([#317](https://github.com/agoranomos/agoranomos/issues/317)) ([b0578c4](https://github.com/agoranomos/agoranomos/commit/b0578c41bec61236641afb74b272602ffd1dcbbd))
+* **stack:** shrink the pools in the test of airflow-init ([#323](https://github.com/agoranomos/agoranomos/issues/323)) ([fa1e2b3](https://github.com/agoranomos/agoranomos/commit/fa1e2b3112f1fb0a50315e29461e0adaae5f7b35))
+
+
+### Documentation
+
+* **adr:** count the jobs that can run at once ([#308](https://github.com/agoranomos/agoranomos/issues/308)) ([64ecfbb](https://github.com/agoranomos/agoranomos/commit/64ecfbb8f2ab3de16d59c94d3a9d09d79f4517c2))
+* **adr:** leave amcheck out of the maintenance ([#301](https://github.com/agoranomos/agoranomos/issues/301)) ([ad2dd16](https://github.com/agoranomos/agoranomos/commit/ad2dd162eee53c24164c772a0184e796b55dfb66))
+* **adr:** mark ADR-0034 as superseded in part ([#300](https://github.com/agoranomos/agoranomos/issues/300)) ([4097859](https://github.com/agoranomos/agoranomos/commit/4097859d5acfc30388ed9017033d7fccc1a9c8d5))
+* **caddy:** describe Caddy 2.11.9 ([#309](https://github.com/agoranomos/agoranomos/issues/309)) ([290d492](https://github.com/agoranomos/agoranomos/commit/290d492255d7cb656f95463aa5b3c0385996eab3))
+* describe Cosmos 1.16.0, which the stack runs ([#280](https://github.com/agoranomos/agoranomos/issues/280)) ([cb2b4d1](https://github.com/agoranomos/agoranomos/commit/cb2b4d1f3798a3278d8a7fd17469e09d8989a87b))
+* describe the warehouse of v0.5 ([#321](https://github.com/agoranomos/agoranomos/issues/321)) ([bad7ad6](https://github.com/agoranomos/agoranomos/commit/bad7ad680de48ca569ae6b8379b1cb09585fd2ae)), closes [#210](https://github.com/agoranomos/agoranomos/issues/210)
+* describe Zensical 0.1.0 ([#310](https://github.com/agoranomos/agoranomos/issues/310)) ([bc884c2](https://github.com/agoranomos/agoranomos/commit/bc884c2228e4bb12d3c6c5e19c6efb07217a30a8))
+* give the light scheme one orange and a light home ([#286](https://github.com/agoranomos/agoranomos/issues/286)) ([6b774c0](https://github.com/agoranomos/agoranomos/commit/6b774c0550e71380d8c996a8326812e6d0677823))
+* give the site the brand style and pictures ([#282](https://github.com/agoranomos/agoranomos/issues/282)) ([8760794](https://github.com/agoranomos/agoranomos/commit/876079401d5068e61efa2ba425a192a3694d6229))
+
 ## [0.4.5](https://github.com/agoranomos/agoranomos/compare/v0.4.4...v0.4.5) (2026-11-03)
 
 
