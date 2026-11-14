@@ -53,7 +53,7 @@ jobs:
       contents: read
     env:
       # renovate: datasource=github-releases depName=docker/compose
-      COMPOSE_VERSION: v5.7.0
+      COMPOSE_VERSION: v5.7.1
       AGORANOMOS_PROFILE: ${{ inputs.profile || 'agency' }}
       AGORANOMOS_PROFILE_DAYS: ${{ inputs.days }}
     steps:
