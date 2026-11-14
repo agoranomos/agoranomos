@@ -37,39 +37,41 @@ The sum of the limits counts every service of server mode at its limit and the l
 
 It ran on the test server of the project, an Intel Core i5-3230M of 2012 with 2 cores and 4 threads (x86-64, Ubuntu 24.04, 7.6 GiB, Docker Engine 29.0.2), on 11 November 2026, in local mode without the demo, with the LocalExecutor, `WAREHOUSE_DB_MEMORY=3g` and the other limits at their defaults. The load of the host over a minute was 0.6 to 2.3 before each measurement of Metabase, and 4.2 before the run of the transform, which came right after a start, with nothing else in Docker but a database of another project that stood idle.
 
-**The cards.** Each of the 22 cards of questions ran four times with the default filters and the cache of Metabase off, so that each run queried the warehouse, in two series, before and after a start of the stack again; the table gives the median of each card, the time of the call to the API of Metabase. Five cards are above the threshold of 2 seconds of [ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md) in both series, in bold:
+**The cards.** Each of the 22 cards of questions ran four times with the default filters and the cache of Metabase off, so that each run queried the warehouse; the table gives the median of each card, the time of the call to the API of Metabase. The first measurement, on 11 November 2026, found five cards above the threshold of 2 seconds of [ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md), with `conversions_primary` of the view of the campaigns a subquery in its select list. On 12 November 2026 the same data ran again in two series with that view, before and after a start of the stack again, and in three with the view that looks the column up by a `LEFT JOIN LATERAL`, two of them after a start of the stack again. The medians of the series of each view differ by at most 0.4 seconds, and the table gives the first two series of each, in bold above 2 seconds:
 
-| Tab | Card | Median, first series | Median, second series |
-|---|---|---:|---:|
-| Overview | Spend | 0.36 s | 0.31 s |
-| Overview | Conversions | 1.88 s | 1.74 s |
-| Overview | Cost per conversion | 1.92 s | 1.79 s |
-| Overview | ROAS | 0.26 s | 0.29 s |
-| Overview | Clicks | 0.19 s | 0.20 s |
-| Overview | CTR | 0.18 s | 0.21 s |
-| Overview | CPC | 0.24 s | 0.26 s |
-| Overview | Key events of web analytics | 0.10 s | 0.12 s |
-| Overview | Spend and conversions over time | 1.93 s | 1.78 s |
-| Overview | Platforms | **3.46 s** | **3.16 s** |
-| Overview | Spend by client | 0.20 s | 0.21 s |
-| Overview | Top campaigns by spend | **4.04 s** | **3.70 s** |
-| Overview | Last loads | 0.08 s | 0.07 s |
-| Platforms | Results by platform | **5.09 s** | **4.88 s** |
-| Platforms | Spend by platform over time | 0.27 s | 0.31 s |
-| Platforms | Conversions by platform over time | 1.83 s | 1.70 s |
-| Campaigns | Campaigns | **4.11 s** | **3.72 s** |
-| Ad groups and ads | Ad groups | 1.55 s | 1.56 s |
-| Ad groups and ads | Ads | **4.03 s** | **4.01 s** |
-| Conversions | Conversions by action | 0.59 s | 0.61 s |
-| Conversions | Conversions by category over time | 0.43 s | 0.43 s |
-| Conversions | Key events of web analytics over time | 0.10 s | 0.12 s |
+| Tab | Card | Subquery, first series | Subquery, second series | Lateral join, first series | Lateral join, second series |
+|---|---|---:|---:|---:|---:|
+| Overview | Spend | 0.24 s | 0.30 s | 0.27 s | 0.29 s |
+| Overview | Conversions | 1.79 s | 1.87 s | 1.73 s | 1.73 s |
+| Overview | Cost per conversion | 1.89 s | 1.91 s | 1.82 s | 1.81 s |
+| Overview | ROAS | 0.28 s | 0.28 s | 0.29 s | 0.29 s |
+| Overview | Clicks | 0.20 s | 0.21 s | 0.20 s | 0.19 s |
+| Overview | CTR | 0.22 s | 0.21 s | 0.20 s | 0.20 s |
+| Overview | CPC | 0.24 s | 0.26 s | 0.27 s | 0.26 s |
+| Overview | Key events of web analytics | 0.10 s | 0.15 s | 0.10 s | 0.13 s |
+| Overview | Spend and conversions over time | 1.92 s | 1.88 s | 1.77 s | 1.79 s |
+| Overview | Platforms | **3.39 s** | **3.43 s** | 1.64 s | 1.64 s |
+| Overview | Spend by client | 0.21 s | 0.22 s | 0.20 s | 0.21 s |
+| Overview | Top campaigns by spend | **4.02 s** | **3.96 s** | **2.21 s** | **2.20 s** |
+| Overview | Last loads | 0.07 s | 0.06 s | 0.07 s | 0.06 s |
+| Platforms | Results by platform | **5.00 s** | **5.02 s** | 1.71 s | 1.73 s |
+| Platforms | Spend by platform over time | 0.27 s | 0.28 s | 0.27 s | 0.31 s |
+| Platforms | Conversions by platform over time | 1.82 s | 1.85 s | 1.70 s | 1.72 s |
+| Campaigns | Campaigns | **3.97 s** | **4.36 s** | **2.29 s** | **2.33 s** |
+| Ad groups and ads | Ad groups | 1.64 s | 1.57 s | 1.61 s | 1.59 s |
+| Ad groups and ads | Ads | **3.89 s** | **3.97 s** | **3.98 s** | **4.06 s** |
+| Conversions | Conversions by action | 0.61 s | 0.63 s | 0.62 s | 0.61 s |
+| Conversions | Conversions by category over time | 0.45 s | 0.42 s | 0.43 s | 0.42 s |
+| Conversions | Key events of web analytics over time | 0.09 s | 0.11 s | 0.10 s | 0.11 s |
 
-Two causes make the five, as `EXPLAIN ANALYZE` of the queries shows:
+The load of the host over a minute was 0.7 and 4.1 before the two series with the subquery, and 4.8, 5.9 and 1.4 before the three with the lateral join, the higher ones right after a start of the stack; the third series, at 1.4, gave the same medians as the others within 0.05 seconds. Two causes make the cards above the threshold, as `EXPLAIN ANALYZE` of the queries that Metabase sends shows, run as `metabase_reader` runs them, with PostgreSQL 18.6:
 
-- **The conversions of the primary actions.** `conversions_primary` of the view of the campaigns is a subquery of the conversions by action, which PostgreSQL runs for each row of the view that a question reads, and again for each place where the question names the column ([ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md)): the 12 weeks of the agency are 94,500 rows of campaigns, and each mention of the column took about 1.6 seconds on this server: the spend by platform took 93 milliseconds, with the column once 1.7 seconds, and with it twice 3.3 seconds. The cards that name it once take 1.7 to 1.9 seconds, close to the threshold, those that name it twice, Platforms, Top campaigns by spend and Campaigns, 3.2 to 4.1, and Results by platform, which names it three times, 4.9 to 5.1.
-- **The grain of the ads.** The card Ads groups the 1.26 million rows of ads of the 12 weeks by ad, with no filter required, as ADR-0037 expected: 4.0 seconds.
+- **The conversions of the primary actions.** As a subquery in the select list, `conversions_primary` ran for each row of the view that a question reads, and again for each place where the question names the column, about 1.6 seconds each time over the 94,500 rows of campaigns of the 12 weeks: Platforms, Top campaigns by spend and Campaigns name it twice, Results by platform three times. The view now looks it up by a `LEFT JOIN LATERAL` in the key of the conversions by action, once for each row however often a question names it, about 13 microseconds a row on this server, 1.2 to 1.5 seconds for the 12 weeks; the planner leaves the join out of a question that does not read the column. PostgreSQL passes the columns of the row to such a subquery as parameters that it does not let a parallel worker take (`is_parallel_safe` in `src/backend/optimizer/util/clauses.c` at the tag REL_18_6), so the lookups run in the leader, one of the two processes that a query has at 3 GiB. The cards that name the column take 1.6 to 1.8 seconds, and Top campaigns by spend and Campaigns, which also sort the rows by the names of their campaigns, 2.2 to 2.3 seconds, still above the threshold.
+- **The grain of the ads.** The card Ads groups the 1.26 million rows of ads of the 12 weeks by ad, with no filter required, as ADR-0037 expected: 3.9 to 4.1 seconds, of which the joins of the rows with their dimensions and rates take 2.9 seconds and the grouping 1.6, in one process, as the planner expects a group for each row.
 
-A card above the threshold moves to an aggregate by ADR-0037, and the stack test of the cards fails on it: the change of the view or of the cards is a decision of its own, which this measurement does not make. These times come from a CPU of 2012 with four threads, and those of a server of 8 vCPUs are not measured.
+Two other forms of the view were measured on the same data and left aside, by the time of the database in `EXPLAIN ANALYZE`, the median of three runs. A join to the primary conversions grouped by the key of the row answers each of these cards in about 1.65 seconds, but it sums the whole history of the conversions for every question that reads the column, as PostgreSQL carries no filter of a period across a join: 1.26 seconds for the campaigns of one client over 7 days, against 11 milliseconds with the subquery and 8 with the lateral join, and more with each month of history. A lateral join by account and day, whose row holds the primary conversions of all the campaigns of the account and which the planner can keep in a Memoize for the other campaigns of the same account and day, answers the cards with no filter in 0.55 to 0.92 seconds, but it computes that row again for each row of campaigns when the planner leaves the Memoize out, as it did with the filter of one client: 0.58 to 1.03 seconds for the cards of the campaigns of one client, against 0.06 to 0.08 seconds with the lateral join by row and 0.07 to 0.17 with the subquery.
+
+A card above the threshold moves to an aggregate by ADR-0037, and the stack test of the cards fails on it: what the three cards above it need, an aggregate or a change of the core, is a decision of its own. These times come from a CPU of 2012 with four threads, and those of a server of 8 vCPUs are not measured.
 
 **The other measurements**, in the same two series:
 
@@ -98,34 +100,34 @@ No process was stopped at a limit and no container restarted. So the profile rai
 
 ### The density of the limit on synthetic data
 
-The same stack, on the same server and with the same limits, `WAREHOUSE_DB_MEMORY=3g` among them, held the density of the limit: 200 accounts with statistics on every day, each with 30 campaigns, 150 ad groups and 400 ads, so 80,000 rows of ads a day, over the 100 days to 11 November 2026, 8.0 million rows of ads and 2.5 GB of warehouse, which the generator wrote in 389 seconds. The limit asks for 16 GiB of `warehouse-db` and a server of 32 GB, which the server of 7.6 GiB cannot give, so these times are those of the density of the limit with the memory of an agency. The cards ran as for the agency, in two series, before and after a start of the stack again, the load of the host 1.6 to 1.7 before them:
+The same stack, on the same server and with the same limits, `WAREHOUSE_DB_MEMORY=3g` among them, held the density of the limit: 200 accounts with statistics on every day, each with 30 campaigns, 150 ad groups and 400 ads, so 80,000 rows of ads a day, over the 100 days to 11 November 2026, 8.0 million rows of ads and 2.5 GB of warehouse, which the generator wrote in 389 seconds. The limit asks for 16 GiB of `warehouse-db` and a server of 32 GB, which the server of 7.6 GiB cannot give, so these times are those of the density of the limit with the memory of an agency. The cards ran as for the agency, on 11 November 2026 in two series with the subquery, before and after a start of the stack again, the load of the host 1.6 to 1.7 before them, and on 12 November 2026 in one series with each form of the view:
 
-| Tab | Card | Median, first series | Median, second series |
-|---|---|---:|---:|
-| Overview | Spend | 0.95 s | 0.77 s |
-| Overview | Conversions | **9.02 s** | **8.98 s** |
-| Overview | Cost per conversion | **9.40 s** | **9.35 s** |
-| Overview | ROAS | 0.96 s | 0.85 s |
-| Overview | Clicks | 0.50 s | 0.48 s |
-| Overview | CTR | 0.53 s | 0.49 s |
-| Overview | CPC | 0.80 s | 0.79 s |
-| Overview | Key events of web analytics | 0.10 s | 0.10 s |
-| Overview | Spend and conversions over time | **9.31 s** | **9.43 s** |
-| Overview | Platforms | **16.74 s** | **16.78 s** |
-| Overview | Spend by client | 0.60 s | 0.56 s |
-| Overview | Top campaigns by spend | **19.98 s** | **20.04 s** |
-| Overview | Last loads | 0.07 s | 0.07 s |
-| Platforms | Results by platform | **24.60 s** | **24.43 s** |
-| Platforms | Spend by platform over time | 0.93 s | 0.88 s |
-| Platforms | Conversions by platform over time | **9.04 s** | **9.18 s** |
-| Campaigns | Campaigns | **19.92 s** | **20.11 s** |
-| Ad groups and ads | Ad groups | **8.87 s** | **8.74 s** |
-| Ad groups and ads | Ads | **29.50 s** | **27.08 s** |
-| Conversions | Conversions by action | **2.87 s** | **2.74 s** |
-| Conversions | Conversions by category over time | 1.75 s | 1.74 s |
-| Conversions | Key events of web analytics over time | 0.12 s | 0.09 s |
+| Tab | Card | Subquery, first series | Subquery, second series | Subquery, again | Lateral join |
+|---|---|---:|---:|---:|---:|
+| Overview | Spend | 0.95 s | 0.77 s | 0.76 s | 0.76 s |
+| Overview | Conversions | **9.02 s** | **8.98 s** | **8.93 s** | **8.50 s** |
+| Overview | Cost per conversion | **9.40 s** | **9.35 s** | **9.26 s** | **9.10 s** |
+| Overview | ROAS | 0.96 s | 0.85 s | 0.90 s | 0.89 s |
+| Overview | Clicks | 0.50 s | 0.48 s | 0.51 s | 0.53 s |
+| Overview | CTR | 0.53 s | 0.49 s | 0.49 s | 0.53 s |
+| Overview | CPC | 0.80 s | 0.79 s | 0.80 s | 0.79 s |
+| Overview | Key events of web analytics | 0.10 s | 0.10 s | 0.10 s | 0.13 s |
+| Overview | Spend and conversions over time | **9.31 s** | **9.43 s** | **9.23 s** | **9.16 s** |
+| Overview | Platforms | **16.74 s** | **16.78 s** | **16.56 s** | **8.63 s** |
+| Overview | Spend by client | 0.60 s | 0.56 s | 0.59 s | 0.57 s |
+| Overview | Top campaigns by spend | **19.98 s** | **20.04 s** | **19.79 s** | **9.24 s** |
+| Overview | Last loads | 0.07 s | 0.07 s | 0.07 s | 0.06 s |
+| Platforms | Results by platform | **24.60 s** | **24.43 s** | **24.13 s** | **8.88 s** |
+| Platforms | Spend by platform over time | 0.93 s | 0.88 s | 0.83 s | 0.84 s |
+| Platforms | Conversions by platform over time | **9.04 s** | **9.18 s** | **9.01 s** | **8.67 s** |
+| Campaigns | Campaigns | **19.92 s** | **20.11 s** | **19.81 s** | **12.48 s** |
+| Ad groups and ads | Ad groups | **8.87 s** | **8.74 s** | **8.54 s** | **8.58 s** |
+| Ad groups and ads | Ads | **29.50 s** | **27.08 s** | **29.66 s** | **29.46 s** |
+| Conversions | Conversions by action | **2.87 s** | **2.74 s** | **2.68 s** | **2.69 s** |
+| Conversions | Conversions by category over time | 1.75 s | 1.74 s | 1.70 s | 1.67 s |
+| Conversions | Key events of web analytics over time | 0.12 s | 0.09 s | 0.14 s | 0.09 s |
 
-Eleven of the 22 cards are above 2 seconds in both series. The causes are those of the agency, with 5.3 times the rows: each mention of `conversions_primary` costs about 8 seconds over the 504,000 rows of campaigns of the 12 weeks, and the card Ads groups 6.7 million rows of ads. The values of the linked filters at their first use took 0.20 to 0.83 seconds. The first use of the values of the 96 fields that are a list took 81.1 seconds, and the scan after it 78.0 seconds, which probed 84 fields in 12 queries, with the load of the host at 5.7 before it, two minutes after a start. Metabase peaked at 1,330 MiB and `warehouse-db` at 926 MiB, with no process stopped at a limit.
+Eleven of the 22 cards are above 2 seconds in every series, with either form of the view. With `conversions_primary` a subquery in the select list of the view of the campaigns, the causes are those of the agency, with 5.3 times the rows: each mention of the column cost about 8 seconds over the 504,000 rows of campaigns of the 12 weeks, and the card Ads groups 6.7 million rows of ads. On 12 November 2026, with the load of the host at 1.9 and 1.6 before the two series, the subquery gave the same times again, and with the lateral join the cards that named the column twice or three times take what those that name it once take, 8.5 to 9.3 seconds, and Campaigns 12.5, as the lookups of the 504,000 rows take about 8 seconds in the one process that runs them; the same eleven cards stay above the threshold. A join to the primary conversions grouped by the key of the row took 2.6 to 3.8 seconds of the database for these cards over the 100 days, as it sums all of them, and its time grows with the months of history, where that of the lateral join follows the rows of the period. The values of the linked filters at their first use took 0.20 to 0.83 seconds. The first use of the values of the 96 fields that are a list took 81.1 seconds, and the scan after it 78.0 seconds, which probed 84 fields in 12 queries, with the load of the host at 5.7 before it, two minutes after a start. Metabase peaked at 1,330 MiB and `warehouse-db` at 926 MiB, with no process stopped at a limit.
 
 ### The disk of the limit
 
