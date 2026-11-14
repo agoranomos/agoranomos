@@ -259,8 +259,9 @@ def oom_kills(service: str) -> int | None:
 def test_no_service_ran_out_of_memory_or_restarted():
     # The memory limits come from measurements (docs/reference/system-requirements.md). A process
     # that the kernel killed at a limit, or a container that Docker restarted, says that a limit is
-    # too low, or that something else broke. CI runs the stack tests twice, so the second run also
-    # checks what the first one did.
+    # too low, or that something else broke. CI runs the tests of each part twice on a stack of its
+    # own, and this file is in every part (parts.py), so the second run also checks what the first
+    # one did.
     problems = []
     for service, container in sorted(containers().items()):
         if service not in LONG_RUNNING:
