@@ -84,13 +84,19 @@ def airflow_init_again(airflow_url, token):
         status, pool = api(airflow_url, token, "GET", f"/api/v2/pools/{name}")
         assert status == 200, pool
         pools[name] = pool
+        # One slot fewer, never more: a run of the transform that an earlier step started can still
+        # run, and a larger pool lets the scheduler start more processes of dbt than the memory of
+        # the container of the tasks holds until airflow-init puts the size back. With 5 slots, a
+        # pull request (#315, 13 November 2026) had four at once, and the kernel stopped two. A pool
+        # of 0 slots, which Airflow 3.3.2 accepts, only holds its tasks back.
+        slots = POOLS[name] - 1
         # Airflow 3.3.2 answers 422 to a body without the name and include_deferred, as the UI
         # sends.
-        edit = {"pool": name, "slots": 5, "include_deferred": pool["include_deferred"]}
+        edit = {"pool": name, "slots": slots, "include_deferred": pool["include_deferred"]}
         path = f"/api/v2/pools/{name}?update_mask=slots"
         status, body = api(airflow_url, token, "PATCH", path, edit)
         assert status == 200, body
-        assert body["slots"] == 5, body
+        assert body["slots"] == slots, body
     return pools, compose("run", "--rm", "--no-deps", "-T", "airflow-init", check=False)
 
 
