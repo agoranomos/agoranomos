@@ -8,6 +8,8 @@ decision-makers: Andrei Gromov
 
 Superseded in part by [ADR-0046](0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md): "in `on-run-start`" and "the newest for each account" of "Pinning", as a task before the tasks of dbt now pins and L1 takes the newest load for each account and day, and "a table that a cleanup has emptied gets a `TRUNCATE`", which now comes under a lock. The rest of this record stays accepted.
 
+Superseded in part by [ADR-0051](0051-take-the-current-day-as-a-load-of-the-kind-intraday.md): the sentence of the light DAG with its own table in L0 and the pool of one slot for dbt of "The current day", as the short cycle is a load of the kind `intraday` that the one transform takes like any load, and, with its bullet "The day before, after midnight", "only the current day of an account" of the same item. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 [ADR-0004](0004-ingest-with-dlt.md) merges rows on natural keys into raw tables that stay for good, and calls data final up to yesterday. In the code, the keys are not set, so a delete of a window walks a table by a chain of `OR`; the load goes by `INSERT ... VALUES`, whose backends the kernel killed 29 times in one morning of October 2026 on a test stack, under the limit of 384 MiB of `warehouse-db`, until files of 5,000 rows and two workers stopped it; and nothing connects a load to the run of dbt that reads it.
