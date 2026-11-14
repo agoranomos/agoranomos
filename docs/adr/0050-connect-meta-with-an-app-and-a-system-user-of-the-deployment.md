@@ -1,0 +1,190 @@
+---
+status: proposed
+date: 2026-11-14
+decision-makers: Andrei Gromov
+---
+
+# Connect Meta with an app and a system user of the deployment
+
+## Context and Problem Statement
+
+[ADR-0032](0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md) connected Google Ads first and left Meta to a record of its own, because the default access tier of the Marketing API is "For development only". Later records already decided parts of the connector of Meta: [ADR-0034](0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md) gives every real source a first load of 36 months; [ADR-0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) checks the campaigns of each account against its totals from the platform (G0a) and keeps a failed account out of the core; [ADR-0036](0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md) asks for `effective_status` on each level, so that removed entities come too, and a common state beside the status of the platform; [ADR-0038](0038-load-by-copy-and-write-the-core-by-whole-days.md) sets the window of restatements of Meta to 28 days and the history to portions by quarters.
+
+What exists today is the demo: the fictional platform `demo_social` in the shape of the Marketing API v26.0 (`airflow/dags/agoranomos_pipelines/demo/social.py`), the shape macros `dbt/macros/shapes/meta_v26.sql` that its staging models call, and the Meta-like actions of `demo_social` in `dbt/seeds/seed_conversion_actions.csv`. No connector of Meta exists.
+
+On 1 November 2026 the maintainer chose the scheme of access: an app of the deployment's own business portfolio, an admin system user, and a token that does not expire. Since then, the page of Meta on system user tokens reads "Some businesses must use expiring tokens", and such a business cannot make a token that does not expire at all. Two pages of Meta also disagree on whether reading the ad accounts of another business, which an agency does, needs more than the default access (see More Information).
+
+How does a deployment connect Meta: under which code, with which sign-in, which accounts and requests, which attribution, windows and checks, within which quota, and on which version of the API?
+
+## Decision Drivers
+
+* A deployment connects the source with steps that one person can follow, without a review by Meta where it can (ADR-0032).
+* The source serves one business: only the accounts that `extensions/model/clients.toml` names ([ADR-0024](0024-one-deployment-is-one-business.md)).
+* The connector fills the model that the demo fills, through the same shape macros, so that the dashboards, the tests and the skills of the demo hold for real data ([ADR-0025](0025-model-advertising-statistics-once.md)).
+* AI access and the loads read only: the token has `ads_read` and no right to change an ad ([ADR-0007](0007-ai-access-via-mcp-read-only.md)).
+* As little secret material in `.env` as the sign-in needs, and no secret in a log or in the output of `./agoranomos` (AGENTS.md).
+* The daily load, its history and the short cycle of the current day ([ADR-0038](0038-load-by-copy-and-write-the-core-by-whole-days.md)) fit the quota of the lowest tier that reads real accounts.
+* The contract of a source: a window in the time zone of the account, safe repeats, explicit retries, loud failures, and an account that fails leaves the others to load ([ADR-0004](0004-ingest-with-dlt.md), ADR-0035).
+* The spend of removed entities counts, and G0a sees a read that lost part of an account (ADR-0036, ADR-0035).
+* No heavy dependency next to Airflow, and every package pinned (AGENTS.md).
+
+## Considered Options
+
+For the platform code:
+
+* `meta_ads`, with the schemas `raw_meta_ads` and `raw_meta_ads_staging`
+* `meta`
+* `facebook_ads`
+
+For the sign-in:
+
+* A system user of the deployment's own portfolio with a token that never expires, and a token that expires in 60 days, refreshed by the load, where the portfolio must use one
+* A system user with a token that never expires, and no other kind
+* A system user with a token that expires in 60 days, always
+* The token of a person
+* One app of the project for every deployment
+
+For the app secret and `appsecret_proof`:
+
+* The App ID and the App Secret in `.env` only with a token that expires, and `appsecret_proof` with every call whenever the secret is set
+* The App Secret in `.env` always, and `appsecret_proof` with every call
+* No App Secret, and no `appsecret_proof`
+
+For the accounts that the source loads:
+
+* The accounts of `meta_ads` that `extensions/model/clients.toml` names
+* Every ad account that the system user reaches
+* A list in a file of its own
+
+For the client of the API:
+
+* The HTTP client of dlt, with explicit retries and a backoff that follows the headers of throttling
+* The Python library `facebook-business`
+* The verified source `facebook_ads` of dlt
+
+For the requests of insights:
+
+* Synchronous requests for the daily window, and asynchronous report runs for the history and for a request that is too large
+* Asynchronous report runs for every request
+* Synchronous requests for every request
+
+For the conversions by action below the campaign:
+
+* Load `actions` and `action_values` at the three levels now, in the requests of the statistics
+* Load them at the level of campaigns only, and below it with the module of C13
+
+For the attribution:
+
+* Request the windows `1d_click`, `7d_click` and `1d_view`, keep them in raw, and read `value` as the conversions
+* Request no window, and read `value`
+* Read one window, such as `7d_click`, as the conversions
+
+For the common state:
+
+* `meta_state` over `status`, with `effective_status` kept beside it
+* A common state over `effective_status`
+
+For the tolerance of G0a:
+
+* A share of 0.01 to start with
+* Zero, as for Google
+* An absolute margin in the currency of the account
+
+For the access tier:
+
+* Limited access until the stand shows a problem
+* Plan Full access now, with App Review and Business Verification
+
+For the sunset of a version while Meta publishes none:
+
+* An estimate from the shortest life of the last ten versions, replaced by the date of Meta once it is published
+* A warning only once Meta publishes a date
+* Two years from the release, as the changelog of v27.0 speaks of "the standard 2-year version lifecycle"
+
+## Decision Outcome
+
+Chosen options: "`meta_ads`", "A system user of the deployment's own portfolio with a token that never expires, and a token that expires in 60 days, refreshed by the load, where the portfolio must use one", "The App ID and the App Secret in `.env` only with a token that expires, and `appsecret_proof` with every call whenever the secret is set", "The accounts of `meta_ads` that `extensions/model/clients.toml` names", "The HTTP client of dlt", "Synchronous requests for the daily window, and asynchronous report runs for the history and for a request that is too large", "Load `actions` and `action_values` at the three levels now", "Request the windows `1d_click`, `7d_click` and `1d_view`, keep them in raw, and read `value` as the conversions", "`meta_state` over `status`", "A share of 0.01 to start with", "Limited access until the stand shows a problem" and "An estimate from the shortest life of the last ten versions", because an app of the deployment's own portfolio reads its accounts with no review by Meta, the scheme of 1 November keeps working for a portfolio that may not have a token that never expires, the source keeps the shape that `demo_social` already has, and each request fits a tier whose limits are per ad account.
+
+Six of these choices are the maintainer's to accept or change in the review of this record, as #221 asks: the kind of token, the App Secret and `appsecret_proof`, the access tier, the conversions below the campaign, the rule of the sunset, and the starting tolerance of G0a. The text below says which.
+
+In practice this means:
+
+* **The platform code and the schemas.** The platform is `meta_ads`, after `google_ads`, with the schemas `raw_meta_ads` and `raw_meta_ads_staging`, owned by `loader` and read by `transformer` as those of Google Ads are. The code is in every key of the core and of `extensions/model/clients.toml`, so it never changes once data exists.
+* **The sign-in.** The deployment creates an app in its own business portfolio, adds the Marketing API product to it, creates an admin system user in the same portfolio, installs the app for it, assigns it the ad accounts to load, and makes a token with the permission `ads_read` only. Meta asks that "Both system user and app should belong to a same Business Manager". The token goes into `.env` as `META_ADS_ACCESS_TOKEN`. *Open to the maintainer's acceptance:*
+    * The default is the token that never expires, the decision of 1 November 2026, made in the UI of Business Manager. A portfolio that must use expiring tokens gets an error when it asks for one; the guide of C1b then makes a token valid for 60 days with `set_token_expires_in_60_days=true`, and sets `META_ADS_APP_ID` and `META_ADS_APP_SECRET` beside it.
+    * With those two set, a load refreshes the token when it is older than 30 days, through `GET oauth/access_token` with `fb_exchange_token`, `client_id`, `client_secret` and `set_token_expires_in_60_days=true`, and keeps the newest token in an Airflow Variable, which Airflow encrypts with the Fernet key of the deployment (`AIRFLOW_FERNET_KEY`) and which the Viewer of the MCP server of Airflow may not read ([ADR-0030](0030-ship-three-mcp-servers-in-v0-3-0-with-the-stdio-servers-in-local-mode.md)), as `.env` stays read-only to the stack. The Variable remembers which token of `.env` it came from, so a new token in `.env` replaces it. A refresh that fails fails the load with the error of Meta, and a token that expired, as after a stop of more than 60 days, needs a new one from a person.
+    * The token never appears in a log, an error or the output of `./agoranomos`: the task masks it, and the script checks only its form. The Graph API documents the token as the parameter `access_token`, so every URL that the load logs has it masked.
+* **The app secret and `appsecret_proof`.** *Open to the maintainer's acceptance:* with a token that never expires, `.env` holds the token alone. Whenever `META_ADS_APP_SECRET` is set, every call carries `appsecret_proof`, the HMAC-SHA256 of the token keyed with the secret, and the guide suggests the setting Require App Secret of the app, after which a token that leaks alone cannot call the API. The secret stays out of `.env` otherwise, because both would sit in the same file, and a copy of `.env` would leak them together.
+* **The accounts.** The source loads the accounts of the platform `meta_ads` that `extensions/model/clients.toml` names, and no other, as for Google (ADR-0024, ADR-0032): a system user can reach the accounts that other businesses share with its portfolio. The file names an account by its numeric ID, without the prefix `act_` that the paths of the API add.
+* **The client of the API.** The source calls the Graph API with the HTTP client of dlt (`dlt.sources.helpers.requests`), as `google_ads.py` does, with explicit retries and a backoff that reads the headers of throttling after each call. It does not use `facebook-business` or the verified source of dlt.
+* **The reports and their requests.** For each account, in this order, each request with every page of its answer through `paging.next`:
+    * the account, `GET act_<id>` with `name`, `currency`, `timezone_name`, `account_status` and `business`;
+    * the full lists of campaigns, ad sets and ads, from the edges `campaigns`, `adsets` and `ads` of the account, with `status`, `configured_status`, `effective_status` and the fields that `meta_v26` reads, filtered on `effective_status` with every value that the edge lists, so that archived and deleted objects come too, as far as the API returns them;
+    * the totals of the account by day, `insights` with `level=account`, `time_increment=1` and `time_range`, with `impressions`, `inline_link_clicks` and `spend`, for G0a;
+    * the daily insights at the levels `campaign`, `adset` and `ad`, with `filtering` on `campaign.effective_status`, `adset.effective_status` or `ad.effective_status` over every value, as ADR-0036 asks, and with `actions`, `action_values` and `attribution_setting`.
+
+    The account and the lists are synchronous `GET` requests. The insights of a daily window are synchronous too: 28 days of an account are small, and each request costs one call. The history goes as asynchronous report runs: `POST act_<id>/insights` returns a `report_run_id`, which the load polls with a backoff from 5 to 60 seconds until `async_status` is `Job Completed` and `async_percent_completion` is 100, and then reads `<report_run_id>/insights` page by page. A synchronous request that fails with out-of-memory, a timeout or too much data per call (code 100, subcode 1487534) goes again as a report run. The load reads `X-Ad-Account-Usage`, `X-FB-Ads-Insights-Throttle` and `X-Business-Use-Case` after each call, logs them, and waits when the use of the account passes 75%, for the reset time where a header gives one, so that a score of 60 in 300 seconds is never reached; an error of throttling (17 with 2446079, 613 with 1487742, 4 with 1504022 or 1504039, 80000 or 80004) waits and asks again within the retries.
+* **The conversions below the campaign.** *Open to the maintainer's acceptance:* `actions` and `action_values` are fields of each row of insights, so the source requests them at the three levels now, as it costs no call, and staging reads them as `demo_social` does, while the core keeps the conversions by action of campaigns only until the module of C13, as for Google (ADR-0036). The alternative, campaigns only, makes the answers of ads smaller and leaves the lower levels to C13.
+* **Attribution.** The source sends no `use_unified_attribution_setting` and no `action_report_time`: since 10 June 2025 Meta disregards both and its answers "mimic Meta Ads Manager settings". It requests `action_attribution_windows` of `1d_click`, `7d_click` and `1d_view`, which raw keeps as the columns of each action, as the demo shape has them, and no `7d_view` or `28d_view`, which return no data since 12 January 2026. Staging reads `value` as the conversions and the conversion value, the attribution of the ad set as Ads Manager shows it, and raw keeps `attribution_setting` of each row. Whether `value` stays the attribution of the ad set when windows are requested is unverified (see More Information).
+* **The windows and the history.** A daily load of an account takes `[min(yesterday + 1 − 28, last accepted day + 1), yesterday]` in the time zone of the account (ADR-0038), as "Insights refresh every 15 minutes and do not change after 28 days of being reported". The first load takes that window, so a dashboard fills in minutes. The history follows in the background by quarters, from new to old, back to the first day of the month 36 months before yesterday (ADR-0034), within the 37 months past which a start date fails with error 3018; each portion runs as report runs, and a quarter that fails with too much data per call goes by months.
+* **The common state.** `meta_state` maps `status`, which is what a person set, as `meta_v26` does today: ACTIVE is active, PAUSED paused, DELETED and ARCHIVED removed, and anything else other. `effective_status`, the delivery status that also carries the state of the parents, such as CAMPAIGN_PAUSED or WITH_ISSUES, stays in raw beside it. Meta itself names `status` "the suggested one to use", and a common state over `effective_status` would call an ad paused because its campaign is, which the dimension of the campaign already says.
+* **G0a.** The totals of the account by day are the request of `level=account`, which includes the statistics of every child, active, archived or deleted, so G0a sees a loss whatever the lists return. *Open to the maintainer's acceptance:* `platform_totals_tolerance.meta_ads` starts at 0.01, because Meta gives `spend` as an estimated numeric string for each row, and the rounding of each campaign may not sum to the rounding of the account; zero, as for Google, would put a healthy account in quarantine for a cent. The value is unverified and may be wrong both ways: a small day, such as 0.50 in three campaigns, can differ by more than 1%, and a loss below 1% passes. The stand S6 (#220) measures the difference by account and day and sets the value.
+* **The quota.** The limits of Limited access are per ad account: a read scores 1 point, the maximum is 60, the score decays over 300 seconds, and an account at the maximum is blocked for 300 seconds; the quota `ads_insights` is 600 + 400 × the active ads of the account per hour. A daily load costs 8 calls for each account (the account, three lists and four requests of insights) and one more for each further page. The short cycle of C3 costs one call for each account every 3 hours. A portion of history costs, for each account, four report runs, their polls and their pages. As the score is per account, the load of N accounts takes about N times as long and no account's quota grows. Limited access therefore carries a daily load, C3 and the history for N accounts on paper; row 21 of the register (#221), the quota on live accounts, stays open until S6.
+* **The access tier.** *Open to the maintainer's acceptance:* the app stays on Limited access, which Meta grants when the Marketing API product is added, until S6 shows a block or Meta refuses the calls. Limited access allows one system user and one admin system user, which is what a deployment needs. The guide of C1b says that Meta calls Limited access "For development only", and that Full access needs App Review after at least 500 calls in 15 days with an error rate under 15%. Whether a system user that reads the accounts of other businesses needs Advanced access to `ads_read` is open (see More Information).
+* **The version and its sunset.** The source calls v27.0, the latest as of November 2026, and the shape macros keep the name `meta_v26`, as `google_ads_v25` kept its name for v26, since no field that they read changed in v27.0. The version and its sunset are in one place, as for Google: a unit test fails from 90 days before the sunset, and each load warns in its log from then on (ADR-0032). *Open to the maintainer's acceptance:* while Meta gives "TBD", the sunset is an estimate, the release plus the shortest life of the last ten versions, 336 days (v18.0), on 1 October 2027 for v27.0 when taken to the start of its month, so the test fails from early July 2027. A release replaces the estimate with the date of Meta once Meta publishes one.
+
+The other options were not chosen for these reasons:
+
+* **`meta`** could be read as metadata, which the stack also has ([ADR-0016](0016-keep-the-metadata-of-the-marts-as-code.md)), and Meta runs other APIs that a deployment may load later, such as the Conversions API. **`facebook_ads`** names one app of Meta, while the same accounts run ads on Instagram, Messenger and Threads too.
+* **A token that never expires, and no other kind**, leaves a portfolio that must use expiring tokens with no way to connect Meta.
+* **A token that expires in 60 days, always**, as Meta recommends, puts the App Secret into every `.env` and adds a refresh that can fail, for portfolios that do not need it.
+* **The token of a person** expires and depends on that person's account and role; a system user belongs to the portfolio.
+* **One app of the project for every deployment** would be used by people with no role on it, which needs Advanced access, and so Business Verification ([Access levels](https://developers.facebook.com/docs/graph-api/overview/access-levels/)), and App Review for Full access; the project would also hold one App Secret for every deployment, against the rule of ADR-0032 of an app of each deployment.
+* **The App Secret in `.env` always** doubles the secret material of a deployment that has a token that never expires, and both sit in one file. **No `appsecret_proof`** gives up the protection where the secret is set anyway.
+* **Every ad account that the system user reaches** would bring in the accounts that other businesses share with the portfolio, against ADR-0024. **A list in a file of its own** would name each account twice.
+* **The library `facebook-business`** 26.0.4 (5 November 2026) brings `requests`, `aiohttp`, `pycountry`, `curlify` and `capi-param-builder-python`, returns objects rather than the JSON that dlt writes as the shape macros read it, and had no release for v27.0 as of that date.
+* **The verified source `facebook_ads` of dlt** is "a Community source and was tested only once", is built on `facebook-business>=16.0.2`, and gives neither the windows of ADR-0038 nor the journal of each load; ADR-0032 rejected the verified source of Google on the same grounds.
+* **Asynchronous report runs for every request** cost a `POST`, polls and the reads of the result for each request, about four times the calls of a daily load, and an async job "can take up to an hour". **Synchronous requests for every request** fail on large ad-level history, where Meta warns of out-of-memory and timeouts.
+* **Requesting no window** loses the columns of the windows, which the demo shape keeps in raw for analysis. **One window as the conversions** would differ from what Ads Manager shows for an ad set with another attribution setting.
+* **A common state over `effective_status`** would call an ad paused because its campaign is, and mix delivery states such as IN_PROCESS into what a person set.
+* **Zero tolerance** would put accounts in quarantine for rounding. **An absolute margin** would need a change of the macro of G0a, which knows only a share; S6 can bring it if a share does not fit.
+* **Planning Full access now** asks every deployment for App Review and Business Verification before anyone knows that Limited access fails. It stays the way out if S6 or Meta shows a need.
+* **A warning only once Meta publishes a date** gives no warning while the date is "TBD", so a deployment on an old release would learn of the sunset when its loads fail. **Two years** disagrees with every expiry in the table of versions, where none of the last ten lived longer than 398 days.
+
+### Consequences
+
+* Good, because a deployment reads its own ad accounts with no App Review and no Business Verification.
+* Good, because a portfolio that must use expiring tokens can still connect, and one that need not keeps a single secret in `.env`.
+* Good, because the connector and `demo_social` share the shape macros, so the dashboards, the tests and the skills of the demo hold for real data.
+* Good, because G0a asks the level of the account, which includes every child, so a list or a filter that misses deleted objects shows as `totals_differ`, not as lost spend.
+* Good, because the limits of Limited access are per ad account, so more accounts make a load longer and not throttled.
+* Bad, because Meta calls Limited access "For development only. Not for production apps running for live advertisers", and a deployment runs on it all the same until S6 or Meta says otherwise.
+* Bad, because a token that never expires is a long-lived secret: whoever reads `.env` or a copy of it reads every ad account assigned to the system user.
+* Bad, because with an expiring token the load writes a secret into the database of Airflow, and a deployment stopped for more than 60 days needs a new token from a person.
+* Bad, because the sunset of v27.0 is an estimate, and a release has to move it when Meta publishes a date.
+* Bad, because a tolerance of 0.01 can quarantine a small day for rounding and pass a loss of less than 1%, until S6 measures it.
+* Bad, because the lists may not return deleted objects at all, so their names come from the rows of statistics, as stubs of ADR-0036.
+
+## More Information
+
+* **Implementation status, as of November 2026:** none of this is built. What exists is the demo: `demo_social` in the shape of v26.0, the macros `meta_v26`, which the connector is to share, and the seed rows of its actions. The tasks C1b (the load into raw), C1c (the history by quarters, with one planner for Google and Meta) and C1d (the core and the marts) of #221 are to build it after the release 0.5.0 and the acceptance of this record.
+* **Not checked yet.** The stand S6 (#220) settles each of these on a live account:
+    * Row 18 of the register (#221), removed objects. The pages of Meta conflict: reading the statistics of an object "includes the stats of all children objects, no matter if the child is active, archived, or deleted", while `act_<id>/insights?level=ad` "does not return stats for the deleted object", a table marks the statistics of ARCHIVED and DELETED objects as not included in `/<PARENT>/insights?level=<OBJECT_LEVEL>`, the same page says "You can query insights for DELETED objects using the ad.effective_status filter", and "you cannot retrieve the deleted objects as a connection object from a non-deleted node". The stand checks that the campaigns of an account with deleted and archived objects sum to its totals and that the lists return them or the stubs cover them. ADR-0036 also notes a report that `effective_status` does not work.
+    * Row 21 of the register (#221), the quota: the headers of throttling over a week of daily loads and a portion of history, the number of pages of a request, the durations of report runs, whether a `POST` of a report run scores as a write (3 points), and whether C3's short cycle fits.
+    * The access tier for accounts that another business shares with the portfolio, between the two statements below.
+    * The kind of token that a given portfolio may make.
+    * Whether `value` of an action is the attribution of the ad set when `action_attribution_windows` is requested, against Ads Manager for the primary actions.
+    * The tolerance of G0a.
+    * Whether the Graph API takes the token in a header rather than as `access_token`, which C1b checks against the reference.
+* **The facts behind this record**, read on 13 November 2026 for #221 and again on 14 November 2026, in the `.md` variants of the pages of developers.facebook.com where they exist:
+    * Versions: v27.0 came out on 4 November 2026 and v26.0 on 29 July 2026, both with the expiry "TBD"; v25.0 expires on 23 February 2027 and v24.0 on 10 November 2026; the lives of v16.0 to v25.0 run from 336 days (v18.0, 12 September 2023 to 13 August 2024) to 398 days (v24.0) ([Versions](https://developers.facebook.com/documentation/ads-commerce/marketing-api/marketing-api-changelog/versions)). The changelog of v27.0 says of one deprecation "when v26.0 expires under the standard 2-year version lifecycle, date to be confirmed", and changes no field of insights, of the lists or of the account ([v27.0](https://developers.facebook.com/documentation/ads-commerce/marketing-api/marketing-api-changelog/version27.0)); neither does v26.0 ([v26.0](https://developers.facebook.com/documentation/ads-commerce/marketing-api/marketing-api-changelog/version26.0)). The out-of-cycle changes of 2026 touch breakdowns, not the fields above ([2026](https://developers.facebook.com/documentation/ads-commerce/marketing-api/out-of-cycle-changes/occ-2026)).
+    * System user tokens: "Never expires" or "Valid for 60 days"; "Some businesses must use expiring tokens. If this requirement applies to your business, omitting this parameter or setting it to false results in an error"; `set_token_expires_in_60_days`, as "Expiring tokens are a security best practice"; "Both system user and app should belong to a same Business Manager"; only apps with "Ads Management API standard access and above" can be installed; a refresh is `GET oauth/access_token` with `fb_exchange_token`, `client_id`, `client_secret` and `set_token_expires_in_60_days=true`; `appsecret_proof` is required to generate a token through the API; the UI of Business Manager can generate one too ([System users](https://developers.facebook.com/docs/business-management-apis/system-users/install-apps-and-generate-tokens)). The proof is "a sha256 hash of your access token, using your app secret as the key", and "Calls from a server can be better secured by adding a parameter called `appsecret_proof`" ([Securing requests](https://developers.facebook.com/docs/graph-api/securing-requests/)).
+    * Access tiers: Limited access is the default, "Heavily rate-limited per ad account. For development only", with 1 system user and 1 admin system user; Full access needs App Review, "at least 500 Marketing API calls in the last 15 days" and "an error rate of less than 15% in the last 500 calls", with 10 system users and 1 admin system user; "Standard Access" is now Limited access and "Advanced Access" Full access; and "If your app is managing other people's ad accounts, you need advanced access to the `ads_read` and/or `ads_management` permissions" ([Authorization](https://developers.facebook.com/documentation/ads-commerce/marketing-api/get-started/authorization)). The Graph API says that an app "will only need Standard Access" "if your app will only be used by people who have a role on it", and that Advanced access needs Business Verification ([Access levels](https://developers.facebook.com/docs/graph-api/overview/access-levels/); #221 gives it an update of 30 June 2026, which the page as read on 14 November 2026 does not show). These two statements disagree for the accounts that other businesses share with the portfolio. The research of 1 November 2026 relied on the first, and the scheme for the deployment's own accounts holds under both.
+    * Rate limits: a read scores 1 point and a write 3; the maximum score is 60 with Limited access and 9000 with Full access, decaying over 300 seconds, with a block of 300 and 60 seconds; the quota `ads_insights` per ad account per hour is "(190000 if your app is in the Ads API Full access or 600 if your app is in the Dev tier) + 400 * Number of Active ads - 0.001 * User Errors", and `ads_management` "(100000 ... or 300 ...) + 40 * Num of Active ads"; the headers are `X-Business-Use-Case`, `X-FB-Ads-Insights-Throttle` (`app_id_util_pct`, `acc_id_util_pct`, `ads_api_access_tier`) and `X-Ad-Account-Usage` (`acc_id_util_pct`, `reset_time_duration`, `ads_api_access_tier`); the errors are 17 with 2446079, 613 with 1487742, 4 with 1504022 or 1504039, and 80000, 80003, 80004 and 80014 ([Rate limiting](https://developers.facebook.com/documentation/ads-commerce/marketing-api/overview/rate-limiting)). The Graph API names `X-Business-Use-Case-Usage` for "v3.3 and older Ads API calls", and gives 80000 to Ads Insights and 80004 to Ads Management ([Graph API rate limiting](https://developers.facebook.com/docs/graph-api/overview/rate-limiting/)).
+    * Insights: `level` in `ad`, `adset`, `campaign` and `account`, `time_range`, `time_increment` (default `all_days`), `filtering` and `action_attribution_windows`; "The start date of the time range cannot be beyond 37 months from the current date" (error 3018); `spend` is "The estimated total amount of money you've spent"; "Inline link clicks use a fixed 1-day-click attribution window"; `attribution_setting` is "The default attribution window to be used when attribution result is calculated"; the examples use v25.0 ([Ad Account Insights](https://developers.facebook.com/documentation/ads-commerce/marketing-api/reference/ad-account/insights)). Since 10 June 2025 "`use_unified_attribution_setting` and `action_report_time` parameters will be disregarded" and "API responses will mimic Meta Ads Manager settings"; since 12 January 2026 `7d_view` and `28d_view` "will no longer be available and will return no data" ([out-of-cycle changes of 2025](https://developers.facebook.com/documentation/ads-commerce/marketing-api/out-of-cycle-changes/occ-2025)).
+    * Asynchronous reports and limits: "Insights refresh every 15 minutes and do not change after 28 days of being reported"; a `POST` to `<AD_OBJECT>/insights` returns a `report_run_id`, to poll "until `async_status` is `Job Completed` and `async_percent_completion` is `100`"; "it can take up to an hour"; the `report_run_id` "expires after 30 days"; "`/GET` or synchronous requests can return out-of-memory or timeout errors"; too much data per call is code 100 with subcode 1487534 ([Limits and best practices](https://developers.facebook.com/documentation/ads-commerce/marketing-api/insights/best-practices)).
+    * Status and removed objects: the quotes of row 18 above ([Manage your ad object's status](https://developers.facebook.com/documentation/ads-commerce/marketing-api/best-practices/manage-your-ad-object-status)), which also allows 100,000 archived campaigns, ad sets and ads each to an account; "A request with no filters returns only campaigns that were not archived or deleted", with `effective_status` taking ACTIVE, PAUSED, DELETED, PENDING_REVIEW, DISAPPROVED, PREAPPROVED, PENDING_BILLING_INFO, CAMPAIGN_PAUSED, ARCHIVED, ADSET_PAUSED, IN_PROCESS and WITH_ISSUES ([campaigns of an account](https://developers.facebook.com/documentation/ads-commerce/marketing-api/reference/ad-account/campaigns)), the same values for ad sets ([ad sets](https://developers.facebook.com/documentation/ads-commerce/marketing-api/reference/ad-account/adsets)), and for ads a `list<string>` with no values listed ([ads](https://developers.facebook.com/documentation/ads-commerce/marketing-api/reference/ad-account/ads)); `status` and `configured_status` take ACTIVE, PAUSED, DELETED and ARCHIVED, `status` "returns the same value as 'configured_status', and is the suggested one to use", and `effective_status` takes ACTIVE, PAUSED, DELETED, ARCHIVED, IN_PROCESS and WITH_ISSUES ([Campaign](https://developers.facebook.com/documentation/ads-commerce/marketing-api/reference/ad-campaign-group)).
+    * Libraries: `facebook-business` 26.0.4, uploaded on 5 November 2026, requires `requests`, `six`, `curlify`, `pycountry`, `capi-param-builder-python` and `aiohttp` ([PyPI](https://pypi.org/project/facebook-business/)). The verified source `facebook_ads` of dlt: "This source is a Community source and was tested only once"; it requires `dlt>=0.5.1` and `facebook-business>=16.0.2`, and its folder last changed on 27 October 2026, by the history of commits ([verified-sources](https://github.com/dlt-hub/verified-sources/tree/master/sources/facebook_ads)). The Airflow image pins `dlt[postgres]` 1.32.0 (`airflow/requirements.txt`).
+    * Not read: the parameters of insights (<https://developers.facebook.com/docs/marketing-api/insights/parameters/>, 404 on 13 November 2026) and the reference of AdsInsights and AdsActionStats (404, and its `.md` returned no content), so the full list of fields and of action types was not read, and C1d reads it; the blog post of 16 October 2025 on the availability of metrics (403), whose content the out-of-cycle changes of 2025 give. The overview of the Insights API in `.md` (<https://developers.facebook.com/documentation/ads-commerce/marketing-api/insights>) gives none of the details on removed objects, which the page on the status of objects gives. A search on deleted objects returned pages of third parties, which this record does not use.
+* Related decisions: the first connector and its rules for a real platform ([ADR-0032](0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md)), one business and its file of clients ([ADR-0024](0024-one-deployment-is-one-business.md)), the shape macros ([ADR-0025](0025-model-advertising-statistics-once.md)), the history of 36 months ([ADR-0034](0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md)), G0a and quarantine ([ADR-0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md)), removed entities and the common state ([ADR-0036](0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md)), the windows and the journal of loads ([ADR-0038](0038-load-by-copy-and-write-the-core-by-whole-days.md)), the pin and the acceptance ([ADR-0046](0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md)), and an agency as one deployment, still proposed ([ADR-0041](0041-run-an-agency-as-one-deployment.md)).
+* Revisit this record when S6 settles an open point above, when Meta publishes the expiry of v27.0, changes its access tiers or its system user tokens, or refuses calls on Limited access.
