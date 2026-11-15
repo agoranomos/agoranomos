@@ -16,9 +16,10 @@ schema ops, into which the hooks of elementary in every task of dbt write the re
 and tests (ADR-0029). Once every task of dbt has succeeded, the task accept marks as accepted in
 core.loads, as transformer, the loads that the run read, but those of the accounts that the checks
 of the run held in quarantine, and then the task transformed updates the asset TRANSFORMED, after
-which the history of Google Ads takes its next portion (agoranomos_google_ads_history, ADR-0038),
-while the task clean_raw deletes, as loader, the rows of the accepted loads from the raw layer, and
-those of a load that did not end and began more than a day ago (ADR-0035, ADR-0046,
+which the histories of Google Ads and of Meta take their next portions
+(agoranomos_google_ads_history, agoranomos_meta_ads_history, ADR-0038), while the task clean_raw
+deletes, as loader, the rows of the accepted loads from the raw layer, and those of a load that did
+not end and began more than a day ago (ADR-0035, ADR-0046,
 agoranomos_pipelines/acceptance.py). A run with a failed or a skipped task of dbt accepts nothing
 and cleans nothing, and the next run reads its loads again. The DAG runs when each of the five
 platforms of the demo has loaded since its last run, each load updating the asset of its main
