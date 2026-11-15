@@ -21,6 +21,8 @@ A deployment of agoranomos is one business, which groups its ad accounts and its
 
 The load of Google Ads reads only the accounts that the file names, so its next load takes the history of a new account, its last 36 months ([Connect Google Ads](connect-google-ads.md)).
 
+The load of Meta reads only the accounts of `meta_ads` that the file names, each by the digits of the ad account without `act_`, such as `1234567890123456`, and its next load takes the last 28 days of a new account into the raw layer ([Connect Meta](connect-meta.md)). The marts show Meta once its models come in v0.6.
+
 ## Move an account to another client
 
 Change the `client` of its entry. From the next run of the transform the account belongs to the new client with its whole history: the views of the marts take the client of each row from the registry of accounts of the core, `core.dim_account`, which each run sets from the file for every account.
@@ -31,7 +33,7 @@ Delete its entry. The next run of the transform keeps its data and marks it as n
 
 - The core keeps its rows for good, and the views of the marts go on showing them, so a total of all the clients over a period that the account covers stays the same.
 - Its rows belong to the client `unassigned`, named Unassigned, and `is_account_active`, **Account Is Active** in Metabase, is false in `ad_accounts` and in each view of a fact: `ad_stats_campaign_daily`, `ad_stats_ad_group_daily`, `ad_stats_ad_daily`, `ad_conversions_campaign_daily` and `web_sessions_daily`. A question that is to leave it out filters on that column.
-- Its platform no longer loads it, as the load of Google Ads reads only the accounts that the file names. So **Late accounts** of Pipeline health counts it once its last load is more than 36 hours old ([Watch the pipeline](watch-the-pipeline.md)). With the last account of Google Ads out, its load fails with `extensions/model/clients.toml names no account of the platform google_ads`: pause `agoranomos_google_ads_daily` in Airflow.
+- Its platform no longer loads it, as the loads of Google Ads and of Meta read only the accounts that the file names. So **Late accounts** of Pipeline health counts it once its last load is more than 36 hours old ([Watch the pipeline](watch-the-pipeline.md)). With the last account of Google Ads out, its load fails with `extensions/model/clients.toml names no account of the platform google_ads`: pause `agoranomos_google_ads_daily` in Airflow. The same holds for Meta and `agoranomos_meta_ads_daily`.
 - On each run of the transform, the test `assert_every_account_with_data_is_in_the_settings` warns while the core holds rows of it, and `assert_every_account_has_a_client` too for an account of an ad platform. **Failed or warned tests** of Pipeline health shows them, and neither stops anything.
 
 So a mistake in the file, such as a removed entry or a typo in an account ID, erases no history, which a platform may no longer serve: name the account again, and the next run makes it active, with the client of its entry and all its data, and its platform loads it again.
