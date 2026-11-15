@@ -74,6 +74,14 @@ class StandInClient:
 
     def execute_sql(self, sql):
         self.pipeline.queries.append(sql)
+        # The queries of the plan of the history: the windows of core.loads and of the journal,
+        # and the whole loads that no pin took yet.
+        if sql.startswith("SELECT account_id, window_from, window_to FROM core.loads "):
+            return self.pipeline.state["core_windows"]
+        if sql.startswith("SELECT count(DISTINCT j._dlt_load_id) "):
+            return [(self.pipeline.state["waiting"],)]
+        if sql.startswith("SELECT j.account_id, j.window_from, j.window_to "):
+            return self.pipeline.state["windows"]
         if " FROM core.loads " in sql:
             return self.pipeline.state["accepted"]
         if self.pipeline.state["loads"] is None:
@@ -342,8 +350,17 @@ def meta(monkeypatch, tmp_path):
     """The module with stand-ins, and what it made and was asked: state["loads"] is how many
     complete loads the dataset holds (None: none yet), state["reloads"] what the journal of its
     whole loads gives, state["accepted"] what core.loads gives as the last accepted day of each
-    account. made["waits"] holds each wait, of throttling and of the polls."""
-    state = {"loads": None, "reloads": [], "accepted": []}
+    account, state["windows"] and state["core_windows"] the windows of the whole loads of each
+    account in the journal and in core.loads, and state["waiting"] how many whole loads no pin took
+    yet. made["waits"] holds each wait, of throttling and of the polls."""
+    state = {
+        "loads": None,
+        "reloads": [],
+        "accepted": [],
+        "windows": [],
+        "core_windows": [],
+        "waiting": 0,
+    }
     graph = Graph()
     made = {"pipelines": [], "clients": [], "waits": [], "graph": graph}
 
@@ -390,7 +407,11 @@ def meta(monkeypatch, tmp_path):
     extensions = tmp_path / "model"
     extensions.mkdir()
     (extensions / "clients.toml").write_text(CLIENTS, encoding="utf-8")
-    names = ("agoranomos_pipelines.meta_ads", "agoranomos_pipelines.loads")
+    names = (
+        "agoranomos_pipelines.history",
+        "agoranomos_pipelines.loads",
+        "agoranomos_pipelines.meta_ads",
+    )
     for name in names:
         sys.modules.pop(name, None)
     module = importlib.import_module("agoranomos_pipelines.meta_ads")
@@ -981,22 +1002,309 @@ def test_a_report_run_cut_by_too_much_data_leaves_no_row_twice(meta):
 
 
 def test_a_report_run_that_fails_fails_the_account_and_a_skipped_one_is_asked_again(meta):
+    # A run that failed is read once more without fields, which gives the fields of its error by
+    # default since v25.0; this one has none.
     module, _, made, extensions = meta
     graph = made["graph"]
     statuses = iter(["Job Skipped", "Job Failed"])
 
     def before(method, path, params):
-        if path == RUN_ID:
+        if path == RUN_ID and "fields" in params:
             return StandInResponse(
                 200, {"async_status": next(statuses), "async_percent_completion": 0}
             )
+        if path == RUN_ID:
+            return StandInResponse(200, {"id": RUN_ID, "async_status": "Job Failed"})
         return None
 
     graph.before = before
     portion = module.Portion((ONE,), date(2026, 1, 1), date(2026, 1, 31))
-    with pytest.raises(module.AccountsFailed, match=f"report run {RUN_ID} ended with Job Failed"):
+    with pytest.raises(module.AccountsFailed, match=f"report run {RUN_ID} ended with Job Failed$"):
         module.load(NOW, extensions, portion=portion)
     assert len(graph.runs) == 2
+    polls = [params for _, url, params in graph.requests if url == f"{BASE}/{RUN_ID}"]
+    assert [sorted(params) for params in polls] == [
+        ["access_token", "fields"],
+        ["access_token", "fields"],
+        ["access_token"],
+    ]
+
+
+def failed_run(code, subcode, message):
+    """The answer of a report run that failed, read without fields, with the fields of its error
+    that Meta returns by default since v25.0 (Limits and best practices, read on 15 November
+    2026)."""
+    return StandInResponse(
+        200,
+        {
+            "id": RUN_ID,
+            "async_status": "Job Failed",
+            "async_percent_completion": 0,
+            "error_code": code,
+            "error_subcode": subcode,
+            "error_message": message,
+            "error_user_title": "A title",
+            "error_user_msg": "A message for a person",
+        },
+    )
+
+
+def failing_runs(graph, failure, when):
+    """Report runs that fail with failure while when(the parameters of their POST) holds, and
+    complete otherwise."""
+
+    def before(method, path, params):
+        if path != RUN_ID or not when(graph.runs[-1]):
+            return None
+        if "fields" in params:
+            return StandInResponse(
+                200, {"async_status": "Job Failed", "async_percent_completion": 0}
+            )
+        return failure
+
+    graph.before = before
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        failed_run(-3, 1504045, "Report Too Large"),
+        failed_run("100", "1487534", "Please reduce the amount of data"),
+    ],
+)
+def test_a_report_run_of_a_quarter_that_fails_as_too_large_goes_by_calendar_months(meta, failure):
+    # ADR-0050: a quarter that fails with too much data per call goes by months, whether Meta
+    # refuses its POST or fails the run with an error of data per call (Ads Insights Error Codes,
+    # read on 15 November 2026). The rows of the quarter come once.
+    module, _, made, extensions = meta
+    graph = made["graph"]
+    failing_runs(graph, failure, lambda asked: len(days_of(asked)) > 31)
+    portion = module.Portion((ONE,), date(2026, 1, 1), date(2026, 3, 31))
+    module.load(NOW, extensions, portion=portion)
+    for level in ("account", "campaign", "adset", "ad"):
+        ranges = [json.loads(run["time_range"]) for run in graph.runs if run["level"] == level]
+        assert ranges == [
+            {"since": "2026-01-01", "until": "2026-03-31"},
+            {"since": "2026-01-01", "until": "2026-01-31"},
+            {"since": "2026-02-01", "until": "2026-02-28"},
+            {"since": "2026-03-01", "until": "2026-03-31"},
+        ], level
+    [(rows, _)] = made["pipelines"][0].runs
+    days = [row["date_start"] for row in rows["insights_campaign"]]
+    assert len(days) == len(set(days)) == 90
+
+
+def test_a_month_that_fails_as_too_large_fails_the_account(meta):
+    module, _, made, extensions = meta
+    graph = made["graph"]
+    failing_runs(graph, failed_run(-3, 1504045, "Report Too Large"), lambda asked: True)
+    portion = module.Portion((ONE,), date(2026, 1, 1), date(2026, 3, 31))
+    with pytest.raises(
+        module.AccountsFailed,
+        match=f"report run {RUN_ID} ended with Job Failed: Report Too Large "
+        r"\(code -3, subcode 1504045\)$",
+    ):
+        module.load(NOW, extensions, portion=portion)
+    # The quarter and its first month, at the first level, where the account fails.
+    assert [json.loads(run["time_range"]) for run in graph.runs] == [
+        {"since": "2026-01-01", "until": "2026-03-31"},
+        {"since": "2026-01-01", "until": "2026-01-31"},
+    ]
+
+
+def test_a_report_run_that_fails_with_an_error_to_retry_later_is_asked_again(meta):
+    # "Report Failed" says to retry later: it is asked again as a skipped run is, up to three runs,
+    # and a failure that lasts fails the account with the error of Meta, and no secret.
+    module, _, made, extensions = meta
+    graph = made["graph"]
+    failing_runs(graph, failed_run(-2, 2490547, f"Report Failed for {TOKEN}"), lambda asked: True)
+    portion = module.Portion((ONE,), date(2026, 1, 1), date(2026, 1, 31))
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load(NOW, extensions, portion=portion)
+    assert len(graph.runs) == 3
+    assert str(raised.value).endswith(
+        f"report run {RUN_ID} ended with Job Failed: Report Failed for *** "
+        "(code -2, subcode 2490547)"
+    )
+    assert TOKEN not in str(raised.value)
+    # Once it completes, the account loads.
+    graph.runs.clear()
+    failing_runs(
+        graph, failed_run(2, 1504043, "Intermittent error"), lambda asked: len(graph.runs) == 1
+    )
+    module.load(NOW, extensions, portion=portion)
+    assert [run["level"] for run in graph.runs] == ["account", "account", "campaign", "adset", "ad"]
+
+
+def test_a_report_run_that_fails_with_another_error_fails_the_account_at_once(meta):
+    module, _, made, extensions = meta
+    graph = made["graph"]
+    failing_runs(graph, failed_run(100, 3191001, "Permission Error"), lambda asked: True)
+    portion = module.Portion((ONE,), date(2026, 1, 1), date(2026, 3, 31))
+    with pytest.raises(
+        module.AccountsFailed, match=r"Permission Error \(code 100, subcode 3191001"
+    ):
+        module.load(NOW, extensions, portion=portion)
+    assert len(graph.runs) == 1
+
+
+def test_no_window_starts_before_the_37_months_that_meta_gives(meta, caplog):
+    # Error 3018: "The start date of the time range cannot be beyond 37 months from the current
+    # date". The oldest day counts from the newest date on Earth, and a day later still.
+    module, state, made, extensions = meta
+    assert module.oldest(NOW) == date(2023, 9, 30)
+    assert module.history_limit(NOW) == date(2023, 10, 1)
+    # At the end of a month, the 37 months come after the first day of the 36th month before.
+    late = datetime(2026, 10, 31, 20, 0, tzinfo=UTC)
+    assert module.oldest(late) == date(2023, 10, 2)
+    assert module.history_limit(late) == date(2023, 10, 2)
+    # A portion starts on the oldest day, and one that ends before it fails its account.
+    portion = module.Portion((ONE,), date(2023, 7, 1), date(2023, 9, 30))
+    module.load(NOW, extensions, portion=portion)
+    starts = {json.loads(run["time_range"])["since"] for run in made["graph"].runs}
+    assert starts == {"2023-09-30"}
+    gone = module.Portion((ONE,), date(2023, 7, 1), date(2023, 9, 29))
+    with pytest.raises(module.AccountsFailed, match="before 2023-09-30, the oldest day"):
+        module.load(NOW, extensions, portion=gone)
+    # A daily window after a stop of more than 37 months starts on the oldest day, and says so.
+    state.update(loads=1, reloads=[(ONE, date(2023, 1, 2), date(2023, 1, 1))])
+    made["graph"].requests.clear()
+    with caplog.at_level(logging.WARNING):
+        module.load(NOW, extensions)
+    assert "the days before are lost" in caplog.text
+    since = {
+        json.loads(params["time_range"])["since"]
+        for _, url, params in made["graph"].requests
+        if url == f"{BASE}/act_{ONE}/insights"
+    }
+    assert since == {"2023-09-30"}
+
+
+@pytest.fixture
+def clock(meta, monkeypatch):
+    """A clock of the module that each wait moves on, and that a test moves on too."""
+    module, _, made, _ = meta
+    now = {"at": 1000.0}
+
+    def wait(seconds):
+        made["waits"].append(seconds)
+        now["at"] += seconds
+
+    monkeypatch.setattr(module, "monotonic", lambda: now["at"])
+    monkeypatch.setattr(module, "sleep", wait)
+    return now
+
+
+def test_a_portion_leaves_the_accounts_that_it_has_not_reached_within_an_hour(meta, clock, caplog):
+    # A task of the load has two hours: a portion starts no account after an hour, and those that
+    # it did not reach are not in its journal, so that the plan gives them to the next portion.
+    module, state, made, extensions = meta
+    graph = made["graph"]
+
+    def before(method, path, params):
+        if method == "POST":
+            clock["at"] += 16 * 60
+        return None
+
+    graph.before = before
+    every = module.Portion((), date(2026, 4, 1), date(2026, 6, 30))
+    with caplog.at_level(logging.WARNING):
+        module.load(NOW, extensions, portion=every)
+    assert not [url for _, url, _ in graph.requests if TWO in url]
+    [(rows, _)] = made["pipelines"][0].runs
+    assert [row["account_id"] for row in rows["_agoranomos_loads"]] == [ONE]
+    assert f"after 1 accounts: the next portion takes {TWO}" in caplog.text
+    # The plan then takes the quarter for the account that the portion left.
+    state.update(
+        loads=2,
+        windows=[
+            (ONE, date(2026, 4, 1), date(2026, 6, 30)),
+            (ONE, date(2026, 7, 1), date(2026, 10, 27)),
+            (TWO, date(2026, 7, 1), date(2026, 10, 28)),
+        ],
+    )
+    assert module.plan(NOW, extensions) == module.Portion(
+        (TWO,), date(2026, 4, 1), date(2026, 6, 30)
+    )
+    # A daily load has no such time.
+    graph.requests.clear()
+    module.load(NOW, extensions)
+    assert [url for _, url, _ in graph.requests if TWO in url]
+
+
+def test_a_report_run_of_a_portion_that_runs_past_its_time_fails_its_account(meta, clock):
+    # A report run that would not complete 90 minutes after the load began fails its account, so
+    # that the task ends within its two hours and dlt writes the other accounts.
+    module, _, made, extensions = meta
+    graph = made["graph"]
+
+    def before(method, path, params):
+        if path == RUN_ID and "fields" in params:
+            clock["at"] += 30 * 60
+            return StandInResponse(
+                200, {"async_status": "Job Running", "async_percent_completion": 1}
+            )
+        return None
+
+    graph.before = before
+    portion = module.Portion((ONE,), date(2026, 4, 1), date(2026, 6, 30))
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load(NOW, extensions, portion=portion)
+    assert (
+        "had not completed when the time of the portion ran out, 90 minutes after the load began"
+        in str(raised.value)
+    )
+    # Three polls of half an hour each, and no fourth one past the time.
+    assert made["waits"] == [5, 10, 20]
+
+
+def test_a_portion_fits_the_timeouts_of_its_task(meta):
+    # The time of a portion leaves half an hour of the two hours of the task to dlt, and a report
+    # run may take all of the hour that Meta gives it in a portion that has just begun.
+    module, _, _, _ = meta
+    text = (DAGS / "agoranomos_meta_ads_daily.py").read_text(encoding="utf-8")
+    assert '"execution_timeout": timedelta(hours=2)' in text
+    assert module.PORTION_STARTS < module.PORTION_ENDS <= 2 * 60 * 60 - 30 * 60
+    assert module.REPORT_TIMEOUT <= module.PORTION_ENDS
+
+
+def test_the_plan_of_the_history_reads_the_loads_of_meta_and_asks_meta_nothing(meta, monkeypatch):
+    # The planner that Google Ads shares (agoranomos_pipelines/history.py), over raw_meta_ads and
+    # the rows of meta_ads in core.loads, back to the first day of the month 36 months before
+    # yesterday; it needs no token.
+    module, state, made, extensions = meta
+    monkeypatch.delenv("META_ADS_ACCESS_TOKEN")
+    state.update(
+        loads=2,
+        windows=[
+            (ONE, date(2026, 9, 30), date(2026, 10, 27)),
+            (TWO, date(2026, 10, 1), date(2026, 10, 28)),
+        ],
+    )
+    assert module.plan(NOW, extensions) == module.Portion(
+        (ONE, TWO), date(2026, 7, 1), date(2026, 9, 30)
+    )
+    queries = made["pipelines"][0].queries
+    assert (
+        "SELECT account_id, window_from, window_to FROM core.loads "
+        "WHERE source = 'meta_ads' AND outcome = 'loaded' "
+        "AND account_id IN ('1111111111111111', '2222222222222222')"
+    ) in queries
+    assert any('FROM "raw_meta_ads"."_agoranomos_loads" AS j' in query for query in queries)
+    # A whole load that no run of the transform pinned, as every load of Meta before its staging
+    # (C1d of #221): nothing.
+    state.update(waiting=1)
+    assert module.plan(NOW, extensions) is None
+    # Every account back to the limit: nothing.
+    state.update(
+        waiting=0,
+        windows=[
+            (ONE, date(2023, 10, 1), date(2026, 10, 27)),
+            (TWO, date(2023, 10, 1), date(2026, 10, 28)),
+        ],
+    )
+    assert module.plan(NOW, extensions) is None
+    assert made["graph"].requests == []
 
 
 def test_a_report_run_that_never_completes_fails_within_an_hour(meta):

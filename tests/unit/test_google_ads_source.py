@@ -369,7 +369,11 @@ def ads(monkeypatch, tmp_path):
     extensions = tmp_path / "model"
     extensions.mkdir()
     (extensions / "clients.toml").write_text(CLIENTS, encoding="utf-8")
-    names = ("agoranomos_pipelines.google_ads", "agoranomos_pipelines.loads")
+    names = (
+        "agoranomos_pipelines.google_ads",
+        "agoranomos_pipelines.history",
+        "agoranomos_pipelines.loads",
+    )
     for name in names:
         sys.modules.pop(name, None)
     module = importlib.import_module("agoranomos_pipelines.google_ads")
