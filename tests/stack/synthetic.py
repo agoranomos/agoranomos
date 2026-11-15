@@ -21,8 +21,9 @@ A profile has a density, the rows of ads a day, over a period that ends yesterda
 
 Each campaign has three conversion actions a day, two of them primary. The accounts spread over the
 five ad platforms of the seed of the base package, and over 40 clients; one in five reports in EUR,
-the others in USD, with a rate for each day into the reporting currency of .env. The numbers come
-from the IDs and the day, so the same profile and period give the same rows.
+shifted by one account after each round of the platforms, so that each platform has accounts in
+EUR, the others in USD, with a rate for each day into the reporting currency of .env. The numbers
+come from the IDs and the day, so the same profile and period give the same rows.
 
 Everything that it writes is marked: the IDs of the clients start with synthetic_, those of the
 accounts and of the conversion actions with synthetic-, the rates have the source synthetic, and a
@@ -154,7 +155,8 @@ INSERT INTO core.dim_account (platform, account_id, account_name, client_id, cur
 SELECT ({platforms})[(n - 1) % {len(PLATFORMS)} + 1], 'synthetic-' || lpad(n::text, 4, '0'),
     'Synthetic account ' || lpad(n::text, 4, '0'),
     'synthetic_' || lpad(((n - 1) % {CLIENTS} + 1)::text, 2, '0'),
-    CASE WHEN n % 5 = 0 THEN 'EUR' ELSE 'USD' END, 'UTC', 'ENABLED', true, false,
+    CASE WHEN (n + (n - 1) / {len(PLATFORMS)}) % 5 = 0 THEN 'EUR' ELSE 'USD' END, 'UTC', 'ENABLED',
+    true, false,
     CASE WHEN n <= {profile.active_accounts} THEN date '{first}' END,
     CASE WHEN n <= {profile.active_accounts} THEN date '{last}' END
 FROM generate_series(1, {profile.accounts}) AS n;
