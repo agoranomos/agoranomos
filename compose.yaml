@@ -485,6 +485,11 @@ services:
       # google_ads (ADR-0032): empty until a deployment connects it.
       GOOGLE_ADS_SERVICE_ACCOUNT_KEY: ${GOOGLE_ADS_SERVICE_ACCOUNT_KEY:-}
       GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${GOOGLE_ADS_LOGIN_CUSTOMER_ID:-}
+      # The token of the system user of Meta, and the App ID and App Secret of a token that
+      # expires, for the load of meta_ads (ADR-0050): empty until a deployment connects it.
+      META_ADS_ACCESS_TOKEN: ${META_ADS_ACCESS_TOKEN:-}
+      META_ADS_APP_ID: ${META_ADS_APP_ID:-}
+      META_ADS_APP_SECRET: ${META_ADS_APP_SECRET:-}
       # The addresses of Apprise for the alerts (ADR-0045): the listener of the plugin
       # agoranomos_alerts runs in the scheduler in both variants, and the task of the watcher where
       # the tasks run; the worker of the CeleryExecutor gets them from here too. Empty, nothing is

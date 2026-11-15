@@ -4631,6 +4631,68 @@ def test_preflight_stops_on_a_manager_account_of_google_ads_that_is_not_ten_digi
     check_limit(result, outcome, "GOOGLE_ADS_LOGIN_CUSTOMER_ID")
 
 
+# A stand-in of a token of Meta, made up here: a real one would be a secret.
+META_TOKEN = "StandInTokenOfMeta0123456789secret"
+
+
+@pytest.mark.parametrize(
+    ("values", "outcome", "word"),
+    [
+        ({"META_ADS_ACCESS_TOKEN": META_TOKEN}, "pass", "META_ADS"),
+        (
+            {
+                "META_ADS_ACCESS_TOKEN": META_TOKEN,
+                "META_ADS_APP_ID": "123456789012345",
+                "META_ADS_APP_SECRET": "standinappsecret0123456789abcdef",
+            },
+            "pass",
+            "META_ADS",
+        ),
+        (
+            {"META_ADS_ACCESS_TOKEN": f"'{META_TOKEN} with a space'"},
+            "stop",
+            "META_ADS_ACCESS_TOKEN",
+        ),
+        ({"META_ADS_ACCESS_TOKEN": f"<{META_TOKEN}>"}, "stop", "META_ADS_ACCESS_TOKEN"),
+        (
+            {"META_ADS_ACCESS_TOKEN": META_TOKEN, "META_ADS_APP_ID": "123456789012345"},
+            "stop",
+            "go together",
+        ),
+        (
+            {"META_ADS_ACCESS_TOKEN": META_TOKEN, "META_ADS_APP_SECRET": "standinappsecret"},
+            "stop",
+            "go together",
+        ),
+        (
+            {
+                "META_ADS_ACCESS_TOKEN": META_TOKEN,
+                "META_ADS_APP_ID": "app-1",
+                "META_ADS_APP_SECRET": "standinappsecret",
+            },
+            "stop",
+            "META_ADS_APP_ID in .env must be the digits",
+        ),
+        (
+            {"META_ADS_APP_ID": "123456789012345", "META_ADS_APP_SECRET": "standinappsecret"},
+            "stop",
+            "need META_ADS_ACCESS_TOKEN",
+        ),
+    ],
+)
+def test_preflight_checks_the_form_of_the_settings_of_meta_and_never_prints_them(
+    cli, values, outcome, word
+):
+    # ADR-0050: the script checks the form of the token and of the App Secret, never their value,
+    # and no message shows either. The template keeps them commented out, so a person adds them.
+    cli.run("init")
+    add_env(cli, **values)
+    result = cli.run("preflight")
+    check_limit(result, outcome, word)
+    for secret in (META_TOKEN, "standinappsecret"):
+        assert secret not in result.stdout + result.stderr
+
+
 def test_preflight_stops_on_keep_daily_of_zeros(cli):
     ops_env(cli, BACKUP_KEEP_DAILY="00")
     result = cli.run("preflight")
