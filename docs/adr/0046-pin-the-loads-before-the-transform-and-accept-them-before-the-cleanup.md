@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Pin the loads before the transform, and accept them before the cleanup
 
+Superseded in part by [ADR-0051](0051-take-the-current-day-as-a-load-of-the-kind-intraday.md): "the load with the largest `_dlt_load_id`" of "What L1 reads", as a load of the kind `window` or `history` now comes before one of the kind `intraday`, whatever their load IDs. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 [ADR-0038](0038-load-by-copy-and-write-the-core-by-whole-days.md) removes the race between a load and the transform by pinning finished loads, [ADR-0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) erases L0 once the core has accepted a load, and [ADR-0039](0039-run-one-dbt-build-in-the-watcher-mode.md) gives the order inside a run. On 1 November 2026 these ran on throwaway stands, with real parallel loads. The design holds, and pinning needs no lock, but four of its wordings do not survive:

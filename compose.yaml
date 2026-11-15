@@ -468,7 +468,8 @@ services:
   # (airflow/plugins/agoranomos_oom.py); on Docker Desktop for macOS, which has no Yama, a task can still stop it.
   airflow-scheduler:
     <<: *airflow
-    # It runs the tasks, so it gets the limit of the tasks; with CeleryExecutor the worker does.
+    # It runs the tasks, so it gets the limit of the tasks. With CeleryExecutor the worker runs them,
+    # with a limit of its own, and this service gets a smaller one (compose.celery.yaml).
     mem_limit: ${AIRFLOW_TASKS_MEMORY:-1280m}
     memswap_limit: ${AIRFLOW_TASKS_MEMORY:-1280m}
     command: ["scheduler"]
