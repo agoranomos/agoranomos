@@ -179,6 +179,16 @@ The load of Google Ads signs in as a service account of the Google Cloud project
 | `GOOGLE_ADS_SERVICE_ACCOUNT_KEY` | empty | The key of the service account: the JSON file that Google Cloud makes, as base64 on one line, or as the JSON on one line in single quotes. It reads every Google Ads account that the service account is a user of, so keep it as you keep the other secrets of `.env`. A load without it fails with a line that says so. |
 | `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | empty | The ten digits of the manager account through which the service account reaches the accounts, without hyphens; empty when the service account is a user of each account. `preflight` stops on another value. |
 
+## Meta
+
+The load of Meta signs in with the token of a system user of the business portfolio of the deployment and loads the accounts of `meta_ads` that `extensions/model/clients.toml` names into `raw_meta_ads` ([ADR-0050](../adr/0050-connect-meta-with-an-app-and-a-system-user-of-the-deployment.md), [Connect Meta](../how-to/connect-meta.md)). Only the container that runs the tasks gets these settings: the scheduler with the LocalExecutor, the worker with the CeleryExecutor. `./agoranomos preflight` checks their form and never prints them.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `META_ADS_ACCESS_TOKEN` | empty | The token of the system user, with the permission `ads_read`. It reads every ad account that is assigned to the system user, so keep it as you keep the other secrets of `.env`. A load without it fails with a line that says so. `preflight` stops on a value with a space, a quote or an angle bracket. |
+| `META_ADS_APP_ID` | empty | The App ID of the app of the portfolio, digits, for a token that expires in 60 days; empty for a token that never expires. `preflight` stops on another value, and when it is set without `META_ADS_APP_SECRET`. |
+| `META_ADS_APP_SECRET` | empty | The App Secret of the same app, for a token that expires; empty otherwise. With it, every call carries `appsecret_proof`, and each load refreshes the token once it is 30 days old and keeps the new one in the Airflow Variable `agoranomos_meta_ads_token` ([A token that expires](../how-to/connect-meta.md#a-token-that-expires)). `preflight` stops when it is set without `META_ADS_APP_ID` or without the token. |
+
 ## Alerts
 
 The stack sends an alert through [Apprise](https://github.com/caronc/apprise) when a run of a DAG fails, and when the DAG `agoranomos_watcher`, every 15 minutes, finds an account in quarantine or late, a backup that failed or is late, or a disk with less than 10 GiB free ([ADR-0045](../adr/0045-send-alerts-from-airflow-through-apprise.md), [Get alerts](../how-to/watch-the-pipeline.md#get-alerts)).

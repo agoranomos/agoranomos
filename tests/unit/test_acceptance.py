@@ -53,7 +53,19 @@ def test_the_cleanup_names_the_account_of_each_raw_table_as_staging_reads_it():
     found = read_by_staging()
     assert len(found) == 7
     assert sum(len(tables) for tables in found.values()) == 40
-    assert found == acceptance.ACCOUNTS
+    staged = {
+        schema: tables
+        for schema, tables in acceptance.ACCOUNTS.items()
+        if schema not in acceptance.NOT_STAGED_YET
+    }
+    assert found == staged
+    # The raw schemas that staging does not read yet: Meta, whose staging is C1d of #221. Its
+    # tables are those of demo_social, with the totals of the account beside them, and name the
+    # account as demo_social does, so that its staging can call the same macros.
+    assert {"raw_meta_ads"} == acceptance.NOT_STAGED_YET
+    assert not set(found) & acceptance.NOT_STAGED_YET
+    meta = acceptance.ACCOUNTS["raw_meta_ads"]
+    assert meta == {**acceptance.ACCOUNTS["raw_demo_social"], "insights_account": "r.account_id"}
     assert acceptance.ACCOUNTS["raw_demo_search"]["customer_clients"] == "r.customer_client__id"
     assert acceptance.ACCOUNTS["raw_ecb"] == {"rates_daily": None}
 
@@ -82,6 +94,7 @@ def test_a_load_that_did_not_end_waits_longer_than_any_run_of_a_dag_lives():
         "agoranomos_demo_daily",
         "agoranomos_ecb_daily",
         "agoranomos_google_ads_daily",
+        "agoranomos_meta_ads_daily",
     ):
         assert name in timeouts, name
     assert max(timeouts.values()) < acceptance.UNFINISHED_AFTER

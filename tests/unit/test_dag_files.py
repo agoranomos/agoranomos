@@ -44,6 +44,7 @@ def test_no_dag_file_imports_another():
         "agoranomos_ecb_daily",
         "agoranomos_google_ads_daily",
         "agoranomos_google_ads_history",
+        "agoranomos_meta_ads_daily",
         "agoranomos_selfcheck",
     } <= stems
     for path in DAG_FILES:
@@ -58,12 +59,13 @@ ASSETS = DAGS / "agoranomos_pipelines" / "assets.py"
 RAW_ECB = "postgres://warehouse-db:5432/warehouse/raw_ecb/rates_daily"
 
 
-def test_the_transform_runs_when_the_demo_the_rates_or_google_ads_have_loaded():
-    # Any of three conditions (ADR-0039): all five assets of the demo, the asset of the rates of
-    # the ECB, or that of Google Ads (ADR-0032). The five of the demo stay one condition, so that
-    # one run of the history or of the daily load starts one run of the transform, after its last
-    # platform, and not one after its first platform and one more for the other four, the first
-    # reading tables whose days the loads still replace. One run at a time, as before.
+def test_the_transform_runs_when_the_demo_the_rates_google_ads_or_meta_have_loaded():
+    # Any of four conditions (ADR-0039): all five assets of the demo, the asset of the rates of
+    # the ECB, that of Google Ads (ADR-0032), or that of Meta (ADR-0050). The five of the demo stay
+    # one condition, so that one run of the history or of the daily load starts one run of the
+    # transform, after its last platform, and not one after its first platform and one more for
+    # the other four, the first reading tables whose days the loads still replace. One run at a
+    # time, as before.
     text = (DAGS / "agoranomos_demo_transform.py").read_text(encoding="utf-8")
     assert "schedule=LOADED" in text
     assert "max_active_runs=1" in text
@@ -73,7 +75,7 @@ def test_the_transform_runs_when_the_demo_the_rates_or_google_ads_have_loaded():
     assets = ASSETS.read_text(encoding="utf-8")
     assert "DEMO_LOADED = AssetAll(*RAW_DEMO_PLATFORMS.values())" in assets
     assert f'RAW_ECB = Asset("{RAW_ECB}")' in assets
-    assert "LOADED = AssetAny(DEMO_LOADED, RAW_ECB, RAW_GOOGLE_ADS)" in assets
+    assert "LOADED = AssetAny(DEMO_LOADED, RAW_ECB, RAW_GOOGLE_ADS, RAW_META_ADS)" in assets
     assert "DEMO_LOADED |" not in assets
 
 
@@ -486,6 +488,90 @@ def test_a_run_of_the_load_of_google_ads_takes_a_portion_of_the_history_from_its
     assert any("portion=portion" in call for call in calls if call.startswith("google_ads.load("))
 
 
+META_ADS_DAILY = DAGS / "agoranomos_meta_ads_daily.py"
+
+
+def test_the_load_of_meta_imports_dlt_in_its_task_and_no_cosmos():
+    found = imports(META_ADS_DAILY)
+    assert ("agoranomos_pipelines.assets", ["RAW_META_ADS"]) in found
+    assert [module for module, _ in found if module.split(".")[0] == "cosmos"] == []
+    tree = ast.parse(META_ADS_DAILY.read_text(encoding="utf-8"))
+    top = [
+        node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert not [m for m in top if m.split(".")[0] == "dlt" or m.endswith((".meta_ads", ".loads"))]
+
+
+def test_the_load_of_meta_starts_paused_masks_its_secrets_and_keeps_a_token_in_a_variable():
+    # A deployment unpauses it once its token and accounts are in place (ADR-0050). The task masks
+    # the token and the App Secret of .env, and gives the load the Variables of Airflow, which keep
+    # a token that a refresh gave, and mask_secret, with which it masks that token.
+    text = META_ADS_DAILY.read_text(encoding="utf-8")
+    keywords = {
+        node.arg: ast.unparse(node.value)
+        for node in ast.walk(ast.parse(text))
+        if isinstance(node, ast.keyword)
+    }
+    assert keywords["is_paused_upon_creation"] == "True"
+    assert keywords["max_active_runs"] == "1"
+    assert keywords["catchup"] == "False"
+    assert "for name in (meta_ads.TOKEN, meta_ads.APP_SECRET):" in text
+    assert "mask_secret(os.environ[name].strip())" in text
+    assert keywords["variables"] == "Variable"
+    assert keywords["mask"] == "mask_secret"
+    assert (
+        "airflow.sdk",
+        ["CronTriggerTimetable", "Param", "Variable", "dag", "get_current_context", "task"],
+    ) in imports(META_ADS_DAILY)
+
+
+def test_the_load_of_meta_runs_before_that_of_google_ads_and_keeps_its_watermarks():
+    # 10:07 UTC: after midnight from UTC-10 east, and half an hour before the load of Google Ads,
+    # so that the run of the transform after it ends before that load. The asset state store of
+    # its asset is the cache of the watermarks (ADR-0038).
+    text = META_ADS_DAILY.read_text(encoding="utf-8")
+    assert 'SCHEDULE = CronTriggerTimetable("7 10 * * *", timezone="UTC")' in text
+    assert 'CronTriggerTimetable("37 10 * * *"' in GOOGLE_ADS_DAILY.read_text(encoding="utf-8")
+    assert decorators(META_ADS_DAILY)["load_meta_ads"] == [
+        "task(task_id='load_meta_ads', outlets=[RAW_META_ADS])"
+    ]
+    assert 'cache=context["asset_state_store"][RAW_META_ADS]' in text
+    assets = ASSETS.read_text(encoding="utf-8")
+    assert (
+        'RAW_META_ADS = Asset("postgres://warehouse-db:5432/warehouse/raw_meta_ads/'
+        'insights_campaign")'
+    ) in assets
+
+
+def test_a_run_of_the_load_of_meta_takes_a_portion_of_the_history_from_its_parameters():
+    # As for Google Ads, so that C1c of #221 adds the planner alone. An account of Meta is digits.
+    text = META_ADS_DAILY.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    [params] = [
+        node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign) and ast.unparse(node.targets[0]) == "PARAMS"
+    ]
+    found = {
+        ast.literal_eval(key): {k.arg: ast.literal_eval(k.value) for k in value.keywords}
+        | {"default": ast.literal_eval(value.args[0])}
+        for key, value in zip(params.keys, params.values, strict=True)
+    }
+    assert set(found) == {"accounts", "window_from", "window_to"}
+    assert found["accounts"]["default"] == []
+    assert found["accounts"]["items"] == {"type": "string", "pattern": "^[0-9]{1,20}$"}
+    for day in ("window_from", "window_to"):
+        assert found[day]["default"] is None
+        assert (found[day]["type"], found[day]["format"]) == (["null", "string"], "date")
+    calls = [ast.unparse(node) for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    assert (
+        "meta_ads.portion_of(params['accounts'], params['window_from'], params['window_to'])"
+    ) in calls
+    assert any("portion=portion" in call for call in calls if call.startswith("meta_ads.load("))
+
+
 GOOGLE_ADS_HISTORY = DAGS / "agoranomos_google_ads_history.py"
 
 
@@ -542,6 +628,13 @@ TEN_MINUTES = "timedelta(minutes=10)"
         ("agoranomos_ecb_daily.py", "timedelta(minutes=5)", TEN_MINUTES, TEN_MINUTES, "hours=1"),
         (
             "agoranomos_google_ads_daily.py",
+            TEN_MINUTES,
+            "timedelta(minutes=20)",
+            "timedelta(hours=2)",
+            "hours=7",
+        ),
+        (
+            "agoranomos_meta_ads_daily.py",
             TEN_MINUTES,
             "timedelta(minutes=20)",
             "timedelta(hours=2)",

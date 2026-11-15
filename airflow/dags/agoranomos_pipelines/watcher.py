@@ -86,6 +86,7 @@ LAG_DAYS = {
     "demo_web": 1,
     "ecb": 1,
     "google_ads": 1,
+    "meta_ads": 1,
 }
 DEFAULT_LAG_DAYS = 1
 # The status of the backups that the backup service publishes (postgres/backup.sh), where

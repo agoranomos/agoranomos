@@ -111,6 +111,8 @@ services:
       WAREHOUSE_LOADER_PASSWORD: ""
       DBT_ENV_SECRET_WAREHOUSE_PASSWORD: ""
       GOOGLE_ADS_SERVICE_ACCOUNT_KEY: ""
+      META_ADS_ACCESS_TOKEN: ""
+      META_ADS_APP_SECRET: ""
     depends_on:
       broker:
         condition: service_healthy

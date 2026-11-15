@@ -1148,6 +1148,26 @@ EOF
     '' | [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
     *) problem "GOOGLE_ADS_LOGIN_CUSTOMER_ID in .env must be the ten digits of a manager account of Google Ads, without hyphens, or empty" ;;
   esac
+  # Meta (ADR-0050): the form of the token and of the App Secret, one word without spaces, quotes
+  # or angle brackets, as the load checks it, and never their values, which no message prints; the
+  # App ID is digits, and goes with the App Secret and the token, for a token that expires.
+  meta_token=$(setting META_ADS_ACCESS_TOKEN '')
+  meta_app_id=$(setting META_ADS_APP_ID '')
+  meta_app_secret=$(setting META_ADS_APP_SECRET '')
+  case "$meta_token" in
+    *[[:space:][:cntrl:]\"\'\<\>]*) problem "META_ADS_ACCESS_TOKEN in .env must be the token of the system user of Meta, one word without spaces or quotes" ;;
+  esac
+  case "$meta_app_secret" in
+    *[[:space:][:cntrl:]\"\'\<\>]*) problem "META_ADS_APP_SECRET in .env must be the App Secret of the app of Meta, one word without spaces or quotes" ;;
+  esac
+  case "$meta_app_id" in
+    *[!0-9]*) problem "META_ADS_APP_ID in .env must be the digits of the App ID of the app of Meta, or empty" ;;
+  esac
+  if { [ -n "$meta_app_id" ] && [ -z "$meta_app_secret" ]; } || { [ -z "$meta_app_id" ] && [ -n "$meta_app_secret" ]; }; then
+    problem "META_ADS_APP_ID and META_ADS_APP_SECRET in .env go together, for a token of Meta that expires, or both stay empty"
+  elif [ -n "$meta_app_secret" ] && [ -z "$meta_token" ]; then
+    problem "META_ADS_APP_ID and META_ADS_APP_SECRET in .env need META_ADS_ACCESS_TOKEN, the token that the load refreshes"
+  fi
   # The daily scan of Metabase (ADR-0037): a whole hour, as Metabase starts a daily scan at the
   # start of an hour. metabase-init checks it too, for a start through plain docker compose.
   case "$(setting METABASE_SCAN_TIME 12:00)" in
