@@ -502,11 +502,11 @@ where c.failed
 {%- endmacro %}
 
 {#- G0a, against the platform (ADR-0035): for each load that this run reads for an account of a
-    source whose loads bring the totals of each account by day, as the connector of Google Ads does,
-    the impressions, the clicks and the spend of the rows of its campaigns, summed by day, against
-    the totals that the platform gives for the account in the same load, on each day of the
-    windows that the load gives the account; a day that the load holds no row of on one side
-    counts as zero there. A sum that differs from its total by more than the share of the
+    source whose loads bring the totals of each account by day, as the connectors of Google Ads and
+    Meta do, the impressions, the clicks and the spend of the rows of its campaigns, summed by
+    day, against the totals that the platform gives for the account in the same load, on each day
+    of the windows that the load gives the account; a day that the load holds no row of on one
+    side counts as zero there. A sum that differs from its total by more than the share of the
     platform in var('platform_totals_tolerance'), zero for one that it does not name, is
     totals_differ: a read of the API that lost part of an account, which no check inside the
     warehouse can see. A load that holds no totals at all, as one of a connector before the

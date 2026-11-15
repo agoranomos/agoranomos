@@ -401,16 +401,10 @@ models:
         description: '{{ doc("account_id") }}'
         data_tests: [not_null]
       - name: total_impressions
-        description: >-
-          How many times the ads of the account were shown on the day, as Meta totals them for the
-          account, over all its campaigns.
+        description: '{{ doc("total_impressions") }}'
       - name: total_clicks
-        description: >-
-          How many times the links of the ads of the account were clicked on the day, as Meta
-          totals them for the account, over all its campaigns.
+        description: '{{ doc("total_clicks") }}'
       - name: total_spend
-        description: >-
-          What the ads of the account cost on the day, as Meta estimates it for the account over all
-          its campaigns, in the currency of the account, to six decimal places.
+        description: '{{ doc("total_spend") }}'
       - name: load_id
         description: '{{ doc("load_id") }}'
