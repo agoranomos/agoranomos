@@ -1101,6 +1101,42 @@ def test_every_service_has_a_memory_limit_and_no_swap(variant):
     assert not problems, "; ".join(problems)
 
 
+def test_the_worker_takes_its_limit_from_a_setting_of_its_own():
+    # The worker extends the scheduler of compose.yaml, whose limit is AIRFLOW_TASKS_MEMORY, and
+    # its own limit in compose.celery.yaml takes the place of that one. The settings of the call
+    # win over .env, so each limit shows the setting that it comes from.
+    sizes = {
+        "AIRFLOW_TASKS_MEMORY": 1100,
+        "AIRFLOW_WORKER_MEMORY": 1700,
+        "AIRFLOW_SCHEDULER_MEMORY": 600,
+    }
+    limits = {}
+    for variant in VARIANTS:
+        output = compose(
+            "config",
+            "--format",
+            "json",
+            env={
+                "COMPOSE_FILE": FILES[variant],
+                "COMPOSE_PROFILES": "core",
+                **{setting: f"{size}m" for setting, size in sizes.items()},
+            },
+        ).stdout
+        services = json.loads(output, object_hook=NamesOnly)["services"]
+        limits[variant] = {
+            name: (int(services[name]["mem_limit"]), int(services[name]["memswap_limit"]))
+            for name in ("airflow-scheduler", "airflow-worker")
+            if name in services
+        }
+    # The limit and the limit of swap of each, in bytes, as Compose gives them.
+    expected = {setting: (size * 1048576,) * 2 for setting, size in sizes.items()}
+    assert limits["local"] == {"airflow-scheduler": expected["AIRFLOW_TASKS_MEMORY"]}
+    assert limits["celery"] == {
+        "airflow-scheduler": expected["AIRFLOW_SCHEDULER_MEMORY"],
+        "airflow-worker": expected["AIRFLOW_WORKER_MEMORY"],
+    }
+
+
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_metabase_gives_half_of_its_limit_to_the_heap_of_java(variant):
     # Without it, Java takes a quarter of the limit, and Metabase runs short of heap.
