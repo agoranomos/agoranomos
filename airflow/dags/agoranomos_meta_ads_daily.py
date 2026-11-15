@@ -11,7 +11,7 @@ of ADR-0035. It signs in with the token of a system user in META_ADS_ACCESS_TOKE
 that expires, refreshes it with META_ADS_APP_ID and META_ADS_APP_SECRET and keeps the newest one in
 an Airflow Variable. Each load updates the asset of its insights, and a scheduled one keeps the
 watermark of each account in the asset state store of that asset, as a cache of the warehouse. The
-staging, core and marts of meta_ads are not built yet (C1d of #221), so the loads stay in raw.
+transform after a load takes it through dbt/models/staging/meta_ads/ into the core and the marts.
 
 A run with the parameters window_from and window_to, and accounts, loads a portion of the history
 (ADR-0038, "The first load"): the days from window_from to window_to of those accounts, or of

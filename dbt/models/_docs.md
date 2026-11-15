@@ -93,6 +93,18 @@ How many times the ads of the row, of its campaign, its ad group or its ad, were
 What the ads of the row, of its campaign, its ad group or its ad, cost on the day, as the ad platform reports it in its statistics, in the currency of the account (see currency), exact to six decimal places. Also called cost or ad spend. It is not the amount that the platform invoices, which can differ from it, for example by taxes or later credits, and the platform can still change it for recent days.
 {% enddocs %}
 
+{% docs total_impressions %}
+How many times the ads of the account were shown on the day, as the ad platform totals them for the account over all its campaigns, in a report of the account apart from those of its campaigns. Each run compares them with the sum of the campaigns of the account (G0a).
+{% enddocs %}
+
+{% docs total_clicks %}
+How many times the ads of the account were clicked on the day with a click that leads to the site, as the ad platform totals them for the account over all its campaigns: the clicks of Google and the link clicks of Meta, as in clicks. Each run compares them with the sum of the campaigns of the account (G0a).
+{% enddocs %}
+
+{% docs total_spend %}
+What the ads of the account cost on the day, as the ad platform totals it for the account over all its campaigns, in the currency of the account, to six decimal places. Each run compares it with the sum of the campaigns of the account (G0a).
+{% enddocs %}
+
 {% docs spend_reporting %}
 The spend of the row in the reporting currency (see reporting_currency), at the rate of its report_date in fx_rates_daily, to six decimal places. A sum over accounts in different currencies is right in this column.
 {% enddocs %}

@@ -21,7 +21,7 @@ A deployment of agoranomos is one business, which groups its ad accounts and its
 
 The load of Google Ads reads only the accounts that the file names, so its next load takes the history of a new account, its last 36 months ([Connect Google Ads](connect-google-ads.md)).
 
-The load of Meta reads only the accounts of `meta_ads` that the file names, each by the digits of the ad account without `act_`, such as `1234567890123456`, and its next load takes the last 28 days of a new account into the raw layer ([Connect Meta](connect-meta.md)). The marts show Meta once its models come in v0.6.
+The load of Meta reads only the accounts of `meta_ads` that the file names, each by the digits of the ad account without `act_`, such as `1234567890123456`, and its next load takes the last 28 days of a new account, which the marts show after the next run of the transform ([Connect Meta](connect-meta.md)).
 
 ## Move an account to another client
 

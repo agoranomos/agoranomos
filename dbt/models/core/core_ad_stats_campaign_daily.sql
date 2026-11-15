@@ -9,10 +9,10 @@
     incremental_predicates=['DBT_INTERNAL_DEST.report_date >= ' ~ window_start()],
     pre_hook=[
         "{{ fact_thaw(ref('int_window_days')) }}",
-        "{{ fact_restatements(fact_stats_rows('campaign', [ref('stg_demo_search__campaign_stats'), ref('stg_demo_social__campaign_stats'), ref('stg_demo_video__campaign_stats'), ref('stg_google_ads__campaign_stats')], ref('int_window_days')), ref('int_window_days')) }}",
-        "{{ fact_empty_days(fact_stats_rows('campaign', [ref('stg_demo_search__campaign_stats'), ref('stg_demo_social__campaign_stats'), ref('stg_demo_video__campaign_stats'), ref('stg_google_ads__campaign_stats')], ref('int_window_days')), ref('int_window_days')) }}",
+        "{{ fact_restatements(fact_stats_rows('campaign', [ref('stg_demo_search__campaign_stats'), ref('stg_demo_social__campaign_stats'), ref('stg_demo_video__campaign_stats'), ref('stg_google_ads__campaign_stats'), ref('stg_meta_ads__campaign_stats')], ref('int_window_days')), ref('int_window_days')) }}",
+        "{{ fact_empty_days(fact_stats_rows('campaign', [ref('stg_demo_search__campaign_stats'), ref('stg_demo_social__campaign_stats'), ref('stg_demo_video__campaign_stats'), ref('stg_google_ads__campaign_stats'), ref('stg_meta_ads__campaign_stats')], ref('int_window_days')), ref('int_window_days')) }}",
     ],
 ) }}
 -- The tests of G2 read the dimension of its entities, which dbt orders before it:
 -- depends_on: {{ ref('dim_campaign') }}
-{{ fact_stats_rows('campaign', [ref('stg_demo_search__campaign_stats'), ref('stg_demo_social__campaign_stats'), ref('stg_demo_video__campaign_stats'), ref('stg_google_ads__campaign_stats')], ref('int_window_days')) }}
+{{ fact_stats_rows('campaign', [ref('stg_demo_search__campaign_stats'), ref('stg_demo_social__campaign_stats'), ref('stg_demo_video__campaign_stats'), ref('stg_google_ads__campaign_stats'), ref('stg_meta_ads__campaign_stats')], ref('int_window_days')) }}

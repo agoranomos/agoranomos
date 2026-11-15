@@ -1291,8 +1291,7 @@ def test_the_plan_of_the_history_reads_the_loads_of_meta_and_asks_meta_nothing(m
         "AND account_id IN ('1111111111111111', '2222222222222222')"
     ) in queries
     assert any('FROM "raw_meta_ads"."_agoranomos_loads" AS j' in query for query in queries)
-    # A whole load that no run of the transform pinned, as every load of Meta before its staging
-    # (C1d of #221): nothing.
+    # A whole load that no run of the transform has pinned yet: nothing.
     state.update(waiting=1)
     assert module.plan(NOW, extensions) is None
     # Every account back to the limit: nothing.

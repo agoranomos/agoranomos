@@ -18,8 +18,7 @@ it has not reached to the next portion, so that it ends within the timeout of it
 starts nothing while a run of the load is queued or running, while a whole load waits for the run
 of the transform that pins it, or once every account that has had its usual window holds its
 history; it reads the journal of the loads and core.loads as the loader role, and asks Meta
-nothing. The staging of Meta is C1d of #221 and is not built yet: until then no run of the
-transform pins a load of Meta, so the plan waits and starts nothing.
+nothing.
 
 The history of Meta and that of Google Ads plan apart, and may each have a portion running at the
 same time: their APIs and their quotas are apart, a load writes what it reads to disk a page at a

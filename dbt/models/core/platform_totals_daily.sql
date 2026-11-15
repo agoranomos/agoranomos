@@ -6,7 +6,7 @@
 -- gives no row for a day without a metric; the model merges them into the table of the migrations
 -- by its key (dbt_project.yml), so a day of a window is replaced and the days before it stay. A
 -- load that holds no totals at all, as one of a connector before the totals came, writes nothing.
--- Today only the connector of Google Ads loads totals; the demo has none.
+-- The connectors of Google Ads and of Meta load totals; the demo has none.
 {{ config(unique_key=['source', 'account_id', 'report_date']) }}
 with totals as (
     select
@@ -18,6 +18,17 @@ with totals as (
         sum(total_clicks) as clicks,
         sum(total_spend) as spend
     from {{ ref('stg_google_ads__account_totals') }}
+    group by platform, account_id, report_date, load_id
+    union all
+    select
+        platform as source,
+        account_id,
+        report_date,
+        load_id,
+        sum(total_impressions) as impressions,
+        sum(total_clicks) as clicks,
+        sum(total_spend) as spend
+    from {{ ref('stg_meta_ads__account_totals') }}
     group by platform, account_id, report_date, load_id
 ),
 

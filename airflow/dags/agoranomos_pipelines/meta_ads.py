@@ -52,9 +52,9 @@ yesterday, and never before the 37 months that Meta gives (plan, history_limit, 
 agoranomos_pipelines/history.py, which the load of Google Ads shares). No window starts before
 those 37 months (oldest). Each load appends the lists and the facts of each account under its
 own _dlt_load_id and records the window of each account in _agoranomos_loads in the same run. The
-staging, core and marts of meta_ads are C1d of #221 and are not built yet: no run of the transform
-pins or reads these loads, so their rows stay in raw, and the plan of the history, which waits for
-the pin of each whole load, starts no portion until then.
+transform after it pins the loads that have ended and takes them through
+dbt/models/staging/meta_ads/ into the core and the marts; the plan of the history waits for the
+pin of each whole load.
 
 The last day that the core accepted for an account is the end of its newest accepted load in
 core.loads, which loader may read; while the core has accepted none, it is the end of its newest

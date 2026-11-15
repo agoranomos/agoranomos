@@ -41,8 +41,7 @@ RAW_META_ADS = Asset("postgres://warehouse-db:5432/warehouse/raw_meta_ads/insigh
 TRANSFORMED = Asset("agoranomos_transformed")
 
 # The condition on which the transform runs (ADR-0039): the demo has loaded, or the rates have, or
-# Google Ads or Meta has. Until the staging of Meta (C1d of #221), a run after a load of Meta reads
-# nothing of it. A source that joins the model adds its asset here. The transform allows one run
-# at a time: while a run is queued or running, Airflow keeps the events that come, and starts one
-# run for all of them once it ends.
+# Google Ads or Meta has. A source that joins the model adds its asset here. The transform allows
+# one run at a time: while a run is queued or running, Airflow keeps the events that come, and
+# starts one run for all of them once it ends.
 LOADED = AssetAny(DEMO_LOADED, RAW_ECB, RAW_GOOGLE_ADS, RAW_META_ADS)
