@@ -33,20 +33,28 @@ action_values and attribution_setting, and the windows 1d_click, 7d_click and 1d
 load asks the insights synchronously; a request that fails with too much data (code 100, subcode
 1487534), a timeout or an error of the server goes again as a report run (report_run), as each
 portion of the history does: POST act_<id>/insights, polled until it completes, and then
-<report_run_id>/insights page by page; a report run that has too much data goes by calendar
-months. After each call, the load reads the headers of throttling, X-Ad-Account-Usage,
-X-FB-Ads-Insights-Throttle and X-Business-Use-Case-Usage, logs them, and waits when a use passes
-PAUSE_AT percent, and an error of throttling waits and asks again (Api.call).
+<report_run_id>/insights page by page; a report run that has too much data, refused at its POST or
+failed with Report Too Large, goes by calendar months, and one that Meta skips or that fails with
+an error to retry later is asked again. After each call, the load reads the headers of
+throttling, X-Ad-Account-Usage, X-FB-Ads-Insights-Throttle and X-Business-Use-Case-Usage, logs
+them, and waits when a use passes PAUSE_AT percent, and an error of throttling waits and asks again
+(Api.call).
 
 The days of each account run from the day after the last day that the core accepted for it, or
 from 28 days back when that is earlier, as insights "do not change after 28 days of being
 reported", to yesterday in the time zone of the account (ADR-0038); the first load takes these 28
 days. A run with a portion, which the parameters of the DAG name, takes the days of the portion of
-its accounts as a load of the kind history, through report runs; the planner of the history is
-C1c of #221 and is not built yet. Each load appends the lists and the facts of each account under
-its own _dlt_load_id and records the window of each account in _agoranomos_loads in the same run.
-The staging, core and marts of meta_ads are C1d of #221 and are not built yet: no run of the
-transform pins or reads these loads, so their rows stay in raw.
+its accounts as a load of the kind history, through report runs, for at most the time of a
+portion (PORTION_STARTS), after which the accounts that it has not reached wait for the next
+portion. The DAG agoranomos_meta_ads_history plans the portions after each run of the transform
+that succeeded, by quarters from the newest, back to the first day of the month 36 months before
+yesterday, and never before the 37 months that Meta gives (plan, history_limit, and
+agoranomos_pipelines/history.py, which the load of Google Ads shares). No window starts before
+those 37 months (oldest). Each load appends the lists and the facts of each account under its
+own _dlt_load_id and records the window of each account in _agoranomos_loads in the same run. The
+transform after it pins the loads that have ended and takes them through
+dbt/models/staging/meta_ads/ into the core and the marts; the plan of the history waits for the
+pin of each whole load.
 
 The last day that the core accepted for an account is the end of its newest accepted load in
 core.loads, which loader may read; while the core has accepted none, it is the end of its newest
@@ -76,7 +84,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from time import sleep
+from time import monotonic, sleep
 from typing import TextIO
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -85,6 +93,13 @@ import dlt
 from dlt.destinations.exceptions import DatabaseUndefinedRelation
 from dlt.sources.helpers.requests import Client, RequestException, Timeout
 
+from agoranomos_pipelines.history import (
+    Portion,
+    history_start,
+    months_back,
+    planned,
+    portion_from,
+)
 from agoranomos_pipelines.loads import (
     APPEND,
     DATE,
@@ -144,6 +159,9 @@ ACCOUNT_ID = re.compile(r"[0-9]{1,20}")
 SECRET_FORM = re.compile(r"[!#-&(-;=?-~]+")
 APP_ID_FORM = re.compile(r"[0-9]+")
 WINDOW_DAYS = 28
+# Meta refuses a start date "beyond 37 months from the current date", error 3018 (the reference of
+# the insights of an ad account, read on 15 November 2026; ADR-0050).
+OLDEST_MONTHS = 37
 # The rows of a page that a request asks for. Meta gives no maximum, and fewer pages are fewer
 # calls of the score of the account; the answers of a page are read whole.
 LIMIT = 500
@@ -187,6 +205,24 @@ POLL_FIRST, POLL_LONGEST = 5, 60
 REPORT_TIMEOUT = 3600
 REPORT_ATTEMPTS = 3
 COMPLETED, FAILED_JOB, SKIPPED = "Job Completed", "Job Failed", "Job Skipped"
+# A report run that fails carries its error since v25.0, "error_code, error_message, error_subcode,
+# error_user_title, and error_user_msg fields returned by default" (Limits and best practices of the
+# Insights API, read on 15 November 2026). Of the codes of the Ads Insights Error Codes
+# (https://developers.facebook.com/documentation/ads-commerce/marketing-api/insights/error-codes,
+# read on 15 November 2026), -3 with 1504045, "Report Too Large", is too much data per call, like
+# 100 with 1487534, and goes by calendar months; -2 with 2490547, "Report Failed", and 2 with
+# 1504043, an intermittent error, say to retry later, and are asked again as a skipped run is. Any
+# other failure fails the account.
+TOO_LARGE = frozenset({TOO_MUCH_DATA, (-3, 1504045)})
+RETRY_LATER = frozenset({(-2, 2490547), (2, 1504043)})
+# The time of a portion of the history, which one task of agoranomos_meta_ads_daily takes, within
+# its execution_timeout of two hours: a portion starts no account PORTION_STARTS seconds after the
+# load began, and leaves the accounts that it has not reached to the next portion, which the plan
+# gives them; a report run of a portion that has not completed PORTION_ENDS seconds after the load
+# began fails its account; the half hour after it is for dlt to write what the load read. A daily
+# load has no such time: its 28 days go synchronously.
+PORTION_STARTS = 60 * 60
+PORTION_ENDS = 90 * 60
 # The values of effective_status that each list and each level of insights filters on, every value
 # that the references of the edges and the objects list as of November 2026: the edges campaigns
 # and adsets of an ad account, and the field effective_status of an ad, list twelve; the field of a
@@ -546,53 +582,47 @@ def remember(cache, cached: dict[str, date], read: dict) -> None:
     )
 
 
-@dataclass(frozen=True)
-class Portion:
-    """A load of the history (ADR-0038, "The first load"): the days from first to last of some
-    accounts, which a run of the DAG of the load takes from its parameters, as report runs, with
-    the kind history in the journal. No accounts are every account of the deployment."""
-
-    accounts: tuple[str, ...]
-    first: date
-    last: date
-
-    def conf(self) -> dict[str, object]:
-        """The parameters of the run of the DAG of the load that takes the portion."""
-        return {
-            "accounts": list(self.accounts),
-            "window_from": self.first.isoformat(),
-            "window_to": self.last.isoformat(),
-        }
-
-
 def portion_of(
     account_ids: Iterable[str] | None, first: str | None, last: str | None
 ) -> Portion | None:
     """The portion that the parameters of a run name: accounts, as digits each, or none for every
     account, and the first and last day, as ISO dates; none when the run names no days, as a
     scheduled run does, which takes the usual window of each account."""
-    account_ids = list(account_ids or ())
-    if first is None and last is None:
-        if account_ids:
-            raise MetaAdsError(
-                "a run of some accounts names the days of their history too: window_from and "
-                "window_to"
-            )
-        return None
-    if first is None or last is None:
-        raise MetaAdsError("a run of the history names both window_from and window_to")
-    try:
-        days = date.fromisoformat(first), date.fromisoformat(last)
-    except (TypeError, ValueError):
-        raise MetaAdsError("window_from and window_to are dates, such as 2026-07-01") from None
-    if days[0] > days[1]:
-        raise MetaAdsError(f"window_from {first} is after window_to {last}")
-    wrong = [account_id for account_id in account_ids if not ACCOUNT_ID.fullmatch(account_id)]
-    if wrong:
-        raise MetaAdsError(
-            f"an account of a run is the digits of the ad account without act_, not {wrong[0]!r}"
-        )
-    return Portion(tuple(sorted(set(account_ids))), *days)
+    return portion_from(
+        account_ids,
+        first,
+        last,
+        form=ACCOUNT_ID,
+        shape="the digits of the ad account without act_",
+        error=MetaAdsError,
+    )
+
+
+def oldest(now: datetime) -> date:
+    """The first day that Meta still gives at now: "The start date of the time range cannot be
+    beyond 37 months from the current date" (error 3018), counted from the newest date anywhere on
+    Earth, at UTC+14, as Meta does not say in which time zone, and a day later still, so that a
+    load never asks for a day that Meta has just dropped."""
+    newest = (now.astimezone(UTC) + timedelta(hours=14)).date()
+    return months_back(newest, OLDEST_MONTHS) + timedelta(days=1)
+
+
+def history_limit(now: datetime) -> date:
+    """The first day of the history of the accounts at now: the first day of the month
+    HISTORY_MONTHS before yesterday in UTC (ADR-0034), or the oldest day that Meta still gives,
+    when that is later, as it can be for a day or two at the end of a month (ADR-0050)."""
+    return max(history_start(now.astimezone(UTC).date() - timedelta(days=1)), oldest(now))
+
+
+def plan(now: datetime, extensions: Path = EXTENSIONS) -> Portion | None:
+    """The next portion of the history of the accounts of the deployment as of now, back to
+    history_limit, or none: when every account holds its history, when no account has had its
+    usual window yet, or while a whole load of meta_ads waits for the run of the transform that
+    pins it, so that each portion goes from raw to the core before the next one starts (ADR-0038,
+    agoranomos_pipelines/history.py). It reads the warehouse as loader, and needs no token."""
+    wanted = checked(accounts(extensions))
+    with open_pipeline() as pipeline:
+        return planned(pipeline, CODE, "Meta", wanted, history_limit(now))
 
 
 def number(value: object) -> float | None:
@@ -600,6 +630,14 @@ def number(value: object) -> float | None:
     try:
         return float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
+        return None
+
+
+def code_of(value: object) -> int | None:
+    """A code of an error, which Meta writes as a number or a numeric string, or None."""
+    try:
+        return int(str(value))
+    except ValueError:
         return None
 
 
@@ -696,6 +734,8 @@ class Api:
         self.secrets = secrets
         self.client = Client(**CLIENT)
         self.requests = 0
+        # The moment, by monotonic(), by which a report run of a portion completes, or None.
+        self.deadline: float | None = None
         self.auth: dict[str, str] = {}
         if token is not None:
             self.sign_in(token, secret)
@@ -908,29 +948,49 @@ def report_run(api: Api, subject: str, account_id: str, params: dict[str, str], 
     on 15 November 2026): POST act_<id>/insights, which returns a report_run_id; a poll of
     <report_run_id> with a backoff from POLL_FIRST to POLL_LONGEST seconds until async_status is
     Job Completed and async_percent_completion 100; then every page of <report_run_id>/insights,
-    written to file. A run that Meta skips is asked again, up to REPORT_ATTEMPTS runs; one that
-    fails, or that has not completed after REPORT_TIMEOUT seconds, fails the account. The history
-    of C1c takes its portions through this function too."""
+    written to file. A run that Meta skips, or that fails with an error of RETRY_LATER, is asked
+    again, up to REPORT_ATTEMPTS runs; one that fails with too much data, of TOO_LARGE, raises
+    TooMuchData, which written_insights takes by months; one that fails otherwise, or that has not
+    completed after REPORT_TIMEOUT seconds, fails the account. The portions of the history take
+    their insights through this function."""
     for attempt in range(1, REPORT_ATTEMPTS + 1):
         body = api.call(subject, "POST", f"{BASE}/act_{account_id}/insights", params)
         run_id = str(body.get("report_run_id", ""))
         if not ACCOUNT_ID.fullmatch(run_id):
             raise api.fail(subject, "the report run has no report_run_id")
-        status = poll(api, subject, run_id)
+        ended = poll(api, subject, run_id)
+        status = ended.get("async_status")
         if status == COMPLETED:
             write_rows(api.pages(subject, f"{run_id}/insights", {"limit": str(LIMIT)}), file)
             return
-        if status == SKIPPED and attempt < REPORT_ATTEMPTS:
-            log.warning("%s: report run %s was skipped; asking again", subject, run_id)
+        found = (code_of(ended.get("error_code")), code_of(ended.get("error_subcode")))
+        said = f"report run {run_id} ended with {status}"
+        if status != FAILED_JOB:
+            found = None
+        elif found[0] is not None:
+            message = ended.get("error_message") or "no message"
+            said += f": {message} (code {found[0]}, subcode {found[1]})"
+        if found in TOO_LARGE:
+            raise api.fail(subject, said, TooMuchData)
+        if (status == SKIPPED or found in RETRY_LATER) and attempt < REPORT_ATTEMPTS:
+            log.warning("%s; asking again", api.secrets.scrub(f"{subject}: {said}"))
             continue
-        raise api.fail(subject, f"report run {run_id} ended with {status}")
+        raise api.fail(subject, said)
 
 
-def poll(api: Api, subject: str, run_id: str) -> str:
-    """The status at which a report run ends: Job Completed at 100 percent, Job Failed or Job
-    Skipped; a run that has not ended after REPORT_TIMEOUT seconds of waits fails the account."""
+def poll(api: Api, subject: str, run_id: str) -> dict:
+    """The answer of the report run at which it ends: Job Completed at 100 percent, Job Skipped,
+    or Job Failed, which is read once more without fields, so that it carries the fields of its
+    error, which Meta returns by default. A run that has not ended after REPORT_TIMEOUT seconds of
+    waits, or that would not end before api.deadline, the time of a portion, fails the account."""
     waited, wait = 0, POLL_FIRST
     while waited < REPORT_TIMEOUT:
+        if api.deadline is not None and monotonic() + wait > api.deadline:
+            raise api.fail(
+                subject,
+                f"report run {run_id} had not completed when the time of the portion ran out, "
+                f"{PORTION_ENDS // 60} minutes after the load began; a later portion asks again",
+            )
         sleep(wait)
         waited += wait
         body = api.call(
@@ -938,9 +998,11 @@ def poll(api: Api, subject: str, run_id: str) -> str:
         )
         status = body.get("async_status")
         if status == COMPLETED and number(body.get("async_percent_completion")) == 100:
-            return COMPLETED
-        if status in (FAILED_JOB, SKIPPED):
-            return status
+            return body
+        if status == FAILED_JOB:
+            return {**api.call(subject, "GET", f"{BASE}/{run_id}", {}), "async_status": status}
+        if status == SKIPPED:
+            return body
         log.info(
             "%s: report run %s is at %s%% (%s)",
             subject,
@@ -958,7 +1020,8 @@ def written_insights(
     """Write the insights of a level of an account over days to file: synchronously, and as a
     report run when the synchronous request is too large, times out or fails on the server, after
     the file is cut back to where its rows began; or as a report run at once, by_report. A report
-    run with too much data goes by calendar months."""
+    run with too much data, refused at its POST or failed with an error of TOO_LARGE, goes by
+    calendar months (ADR-0050), and a month with too much data fails the account."""
     subject = f"Meta ad account {account_id}"
     params = insights_params(level, days)
     if not by_report:
@@ -1006,7 +1069,9 @@ def read_account(
     insights of its window, each table into a file in the folder of the account under staging. With
     days, a portion of the history, the window is those days, up to yesterday of the account, and
     the insights go as report runs; the lists come too, as staging is to read the lists of the
-    newest load of an account. An error raises MetaAdsError and leaves nothing of the account: a
+    newest load of an account. No window starts before the oldest day that Meta still gives
+    (oldest): a daily window after a stop of more than 37 months starts there, and says that the
+    days before it are lost. An error raises MetaAdsError and leaves nothing of the account: a
     window replaces whole days, and a part of one would lose the rest (ADR-0035)."""
     subject = f"Meta ad account {account_id}"
     account = api.call(
@@ -1018,10 +1083,26 @@ def read_account(
         last_day_of_account = yesterday(now, str(account.get("timezone_name")))
     except (ZoneInfoNotFoundError, ValueError):
         raise api.fail(subject, "the account has no time zone that agoranomos knows") from None
+    earliest = oldest(now)
     if days is None:
         first, last = window(last_day_of_account, last_end)
+        if first < earliest:
+            log.warning(
+                "%s: the window would start on %s, but Meta gives nothing older than 37 months; it "
+                "starts on %s, and the days before are lost",
+                subject,
+                first.isoformat(),
+                earliest.isoformat(),
+            )
+            first = earliest
     else:
-        first, last = days[0], min(days[1], last_day_of_account)
+        first, last = max(days[0], earliest), min(days[1], last_day_of_account)
+        if days[1] < earliest:
+            raise api.fail(
+                subject,
+                f"the days of the history end on {days[1].isoformat()}, before "
+                f"{earliest.isoformat()}, the oldest day that Meta still gives (error 3018)",
+            )
         if first > last:
             raise api.fail(
                 subject,
@@ -1112,9 +1193,11 @@ def load(
     asset of the load, or None; variables the Variables of Airflow, which keep a token that
     expires; mask hides a token that a refresh gives in the logs of Airflow. With a portion, the
     load takes the days of the portion of its accounts, or of every account, with the kind history,
-    and leaves the watermarks as they were. When an account failed, the load takes the other
-    accounts and raises AccountsFailed at the end; when every account failed, it writes the
-    journal alone."""
+    and leaves the watermarks as they were; it starts no account PORTION_STARTS seconds after it
+    began, and leaves those to the next portion, and a report run that has not completed
+    PORTION_ENDS seconds after it began fails its account. When an account failed, the load takes
+    the other accounts and raises AccountsFailed at the end; when every account failed, it writes
+    the journal alone."""
     warn_of_the_sunset(now)
     named = accounts(extensions)
     wanted = named
@@ -1144,7 +1227,15 @@ def load(
         days = None if portion is None else (portion.first, portion.last)
         read: dict[str, Read] = {}
         failed: dict[str, MetaAdsError] = {}
+        left: list[str] = []
+        began = monotonic()
+        if portion is not None:
+            api.deadline = began + PORTION_ENDS
         for account_id in wanted:
+            if portion is not None and (read or failed) and monotonic() - began >= PORTION_STARTS:
+                # Not read and not in the journal: the plan gives it to the next portion.
+                left.append(account_id)
+                continue
             if portion is None:
                 check_watermark(account_id, cached, core, journal)
             last_end = last_day(account_id, core, journal)
@@ -1204,7 +1295,15 @@ def load(
             remember(cache, cached, read)
     for table, rows in sorted(counts.items()):
         log.info("Loaded %d rows into %s.%s, as of %s", rows, DATASET, table, now.isoformat())
-    log.info("%d calls to the Graph API for %d accounts", api.requests, len(wanted))
+    log.info("%d calls to the Graph API for %d accounts", api.requests, len(wanted) - len(left))
+    if left:
+        log.warning(
+            "The portion ran out of its time, %d minutes, after %d accounts: the next portion "
+            "takes %s",
+            PORTION_STARTS // 60,
+            len(read) + len(failed),
+            ", ".join(left),
+        )
     if failed:
         raise AccountsFailed(failure_line(failed, len(read)))
     return counts

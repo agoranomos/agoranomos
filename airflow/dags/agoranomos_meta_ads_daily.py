@@ -11,13 +11,15 @@ of ADR-0035. It signs in with the token of a system user in META_ADS_ACCESS_TOKE
 that expires, refreshes it with META_ADS_APP_ID and META_ADS_APP_SECRET and keeps the newest one in
 an Airflow Variable. Each load updates the asset of its insights, and a scheduled one keeps the
 watermark of each account in the asset state store of that asset, as a cache of the warehouse. The
-staging, core and marts of meta_ads are not built yet (C1d of #221), so the loads stay in raw.
+transform after a load takes it through dbt/models/staging/meta_ads/ into the core and the marts.
 
 A run with the parameters window_from and window_to, and accounts, loads a portion of the history
 (ADR-0038, "The first load"): the days from window_from to window_to of those accounts, or of
 every account when accounts is empty, through report runs, as a load of the kind history, which
-leaves the watermarks as they were. A person may start one from the form of the run; the planner
-that starts them by quarters is C1c of #221 and is not built yet.
+leaves the watermarks as they were, and leaves to the next portion the accounts that it has not
+reached within an hour, so that a portion ends within the timeout of its task.
+agoranomos_meta_ads_history starts such runs, a quarter at a time, and a person may start one from
+the form of the run to load a period again.
 
 The DAG starts paused: a deployment unpauses it once its token and its accounts are in place
 ([Connect Meta](docs/how-to/connect-meta.md)). A load without a token, or without an account of
