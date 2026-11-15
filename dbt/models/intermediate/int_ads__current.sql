@@ -31,6 +31,11 @@ with listed as (
         platform, account_id, campaign_id, ad_group_id, ad_id, observed_name, ad_status, ad_state,
         ad_type
     from {{ ref('stg_google_ads__ads') }}
+    union all
+    select
+        platform, account_id, campaign_id, ad_group_id, ad_id, observed_name, ad_status, ad_state,
+        ad_type
+    from {{ ref('stg_meta_ads__ads') }}
 ),
 
 stats as (
@@ -45,6 +50,9 @@ stats as (
     union all
     select platform, account_id, campaign_id, ad_group_id, ad_id, report_date, loaded_ad_name
     from {{ ref('stg_google_ads__ad_stats') }}
+    union all
+    select platform, account_id, campaign_id, ad_group_id, ad_id, report_date, loaded_ad_name
+    from {{ ref('stg_meta_ads__ad_stats') }}
 ),
 
 reported as (
@@ -72,6 +80,8 @@ lists as (
     {{ newest_lists('raw_demo_video', source('core', 'loads')) }}
     union all
     {{ newest_lists('raw_google_ads', source('core', 'loads')) }}
+    union all
+    {{ newest_lists('raw_meta_ads', source('core', 'loads')) }}
 ),
 
 accounts as (

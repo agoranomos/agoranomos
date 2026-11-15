@@ -2,7 +2,7 @@
 
 This guide connects the Meta ad accounts of your business to agoranomos: the load reads their accounts, campaigns, ad sets, ads and insights every day into the warehouse, through an app and a system user of your own business portfolio ([ADR-0050](../adr/0050-connect-meta-with-an-app-and-a-system-user-of-the-deployment.md)).
 
-What exists today is the load into the raw layer, the schema `raw_meta_ads`. The models that take Meta into staging, the core and the marts, and so into the dashboards and the MCP servers, are planned for v0.6, and so is the history of each account by quarters. Until then the loads stay in `raw_meta_ads`, where `transformer` can read them, and no run of the transform reads them.
+Each load goes into the raw layer, the schema `raw_meta_ads`, and the run of the transform after it takes it into the core and the marts, and so into the dashboards and the MCP servers, under the platform `meta_ads`. The history of each account by quarters in the background is planned for v0.6.
 
 No load has reached a real Meta account yet: the connector is tested against a stand-in of the Graph API, made from the reference of the Marketing API v27.0 as of November 2026, so compare the first load with Ads Manager.
 
@@ -61,12 +61,30 @@ client = "acme"
 ## 3. Start the load
 
 1. Run `./agoranomos up`, which gives the new settings to the container that runs the tasks.
-2. In the Airflow UI, unpause the DAG `agoranomos_meta_ads_daily`. It starts paused, so that a deployment without Meta asks Meta nothing. The rates of the ECB, which the DAG `agoranomos_ecb_daily` loads, are to convert the money of the accounts of Meta once the marts take Meta; if you have [connected Google Ads](connect-google-ads.md), it is unpaused already.
-3. Trigger `agoranomos_meta_ads_daily` once, or wait for 10:07 UTC. The first load of each account takes its usual window, the last 28 days.
+2. In the Airflow UI, unpause the DAG `agoranomos_meta_ads_daily`. It starts paused, so that a deployment without Meta asks Meta nothing. Unpause `agoranomos_ecb_daily` too, whose rates of the ECB convert the money of the accounts of Meta into the reporting currency, and `agoranomos_demo_transform` if the demo did not unpause it; if you have [connected Google Ads](connect-google-ads.md), both are unpaused already.
+3. Trigger `agoranomos_meta_ads_daily` once, or wait for 10:07 UTC. The first load of each account takes its usual window, the last 28 days, and the transform runs after it.
 
-Each load reads, for each account, the account (`ad_accounts`), the full lists of its campaigns, ad sets and ads with every value of `effective_status`, so that archived and deleted objects come too as far as the API returns them (`campaigns`, `adsets`, `ads`), and, by day, the totals of the account (`insights_account`) and the insights of its campaigns, ad sets and ads (`insights_campaign`, `insights_adset`, `insights_ad`), with their actions and the values of the actions in the attribution windows `1d_click`, `7d_click` and `1d_view` ([The data model](../reference/data-model.md#meta)). The window of an account runs from the day after the last that the core accepted for it, or from 28 days back when that is earlier, to yesterday in its time zone, as Meta says that insights "do not change after 28 days of being reported" ([ADR-0038](../adr/0038-load-by-copy-and-write-the-core-by-whole-days.md)). As the core accepts no load of Meta until the models of v0.6, the window follows the journal `_agoranomos_loads` of `raw_meta_ads` for now.
+After the transform, the Ops collection of Metabase shows the loads of `meta_ads` ([Watch the pipeline](watch-the-pipeline.md)), and the marts have the rows of the platform `meta_ads` for the last 28 days.
+
+Each load reads, for each account, the account (`ad_accounts`), the full lists of its campaigns, ad sets and ads with every value of `effective_status`, so that archived and deleted objects come too as far as the API returns them (`campaigns`, `adsets`, `ads`), and, by day, the totals of the account (`insights_account`) and the insights of its campaigns, ad sets and ads (`insights_campaign`, `insights_adset`, `insights_ad`), with their actions and the values of the actions in the attribution windows `1d_click`, `7d_click` and `1d_view` ([The data model](../reference/data-model.md#meta)). The window of an account runs from the day after the last that the core accepted for it, or from 28 days back when that is earlier, to yesterday in its time zone, as Meta says that insights "do not change after 28 days of being reported" ([ADR-0038](../adr/0038-load-by-copy-and-write-the-core-by-whole-days.md)). Until the core has accepted a load of an account, the window follows the journal `_agoranomos_loads` of `raw_meta_ads`.
 
 To load a period of an account, such as an older quarter, trigger `agoranomos_meta_ads_daily` with its parameters: `window_from` and `window_to`, as dates such as `2026-01-01`, and `accounts`, the IDs of the accounts, or none for every account of `clients.toml`. Such a run is a load of the kind `history` and asks the insights of its days as asynchronous report runs. Meta refuses a start date more than 37 months back.
+
+### The conversions
+
+Meta has no metric of conversions of its own: it counts each action type apart, so the `conversions` of `ad_stats_campaign_daily`, `ad_stats_ad_group_daily` and `ad_stats_ad_daily` are empty for `meta_ads`, and `conversions_primary` of `ad_stats_campaign_daily` is the sum of the primary action types of each campaign and day. The count and the value of an action type are its field `value`, which the reference of Meta calls the default attribution window, the attribution setting of the ad set as Ads Manager shows it; the windows `1d_click`, `7d_click` and `1d_view` stay in `raw_meta_ads` ([The data model](../reference/data-model.md#meta)). `ad_conversions_campaign_daily` has every action type of each campaign, with `is_primary` beside it. The seed of the base package makes the purchases and the leads of the pixel primary, `offsite_conversion.fb_pixel_purchase` and `offsite_conversion.fb_pixel_lead`, and no grouped type such as `omni_purchase` or `lead`, which count the same actions again. For another choice, name the action types in `extensions/model/conversion_actions.toml`, and keep only one of the pixel's purchases and `omni_purchase` primary, or a purchase counts twice:
+
+```toml
+[[actions]]
+platform = "meta_ads"
+conversion_action_id = "offsite_conversion.fb_pixel_purchase"
+is_primary = false
+
+[[actions]]
+platform = "meta_ads"
+conversion_action_id = "omni_purchase"
+is_primary = true
+```
 
 ## Limited access
 
@@ -96,5 +114,10 @@ A mistake in the settings stops the load before it asks Meta anything, with a li
 An error of the API on one account does not stop the others ([ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md)). The load reads each account whole, page by page into files on the disk of the container that runs the tasks, before it writes anything, so an account whose request fails leaves nothing in the warehouse. The load takes the other accounts, and the task fails at the end with one line that counts the accounts and lists each failed account with the error of the API, such as `1 of 3 Meta ad accounts failed, the other 2 are loaded: Meta ad account 1234567890123456: 400 Permissions error (code 200, subcode None)`. Airflow does not retry that failure; the next daily load takes the days that the account missed. The journal `_agoranomos_loads` of `raw_meta_ads` has a row for the account with `status = 'failed'` and the text of the error. Any other failure of the task, such as a failed refresh of the token, Airflow retries twice, after 10 and then 20 minutes, and a run ends within seven hours.
 
 A synchronous request of insights that Meta refuses with too much data (code 100, subcode 1487534), that times out, or that fails on the server goes again as an asynchronous report run, which the load polls for up to an hour; a report run with too much data goes by calendar months.
+
+Two failures come after the load:
+
+- **The account in quarantine with `totals_differ`**: on a day of the load, the impressions, link clicks or spend of the campaigns of the account do not add up to the totals of the account, which the load asks Meta for at the level of the account, within 1%, as Meta estimates the spend of each row (G0a of [ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md), `platform_totals_tolerance` of `dbt/dbt_project.yml`). The run of the transform leaves the account out: the core and the marts keep its data as it was, and the card **Accounts in quarantine** of the Ops collection gives the days and the sums of both sides ([Watch the pipeline](watch-the-pipeline.md#when-an-account-is-in-quarantine)). The account comes back with the first load that adds up. When it does not, compare the days with Ads Manager: the share of 1% is not checked on a real account yet, and a day with little spend can differ by more for rounding.
+- **The account in quarantine with `missing_rate`**: the account pays in a currency that the ECB does not publish, so the core has no rate of it into the reporting currency, and the core and the marts keep its data as it was until a source of its rates comes.
 
 Campaign names come from anyone who can edit the account: agoranomos keeps them as data, and an AI client that reads them should treat them so too ([Talk to your data](talk-to-your-data.md)).

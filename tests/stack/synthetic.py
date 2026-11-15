@@ -20,7 +20,7 @@ A profile has a density, the rows of ads a day, over a period that ends yesterda
   the disk of a runner of GitHub.
 
 Each campaign has three conversion actions a day, two of them primary. The accounts spread over the
-four ad platforms of the seed of the base package, and over 40 clients; one in five reports in EUR,
+five ad platforms of the seed of the base package, and over 40 clients; one in five reports in EUR,
 the others in USD, with a rate for each day into the reporting currency of .env. The numbers come
 from the IDs and the day, so the same profile and period give the same rows.
 
@@ -62,7 +62,7 @@ from stack_helpers import REPO_ROOT, load_env, warehouse_output
 MARK = "agoranomos synthetic data: a partition made by tests/stack/synthetic.py"
 # The ad platforms of the seed of the base package (dbt/seeds/seed_ad_platforms.csv), which the
 # views of marts name; the accounts take them in turn.
-PLATFORMS = ("google_ads", "demo_search", "demo_social", "demo_video")
+PLATFORMS = ("google_ads", "meta_ads", "demo_search", "demo_social", "demo_video")
 CLIENTS = 40
 # The conversion actions of each platform: the ID after the prefix, the category, and whether it is
 # primary, with the share of the conversions of a campaign that each takes.

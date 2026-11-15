@@ -114,7 +114,7 @@ where d.status = 'pinned'
 
 {#- The journal of a source, or, while no load has written it, an empty query with its columns
     (relation_or_empty): a deployment without the demo never loads the sources of the demo, and a
-    deployment may never load the rates of the ECB or Google Ads. -#}
+    deployment may never load the rates of the ECB, Google Ads or Meta. -#}
 {% macro newest_load_table(source_name, table_name) -%}
     {{- relation_or_empty(source(source_name, table_name), newest_load_columns()[table_name]) -}}
 {%- endmacro %}
@@ -138,7 +138,8 @@ where d.status = 'pinned'
     the journal names it, and the day as a date. The rates have one account, the base of the
     rates, and their rows none (none): the day alone finds the load. The demo platforms take these
     from airflow/dags/agoranomos_pipelines/demo/platforms.py, and tests/unit/test_dbt_project.py
-    checks that the two agree; Google Ads has the shape of demo_search. -#}
+    checks that the two agree; Google Ads has the shape of demo_search, and Meta that of
+    demo_social, whose date_start the load of Meta also writes as a date. -#}
 {% macro newest_load_sources() -%}
 {{- return({
     'raw_demo_fx': (none, 'r.rate_date'),
@@ -148,6 +149,7 @@ where d.status = 'pinned'
     'raw_demo_web': ("split_part(r.property, '/', 2)", "to_date(r.date, 'YYYYMMDD')"),
     'raw_ecb': (none, 'cast(r.time_period as date)'),
     'raw_google_ads': ('r.customer__id', 'r.segments__date::date'),
+    'raw_meta_ads': ('r.account_id', 'r.date_start'),
 }) -}}
 {%- endmacro %}
 

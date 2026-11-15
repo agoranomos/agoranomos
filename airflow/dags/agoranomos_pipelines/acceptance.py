@@ -131,8 +131,7 @@ ACCOUNTS: dict[str, dict[str, str | None]] = {
         "ad_stats": SEARCH,
         "ad_conversions": SEARCH,
     },
-    # Meta (ADR-0050), in the shape of demo_social, whose staging models C1d of #221 is to add:
-    # until then no pin takes its loads, so the cleanup removes only those that did not end.
+    # Meta (ADR-0050), in the shape of demo_social, with the totals of each account beside it.
     "raw_meta_ads": {
         "ad_accounts": SOCIAL,
         "campaigns": SOCIAL,
@@ -145,8 +144,8 @@ ACCOUNTS: dict[str, dict[str, str | None]] = {
     },
 }
 # The raw schemas that the cleanup names before staging reads them, which
-# tests/unit/test_acceptance.py leaves out of its comparison with the staging models.
-NOT_STAGED_YET = frozenset({"raw_meta_ads"})
+# tests/unit/test_acceptance.py leaves out of its comparison with the staging models: none today.
+NOT_STAGED_YET: frozenset[str] = frozenset()
 
 # The acceptance (ADR-0046). The bound is the newest pin that this run read: the latest pinned_at
 # of the loads of the days of the run. Pins go one after another, so every row pinned at or before

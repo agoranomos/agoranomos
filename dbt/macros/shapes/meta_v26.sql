@@ -2,7 +2,9 @@
     campaigns, ad sets and ads: the lists actions and action_values become the child tables
     <insights>__actions and <insights>__action_values, joined to their row by _dlt_parent_id, with
     the windows of attribution as columns whose names start with an underscore, such as
-    _7d_click (ADR-0025; the windows stay in raw). -#}
+    _7d_click (ADR-0025; the windows stay in raw). The macros serve the demo platform demo_social
+    and the connector of Meta, meta_ads, which calls v27.0, in which no field that they read
+    changed (ADR-0050). Each takes the relation of a raw table and the code of its platform. -#}
 
 {#- The IDs of a row of the insights of a level, campaign, ad_group (an ad set of Meta) or ad, after
     those of the account and the campaign, with the name of the level that the row carried when
@@ -41,6 +43,23 @@ select
     cast(null as numeric(18,6)) as all_conversion_value
 from {{ relation }}
 {%- endcall %}
+{% endmacro %}
+
+{#- The totals of an account by day, from the insights at the level of the account, which Meta
+    sums over every campaign, ad set and ad of the account, active, archived or deleted: the
+    platform side of G0a (ADR-0035, ADR-0050), for the connector of Meta, which reads them in a
+    request of their own; the demo has none. Clicks are the link clicks, as meta_stats takes them.
+    load_id is the load of the row, as core.platform_totals_daily keeps it. -#}
+{% macro meta_totals(relation, platform) %}
+select
+    cast(date_start as date) as report_date,
+    '{{ platform }}' as platform,
+    account_id,
+    {{ to_count('impressions') }} as total_impressions,
+    {{ to_count('inline_link_clicks') }} as total_clicks,
+    {{ to_number('spend') }} as total_spend,
+    _dlt_load_id as load_id
+from {{ relation }}
 {% endmacro %}
 
 {#- Each action of each row, with the count and the value of the default attribution of the

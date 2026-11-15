@@ -86,7 +86,8 @@
     of the decimal places read as they are: each table with the column of its spend as text, and
     whether that spend is in micros, as cost_micros of Google is. A table of conversions or of
     sessions has no spend. The account and the day of a row are those of newest_load_sources. The
-    connector of Google Ads also loads the totals of each account, which demo_search does not. -#}
+    connectors of Google Ads and of Meta also load the totals of each account, which demo_search
+    and demo_social do not. -#}
 {% macro quarantine_raw_tables() -%}
 {%- set google = [
     ('campaign_stats', 'metrics__cost_micros', true),
@@ -118,7 +119,30 @@
         ('ad_conversions', none, false),
         ('customer_stats', 'metrics__cost_micros', true),
     ],
+    'raw_meta_ads': [
+        ('insights_campaign', 'spend', false),
+        ('insights_adset', 'spend', false),
+        ('insights_ad', 'spend', false),
+        ('insights_account', 'spend', false),
+    ],
 }) -}}
+{%- endmacro %}
+
+{#- The columns of the account and the day of the fact tables of a source that is not of the demo,
+    with their types, for the empty query of a table that no load has written yet
+    (relation_or_empty): the columns that newest_load_sources names, and the load. -#}
+{% macro quarantine_raw_keys(source_name) -%}
+{%- set keys = {
+    'raw_google_ads': {'customer__id': 'text', 'segments__date': 'date'},
+    'raw_meta_ads': {'account_id': 'text', 'date_start': 'date'},
+} -%}
+{%- if source_name not in keys -%}
+    {{- exceptions.raise_compiler_error('quarantine_raw_keys knows no source ' ~ source_name) -}}
+{%- endif -%}
+{%- set found = {} -%}
+{%- do found.update(keys[source_name]) -%}
+{%- do found.update({'_dlt_load_id': 'text'}) -%}
+{{- return(found) -}}
 {%- endmacro %}
 
 {#- The columns of the table of the failures, in their order, as each statement inserts them. -#}
@@ -419,9 +443,7 @@ group by f.source, f.account_id, d.load_id, c.reason
     {%- if source_name.startswith('raw_demo_') -%}
         {%- set relation = demo_source(source_name, table) -%}
     {%- else -%}
-        {%- set columns = {
-            'customer__id': 'text', 'segments__date': 'date', '_dlt_load_id': 'text',
-        } -%}
+        {%- set columns = quarantine_raw_keys(source_name) -%}
         {%- if spend is not none -%}
             {%- do columns.update({spend: 'text'}) -%}
         {%- endif -%}

@@ -597,8 +597,9 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
     rows = {r["platform"]: r for r in seed_rows("seed_ad_platforms")}
     from agoranomos_pipelines.demo import platforms
 
-    # And the real sources, which mimic nothing: the rates of the ECB and Google Ads (ADR-0032).
-    assert set(rows) == {*platforms.PLATFORMS, "ecb", "google_ads"}
+    # And the real sources, which mimic nothing: the rates of the ECB, Google Ads (ADR-0032) and
+    # Meta (ADR-0050).
+    assert set(rows) == {*platforms.PLATFORMS, "ecb", "google_ads", "meta_ads"}
     for code, platform in platforms.PLATFORMS.items():
         assert rows[code]["mimics"] == platform.mimics
         assert rows[code]["is_demo"] == "true"
@@ -612,6 +613,13 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
     assert rows["google_ads"] == {
         "platform": "google_ads",
         "platform_name": "Google Ads",
+        "kind": "ads",
+        "mimics": "",
+        "is_demo": "false",
+    }
+    assert rows["meta_ads"] == {
+        "platform": "meta_ads",
+        "platform_name": "Meta Ads",
         "kind": "ads",
         "mimics": "",
         "is_demo": "false",
@@ -1007,7 +1015,13 @@ def test_the_pin_makes_the_partitions_of_the_facts_that_each_source_is_to_write(
     assert {fact for listed in facts.values() for fact in listed} == partitioned
     assert facts["raw_demo_web"] == ["web_sessions_daily"]
     assert facts["raw_demo_fx"] == facts["raw_ecb"] == []
-    for source in ("raw_demo_search", "raw_demo_social", "raw_demo_video", "raw_google_ads"):
+    for source in (
+        "raw_demo_search",
+        "raw_demo_social",
+        "raw_demo_video",
+        "raw_google_ads",
+        "raw_meta_ads",
+    ):
         assert sorted(facts[source]) == sorted(partitioned - {"web_sessions_daily"}), source
     rates = (MIGRATIONS / "0007_create_the_rates.sql").read_text(encoding="utf-8")
     assert "PARTITION BY" not in rates
@@ -1015,7 +1029,8 @@ def test_the_pin_makes_the_partitions_of_the_facts_that_each_source_is_to_write(
 
 def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_does():
     # For the demo, as the fact tables of platforms.py hold them, through which each load records
-    # its windows; Google Ads has the shape of demo_search, and the rates of the ECB, one account.
+    # its windows; Google Ads has the shape of demo_search, Meta that of demo_social, and the rates
+    # of the ECB, one account.
     from agoranomos_pipelines.demo import platforms
 
     text = (DBT / "macros" / "newest_load.sql").read_text(encoding="utf-8")
@@ -1027,6 +1042,7 @@ def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_do
         *(platform.dataset for platform in platforms.PLATFORMS.values()),
         "raw_ecb",
         "raw_google_ads",
+        "raw_meta_ads",
     }
 
     def plain(sql):
@@ -1046,6 +1062,7 @@ def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_do
                 assert prefix.count("/") == 1, platform.code
                 assert account == f"split_part({plain(fact.account_sql)}, '/', 2)", platform.code
     assert keys["raw_google_ads"] == keys["raw_demo_search"]
+    assert keys["raw_meta_ads"] == keys["raw_demo_social"]
     assert keys["raw_ecb"] == (None, "cast(r.time_period as date)")
 
 
@@ -1286,7 +1303,7 @@ def test_the_intermediate_models_have_their_critical_tests():
 
 
 # The ad platforms of the model, whose staging the facts of ads of the core read.
-AD_PLATFORMS = ("demo_search", "demo_social", "demo_video", "google_ads")
+AD_PLATFORMS = ("demo_search", "demo_social", "demo_video", "google_ads", "meta_ads")
 # The tests of the sums of G2: what each compares, the fact of the core, and the staging models.
 G2_SUMS = [
     *(
@@ -1593,6 +1610,200 @@ def test_every_union_of_the_platforms_reads_google_ads_and_the_loads_show_it():
     assert "('raw_google_ads', 'google_ads')," in loads
 
 
+META_ADS = STAGING / "meta_ads"
+# The staging models of Meta, each one call of a macro of the shape that demo_social mimics, over
+# the tables of raw_meta_ads, through relation_or_empty, as the DAG starts paused (ADR-0050), with
+# the level of a report where it is not that of campaigns; the totals of the accounts, which the
+# demo does not have, the connector alone reads.
+META_ADS_MODELS = {
+    **{
+        model: (
+            macro,
+            [table.replace("raw_demo_social", "raw_meta_ads") for table in tables],
+            *level,
+        )
+        for model, (macro, tables, *level) in SHAPED["demo_social"].items()
+    },
+    "account_totals": ("meta_totals", ["insights_account"]),
+}
+
+
+def meta_ads_columns() -> dict[str, set[str]]:
+    """The columns that dlt makes of the fields of each table of the load of Meta, as
+    meta_ads.columns hints them: the business of an account as its ID and name, and no column for
+    the lists of actions, which become child tables. dlt is not in the development environment, so
+    the fields come from the text of the source."""
+    source = ast.parse((DAGS_PIPELINES / "meta_ads.py").read_text(encoding="utf-8"))
+    constants = {
+        node.targets[0].id: node.value
+        for node in source.body
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+    }
+    named = {name: ast.literal_eval(constants[name]) for name in ("STATS", "ACTIONS", "ACCOUNT")}
+
+    def fields(node):
+        found = []
+        for item in node.elts:
+            if isinstance(item, ast.Starred):
+                found += named[item.value.id]
+            else:
+                found.append(ast.literal_eval(item))
+        return found
+
+    tables = {
+        ast.literal_eval(key): fields(value)
+        for key, value in zip(constants["FIELDS"].keys, constants["FIELDS"].values, strict=True)
+    }
+    hinted = {}
+    for table, names in tables.items():
+        columns = set()
+        for name in names:
+            if name in ("actions", "action_values"):
+                continue
+            columns |= {"business__id", "business__name"} if name == "business" else {name}
+        hinted[table] = columns
+    return hinted
+
+
+def test_each_staging_model_of_meta_ads_is_one_call_of_the_shape_that_the_demo_shares():
+    found = {path.name for path in META_ADS.glob("*.sql")}
+    assert found == {f"stg_meta_ads__{model}.sql" for model in META_ADS_MODELS}
+    for model, (macro, tables, *level) in META_ADS_MODELS.items():
+        text = (META_ADS / f"stg_meta_ads__{model}.sql").read_text(encoding="utf-8")
+        assert text.startswith(f"-- stg_meta_ads__{model}.sql: "), model
+        relations = [f"relation_or_empty(source('raw_meta_ads', '{table}'), {{" for table in tables]
+        by_load = model in BY_LOAD
+        reader = "newest_load" if by_load else "newest_list"
+        assert text.count(f"{{{{ {macro}({reader}({relations[0]}") == 1, model
+        loads = "ref('stg_loads__newest_days')" if by_load else "source('core', 'loads')"
+        assert f"}}), 'raw_meta_ads', {loads})" in text, model
+        # The child tables of the actions follow the rows of their insights, in this order.
+        assert [text.index(relation) for relation in relations] == sorted(
+            text.index(relation) for relation in relations
+        ), model
+        assert text.count("relation_or_empty(") == len(tables), model
+        arguments = ", ".join(["'meta_ads'", *(f"'{name}'" for name in level)])
+        assert text.rstrip().endswith(f"), {arguments}) }}}}"), model
+        assert "depends_on" not in text, model
+    macros = (DBT / "macros" / "shapes" / "meta_v26.sql").read_text(encoding="utf-8")
+
+    def shape(name):
+        body = macros[macros.index(f"{{% macro {name}(") :]
+        return body[: body.index("{% endmacro %}")]
+
+    assert "{% macro meta_totals(relation, platform) %}" in macros
+    totals = shape("meta_totals")
+    # The clicks of the totals are the link clicks, as those of the campaigns are.
+    assert "{{ to_count('inline_link_clicks') }} as total_clicks" in totals
+    assert "{{ to_count('inline_link_clicks') }} as clicks" in shape("meta_stats")
+    assert "_dlt_load_id as load_id" in totals
+
+
+def test_the_columns_of_the_empty_tables_of_meta_ads_are_the_fields_of_its_requests():
+    # The empty query of a table before the first load has the columns that dlt makes from the
+    # fields of its request, with the load and the ID of each row, which the actions join; a child
+    # table of actions has the columns that the macros read.
+    hinted = meta_ads_columns()
+    child = {"action_type", "value", "_dlt_parent_id", "_dlt_id"}
+    for model, (_, tables, *_) in META_ADS_MODELS.items():
+        text = (META_ADS / f"stg_meta_ads__{model}.sql").read_text(encoding="utf-8")
+        for table in tables:
+            start = text.index(f"relation_or_empty(source('raw_meta_ads', '{table}'), {{")
+            body = text[start : text.index("})", start)]
+            columns = set(re.findall(r"'(\w+)': '[\w ]+'", body))
+            wanted = child if "__" in table else hinted[table] | {"_dlt_load_id", "_dlt_id"}
+            assert columns == wanted, (model, table, sorted(columns ^ wanted))
+            assert ("'date_start': 'date'" in body) is ("date_start" in wanted), (model, table)
+
+
+def test_the_staging_of_meta_ads_has_the_tests_of_the_staging_of_demo_social():
+    # The same macros give the same columns, and the same critical tests guard both. The totals of
+    # the accounts, which the demo does not have, come last.
+    demo = (STAGING / "demo_social" / "_demo_social__models.yml").read_text(encoding="utf-8")
+    text = (META_ADS / "_meta_ads__models.yml").read_text(encoding="utf-8")
+    ads, totals = text.split("  - name: stg_meta_ads__account_totals\n")
+    tested = {
+        name: column_tests(column)
+        for name, column in blocks("    columns:\n" + totals.split("    columns:\n")[1], 6).items()
+    }
+    assert {name for name, tests in tested.items() if tests} == set(STATS_KEY[:3])
+
+    def tests(text):
+        return [
+            line
+            for line in text.replace("demo_social", "meta_ads").splitlines()
+            if "description" not in line and not line.startswith("      ")
+        ]
+
+    assert [
+        b.split("    data_tests:", 1)[1].split("  - name:", 1)[0]
+        for b in ads.split("  - name: stg_")[1:]
+    ] == [
+        b.split("    data_tests:", 1)[1].split("  - name:", 1)[0]
+        for b in demo.replace("demo_social", "meta_ads").split("  - name: stg_")[1:]
+    ]
+    assert tests(ads) == tests(demo)
+
+
+def test_the_sources_of_meta_ads_are_the_tables_that_its_load_writes():
+    # The tables of demo_social with the totals of the account, the child tables of the actions
+    # of each level of insights, the journal and the loads of dlt.
+    text = (META_ADS / "_meta_ads__sources.yml").read_text(encoding="utf-8")
+    [source] = re.findall(r"^  - name: (\w+)\n    description:", text, flags=re.MULTILINE)
+    assert source == "raw_meta_ads"
+    assert re.search(r"^    schema: raw_meta_ads$", text, flags=re.MULTILINE)
+    pattern = r"^      - name: (\w+)\n        description:"
+    demo = (STAGING / "demo_social" / "_demo_social__sources.yml").read_text(encoding="utf-8")
+    assert set(re.findall(pattern, text, flags=re.MULTILINE)) == {
+        *re.findall(pattern, demo, flags=re.MULTILINE),
+        "insights_account",
+    }
+    assert set(meta_ads_columns()) <= set(re.findall(pattern, text, flags=re.MULTILINE))
+
+
+def test_every_union_of_the_platforms_reads_meta_ads_and_the_loads_show_it():
+    unions = {
+        "int_conversion_actions__resolved": ["stg_meta_ads__campaign_conversions"],
+        "int_accounts__current": ["stg_meta_ads__accounts", "stg_meta_ads__campaign_stats"],
+        "int_campaigns__current": ["stg_meta_ads__campaigns", "stg_meta_ads__campaign_stats"],
+        "int_ad_groups__current": ["stg_meta_ads__ad_groups", "stg_meta_ads__ad_group_stats"],
+        "int_ads__current": ["stg_meta_ads__ads", "stg_meta_ads__ad_stats"],
+    }
+    for model, staged in unions.items():
+        text = (INTERMEDIATE / f"{model}.sql").read_text(encoding="utf-8")
+        for name in staged:
+            assert f"from {{{{ ref('{name}') }}}}" in text, (model, name)
+        if model != "int_conversion_actions__resolved" and model != "int_accounts__current":
+            assert "{{ newest_lists('raw_meta_ads', source('core', 'loads')) }}" in text, model
+    totals = (DBT / "models" / "core" / "platform_totals_daily.sql").read_text(encoding="utf-8")
+    assert "from {{ ref('stg_meta_ads__account_totals') }}" in totals
+    loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
+    assert "('raw_meta_ads', 'meta_ads')," in loads
+
+
+def test_the_action_types_of_meta_ads_count_a_purchase_once():
+    # ADR-0050: the action types of the seed come from the reference of AdsActionStats; the
+    # purchases and the leads of the pixel are primary, and the grouped types that count the same
+    # actions again are not, as for demo_social.
+    rows = [r for r in seed_rows("seed_conversion_actions") if r["platform"] == "meta_ads"]
+    primary = {r["conversion_action_id"] for r in rows if r["is_primary"] == "true"}
+    assert primary == {
+        "offsite_conversion.fb_pixel_purchase",
+        "offsite_conversion.fb_pixel_lead",
+    }
+    found = {r["conversion_action_id"]: r["conversion_category"] for r in rows}
+    for grouped in ("omni_purchase", "lead", "onsite_conversion.lead_grouped"):
+        assert grouped in found, grouped
+        assert grouped not in primary, grouped
+    demo = {
+        r["conversion_action_id"]: (r["conversion_category"], r["is_primary"])
+        for r in seed_rows("seed_conversion_actions")
+        if r["platform"] == "demo_social"
+    }
+    meta = {r["conversion_action_id"]: (r["conversion_category"], r["is_primary"]) for r in rows}
+    assert {action: meta[action] for action in demo} == demo
+
+
 PROJECT_FILE = DBT / "dbt_project.yml"
 SNAPSHOTS = DBT / "snapshots"
 SNAPSHOTS_FILE = SNAPSHOTS / "_snapshots.yml"
@@ -1664,7 +1875,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 319, counted
+    assert counted == 362, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text
@@ -1921,7 +2132,7 @@ def test_the_views_of_the_core_take_their_accounts_from_one_place():
         assert "join {{ ref('dim_account') }} as d" in text, view
         # The accounts whose newest list this run reads, of every platform of the ads, and the
         # entities of the core that such a list no longer names (ADR-0036).
-        for source in ("raw_demo_search", "raw_demo_social", "raw_demo_video", "raw_google_ads"):
+        for source in (*(f"raw_{code}" for code in SHAPED_ADS), "raw_google_ads", "raw_meta_ads"):
             assert f"{{{{ newest_lists('{source}', source('core', 'loads')) }}}}" in text, view
         assert f"from {{{{ source('core', '{dimension}') }}}} as k" in text, view
         assert "when l.account_id is not null then false" in text, view
@@ -2120,7 +2331,7 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
     for statement, kind in zip(by_kind, kinds, strict=True):
         assert statement.count("quarantine_insert(this, quarantine_attributed(") == 1, kind
         assert f"quarantine_fact_findings('{kind}', [" in statement, kind
-        codes = ["demo_web"] if kind == "sessions_daily" else [*SHAPED_ADS, "google_ads"]
+        codes = ["demo_web"] if kind == "sessions_daily" else [*SHAPED_ADS, *REAL_ADS]
         read = re.findall(r"ref\('(stg_\w+)'\)", statement)
         assert read == [*(f"stg_{code}__{kind}" for code in codes), *["stg_loads__newest_days"] * 2]
     raw, totals, collapse, sessions, rates, stop = statements[len(kinds) : -1]
@@ -2128,7 +2339,8 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
     assert raw.count("quarantine_insert(") == 1
     assert (
         "quarantine_totals_findings([(ref('stg_google_ads__campaign_stats'), "
-        "ref('stg_google_ads__account_totals'))], ref('stg_loads__newest_days'))"
+        "ref('stg_google_ads__account_totals')), (ref('stg_meta_ads__campaign_stats'), "
+        "ref('stg_meta_ads__account_totals'))], ref('stg_loads__newest_days'))"
     ) in totals
     assert "quarantine_collapse_findings([" in collapse
     assert "source('core', 'dim_account'), source('core', 'ad_stats_campaign_daily'))" in collapse
@@ -2160,8 +2372,9 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
     assert "-- depends_on: {{ source('core', 'fx_rates_daily') }}" in model
 
 
-# The ad platforms of the demo.
+# The ad platforms of the demo, and the real ones.
 SHAPED_ADS = ["demo_search", "demo_social", "demo_video"]
+REAL_ADS = ["google_ads", "meta_ads"]
 
 
 def test_g1_reads_the_fact_tables_of_raw_of_each_source_that_names_an_account():
@@ -2184,11 +2397,15 @@ def test_g1_reads_the_fact_tables_of_raw_of_each_source_that_names_an_account():
         assert [table for table, _, _ in tables[dataset]] == [
             fact.table for fact in platforms.PLATFORMS[code].facts
         ], code
-    # The connector of Google Ads also loads the totals of each account, which demo_search does
-    # not.
+    # The connectors of Google Ads and of Meta also load the totals of each account, which
+    # demo_search and demo_social do not.
     assert tables["raw_google_ads"] == [
         *tables["raw_demo_search"],
         ("customer_stats", "metrics__cost_micros", True),
+    ]
+    assert tables["raw_meta_ads"] == [
+        *tables["raw_demo_social"],
+        ("insights_account", "spend", False),
     ]
     # The spend of each table, as the shape of its platform reads it.
     shapes = {
@@ -2196,6 +2413,7 @@ def test_g1_reads_the_fact_tables_of_raw_of_each_source_that_names_an_account():
         "raw_demo_social": "meta_v26.sql",
         "raw_demo_video": "tiktok_v1_3.sql",
         "raw_google_ads": "google_ads_v25.sql",
+        "raw_meta_ads": "meta_v26.sql",
     }
     for dataset, shape in shapes.items():
         text = (DBT / "macros" / "shapes" / shape).read_text(encoding="utf-8")
@@ -2210,9 +2428,10 @@ def test_g0a_checks_the_campaigns_of_an_account_against_its_totals_on_each_day()
     # ADR-0035: the impressions, clicks and spend of the rows of the campaigns of a load, summed by
     # account and day, against the totals that the platform gives for the account in the same
     # load, a day without a row on one side as zero, within the share of the platform in the vars,
-    # zero for Google; a load with no totals at all, as one of a connector before them, passes.
+    # zero for Google and a hundredth for Meta, whose spend is an estimate on each row (ADR-0050);
+    # a load with no totals at all, as one of a connector before them, passes.
     project = PROJECT_FILE.read_text(encoding="utf-8")
-    assert "\n  platform_totals_tolerance:\n    google_ads: 0\n" in project
+    assert "\n  platform_totals_tolerance:\n    google_ads: 0\n    meta_ads: 0.01\n" in project
     text = macro_text("quarantine_totals_findings")
     assert "{%- set tolerances = var('platform_totals_tolerance', {}) -%}" in text
     assert "when w.source = '{{ platform }}' then {{ share | float }}" in text
