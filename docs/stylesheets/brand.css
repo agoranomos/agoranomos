@@ -554,6 +554,15 @@ body {
     box-shadow: inset -1px 0 0 var(--ag-rule);
   }
 
+  /*
+    The sidebar sticks, so it is positioned, and the column a window high that it draws would lie
+    over the left of the footer at the end of a page. The footer is positioned above it.
+  */
+  .md-footer {
+    position: relative;
+    z-index: 1;
+  }
+
   .md-sidebar--secondary {
     padding-top: 1.6rem;
   }
