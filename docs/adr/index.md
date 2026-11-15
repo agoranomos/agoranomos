@@ -96,3 +96,4 @@ agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0047](0047-leave-amcheck-out-of-the-maintenance.md) | Leave amcheck out of the maintenance of the warehouse | accepted | 2026-11-10 |
 | [0048](0048-count-the-one-shot-jobs-that-can-run-at-the-same-time.md) | Count the one-shot jobs that can run at the same time in the memory budget | accepted | 2026-11-10 |
 | [0049](0049-keep-jit-off-for-the-transform-at-the-limit-of-one-server.md) | Keep JIT off for the transform at the limit of one server | accepted | 2026-11-12 |
+| [0051](0051-take-the-current-day-as-a-load-of-the-kind-intraday.md) | Take the current day as a load of the kind intraday in the one transform | proposed | 2026-11-14 |
