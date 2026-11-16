@@ -143,6 +143,7 @@ select pg_advisory_unlock_shared({{ marts_init_lock() }})
         'ad_conversions_campaign_daily',
     ] -%}
 {{- return({
+    'raw_bank_of_italy': [],
     'raw_demo_fx': [],
     'raw_demo_search': ads,
     'raw_demo_social': ads,

@@ -374,7 +374,7 @@ The value of one unit of currency in reporting_currency on the day, through the 
 {% enddocs %}
 
 {% docs rate_source %}
-Where the rate comes from: the code of the source of the rates, ecb for the European Central Bank or demo_fx for the demo, or identity where the two currencies are one.
+Where the rate comes from: the code of the source of the rates, ecb for the European Central Bank or demo_fx for the demo, or identity where the two currencies are one. In staging, bank_of_italy is the Bank of Italy, whose rates the core does not take yet.
 {% enddocs %}
 
 {% docs is_carried_forward %}
