@@ -931,14 +931,18 @@ def test_the_rates_in_tenge_take_the_nbk_then_the_bank_of_italy(env, chain):
 def test_the_rates_held_from_the_ecb_keep_their_source_under_a_history_of_the_bank(env, chain):
     # The decision of 16 November 2026: a row that the core holds from the ECB, as on a deployment
     # of v0.5, keeps its source when the first load of the Bank of Italy, a load of the history,
-    # brings the same day, and that load fills only what the core lacks, such as ARS.
+    # brings the same day, and that load fills only what the core lacks, such as ARS. The load of
+    # the ECB that this run reads starts on 10 November: the core accepted the ECB of 6 November in
+    # a run before, and the raw layer no longer holds it (ADR-0035). A load that read the day would
+    # bring its rates, and a day that it reads without a rate has no publication.
     parsed, _ = chain
     pound = euros(parsed, "GBP", "2026-11-06")
     held = [
+        "DELETE FROM staging.stg_loads__newest_days WHERE source = 'ecb' AND day < '2026-11-10'",
         "INSERT INTO core.fx_rates_daily (rate_date, currency, reporting_currency, "  # noqa: S608 (a rate of a recorded answer)
         "rate_into_reporting_currency, base_currency, base_rate, rate_source, published_on, "
         f"is_carried_forward) VALUES ('2026-11-06', 'GBP', 'EUR', 1 / {pound}, 'EUR', {pound}, "
-        "'ecb', '2026-11-06', false)"
+        "'ecb', '2026-11-06', false)",
     ]
     rows = chain_rows(env, chain, "EUR", held)
     kept = rows.get(("GBP", "2026-11-06"))

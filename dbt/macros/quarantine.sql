@@ -9,7 +9,7 @@
 {#- The reasons of quarantine, as codes, in the order of the checks: the newest pinned load of the
     account failed for it; the loads name an account that no list gives; two rows share a key, or
     a list gives the account twice; a row misses a part of its key; the currency of the account is
-    not one of ISO 4217; its time zone is not one of IANA; the source of the rates has no rate of
+    not one of ISO 4217; its time zone is not one of IANA; no source of the rates has a rate of
     its currency into the reporting currency (ADR-0042); a spend has more than six decimal places;
     a measure is missing or below zero; a load holds rows outside its window; the rows of the
     campaigns of a load do not add up to the totals of the account that the platform gives in the
@@ -340,7 +340,7 @@ select distinct
     'missing_rate'::text as reason,
     'rates'::text as checked,
     'no rate of ' || l.currency || ' into ' || {{ reporting_currency() }}
-        || ' from the sources of the rates, ' || '{{ rates_chain() | join(", ") }}' as detail
+        || ' from ' || {{ rates_named(staged, rates) }} as detail
 from listed as l
 join named as n
     on n.source = l.source and n.account_id = l.account_id

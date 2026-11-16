@@ -35,6 +35,24 @@
     {{- return(chains[setting]) -}}
 {%- endmacro %}
 
+{#- The sources of the rates as the check of the rates names them (quarantine.sql), as SQL text: the
+    order of AGORANOMOS_RATES_SOURCE, or demo_fx while no source of the order has a rate, neither in
+    its staging model nor in core.fx_rates_daily, as in the demo, which then serves (rates_known).
+    staged maps the code of each source to its staging model, rates is core.fx_rates_daily. -#}
+{% macro rates_named(staged, rates) -%}
+    {%- set chain = rates_chain() -%}
+    {%- set named = ('the sources of the rates, ' if chain | length > 1 else 'the source of the rates, ') ~ chain | join(', ') -%}
+(case
+    when
+        {%- for code in chain %}
+        {% if not loop.first %}or {% endif %}exists (select from {{ staged[code] }})
+        {%- endfor %}
+        or exists (select from {{ rates }} where rate_source in ('{{ chain | join("', '") }}'))
+        then '{{ named }}'
+    else 'the source of the rates, demo_fx'
+end)
+{%- endmacro %}
+
 {#- The base currency of a source of the rates, against which it publishes them: the tenge for the
     National Bank of Kazakhstan, the euro for the others. -#}
 {% macro rates_base(code) -%}
