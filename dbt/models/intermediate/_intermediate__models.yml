@@ -324,9 +324,10 @@ models:
       The days of the windows that this run of the transform writes into the facts of the core
       (ADR-0038): one row for each account of the ad platforms or property of web analytics and
       each day of the loads that the run pinned, with the newest load that covers the day, the
-      surrogate and the currency of the account, and the surrogate and the ID of the load. A model of
-      a fact replaces each day whole: the rows of its load go in, and a day on which the load holds no row
-      is emptied. An account that the checks of this run hold, in int_g1_failures, has no row here,
+      surrogate and the currency of the account, the surrogate and the ID of the load, and whether
+      the day is partial, as a load of the kind intraday took it (ADR-0051). A model of a fact
+      replaces each day whole: the rows of its load go in, and a day on which the load holds no row
+      is emptied; a partial day is a day of the fact of campaigns only. An account that the checks of this run hold, in int_g1_failures, has no row here,
       so that every fact keeps its days. A table that each run fills anew. account_sk and
       report_date are its key. Its tests guard the core: when one of them fails, dbt does not build
       the facts.
@@ -350,5 +351,7 @@ models:
         description: '{{ doc("load_sk") }}'
       - name: load_id
         description: '{{ doc("load_id") }}'
+      - name: is_partial_day
+        description: '{{ doc("is_partial_day") }}'
       - name: day_key
         description: '{{ doc("day_key") }}'

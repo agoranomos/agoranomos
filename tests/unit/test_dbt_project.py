@@ -910,13 +910,28 @@ def test_staging_reads_the_newest_pinned_load_of_each_account_and_day():
     assert "where a.source = '{{ source }}' and a.status = 'accepted' and a.outcome = 'loaded'" in (
         pinned
     )
-    assert "on oldest.account_id = a.account_id and a.load_id::numeric > oldest.load_number" in (
-        pinned
-    )
+    # Of one rank, whole or intraday, the accepted loads newer than the oldest pinned one count;
+    # an accepted whole load counts on the days of a pinned intraday load whatever their load IDs
+    # (ADR-0051).
+    assert (
+        "on oldest.account_id = a.account_id and oldest.is_intraday = (a.kind = 'intraday')\n"
+        "            and a.load_id::numeric > oldest.load_number"
+    ) in pinned
     assert "min(load_id::numeric) as load_number" in pinned
+    assert "group by account_id, kind = 'intraday'" in pinned
+    assert (
+        "            a.account_id, a.load_id, a.kind, greatest(a.window_from, i.window_from),\n"
+        "            least(a.window_to, i.window_to), a.status\n"
+    ) in pinned
+    assert "and i.status = 'pinned' and i.outcome = 'loaded' and i.kind = 'intraday'" in pinned
     assert "select distinct on (l.account_id, w.day)" in pinned
-    assert "order by l.account_id, w.day, l.load_id::numeric desc" in pinned
+    # A whole load before an intraday one, and then the largest load ID.
+    assert "order by l.account_id, w.day, l.kind = 'intraday', l.load_id::numeric desc" in pinned
     assert pinned.rstrip().endswith("where d.status = 'pinned'")
+    # The lists leave out the loads of the kind intraday, which take none.
+    lists = text[text.index("{% macro newest_lists(") :]
+    lists = lists[: lists.index("{%- endmacro %}")]
+    assert lists.count("kind <> 'intraday'") == 2
     # The pin is the one thing that reads the raw journals and _dlt_loads to choose loads.
     assert "_dlt_loads" not in pinned
     assert "_agoranomos_loads" not in pinned
@@ -967,10 +982,10 @@ def test_the_pin_copies_each_whole_load_once_and_skips_a_source_without_tables()
         "invocation_id,\n    kind\n"
     ) in text
     assert "    l.inserted_at, '{{ invocation_id }}'::uuid,\n" in text
-    # The kind of the load, window or history (ADR-0038), from a journal that has the column, and
-    # window from one that does not, or from a row without it.
+    # The kind of the load, window, history (ADR-0038) or intraday (ADR-0051), from a journal that
+    # has the column, and window from one that does not, or from a row without it or with another.
     assert (
-        "{% if kinds %}case when j.kind = 'history' then 'history' else 'window' end"
+        "{% if kinds %}case when j.kind in ('history', 'intraday') then j.kind else 'window' end"
         "{% else %}'window'{% endif %}"
     ) in text
     assert "adapter.get_columns_in_relation(journal)" in text
@@ -1962,7 +1977,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 371, counted
+    assert counted == 372, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text
@@ -2067,23 +2082,36 @@ FACT_CREATE = re.compile(
     flags=re.M | re.S,
 )
 FACT_COLUMN = re.compile(r"^  (\w+) ([a-z]+(?:\(\d+(?:,\d+)?\))?)")
+# A column that a later migration adds to a table, as the core changes by addition (ADR-0044).
+ADD_COLUMN = re.compile(
+    r"^ALTER TABLE core\.(\w+)\n  ADD COLUMN (\w+) ([a-z]+(?:\(\d+(?:,\d+)?\))?)", flags=re.M
+)
 
 
 def fact_tables() -> dict[str, dict]:
-    """The facts of the core, as migration 0005 creates them: for each, its columns in order with
-    their types, without a collation, and the comments of the table and of its columns."""
-    text = (MIGRATIONS / "0005_create_the_facts.sql").read_text(encoding="utf-8")
+    """The facts of the core, as migration 0005 creates them and the later migrations add to
+    them: for each, its columns in order with their types, without a collation, and the comments
+    of the table and of its columns, the newest of each."""
     tables: dict[str, dict] = {}
-    for name, body in FACT_CREATE.findall(text):
-        columns = {
-            found.group(1): found.group(2)
-            for found in map(FACT_COLUMN.match, body.splitlines())
-            if found and found.group(1) not in ("PRIMARY", "CHECK", "UNIQUE")
-        }
-        tables[name] = {"columns": list(columns), "types": columns, "comments": {}}
-    for kind, table, column, body in COMMENT.findall(text):
-        if table in tables:
-            tables[table]["comments"][None if kind == "TABLE" else column] = body.replace("''", "'")
+    for path in sorted(MIGRATIONS.glob("*.sql")):
+        if path.name < "0005":
+            continue
+        text = path.read_text(encoding="utf-8")
+        for name, body in FACT_CREATE.findall(text):
+            columns = {
+                found.group(1): found.group(2)
+                for found in map(FACT_COLUMN.match, body.splitlines())
+                if found and found.group(1) not in ("PRIMARY", "CHECK", "UNIQUE")
+            }
+            tables[name] = {"columns": list(columns), "types": columns, "comments": {}}
+        for table, column, data_type in ADD_COLUMN.findall(text):
+            if table in tables:
+                tables[table]["columns"].append(column)
+                tables[table]["types"][column] = data_type
+        for kind, table, column, body in COMMENT.findall(text):
+            if table in tables:
+                comment = body.replace("''", "'")
+                tables[table]["comments"][None if kind == "TABLE" else column] = comment
     return tables
 
 
@@ -2553,7 +2581,8 @@ def test_the_facts_of_statistics_take_all_the_conversions_of_the_platform():
     facts = facts[: facts.index("{%- endmacro %}")]
     assert "cast(r.all_conversions as numeric(18,6)) as all_conversions" in facts
     assert "cast(r.all_conversion_value as numeric(18,6)) as all_conversion_value" in facts
-    assert "\nwhere " not in facts
+    # No row is left out but those of a partial day, which only the campaigns take (ADR-0051).
+    assert re.findall(r"\nwhere .*", facts) == ["\nwhere not d.is_partial_day"]
     google = (DBT / "macros" / "shapes" / "google_ads_v25.sql").read_text(encoding="utf-8")
     stats = google[google.index("{% macro google_ads_stats(") :]
     stats = stats[: stats.index("{% endmacro %}")]
@@ -2665,6 +2694,9 @@ def fact_config(fact: str) -> tuple[str, str]:
     return text[text.index("{{ config(\n") : end], text[end + len("\n) }}\n") :]
 
 
+# The facts whose rows can be of a partial day, of a load of the kind intraday (ADR-0051).
+PARTIAL_DAY_FACTS = {"ad_stats_campaign_daily"}
+
 # The lower bound of the windows of a run, as SQL that PostgreSQL computes when a statement runs.
 WINDOW_START = (
     "(select min(window_from) from core.loads where status = 'pinned' and outcome = 'loaded')"
@@ -2711,9 +2743,11 @@ def test_the_facts_of_the_core_replace_whole_days_of_the_windows():
         wanted.append(("fact_empty_days", f"{rows}, {days}"))
         assert hooks == wanted, fact
         # The grain of the fact: its key between the account and the day, its other IDs and its
-        # measures, which with the currency and the load are its columns, and its journal.
+        # measures, which with the currency and the load are its columns, and its journal; the
+        # facts that take a partial day have its flag too (ADR-0051).
         key, others, measures, journal = grains[fact]
         columns = ["account_sk", *key, *others, "report_date", *measures, "currency", "load_sk"]
+        columns += ["is_partial_day"] if fact in PARTIAL_DAY_FACTS else []
         assert sorted(columns) == sorted(facts[fact]["columns"]), fact
         assert journal is (fact in journals), fact
 
@@ -2737,6 +2771,9 @@ def test_the_rows_of_a_fact_take_the_columns_and_the_types_of_its_table():
         assert f"{{{{ {macro}(" in body, fact
         found = []
         for kind, column in cast.findall(facts_macro(macro)):
+            # The flag of the partial day goes only into the campaigns (ADR-0051).
+            if column == "is_partial_day" and fact not in PARTIAL_DAY_FACTS:
+                continue
             found += [(id_, kind) for id_ in ids] if column == "{{ id }}" else [(column, kind)]
         assert found == list(facts[fact]["types"].items()), fact
         # The rows join the days of the windows on their key of one column.
@@ -2830,3 +2867,56 @@ def test_g2_compares_every_fact_with_staging_and_its_entities_with_their_dimensi
             assert "few_without_a_dimension" not in block, fact
     project = PROJECT_FILE.read_text(encoding="utf-8")
     assert "\n  dimensionless_share: 0.001\n" in project
+
+
+def test_a_partial_day_is_a_day_of_the_campaigns_only_and_no_restatement():
+    # ADR-0051: the day of a load of the kind intraday is partial, a day of the fact of campaigns
+    # alone, whose rows carry the flag; no other fact reads it, so none empties it, and the journal
+    # of restatements skips a partial row that a whole load replaces.
+    days = (INTERMEDIATE / "int_window_days.sql").read_text(encoding="utf-8")
+    assert "    (l.kind = 'intraday')::boolean as is_partial_day,\n" in days
+    assert facts_returned("partial_day_facts") == sorted(PARTIAL_DAY_FACTS)
+    where = facts_macro("fact_days_where")
+    assert "{%- if fact not in partial_day_facts() %} and not is_partial_day{% endif %}" in where
+    assert "where {{ fact_days_where(fact) }}) as days" in facts_macro("fact_days")
+    assert "    where {{ fact_days_where(fact.identifier) }}\n" in facts_macro("fact_sums_differ")
+    stats = facts_macro("fact_stats_rows")
+    assert (
+        "    {%- if level == 'campaign' %},\n"
+        "    cast(d.is_partial_day as boolean) as is_partial_day\n"
+        "    {%- endif %}\n"
+    ) in stats
+    assert "{%- if level != 'campaign' %}\nwhere not d.is_partial_day\n{%- endif %}\n" in stats
+    for macro in ("fact_conversions_rows", "fact_sessions_rows"):
+        assert facts_macro(macro).rstrip().endswith("where not d.is_partial_day"), macro
+    assert (
+        "    {%- if this.identifier in partial_day_facts() %}\n    and not f.is_partial_day\n"
+    ) in facts_macro("fact_restatements")
+
+
+def test_g1a_leaves_out_the_loads_of_the_current_day_and_g0a_checks_only_loads_with_totals():
+    # ADR-0051: G1a skips a load of the kind intraday, and the partial rows of the core do not
+    # count in what it holds; G0a checks a load against the totals of the same load, which a load
+    # of the current day does not bring, so it checks none of them as the code stands.
+    collapse = macro_text("quarantine_collapse_findings")
+    assert "        and kind <> 'intraday'\n),\n\nheld as (" in collapse
+    assert (
+        "        {%- if facts.identifier in partial_day_facts() %}\n"
+        "        and not f.is_partial_day\n        {%- endif %}\n"
+    ) in collapse
+    totals = macro_text("quarantine_totals_findings")
+    assert "join totalled as t\n        on t.source = d.source and t.load_id = d.load_id" in totals
+    assert "kind" not in totals
+    # An intraday load takes no list: an account that a run reads from such loads alone is known
+    # when the core holds it from a list before, and else unknown_account, as any account.
+    accounts = macro_text("quarantine_account_findings")
+    assert (
+        "            d.kind <> 'intraday'\n            or not exists (\n"
+        "                select\n                from {{ accounts }} as k\n"
+        "                where k.platform = d.source and k.account_id = d.account_id "
+        "and not k.is_stub\n"
+    ) in accounts
+    model = G1.read_text(encoding="utf-8")
+    assert (
+        "        source('core', 'loads'),\n        source('core', 'dim_account'),\n    ),\n"
+    ) in model

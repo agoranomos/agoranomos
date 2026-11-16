@@ -50,6 +50,9 @@ CHECKSUMS = {
     "0008_add_the_kind_of_a_load.sql": (
         "8e503096f4274b41140d8f71e691d471cbc39f3a335e063f8501108f36c78d3c"
     ),
+    "0009_add_the_partial_day.sql": (
+        "603f215dfc373b148d7d9a9a7b63115bcb4d3159de30296cfac3b8fb4926189f"
+    ),
 }
 
 
@@ -312,6 +315,26 @@ def test_the_kind_of_a_load_tells_the_usual_window_from_the_history():
         "CHECK (kind IN ('window', 'history'));"
     ) in text
     assert not re.search(r"\b(GRANT|REVOKE)\b", text)
+
+
+def test_the_partial_day_is_a_kind_of_a_load_and_a_flag_of_the_campaigns_only():
+    # ADR-0051: the CHECK of 0008, by the name that PostgreSQL gave it, takes the kind intraday,
+    # and the fact of campaigns alone gets the flag, with a constant default, which PostgreSQL 18
+    # keeps in the catalog without a rewrite of the partitions. The grants of 0005 and 0006 cover
+    # both.
+    text = code(MIGRATIONS / "0009_add_the_partial_day.sql", keep_strings=True)
+    assert statement_starts(MIGRATIONS / "0009_add_the_partial_day.sql")[:3] == [
+        "ALTER TABLE core.loads DROP CONSTRAINT loads_kind_check",
+        "ALTER TABLE core.loads ADD CONSTRAINT loads_kind_check CHECK (kind IN ('', '', ''))",
+        "ALTER TABLE core.ad_stats_campaign_daily ADD COLUMN is_partial_day boolean NOT NULL "
+        "DEFAULT false",
+    ]
+    assert "CHECK (kind IN ('window', 'history', 'intraday'))" in text
+    assert re.findall(r"\bADD COLUMN (\w+)", text) == ["is_partial_day"]
+    assert not re.search(
+        r"\b(GRANT|REVOKE|UPDATE|INSERT|DELETE)\b",
+        code(MIGRATIONS / "0009_add_the_partial_day.sql"),
+    )
 
 
 def test_each_fact_has_the_trigger_of_the_freeze_and_each_journal_has_none():

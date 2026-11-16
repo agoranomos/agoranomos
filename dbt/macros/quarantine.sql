@@ -215,9 +215,13 @@ left join {{ loads }} as l
     it, an account that a list gives twice, a currency outside ISO 4217 or a time zone outside
     IANA, which a cast to char(3) would cut silently in the core (ADR-0038), and an account that
     the pinned loads name and no list gives, which the core cannot convert or place in a day
-    (ADR-0035, "a known account for each fact"). lists are the staging models of the accounts and
-    the properties, each with the column of its account; currencies and time_zones the seeds. -#}
-{% macro quarantine_account_findings(lists, currencies, time_zones, days, loads) -%}
+    (ADR-0035, "a known account for each fact"). A load of the kind intraday takes no list
+    (ADR-0051), so an account that this run reads from such loads alone is known when the core
+    holds it from a list before, as accounts, core.dim_account as the runs before this one left
+    it, says; the dimensions keep what the core holds of it. lists are the staging models of the
+    accounts and the properties, each with the column of its account; currencies and time_zones
+    the seeds. -#}
+{% macro quarantine_account_findings(lists, currencies, time_zones, days, loads, accounts) -%}
 with listed as (
     {%- for relation, account in lists %}
     {%- if not loop.first %}
@@ -254,9 +258,17 @@ newest_pinned as (
 ),
 
 named as (
-    select distinct source, account_id
-    from {{ days }}
-    where source in ('{{ quarantine_sources() | join("', '") }}')
+    select distinct d.source, d.account_id
+    from {{ days }} as d
+    where d.source in ('{{ quarantine_sources() | join("', '") }}')
+        and (
+            d.kind <> 'intraday'
+            or not exists (
+                select
+                from {{ accounts }} as k
+                where k.platform = d.source and k.account_id = d.account_id and not k.is_stub
+            )
+        )
 )
 
 select
@@ -631,7 +643,10 @@ group by source, account_id, load_id
     tables core.dim_account and the fact of the core of that kind as the runs before this one left
     them. The ad platforms compare the spend of the statistics of campaigns, and web analytics,
     which has no spend, the sessions, for an empty window only. The days of the core are bounded by
-    those of the windows, so that PostgreSQL reads only the partitions of the windows. -#}
+    those of the windows, so that PostgreSQL reads only the partitions of the windows. A load of
+    the kind intraday is not checked, and the partial rows of the core do not count in what it
+    holds (ADR-0051): a partial day is below the day that it becomes, so the check would hold an
+    account on the first cycle of each day, and with it every load that the account has pinned. -#}
 {% macro quarantine_collapse_findings(
     relations, days, accounts, facts, measure='spend', checked='campaign_stats',
     account='account_id', fall=true
@@ -640,6 +655,7 @@ with window_days as (
     select source, account_id, day, load_id
     from {{ days }}
     where source in ('{{ quarantine_sources() | join("', '") }}')
+        and kind <> 'intraday'
 ),
 
 held as (
@@ -653,6 +669,9 @@ held as (
         on a.account_sk = f.account_sk
     where f.report_date >= (select min(day) from window_days)
         and f.report_date <= (select max(day) from window_days)
+        {%- if facts.identifier in partial_day_facts() %}
+        and not f.is_partial_day
+        {%- endif %}
     group by a.platform, a.account_id, f.report_date
 ),
 

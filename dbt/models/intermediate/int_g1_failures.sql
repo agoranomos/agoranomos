@@ -85,6 +85,7 @@
         ref('seed_iana_time_zones'),
         ref('stg_loads__newest_days'),
         source('core', 'loads'),
+        source('core', 'dim_account'),
     ),
     ref('stg_loads__newest_days'),
     source('core', 'loads'),

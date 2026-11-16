@@ -429,6 +429,10 @@ The ID of a load, _dlt_load_id of dlt, as core.loads holds it: a time in seconds
 The load that gives the day of the row, load_sk of core.loads: for an account and a day, the newest load that the runs pinned whose window covers the day.
 {% enddocs %}
 
+{% docs is_partial_day %}
+Whether the day is still in progress in its account, as a load of the kind intraday read it at the moment of its load: the impressions, clicks and spend of the campaigns so far, and no conversions, until a load of the kind window or history replaces the day whole (ADR-0051). Only the statistics of campaigns have a partial day.
+{% enddocs %}
+
 {% docs day_key %}
 The source, the account and the day of the row in one text, as source|account_id|the number of days since 1 January 2000, on which the rows of staging join the days of the windows: the planner estimates a join on one column from its statistics.
 {% enddocs %}
