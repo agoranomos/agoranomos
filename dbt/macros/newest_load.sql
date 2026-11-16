@@ -142,6 +142,7 @@ where d.status = 'pinned'
     demo_social, whose date_start the load of Meta also writes as a date. -#}
 {% macro newest_load_sources() -%}
 {{- return({
+    'raw_bank_of_italy': (none, 'cast(r.reference_date as date)'),
     'raw_demo_fx': (none, 'r.rate_date'),
     'raw_demo_search': ('r.customer__id', 'r.segments__date::date'),
     'raw_demo_social': ('r.account_id', 'r.date_start'),

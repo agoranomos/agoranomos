@@ -9,8 +9,9 @@ models:
       tasks of dbt, so the run reads the loads that were whole at its start, and a load that ends
       later waits for the next run. Each run fills the table anew before the staging models of the
       facts. The account is as the journal names it: the ID of a property for demo_web, and EUR,
-      the base of the rates, for demo_fx and ecb. source, account_id and day are its key. Its tests
-      guard the marts: when one of them fails, dbt does not rebuild the models that read this one.
+      the base of the rates, for demo_fx, ecb and bank_of_italy. source, account_id and day are
+      its key. Its tests guard the marts: when one of them fails, dbt does not rebuild the models
+      that read this one.
     data_tests:
       - unique_combination:
           arguments:

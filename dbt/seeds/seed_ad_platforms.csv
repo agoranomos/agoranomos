@@ -1,4 +1,5 @@
 platform,platform_name,kind,mimics,is_demo
+bank_of_italy,Bank of Italy,exchange_rates,,false
 demo_fx,Demo Rates,exchange_rates,a source of euro reference rates,true
 demo_search,Demo Search,ads,Google Ads API v25,true
 demo_social,Demo Social,ads,Meta Marketing API v26.0,true

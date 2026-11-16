@@ -79,6 +79,7 @@ OTHER_QUARANTINE_REASON = "quarantine"
 # ago, so a load that missed one day shows within one to two days. A source of a deployment that
 # this list does not name takes DEFAULT_LAG_DAYS.
 LAG_DAYS = {
+    "bank_of_italy": 1,
     "demo_fx": 1,
     "demo_search": 1,
     "demo_social": 1,

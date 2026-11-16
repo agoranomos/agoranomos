@@ -597,12 +597,19 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
     rows = {r["platform"]: r for r in seed_rows("seed_ad_platforms")}
     from agoranomos_pipelines.demo import platforms
 
-    # And the real sources, which mimic nothing: the rates of the ECB, Google Ads (ADR-0032) and
-    # Meta (ADR-0050).
-    assert set(rows) == {*platforms.PLATFORMS, "ecb", "google_ads", "meta_ads"}
+    # And the real sources, which mimic nothing: the rates of the ECB, Google Ads (ADR-0032), Meta
+    # (ADR-0050) and the rates of the Bank of Italy (ADR-0042).
+    assert set(rows) == {*platforms.PLATFORMS, "bank_of_italy", "ecb", "google_ads", "meta_ads"}
     for code, platform in platforms.PLATFORMS.items():
         assert rows[code]["mimics"] == platform.mimics
         assert rows[code]["is_demo"] == "true"
+    assert rows["bank_of_italy"] == {
+        "platform": "bank_of_italy",
+        "platform_name": "Bank of Italy",
+        "kind": "exchange_rates",
+        "mimics": "",
+        "is_demo": "false",
+    }
     assert rows["ecb"] == {
         "platform": "ecb",
         "platform_name": "European Central Bank",
@@ -1014,7 +1021,7 @@ def test_the_pin_makes_the_partitions_of_the_facts_that_each_source_is_to_write(
     assert len(partitioned) == 5, sorted(partitioned)
     assert {fact for listed in facts.values() for fact in listed} == partitioned
     assert facts["raw_demo_web"] == ["web_sessions_daily"]
-    assert facts["raw_demo_fx"] == facts["raw_ecb"] == []
+    assert facts["raw_demo_fx"] == facts["raw_ecb"] == facts["raw_bank_of_italy"] == []
     for source in (
         "raw_demo_search",
         "raw_demo_social",
@@ -1030,7 +1037,7 @@ def test_the_pin_makes_the_partitions_of_the_facts_that_each_source_is_to_write(
 def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_does():
     # For the demo, as the fact tables of platforms.py hold them, through which each load records
     # its windows; Google Ads has the shape of demo_search, Meta that of demo_social, and the rates
-    # of the ECB, one account.
+    # of the ECB and of the Bank of Italy, one account.
     from agoranomos_pipelines.demo import platforms
 
     text = (DBT / "macros" / "newest_load.sql").read_text(encoding="utf-8")
@@ -1040,6 +1047,7 @@ def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_do
     }
     assert set(keys) == {
         *(platform.dataset for platform in platforms.PLATFORMS.values()),
+        "raw_bank_of_italy",
         "raw_ecb",
         "raw_google_ads",
         "raw_meta_ads",
@@ -1064,6 +1072,7 @@ def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_do
     assert keys["raw_google_ads"] == keys["raw_demo_search"]
     assert keys["raw_meta_ads"] == keys["raw_demo_social"]
     assert keys["raw_ecb"] == (None, "cast(r.time_period as date)")
+    assert keys["raw_bank_of_italy"] == (None, "cast(r.reference_date as date)")
 
 
 def test_every_table_of_the_demo_can_be_missing():
@@ -1456,6 +1465,7 @@ def test_the_rates_take_the_ecb_alone_once_it_has_any_and_the_loads_show_it_befo
     ) in rates
     loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
     assert "('raw_ecb', 'ecb')," in loads
+    assert "('raw_bank_of_italy', 'bank_of_italy')," in loads
 
 
 GOOGLE_ADS = STAGING / "google_ads"
@@ -1875,7 +1885,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 362, counted
+    assert counted == 369, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text
