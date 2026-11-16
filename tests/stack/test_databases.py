@@ -250,6 +250,12 @@ SCHEMA_PRIVILEGES = {
     ("transformer", "raw_ecb_staging"): (False, False),
     ("metabase_reader", "raw_ecb"): (False, False),
     ("metabase_reader", "raw_ecb_staging"): (False, False),
+    ("loader", "raw_bank_of_italy"): (True, True),
+    ("loader", "raw_bank_of_italy_staging"): (True, True),
+    ("transformer", "raw_bank_of_italy"): (True, False),
+    ("transformer", "raw_bank_of_italy_staging"): (False, False),
+    ("metabase_reader", "raw_bank_of_italy"): (False, False),
+    ("metabase_reader", "raw_bank_of_italy_staging"): (False, False),
     ("loader", "raw_google_ads"): (True, True),
     ("loader", "raw_google_ads_staging"): (True, True),
     ("transformer", "raw_google_ads"): (True, False),
@@ -297,6 +303,8 @@ def test_each_schema_of_the_layers_has_its_owner(env):
         "core:migrator",
         "marts:transformer",
         "ops:transformer",
+        "raw_bank_of_italy:loader",
+        "raw_bank_of_italy_staging:loader",
         "raw_demo_fx:loader",
         "raw_demo_fx_staging:loader",
         "raw_demo_search:loader",
@@ -349,6 +357,7 @@ def test_the_default_privileges_are_those_of_the_roles_that_create_the_tables(en
     assert result.returncode == 0, result.stderr
     # Sorted here, as the owners of the schemas are.
     assert sorted(result.stdout.split()) == [
+        "loader:raw_bank_of_italy:r:{transformer=r/loader}",
         "loader:raw_demo_fx:r:{transformer=r/loader}",
         "loader:raw_demo_search:r:{transformer=r/loader}",
         "loader:raw_demo_social:r:{transformer=r/loader}",
