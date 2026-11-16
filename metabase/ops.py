@@ -5,8 +5,9 @@ keeps in the collection agoranomos / Ops as the code says, on every start, with 
 Its questions are native SQL on the views of the schema ops that the transform builds
 (dbt/models/ops): the accounts that the checks of the last run kept out of the core (ADR-0035), the
 last load of each account, the runs of the transform with their models and tests, as the hooks of
-elementary record them, the size of the tables of the warehouse, and how far back the loads of each
-account reach, with the portions of its history (ADR-0038); and on the tables of ops that the DAG
+elementary record them, the size of the tables of the warehouse, how far back the loads of each
+account reach, with the portions of its history (ADR-0038), and how much the platforms change the
+days that the loads replace, by the age of the day (ADR-0036); and on the tables of ops that the DAG
 of maintenance fills and the transform creates (ADR-0039): the disk, the steps of the maintenance,
 and the monthly comparison of the core with the totals of the platforms.
 Metabase reads them as metabase_reader, which may read these views and tables and no table of
@@ -27,7 +28,8 @@ OPS_NAME = "Ops"
 OPS_DESCRIPTION = (
     "The pipeline of agoranomos itself: the accounts in quarantine, the loads of each account, the "
     "runs of the transform with their models and tests, the size of the warehouse, the disk, the "
-    "maintenance of the core, and the history of each account."
+    "maintenance of the core, the history of each account, and how much the platforms change "
+    "recent days."
 )
 PIPELINE = "pipeline"
 PIPELINE_NAME = "Pipeline health"
@@ -36,7 +38,8 @@ PIPELINE_DESCRIPTION = (
     "and why, when each account was last loaded, how the last runs of the transform went, which "
     "models failed and which tests warned or failed, the largest tables of the warehouse, the free "
     "disk, what the daily maintenance did, how the core compares with the totals of the platforms, "
-    "and how far back the loads of each account reach."
+    "how far back the loads of each account reach, and up to which age the platforms still change "
+    "the numbers of a day."
 )
 
 # The types that Metabase 0.64.1 gives the columns of the answers, and the semantic types that it
@@ -46,6 +49,7 @@ PIPELINE_DESCRIPTION = (
 TEXT = ("type/Text", "text")
 VARCHAR = ("type/Text", "varchar")
 COUNT = ("type/BigInteger", "int8")
+INTEGER = ("type/Integer", "int4")
 NUMBER = ("type/Decimal", "numeric")
 MOMENT = ("type/DateTimeWithLocalTZ", "timestamptz")
 COLUMN_TYPES = {
@@ -102,6 +106,9 @@ COLUMN_TYPES = {
     "first_day_loaded": ("type/Date", "date"),
     "portions": COUNT,
     "last_portion_at": MOMENT,
+    "age_days": INTEGER,
+    "series_name": TEXT,
+    "pct_of_day": NUMBER,
 }
 SEMANTIC_TYPES = {
     "started_at": "type/CreationTimestamp",
@@ -165,6 +172,9 @@ TITLES = {
     "first_day_loaded": "First Day Loaded",
     "portions": "Portions of History",
     "last_portion_at": "Last Portion",
+    "age_days": "Age of the Day (Days)",
+    "series_name": "Series",
+    "pct_of_day": "Share, %",
 }
 # The columns shown with one decimal; the others as Metabase shows them.
 ONE_DECIMAL = frozenset(
@@ -567,12 +577,46 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         ),
         "layout": {"row": 57, "col": 0, "size_x": 24, "size_y": 6},
     },
+    {
+        "key": "restatements",
+        "name": "Restatements by age of the day",
+        "description": (
+            "How much the daily loads of the last 35 days changed the days that they replaced, by "
+            "the age of the day, for each platform, in percent: the share of the days of an "
+            "account that changed, and how far the spend and the conversions of a day moved on "
+            "average. The age at which the lines of a platform reach 0 is the age after which its "
+            "numbers no longer change (ADR-0036)."
+        ),
+        "display": "line",
+        "columns": ("age_days", "series_name", "pct_of_day"),
+        "visualization_settings": {
+            "graph.dimensions": ["age_days", "series_name"],
+            "graph.metrics": ["pct_of_day"],
+        },
+        "query": sql(
+            "SELECT",
+            "    r.age_days,",
+            "    r.platform || ': ' || s.measure AS series_name,",
+            "    round(100 * s.share, 2) AS pct_of_day",
+            "FROM ops.ops_restatements AS r",
+            "CROSS JOIN LATERAL (VALUES",
+            "    ('days changed', r.changed_days_share),",
+            "    ('spend', r.spend_shift),",
+            "    ('conversions', r.conversions_shift)",
+            ") AS s (measure, share)",
+            "WHERE r.load_kind = 'window'",
+            "ORDER BY r.age_days, series_name",
+        ),
+        "layout": {"row": 63, "col": 0, "size_x": 24, "size_y": 7},
+    },
 )
 
 
 def visualization_settings(question: Mapping[str, Any]) -> dict[str, Any]:
     """The settings of a question: the title of each of its columns, one decimal where ONE_DECIMAL
-    says, and for a chart the titles of its axes and the color of its series."""
+    says, and for a chart the titles of its axes and, with one series, its color: a chart with a
+    breakout, a second dimension, has a series for each of its values, in the colors of
+    Metabase."""
     settings = dict(question.get("visualization_settings", {}))
     columns = {}
     for name in question["columns"]:
@@ -582,11 +626,12 @@ def visualization_settings(question: Mapping[str, Any]) -> dict[str, Any]:
         columns[content.column_key(name)] = shown
     settings["column_settings"] = columns
     if "graph.dimensions" in settings:
-        [dimension] = settings["graph.dimensions"]
+        dimension, *breakout = settings["graph.dimensions"]
         [metric] = settings["graph.metrics"]
         for key, name in zip(content.AXIS_TITLES, (dimension, metric), strict=True):
             settings[key] = TITLES[name]
-        settings["series_settings"] = {metric: {"color": content.SERIES_COLOR}}
+        if not breakout:
+            settings["series_settings"] = {metric: {"color": content.SERIES_COLOR}}
     return settings
 
 

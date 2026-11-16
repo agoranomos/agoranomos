@@ -90,6 +90,80 @@ models:
         description: >-
           When the newest load of the kind history of the account ended, with its time zone; none
           while its history has not started.
+  - name: ops_restatements
+    description: >-
+      How much the platforms changed the days that their loads replaced in the last 35 days, one
+      row for each platform, kind of the replacing load and age of the day (ADR-0036, ADR-0038),
+      from the journal of restatements of the campaigns, core.ad_stats_campaign_daily_restatements,
+      and the loads that the core accepted, core.loads: how many days of an account the loads
+      replaced, how many of them and of their rows of campaigns changed or vanished, and how far
+      the spend and the conversions of a day moved. A day counts as replaced where a load that the
+      core accepted before had taken it, so a day that a load took for the first time, such as
+      yesterday in a daily load, is new and not counted, and the first load of an account counts
+      none. The journal keeps the rows that a load changed or removed and not the rows that it
+      added to a day, so a day whose only change is a new row of a campaign counts as unchanged.
+      The age at which the shares fall to 0 is the age after which the numbers of a day no longer
+      change. The Ops collection of Metabase shows it.
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: load_kind
+        description: >-
+          The kind of the loads that replaced the days, as core.loads has it: window for the usual
+          window of an account, which a daily load takes, history for a load of the days before it.
+      - name: age_days
+        description: >-
+          How old a day was when a load replaced it: the day on which the load ended, in the time
+          zone of the account, minus the day of the statistics; 1 for yesterday.
+      - name: replaced_days
+        description: >-
+          How many days of an account of the platform at this age the loads replaced, counted once
+          for each load: the days of their windows that a load accepted before had taken, on which
+          the fact of the campaigns holds rows of the account now or the journal names a row that
+          the load changed or removed.
+      - name: changed_days
+        description: >-
+          How many of those days of an account had at least one row of a campaign that the
+          replacing load changed or removed.
+      - name: changed_days_share
+        description: >-
+          changed_days divided by replaced_days, from 0 to 1, to six decimal places: exact, as each
+          replacement of a day counts once.
+      - name: changed_rows
+        description: >-
+          How many rows of campaigns on those days the replacing loads changed and kept, with other
+          values of a measure or of the currency.
+      - name: vanished_rows
+        description: >-
+          How many rows of campaigns on those days the replacing loads removed, as the platform no
+          longer reported them.
+      - name: changed_rows_share
+        description: >-
+          changed_rows and vanished_rows together divided by the rows of campaigns that the fact
+          holds on those days now, to six decimal places: close but not exact, as a day that loads
+          replaced more than once, or whose rows vanished, held another number of rows at each
+          replacement. None when the fact holds no row on them.
+      - name: spend_shift
+        description: >-
+          How far a replacement moved the spend of a day, on average: for each replaced day of an
+          account, the absolute change of the spend of its campaigns, new minus old, divided by
+          their spend now, averaged over the replaced days, 0 for a day that did not change, to six
+          decimal places. A share and not an amount, as the accounts have their own currencies; a
+          day whose spend is 0 now is left out of the average.
+      - name: conversions_shift
+        description: >-
+          How far a replacement moved the conversions of a day, on average, as spend_shift for the
+          spend: the absolute change of the conversions of the campaigns of an account, the metric
+          of the platform, divided by their conversions now, averaged over the replaced days; a day
+          with no conversions now is left out of the average.
+      - name: reporting_currency
+        description: '{{ doc("reporting_currency") }}'
+      - name: spend_change_reporting
+        description: >-
+          The sum of the changes of the spend of the campaigns on those days, new minus old, each
+          in the reporting currency at the rate of its day: negative when the platforms lowered
+          the spend, and 0 when no row changed. A change in a currency of which the core holds no
+          rate on its day is left out.
   - name: ops_transform_nodes
     description: >-
       Each model, seed, snapshot and test of the dbt project in each run of dbt that the hooks of
