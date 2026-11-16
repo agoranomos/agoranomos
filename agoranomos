@@ -1975,7 +1975,8 @@ rate_dag() {
 # currency and how many business days ago, with a warning when that is more than 3, as the view
 # ops.ops_rates says, and the DAG of the loads of the source; that the first source of the order
 # has no rate in the core yet, as before the first load of the Bank of Italy on a deployment of
-# v0.5; or that the core holds none yet; and a warning when days of the facts have no rate into
+# v0.5, or that the demo has none into the reporting currency, as after a change of it on the demo
+# stack; or that the core holds none yet; and a warning when days of the facts have no rate into
 # the reporting currency, as after a change of it, which the next load of the rates takes again.
 rates_summary() {
   case "$1" in
@@ -1997,6 +1998,8 @@ rates_summary() {
     rates_currency=$rate_currency rates_gap_day=$rate_gap_day rates_gap_days=$rate_gap_days
     if [ -z "$rate_source" ]; then
       say "Rates: the core holds no rate that a source published, so only the accounts in the reporting currency enter it (ADR-0042)."
+    elif [ -z "$rate_day" ] && [ "$rate_source" = demo_fx ]; then
+      say "Rates: the core holds no rate of demo_fx into $rate_currency yet (ADR-0042)."
     elif [ -z "$rate_day" ]; then
       say "Rates: the core holds no rate of $rate_source into $rate_currency yet, the first source of AGORANOMOS_RATES_SOURCE: unpause $(rate_dag "$rate_source") in Airflow (ADR-0042)."
     else

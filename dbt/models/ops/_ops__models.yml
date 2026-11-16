@@ -29,7 +29,8 @@ models:
       The rates of the core into the reporting currency, one row for each source of the rates
       (ADR-0042): those of the order of AGORANOMOS_RATES_SOURCE whose rates core.fx_rates_daily
       holds, and the first source of the order, also before its first rate; without a rate of any
-      of them, the demo once the core holds one of it, or one row without a source. The age of the
+      of them, the demo once the core holds one of it; each source whose currencies lack a rate;
+      or one row without a source. The age of the
       last rate that the source published, as the core holds it, of a currency or of the second leg
       of a rate: the day of the last rate, how many business days, Monday to Friday, have passed
       since that day up to the day on which the view is read, and whether that is more than 3. The
@@ -40,8 +41,10 @@ models:
       the accounts of each currency but the reporting currency, the days on which the core holds no
       rate of the currency into the reporting currency, as after a change of the reporting currency
       to one whose older rates the core cannot take from its own rows, the first of them and how
-      many, of all the currencies on every row, and of those of the source of the row. The next
-      load of that source takes their history again. ./agoranomos status warns when a rate is late,
+      many, of all the currencies on every row, and of those of the source of the row. A currency
+      without a rate belongs to the first source of the order, or to the demo while the core holds
+      a rate of it and none of a source of the order, in any reporting currency. The next load of
+      that source takes their history again. ./agoranomos status warns when a rate is late,
       and when a day has no rate.
     columns:
       - name: reporting_currency

@@ -3,7 +3,8 @@
 -- (agoranomos_pipelines/rates.py). The sources are those of the order of AGORANOMOS_RATES_SOURCE
 -- (rates_chain) whose rates the core holds, and the first of them, also before its first rate, as
 -- on a deployment of v0.5 whose first load of the Bank of Italy has not come yet; or, without a
--- rate of any of them, the demo, once the core holds one of it; or one row without a source.
+-- rate of any of them, the demo, once the core holds one of it; and each source whose currencies
+-- lack a rate; or one row without a source.
 -- * The age of the last rate that the source published into the reporting currency, as the core
 --   holds it, of a currency or of the second leg of a rate, with a warning after 3 business days,
 --   as ops_loads gives the hours since each load: none while the core holds no such rate. The
@@ -18,8 +19,10 @@
 --   holds no rate of the currency into the reporting currency, as after a change of
 --   AGORANOMOS_REPORTING_CURRENCY to a currency whose rates of the days that the core has accepted
 --   it cannot take from its own rows (core_fx_rates_daily). The first of them and how many there
---   are, of all the currencies on every row, and of the currencies whose newest rate in the core
---   comes from the source of the row, or, for one without a rate, from the first source: a load of
+--   are, of all the currencies on every row, and of the currencies of the source of the row: the
+--   first source of the order, or the demo, that the core holds a rate of the currency from, and
+--   for a currency without one the first source, or the demo while the core holds a rate of it
+--   and none of a source of the order in any reporting currency, as on the demo stack: a load of
 --   that source then takes their history again. Each fact gives the first and the last day of an
 --   account through its index of the account and the day.
 {%- set chain = rates_chain() %}
@@ -60,9 +63,26 @@ listed as (
     where (select found from real)
 ),
 
--- The source that serves a currency without a rate.
+-- The source that serves a currency without a rate into the reporting currency: the first of the
+-- order, or the demo while the core holds a rate of it and none of a source of the order, in any
+-- reporting currency. A change of the reporting currency leaves the core without a rate into the
+-- new one, and the source of the deployment takes their history again. rate_source has no index,
+-- and the scan of each EXISTS ends at its first match.
 serving as (
-    select case when (select found from real) then '{{ chain[0] }}' else 'demo_fx' end as source
+    select
+        case
+            when
+                exists (
+                    select from {{ ref('core_fx_rates_daily') }}
+                    where rate_source = 'demo_fx'
+                )
+                and not exists (
+                    select from {{ ref('core_fx_rates_daily') }}
+                    where rate_source in ('{{ chain | join("', '") }}')
+                )
+                then 'demo_fx'
+            else '{{ chain[0] }}'
+        end as source
 ),
 
 aged as (
@@ -165,10 +185,14 @@ gaps_by_source as (
     group by source
 ),
 
+-- The rows: the sources listed and those whose currencies lack a rate, or one without a source.
 rows as (
     select source from listed
+    union
+    select source from gaps_by_source
     union all
-    select cast(null as text) where not exists (select from listed)
+    select cast(null as text)
+    where not exists (select from listed) and not exists (select from gaps_by_source)
 )
 
 select

@@ -6018,6 +6018,20 @@ def test_status_says_how_old_the_last_rate_of_each_source_is(cli, tmp_path):
     assert result.stderr == ""
 
 
+def test_status_says_that_the_demo_has_no_rate_into_a_new_reporting_currency(cli, tmp_path):
+    # ops.ops_rates gives the days without a rate to the demo on the demo stack after a change of
+    # the reporting currency, which its next load takes again; the demo is no source of the order.
+    cli.run("init")
+    rows = "built\ndemo_fx\x1fGBP\x1f\x1f\x1f\x1f2025-05-14\x1f2"
+    result = cli.run("status", FAKE_PS_FILE=ps_file(tmp_path, STATUS_TABLE), FAKE_RATES_OUTPUT=rows)
+    assert result.returncode == 0, result.stderr
+    assert "Rates: the core holds no rate of demo_fx into GBP yet (ADR-0042)." in (
+        result.stdout.splitlines()
+    )
+    assert "AGORANOMOS_RATES_SOURCE" not in result.stdout
+    assert result.stderr.count("the core holds no rate into GBP on 2 days") == 1
+
+
 def test_status_names_the_dag_of_the_rates_of_the_demo_when_they_are_late(cli, tmp_path):
     cli.run("init")
     rows = "built\ndemo_fx\x1fEUR\x1f2026-11-02\x1f6\x1ft"

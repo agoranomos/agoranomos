@@ -770,6 +770,12 @@ def chain(env, core_rates):
     ]
     # The values are literals of the recorded answers, their quotes doubled.
     statements.append(f"INSERT INTO raw_ecb.stack_test_rates VALUES {', '.join(rows)}")  # noqa: S608
+    # The views of staging that dbt built keep transformer as their owner when they are replaced,
+    # and a view reads its tables with the privileges of its owner.
+    statements.append(
+        "GRANT SELECT ON raw_bank_of_italy.stack_test_rates, raw_nbk.stack_test_rates, "
+        "raw_ecb.stack_test_rates TO transformer"
+    )
     for code, first_column, path in (
         ("bank_of_italy", "country", "bank_of_italy/stg_bank_of_italy__rates_daily.sql"),
         ("nbk", "date", "nbk/stg_nbk__rates_daily.sql"),

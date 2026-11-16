@@ -18,7 +18,9 @@ each source of the rates, which names the first day without a rate of the curren
 source and how many there are: from the first to the last day of the facts of the accounts of each
 currency but the reporting currency, the days on which the currency has no rate into the reporting
 currency. The source of a currency is the first in the order that the core holds a rate of it
-from, and the first source of the order for a currency without one. A load of a source of the
+from, and for a currency without one the first source of the order, or the demo while the core
+holds a rate of it and none of a source of the order, in any reporting currency: so after a change
+of the reporting currency the source of the deployment takes the history. A load of a source of the
 rates reads its row, and while it names a day, the load takes the history of the rates again,
 from a week before that day, or from the first day of core.fx_rates_daily when that is earlier, to
 its usual last day, with the kind history in its journal (ADR-0038). The next run of the transform
