@@ -4,7 +4,7 @@ How-to guides are short recipes for people who want to get a specific job done w
 
 ## Guides
 
-- [Run agoranomos locally](run-locally.md): start the stack on your own machine, sign in, update it, switch to separate workers, and give a service more memory.
+- [Run agoranomos locally](run-locally.md): start the stack on your own machine or on another machine of yours through an SSH tunnel, sign in, update it, switch to separate workers, and give a service more memory.
 - [Deploy on a server](deploy-on-a-server.md): put Metabase on the internet over HTTPS, with Airflow behind an SSH tunnel and daily backups.
 - [Back up and restore](back-up-and-restore.md): take, schedule and copy backups, and restore them, also on a new server.
 - [See the demo](see-the-demo.md): what the demo shows, how it stays up to date, and how to turn it off.
