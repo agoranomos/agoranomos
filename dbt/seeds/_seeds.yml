@@ -2,11 +2,15 @@ seeds:
   - name: seed_ad_platforms
     description: >-
       The platforms that the data of the model comes from, one row each: their codes, the names
-      that the marts show, and what kind of data each gives. The demo platforms are fictional, and
+      that the marts show, what kind of data each gives, and its window of restatements, which the
+      daily load of its connector takes again (ADR-0038). The demo platforms are fictional, and
       mimics names the API whose shape each follows; the codes of real platforms come with their
-      connectors.
+      connectors. The windows are code of the base package, in this seed alone, and a deployment
+      has no setting for them.
     config:
-      column_types: {is_demo: boolean}
+      column_types: {is_demo: boolean, restatement_window_days: integer}
+      # The column of the windows, which the table of the seed of an earlier release lacks.
+      pre-hook: "{{ add_platform_columns(this) }}"
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
@@ -28,6 +32,8 @@ seeds:
         description: '{{ doc("mimics") }}'
       - name: is_demo
         description: '{{ doc("is_demo") }}'
+      - name: restatement_window_days
+        description: '{{ doc("restatement_window_days") }}'
   - name: seed_conversion_actions
     description: >-
       The conversion actions that the base package knows, one row for each platform and action:

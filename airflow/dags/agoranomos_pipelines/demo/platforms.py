@@ -1,8 +1,10 @@
 """The fictional platforms of the demo in the order that the history loads them: where dlt loads
-each, the main table whose asset its load updates, how its fact tables hold an account and a day,
-and how many recent days its daily load is to reload (ADR-0025). The history leaves one day of one
-account out (gap): a failed day that no reload window reaches, which the warning test gap of dbt
-finds. Nothing here imports dlt, so that code without it can read the fact tables."""
+each, the main table whose asset its load updates, and how its fact tables hold an account and a
+day (ADR-0025). How many recent days its daily load is to reload is its window of restatements in
+the seed of the platforms, which a task reads when it runs (agoranomos_pipelines/windows.py). The
+history leaves one day of one account out (gap): a failed day that no reload window reaches, which
+the warning test gap of dbt finds. Nothing here imports dlt, so that code without it can read the
+fact tables."""
 
 from __future__ import annotations
 
@@ -12,6 +14,7 @@ from types import ModuleType
 
 from agoranomos_pipelines.demo import fx, search, social, video, web
 from agoranomos_pipelines.demo.common import last_final_day
+from agoranomos_pipelines.windows import restatement_window_days
 
 
 @dataclass(frozen=True)
@@ -36,12 +39,17 @@ class Platform:
     dataset: str
     pipeline: str
     main_table: str
-    window_days: int
     module: ModuleType
     facts: tuple[FactTable, ...]  # the main table first
 
+    @property
+    def window_days(self) -> int:
+        """The days that the daily load reloads: the window of restatements of the platform in the
+        seed of the platforms, read now."""
+        return restatement_window_days(self.code)
 
-def _platform(module: ModuleType, main_table: str, window_days: int, *facts: FactTable) -> Platform:
+
+def _platform(module: ModuleType, main_table: str, *facts: FactTable) -> Platform:
     code = module.PLATFORM
     return Platform(
         code,
@@ -49,7 +57,6 @@ def _platform(module: ModuleType, main_table: str, window_days: int, *facts: Fac
         f"raw_{code}",
         f"agoranomos_{code}",
         main_table,
-        window_days,
         module,
         facts,
     )
@@ -68,13 +75,11 @@ PLATFORMS = {
         _platform(
             fx,
             "rates_daily",
-            7,
             FactTable("rates_daily", None, "{}", '"rate_date"', ISO, '"rate_date"'),
         ),
         _platform(
             search,
             "campaign_stats",
-            90,
             *(
                 FactTable(table, '"customer__id"', "{}", *SEARCH_DAY)
                 for table in (
@@ -90,7 +95,6 @@ PLATFORMS = {
         _platform(
             social,
             "insights_campaign",
-            28,
             # Their child tables of actions follow their rows through _dlt_parent_id.
             *(
                 FactTable(table, '"account_id"', "{}", '"date_start"', ISO, '"date_start"')
@@ -100,7 +104,6 @@ PLATFORMS = {
         _platform(
             video,
             "report_campaign_daily",
-            28,
             *(
                 FactTable(table, '"advertiser_id"', "{}", VIDEO_DAY, ISO, f"{VIDEO_DAY}::date")
                 for table in ("report_campaign_daily", "report_adgroup_daily", "report_ad_daily")
@@ -109,7 +112,6 @@ PLATFORMS = {
         _platform(
             web,
             "report_sessions_daily",
-            14,
             FactTable(
                 "report_sessions_daily",
                 '"property"',
