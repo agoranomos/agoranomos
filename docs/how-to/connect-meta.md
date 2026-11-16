@@ -61,7 +61,7 @@ client = "acme"
 ## 3. Start the load
 
 1. Run `./agoranomos up`, which gives the new settings to the container that runs the tasks.
-2. In the Airflow UI, unpause the DAGs `agoranomos_meta_ads_daily` and `agoranomos_meta_ads_history`. Each starts paused, so that a deployment without Meta asks Meta nothing. Unpause `agoranomos_ecb_daily` too, whose rates of the ECB convert the money of the accounts of Meta into the reporting currency, and `agoranomos_demo_transform` if the demo did not unpause it; if you have [connected Google Ads](connect-google-ads.md), both are unpaused already.
+2. In the Airflow UI, unpause the DAGs `agoranomos_meta_ads_daily` and `agoranomos_meta_ads_history`. Each starts paused, so that a deployment without Meta asks Meta nothing. Unpause the DAGs of the rates too, `agoranomos_bank_of_italy_daily`, `agoranomos_nbk_daily` and `agoranomos_ecb_daily`, or with `AGORANOMOS_RATES_SOURCE=ecb` the last alone, whose rates convert the money of the accounts of Meta into the reporting currency ([The rates](../reference/configuration.md#the-rates)), and `agoranomos_demo_transform` if the demo did not unpause it; if you have [connected Google Ads](connect-google-ads.md), they are unpaused already.
 3. Trigger `agoranomos_meta_ads_daily` once, or wait for 10:07 UTC. The first load of each account takes its usual window, the last 28 days, and the transform runs after it.
 
 After the transform, the Ops collection of Metabase shows the loads of `meta_ads` ([Watch the pipeline](watch-the-pipeline.md)), and the marts have the rows of the platform `meta_ads` for the last 28 days.

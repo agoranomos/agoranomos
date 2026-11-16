@@ -106,7 +106,7 @@ What the ads of the account cost on the day, as the ad platform totals it for th
 {% enddocs %}
 
 {% docs spend_reporting %}
-The spend of the row in the reporting currency (see reporting_currency), at the rate of its report_date in fx_rates_daily, to six decimal places. A sum over accounts in different currencies is right in this column.
+The spend of the row in the reporting currency (see reporting_currency), at the rate of its report_date in fx_rates_daily, whose rate_source and cross_source name the sources of the rate, to six decimal places. A sum over accounts in different currencies is right in this column.
 {% enddocs %}
 
 {% docs conversions %}
@@ -118,7 +118,7 @@ The value of the conversions of the row, as the ad platform reports it, in the c
 {% enddocs %}
 
 {% docs conversion_value_reporting %}
-The conversion value of the row in the reporting currency (see reporting_currency), at the rate of its report_date in fx_rates_daily, to six decimal places.
+The conversion value of the row in the reporting currency (see reporting_currency), at the rate of its report_date in fx_rates_daily, whose rate_source and cross_source name the sources of the rate, to six decimal places.
 {% enddocs %}
 
 {% docs platform_conversions %}
@@ -142,7 +142,7 @@ The conversions of the primary conversion actions of the deployment (is_primary)
 {% enddocs %}
 
 {% docs fx_rate_into_reporting_currency %}
-The rate of the day of the row from the currency of the row into the reporting currency, from core.fx_rates_daily, with no rounding: an amount of the row times this rate is the amount of the columns that end in _reporting. The reporting currency has the rate 1; none on a day that has no rate.
+The rate of the day of the row from the currency of the row into the reporting currency, from core.fx_rates_daily, which names its sources, with no rounding: an amount of the row times this rate is the amount of the columns that end in _reporting. The reporting currency has the rate 1; none on a day that has no rate.
 {% enddocs %}
 
 {% docs fx_rate_date %}
@@ -358,7 +358,7 @@ The revenue that web analytics records for the sessions, in the currency of the 
 {% enddocs %}
 
 {% docs total_revenue_reporting %}
-The total revenue of the row in the reporting currency (see reporting_currency), at the rate of its report_date in fx_rates_daily, to six decimal places.
+The total revenue of the row in the reporting currency (see reporting_currency), at the rate of its report_date in fx_rates_daily, whose rate_source and cross_source name the sources of the rate, to six decimal places.
 {% enddocs %}
 
 {% docs rate_date %}
@@ -366,15 +366,19 @@ The day of the rate.
 {% enddocs %}
 
 {% docs rate %}
-How many units of one currency one unit of another is worth on the day, to eight decimal places. In the rates into the reporting currency, as in core.fx_rates_daily, the value of one unit of currency in reporting_currency, through the reference rates of the euro, such as 1.08320000 from EUR to USD; in the rates of a source, the value of one unit of base_currency in quote_currency; for the National Bank of Kazakhstan, whose base is one tenge, not rounded to eight places but with the digits of the division, at least 16 significant ones, such as 0.0022484036 and more from KZT to USD on 12 November 2026.
+How many units of one currency one unit of another is worth on the day, to eight decimal places. In the rates into the reporting currency, as in core.fx_rates_daily, the value of one unit of currency in reporting_currency, through the base currency of the first source of the rates, such as 1.08320000 from EUR to USD; in the rates of a source, the value of one unit of base_currency in quote_currency; for the National Bank of Kazakhstan, whose base is one tenge, not rounded to eight places but with the digits of the division, at least 16 significant ones, such as 0.0022484036 and more from KZT to USD on 12 November 2026.
 {% enddocs %}
 
 {% docs rate_into_reporting_currency %}
-The value of one unit of currency in reporting_currency on the day, through the reference rates of the euro, to eight decimal places, such as 1.08320000 from EUR to USD: an amount in currency times this rate is the amount in the reporting currency. The reporting currency has the rate 1.
+The value of one unit of currency in reporting_currency on the day, through the base currency of the first source of the rates with no rounding on the way, to eight decimal places, such as 1.08320000 from EUR to USD: an amount in currency times this rate is the amount in the reporting currency. The reporting currency has the rate 1.
 {% enddocs %}
 
 {% docs rate_source %}
-Where the rate comes from: the code of the source of the rates, ecb for the European Central Bank or demo_fx for the demo, or identity where the two currencies are one. In staging, bank_of_italy is the Bank of Italy, whose rates the core does not take yet.
+Where the rate comes from: the code of the source of the rates, bank_of_italy for the Bank of Italy, nbk for the National Bank of Kazakhstan, ecb for the European Central Bank or demo_fx for the demo, or identity where the two currencies are one. The deployment sets the order of the sources (AGORANOMOS_RATES_SOURCE), and a rate that goes through the base currency of another source has the source of that second leg in cross_source. The Bank of Italy calls its rates indicative and no financial benchmark under Regulation (EU) 2016/1011; the NBK allows their use with the source named, under its data licence.
+{% enddocs %}
+
+{% docs cross_source %}
+The source of the second leg of a rate that goes through the base currency of its source, the rate of that base currency against the base currency of the first source of the rates, such as bank_of_italy for a rate of RUB of nbk through KZT into the euro; none for a rate against the base currency of the first source and for the reporting currency.
 {% enddocs %}
 
 {% docs is_carried_forward %}

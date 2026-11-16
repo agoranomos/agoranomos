@@ -318,6 +318,7 @@ LISTED_COLUMNS = {
     "ad_platform",
     "attribution_setting",
     "conversion_category",
+    "cross_source",
     "currency",
     "kind",
     "mimics",
@@ -1478,13 +1479,15 @@ def test_the_staging_of_the_ecb_has_the_critical_tests_of_the_rates_of_the_demo(
     assert "severity" not in ecb
 
 
-def test_the_rates_take_the_ecb_alone_once_it_has_any_and_the_loads_show_it_before_a_load():
-    # Never a fictional rate of the demo on a day on which the ECB publishes none (ADR-0032): the
-    # rates of the core take the ECB once it has a rate in staging or in the core.
+def test_the_rates_take_no_rate_of_the_demo_once_a_real_source_has_one():
+    # Never a fictional rate of the demo on a day on which a real source publishes none
+    # (ADR-0032, ADR-0042): the demo is a candidate only while no source of the order has a rate,
+    # in staging or in the core.
     rates = (DBT / "macros" / "rates.sql").read_text(encoding="utf-8")
+    assert "{%- set links = chain + ['demo_fx'] -%}" in rates
     assert (
-        "    when exists (select from {{ ecb }}) or exists (select from {{ rates }} where "
-        "rate_source = 'ecb')\n        then 'ecb'\n    else 'demo_fx'\n"
+        "    {%- if code == 'demo_fx' %}\n        and not (select found from real)\n"
+        "    {%- endif %}\n"
     ) in rates
     loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
     assert "('raw_ecb', 'ecb')," in loads
@@ -1528,10 +1531,13 @@ def test_the_shape_of_the_nbk_gives_the_rates_of_one_tenge_and_the_tenge_of_one_
     body = macro[macro.index("{% macro") :]
     assert "numeric(" not in body
     assert "round(" not in body
-    # The direction in which rates_into_reporting divides: the rate of the reporting currency over
-    # that of the currency.
+    # The direction in which rates_known divides: the rate of the reporting currency over that of
+    # the currency, each the units for one unit of the base; the rate of the NBK from its price, as
+    # a row of the core keeps it.
     rates = (DBT / "macros" / "rates.sql").read_text(encoding="utf-8")
-    assert "r.rate / c.rate as rate_into_reporting_currency" in rates
+    assert "r.amount / c.amount as rate_into_reporting_currency" in rates
+    assert "b.rate / p.base_rate as amount," in rates
+    assert "(case when {{ code }} = 'nbk' then 1 / {{ value }} else {{ value }} end)" in rates
 
 
 def test_the_sources_of_the_nbk_are_the_tables_that_its_load_writes():
@@ -1559,13 +1565,18 @@ def test_the_staging_of_the_nbk_has_the_tests_of_the_rates_and_of_its_base_rate(
     assert nbk.replace(base_rate, "") == ecb
     loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
     assert "('raw_nbk', 'nbk')," in loads
-    # Nothing of the model reads the rates of the NBK yet: C2c of #222 takes them.
-    readers = [
+    # The rates of the core and the check of G1 read the rates of the NBK, as those of every source
+    # of the order (ADR-0042), and nothing else does.
+    readers = sorted(
         path.relative_to(DBT).as_posix()
         for path in (DBT / "models").rglob("*.sql")
         if "stg_nbk__rates_daily" in path.read_text(encoding="utf-8")
+    )
+    assert readers == [
+        "models/core/core_fx_rates_daily.sql",
+        "models/intermediate/int_g1_failures.sql",
+        "models/staging/nbk/stg_nbk__rates_daily.sql",
     ]
-    assert readers == ["models/staging/nbk/stg_nbk__rates_daily.sql"]
 
 
 GOOGLE_ADS = STAGING / "google_ads"
@@ -2075,14 +2086,30 @@ def dimension_tables() -> dict[str, dict]:
 
 
 # The rates of the core, which the model core_fx_rates_daily writes under the name of its table, as
-# a mart has the name (ADR-0042).
+# a mart has the name (ADR-0042), and the migration that adds the second leg of a rate to it.
 RATES_MIGRATION = "0007_create_the_rates.sql"
+RATES_LEG_MIGRATION = "0009_add_the_second_leg_of_a_rate.sql"
 RATES_MODEL = "core_fx_rates_daily"
+ADDED = re.compile(
+    r"^ALTER TABLE core\.(\w+)\n  ADD COLUMN (\w+) ([a-z]+(?:\(\d+(?:,\d+)?\))?)", flags=re.M
+)
 
 
 def rates_table() -> dict:
-    """The table of the rates of the core, as migration 0007 creates it."""
-    return migration_tables({RATES_MIGRATION: {"fx_rates_daily"}})["fx_rates_daily"]
+    """The table of the rates of the core, as migration 0007 creates it and 0009 adds to it: its
+    columns in order, its key, the types of the added columns, and the comments of the table and of
+    its columns, those of 0009 in place of those of 0007."""
+    table = migration_tables({RATES_MIGRATION: {"fx_rates_daily"}})["fx_rates_daily"]
+    text = (MIGRATIONS / RATES_LEG_MIGRATION).read_text(encoding="utf-8")
+    table["added"] = {}
+    for name, column, kind in ADDED.findall(text):
+        if name == "fx_rates_daily":
+            table["columns"].append(column)
+            table["added"][column] = kind
+    for kind, name, column, body in COMMENT.findall(text):
+        if name == "fx_rates_daily":
+            table["comments"][None if kind == "TABLE" else column] = body.replace("''", "'")
+    return table
 
 
 FACT_CREATE = re.compile(
@@ -2202,23 +2229,39 @@ def test_the_rates_of_the_core_merge_the_days_that_a_run_brings():
         for found in map(FACT_COLUMN.match, body.splitlines())
         if found and found.group(1) not in ("PRIMARY", "CHECK", "UNIQUE")
     }
+    columns |= table["added"]
     assert list(columns) == table["columns"]
     for column, kind in columns.items():
         assert re.search(rf" as {re.escape(kind)}\) as {column},?\n", text), column
     assert set(referenced(text)) == {
+        "stg_bank_of_italy__rates_daily",
+        "stg_nbk__rates_daily",
         "stg_ecb__rates_daily",
         "stg_demo_fx__rates_daily",
         "stg_loads__newest_days",
         "int_window_days",
         "dim_account",
+        # The kind of each load, so that a load of the history fills only what the core lacks.
+        "source:core.loads",
     }
     assert "round(" not in text
     assert "published_on < rate_date as is_carried_forward" in text
     assert "{{ 'true' if var('recompute_rates') else 'false' }}" in text
     assert "\n  recompute_rates: false\n" in PROJECT_FILE.read_text(encoding="utf-8")
     rates = (DBT / "macros" / "rates.sql").read_text(encoding="utf-8")
-    assert "or exists (select from {{ rates }} where rate_source = 'ecb')" in rates
-    assert "r.rate / c.rate as rate_into_reporting_currency" in rates
+    # The setting gives the order of the sources (ADR-0042), and the demo serves only without a
+    # rate of one of them.
+    assert "env_var('AGORANOMOS_RATES_SOURCE', 'auto')" in rates
+    assert "'bank_of_italy': ['bank_of_italy', 'nbk', 'ecb']," in rates
+    assert "'nbk': ['nbk', 'bank_of_italy', 'ecb']," in rates
+    assert "'ecb': ['ecb']," in rates
+    assert "select exists (select from publications where source <> 'demo_fx') as found" in rates
+    # The rate of the reporting currency over that of the currency, each in the convention of the
+    # first source: for the euro the units of a currency for one euro, for the tenge the tenge for
+    # one unit, so that a published rate is divided once.
+    assert "r.amount / c.amount as rate_into_reporting_currency" in rates
+    assert "c.amount / r.amount as rate_into_reporting_currency" in rates
+    assert "round(" not in rates
     # A load of the ECB reads the last 14 days again (ADR-0042).
     ecb = (DAGS_PIPELINES / "ecb.py").read_text(encoding="utf-8")
     assert "\nWINDOW_DAYS = 14\n" in ecb
@@ -2465,8 +2508,10 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
     # before the stop, which counts it.
     assert "quarantine_rate_findings([" in rates
     assert (
-        "ref('stg_ecb__rates_daily'), ref('stg_demo_fx__rates_daily'), "
-        "source('core', 'fx_rates_daily'))"
+        "{'bank_of_italy': ref('stg_bank_of_italy__rates_daily'), "
+        "'nbk': ref('stg_nbk__rates_daily'), 'ecb': ref('stg_ecb__rates_daily'), "
+        "'demo_fx': ref('stg_demo_fx__rates_daily')}, source('core', 'fx_rates_daily'), "
+        "source('core', 'loads'))"
     ) in rates
     assert "quarantine_stop_findings(this, source('core', 'loads'))" in stop
     # dbt orders the model after what the statements read: a line depends_on, or a ref of its

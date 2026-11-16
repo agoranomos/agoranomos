@@ -19,8 +19,10 @@ rates of the newest load whose window covers it, of those that the run of the tr
 back, about 800 requests; a later one, the days from the day after the last that a whole load took,
 or from 14 days back when that is earlier, so that a rate that the bank corrects, or that an
 earlier load missed, comes again, and, when the core needs them (rates.history_from), from the
-first day without a rate. All end yesterday in Rome, where the bank publishes. The model reads none
-of these rates yet: the ECB stays the source of core.fx_rates_daily until C2c of #222."""
+first day without a rate. All end yesterday in Rome, where the bank publishes. A source that the
+setting AGORANOMOS_RATES_SOURCE does not name, as with ecb alone, takes no history but its first
+(rates.chain). core.fx_rates_daily takes these rates first, unless the setting names nbk or ecb
+(dbt/macros/rates.sql)."""
 
 from __future__ import annotations
 

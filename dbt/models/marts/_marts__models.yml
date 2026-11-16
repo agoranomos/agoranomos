@@ -1558,10 +1558,13 @@ models:
   - name: fx_rates_daily
     description: >-
       The rate of each currency of the data into the reporting currency on each day, a view over
-      core.fx_rates_daily: one row for each day and currency, through the reference rates of the
-      euro, the last published one carried over a day without a publication (is_carried_forward).
-      rate_date, currency and reporting_currency together are its key, and it holds the one
-      reporting currency of the deployment.
+      core.fx_rates_daily: one row for each day and currency, from the sources in the order that
+      the deployment sets, the Bank of Italy, the National Bank of Kazakhstan and the European
+      Central Bank, which rate_source and cross_source name, the last published one carried over a
+      day without a publication (is_carried_forward). The Bank of Italy calls its rates indicative
+      and no financial benchmark under Regulation (EU) 2016/1011. rate_date, currency and
+      reporting_currency together are its key, and it holds the one reporting currency of the
+      deployment.
     config:
       contract:
         enforced: true
@@ -1622,6 +1625,15 @@ models:
           meta:
             metabase:
               display_name: Rate Source
+              semantic_type: type/Source
+              has_field_values: list
+      - name: cross_source
+        data_type: text
+        description: '{{ doc("cross_source") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Cross Rate Source
               semantic_type: type/Source
               has_field_values: list
       - name: is_carried_forward

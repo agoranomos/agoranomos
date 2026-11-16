@@ -16,7 +16,7 @@ Marketing data moves through agoranomos in one direction, from ad platforms to d
 
 ```mermaid
 flowchart TB
-    sources["<b>Sources</b><br/>Google Ads, the rates of the ECB,<br/>demo generator of fictional platforms<br/>planned: more ad platforms, GA4, CRM, files"]
+    sources["<b>Sources</b><br/>Google Ads, the rates of the Bank of Italy,<br/>the NBK and the ECB, demo generator of fictional platforms<br/>planned: more ad platforms, GA4, CRM, files"]
     dlt["<b>dlt</b><br/>incremental load"]
     airflow["<b>Apache Airflow</b><br/>schedules loads,<br/>dbt builds and<br/>the daily maintenance"]
 

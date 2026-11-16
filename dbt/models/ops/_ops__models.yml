@@ -26,18 +26,23 @@ models:
         description: How many loads of the account the journal holds, the first load among them.
   - name: ops_rates
     description: >-
-      The rates of the core into the reporting currency, in one row (ADR-0042). The age of the last
-      rate that the source of the rates published, as core.fx_rates_daily holds it, once it holds
-      one: the source, the day of the last rate, how many business days, Monday to Friday, have
-      passed since that day up to the day on which the view is read, and whether that is more than
-      3. The ECB publishes on the working days of TARGET, and its daily load takes the days up to
-      yesterday, so the last rate is usually 1 business day old; a closing day of TARGET counts as a
-      business day. And the days without a rate: from the first to the last day of the facts of the
-      accounts of each currency but the reporting currency, the days on which the core holds no
+      The rates of the core into the reporting currency, one row for each source of the rates
+      (ADR-0042): those of the order of AGORANOMOS_RATES_SOURCE whose rates core.fx_rates_daily
+      holds, and the first source of the order, also before its first rate; without a rate of any
+      of them, the demo once the core holds one of it, or one row without a source. The age of the
+      last rate that the source published, as the core holds it, of a currency or of the second leg
+      of a rate: the day of the last rate, how many business days, Monday to Friday, have passed
+      since that day up to the day on which the view is read, and whether that is more than 3. The
+      Bank of Italy and the ECB publish on the working days of TARGET, and their daily loads take
+      the days up to yesterday, so their last rate is usually 1 business day old; a closing day of
+      TARGET counts as a business day. The NBK publishes on every calendar day, its rate of a day
+      before the day. And the days without a rate: from the first to the last day of the facts of
+      the accounts of each currency but the reporting currency, the days on which the core holds no
       rate of the currency into the reporting currency, as after a change of the reporting currency
       to one whose older rates the core cannot take from its own rows, the first of them and how
-      many. The next load of the rates takes their history again. ./agoranomos status warns when
-      the rate is late, and when a day has no rate.
+      many, of all the currencies on every row, and of those of the source of the row. The next
+      load of that source takes their history again. ./agoranomos status warns when a rate is late,
+      and when a day has no rate.
     columns:
       - name: reporting_currency
         description: '{{ doc("reporting_currency") }}'
@@ -45,8 +50,9 @@ models:
         description: '{{ doc("rate_source") }}'
       - name: last_rate_date
         description: >-
-          The day of the last rate that the source published, as core.fx_rates_daily holds it;
-          none while it holds no such rate into the reporting currency.
+          The day of the last rate that the source published, as core.fx_rates_daily holds it, of
+          a currency or of the second leg of a rate; none while it holds no such rate into the
+          reporting currency.
       - name: business_days_since_rate
         description: >-
           How many days, Monday to Friday, there are after last_rate_date up to the day on which
@@ -65,6 +71,16 @@ models:
           How many calendar days, from the first to the last day of the facts of the accounts of
           each currency but the reporting currency, have no rate of that currency into the
           reporting currency in the core: 0 when each of them has one.
+      - name: first_day_without_rate_of_source
+        description: >-
+          The first day without a rate, as first_day_without_rate, of the currencies whose newest
+          rate in the core comes from the source of the row, or, for the first source of the order,
+          of those without a rate in the core; none when every such day has one. The next load of
+          the source takes the history of the rates again from it (agoranomos_pipelines/rates.py).
+      - name: days_without_rate_of_source
+        description: >-
+          How many calendar days without a rate, as days_without_rate, the currencies of
+          first_day_without_rate_of_source have: 0 when each of them has one.
   - name: ops_history
     description: >-
       How far back the loads of each account of each platform reach, one row each, from the loads

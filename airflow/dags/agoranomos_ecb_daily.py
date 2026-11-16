@@ -9,13 +9,15 @@ AGORANOMOS_REPORTING_CURRENCY, which ops.ops_rates names, a load takes the histo
 again from those days, with the kind history, after reading the core as the transformer role
 (agoranomos_pipelines/rates.py). The first task, due, skips the run when a load has taken the day
 already and the core needs no history. Each load updates the asset of the rates, and the transform
-runs after it (ADR-0039); where the ECB and the demo both have a rate for a day, it takes the rate
-of the ECB.
+runs after it (ADR-0039), which takes the rates in the order that AGORANOMOS_RATES_SOURCE gives
+(dbt/macros/rates.sql): the ECB after the two banks, for a currency and a day that the first of
+them did not publish, as when its load of the day failed, or alone with ecb; and once the core
+holds a rate of a real source, no rate of the demo.
 
 The DAG starts paused: the demo keeps its own rates and asks the ECB nothing, so a deployment with
 the demo alone, and the stack tests, need no network. A deployment with a real source unpauses it,
-which the setup of the first real source is to do. A repeat is safe: each load replaces the days
-that it covers.
+with agoranomos_bank_of_italy_daily and agoranomos_nbk_daily, as its guide of the setup says. A
+repeat is safe: each load replaces the days that it covers.
 """
 
 from __future__ import annotations

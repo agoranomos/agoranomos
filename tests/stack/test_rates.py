@@ -20,12 +20,23 @@ and builds ops.ops_rates and the views of the marts again in the reporting curre
 If it is killed before that, run DELETE FROM core.fx_rates_daily WHERE reporting_currency = 'GBP'
 as postgres, dbt run --select ops_rates in the container of the tasks, and marts-init.
 
+The order of the sources of the rates (ADR-0042, C2c of #222) is checked on the recorded answers of
+the Bank of Italy and of the National Bank of Kazakhstan that the unit tests of their loads read:
+the code of each load parses them in the container of the tasks, with the HTTP of its client
+replaced, and one transaction as postgres, which ends in ROLLBACK, puts them in stand-ins of the raw
+tables under the staging views of the two banks and of the ECB, as the compiled staging models
+read them, with their days in stg_loads__newest_days and their loads in core.loads, and reads the
+rows that the model of the rates would merge in EUR and in KZT. No request reaches a bank, no load
+of dlt writes a table, and the core is as before.
+
 The assertions print counts, days and codes of currencies, never a secret.
 """
 
+import json
 import re
 import subprocess
 from datetime import date, timedelta
+from decimal import Decimal
 
 import pytest
 from agoranomos_pipelines import rates
@@ -81,11 +92,11 @@ def test_the_view_of_the_rates_shows_the_rates_of_the_core_into_the_reporting_cu
     differ = warehouse_output(
         env,
         "SELECT (SELECT count(*) FROM (SELECT rate_date, currency::text, reporting_currency::text, "  # noqa: S608 (a code of .env)
-        "round(rate_into_reporting_currency, 8), rate_source, is_carried_forward "
+        "round(rate_into_reporting_currency, 8), rate_source, cross_source, is_carried_forward "
         f"FROM core.fx_rates_daily WHERE reporting_currency = '{currency}' EXCEPT SELECT * "
         "FROM marts.fx_rates_daily) AS c), (SELECT count(*) FROM (SELECT * FROM "
         "marts.fx_rates_daily EXCEPT SELECT rate_date, currency::text, reporting_currency::text, "
-        "round(rate_into_reporting_currency, 8), rate_source, is_carried_forward "
+        "round(rate_into_reporting_currency, 8), rate_source, cross_source, is_carried_forward "
         f"FROM core.fx_rates_daily WHERE reporting_currency = '{currency}') AS m), "
         "(SELECT count(DISTINCT reporting_currency) FROM marts.fx_rates_daily)",
     )
@@ -563,3 +574,368 @@ def test_a_new_reporting_currency_takes_the_history_of_the_rates_again(
         marts_init()
     [[shown, _, _]] = table(env, GAPS)
     assert shown == currency
+
+
+# The order of the sources of the rates (ADR-0042): the recorded answers of the two banks, the
+# days of their loads, and the accounts of the check, whose currencies the model computes. The
+# answer of the Bank of Italy of Thursday 12 November 2026 stands for Friday 6 November too, as
+# the fixtures hold no other weekday; Monday 9 to Wednesday 11 November it quotes nothing, as on a
+# day that its load missed, and the ECB has Tuesday 10 November.
+FIXTURES = REPO_ROOT / "tests" / "unit" / "fixtures"
+ITALY = FIXTURES / "bank_of_italy" / "daily_rates_2026-11-12.json"
+ITALY_EMPTY = FIXTURES / "bank_of_italy" / "daily_rates_2026-11-08.json"
+NBK_DAYS = ("2026-11-06", "2026-11-07", "2026-11-08", "2026-11-09", "2026-11-12")
+# The currencies of the check: RUB, which the Bank of Italy gives as N.A., ARS, which the NBK
+# lacks, KPW, which no source has, and the others that both have.
+CHAIN_CURRENCIES = ("RUB", "ARS", "KPW", "KZT", "GBP", "USD", "EUR")
+# The script that parses the answers through the code of the loads, in the container of the
+# tasks: argv holds pairs of a source and a day, and the answer of that day. It prints the rows
+# that each load would give dlt, the fields of the Bank of Italy in the snake_case of dlt, of the
+# currencies of the check.
+PARSE = """
+import json
+import re
+import sys
+from datetime import date
+
+from agoranomos_pipelines import bank_of_italy, nbk
+
+answers = {}
+for key, body in zip(sys.argv[2::2], sys.argv[3::2]):
+    source, day = key.split(":")
+    answers.setdefault(source, {})[day] = body
+kept = set(sys.argv[1].split(","))
+
+
+class Answer:
+    def __init__(self, body):
+        self.body = body
+
+    def json(self):
+        return json.loads(self.body)
+
+    @property
+    def content(self):
+        return self.body.encode("utf-8")
+
+
+class Client:
+    def __init__(self, **settings):
+        pass
+
+    def get(self, url, params=None, headers=None):
+        if url == bank_of_italy.URL:
+            return Answer(answers["bank_of_italy"][params["referenceDate"]])
+        assert url == nbk.URL, url
+        day, month, year = params["fdate"].split(".")
+        return Answer(answers["nbk"][f"{year}-{month}-{day}"])
+
+
+bank_of_italy.Client = Client
+bank_of_italy.sleep = lambda seconds: None
+nbk.Client = Client
+nbk.time.sleep = lambda seconds: None
+
+
+def snake(name):
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
+italy = [
+    {snake(key): value for key, value in row.items()}
+    for row in bank_of_italy.rows(date(2026, 11, 6), date(2026, 11, 12))
+]
+kazakhstan = [
+    *nbk.rows(date(2026, 11, 6), date(2026, 11, 9)),
+    *nbk.rows(date(2026, 11, 12), date(2026, 11, 12)),
+]
+print(json.dumps({
+    "bank_of_italy": [row for row in italy if row["iso_code"] in kept],
+    "nbk": [row for row in kazakhstan if row["title"] in kept],
+}))
+"""
+# The columns of the stand-ins of the raw tables, every one text, as dlt writes them.
+ITALY_COLUMNS = (
+    "country",
+    "currency",
+    "iso_code",
+    "uic_code",
+    "avg_rate",
+    "exchange_convention",
+    "exchange_convention_code",
+    "reference_date",
+)
+NBK_COLUMNS = ("date", "fullname", "title", "description", "quant", "index", "change")
+ECB_COLUMNS = (
+    "key",
+    "freq",
+    "currency",
+    "currency_denom",
+    "exr_type",
+    "exr_suffix",
+    "time_period",
+    "obs_value",
+)
+# The loads of the check: the source, the id of its load, its account, its window and its kind.
+# The first load of the Bank of Italy is a load of the history, as after an update from v0.5.
+CHAIN_LOADS = (
+    ("bank_of_italy", "9000000001.1", "EUR", "2026-11-06", "2026-11-12", "history"),
+    ("nbk", "9000000002.1", "KZT", "2026-11-06", "2026-11-09", "window"),
+    ("nbk", "9000000003.1", "KZT", "2026-11-12", "2026-11-12", "window"),
+    ("ecb", "9000000004.1", "EUR", "2026-11-06", "2026-11-12", "window"),
+)
+
+
+def literal(value):
+    """A value as an SQL literal of text: data of a bank, whose quotes are doubled."""
+    return "NULL" if value is None else "'" + str(value).replace("'", "''") + "'"
+
+
+def compiled_node(name, select, path, currency=None):
+    """The SQL of a node as dbt compiles it in the container of the tasks, in a reporting currency
+    when one is given."""
+    work = f"{WORK}-{name}"
+    service = task_service()
+    command = ["exec", "-T"]
+    if currency:
+        command += ["-e", f"AGORANOMOS_REPORTING_CURRENCY={currency}"]
+    command += ["-e", "AGORANOMOS_RATES_SOURCE=auto"]
+    command += [service, DBT, "--quiet", "--no-use-colors", "compile", "--select", select]
+    command += ["--project-dir", PROJECT, "--profiles-dir", PROJECT]
+    command += ["--target-path", f"{work}/target", "--log-path", f"{work}/logs"]
+    compose(*command)
+    return compose("exec", "-T", service, "cat", f"{work}/target/compiled/agoranomos/{path}").stdout
+
+
+def stand_in(sql, first_column, table):
+    """The SQL of a compiled staging model of a bank with the stand-in of its raw table in place
+    of the empty query that it reads while the table does not exist (relation_or_empty)."""
+    pattern = rf"\(select\s+cast\(null as text\) as {first_column}\b.*?where false\) as rates_daily"
+    found, count = re.subn(pattern, f"{table} as rates_daily", sql, flags=re.S)
+    if count != 1:
+        pytest.skip(f"the staging model reads a raw table of its bank: {table} stands in for none")
+    return found
+
+
+@pytest.fixture(scope="module")
+def chain(env, core_rates):
+    """The rows of the recorded answers as the loads give them, and the SQL that puts them under
+    the staging views, in one transaction that the caller ends."""
+    italy, empty = ITALY.read_text(encoding="utf-8"), ITALY_EMPTY.read_text(encoding="utf-8")
+    arguments = [",".join(CHAIN_CURRENCIES)]
+    arguments += ["bank_of_italy:2026-11-06", italy.replace('"2026-11-12"', '"2026-11-06"')]
+    for day in ("2026-11-09", "2026-11-10", "2026-11-11"):
+        arguments += [f"bank_of_italy:{day}", empty.replace('"2026-11-08"', f'"{day}"')]
+    arguments += ["bank_of_italy:2026-11-12", italy]
+    for day in NBK_DAYS:
+        arguments += [f"nbk:{day}", (FIXTURES / "nbk" / f"{day}.xml").read_text(encoding="utf-8")]
+    parsed = json.loads(run_in_tasks(env, PARSE, *arguments).stdout.strip().splitlines()[-1])
+    italy_load = CHAIN_LOADS[0][1]
+    statements = ["BEGIN"]
+    statements.append(
+        "CREATE TABLE raw_bank_of_italy.stack_test_rates ("
+        + ", ".join(f"{c} text" for c in (*ITALY_COLUMNS, "_dlt_load_id"))
+        + ")"
+    )
+    rows = [
+        "(" + ", ".join(literal(row.get(c)) for c in ITALY_COLUMNS) + f", '{italy_load}')"
+        for row in parsed["bank_of_italy"]
+    ]
+    # The values are literals of the recorded answers, their quotes doubled.
+    statements.append(f"INSERT INTO raw_bank_of_italy.stack_test_rates VALUES {', '.join(rows)}")  # noqa: S608
+    statements.append(
+        "CREATE TABLE raw_nbk.stack_test_rates ("
+        + ", ".join(f'"{c}" text' for c in (*NBK_COLUMNS, "_dlt_load_id"))
+        + ")"
+    )
+    rows = []
+    for row in parsed["nbk"]:
+        load = CHAIN_LOADS[2][1] if row["date"] == "12.11.2026" else CHAIN_LOADS[1][1]
+        rows.append("(" + ", ".join(literal(row.get(c)) for c in NBK_COLUMNS) + f", '{load}')")
+    # The values are literals of the recorded answers, their quotes doubled.
+    statements.append(f"INSERT INTO raw_nbk.stack_test_rates VALUES {', '.join(rows)}")  # noqa: S608
+    # The ECB publishes the same numbers as the Bank of Italy for its currencies (ADR-0042): those
+    # of the answer of 12 November stand for Tuesday 10 November.
+    statements.append(
+        "CREATE TABLE raw_ecb.stack_test_rates ("
+        + ", ".join(f"{c} text" for c in (*ECB_COLUMNS, "_dlt_load_id"))
+        + ")"
+    )
+    ecb_load = CHAIN_LOADS[3][1]
+    rows = [
+        f"('D.{row['iso_code']}.EUR.SP00.A', 'D', '{row['iso_code']}', 'EUR', 'SP00', 'A', "
+        f"'2026-11-10', {literal(row['avg_rate'])}, '{ecb_load}')"
+        for row in parsed["bank_of_italy"]
+        if row["reference_date"] == "2026-11-12" and row["iso_code"] in ("USD", "GBP")
+    ]
+    # The values are literals of the recorded answers, their quotes doubled.
+    statements.append(f"INSERT INTO raw_ecb.stack_test_rates VALUES {', '.join(rows)}")  # noqa: S608
+    for code, first_column, path in (
+        ("bank_of_italy", "country", "bank_of_italy/stg_bank_of_italy__rates_daily.sql"),
+        ("nbk", "date", "nbk/stg_nbk__rates_daily.sql"),
+        ("ecb", "key", "ecb/stg_ecb__rates_daily.sql"),
+    ):
+        model = f"stg_{code}__rates_daily"
+        sql = compiled_node(f"chain-{code}", model, f"models/staging/{path}")
+        sql = stand_in(sql, first_column, f"raw_{code}.stack_test_rates")
+        statements.append(f"CREATE OR REPLACE VIEW staging.{model} AS {sql}")
+    statements.append(
+        "DELETE FROM staging.stg_loads__newest_days WHERE source IN ('bank_of_italy', 'nbk', 'ecb')"
+    )
+    for source, load, account, first, last, kind in CHAIN_LOADS:
+        statements.append(
+            "INSERT INTO staging.stg_loads__newest_days "  # noqa: S608 (constants of this file)
+            "(source, account_id, day, load_id, load_key) "
+            f"SELECT '{source}', '{account}', d::date, '{load}', "
+            f"'{source}|{load}|' || (d::date - date '2000-01-01')::text "
+            f"FROM generate_series(date '{first}', date '{last}', interval '1 day') AS d"
+        )
+        statements.append(
+            "INSERT INTO core.loads (source, load_id, account_id, window_from, window_to, outcome, "  # noqa: S608 (constants of this file)
+            f"finished_at, invocation_id, kind) VALUES ('{source}', '{load}', '{account}', "
+            f"'{first}', '{last}', 'loaded', now(), gen_random_uuid(), '{kind}')"
+        )
+    # The accounts of the check, so that the model computes their currencies.
+    statements.append(
+        "INSERT INTO core.dim_account (platform, account_id, client_id, currency, is_active, "  # noqa: S608 (constants of this file)
+        "is_stub) SELECT 'stack_test_rates', currency, 'stack-test', currency, true, false "
+        f"FROM unnest(ARRAY{list(CHAIN_CURRENCIES)!r}) AS currency"
+    )
+    return parsed, statements
+
+
+def chain_rows(env, chain, currency, held=()):
+    """The rows that the model of the rates would merge in a reporting currency over the recorded
+    answers, with the rows of held in core.fx_rates_daily first, by currency and day: each a dict
+    of its columns as text."""
+    _, statements = chain
+    sql = compiled_node(
+        f"chain-core-{currency}", CORE_MODEL, "models/core/core_fx_rates_daily.sql", currency
+    )
+    columns = (
+        "rate_date",
+        "currency",
+        "rate_into_reporting_currency",
+        "base_currency",
+        "base_rate",
+        "rate_source",
+        "published_on",
+        "is_carried_forward",
+        "cross_source",
+        "cross_rate",
+        "cross_published_on",
+    )
+    shown = " || '|' || ".join(f"coalesce(w.{c}::text, '')" for c in columns)
+    output = warehouse_output(
+        env,
+        "; ".join(
+            [
+                *statements,
+                *held,
+                f"SELECT 'written|' || {shown} FROM ({sql}) AS w "  # noqa: S608 (the SQL of dbt and constants of this file)
+                f"WHERE w.currency IN {tuple(CHAIN_CURRENCIES)!r}",
+                "ROLLBACK",
+            ]
+        ),
+    )
+    found = {}
+    for values in written(output):
+        row = dict(zip(columns, values, strict=True))
+        found[(row["currency"], row["rate_date"])] = row
+    return found
+
+
+def price(parsed, title, day):
+    """The tenge for one unit of a currency of the NBK on a day, as the feed writes it."""
+    [row] = [r for r in parsed["nbk"] if r["title"] == title and r["date"] == day]
+    return Decimal(row["description"]) / Decimal(row["quant"])
+
+
+def euros(parsed, code, day):
+    """The units of a currency for one euro of the Bank of Italy on a day, as it writes them."""
+    [row] = [
+        r for r in parsed["bank_of_italy"] if r["iso_code"] == code and r["reference_date"] == day
+    ]
+    return Decimal(row["avg_rate"])
+
+
+def test_the_rates_in_euros_take_the_bank_of_italy_then_the_nbk_then_the_ecb(env, chain):
+    # ADR-0042: the Bank of Italy first; RUB, which it gives as N.A., from the NBK through the
+    # tenge, on a Saturday too, with the tenge of the Bank of Italy of the Friday; the ECB on a day
+    # that the Bank of Italy missed; no rate of KPW, which no source has, so that an account in it
+    # goes to quarantine (missing_rate) and G3 never meets it.
+    parsed, _ = chain
+    rows = chain_rows(env, chain, "EUR")
+    saturday = rows[("RUB", "2026-11-07")]
+    assert (saturday["rate_source"], saturday["base_currency"]) == ("nbk", "KZT")
+    assert (saturday["cross_source"], saturday["cross_published_on"]) == (
+        "bank_of_italy",
+        "2026-11-06",
+    )
+    assert Decimal(saturday["base_rate"]) == price(parsed, "RUB", "07.11.2026")
+    assert Decimal(saturday["cross_rate"]) == euros(parsed, "KZT", "2026-11-06")
+    wanted = price(parsed, "RUB", "07.11.2026") / euros(parsed, "KZT", "2026-11-06")
+    assert abs(Decimal(saturday["rate_into_reporting_currency"]) / wanted - 1) < Decimal("1e-12")
+    assert saturday["is_carried_forward"] == "false"
+    # The tenge of the Bank of Italy is carried over the weekend, not taken from the NBK.
+    tenge = rows[("KZT", "2026-11-07")]
+    assert (tenge["rate_source"], tenge["published_on"], tenge["is_carried_forward"]) == (
+        "bank_of_italy",
+        "2026-11-06",
+        "true",
+    )
+    # The Bank of Italy quotes nothing on Tuesday 10 November: the ECB covers its currencies.
+    tuesday = rows[("USD", "2026-11-10")]
+    assert (tuesday["rate_source"], tuesday["published_on"]) == ("ecb", "2026-11-10")
+    assert rows[("ARS", "2026-11-10")]["rate_source"] == "bank_of_italy"
+    assert rows[("ARS", "2026-11-10")]["is_carried_forward"] == "true"
+    assert rows[("USD", "2026-11-12")]["rate_source"] == "bank_of_italy"
+    assert not [key for key in rows if key[0] == "KPW"]
+    # Every day from the first rate of each other currency, 6 November, to the last day that the
+    # run computes has a row: no gap, which G3 would find.
+    for code in ("RUB", "ARS", "KZT", "GBP", "USD"):
+        days = sorted(date.fromisoformat(day) for (c, day) in rows if c == code)
+        assert days[0] == date(2026, 11, 6), code
+        assert days == [days[0] + timedelta(days=n) for n in range(len(days))], code
+        assert days[-1] >= date(2026, 11, 12), code
+
+
+def test_the_rates_in_tenge_take_the_nbk_then_the_bank_of_italy(env, chain):
+    # ADR-0042: a deployment that reports in KZT takes the official rate of the NBK, the price
+    # that it publishes, and a currency that the NBK lacks from the Bank of Italy through the euro
+    # of the NBK of the same day.
+    parsed, _ = chain
+    rows = chain_rows(env, chain, "KZT")
+    dollar = rows[("USD", "2026-11-12")]
+    assert (dollar["rate_source"], dollar["cross_source"]) == ("nbk", "")
+    assert Decimal(dollar["rate_into_reporting_currency"]) == price(parsed, "USD", "12.11.2026")
+    assert rows[("RUB", "2026-11-07")]["rate_source"] == "nbk"
+    peso = rows[("ARS", "2026-11-12")]
+    assert (peso["rate_source"], peso["cross_source"], peso["cross_published_on"]) == (
+        "bank_of_italy",
+        "nbk",
+        "2026-11-12",
+    )
+    assert Decimal(peso["cross_rate"]) == price(parsed, "EUR", "12.11.2026")
+    wanted = price(parsed, "EUR", "12.11.2026") / euros(parsed, "ARS", "2026-11-12")
+    assert abs(Decimal(peso["rate_into_reporting_currency"]) / wanted - 1) < Decimal("1e-12")
+    assert not [key for key in rows if key[0] == "KPW"]
+
+
+def test_the_rates_held_from_the_ecb_keep_their_source_under_a_history_of_the_bank(env, chain):
+    # The decision of 16 November 2026: a row that the core holds from the ECB, as on a deployment
+    # of v0.5, keeps its source when the first load of the Bank of Italy, a load of the history,
+    # brings the same day, and that load fills only what the core lacks, such as ARS.
+    parsed, _ = chain
+    pound = euros(parsed, "GBP", "2026-11-06")
+    held = [
+        "INSERT INTO core.fx_rates_daily (rate_date, currency, reporting_currency, "  # noqa: S608 (a rate of a recorded answer)
+        "rate_into_reporting_currency, base_currency, base_rate, rate_source, published_on, "
+        f"is_carried_forward) VALUES ('2026-11-06', 'GBP', 'EUR', 1 / {pound}, 'EUR', {pound}, "
+        "'ecb', '2026-11-06', false)"
+    ]
+    rows = chain_rows(env, chain, "EUR", held)
+    kept = rows.get(("GBP", "2026-11-06"))
+    assert kept is None or kept["rate_source"] == "ecb", kept
+    assert rows[("ARS", "2026-11-06")]["rate_source"] == "bank_of_italy"
+    assert Decimal(rows[("ARS", "2026-11-06")]["base_rate"]) == euros(parsed, "ARS", "2026-11-06")

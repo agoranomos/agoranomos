@@ -1,6 +1,6 @@
 # Connect Google Ads
 
-This guide connects the Google Ads accounts of your business to agoranomos: the load reads their campaigns, statistics and conversions every day into the warehouse, and the model, the dashboards and the MCP servers show them beside the demo, or in its place ([ADR-0032](../adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md)). With it, you turn on the reference rates of the European Central Bank, which convert the money of the accounts into the reporting currency.
+This guide connects the Google Ads accounts of your business to agoranomos: the load reads their campaigns, statistics and conversions every day into the warehouse, and the model, the dashboards and the MCP servers show them beside the demo, or in its place ([ADR-0032](../adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md)). With it, you turn on the exchange rates of the Bank of Italy, of the National Bank of Kazakhstan and of the European Central Bank, which convert the money of the accounts into the reporting currency, in the order that `AGORANOMOS_RATES_SOURCE` sets ([The rates](../reference/configuration.md#the-rates)).
 
 No load has reached a real Google Ads account yet: the connector is tested against a stand-in of the API, so compare the first load with the Google Ads UI.
 
@@ -73,10 +73,10 @@ A campaign with conversion goals of its own, chosen for the campaign or a custom
 ## 5. Start the loads
 
 1. Run `./agoranomos up`, which gives the new settings to the container that runs the tasks.
-2. In the Airflow UI, unpause the DAGs `agoranomos_ecb_daily`, `agoranomos_google_ads_daily` and `agoranomos_google_ads_history`, and `agoranomos_demo_transform` if the demo did not unpause it. Each starts paused, so that a deployment without Google Ads asks Google and the ECB nothing.
-3. Trigger `agoranomos_ecb_daily` and then `agoranomos_google_ads_daily` once, or wait for 06:47 and 10:37 UTC. The first load of Google Ads takes the usual window of each account, the last 90 days, and the transform runs after each of the two loads.
+2. In the Airflow UI, unpause the DAGs of the rates, `agoranomos_bank_of_italy_daily`, `agoranomos_nbk_daily` and `agoranomos_ecb_daily`, or with `AGORANOMOS_RATES_SOURCE=ecb` the last alone, then `agoranomos_google_ads_daily` and `agoranomos_google_ads_history`, and `agoranomos_demo_transform` if the demo did not unpause it. Each starts paused, so that a deployment without Google Ads asks Google and the banks nothing.
+3. Trigger the DAGs of the rates and then `agoranomos_google_ads_daily` once, or wait for their schedules: 06:47 UTC for the ECB, 07:17 for the Bank of Italy, 11:13 for the NBK and 10:37 for Google Ads. The first load of each bank takes its 37 months, one request a second, about 15 minutes for the Bank of Italy and 20 for the NBK. The first load of Google Ads takes the usual window of each account, the last 90 days, and the transform runs after each load.
 
-After the transform, the Ops collection of Metabase shows the loads of `ecb` and `google_ads` ([Watch the pipeline](watch-the-pipeline.md)), and the marts have the rows of the platform `google_ads` for the last 90 days.
+After the transform, the Ops collection of Metabase shows the loads of `bank_of_italy`, `nbk`, `ecb` and `google_ads` ([Watch the pipeline](watch-the-pipeline.md)), and the marts have the rows of the platform `google_ads` for the last 90 days.
 
 ### When the history arrives
 

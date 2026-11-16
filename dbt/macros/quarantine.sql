@@ -295,17 +295,17 @@ where unknown_time_zone
 {%- endmacro %}
 
 {#- The check of the rates (ADR-0042): an account whose currency has no rate into the reporting
-    currency at the source of the rates, neither among the rates of the loads that this run reads
-    nor in core.fx_rates_daily as the runs before this one left it, so that the core takes no fact
-    that a view could not convert, and no rate of 1 or 0 stands for a missing one. Only the
-    accounts that the pinned loads of this run name, as only they write the core; a currency
-    outside ISO 4217 has a reason of its own, and the reporting currency needs no rate. A day of a
-    currency that has a rate but none on or before that day is a gap, which the test of G3 finds
-    after the write of the rates. lists are the staging models of the accounts and the properties,
-    each with the column of its account; currencies the seed of ISO 4217; days the table
-    stg_loads__newest_days; ecb and demo the staging models of the rates of the ECB and of the
-    demo, and rates core.fx_rates_daily (macros/rates.sql). -#}
-{% macro quarantine_rate_findings(lists, currencies, days, ecb, demo, rates) -%}
+    currency from any source of the order of AGORANOMOS_RATES_SOURCE (rates_chain), neither among
+    the rates of the loads that this run reads nor in core.fx_rates_daily as the runs before this
+    one left it, so that the core takes no fact that a view could not convert, and no rate of 1 or
+    0 stands for a missing one. Only the accounts that the pinned loads of this run name, as only
+    they write the core; a currency outside ISO 4217 has a reason of its own, and the reporting
+    currency needs no rate. A day of a currency that has a rate but none on or before that day is
+    a gap, which the test of G3 finds after the write of the rates. lists are the staging models
+    of the accounts and the properties, each with the column of its account; currencies the seed
+    of ISO 4217; days the table stg_loads__newest_days; staged the staging models of the rates of
+    each source by its code, rates core.fx_rates_daily and loads core.loads (macros/rates.sql). -#}
+{% macro quarantine_rate_findings(lists, currencies, days, staged, rates, loads) -%}
 with listed as (
     {%- for relation, account in lists %}
     {%- if not loop.first %}
@@ -322,12 +322,11 @@ named as (
     where source in ('{{ quarantine_sources() | join("', '") }}')
 ),
 
-published as (
-    {{ rates_published(ecb, demo, rates) }}
-),
-
 rated as (
-    select currency from ({{ rates_into_reporting('published') }}) as read_rates
+    select distinct currency
+    from (
+        {{ rates_known(staged, rates, days, loads, 'select currency from listed') }}
+    ) as known
     union
     select currency::text
     from {{ rates }}
@@ -341,7 +340,7 @@ select distinct
     'missing_rate'::text as reason,
     'rates'::text as checked,
     'no rate of ' || l.currency || ' into ' || {{ reporting_currency() }}
-        || ' from the source of the rates, ' || {{ rates_source(ecb, rates) }} as detail
+        || ' from the sources of the rates, ' || '{{ rates_chain() | join(", ") }}' as detail
 from listed as l
 join named as n
     on n.source = l.source and n.account_id = l.account_id

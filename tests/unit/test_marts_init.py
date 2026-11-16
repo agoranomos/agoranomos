@@ -148,9 +148,10 @@ def test_a_new_reporting_currency_without_older_rates_is_a_warning_and_no_failur
     assert (
         "marts-init: warning: the core holds no rate into EUR on 548 days from 2025-05-14 on, of "
         "the currencies of the accounts, as their loads of the rates are accepted and have left "
-        "the raw layer: the next load of the rates takes their history again, "
-        "agoranomos_ecb_daily or with the demo alone agoranomos_demo_daily, and until the "
-        "transform reads it, the amounts of those days in EUR are empty (ADR-0042)\n"
+        "the raw layer: the next load of the rates of their source takes their history again, "
+        "agoranomos_bank_of_italy_daily, agoranomos_nbk_daily or agoranomos_ecb_daily, or with "
+        "the demo alone agoranomos_demo_daily, and until the transform reads it, the amounts of "
+        "those days in EUR are empty (ADR-0042)\n"
     ) in out
     assert out.endswith("marts-init: done\n")
     # A view that cannot be read is a warning too.

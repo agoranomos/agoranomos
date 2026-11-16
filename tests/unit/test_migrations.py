@@ -50,6 +50,9 @@ CHECKSUMS = {
     "0008_add_the_kind_of_a_load.sql": (
         "8e503096f4274b41140d8f71e691d471cbc39f3a335e063f8501108f36c78d3c"
     ),
+    "0009_add_the_second_leg_of_a_rate.sql": (
+        "c82804e56923514ba448364cfc00deffc10d553679509bb537e355ea8afd18de"
+    ),
 }
 
 
@@ -312,6 +315,27 @@ def test_the_kind_of_a_load_tells_the_usual_window_from_the_history():
         "CHECK (kind IN ('window', 'history'));"
     ) in text
     assert not re.search(r"\b(GRANT|REVOKE)\b", text)
+
+
+def test_the_second_leg_of_a_rate_is_three_columns_that_go_together():
+    # ADR-0042 (C2c of #222): a rate of a second source goes through the base currency of its
+    # source, whose rate the first source published, so the row names the source, the rate and the
+    # day of that leg too. The columns are nullable and added without a default, so no row is
+    # rewritten, and the grants of 0007 on the table cover them.
+    text = code(MIGRATIONS / "0009_add_the_second_leg_of_a_rate.sql", keep_strings=True)
+    for column in (
+        "cross_source text",
+        "cross_rate numeric(20,10) CHECK (cross_rate > 0)",
+        "cross_published_on date",
+    ):
+        assert f"ALTER TABLE core.fx_rates_daily ADD COLUMN {column};" in text, column
+    assert (
+        "ADD CONSTRAINT fx_rates_daily_cross_leg_is_whole CHECK ( "
+        "(cross_source IS NULL) = (cross_rate IS NULL) "
+        "AND (cross_rate IS NULL) = (cross_published_on IS NULL) "
+        "AND cross_published_on <= rate_date );"
+    ) in text
+    assert not re.search(r"\b(GRANT|REVOKE|UPDATE|DELETE|DEFAULT)\b", text)
 
 
 def test_each_fact_has_the_trigger_of_the_freeze_and_each_journal_has_none():
