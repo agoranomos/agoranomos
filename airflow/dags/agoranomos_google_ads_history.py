@@ -20,8 +20,11 @@ run at the same time as one of Google Ads (agoranomos_meta_ads_history).
 
 The DAG starts paused: a deployment unpauses it with agoranomos_google_ads_daily, once its key and
 its accounts are in place ([Connect Google Ads](docs/how-to/connect-google-ads.md)). A run of the
-load of a portion that fails for an account leaves the days of that account to the next plan,
-after the next run of the transform that succeeds. Ops shows the progress (ops.ops_history).
+load of a portion that fails for an account fails its task, which updates no asset, so the next
+plan comes after the next run of the transform that succeeds, which another load starts. The
+account then holds up no other: the portions go on without it, and its quarter comes again once
+the other accounts hold their history and a load of its usual window has loaded it since
+(agoranomos_pipelines/history.py, failures). Ops shows the progress (ops.ops_history).
 """
 
 from __future__ import annotations

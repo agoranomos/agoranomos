@@ -20,6 +20,18 @@ usual window comes first, or once every account holds its days back to the first
 plans on its own: the loads of two sources may run at the same time, as their APIs and quotas are
 apart, and the one transform takes them one run at a time (max_active_runs of the transform, and
 the pin of ADR-0046, which reads only the loads that have ended).
+
+An account that the newest load of its history failed for, an error of its API or a Meta account
+that ran out of the time of its portion, is set aside (failures), so that it never holds up the
+other accounts of its source: a portion that fails for an account fails the task of its load,
+which then updates no asset, so the next plan waits for a run of the transform that another load
+starts, and a portion that took the account again and again would hold the others as long. The
+portions go on without it, and once no other account lacks a day, a portion takes it again, the
+account that failed longest ago first, if a load of its usual window has ended with it loaded since
+it failed: an account that its platform refuses whole waits for that, and one whose history alone
+fails is taken again at most once for each load of its usual window. A load of its history that
+ends with it loaded, by a portion or by a person with the parameters of a run, puts it back among
+the others.
 """
 
 from __future__ import annotations
@@ -29,11 +41,11 @@ import logging
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from dlt.destinations.exceptions import DatabaseUndefinedRelation
 
-from agoranomos_pipelines.loads import LOADED, LOADS, has_loads
+from agoranomos_pipelines.loads import FAILED, HISTORY, LOADED, LOADS, WINDOW, has_loads
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +74,15 @@ class Portion:
             "window_from": self.first.isoformat(),
             "window_to": self.last.isoformat(),
         }
+
+
+@dataclass(frozen=True)
+class Failure:
+    """An account that the newest load of its history failed for: when that load ended (at), and
+    whether a load of the usual window of the account has ended with it loaded since (again)."""
+
+    at: datetime
+    again: bool
 
 
 def portion_from(
@@ -135,21 +156,47 @@ def missing(windows: Iterable[tuple[date, date]], limit: date) -> list[tuple[dat
     return gaps
 
 
-def next_portion(known: dict[str, list[tuple[date, date]]], limit: date) -> Portion | None:
+def next_portion(
+    known: dict[str, list[tuple[date, date]]],
+    limit: date,
+    failed: dict[str, Failure] | None = None,
+) -> Portion | None:
     """The next load of the history, from the windows of the whole loads of each account, known:
     the newest calendar quarter that an account lacks days of, back to limit, for every account
     that lacks days of it, from the first to the last of those days, so that a portion takes one
     quarter across all the new accounts and the history goes from the new quarters to the old
     ones (ADR-0038). An account whose days of the quarter are fewer takes the others again, which
-    the newest load replaces whole. None once no account lacks a day."""
-    lacking = {account_id: missing(windows, limit) for account_id, windows in known.items()}
-    ends = [gap[1] for gaps in lacking.values() for gap in gaps]
-    if not ends:
+    the newest load replaces whole. The accounts that the newest load of their history failed
+    for, failed, are set aside: once no other account lacks a day, the portion is the newest
+    quarter that the one that failed longest ago lacks, for every account set aside that lacks
+    days of it, of those that a load of their usual window has reached since they failed. None
+    once no account lacks a day, but those set aside that wait for their usual window."""
+    failed = failed or {}
+    lacking = {
+        account_id: gaps
+        for account_id, windows in known.items()
+        if (gaps := missing(windows, limit))
+    }
+    others = {account_id: gaps for account_id, gaps in lacking.items() if account_id not in failed}
+    again = {
+        account_id: gaps
+        for account_id, gaps in lacking.items()
+        if account_id in failed and failed[account_id].again
+    }
+    if others:
+        chosen = others
+        newest = max(gap[1] for gaps in others.values() for gap in gaps)
+    elif again:
+        chosen = again
+        # The runs of days of an account go from the oldest, so its last ends on its newest day.
+        oldest = min(again, key=lambda account_id: (failed[account_id].at, account_id))
+        newest = again[oldest][-1][1]
+    else:
         return None
-    start, end = quarter(max(ends))
+    start, end = quarter(newest)
     taken = {
         account_id: [(max(first, start), min(last, end)) for first, last in gaps]
-        for account_id, gaps in lacking.items()
+        for account_id, gaps in chosen.items()
     }
     taken = {
         account_id: [(first, last) for first, last in days if first <= last]
@@ -217,6 +264,36 @@ def known_windows(
     return found
 
 
+def failures(pipeline, source: str, account_ids: Iterable[str]) -> dict[str, Failure]:
+    """The accounts of a source that the newest load of their history failed for, as core.loads
+    holds their loads, which loader may read: each with the moment when that load ended, and
+    whether a load of its usual window has ended with it loaded since. The plan reads them once
+    no whole load of the source waits for its pin, so that core.loads holds every load of the
+    journal."""
+    wanted = checked(source, account_ids)
+    # IDs of checked digits, and a checked code.
+    listed = ", ".join(f"'{account_id}'" for account_id in wanted)
+    try:
+        with pipeline.sql_client() as client:
+            rows = client.execute_sql(
+                "SELECT account_id, kind, outcome, max(finished_at) FROM core.loads "  # noqa: S608
+                f"WHERE source = '{source}' AND account_id IN ({listed}) "
+                "GROUP BY account_id, kind, outcome"
+            )
+    except DatabaseUndefinedRelation:
+        return {}
+    newest = {(account_id, kind, outcome): at for account_id, kind, outcome, at in rows or ()}
+    found: dict[str, Failure] = {}
+    for account_id in wanted:
+        at = newest.get((account_id, HISTORY, FAILED))
+        loaded = newest.get((account_id, HISTORY, LOADED))
+        if at is None or (loaded is not None and loaded > at):
+            continue
+        window = newest.get((account_id, WINDOW, LOADED))
+        found[account_id] = Failure(at, window is not None and window > at)
+    return found
+
+
 def waiting(pipeline, source: str) -> int:
     """How many whole loads of the accounts of the journal of a source no run of the transform has
     pinned yet, as core.loads holds none of their rows: the next portion of the history waits for
@@ -248,9 +325,10 @@ def planned(
 ) -> Portion | None:
     """The next portion of the history of the accounts of a source, back to limit, from the
     dataset of pipeline, or none: when every account holds its history, when no account has had
-    its usual window yet, or while a whole load of the source waits for the run of the transform
+    its usual window yet, while a whole load of the source waits for the run of the transform
     that pins it, so that each portion goes from raw to the core before the next one starts
-    (ADR-0038). platform names the source in the log."""
+    (ADR-0038), or when only accounts that the newest load of their history failed for lack days,
+    and none of them has had its usual window since. platform names the source in the log."""
     wanted = checked(source, account_ids)
     pending = waiting(pipeline, source)
     if pending:
@@ -261,8 +339,22 @@ def planned(
             platform,
         )
         return None
-    portion = next_portion(known_windows(pipeline, source, wanted), limit)
-    if portion is None:
+    known = known_windows(pipeline, source, wanted)
+    failed = failures(pipeline, source, wanted)
+    aside = sorted(account_id for account_id in failed if missing(known[account_id], limit))
+    if aside:
+        log.warning(
+            "The newest load of the history of %d accounts (%s) of %s failed for them: the "
+            "history takes them again once the other accounts hold their days, and each once a "
+            "load of its usual window has ended with it loaded since",
+            len(aside),
+            ", ".join(aside),
+            platform,
+        )
+    portion = next_portion(known, limit, failed)
+    if portion is None and aside:
+        log.info("No account of %s that the history may take now lacks a day", platform)
+    elif portion is None:
         log.info(
             "Every account of %s that has had its usual window holds its days back to %s",
             platform,

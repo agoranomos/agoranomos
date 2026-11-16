@@ -10,7 +10,7 @@ import importlib
 import logging
 import sys
 import types
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -46,6 +46,10 @@ class StandInClient:
             return [(state["loads"],)]
         if sql.startswith("SELECT account_id, window_from, window_to FROM core.loads "):
             return state["core_windows"]
+        if sql.startswith("SELECT account_id, kind, outcome, max(finished_at) FROM core.loads "):
+            if state["attempts"] is None:
+                raise UndefinedRelation(sql)
+            return state["attempts"]
         if sql.startswith("SELECT count(DISTINCT j._dlt_load_id) "):
             return [(state["waiting"],)]
         if sql.startswith("SELECT j.account_id, j.window_from, j.window_to "):
@@ -56,7 +60,14 @@ class StandInClient:
 class StandInPipeline:
     def __init__(self, dataset_name, **state):
         self.dataset_name, self.queries = dataset_name, []
-        self.state = {"loads": 1, "core_windows": [], "waiting": 0, "windows": [], **state}
+        self.state = {
+            "loads": 1,
+            "core_windows": [],
+            "attempts": [],
+            "waiting": 0,
+            "windows": [],
+            **state,
+        }
 
     def sql_client(self):
         return StandInClient(self)
@@ -133,6 +144,147 @@ def test_the_history_goes_by_quarters_from_the_newest_back_to_the_limit(history,
     assert history.missing(known["1"], LIMIT) == history.missing(known["2"], LIMIT) == []
 
 
+def test_an_account_whose_history_fails_holds_up_no_other_account(history):
+    # One account fails at its first portion, as one that its platform refuses would: the portions
+    # go on with the others back to the limit, and the failed account waits until a load of its
+    # usual window has ended since, then its portion comes again, alone, and its history goes on.
+    known = {
+        account_id: [(date(2026, 7, 31), date(2026, 10, 28))] for account_id in ("1", "2", "3")
+    }
+    failed, broken, moment = {}, {"1"}, datetime(2026, 10, 29, 12, tzinfo=UTC)
+    portions = []
+    while (portion := history.next_portion(known, LIMIT, failed)) is not None:
+        portions.append(portion)
+        moment += timedelta(hours=1)
+        for account_id in portion.accounts:
+            if account_id in broken:
+                failed[account_id] = history.Failure(moment, again=False)
+            else:
+                known[account_id].append((portion.first, portion.last))
+                failed.pop(account_id, None)
+        assert len(portions) < 30, "the history never ends"
+    first = history.Portion(("1", "2", "3"), date(2026, 7, 1), date(2026, 7, 30))
+    assert portions[0] == first
+    # The eleven quarters before it, of the two others alone.
+    assert len(portions) == 12
+    assert all(portion.accounts == ("2", "3") for portion in portions[1:])
+    assert (portions[-1].first, portions[-1].last) == (LIMIT, date(2023, 12, 31))
+    assert history.missing(known["1"], LIMIT) == [(LIMIT, date(2026, 7, 30))]
+    # A load of its usual window has ended since: its quarter comes again, of it alone.
+    failed["1"] = history.Failure(failed["1"].at, again=True)
+    assert history.next_portion(known, LIMIT, failed) == history.Portion(
+        ("1",), date(2026, 7, 1), date(2026, 7, 30)
+    )
+    # Once it is loaded, it goes on as any other.
+    known["1"].append((date(2026, 7, 1), date(2026, 7, 30)))
+    del failed["1"]
+    assert history.next_portion(known, LIMIT, failed) == history.Portion(
+        ("1",), date(2026, 4, 1), date(2026, 6, 30)
+    )
+
+
+def test_the_accounts_set_aside_come_again_the_one_that_failed_longest_ago_first(history):
+    usual = [(date(2026, 7, 31), date(2026, 10, 28))]
+    known = {
+        # Failed on the newest quarter, an hour after the other.
+        "1": list(usual),
+        # Failed on the quarter before, after it loaded the newest one.
+        "2": [*usual, (date(2026, 7, 1), date(2026, 7, 30))],
+        # Holds its history.
+        "3": [(LIMIT, date(2026, 10, 28))],
+    }
+    at = datetime(2026, 10, 30, 9, tzinfo=UTC)
+    failed = {
+        "1": history.Failure(at + timedelta(hours=1), again=True),
+        "2": history.Failure(at, again=True),
+    }
+    # The quarter that the account that failed first lacks, of each account that lacks it.
+    assert history.next_portion(known, LIMIT, failed) == history.Portion(
+        ("1", "2"), date(2026, 4, 1), date(2026, 6, 30)
+    )
+    failed["2"] = history.Failure(at + timedelta(hours=2), again=True)
+    assert history.next_portion(known, LIMIT, failed) == history.Portion(
+        ("1",), date(2026, 7, 1), date(2026, 7, 30)
+    )
+    # An account that waits for its usual window is not taken, nor one that lacks no day.
+    failed["1"] = history.Failure(at + timedelta(hours=1), again=False)
+    failed["3"] = history.Failure(at, again=True)
+    assert history.next_portion(known, LIMIT, failed) == history.Portion(
+        ("2",), date(2026, 4, 1), date(2026, 6, 30)
+    )
+    failed["2"] = history.Failure(at + timedelta(hours=2), again=False)
+    assert history.next_portion(known, LIMIT, failed) is None
+
+
+def test_the_failures_are_the_accounts_whose_newest_load_of_the_history_failed(history):
+    source, dataset, _ = GOOGLE
+    at = datetime(2026, 10, 30, 10, tzinfo=UTC)
+    hour = timedelta(hours=1)
+    pipeline = StandInPipeline(
+        dataset,
+        attempts=[
+            # Its usual window loaded after its history failed.
+            ("1", "history", "failed", at),
+            ("1", "history", "loaded", at - hour),
+            ("1", "window", "loaded", at + hour),
+            # A later load of its history loaded it.
+            ("2", "history", "failed", at),
+            ("2", "history", "loaded", at + hour),
+            # Its usual window has not loaded since.
+            ("3", "history", "failed", at),
+            ("3", "window", "loaded", at - hour),
+            ("3", "window", "failed", at + hour),
+            # A failed usual window sets nothing aside.
+            ("4", "window", "failed", at),
+        ],
+    )
+    assert history.failures(pipeline, source, ["4", "3", "2", "1", "5"]) == {
+        "1": history.Failure(at, again=True),
+        "3": history.Failure(at, again=False),
+    }
+    assert pipeline.queries == [
+        "SELECT account_id, kind, outcome, max(finished_at) FROM core.loads "
+        "WHERE source = 'google_ads' AND account_id IN ('1', '2', '3', '4', '5') "
+        "GROUP BY account_id, kind, outcome"
+    ]
+    # A warehouse without core.loads: none.
+    assert history.failures(StandInPipeline(dataset, attempts=None), source, ["1"]) == {}
+
+
+@pytest.mark.parametrize(("source", "dataset", "accounts"), SOURCES)
+def test_the_plan_goes_on_without_an_account_whose_history_failed(
+    history, caplog, source, dataset, accounts
+):
+    one, two = accounts
+    at = datetime(2026, 10, 30, 10, tzinfo=UTC)
+    pipeline = StandInPipeline(
+        dataset,
+        windows=[
+            (one, date(2026, 7, 31), date(2026, 10, 28)),
+            (two, date(2026, 7, 31), date(2026, 10, 28)),
+            (two, date(2026, 7, 1), date(2026, 7, 30)),
+        ],
+        attempts=[(one, "history", "failed", at), (one, "window", "loaded", at)],
+    )
+    with caplog.at_level(logging.INFO):
+        portion = history.planned(pipeline, source, "The platform", accounts, LIMIT)
+    assert portion == history.Portion((two,), date(2026, 4, 1), date(2026, 6, 30))
+    said = f"The newest load of the history of 1 accounts ({one}) of The platform failed for them"
+    assert said in caplog.text
+    # Once the other holds its history, nothing, until a load of the usual window of the failed
+    # account ends with it loaded.
+    pipeline.state["windows"].append((two, LIMIT, date(2026, 6, 30)))
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        assert history.planned(pipeline, source, "The platform", accounts, LIMIT) is None
+    assert "No account of The platform that the history may take now lacks a day" in caplog.text
+    assert "holds its days back to" not in caplog.text
+    pipeline.state["attempts"].append((one, "window", "loaded", at + timedelta(days=1)))
+    assert history.planned(pipeline, source, "The platform", accounts, LIMIT) == history.Portion(
+        (one,), date(2026, 7, 1), date(2026, 7, 30)
+    )
+
+
 def test_the_parameters_of_a_run_name_a_portion_with_the_form_of_the_platform(history):
     class PlatformError(RuntimeError):
         pass
@@ -198,6 +350,9 @@ def test_the_plan_of_a_source_reads_its_own_journal_and_its_rows_of_core_loads(
         'JOIN "DATASET"."_dlt_loads" AS l '
         "ON l.load_id = j._dlt_load_id AND l.status = 0 "
         "WHERE j.status = 'loaded' AND j.account_id IN ('ONE', 'TWO')",
+        "SELECT account_id, kind, outcome, max(finished_at) FROM core.loads "
+        "WHERE source = 'SOURCE' AND account_id IN ('ONE', 'TWO') "
+        "GROUP BY account_id, kind, outcome",
     ]
     names = {"DATASET": dataset, "SOURCE": source, "ONE": one, "TWO": two}
     for name, value in names.items():
