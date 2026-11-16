@@ -51,7 +51,7 @@ CHECKSUMS = {
         "8e503096f4274b41140d8f71e691d471cbc39f3a335e063f8501108f36c78d3c"
     ),
     "0009_add_the_partial_day.sql": (
-        "603f215dfc373b148d7d9a9a7b63115bcb4d3159de30296cfac3b8fb4926189f"
+        "05ecdaee32df661a8675a5efc851515f2478377458b9eff881fe40635f363e25"
     ),
 }
 

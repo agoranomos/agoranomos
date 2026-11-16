@@ -25,3 +25,29 @@ COMMENT ON COLUMN core.ad_stats_campaign_daily.is_partial_day IS
 'Whether the row is of a day still in progress, as a load of the kind intraday read it at the moment of its load: impressions, clicks and spend so far, and no conversions. A load of the kind window or history replaces the day whole, with false, and the journal of restatements does not keep the partial row. The other facts have no partial day.';
 COMMENT ON TABLE core.ad_stats_campaign_daily_restatements IS
 'The journal of restatements of core.ad_stats_campaign_daily: one row for each row of the fact that a load changed or removed when it replaced the days of its window, with its old values, the load that had written it and the one that replaced it; a partial row of a day still in progress (is_partial_day) goes nowhere. Partitioned by month of replaced_at, and kept 13 months.';
+
+-- The partitions that exist take the comment of the new column from their parent, as a partition
+-- that core.ensure_partition makes later copies it: ADD COLUMN gives them the column and not its
+-- comment. They are those of 0005 on a new warehouse, and every month of the facts on one that a
+-- release before this one wrote. migrator owns them, as ensure_partition runs as migrator.
+DO $$
+DECLARE
+  v_parent CONSTANT regclass := 'core.ad_stats_campaign_daily';
+  v_comment text;
+  v_schema name;
+  v_name name;
+BEGIN
+  SELECT col_description(a.attrelid, a.attnum) INTO STRICT v_comment
+  FROM pg_attribute AS a
+  WHERE a.attrelid = v_parent AND a.attname = 'is_partial_day';
+  FOR v_schema, v_name IN
+    SELECT n.nspname, c.relname
+    FROM pg_inherits AS i
+    JOIN pg_class AS c ON c.oid = i.inhrelid
+    JOIN pg_namespace AS n ON n.oid = c.relnamespace
+    WHERE i.inhparent = v_parent
+  LOOP
+    EXECUTE format('COMMENT ON COLUMN %I.%I.is_partial_day IS %L', v_schema, v_name, v_comment);
+  END LOOP;
+END
+$$;
