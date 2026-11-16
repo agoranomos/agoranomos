@@ -3,9 +3,9 @@ destination, the format of the files, the contract of the schema and the setting
 load, the hints of the journal of the loads (_agoranomos_loads), which records the window of each
 account that a load took, or that the account failed, how a load reads that journal, and how it
 counts its rows (ADR-0004, ADR-0038). The sources of the demo (demo/sources.py), of the rates of
-the ECB (ecb.py), of Google Ads (google_ads.py) and of Meta (meta_ads.py) load through them, and
-the source of the settings of the model (settings/source.py) takes the connection, the format and
-the counts."""
+the ECB (ecb.py) and of the Bank of Italy (bank_of_italy.py), of Google Ads (google_ads.py) and of
+Meta (meta_ads.py) load through them, and the source of the settings of the model
+(settings/source.py) takes the connection, the format and the counts."""
 
 from __future__ import annotations
 

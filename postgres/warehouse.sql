@@ -144,6 +144,16 @@ ALTER SCHEMA raw_ecb_staging OWNER TO loader;
 GRANT USAGE ON SCHEMA raw_ecb TO transformer;
 GRANT SELECT ON ALL TABLES IN SCHEMA raw_ecb TO transformer;
 ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_ecb GRANT SELECT ON TABLES TO transformer;
+-- The exchange rates of the Bank of Italy against the euro (ADR-0042), which dlt appends to
+-- raw_bank_of_italy, with raw_bank_of_italy_staging beside it, as for the ECB. loader owns both;
+-- transformer may read the first.
+CREATE SCHEMA IF NOT EXISTS raw_bank_of_italy AUTHORIZATION loader;
+CREATE SCHEMA IF NOT EXISTS raw_bank_of_italy_staging AUTHORIZATION loader;
+ALTER SCHEMA raw_bank_of_italy OWNER TO loader;
+ALTER SCHEMA raw_bank_of_italy_staging OWNER TO loader;
+GRANT USAGE ON SCHEMA raw_bank_of_italy TO transformer;
+GRANT SELECT ON ALL TABLES IN SCHEMA raw_bank_of_italy TO transformer;
+ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_bank_of_italy GRANT SELECT ON TABLES TO transformer;
 -- The Google Ads accounts of the deployment (ADR-0032), whose facts and lists of campaigns, ad
 -- groups, ads and conversion actions dlt appends to raw_google_ads, with raw_google_ads_staging
 -- beside it, empty, as a platform has it. loader owns both; transformer may read the first.
