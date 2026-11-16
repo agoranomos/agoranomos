@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import functools
 import http.client
 import json
@@ -558,6 +559,33 @@ def totals(env: dict[str, str], table: str) -> dict[str, int | Decimal]:
         "spend": Decimal(spend),
         "conversions": Decimal(conversions),
     }
+
+
+# The seed of the platforms of the base package, whose rows the views of marts carry in their
+# text, as marts-init loads it and builds them (dbt/macros/platforms.sql, metabase/marts_init.py).
+PLATFORMS_SEED = REPO_ROOT / "dbt" / "seeds" / "seed_ad_platforms.csv"
+COLUMN_NAME = re.compile(r"[a-z_][a-z0-9_]*")
+
+
+def seed_platforms() -> tuple[list[str], set[str]]:
+    """The columns of the seed of the platforms of the checkout, and each of its rows as its
+    values joined by |, an empty value as an empty text."""
+    with PLATFORMS_SEED.open(encoding="utf-8", newline="") as file:
+        reader = csv.reader(file)
+        columns = next(reader)
+        rows = {"|".join(row) for row in reader}
+    return columns, rows
+
+
+def shown_platforms(env: dict[str, str], columns: list[str]) -> set[str]:
+    """The rows of the view marts.ad_platforms in the columns of the seed, as seed_platforms()
+    gives them: a null as an empty text, a boolean as true or false."""
+    for column in columns:
+        if not COLUMN_NAME.fullmatch(column):
+            raise ValueError(f"not a column of the seed: {column!r}")
+    values = ", ".join(f"coalesce({column}::text, '')" for column in columns)
+    output = warehouse_output(env, f"SELECT concat_ws('|', {values}) FROM marts.ad_platforms")  # noqa: S608 (names checked above)
+    return set(output.splitlines())
 
 
 def wait_for(
