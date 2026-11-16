@@ -4,9 +4,9 @@ models:
       The last load of each account of each platform, one row each, from the journal that each load
       writes (_agoranomos_loads): the last day that a load took, when it was loaded, and how many
       hours ago, as of the moment that the view is read. The accounts of demo_web are its
-      properties, and demo_fx and ecb have one account each, EUR, the base of their rates; ecb,
-      google_ads and meta_ads have none until their first load. The Ops collection of Metabase shows it
-      (ADR-0029).
+      properties, and demo_fx, ecb and bank_of_italy have one account each, EUR, the base of
+      their rates; ecb, bank_of_italy, google_ads and meta_ads have none until their first load.
+      The Ops collection of Metabase shows it (ADR-0029).
     columns:
       - name: platform
         description: '{{ doc("platform") }}'

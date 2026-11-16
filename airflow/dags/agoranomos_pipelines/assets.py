@@ -27,6 +27,10 @@ DEMO_LOADED = AssetAll(*RAW_DEMO_PLATFORMS.values())
 # The asset of the rates of the ECB (ADR-0032), in the same form, which each of its loads updates.
 RAW_ECB = Asset("postgres://warehouse-db:5432/warehouse/raw_ecb/rates_daily")
 
+# The asset of the rates of the Bank of Italy (ADR-0042), in the same form, which each of its loads
+# updates.
+RAW_BANK_OF_ITALY = Asset("postgres://warehouse-db:5432/warehouse/raw_bank_of_italy/rates_daily")
+
 # The asset of the statistics of Google Ads (ADR-0032), in the same form, which each of its loads
 # updates.
 RAW_GOOGLE_ADS = Asset("postgres://warehouse-db:5432/warehouse/raw_google_ads/campaign_stats")
@@ -45,7 +49,8 @@ RAW_NBK = Asset("postgres://warehouse-db:5432/warehouse/raw_nbk/rates_daily")
 TRANSFORMED = Asset("agoranomos_transformed")
 
 # The condition on which the transform runs (ADR-0039): the demo has loaded, or the rates of the ECB
-# have, or Google Ads or Meta has, or the rates of the NBK have. A source that joins the model adds
-# its asset here. The transform allows one run at a time: while a run is queued or running, Airflow
-# keeps the events that come, and starts one run for all of them once it ends.
-LOADED = AssetAny(DEMO_LOADED, RAW_ECB, RAW_GOOGLE_ADS, RAW_META_ADS, RAW_NBK)
+# or of the Bank of Italy have, or Google Ads or Meta has, or the rates of the NBK have. A source
+# that joins the model adds its asset here. The transform allows one run at a time: while a run is
+# queued or running, Airflow keeps the events that come, and starts one run for all of them once it
+# ends.
+LOADED = AssetAny(DEMO_LOADED, RAW_ECB, RAW_BANK_OF_ITALY, RAW_GOOGLE_ADS, RAW_META_ADS, RAW_NBK)
