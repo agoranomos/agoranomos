@@ -56,10 +56,10 @@ WINDOW_DAYS = "staging.int_window_days"
 
 # The rows of a load that has no row in _dlt_loads and none in core.loads, a load that stopped half
 # way, go once its load id, the moment when dlt began to extract it, is older than this: longer than
-# the dagrun_timeout of every DAG that loads, seven hours for Google Ads and Meta, two for the rates
-# of the Bank of Italy and an hour for the others, so that no load that is still running loses a
-# row (ADR-0046). tests/unit/test_acceptance.py
-# compares it with the DAGs.
+# the dagrun_timeout of every DAG that loads, seven hours for Google Ads and Meta, four for the
+# rates of the NBK, two for those of the Bank of Italy and an hour for the others, so that no load
+# that is still running loses a row (ADR-0046). tests/unit/test_acceptance.py compares it with the
+# DAGs.
 UNFINISHED_AFTER = timedelta(days=1)
 
 # How long the cleanup waits for the lock of a table before it deletes instead: a load in progress
@@ -144,6 +144,7 @@ ACCOUNTS: dict[str, dict[str, str | None]] = {
         "insights_adset": SOCIAL,
         "insights_ad": SOCIAL,
     },
+    "raw_nbk": {"rates_daily": None},
 }
 # The raw schemas that the cleanup names before staging reads them, which
 # tests/unit/test_acceptance.py leaves out of its comparison with the staging models: none today.

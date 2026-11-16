@@ -139,7 +139,8 @@ where d.status = 'pinned'
     rates, and their rows none (none): the day alone finds the load. The demo platforms take these
     from airflow/dags/agoranomos_pipelines/demo/platforms.py, and tests/unit/test_dbt_project.py
     checks that the two agree; Google Ads has the shape of demo_search, and Meta that of
-    demo_social, whose date_start the load of Meta also writes as a date. -#}
+    demo_social, whose date_start the load of Meta also writes as a date. The rates of the NBK
+    have their day as its feed writes it, DD.MM.YYYY. -#}
 {% macro newest_load_sources() -%}
 {{- return({
     'raw_bank_of_italy': (none, 'cast(r.reference_date as date)'),
@@ -151,6 +152,7 @@ where d.status = 'pinned'
     'raw_ecb': (none, 'cast(r.time_period as date)'),
     'raw_google_ads': ('r.customer__id', 'r.segments__date::date'),
     'raw_meta_ads': ('r.account_id', 'r.date_start'),
+    'raw_nbk': (none, "to_date(r.date, 'DD.MM.YYYY')"),
 }) -}}
 {%- endmacro %}
 
