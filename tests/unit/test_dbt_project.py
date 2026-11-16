@@ -597,9 +597,9 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
     rows = {r["platform"]: r for r in seed_rows("seed_ad_platforms")}
     from agoranomos_pipelines.demo import platforms
 
-    # And the real sources, which mimic nothing: the rates of the ECB, Google Ads (ADR-0032) and
-    # Meta (ADR-0050).
-    assert set(rows) == {*platforms.PLATFORMS, "ecb", "google_ads", "meta_ads"}
+    # And the real sources, which mimic nothing: the rates of the ECB, Google Ads (ADR-0032), Meta
+    # (ADR-0050) and the rates of the NBK (ADR-0042).
+    assert set(rows) == {*platforms.PLATFORMS, "ecb", "google_ads", "meta_ads", "nbk"}
     for code, platform in platforms.PLATFORMS.items():
         assert rows[code]["mimics"] == platform.mimics
         assert rows[code]["is_demo"] == "true"
@@ -621,6 +621,13 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
         "platform": "meta_ads",
         "platform_name": "Meta Ads",
         "kind": "ads",
+        "mimics": "",
+        "is_demo": "false",
+    }
+    assert rows["nbk"] == {
+        "platform": "nbk",
+        "platform_name": "National Bank of Kazakhstan",
+        "kind": "exchange_rates",
         "mimics": "",
         "is_demo": "false",
     }
@@ -1014,7 +1021,7 @@ def test_the_pin_makes_the_partitions_of_the_facts_that_each_source_is_to_write(
     assert len(partitioned) == 5, sorted(partitioned)
     assert {fact for listed in facts.values() for fact in listed} == partitioned
     assert facts["raw_demo_web"] == ["web_sessions_daily"]
-    assert facts["raw_demo_fx"] == facts["raw_ecb"] == []
+    assert facts["raw_demo_fx"] == facts["raw_ecb"] == facts["raw_nbk"] == []
     for source in (
         "raw_demo_search",
         "raw_demo_social",
@@ -1043,6 +1050,7 @@ def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_do
         "raw_ecb",
         "raw_google_ads",
         "raw_meta_ads",
+        "raw_nbk",
     }
 
     def plain(sql):
@@ -1064,6 +1072,8 @@ def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_do
     assert keys["raw_google_ads"] == keys["raw_demo_search"]
     assert keys["raw_meta_ads"] == keys["raw_demo_social"]
     assert keys["raw_ecb"] == (None, "cast(r.time_period as date)")
+    # The NBK writes its day as DD.MM.YYYY, in the column date of each item (nbk.py).
+    assert keys["raw_nbk"] == (None, "to_date(r.date, 'DD.MM.YYYY')")
 
 
 def test_every_table_of_the_demo_can_be_missing():
@@ -1456,6 +1466,83 @@ def test_the_rates_take_the_ecb_alone_once_it_has_any_and_the_loads_show_it_befo
     ) in rates
     loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
     assert "('raw_ecb', 'ecb')," in loads
+
+
+NBK = STAGING / "nbk"
+# The columns that the load of the NBK writes, every one text (nbk.py).
+NBK_COLUMNS = ("date", "fullname", "title", "description", "quant", "index", "change")
+
+
+def test_the_staging_of_the_nbk_reads_its_feed_through_its_shape_even_before_a_load():
+    # The DAG of the rates of the NBK starts paused, so the model reads an empty query of the same
+    # columns until a load writes the table (ADR-0042).
+    text = (DAGS_PIPELINES / "nbk.py").read_text(encoding="utf-8")
+    assert 'DAY_COLUMN = "date"\n' in text
+    assert 'FIELDS = ("fullname", "title", "description", "quant", "index", "change")\n' in text
+    text = (NBK / "stg_nbk__rates_daily.sql").read_text(encoding="utf-8")
+    comment, *_ = text.splitlines()
+    assert comment.startswith("-- stg_nbk__rates_daily.sql: ")
+    columns = dict(re.findall(r"'(\w+)': '([\w ]+)'", text))
+    assert columns == dict.fromkeys((*NBK_COLUMNS, "_dlt_load_id"), "text")
+    call = "{{ nbk_rates(newest_load(relation_or_empty(source('raw_nbk', 'rates_daily'), {"
+    assert text.count(call) == 1
+    assert text.rstrip().endswith("}), 'raw_nbk', ref('stg_loads__newest_days')), 'nbk') }}")
+
+
+def test_the_shape_of_the_nbk_gives_the_rates_of_one_tenge_and_the_tenge_of_one_unit():
+    # rates_published reads the units of quote_currency for one unit of base_currency, so for the
+    # base KZT the rate is quant over the price in tenge of quant units, with no rounding to eight
+    # places; base_rate keeps the convention of the NBK, the tenge for one unit (ADR-0042).
+    macro = (DBT / "macros" / "shapes" / "nbk_rates.sql").read_text(encoding="utf-8")
+    assert "{% macro nbk_rates(relation, platform) %}" in macro
+    assert "cast('KZT' as text) as base_currency," in macro
+    assert "title as quote_currency," in macro
+    assert "units / price as rate," in macro
+    assert "price / units as base_rate," in macro
+    assert "'{{ platform }}' as rate_source" in macro
+    assert "to_date(\"date\", 'DD.MM.YYYY') as rate_date," in macro
+    assert "where price > 0 and units > 0" in macro
+    body = macro[macro.index("{% macro") :]
+    assert "numeric(" not in body
+    assert "round(" not in body
+    # The direction in which rates_into_reporting divides: the rate of the reporting currency over
+    # that of the currency.
+    rates = (DBT / "macros" / "rates.sql").read_text(encoding="utf-8")
+    assert "r.rate / c.rate as rate_into_reporting_currency" in rates
+
+
+def test_the_sources_of_the_nbk_are_the_tables_that_its_load_writes():
+    text = (NBK / "_nbk__sources.yml").read_text(encoding="utf-8")
+    [source] = re.findall(r"^  - name: (\w+)\n    description:", text, flags=re.MULTILINE)
+    assert source == "raw_nbk"
+    assert re.search(r"^    schema: raw_nbk$", text, flags=re.MULTILINE)
+    pattern = r"^      - name: (\w+)\n        description:"
+    assert set(re.findall(pattern, text, flags=re.MULTILINE)) == {
+        "rates_daily",
+        "_agoranomos_loads",
+        "_dlt_loads",
+    }
+
+
+def test_the_staging_of_the_nbk_has_the_tests_of_the_rates_and_of_its_base_rate():
+    nbk = (NBK / "_nbk__models.yml").read_text(encoding="utf-8").split("    data_tests:", 1)[1]
+    ecb = (ECB / "_ecb__models.yml").read_text(encoding="utf-8").split("    data_tests:", 1)[1]
+    base_rate = (
+        "      - name: base_rate\n"
+        "        description: '{{ doc(\"base_rate\") }}'\n"
+        "        data_tests: [not_null, non_negative]\n"
+    )
+    assert base_rate in nbk
+    assert nbk.replace(base_rate, "") == ecb
+    loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
+    assert "('raw_nbk', 'nbk')," in loads
+    # Nothing of the model reads the rates of the NBK yet: C2c of #222 takes them.
+    readers = [
+        path.relative_to(DBT).as_posix()
+        for path in (DBT / "models").rglob("*.sql")
+        if "stg_nbk__rates_daily" in path.read_text(encoding="utf-8")
+    ]
+    assert readers == ["models/staging/nbk/stg_nbk__rates_daily.sql"]
 
 
 GOOGLE_ADS = STAGING / "google_ads"
@@ -1875,7 +1962,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 362, counted
+    assert counted == 371, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text

@@ -1,8 +1,8 @@
 -- The last load of each account of each platform, from the journal that each load writes in the
 -- same run as its rows (_agoranomos_loads). It reads the sources only, so that it shows the loads
 -- also when a model of staging fails. A journal that no load has written, as those of the ECB, of
--- Google Ads and of Meta, whose DAGs start paused, or of the demo in a deployment without it, is
--- empty.
+-- Google Ads, of Meta and of the NBK, whose DAGs start paused, or of the demo in a deployment
+-- without it, is empty.
 with loads as (
     {%- for source_name, platform in [
         ('raw_demo_fx', 'demo_fx'),
@@ -13,6 +13,7 @@ with loads as (
         ('raw_ecb', 'ecb'),
         ('raw_google_ads', 'google_ads'),
         ('raw_meta_ads', 'meta_ads'),
+        ('raw_nbk', 'nbk'),
     ] %}
     {%- if not loop.first %}
     union all
