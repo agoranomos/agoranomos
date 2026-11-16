@@ -655,7 +655,7 @@ with window_days as (
     select source, account_id, day, load_id
     from {{ days }}
     where source in ('{{ quarantine_sources() | join("', '") }}')
-        and kind <> 'intraday'
+        and load_kind <> 'intraday'
 ),
 
 held as (

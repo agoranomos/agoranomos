@@ -2899,7 +2899,7 @@ def test_g1a_leaves_out_the_loads_of_the_current_day_and_g0a_checks_only_loads_w
     # count in what it holds; G0a checks a load against the totals of the same load, which a load
     # of the current day does not bring, so it checks none of them as the code stands.
     collapse = macro_text("quarantine_collapse_findings")
-    assert "        and kind <> 'intraday'\n),\n\nheld as (" in collapse
+    assert "        and load_kind <> 'intraday'\n),\n\nheld as (" in collapse
     assert (
         "        {%- if facts.identifier in partial_day_facts() %}\n"
         "        and not f.is_partial_day\n        {%- endif %}\n"
