@@ -2911,7 +2911,7 @@ def test_g1a_leaves_out_the_loads_of_the_current_day_and_g0a_checks_only_loads_w
     # when the core holds it from a list before, and else unknown_account, as any account.
     accounts = macro_text("quarantine_account_findings")
     assert (
-        "            d.kind <> 'intraday'\n            or not exists (\n"
+        "            d.load_kind <> 'intraday'\n            or not exists (\n"
         "                select\n                from {{ accounts }} as k\n"
         "                where k.platform = d.source and k.account_id = d.account_id "
         "and not k.is_stub\n"

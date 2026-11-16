@@ -83,7 +83,7 @@ select
     d.account_id,
     d.day,
     d.load_id,
-    d.kind,
+    d.kind as load_kind,
     {{ newest_load_key(source_name, 'd.load_id', none if account is none else 'd.account_id', 'd.day') }} as load_key
 from (
     select distinct on (l.account_id, w.day)

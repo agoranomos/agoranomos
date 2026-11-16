@@ -262,7 +262,7 @@ named as (
     from {{ days }} as d
     where d.source in ('{{ quarantine_sources() | join("', '") }}')
         and (
-            d.kind <> 'intraday'
+            d.load_kind <> 'intraday'
             or not exists (
                 select
                 from {{ accounts }} as k
