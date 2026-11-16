@@ -52,8 +52,8 @@ def test_no_window_is_longer_than_the_freeze_allows():
     for platform, days in windows.restatement_windows().items():
         assert days <= longest, (
             f"the window of {platform}, {days} days, is longer than the {longest} days that the "
-            f"freeze of the facts at {maintenance.FROZEN_DAYS} days allows: a longer window needs a "
-            "new migration that moves the triggers of the freeze, with FROZEN_DAYS of "
+            f"freeze of the facts at {maintenance.FROZEN_DAYS} days allows: a longer window needs "
+            "a new migration that moves the triggers of the freeze, with FROZEN_DAYS of "
             "maintenance.py and frozen_before() of dbt/macros/facts.sql"
         )
 
