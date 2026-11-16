@@ -143,6 +143,7 @@ where d.status = 'pinned'
     have their day as its feed writes it, DD.MM.YYYY. -#}
 {% macro newest_load_sources() -%}
 {{- return({
+    'raw_bank_of_italy': (none, 'cast(r.reference_date as date)'),
     'raw_demo_fx': (none, 'r.rate_date'),
     'raw_demo_search': ('r.customer__id', 'r.segments__date::date'),
     'raw_demo_social': ('r.account_id', 'r.date_start'),

@@ -17,8 +17,9 @@ SEED = REPO / "dbt" / "seeds" / "seed_ad_platforms.csv"
 PIPELINES = REPO / "airflow" / "dags" / "agoranomos_pipelines"
 MIGRATIONS = REPO / "postgres" / "migrations"
 # The windows of today: those of ADR-0038 ("The window") for Google Ads and Meta, the 14 days of
-# the rates (ADR-0042), and those of the demo, which keeps its own as it mimics.
+# the rates of the three banks (ADR-0042), and those of the demo, which keeps its own as it mimics.
 WINDOWS = {
+    "bank_of_italy": 14,
     "demo_fx": 7,
     "demo_search": 90,
     "demo_social": 28,
@@ -30,7 +31,13 @@ WINDOWS = {
     "nbk": 14,
 }
 # The sources whose load reads its window, by the module of its connector.
-CONNECTORS = {"google_ads": "google_ads", "meta_ads": "meta_ads", "ecb": "ecb", "nbk": "nbk"}
+CONNECTORS = {
+    "google_ads": "google_ads",
+    "meta_ads": "meta_ads",
+    "bank_of_italy": "bank_of_italy",
+    "ecb": "ecb",
+    "nbk": "nbk",
+}
 
 
 def test_the_seed_gives_each_platform_its_window_of_today():

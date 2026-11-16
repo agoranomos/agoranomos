@@ -1,0 +1,1719 @@
+{
+  "resultsInfo": {
+    "totalRecords": 171,
+    "timezoneReference": "Dates refer to the Central European Time Zone",
+    "notice": "DISCLAIMER: The exchange rates posted on the foreign exchange rates portal are not provided in real time and there is a lag between the time they are recorded and the time they are published on the portal. Except for the cases provided for by Italian law, the exchange rates are only indicative and are not intended to be used as a financial benchmark under Regulation (EU) 2016/1011. Banca d’Italia is not responsible for any use of the exchange rates for purposes other than those provided for by Italian law and liability for any such use rests solely with the users.Exchange rates for the major currencies vis-à-vis the euro are compiled based on a daily concertation procedure with the other ESCB central banks.In the event of changes in the currency systems, Banca d’Italia will update the exchange rates with effect from the date on which they are recorded and verified, and will provide the pertinent information in the ‘Notices’ section. Banca d’Italia accepts no responsibility for any inaccuracy or error caused for whatever reason.It is recommended that you refer to the ‘Notices’ section before consulting the exchange rates."
+  },
+  "rates": [
+    {
+      "country": "AFGHANISTAN (Islamic State of)",
+      "currency": "Afghani",
+      "isoCode": "AFN",
+      "uicCode": "115",
+      "avgRate": "72.3811",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ALBANIA",
+      "currency": "Lek",
+      "isoCode": "ALL",
+      "uicCode": "047",
+      "avgRate": "90.70",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ALGERIA",
+      "currency": "Algerian Dinar",
+      "isoCode": "DZD",
+      "uicCode": "106",
+      "avgRate": "151.5599",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ANGOLA",
+      "currency": "Adjusted Kwanza",
+      "isoCode": "AOA",
+      "uicCode": "087",
+      "avgRate": "1014.830",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ANTIGUA AND BARBUDA",
+      "currency": "East Caribbean Dollar",
+      "isoCode": "XCD",
+      "uicCode": "137",
+      "avgRate": "2.9919",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ARGENTINA",
+      "currency": "Peso",
+      "isoCode": "ARS",
+      "uicCode": "216",
+      "avgRate": "1711.7059",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ARMENIA",
+      "currency": "Armenian Dram",
+      "isoCode": "AMD",
+      "uicCode": "246",
+      "avgRate": "399.56",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ARUBA",
+      "currency": "Aruban Florin",
+      "isoCode": "AWG",
+      "uicCode": "211",
+      "avgRate": "1.9835",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "AUSTRALIA",
+      "currency": "Australian Dollar",
+      "isoCode": "AUD",
+      "uicCode": "109",
+      "avgRate": "1.6246",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "AZERBAIJAN",
+      "currency": "New Azerbaijan Manat",
+      "isoCode": "AZN",
+      "uicCode": "271",
+      "avgRate": "1.8838",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "BAHAMAS (The)",
+      "currency": "Bahamian Dollar",
+      "isoCode": "BSD",
+      "uicCode": "135",
+      "avgRate": "1.1081",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "BAHRAIN",
+      "currency": "Bahrain Dinar",
+      "isoCode": "BHD",
+      "uicCode": "136",
+      "avgRate": "0.417",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "BANGLADESH",
+      "currency": "Bangladesh Taka",
+      "isoCode": "BDT",
+      "uicCode": "174",
+      "avgRate": "138.2355",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "BARBADOS",
+      "currency": "Barbados Dollar",
+      "isoCode": "BBD",
+      "uicCode": "195",
+      "avgRate": "2.216200",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "BELARUS",
+      "currency": "Belarussian Ruble (new)",
+      "isoCode": "BYN",
+      "uicCode": "280",
+      "avgRate": "N.A.",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "BELIZE",
+      "currency": "Belize Dollar",
+      "isoCode": "BZD",
+      "uicCode": "152",
+      "avgRate": "2.2162",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "BENIN",
+      "currency": "CFA Franc",
+      "isoCode": "XOF",
+      "uicCode": "209",
+      "avgRate": "655.957",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "BERMUDA",
+      "currency": "Bermuda Dollar",
+      "isoCode": "BMD",
+      "uicCode": "138",
+      "avgRate": "1.1081",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "BHUTAN",
+      "currency": "Ngultrum",
+      "isoCode": "BTN",
+      "uicCode": "180",
+      "avgRate": "104.2118",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "BOLIVIA",
+      "currency": "Boliviano",
+      "isoCode": "BOB",
+      "uicCode": "074",
+      "avgRate": "12.9648",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "BOSNIA and HERZEGOVINA",
+      "currency": "Convertible Marks",
+      "isoCode": "BAM",
+      "uicCode": "240",
+      "avgRate": "1.95583",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "BOTSWANA",
+      "currency": "Botswana Pula",
+      "isoCode": "BWP",
+      "uicCode": "171",
+      "avgRate": "15.5851",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "BRAZIL",
+      "currency": "Real",
+      "isoCode": "BRL",
+      "uicCode": "234",
+      "avgRate": "6.2241",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "BRUNEI DARUSSALAM",
+      "currency": "Brunei Dollar",
+      "isoCode": "BND",
+      "uicCode": "139",
+      "avgRate": "1.4249",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "BURKINA FASO",
+      "currency": "CFA Franc",
+      "isoCode": "XOF",
+      "uicCode": "209",
+      "avgRate": "655.957",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "BURUNDI",
+      "currency": "Burundi Franc",
+      "isoCode": "BIF",
+      "uicCode": "140",
+      "avgRate": "3340.910",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "CAMBODIA",
+      "currency": "Cambodian Riel",
+      "isoCode": "KHR",
+      "uicCode": "141",
+      "avgRate": "4528.95",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "CAMEROON",
+      "currency": "CFA Franc",
+      "isoCode": "XAF",
+      "uicCode": "043",
+      "avgRate": "655.957",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "CANADA",
+      "currency": "Canadian Dollar",
+      "isoCode": "CAD",
+      "uicCode": "012",
+      "avgRate": "1.5789",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "CAPE VERDE",
+      "currency": "Cape Verde Escudo",
+      "isoCode": "CVE",
+      "uicCode": "181",
+      "avgRate": "110.265",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "CAYMAN (Islands)",
+      "currency": "Cayman Dollar",
+      "isoCode": "KYD",
+      "uicCode": "205",
+      "avgRate": "0.9086",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "CENTRAL AFRICAN REPUBLIC",
+      "currency": "CFA Franc",
+      "isoCode": "XAF",
+      "uicCode": "043",
+      "avgRate": "655.957",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "CHAD",
+      "currency": "CFA Franc",
+      "isoCode": "XAF",
+      "uicCode": "043",
+      "avgRate": "655.957",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "CHILE",
+      "currency": "Chilean Peso",
+      "isoCode": "CLP",
+      "uicCode": "029",
+      "avgRate": "1091.37",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "CHINA (People Republic of)",
+      "currency": "Renminbi",
+      "isoCode": "CNY",
+      "uicCode": "144",
+      "avgRate": "7.3891",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "COLOMBIA",
+      "currency": "Colombian Peso",
+      "isoCode": "COP",
+      "uicCode": "040",
+      "avgRate": "3637.43",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "COMOROS",
+      "currency": "Comorian Franc",
+      "isoCode": "KMF",
+      "uicCode": "210",
+      "avgRate": "491.96775",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "CONGO (Democratic Republic of)",
+      "currency": "Franc Congolais",
+      "isoCode": "CDF",
+      "uicCode": "261",
+      "avgRate": "2505.1592",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "CONGO (Republic of)",
+      "currency": "CFA Franc",
+      "isoCode": "XAF",
+      "uicCode": "043",
+      "avgRate": "655.957",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "COSTA RICA",
+      "currency": "Costa Rican Colon",
+      "isoCode": "CRC",
+      "uicCode": "077",
+      "avgRate": "498.3458",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "COTE D IVOIRE",
+      "currency": "CFA Franc",
+      "isoCode": "XOF",
+      "uicCode": "209",
+      "avgRate": "655.957",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "CUBA",
+      "currency": "Cuban Peso",
+      "isoCode": "CUP",
+      "uicCode": "067",
+      "avgRate": "26.5944",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "CZECH REPUBLIC",
+      "currency": "Czech Koruna",
+      "isoCode": "CZK",
+      "uicCode": "223",
+      "avgRate": "24.3790",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "DENMARK",
+      "currency": "Danish Krone",
+      "isoCode": "DKK",
+      "uicCode": "007",
+      "avgRate": "7.4754",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "DJIBOUTI",
+      "currency": "Djibouti Franc",
+      "isoCode": "DJF",
+      "uicCode": "083",
+      "avgRate": "196.933",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "DOMINICA",
+      "currency": "East Caribbean Dollar",
+      "isoCode": "XCD",
+      "uicCode": "137",
+      "avgRate": "2.9919",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "DOMINICAN REPUBLIC",
+      "currency": "Dominican Peso",
+      "isoCode": "DOP",
+      "uicCode": "116",
+      "avgRate": "67.2280",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "EGYPT",
+      "currency": "Egyptian Pound",
+      "isoCode": "EGP",
+      "uicCode": "070",
+      "avgRate": "59.3169",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "EL SALVADOR",
+      "currency": "Salvadoran Colon",
+      "isoCode": "SVC",
+      "uicCode": "117",
+      "avgRate": "9.6959",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "EQUATORIAL GUINEA",
+      "currency": "CFA Franc",
+      "isoCode": "XAF",
+      "uicCode": "043",
+      "avgRate": "655.957",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ERITREA",
+      "currency": "Nakfa",
+      "isoCode": "ERN",
+      "uicCode": "243",
+      "avgRate": "17.0426",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ESWATINI (EX SWAZILAND)",
+      "currency": "Lilangeni",
+      "isoCode": "SZL",
+      "uicCode": "173",
+      "avgRate": "18.5219",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ETHIOPIA",
+      "currency": "Ethiopian Birr",
+      "isoCode": "ETB",
+      "uicCode": "068",
+      "avgRate": "180.2735",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "FALKLAND or MALVINE (Islands)",
+      "currency": "Falkland Pound",
+      "isoCode": "FKP",
+      "uicCode": "146",
+      "avgRate": "0.83595",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "FIJI",
+      "currency": "Fiji Dollar",
+      "isoCode": "FJD",
+      "uicCode": "147",
+      "avgRate": "2.5264",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "FRENCH POLINESIA",
+      "currency": "CFP Franc",
+      "isoCode": "XPF",
+      "uicCode": "105",
+      "avgRate": "119.3317",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "GABON",
+      "currency": "CFA Franc",
+      "isoCode": "XAF",
+      "uicCode": "043",
+      "avgRate": "655.957",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "GAMBIA (The)",
+      "currency": "Dalasi",
+      "isoCode": "GMD",
+      "uicCode": "193",
+      "avgRate": "79.85",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "GEORGIA",
+      "currency": "Lari",
+      "isoCode": "GEL",
+      "uicCode": "230",
+      "avgRate": "2.8727",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "GHANA",
+      "currency": "New Ghana Cedi",
+      "isoCode": "GHS",
+      "uicCode": "276",
+      "avgRate": "12.9757",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "GIBRALTAR",
+      "currency": "Gibraltar Pound",
+      "isoCode": "GIP",
+      "uicCode": "044",
+      "avgRate": "0.83595",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "GRENADA",
+      "currency": "East Caribbean Dollar",
+      "isoCode": "XCD",
+      "uicCode": "137",
+      "avgRate": "2.9919",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "GUATEMALA",
+      "currency": "Quetzal",
+      "isoCode": "GTQ",
+      "uicCode": "078",
+      "avgRate": "8.4674",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "GUINEA",
+      "currency": "Guinean Franc",
+      "isoCode": "GNF",
+      "uicCode": "129",
+      "avgRate": "9783.3594",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "GUINEA BISSAU",
+      "currency": "CFA Franc",
+      "isoCode": "XOF",
+      "uicCode": "209",
+      "avgRate": "655.957",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "GUYANA",
+      "currency": "Guyanan Dollar",
+      "isoCode": "GYD",
+      "uicCode": "149",
+      "avgRate": "231.8367",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "HAITI",
+      "currency": "Gourde",
+      "isoCode": "HTG",
+      "uicCode": "151",
+      "avgRate": "144.8685",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "HONDURAS",
+      "currency": "Lempira",
+      "isoCode": "HNL",
+      "uicCode": "118",
+      "avgRate": "29.8463",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "HONG KONG (China)",
+      "currency": "Hong Kong Dollar",
+      "isoCode": "HKD",
+      "uicCode": "103",
+      "avgRate": "8.6928",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "HUNGARY",
+      "currency": "Forint",
+      "isoCode": "HUF",
+      "uicCode": "153",
+      "avgRate": "364.9800",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ICELAND",
+      "currency": "Icelandic Krona",
+      "isoCode": "ISK",
+      "uicCode": "062",
+      "avgRate": "136.60",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "INDIA",
+      "currency": "Indian Rupee",
+      "isoCode": "INR",
+      "uicCode": "031",
+      "avgRate": "104.2118",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "INDONESIA",
+      "currency": "Indonesian Rupiah",
+      "isoCode": "IDR",
+      "uicCode": "123",
+      "avgRate": "20225.76",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "INTERNATIONAL MONETARY FUND",
+      "currency": "SDR",
+      "isoCode": "XDR",
+      "uicCode": "188",
+      "avgRate": "0.821271",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "IRAN (Islamic Republic of)",
+      "currency": "Iranian Rial",
+      "isoCode": "IRR",
+      "uicCode": "057",
+      "avgRate": "N.A.",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "IRAQ",
+      "currency": "Iraq Dinar",
+      "isoCode": "IQD",
+      "uicCode": "093",
+      "avgRate": "1679.880",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ISRAEL",
+      "currency": "New Sheqel",
+      "isoCode": "ILS",
+      "uicCode": "203",
+      "avgRate": "3.5495",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "JAMAICA",
+      "currency": "Jamaica Dollar",
+      "isoCode": "JMD",
+      "uicCode": "142",
+      "avgRate": "175.2490",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "JAPAN",
+      "currency": "Japanese Yen",
+      "isoCode": "JPY",
+      "uicCode": "071",
+      "avgRate": "176.9600",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "JORDAN",
+      "currency": "Jordan Dinar",
+      "isoCode": "JOB",
+      "uicCode": "089",
+      "avgRate": "0.7856",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "KAZAKHSTAN",
+      "currency": "Tenge",
+      "isoCode": "KZT",
+      "uicCode": "231",
+      "avgRate": "493.94",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "KENYA",
+      "currency": "Kenya Shilling",
+      "isoCode": "KES",
+      "uicCode": "022",
+      "avgRate": "144.0307",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "KOREA (Democratic People Rep.)",
+      "currency": "North Korean Won",
+      "isoCode": "KPW",
+      "uicCode": "182",
+      "avgRate": "N.A.",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "KOREA (Republic of)",
+      "currency": "South Korean Won",
+      "isoCode": "KRW",
+      "uicCode": "119",
+      "avgRate": "1478.32",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "KUWAIT",
+      "currency": "Kuwaiti Dinar",
+      "isoCode": "KWD",
+      "uicCode": "102",
+      "avgRate": "0.3434",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "KYRGYZ REPUBLIC",
+      "currency": "Some",
+      "isoCode": "KGS",
+      "uicCode": "225",
+      "avgRate": "96.9021",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "LAO PEOPLE S DEMOCRATIC REPUBL",
+      "currency": "Lao Kip",
+      "isoCode": "LAK",
+      "uicCode": "154",
+      "avgRate": "24824",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "LEBANON",
+      "currency": "Lebanese Pound",
+      "isoCode": "LBP",
+      "uicCode": "032",
+      "avgRate": "99174.95",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "LESOTHO",
+      "currency": "Loti",
+      "isoCode": "LSL",
+      "uicCode": "172",
+      "avgRate": "18.5219",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "LIBERIA",
+      "currency": "Liberian Dollar",
+      "isoCode": "LRD",
+      "uicCode": "155",
+      "avgRate": "188.5211",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "LIBYAN ARAB JAMAHIRIYA",
+      "currency": "Libyan Dinar",
+      "isoCode": "LYD",
+      "uicCode": "069",
+      "avgRate": "7.1335",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "MACAU",
+      "currency": "Pataca",
+      "isoCode": "MOP",
+      "uicCode": "156",
+      "avgRate": "8.9536",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "MACEDONIA (form. Yugoslav Rep)",
+      "currency": "Macedonian Denar",
+      "isoCode": "MKD",
+      "uicCode": "236",
+      "avgRate": "61.5214",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "MADAGASCAR",
+      "currency": "Ariary",
+      "isoCode": "MGA",
+      "uicCode": "268",
+      "avgRate": "5068.08",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "MALAWI",
+      "currency": "Malawi Kwacha",
+      "isoCode": "MWK",
+      "uicCode": "157",
+      "avgRate": "1921.3798",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "MALAYSIA",
+      "currency": "Ringgit",
+      "isoCode": "MYR",
+      "uicCode": "055",
+      "avgRate": "4.5194",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "MALDIVES",
+      "currency": "Rufiyaa",
+      "isoCode": "MVR",
+      "uicCode": "158",
+      "avgRate": "17.0869",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "MALI",
+      "currency": "CFA Franc",
+      "isoCode": "XOF",
+      "uicCode": "209",
+      "avgRate": "655.957",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "MAURITANIA",
+      "currency": "Ouguiya",
+      "isoCode": "MRU",
+      "uicCode": "282",
+      "avgRate": "44.889",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "MAURITIUS",
+      "currency": "Mauritian Rupee",
+      "isoCode": "MUR",
+      "uicCode": "170",
+      "avgRate": "52.4415",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "MEXICO",
+      "currency": "Mexican Peso",
+      "isoCode": "MXN",
+      "uicCode": "222",
+      "avgRate": "20.7113",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "MOLDOVA",
+      "currency": "Moldovan Leu",
+      "isoCode": "MDL",
+      "uicCode": "235",
+      "avgRate": "20.0327",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "MONGOLIA",
+      "currency": "Tugrik",
+      "isoCode": "MNT",
+      "uicCode": "160",
+      "avgRate": "3992.41",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "MOROCCO",
+      "currency": "Moroccan Dirham",
+      "isoCode": "MAD",
+      "uicCode": "084",
+      "avgRate": "10.887",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "MOZAMBIQUE",
+      "currency": "New Mozambique Metical",
+      "isoCode": "MZN",
+      "uicCode": "272",
+      "avgRate": "70.69",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "MYANMAR",
+      "currency": "Kyat",
+      "isoCode": "MMK",
+      "uicCode": "107",
+      "avgRate": "2327.0",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "NAMIBIA",
+      "currency": "Namibian Dollar",
+      "isoCode": "NAD",
+      "uicCode": "252",
+      "avgRate": "18.5219",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "NEPAL",
+      "currency": "Nepalese Rupee",
+      "isoCode": "NPR",
+      "uicCode": "161",
+      "avgRate": "166.7389",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "NETHERLANDS ANTILLES",
+      "currency": "Caribbean guilder",
+      "isoCode": "XCG",
+      "uicCode": "292",
+      "avgRate": "1.9835",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "NEW ZEALAND",
+      "currency": "New Zealand Dollar",
+      "isoCode": "NZD",
+      "uicCode": "113",
+      "avgRate": "1.9942",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "NICARAGUA",
+      "currency": "Cordoba",
+      "isoCode": "NIO",
+      "uicCode": "120",
+      "avgRate": "40.8563",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "NIGER",
+      "currency": "CFA Franc",
+      "isoCode": "XOF",
+      "uicCode": "209",
+      "avgRate": "655.957",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "NIGERIA",
+      "currency": "Naira",
+      "isoCode": "NGN",
+      "uicCode": "081",
+      "avgRate": "1505.1766",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "NORWAY",
+      "currency": "Norwegian Krone",
+      "isoCode": "NOK",
+      "uicCode": "008",
+      "avgRate": "10.5630",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "OMAN",
+      "currency": "Rial Omani",
+      "isoCode": "OMR",
+      "uicCode": "184",
+      "avgRate": "0.4261",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "PAKISTAN",
+      "currency": "Pakistan Rupee",
+      "isoCode": "PKR",
+      "uicCode": "026",
+      "avgRate": "306.7102",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "PANAMA",
+      "currency": "Balboa",
+      "isoCode": "PAB",
+      "uicCode": "162",
+      "avgRate": "1.1081",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "PAPUA NEW GUINEA",
+      "currency": "Kina",
+      "isoCode": "PGK",
+      "uicCode": "190",
+      "avgRate": "5.0027",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "PARAGUAY",
+      "currency": "Paraguayan Guarani",
+      "isoCode": "PYG",
+      "uicCode": "101",
+      "avgRate": "6876.29",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "PERU",
+      "currency": "Nuevo Sol",
+      "isoCode": "PEN",
+      "uicCode": "201",
+      "avgRate": "3.7777",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "PHILIPPINES",
+      "currency": "Philippine Peso",
+      "isoCode": "PHP",
+      "uicCode": "066",
+      "avgRate": "70.6160",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "POLAND",
+      "currency": "Zloty",
+      "isoCode": "PLN",
+      "uicCode": "237",
+      "avgRate": "4.4088",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "QATAR",
+      "currency": "Qatar Riyal",
+      "isoCode": "QAR",
+      "uicCode": "189",
+      "avgRate": "4.0335",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ROMANIA",
+      "currency": "New Romanian Leu",
+      "isoCode": "RON",
+      "uicCode": "270",
+      "avgRate": "5.3473",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "RUSSIAN FEDERATION",
+      "currency": "Russian Ruble",
+      "isoCode": "RUB",
+      "uicCode": "244",
+      "avgRate": "N.A.",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "RWANDA",
+      "currency": "Rwanda Franc",
+      "isoCode": "RWF",
+      "uicCode": "163",
+      "avgRate": "1638.2101",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SAO TOME and PRINCIPE",
+      "currency": "Dobra",
+      "isoCode": "STN",
+      "uicCode": "283",
+      "avgRate": "24.5000",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SAUDI ARABIA",
+      "currency": "Saudi Arabian Riyal",
+      "isoCode": "SAR",
+      "uicCode": "075",
+      "avgRate": "4.1554",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SENEGAL",
+      "currency": "CFA Franc",
+      "isoCode": "XOF",
+      "uicCode": "209",
+      "avgRate": "655.957",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SERBIA",
+      "currency": "Serbian Dinar",
+      "isoCode": "RSD",
+      "uicCode": "274",
+      "avgRate": "117.5213",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SEYCHELLES",
+      "currency": "Seychelles Rupee",
+      "isoCode": "SCR",
+      "uicCode": "185",
+      "avgRate": "16.2760",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SIERRA LEONE",
+      "currency": "Leone",
+      "isoCode": "SLE",
+      "uicCode": "291",
+      "avgRate": "25.6966",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SINGAPORE",
+      "currency": "Singapore Dollar",
+      "isoCode": "SGD",
+      "uicCode": "124",
+      "avgRate": "1.4249",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SOLOMON (Islands)",
+      "currency": "Solomon Islands Dollar",
+      "isoCode": "SBD",
+      "uicCode": "206",
+      "avgRate": "8.9870",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SOMALIA",
+      "currency": "Somali Shilling",
+      "isoCode": "SOS",
+      "uicCode": "065",
+      "avgRate": "633.9329",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SOUTH AFRICA",
+      "currency": "South African Rand",
+      "isoCode": "ZAR",
+      "uicCode": "082",
+      "avgRate": "18.5219",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SOUTH SUDAN",
+      "currency": "South Sudanese Pound",
+      "isoCode": "SSP",
+      "uicCode": "279",
+      "avgRate": "6401.6590",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SRI LANKA",
+      "currency": "Sri Lanka Rupee",
+      "isoCode": "LKR",
+      "uicCode": "058",
+      "avgRate": "368.2984",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ST. HELENA",
+      "currency": "St. Helena Pound",
+      "isoCode": "SHP",
+      "uicCode": "207",
+      "avgRate": "0.83595",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ST. KITTS AND NEVIS",
+      "currency": "East Caribbean Dollar",
+      "isoCode": "XCD",
+      "uicCode": "137",
+      "avgRate": "2.9919",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ST. LUCIA",
+      "currency": "East Caribbean Dollar",
+      "isoCode": "XCD",
+      "uicCode": "137",
+      "avgRate": "2.9919",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ST. VINCENT and the GRENADINES",
+      "currency": "East Caribbean Dollar",
+      "isoCode": "XCD",
+      "uicCode": "137",
+      "avgRate": "2.9919",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SUDAN",
+      "currency": "Sudanese Pound",
+      "isoCode": "SDG",
+      "uicCode": "275",
+      "avgRate": "665.1022",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SURINAME",
+      "currency": "Suriname Dollar",
+      "isoCode": "SRD",
+      "uicCode": "266",
+      "avgRate": "41.567",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SWEDEN",
+      "currency": "Swedish Krona",
+      "isoCode": "SEK",
+      "uicCode": "009",
+      "avgRate": "11.0628",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SWITZERLAND",
+      "currency": "Swiss Franc",
+      "isoCode": "CHF",
+      "uicCode": "003",
+      "avgRate": "0.9232",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "SYRIAN ARAB REPUBLIC",
+      "currency": "Syrian Pound",
+      "isoCode": "SYP",
+      "uicCode": "036",
+      "avgRate": "135.1882",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "TAIWAN",
+      "currency": "New Taiwan Dollar",
+      "isoCode": "TWD",
+      "uicCode": "143",
+      "avgRate": "36.4764",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "TAJIKISTAN",
+      "currency": "Somoni",
+      "isoCode": "TJS",
+      "uicCode": "264",
+      "avgRate": "10.2101",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "TANZANIA",
+      "currency": "Tanzania Shilling",
+      "isoCode": "TZS",
+      "uicCode": "125",
+      "avgRate": "2931.5712",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "THAILAND",
+      "currency": "Baht",
+      "isoCode": "THB",
+      "uicCode": "073",
+      "avgRate": "37.470",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "TOGO",
+      "currency": "CFA Franc",
+      "isoCode": "XOF",
+      "uicCode": "209",
+      "avgRate": "655.957",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "TONGA",
+      "currency": "Pa anga",
+      "isoCode": "TOP",
+      "uicCode": "167",
+      "avgRate": "2.6365",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "TRINIDAD and TOBAGO",
+      "currency": "Trinidad and Tobago Dollar",
+      "isoCode": "TTD",
+      "uicCode": "166",
+      "avgRate": "7.4962",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "TUNISIA",
+      "currency": "Tunisian Dinar",
+      "isoCode": "TND",
+      "uicCode": "080",
+      "avgRate": "3.3370",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "TURKEY",
+      "currency": "Turkey Lira (new)",
+      "isoCode": "TRY",
+      "uicCode": "267",
+      "avgRate": "55.6906",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "TURKMENISTAN",
+      "currency": "Turkmen Manat (new)",
+      "isoCode": "TMT",
+      "uicCode": "278",
+      "avgRate": "3.8784",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "UGANDA",
+      "currency": "Uganda Shilling",
+      "isoCode": "UGX",
+      "uicCode": "126",
+      "avgRate": "4537.27",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "UKRAINE",
+      "currency": "Hryvnia",
+      "isoCode": "UAH",
+      "uicCode": "241",
+      "avgRate": "50.3379",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "UNITED ARAB EMIRATES",
+      "currency": "U.A.E. Dirham",
+      "isoCode": "AED",
+      "uicCode": "187",
+      "avgRate": "4.0695",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "UNITED KINGDOM",
+      "currency": "Pound Sterling",
+      "isoCode": "GBP",
+      "uicCode": "002",
+      "avgRate": "0.83595",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "UNITED STATES",
+      "currency": "U.S. Dollar",
+      "isoCode": "USD",
+      "uicCode": "001",
+      "avgRate": "1.1081",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "URUGUAY",
+      "currency": "Uruguayan Peso",
+      "isoCode": "UYU",
+      "uicCode": "053",
+      "avgRate": "44.8973",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "UZBEKISTAN",
+      "currency": "Uzbek Sum",
+      "isoCode": "UZS",
+      "uicCode": "232",
+      "avgRate": "13260.78",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "VANUATU",
+      "currency": "Vatu",
+      "isoCode": "VUV",
+      "uicCode": "208",
+      "avgRate": "132.51",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "VENEZUELA",
+      "currency": "Bolivar Soberano",
+      "isoCode": "VES",
+      "uicCode": "284",
+      "avgRate": "1000.9666",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "VIETNAM",
+      "currency": "Dong",
+      "isoCode": "VND",
+      "uicCode": "145",
+      "avgRate": "28444",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "WESTERN SAMOA",
+      "currency": "Tala",
+      "isoCode": "WST",
+      "uicCode": "164",
+      "avgRate": "3.0722",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "YEMEN",
+      "currency": "Yemeni Rial",
+      "isoCode": "YER",
+      "uicCode": "122",
+      "avgRate": "261.99",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ZAMBIA",
+      "currency": "Zambian Kwacha",
+      "isoCode": "ZMW",
+      "uicCode": "148",
+      "avgRate": "22.6732",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    },
+    {
+      "country": "ZIMBABWE",
+      "currency": "Zimbabwe Dollar",
+      "isoCode": "ZWG",
+      "uicCode": "269",
+      "avgRate": "29.4086",
+      "exchangeConvention": "Foreign currency amount for 1 Euro.",
+      "exchangeConventionCode": "C",
+      "referenceDate": "2026-11-12"
+    }
+  ]
+}

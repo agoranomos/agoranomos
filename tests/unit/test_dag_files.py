@@ -41,6 +41,7 @@ def test_no_dag_file_imports_another():
         "agoranomos_demo_daily",
         "agoranomos_demo_history",
         "agoranomos_demo_transform",
+        "agoranomos_bank_of_italy_daily",
         "agoranomos_ecb_daily",
         "agoranomos_google_ads_daily",
         "agoranomos_google_ads_history",
@@ -59,13 +60,15 @@ ASSETS = DAGS / "agoranomos_pipelines" / "assets.py"
 # The asset of the rates of the ECB, as the DAG of the rates updates it and the stack test of the
 # schedule of the transform, tests/stack/test_transform_schedule.py, makes an event of it.
 RAW_ECB = "postgres://warehouse-db:5432/warehouse/raw_ecb/rates_daily"
+# The asset of the rates of the Bank of Italy (ADR-0042), as its DAG updates it.
+RAW_BANK_OF_ITALY = "postgres://warehouse-db:5432/warehouse/raw_bank_of_italy/rates_daily"
 RAW_NBK = "postgres://warehouse-db:5432/warehouse/raw_nbk/rates_daily"
 
 
 def test_the_transform_runs_when_the_demo_the_rates_google_ads_or_meta_have_loaded():
-    # Any of five conditions (ADR-0039): all five assets of the demo, the asset of the rates of
-    # the ECB, that of Google Ads (ADR-0032), that of Meta (ADR-0050), or that of the rates of the
-    # NBK (ADR-0042). The five of the demo stay
+    # Any of six conditions (ADR-0039): all five assets of the demo, the asset of the rates of the
+    # ECB, that of the rates of the Bank of Italy (ADR-0042), that of Google Ads (ADR-0032), that of
+    # Meta (ADR-0050), or that of the rates of the NBK (ADR-0042). The five of the demo stay
     # one condition, so that one run of the history or of the daily load starts one run of the
     # transform, after its last platform, and not one after its first platform and one more for
     # the other four, the first reading tables whose days the loads still replace. One run at a
@@ -79,10 +82,12 @@ def test_the_transform_runs_when_the_demo_the_rates_google_ads_or_meta_have_load
     assets = ASSETS.read_text(encoding="utf-8")
     assert "DEMO_LOADED = AssetAll(*RAW_DEMO_PLATFORMS.values())" in assets
     assert f'RAW_ECB = Asset("{RAW_ECB}")' in assets
+    assert f'RAW_BANK_OF_ITALY = Asset("{RAW_BANK_OF_ITALY}")' in assets
     assert f'RAW_NBK = Asset("{RAW_NBK}")' in assets
     assert (
-        "LOADED = AssetAny(DEMO_LOADED, RAW_ECB, RAW_GOOGLE_ADS, RAW_META_ADS, RAW_NBK)" in assets
-    )
+        "LOADED = AssetAny(DEMO_LOADED, RAW_ECB, RAW_BANK_OF_ITALY, RAW_GOOGLE_ADS, RAW_META_ADS, "
+        "RAW_NBK)"
+    ) in assets
     assert "DEMO_LOADED |" not in assets
 
 
@@ -416,6 +421,48 @@ def test_the_load_of_the_rates_of_the_ecb_runs_after_midnight_in_frankfurt():
     )
 
 
+BANK_OF_ITALY_DAILY = DAGS / "agoranomos_bank_of_italy_daily.py"
+
+
+def test_the_load_of_the_rates_of_the_bank_of_italy_imports_dlt_in_its_tasks_and_no_cosmos():
+    # As the load of the ECB: the DAG processor parses the file often.
+    found = imports(BANK_OF_ITALY_DAILY)
+    assert ("agoranomos_pipelines.assets", ["RAW_BANK_OF_ITALY"]) in found
+    assert [module for module, _ in found if module.split(".")[0] == "cosmos"] == []
+    tree = ast.parse(BANK_OF_ITALY_DAILY.read_text(encoding="utf-8"))
+    top = [
+        node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert not [
+        m for m in top if m.split(".")[0] == "dlt" or m.endswith((".bank_of_italy", ".loads"))
+    ]
+
+
+def test_the_load_of_the_rates_of_the_bank_of_italy_updates_its_asset_and_starts_paused():
+    # The task of the load updates the asset of the rates, on which the transform runs
+    # (ADR-0039), and the DAG starts paused, so the demo and the stack tests ask the bank nothing.
+    assert decorators(BANK_OF_ITALY_DAILY)["load_bank_of_italy"] == [
+        "task(task_id='load_bank_of_italy', outlets=[RAW_BANK_OF_ITALY])"
+    ]
+    tree = ast.parse(BANK_OF_ITALY_DAILY.read_text(encoding="utf-8"))
+    paused = [
+        node.value.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.keyword) and node.arg == "is_paused_upon_creation"
+    ]
+    assert paused == [True]
+    assert "due() >> load_bank_of_italy()" in BANK_OF_ITALY_DAILY.read_text(encoding="utf-8")
+
+
+def test_the_load_of_the_rates_of_the_bank_of_italy_runs_after_midnight_in_rome():
+    # 07:17 UTC is 08:17 in CET and 09:17 in CEST: after the load of the ECB, and before the daily
+    # load of the demo.
+    text = BANK_OF_ITALY_DAILY.read_text(encoding="utf-8")
+    assert 'SCHEDULE = CronTriggerTimetable("17 7 * * *", timezone="UTC")' in text
+
+
 NBK_DAILY = DAGS / "agoranomos_nbk_daily.py"
 
 
@@ -736,6 +783,13 @@ TEN_MINUTES = "timedelta(minutes=10)"
         ("agoranomos_demo_daily.py", "timedelta(minutes=1)", None, TEN_MINUTES, "hours=1"),
         ("agoranomos_ecb_daily.py", "timedelta(minutes=5)", TEN_MINUTES, TEN_MINUTES, "hours=1"),
         (
+            "agoranomos_bank_of_italy_daily.py",
+            "timedelta(minutes=5)",
+            TEN_MINUTES,
+            "timedelta(minutes=30)",
+            "hours=2",
+        ),
+        (
             "agoranomos_google_ads_daily.py",
             TEN_MINUTES,
             "timedelta(minutes=20)",
@@ -764,10 +818,11 @@ def test_the_loads_retry_with_a_growing_wait_and_end_within_their_timeout(
     # ADR-0039: the DAGs of the loads retry with an exponential backoff, also after a new column
     # waited past the lock timeout of loader for a run of the transform (ADR-0046), and a run ends
     # within its timeout, an hour, and for Google Ads, whose load of many accounts, or whose window
-    # after a long stop, takes long, its three tries of two hours and the waits between them, so
-    # that a load never lives longer: the cleanup of the rows of a load that did not end is to wait
-    # at least that long. Airflow 3.3.2 takes a multiplier for the backoff, so True would be 1, a
-    # constant wait.
+    # after a long stop, takes long, its three tries of two hours and the waits between them, and
+    # for the Bank of Italy, whose history is about 800 requests at one a second, its three tries
+    # of half an hour and their waits within two hours, so that a load never lives longer: the
+    # cleanup of the rows of a load that did not end is to wait at least that long. Airflow 3.3.2
+    # takes a multiplier for the backoff, so True would be 1, a constant wait.
     keywords = {
         node.arg: node.value
         for node in ast.walk(ast.parse((DAGS / name).read_text(encoding="utf-8")))
