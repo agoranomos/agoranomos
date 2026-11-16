@@ -8,9 +8,16 @@ No connector writes such a load yet, so the tests write their own into raw_demo_
 the owner of raw, as tests/stack/test_core_facts.py writes a changed day: rows of the statistics of
 the campaigns of one account on the day after the last day that its whole loads took, which the
 test calls today, made from the rows of the core of its last day, with no conversions, a row in
-_dlt_loads and a row in the journal for each load, of the kind intraday or window. Each step runs
-the transform, which pins, reads, accepts and cleans the loads of the step, so that the next step
-starts from what the core then holds:
+_dlt_loads and a row in the journal for each load, of the kind intraday or window. A whole load
+carries the lists of the account too, as a real load appends them in the same run (ADR-0038):
+without them, the account would be in no list that staging reads, and the checks would hold it out
+as unknown_account. A run that succeeds deletes from raw the rows of the loads that it accepted, so
+the test first loads the last day of demo_search again, as of its newest load, which gives the same
+rows and lists, and runs the transform with its cleanup skipped; it keeps the lists of the account
+of that load under a load ID of its own, in no journal, which the cleanup leaves for a day as a load
+that has not ended, and gives them to its whole load. Each step runs the transform, which pins,
+reads, accepts and cleans the loads of the step, so that the next step starts from what the core
+then holds:
 
 1. an intraday load alone: today partial, nothing in the other facts or in a journal, and the lists
    and the dimensions as they were;
@@ -23,9 +30,9 @@ The finally deletes the loads of the tests from raw, _dlt_loads, the journal and
 today from the fact of campaigns, as the superuser, and gives the dimensions back the last day of
 statistics that they held before, so that the demo is as before; the rates of today stay, as a rate
 of each calendar day. If the tests are killed before that, delete by hand what the finally deletes:
-the rows of raw_demo_search.campaign_stats, _agoranomos_loads and _dlt_loads whose load ID starts
-with the time of the tests, those loads in core.loads and core.account_quarantine, and the rows of
-the account on today in core.ad_stats_campaign_daily.
+the rows of raw_demo_search.campaign_stats, of its tables of lists, of _agoranomos_loads and of
+_dlt_loads whose load ID starts with the time of the tests, those loads in core.loads and
+core.account_quarantine, and the rows of the account on today in core.ad_stats_campaign_daily.
 
 The assertions print IDs, days, counts and sums, never a secret.
 """
@@ -36,6 +43,7 @@ from decimal import Decimal
 
 import pytest
 from airflow_api import is_busy, trigger, unpause, wait_for_dag, wait_for_run
+from raw_loads import columns_of, last_moment, load_platform, transform_keeping_raw
 from stack_helpers import wait_for, warehouse_output
 
 pytestmark = [
@@ -49,6 +57,14 @@ ASSETS = 5
 SOURCE = "demo_search"
 ACCOUNT = "4170000011"
 MARK = "stack-test-partial-day"
+# The tables of the lists of the entities of raw_demo_search, with the column that names the
+# account, as tests/stack/test_core_facts.py copies them.
+LISTS = {
+    "customer_clients": "customer_client__id",
+    "campaigns": "customer__id",
+    "ad_groups": "customer__id",
+    "ads": "customer__id",
+}
 # The facts of the core but that of campaigns, and the journals of restatements.
 OTHER_FACTS = (
     "ad_stats_ad_group_daily",
@@ -119,18 +135,50 @@ def transform(airflow_url, token):
 
 class Loads:
     """The loads of the tests, each with the rows of the statistics of campaigns that it writes into
-    raw_demo_search as loader, as (campaign, impressions, clicks, cost in micros)."""
+    raw_demo_search as loader, as (campaign, impressions, clicks, cost in micros), and the lists of
+    the account that the tests hold for a whole load, under the load ID held."""
 
     def __init__(self, env):
         self.env = env
         self.start = f"{time.time():.0f}"
         self.ids: list[str] = []
+        self.held = f"{self.start}.000000"
 
-    def write(self, kind: str, day: date, stats: list[tuple[str, int, int, int]]) -> str:
-        """A whole load of one day of the account, of the kind given, with its rows, its row of
-        _dlt_loads and its row of the journal, whose ID is larger than every one before."""
+    def hold_lists(self, load: str):
+        """Copy the lists of the account of a load in raw under the load ID held, as loader."""
+        for table, account in LISTS.items():
+            columns = columns_of(self.env, table)
+            warehouse_output(
+                self.env,
+                f"INSERT INTO raw_demo_search.{table} ({columns}, _dlt_load_id, _dlt_id) "  # noqa: S608 (names of the demo)
+                f"SELECT {columns}, '{self.held}', '{MARK}-' || md5(random()::text) "
+                f"FROM raw_demo_search.{table} WHERE _dlt_load_id = '{load}' "
+                f"AND {account} = '{ACCOUNT}'",
+                "loader",
+            )
+            held = warehouse_output(
+                self.env,
+                f"SELECT count(*) FROM raw_demo_search.{table} WHERE _dlt_load_id = '{self.held}'",  # noqa: S608 (names of the demo)
+                "loader",
+            )
+            assert held != "0", f"load {load} has no {table} of the account in raw"
+
+    def write(
+        self, kind: str, day: date, stats: list[tuple[str, int, int, int]], listed: bool = False
+    ) -> str:
+        """A load of one day of the account, of the kind given, with its rows, its row of
+        _dlt_loads and its row of the journal, whose ID is larger than every one before; listed,
+        it takes the lists held."""
         load = f"{self.start}.{len(self.ids) + 1:06d}"
         self.ids.append(load)
+        if listed:
+            for table in LISTS:
+                warehouse_output(
+                    self.env,
+                    f"UPDATE raw_demo_search.{table} SET _dlt_load_id = '{load}' "  # noqa: S608 (names of the demo)
+                    f"WHERE _dlt_load_id = '{self.held}'",
+                    "loader",
+                )
         values = ", ".join(
             f"('{ACCOUNT}', '{campaign}', DATE '{day}', '{impressions}', '{clicks}', '{micros}', "
             f"'{load}', '{MARK}-' || md5(random()::text))"
@@ -162,10 +210,8 @@ class Loads:
         return load
 
     def remove(self):
-        if not self.ids:
-            return
-        listed = ", ".join(f"'{load}'" for load in self.ids)
-        for table in ("campaign_stats", "_agoranomos_loads"):
+        listed = ", ".join(f"'{load}'" for load in (self.held, *self.ids))
+        for table in ("campaign_stats", *LISTS, "_agoranomos_loads"):
             warehouse_output(
                 self.env,
                 f"DELETE FROM raw_demo_search.{table} WHERE _dlt_load_id IN ({listed})",  # noqa: S608
@@ -251,6 +297,10 @@ def test_a_partial_day_stays_below_the_whole_day_that_replaces_it(env, airflow_u
     last = date.fromisoformat(warehouse_output(env, LAST_DAY))
     today = last + timedelta(days=1)
     assert rows(env, CAMPAIGNS.format(sk=sk, day=today)) == [], "the core holds today already"
+    # The last day of demo_search again, as of its newest load: the same rows and lists, which the
+    # run accepts and leaves in raw, for the lists of the whole load of step 3.
+    listing = load_platform(env, SOURCE, last_moment(env, SOURCE), last)
+    transform_keeping_raw(airflow_url, token, skipped="clean_raw")
     # The rows of the last day with a count or a spend, as a row of conversions alone would be
     # a row of zeros without them.
     whole = [
@@ -266,6 +316,8 @@ def test_a_partial_day_stays_below_the_whole_day_that_replaces_it(env, airflow_u
     before = dimensions(env, sk)
     loads = Loads(env)
     try:
+        loads.hold_lists(listing)
+
         # 1. An intraday load alone: today partial, with no conversions, in the campaigns only.
         first = loads.write("intraday", today, whole)
         transform(airflow_url, token)
@@ -311,7 +363,7 @@ def test_a_partial_day_stays_below_the_whole_day_that_replaces_it(env, airflow_u
         # restatement, and G1a counts no partial row of the core.
         least = scaled(whole, 10)
         assert spend(least) < spend(lower) / 2, "the whole load would not fall far enough"
-        window = loads.write("window", today, least)
+        window = loads.write("window", today, least, listed=True)
         later = loads.write("intraday", today, whole)
         assert Decimal(later) > Decimal(window)
         transform(airflow_url, token)

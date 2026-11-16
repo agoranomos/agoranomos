@@ -146,6 +146,18 @@ def load_platform(
     return warehouse_output(env, NEWEST_LOAD.format(dataset=dataset))
 
 
+def columns_of(env: dict[str, str], table: str) -> str:
+    """The columns of a table of raw_demo_search but the load and the row id, which dlt gives, as
+    a list for SQL."""
+    return warehouse_output(
+        env,
+        "SELECT string_agg(column_name, ', ' ORDER BY ordinal_position) "  # noqa: S608 (names of the demo)
+        "FROM information_schema.columns WHERE table_schema = 'raw_demo_search' "
+        f"AND table_name = '{table}' AND column_name NOT IN ('_dlt_load_id', '_dlt_id')",
+        "loader",
+    )
+
+
 TRANSFORM = "agoranomos_demo_transform"
 
 
