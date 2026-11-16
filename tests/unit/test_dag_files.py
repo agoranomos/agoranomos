@@ -46,6 +46,7 @@ def test_no_dag_file_imports_another():
         "agoranomos_google_ads_history",
         "agoranomos_meta_ads_daily",
         "agoranomos_meta_ads_history",
+        "agoranomos_nbk_daily",
         "agoranomos_selfcheck",
     } <= stems
     for path in DAG_FILES:
@@ -58,11 +59,13 @@ ASSETS = DAGS / "agoranomos_pipelines" / "assets.py"
 # The asset of the rates of the ECB, as the DAG of the rates updates it and the stack test of the
 # schedule of the transform, tests/stack/test_transform_schedule.py, makes an event of it.
 RAW_ECB = "postgres://warehouse-db:5432/warehouse/raw_ecb/rates_daily"
+RAW_NBK = "postgres://warehouse-db:5432/warehouse/raw_nbk/rates_daily"
 
 
 def test_the_transform_runs_when_the_demo_the_rates_google_ads_or_meta_have_loaded():
-    # Any of four conditions (ADR-0039): all five assets of the demo, the asset of the rates of
-    # the ECB, that of Google Ads (ADR-0032), or that of Meta (ADR-0050). The five of the demo stay
+    # Any of five conditions (ADR-0039): all five assets of the demo, the asset of the rates of
+    # the ECB, that of Google Ads (ADR-0032), that of Meta (ADR-0050), or that of the rates of the
+    # NBK (ADR-0042). The five of the demo stay
     # one condition, so that one run of the history or of the daily load starts one run of the
     # transform, after its last platform, and not one after its first platform and one more for
     # the other four, the first reading tables whose days the loads still replace. One run at a
@@ -76,7 +79,10 @@ def test_the_transform_runs_when_the_demo_the_rates_google_ads_or_meta_have_load
     assets = ASSETS.read_text(encoding="utf-8")
     assert "DEMO_LOADED = AssetAll(*RAW_DEMO_PLATFORMS.values())" in assets
     assert f'RAW_ECB = Asset("{RAW_ECB}")' in assets
-    assert "LOADED = AssetAny(DEMO_LOADED, RAW_ECB, RAW_GOOGLE_ADS, RAW_META_ADS)" in assets
+    assert f'RAW_NBK = Asset("{RAW_NBK}")' in assets
+    assert (
+        "LOADED = AssetAny(DEMO_LOADED, RAW_ECB, RAW_GOOGLE_ADS, RAW_META_ADS, RAW_NBK)" in assets
+    )
     assert "DEMO_LOADED |" not in assets
 
 
@@ -410,6 +416,43 @@ def test_the_load_of_the_rates_of_the_ecb_runs_after_midnight_in_frankfurt():
     )
 
 
+NBK_DAILY = DAGS / "agoranomos_nbk_daily.py"
+
+
+def test_the_load_of_the_rates_of_the_nbk_imports_dlt_in_its_tasks_and_no_cosmos():
+    # As the load of the ECB: the DAG processor parses the file often, and a broken manifest of
+    # dbt must not break its import.
+    found = imports(NBK_DAILY)
+    assert ("agoranomos_pipelines.assets", ["RAW_NBK"]) in found
+    assert [module for module, _ in found if module.split(".")[0] == "cosmos"] == []
+    tree = ast.parse(NBK_DAILY.read_text(encoding="utf-8"))
+    top = [
+        node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert not [m for m in top if m.split(".")[0] == "dlt" or m.endswith((".nbk", ".loads"))]
+
+
+def test_the_load_of_the_rates_of_the_nbk_updates_its_asset_and_starts_paused():
+    # The task of the load updates the asset of the rates of the NBK, on which the transform runs
+    # (ADR-0039). The demo asks the NBK nothing, so the DAG starts paused, as that of the ECB.
+    assert decorators(NBK_DAILY)["load_nbk"] == ["task(task_id='load_nbk', outlets=[RAW_NBK])"]
+    tree = ast.parse(NBK_DAILY.read_text(encoding="utf-8"))
+    paused = [
+        node.value.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.keyword) and node.arg == "is_paused_upon_creation"
+    ]
+    assert paused == [True]
+
+
+def test_the_load_of_the_rates_of_the_nbk_runs_after_the_fixing_in_astana():
+    # 11:13 UTC is 16:13 in Astana, UTC+5, after the fixing of 15:30 and the cross rates of 16:00.
+    text = NBK_DAILY.read_text(encoding="utf-8")
+    assert 'SCHEDULE = CronTriggerTimetable("13 11 * * *", timezone="UTC")' in text
+
+
 GOOGLE_ADS_DAILY = DAGS / "agoranomos_google_ads_daily.py"
 
 
@@ -705,6 +748,13 @@ TEN_MINUTES = "timedelta(minutes=10)"
             "timedelta(minutes=20)",
             "timedelta(hours=2)",
             "hours=7",
+        ),
+        (
+            "agoranomos_nbk_daily.py",
+            "timedelta(minutes=5)",
+            TEN_MINUTES,
+            "timedelta(hours=1)",
+            "hours=4",
         ),
     ],
 )

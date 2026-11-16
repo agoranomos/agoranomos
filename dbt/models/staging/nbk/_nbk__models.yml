@@ -1,0 +1,36 @@
+models:
+  - name: stg_nbk__rates_daily
+    description: >-
+      The official rates of the tenge of the National Bank of Kazakhstan, one row for each calendar
+      day and currency, against KZT, the base_currency, in two directions. rate is the value of one
+      tenge in quote_currency, quant divided by the price in tenge of quant units, as the rates of a
+      source go into the rates of the core: the rate of one unit of a currency in another is the
+      rate of the other divided by the rate of the currency. base_rate is the price in tenge of one
+      unit of quote_currency, as the NBK publishes it. A day that the NBK has not published yet has
+      no row, and the model is empty while no load has taken the rates. The model of the rates does
+      not read these rates yet: core.fx_rates_daily takes those of the ECB, or of the demo.
+      rate_date, base_currency and quote_currency are its key. Its tests guard the marts: when one
+      of them fails, dbt does not rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [rate_date, base_currency, quote_currency]
+    columns:
+      - name: rate_date
+        description: '{{ doc("rate_date") }}'
+        data_tests: [not_null]
+      - name: base_currency
+        description: '{{ doc("base_currency") }}'
+        data_tests: [not_null]
+      - name: quote_currency
+        description: '{{ doc("quote_currency") }}'
+        data_tests: [not_null]
+      - name: rate
+        description: '{{ doc("rate") }}'
+        data_tests: [not_null, non_negative]
+      - name: base_rate
+        description: '{{ doc("base_rate") }}'
+        data_tests: [not_null, non_negative]
+      - name: rate_source
+        description: '{{ doc("rate_source") }}'
+        data_tests: [not_null]

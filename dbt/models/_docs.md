@@ -366,7 +366,7 @@ The day of the rate.
 {% enddocs %}
 
 {% docs rate %}
-How many units of one currency one unit of another is worth on the day, to eight decimal places. In the rates into the reporting currency, as in core.fx_rates_daily, the value of one unit of currency in reporting_currency, through the reference rates of the euro, such as 1.08320000 from EUR to USD; in the rates of a source, the value of one unit of base_currency in quote_currency.
+How many units of one currency one unit of another is worth on the day, to eight decimal places. In the rates into the reporting currency, as in core.fx_rates_daily, the value of one unit of currency in reporting_currency, through the reference rates of the euro, such as 1.08320000 from EUR to USD; in the rates of a source, the value of one unit of base_currency in quote_currency; for the National Bank of Kazakhstan, whose base is one tenge, not rounded to eight places but with the digits of the division, at least 16 significant ones, such as 0.0022484036 and more from KZT to USD on 12 November 2026.
 {% enddocs %}
 
 {% docs rate_into_reporting_currency %}
@@ -382,7 +382,11 @@ Whether the rate is the last published one before the day, on a day without a pu
 {% enddocs %}
 
 {% docs base_currency %}
-The currency that a rate of the source is given for one unit of, EUR for the reference rates of the euro.
+The currency that a rate of the source is given for one unit of, EUR for the reference rates of the euro and KZT for the official rates of the National Bank of Kazakhstan.
+{% enddocs %}
+
+{% docs base_rate %}
+The rate of quote_currency against base_currency in the convention of the source: for the National Bank of Kazakhstan, the price in tenge of one unit of quote_currency, the price that the NBK publishes for quant units divided by quant, such as 444.76 for USD on 12 November 2026.
 {% enddocs %}
 
 {% docs quote_currency %}

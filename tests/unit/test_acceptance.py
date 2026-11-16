@@ -51,8 +51,8 @@ def test_the_cleanup_names_the_account_of_each_raw_table_as_staging_reads_it():
     # A row goes by load and account, so the account of each table must be the one through which
     # staging finds its load: a wrong column would keep rows, or take those of another account.
     found = read_by_staging()
-    assert len(found) == 8
-    assert sum(len(tables) for tables in found.values()) == 48
+    assert len(found) == 9
+    assert sum(len(tables) for tables in found.values()) == 49
     staged = {
         schema: tables
         for schema, tables in acceptance.ACCOUNTS.items()
@@ -67,6 +67,7 @@ def test_the_cleanup_names_the_account_of_each_raw_table_as_staging_reads_it():
     assert meta == {**acceptance.ACCOUNTS["raw_demo_social"], "insights_account": "r.account_id"}
     assert acceptance.ACCOUNTS["raw_demo_search"]["customer_clients"] == "r.customer_client__id"
     assert acceptance.ACCOUNTS["raw_ecb"] == {"rates_daily": None}
+    assert acceptance.ACCOUNTS["raw_nbk"] == {"rates_daily": None}
 
 
 def dag_timeouts() -> dict[str, timedelta]:
@@ -94,6 +95,7 @@ def test_a_load_that_did_not_end_waits_longer_than_any_run_of_a_dag_lives():
         "agoranomos_ecb_daily",
         "agoranomos_google_ads_daily",
         "agoranomos_meta_ads_daily",
+        "agoranomos_nbk_daily",
     ):
         assert name in timeouts, name
     assert max(timeouts.values()) < acceptance.UNFINISHED_AFTER
