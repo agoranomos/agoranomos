@@ -1,8 +1,9 @@
 """Stack tests of the one-shot job marts-init (metabase/marts_init.py, ADR-0039, ADR-0044): every
-start builds the views of marts again, before metabase-init, as transformer; a view keeps its
-grants and its comment; the job waits for a node of the transform that writes, through the lock
-of dbt/macros/marts_init.sql; and it drops the relations of earlier releases that no model builds
-or reads, but one that a view needs. They need no demo: the views exist over an empty core too."""
+start loads the seeds and builds the views of marts again from them, before metabase-init, as
+transformer; a view keeps its grants and its comment; the job waits for a node of the transform
+that writes, through the lock of dbt/macros/marts_init.sql; and it drops the relations of earlier
+releases that no model builds or reads, but one that a view needs. They need no demo: the views
+exist over an empty core too."""
 
 from __future__ import annotations
 
@@ -11,7 +12,15 @@ import subprocess
 import time
 
 import marts_init
-from stack_helpers import REPO_ROOT, compose, job_failed, wait_for, warehouse_output
+from stack_helpers import (
+    REPO_ROOT,
+    compose,
+    job_failed,
+    seed_platforms,
+    shown_platforms,
+    wait_for,
+    warehouse_output,
+)
 
 # The views of marts, as the dbt project has them.
 MARTS = sorted(path.stem for path in (REPO_ROOT / "dbt" / "models" / "marts").glob("*.sql"))
@@ -64,7 +73,8 @@ def test_a_start_builds_the_views_again_with_their_grants_and_comments(env):
     before = views(env)
     result = compose("run", "--rm", "--no-deps", "-T", "marts-init", check=False)
     assert result.returncode == 0, job_failed("marts-init", result)
-    # After the first start the snapshots of the core exist, so only the views are built.
+    # After the first start the snapshots of the core exist, so only the seeds and the views are
+    # built.
     assert "marts-init: building the views of marts again" in result.stdout
     after = views(env)
     assert sorted(after) == MARTS
@@ -74,6 +84,18 @@ def test_a_start_builds_the_views_again_with_their_grants_and_comments(env):
     # transformer on marts give them.
     for name in MARTS:
         warehouse_output(env, f"SELECT FROM marts.{name} LIMIT 0", role="metabase_reader")
+
+
+def test_a_start_loads_the_seeds_before_it_builds_the_views(env):
+    # A platform that the seed table lacks, as after an upgrade from a release whose seed did not
+    # have it: the job loads the seed of the checkout first, so the view shows every platform.
+    columns, rows = seed_platforms()
+    platform = max(rows).split("|", 1)[0]
+    warehouse_output(env, f"DELETE FROM staging.seed_ad_platforms WHERE platform = '{platform}'")  # noqa: S608 (a code of the seed)
+    result = compose("run", "--rm", "--no-deps", "-T", "marts-init", check=False)
+    assert result.returncode == 0, job_failed("marts-init", result)
+    assert "marts-init: building the views of marts again from the seeds" in result.stdout
+    assert shown_platforms(env, columns) == rows
 
 
 def test_marts_init_waits_for_a_node_of_the_transform_that_writes(env):

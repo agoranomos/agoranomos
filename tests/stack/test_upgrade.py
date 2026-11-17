@@ -3,21 +3,21 @@ demo, then the current code in the same checkout, on the same volumes, and ./ago
 
 The workflow Upgrade runs it in two steps. AGORANOMOS_UPGRADE=before runs on the stack of the
 previous release, once the checkout holds the current code and before ./agoranomos up: it records
-the relations of the warehouse with their oids, the migrations of the core that it has applied,
-the backups, the rows of the marts, the dashboards of the package and the tables and fields of the
+the relations of the warehouse with their oids, the migrations of the core that it has applied, the
+backups, the rows of the marts, the dashboards of the package and the tables and fields of the
 marts as Metabase knows them. AGORANOMOS_UPGRADE=after, once ./agoranomos up has upgraded the
 stack, checks what the upgrade must do: db-init applied and recorded every migration that waited,
 up took a backup before them whose manifest names them, marts-init built the views of the marts
-and dropped the relations of the release that no model builds or reads, every card of the
-dashboards of the package answers, on the same tables and fields of Metabase, the metadata of the
-marts is applied, the raw tables of the demo are in the shape of the current code, no relation of
-the release stays that the current code neither builds nor reads, and the demo goes on, with a
-daily load and a run of the transform. AGORANOMOS_UPGRADE_FILE
-names the file in which the first step leaves what it found for the second. With
-AGORANOMOS_UPGRADE_SUMMARY, the second step appends to that file, such as the summary of a job of
-CI, the rows of the marts before and after, and the relations of the previous release that the
-upgrade left as they were. Without these variables the tests skip: they need a stack of the
-previous release, which no other run of the stack tests has.
+from the seeds of the current code and dropped the relations of the release that no model builds or
+reads, every card of the dashboards of the package answers, on the same tables and fields of
+Metabase, the metadata of the marts is applied, the raw tables of the demo are in the shape of the
+current code, no relation of the release stays that the current code neither builds nor reads, and
+the demo goes on, with a daily load and a run of the transform. AGORANOMOS_UPGRADE_FILE names the
+file in which the first step leaves what it found for the second. With AGORANOMOS_UPGRADE_SUMMARY,
+the second step appends to that file, such as the summary of a job of CI, the rows of the marts
+before and after, and the relations of the previous release that the upgrade left as they were.
+Without these variables the tests skip: they need a stack of the previous release, which no other
+run of the stack tests has.
 
 The assertions print names, numbers, states and kinds of relations, never a secret.
 """
@@ -48,6 +48,8 @@ from stack_helpers import (
     leaked,
     read_env,
     secrets,
+    seed_platforms,
+    shown_platforms,
     wait_for,
     warehouse_output,
 )
@@ -391,6 +393,18 @@ def test_marts_init_built_the_views_of_the_marts_in_place_of_those_of_the_releas
     )
     old = {key: value for key, value in saved["relations"].items() if key.startswith("marts.")}
     assert [key for key, (_, oid) in old.items() if marts.get(key, ("", 0))[1] == oid] == []
+
+
+@after_only
+def test_marts_init_built_the_views_from_the_seeds_of_the_checkout(env):
+    # The views carry the rows of the seed of the platforms in their text, and a run of the
+    # transform keeps a view that exists: marts-init loaded the seed of the current code before it
+    # built them, so the first start of the release shows every platform that it brings, and no
+    # row of the seed of the previous release.
+    columns, rows = seed_platforms()
+    shown = shown_platforms(env, columns)
+    assert sorted(rows - shown) == []
+    assert sorted(shown - rows) == []
 
 
 @after_only
