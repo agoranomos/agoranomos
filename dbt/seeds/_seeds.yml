@@ -9,8 +9,6 @@ seeds:
       has no setting for them.
     config:
       column_types: {is_demo: boolean, restatement_window_days: integer}
-      # The column of the windows, which the table of the seed of an earlier release lacks.
-      pre-hook: "{{ add_platform_columns(this) }}"
     columns:
       - name: platform
         description: '{{ doc("platform") }}'

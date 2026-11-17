@@ -89,6 +89,25 @@ def test_the_project_pins_the_dbt_line_of_the_image():
     assert re.search(r"^dbt-core==1\.12\.\d+$", pins, flags=re.MULTILINE)
 
 
+def test_the_hooks_are_in_the_project_file_alone():
+    # dbt 1.12.6 renders a hook in a properties file when it parses the project, where the macros
+    # of the project are not defined, so every command of dbt failed on the pre-hook of the seed of
+    # the platforms in seeds/_seeds.yml (checked on 17 November 2026). dbt_project.yml keeps its
+    # hooks for the run, as the config blocks of the SQL files do.
+    files = [
+        *(DBT / "models").rglob("*.yml"),
+        *SEEDS.glob("*.yml"),
+        *(DBT / "snapshots").glob("*.yml"),
+    ]
+    for path in sorted(files):
+        text = path.read_text(encoding="utf-8")
+        hook = re.search(r"^\s*\+?(pre|post)[-_]hook\s*:", text, flags=re.MULTILINE)
+        assert hook is None, path.relative_to(DBT)
+    project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
+    assert "    seed_ad_platforms:\n" in project
+    assert '+pre-hook: "{{ add_platform_columns(this) }}"' in project
+
+
 def yaml_files() -> list[Path]:
     return sorted((DBT / "models").rglob("*.yml"))
 
