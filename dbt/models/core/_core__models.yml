@@ -496,8 +496,9 @@ models:
       Advertising statistics by day and campaign of every ad platform: one row for a campaign of an
       account on a day, in the time zone of the account, as the platform reports its campaign level,
       with the amounts in the currency of the account. account_sk, campaign_id and report_date are
-      its key. Partitioned by month of report_date; a month that ended before the window of
-      restatements is frozen (the trigger freeze_the_months_before_the_window).
+      its key. A day that only a load of the kind intraday took is partial (is_partial_day) until a
+      whole load replaces it. Partitioned by month of report_date; a month that ended before the
+      window of restatements is frozen (the trigger freeze_the_months_before_the_window).
     data_tests:
       - few_without_a_dimension:
           arguments:
@@ -571,6 +572,12 @@ models:
       - name: load_sk
         description: >-
           The load that wrote the row, load_sk of core.loads.
+      - name: is_partial_day
+        description: >-
+          Whether the row is of a day still in progress, as a load of the kind intraday read it at
+          the moment of its load: impressions, clicks and spend so far, and no conversions. A load
+          of the kind window or history replaces the day whole, with false, and the journal of
+          restatements does not keep the partial row. The other facts have no partial day.
   - name: core_ad_stats_ad_group_daily
     description: >-
       Advertising statistics by day and ad group of every ad platform, ad sets of Meta among them:

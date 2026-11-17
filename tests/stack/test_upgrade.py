@@ -377,7 +377,7 @@ def test_db_init_applied_and_recorded_every_migration_of_the_checkout(env):
 def test_the_rates_that_the_core_held_keep_their_rows_and_their_source(env):
     # ADR-0042 and the decision of the maintainer of 16 November 2026 (C2c of #222): the update
     # rewrites no row of core.fx_rates_daily, relabels none, and loads the history of no source of
-    # the rates again. Migration 0009 adds the second leg of a rate, which no row of before has. A
+    # the rates again. Migration 0010 adds the second leg of a rate, which no row of before has. A
     # run of the transform after the update may add the rows of later days, and rewrites none of
     # these, as the demo gives the same rates for the same days.
     saved = recorded()["rates"]

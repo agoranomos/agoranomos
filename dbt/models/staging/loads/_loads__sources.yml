@@ -20,7 +20,9 @@ sources:
         description: >-
           The registry of the accounts of the core, which the model dim_account writes, as the runs
           before this one left it: the checks of G1a in int_g1_failures read it before this run
-          writes the core, to find the accounts of the rows of core.ad_stats_campaign_daily.
+          writes the core, to find the accounts of the rows of core.ad_stats_campaign_daily, and
+          the checks of the accounts to know an account that this run reads from loads of the kind
+          intraday alone, which take no list.
       - name: dim_campaign
         description: >-
           The campaigns of the core, which the model dim_campaign writes, as the runs before this
