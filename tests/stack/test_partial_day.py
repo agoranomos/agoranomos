@@ -389,6 +389,10 @@ def test_a_partial_day_stays_below_the_whole_day_that_replaces_it(env, airflow_u
         transform(airflow_url, token)
         assert quarantine(env) == []
         assert rows(env, CAMPAIGNS.format(sk=sk, day=today)) == found
+        # The view of restatements leaves the intraday loads out, as the replacement of a partial
+        # day is no restatement: this one replaced the whole day of step 3 (ADR-0051).
+        intraday = "SELECT count(*) FROM ops.ops_restatements WHERE load_kind = 'intraday'"
+        assert warehouse_output(env, intraday) == "0"
     finally:
         loads.remove()
         warehouse_output(
