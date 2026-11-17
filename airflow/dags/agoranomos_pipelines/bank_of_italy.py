@@ -54,6 +54,7 @@ from agoranomos_pipelines.loads import (
     row_counts,
     run,
 )
+from agoranomos_pipelines.windows import restatement_window_days
 
 log = logging.getLogger(__name__)
 
@@ -67,7 +68,6 @@ ACCOUNT = "EUR"
 # The dates of the answers refer to Central European Time.
 TIME_ZONE = ZoneInfo("Europe/Rome")
 # As for the ECB (ecb.py): the history starts one month before that of Google Ads (ADR-0034).
-WINDOW_DAYS = 14
 HISTORY_MONTHS = 37
 # At most one request a second: the history of 37 months is about 800 of them, and the policy of
 # the statistics of the ESCB lets the bank restrict a user who acts against the interests of the
@@ -110,13 +110,15 @@ def window(
 ) -> tuple[date, date, str]:
     """The days of a load at now and its kind: the history when no load has taken a day yet, from
     history when the core needs it earlier (rates.history_from), else the days from the day after
-    the last loaded, or from the first of the last WINDOW_DAYS when that is earlier, to yesterday,
-    and those from history, as a load of the history, when it is earlier still."""
+    the last loaded, or from the first of the last days of its window of restatements (windows.py)
+    when that is earlier, to yesterday, and those from history, as a load of the history, when it
+    is earlier still."""
     end = yesterday(now)
     if last_end is None:
         first = history_start(now)
         return (first if history is None else min(first, history)), end, HISTORY
-    usual = min(last_end + timedelta(days=1), end - timedelta(days=WINDOW_DAYS - 1))
+    width = restatement_window_days(CODE)
+    usual = min(last_end + timedelta(days=1), end - timedelta(days=width - 1))
     if history is not None and history < usual:
         return history, end, HISTORY
     return usual, end, WINDOW
