@@ -102,15 +102,15 @@ models:
       yesterday in a daily load, is new and not counted, and the first load of an account counts
       none. The journal keeps the rows that a load changed or removed and not the rows that it
       added to a day, so a day whose only change is a new row of a campaign counts as unchanged.
+      The loads of the kind intraday are left out, as the replacement of a partial day is no
+      restatement (ADR-0051).
       The age at which the shares fall to 0 is the age after which the numbers of a day no longer
       change. The Ops collection of Metabase shows it.
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
       - name: load_kind
-        description: >-
-          The kind of the loads that replaced the days, as core.loads has it: window for the usual
-          window of an account, which a daily load takes, history for a load of the days before it.
+        description: '{{ doc("load_kind") }}'
       - name: age_days
         description: >-
           How old a day was when a load replaced it: the day on which the load ended, in the time

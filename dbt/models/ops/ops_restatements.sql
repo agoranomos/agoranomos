@@ -18,7 +18,9 @@
 --   over the days replaced; a day whose total is 0 now is left out of the average. Money of several
 --   currencies is not summed, but for the change of spend in the reporting currency, at the rate of
 --   the day. A window function is allowed here: the rule of none is for the marts (ADR-0037).
--- Partial rows of a day (#223) never enter the journal, so nothing here leaves them out.
+-- * The loads of the kind intraday are left out (ADR-0051), both as loads that replace and as
+--   loads that took a day before: a partial row never enters the journal, as the replacement of a
+--   partial day is no restatement, so the whole load that takes the day after it takes it as new.
 with loads as (
     select
         l.load_sk,
@@ -35,6 +37,7 @@ with loads as (
     from {{ source('core', 'loads') }} as l
     where l.status = 'accepted'
         and l.outcome = 'loaded'
+        and l.kind <> 'intraday'
         and l.source in ('{{ fact_sources("ad_stats_campaign_daily") | join("', '") }}')
     -- The loads that the core accepted before each, in an earlier run.
     window earlier as (

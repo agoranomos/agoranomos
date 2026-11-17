@@ -10,8 +10,10 @@
       writes after the last table of the load, so no row of a load that stopped half way is read;
     * an account counts in a load when its row of the journal has the status loaded: one that
       failed has no window, and its days keep the load before;
-    * the newest load of a day is the one with the largest load id, a time in seconds as text with
-      a fraction of varying length, which compares as a number;
+    * a whole load, of the kind window or history, takes a day before a load of the kind intraday,
+      which reads the current day of its accounts, whatever their load ids (ADR-0051), and among
+      the loads of one rank the newest of a day is the one with the largest load id, a time in
+      seconds as text with a fraction of varying length, which compares as a number;
     * a day that the newest load covering it does not hold is empty, so a load replaces its days
       whole, and a row that a platform no longer sends goes; a day of a shorter window keeps the
       older load that covers it (ADR-0046).
@@ -55,14 +57,21 @@ join (
 {%- endmacro %}
 
 {#- For each account and day of the windows of the pinned loads of a source, the newest load that
-    covers it, from loads, the relation of core.loads, with the key of newest_load_key: the rows of
-    stg_loads__newest_days of one source (ADR-0046).
+    covers it, from loads, the relation of core.loads, with its kind and the key of
+    newest_load_key: the rows of stg_loads__newest_days of one source (ADR-0046, ADR-0051).
     * The newest load is chosen among the pinned and the accepted loads of the account, and a day
       is read only when it is a pinned one, as the core holds the days of an accepted load: so an
       older load that ends after a newer one was accepted does not replace its days.
-    * Of the accepted loads, only those newer than the oldest pinned load of the account count,
-      as only such a load can win a day of a pinned one: the accepted loads of 13 months would
-      otherwise unroll about 180 windows of 90 days for each account (#191).
+    * A whole load, of the kind window or history, ranks before a load of the kind intraday, and
+      within a rank the largest load id wins: a read of the current day that started before
+      midnight in the account and reached dlt after a daily load had begun has the larger load id,
+      and would otherwise replace a whole day with a partial one.
+    * Of the accepted loads, only those newer than the oldest pinned load of the account of their
+      rank count, as only such a load can win a day of a pinned one of that rank: the accepted
+      loads of 13 months would otherwise unroll about 180 windows of 90 days for each account
+      (#191). An accepted whole load wins a day of a pinned intraday load whatever their load ids,
+      so it counts too where its window meets that of a pinned intraday load of the account, for
+      those days only, and the day is then not read.
     * A failed account has no window, and its row is passed over.
     A run that succeeds accepts the loads that it read (agoranomos_pipelines/acceptance.py), so
     the next run reads only the loads pinned since, and those of an account in quarantine. -#}
@@ -74,34 +83,51 @@ select
     d.account_id,
     d.day,
     d.load_id,
+    d.kind as load_kind,
     {{ newest_load_key(source_name, 'd.load_id', none if account is none else 'd.account_id', 'd.day') }} as load_key
 from (
     select distinct on (l.account_id, w.day)
         l.account_id,
         w.day,
         l.load_id,
+        l.kind,
         l.status
     from (
-        select p.account_id, p.load_id, p.window_from, p.window_to, p.status
+        select p.account_id, p.load_id, p.kind, p.window_from, p.window_to, p.status
         from {{ loads }} as p
         where p.source = '{{ source }}' and p.status = 'pinned' and p.outcome = 'loaded'
         union all
-        select a.account_id, a.load_id, a.window_from, a.window_to, a.status
+        select a.account_id, a.load_id, a.kind, a.window_from, a.window_to, a.status
         from {{ loads }} as a
         join (
-            select account_id, min(load_id::numeric) as load_number
+            select
+                account_id,
+                kind = 'intraday' as is_intraday,
+                min(load_id::numeric) as load_number
             from {{ loads }}
             where source = '{{ source }}' and status = 'pinned' and outcome = 'loaded'
-            group by account_id
+            group by account_id, kind = 'intraday'
         ) as oldest
-            on oldest.account_id = a.account_id and a.load_id::numeric > oldest.load_number
+            on oldest.account_id = a.account_id and oldest.is_intraday = (a.kind = 'intraday')
+            and a.load_id::numeric > oldest.load_number
         where a.source = '{{ source }}' and a.status = 'accepted' and a.outcome = 'loaded'
+        union all
+        select
+            a.account_id, a.load_id, a.kind, greatest(a.window_from, i.window_from),
+            least(a.window_to, i.window_to), a.status
+        from {{ loads }} as a
+        join {{ loads }} as i
+            on i.source = a.source and i.account_id = a.account_id
+            and i.window_from <= a.window_to and i.window_to >= a.window_from
+        where a.source = '{{ source }}' and a.status = 'accepted' and a.outcome = 'loaded'
+            and a.kind <> 'intraday'
+            and i.status = 'pinned' and i.outcome = 'loaded' and i.kind = 'intraday'
     ) as l
     cross join lateral (
         select l.window_from + n as day
         from generate_series(0, l.window_to - l.window_from) as n
     ) as w
-    order by l.account_id, w.day, l.load_id::numeric desc
+    order by l.account_id, w.day, l.kind = 'intraday', l.load_id::numeric desc
 ) as d
 where d.status = 'pinned'
 {%- endmacro %}
@@ -120,15 +146,16 @@ where d.status = 'pinned'
 {%- endmacro %}
 
 {#- The columns of the journal that ops_loads reads, each of the type that dlt gives it in
-    PostgreSQL. -#}
+    PostgreSQL, with the kind of a load, for a reader that is to leave out the loads of the kind
+    intraday (ADR-0051). -#}
 {% macro newest_load_columns() -%}
 {{- return({
     '_agoranomos_loads': {
         'account_id': 'character varying', 'as_of': 'date', 'window_from': 'date',
         'window_to': 'date', 'now': 'timestamp with time zone',
         'loaded_at': 'timestamp with time zone', 'status': 'character varying',
-        'error': 'character varying', '_dlt_load_id': 'character varying',
-        '_dlt_id': 'character varying',
+        'error': 'character varying', 'kind': 'character varying',
+        '_dlt_load_id': 'character varying', '_dlt_id': 'character varying',
     },
 }) -}}
 {%- endmacro %}
@@ -197,6 +224,9 @@ join ({{ newest_lists(source_name, loads) }}) as l
     * Of the accepted loads, only those newer than the oldest pinned load of the account count, as
       only such a load can be newer than every pinned one (pinned_loads).
     * A failed account has no list in its load, and its row is passed over.
+    * A load of the kind intraday takes no list (ADR-0051), and is passed over too: a run that
+      held only such loads would otherwise read empty lists, and say of every entity of the
+      account that the platform no longer lists it.
     An account whose newest load is accepted has no list here, and its dimensions keep what the
     core holds. -#}
 {% macro newest_lists(source_name, loads) -%}
@@ -209,10 +239,11 @@ from (
         select account_id, min(load_id::numeric) as load_number
         from {{ loads }}
         where source = '{{ source }}' and status = 'pinned' and outcome = 'loaded'
+            and kind <> 'intraday'
         group by account_id
     ) as oldest
         on oldest.account_id = l.account_id and l.load_id::numeric >= oldest.load_number
-    where l.source = '{{ source }}' and l.outcome = 'loaded'
+    where l.source = '{{ source }}' and l.outcome = 'loaded' and l.kind <> 'intraday'
     order by l.account_id, l.load_id::numeric desc
 ) as n
 where n.status = 'pinned'

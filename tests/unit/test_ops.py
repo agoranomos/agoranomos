@@ -122,6 +122,8 @@ def test_the_view_of_the_restatements_reads_the_journal_of_the_campaigns_of_35_d
     assert "where j.replaced_at >= now() - interval '35 days'" in text
     assert "where l.accepted_at >= now() - interval '35 days'" in text
     assert "where l.status = 'accepted'" in text
+    # A partial day is no restatement (ADR-0051).
+    assert "and l.kind <> 'intraday'" in text
     # Only the days that an earlier load took count as replaced, and a load that a run read beside
     # a newer one of the account replaced none of the days of the newer one.
     assert "range between unbounded preceding and current row exclude group" in text
