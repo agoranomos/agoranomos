@@ -1135,7 +1135,7 @@ models:
         config:
           meta:
             metabase:
-              display_name: Restatement Window (Days)
+              display_name: Restatement Window in Days
               semantic_type: type/Quantity
               has_field_values: none
   - name: ad_accounts
