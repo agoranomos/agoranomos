@@ -213,10 +213,12 @@ def test_a_load_ends_yesterday_in_rome(bank):
 
 def test_the_window_and_the_history_are_those_of_the_ecb(bank):
     module, _, _ = bank
-    from agoranomos_pipelines import ecb
+    from agoranomos_pipelines import ecb, windows
 
     assert module.HISTORY_MONTHS == ecb.HISTORY_MONTHS == 37
-    assert module.WINDOW_DAYS == ecb.WINDOW_DAYS == 14
+    # The window of restatements of each, in the seed of the platforms (windows.py).
+    assert windows.restatement_window_days(module.CODE) == 14
+    assert windows.restatement_window_days(ecb.CODE) == 14
     # The first load takes the history, from the first day of the month 37 months back.
     assert module.window(NOW, None) == (date(2023, 10, 1), date(2026, 11, 12), "history")
     # A later one, the day after the last loaded, or the last fourteen days when that is earlier.

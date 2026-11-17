@@ -25,6 +25,10 @@ For a fictional platform of the demo, the API whose shape its data follows, with
 Whether the platform is a fictional one of the demo.
 {% enddocs %}
 
+{% docs restatement_window_days %}
+The window of restatements of the platform, in days: how many of its recent days, up to the last that a load takes, each daily load takes again, as the platform may still change them, such as 90 for Google Ads, whose conversions keep coming for up to 90 days after a click. An older day changes only when a load takes it again, after a stop of the loads or as a portion of the history.
+{% enddocs %}
+
 {% docs client_id %}
 The ID of a client of the business, a brand, shop or legal entity, as the settings of the model name it: those of the deployment in extensions/model/clients.toml, or the file of the demo. In a row of an account or of its data, the client that the account belongs to; unassigned for an account that no setting names.
 {% enddocs %}
