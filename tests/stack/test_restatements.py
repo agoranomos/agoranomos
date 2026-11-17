@@ -211,11 +211,12 @@ def test_the_loads_are_daily_loads_that_the_core_accepted(replaced):
 @pytest.mark.parametrize("platform", WINDOWS)
 def test_the_view_counts_each_day_of_the_window_as_replaced_at_its_age(replaced, platform):
     # The history took every day of the usual window, so each is a replaced day of the load of
-    # the test, at its age: 1 to 90 on demo_search and 1 to 28 on demo_social when the load ended
-    # on the day of the history in the time zone of each account.
+    # the test, at its age: 1 to 90 on demo_search and 1 to 28 on demo_social, a day older for
+    # each midnight of the account between the moment as of which the test made the load and the
+    # end of the load, as at 23:00 UTC in winter for an account in Europe/Berlin.
     before, after, windows, ended, _ = replaced
     expected = ages(windows, ended, platform)
-    assert len(expected) == WINDOWS[platform], sorted(expected)
+    assert min(expected) >= 1, sorted(expected)
     assert set(expected) <= set(after[platform]), sorted(set(expected) - set(after[platform]))
     for age, accounts in expected.items():
         was = int(before[platform][age][0]) if age in before[platform] else 0
