@@ -1070,9 +1070,9 @@ models:
       of exchange rates whose data the marts hold, with the kind of data that each gives and its
       window of restatements, the recent days that each daily load takes again, which still change.
       platform is its key; the marts that name a platform take its name from here. It lists the
-      sources of the connectors, Google Ads and the European Central Bank, and the fictional
-      platforms of the demo, which is_demo marks. A view whose rows are those of the seed of the
-      platforms of the base package, written into the view when it is built.
+      platforms and the sources of rates of the connectors, and the fictional platforms of the
+      demo, which is_demo marks. A view whose rows are those of the seed of the platforms of the
+      base package, written into the view when it is built.
     config:
       contract:
         enforced: true
