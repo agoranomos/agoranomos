@@ -170,3 +170,9 @@ seeds:
       columns: true
     +quote_columns: false
     +pre-hook: "{{ wait_for_marts_init() }}"
+    seed_ad_platforms:
+      # The column of the windows, which the table of the seed of an earlier release lacks
+      # (macros/platforms.sql). Hooks add up, so the seed waits for marts-init too. Here and not in
+      # seeds/_seeds.yml, where dbt renders the config when it parses the project, without the
+      # macros of the project.
+      +pre-hook: "{{ add_platform_columns(this) }}"

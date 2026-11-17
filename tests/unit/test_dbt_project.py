@@ -89,6 +89,25 @@ def test_the_project_pins_the_dbt_line_of_the_image():
     assert re.search(r"^dbt-core==1\.12\.\d+$", pins, flags=re.MULTILINE)
 
 
+def test_the_hooks_are_in_the_project_file_alone():
+    # dbt 1.12.6 renders a hook in a properties file when it parses the project, where the macros
+    # of the project are not defined, so every command of dbt failed on the pre-hook of the seed of
+    # the platforms in seeds/_seeds.yml (checked on 17 November 2026). dbt_project.yml keeps its
+    # hooks for the run, as the config blocks of the SQL files do.
+    files = [
+        *(DBT / "models").rglob("*.yml"),
+        *SEEDS.glob("*.yml"),
+        *(DBT / "snapshots").glob("*.yml"),
+    ]
+    for path in sorted(files):
+        text = path.read_text(encoding="utf-8")
+        hook = re.search(r"^\s*\+?(pre|post)[-_]hook\s*:", text, flags=re.MULTILINE)
+        assert hook is None, path.relative_to(DBT)
+    project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
+    assert "    seed_ad_platforms:\n" in project
+    assert '+pre-hook: "{{ add_platform_columns(this) }}"' in project
+
+
 def yaml_files() -> list[Path]:
     return sorted((DBT / "models").rglob("*.yml"))
 
@@ -616,6 +635,7 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
         "kind": "exchange_rates",
         "mimics": "",
         "is_demo": "false",
+        "restatement_window_days": "14",
     }
     assert rows["ecb"] == {
         "platform": "ecb",
@@ -623,6 +643,7 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
         "kind": "exchange_rates",
         "mimics": "",
         "is_demo": "false",
+        "restatement_window_days": "14",
     }
     assert rows["google_ads"] == {
         "platform": "google_ads",
@@ -630,6 +651,7 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
         "kind": "ads",
         "mimics": "",
         "is_demo": "false",
+        "restatement_window_days": "90",
     }
     assert rows["meta_ads"] == {
         "platform": "meta_ads",
@@ -637,6 +659,7 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
         "kind": "ads",
         "mimics": "",
         "is_demo": "false",
+        "restatement_window_days": "28",
     }
     assert rows["nbk"] == {
         "platform": "nbk",
@@ -644,6 +667,7 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
         "kind": "exchange_rates",
         "mimics": "",
         "is_demo": "false",
+        "restatement_window_days": "14",
     }
 
 
@@ -2247,9 +2271,9 @@ def test_the_rates_of_the_core_merge_the_days_that_a_run_brings():
     rates = (DBT / "macros" / "rates.sql").read_text(encoding="utf-8")
     assert "or exists (select from {{ rates }} where rate_source = 'ecb')" in rates
     assert "r.rate / c.rate as rate_into_reporting_currency" in rates
-    # A load of the ECB reads the last 14 days again (ADR-0042).
-    ecb = (DAGS_PIPELINES / "ecb.py").read_text(encoding="utf-8")
-    assert "\nWINDOW_DAYS = 14\n" in ecb
+    # A load of the ECB reads the last 14 days again (ADR-0042), its window in the seed.
+    ecb = {r["platform"]: r for r in seed_rows("seed_ad_platforms")}["ecb"]
+    assert ecb["restatement_window_days"] == "14"
 
 
 def test_the_views_of_the_core_take_their_accounts_from_one_place():
