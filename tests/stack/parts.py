@@ -14,8 +14,8 @@ run 43342339715 of the Stack workflow, on main b0578c4 on 13 November 2026, whic
 one job: a run of all of them took 148 to 169 minutes, and 209 on amd64 with the CeleryExecutor,
 with each run of the transform of the demo about 14 minutes. The files that run the transform, the
 first three of each part below, took 200 of those 209 minutes. test_meta_ads.py, which came later,
-runs the transform once and has no measured time yet, and test_partial_day.py, which came later
-too, runs it four times.
+runs the transform once and has no measured time yet, nor has test_restatements.py, which runs it
+once too, and test_partial_day.py, which came later still, runs it five times.
 """
 
 # Each part, test_compose.py included: 69 to 70 minutes on amd64 with the CeleryExecutor, and 49 to
@@ -43,7 +43,8 @@ PARTS: tuple[tuple[str, ...], ...] = (
         "test_raw_cleanup.py",  # 47, and 33 to 38
         "test_demo_load.py",  # 11, and 8 to 9
         "test_dbt_metadata.py",  # 8, and 6
-        "test_partial_day.py",  # four runs of the transform, not measured yet
+        "test_partial_day.py",  # five runs of the transform, not measured yet
+        "test_restatements.py",  # one run of the transform, not measured yet
         "test_airflow.py",
         "test_airflow_image.py",
         "test_alerts.py",
