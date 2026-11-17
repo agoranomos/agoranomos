@@ -14,7 +14,10 @@
     staging, of the days of int_window_days, which leaves out the accounts in quarantine and the
     sources that stop (ADR-0035), as integers, numeric(18,6) and char(3), the types of the tables
     of the migrations; staging has left out a row whose measures are all zero (ADR-0036,
-    macros/numbers.sql). -#}
+    macros/numbers.sql). A day that only a load of the kind intraday took is partial (ADR-0051): a
+    day of the fact of campaigns alone, whose rows carry is_partial_day, as that load brings the
+    statistics of campaigns and nothing else. No other fact reads it, so none takes it for an empty
+    day, and a whole load replaces the partial rows with its day. -#}
 
 {#- The first day that the pinned windows reach, as SQL: the lower bound of the delete of a fact,
     its incremental_predicates, and of the hooks and tests of the facts, so that PostgreSQL reads
@@ -66,6 +69,12 @@ date_trunc('month', current_date - 92)::date
 {{ source }} || '|' || {{ account }} || '|' || ({{ day }} - date '2000-01-01')::text
 {%- endmacro %}
 
+{#- The facts that take a partial day, of a load of the kind intraday (ADR-0051): the statistics
+    of campaigns, whose table has the column is_partial_day (0009_add_the_partial_day.sql). -#}
+{% macro partial_day_facts() -%}
+    {{- return(['ad_stats_campaign_daily']) -}}
+{%- endmacro %}
+
 {#- The sources whose loads a fact takes, as core.loads names them: those of pinned_load_facts. -#}
 {% macro fact_sources(fact) -%}
     {%- set found = [] -%}
@@ -77,18 +86,26 @@ date_trunc('month', current_date - 92)::date
     {{- return(found) -}}
 {%- endmacro %}
 
-{#- The days of the windows that this run writes into a fact, from days, int_window_days. -#}
+{#- The days of the windows that this run writes into a fact, from days, int_window_days: of the
+    sources of the fact, and partial ones only for a fact of partial_day_facts. -#}
 {% macro fact_days(fact, days) -%}
 (select account_sk, report_date, load_sk
 from {{ days }}
-where source in ('{{ fact_sources(fact) | join("', '") }}')) as days
+where {{ fact_days_where(fact) }}) as days
+{%- endmacro %}
+
+{#- The condition on a row of int_window_days of the days of a fact, as SQL. -#}
+{% macro fact_days_where(fact) -%}
+source in ('{{ fact_sources(fact) | join("', '") }}')
+{%- if fact not in partial_day_facts() %} and not is_partial_day{% endif %}
 {%- endmacro %}
 
 {#- The rows of a fact of statistics of a level, campaign, ad_group or ad, that this run writes:
     those of relations, the staging models of the level of each ad platform, on the days of days,
     with the own metric of conversions of each platform and all its conversions, which the
     connector of Google Ads reads and the other platforms have none of;
-    core.ad_conversions_campaign_daily has them by action. -#}
+    core.ad_conversions_campaign_daily has them by action. The campaigns take the partial days
+    too, each row with is_partial_day, and the ad groups and the ads none (ADR-0051). -#}
 {% macro fact_stats_rows(level, relations, days) -%}
 {%- set ids = {
     'campaign': ['campaign_id'],
@@ -131,14 +148,21 @@ select
     cast(r.all_conversion_value as numeric(18,6)) as all_conversion_value,
     cast(d.currency as char(3)) as currency,
     cast(d.load_sk as integer) as load_sk
+    {%- if level == 'campaign' %},
+    cast(d.is_partial_day as boolean) as is_partial_day
+    {%- endif %}
 from read as r
 join {{ days }} as d
     on d.day_key = {{ window_day_key('r.platform', 'r.account_id', 'r.report_date') }}
+{%- if level != 'campaign' %}
+where not d.is_partial_day
+{%- endif %}
 {%- endmacro %}
 
 {#- The rows of the fact of the conversions of the campaigns by action that this run writes: those
     of relations, the staging models of the conversions of the campaigns of each ad platform, on the
-    days of days, with the surrogate of the action from actions, core.dim_conversion_action. -#}
+    days of days, with the surrogate of the action from actions, core.dim_conversion_action, and
+    no partial day, as a load of the kind intraday brings no conversions (ADR-0051). -#}
 {% macro fact_conversions_rows(relations, days, actions) -%}
 with read as (
     {%- for relation in relations %}
@@ -177,10 +201,12 @@ join {{ days }} as d
     on d.day_key = {{ window_day_key('r.platform', 'r.account_id', 'r.report_date') }}
 join {{ actions }} as a
     on a.platform = r.platform and a.conversion_action_id = r.conversion_action_id
+where not d.is_partial_day
 {%- endmacro %}
 
 {#- The rows of the fact of the sessions of web analytics that this run writes: those of relations,
-    the staging models of the sessions of each source of web analytics, on the days of days. -#}
+    the staging models of the sessions of each source of web analytics, on the days of days, of
+    which none is partial (ADR-0051). -#}
 {% macro fact_sessions_rows(relations, days) -%}
 with read as (
     {%- for relation in relations %}
@@ -221,6 +247,7 @@ select
 from read as r
 join {{ days }} as d
     on d.day_key = {{ window_day_key('r.platform', 'r.property_id', 'r.report_date') }}
+where not d.is_partial_day
 {%- endmacro %}
 
 {#- The first pre-hook of a fact: the freeze (ADR-0035) lifted for the transaction of the model,
@@ -243,7 +270,9 @@ where exists (
     that the fact holds on a day of the window whose replacement, in rows, the rows that the model
     writes, has other values, or has no row of its key, goes into the journal with its old values,
     the load that wrote it and the one that replaces it, the moment of the transaction, and
-    whether it vanished. A row that the replacement holds with the same values goes nowhere. -#}
+    whether it vanished. A row that the replacement holds with the same values goes nowhere, and
+    so does a partial row, of a day still in progress, whose replacement is no restatement
+    (ADR-0038, ADR-0051). -#}
 {% macro fact_restatements(rows, days) -%}
 {#- dbt renders the hooks when it parses the project too, before this names the table. -#}
 {%- if not execute -%}
@@ -272,6 +301,9 @@ left join ({{ rows }}) as n
     and n.{{ column }} = f.{{ column }}
     {%- endfor %}
 where f.report_date >= {{ window_start() }}
+    {%- if this.identifier in partial_day_facts() %}
+    and not f.is_partial_day
+    {%- endif %}
     and (
         n.account_sk is null
         or (n.{{ compared | join(', n.') }}) is distinct from (f.{{ compared | join(', f.') }})
@@ -308,7 +340,7 @@ where f.account_sk = empty.account_sk
 with window_days as (
     select account_sk, report_date, day_key
     from {{ days }}
-    where source in ('{{ fact_sources(fact.identifier) | join("', '") }}')
+    where {{ fact_days_where(fact.identifier) }}
 ),
 
 staged as (

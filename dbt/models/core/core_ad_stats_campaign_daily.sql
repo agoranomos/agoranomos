@@ -1,7 +1,9 @@
 -- core.ad_stats_campaign_daily, the statistics of the campaigns of every ad platform by day
 -- (ADR-0036, ADR-0038): each run replaces the days of the windows that it pinned whole, by account
 -- and day, with the rows of the newest load of each day, and keeps the rows that it changes or
--- removes in core.ad_stats_campaign_daily_restatements, in one transaction (macros/facts.sql).
+-- removes in core.ad_stats_campaign_daily_restatements, in one transaction (macros/facts.sql). A
+-- day that only a load of the kind intraday took is partial, and its rows carry is_partial_day
+-- until a whole load replaces the day, which the journal does not record (ADR-0051).
 {{ config(
     alias='ad_stats_campaign_daily',
     incremental_strategy='delete+insert',
