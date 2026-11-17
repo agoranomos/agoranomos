@@ -2660,6 +2660,7 @@ def test_g1a_and_the_stop_of_a_source_follow_adr_0035():
         "dim_ad",
         "dim_conversion_action",
         "ad_stats_campaign_daily",
+        "ad_stats_campaign_daily_restatements",
         "web_sessions_daily",
         "fx_rates_daily",
     ]
