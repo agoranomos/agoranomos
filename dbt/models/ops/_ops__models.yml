@@ -110,10 +110,7 @@ models:
       - name: platform
         description: '{{ doc("platform") }}'
       - name: load_kind
-        description: >-
-          The kind of the loads that replaced the days, as core.loads has it: window for the usual
-          window of an account, which a daily load takes, history for a load of the days before it;
-          never intraday.
+        description: '{{ doc("load_kind") }}'
       - name: age_days
         description: >-
           How old a day was when a load replaced it: the day on which the load ended, in the time

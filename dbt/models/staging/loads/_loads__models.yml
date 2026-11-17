@@ -32,10 +32,7 @@ models:
         description: '{{ doc("load_id") }}'
         data_tests: [not_null]
       - name: load_kind
-        description: >-
-          The kind of the load, as core.loads holds it: window for the usual window of the account,
-          history for a load of the days before it, intraday for a load of its current day, whose
-          day is partial.
+        description: '{{ doc("load_kind") }}'
         data_tests: [not_null]
       - name: load_key
         description: >-
