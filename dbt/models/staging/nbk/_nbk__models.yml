@@ -7,10 +7,11 @@ models:
       source go into the rates of the core: the rate of one unit of a currency in another is the
       rate of the other divided by the rate of the currency. base_rate is the price in tenge of one
       unit of quote_currency, as the NBK publishes it. A day that the NBK has not published yet has
-      no row, and the model is empty while no load has taken the rates. The model of the rates does
-      not read these rates yet: core.fx_rates_daily takes those of the ECB, or of the demo.
-      rate_date, base_currency and quote_currency are its key. Its tests guard the marts: when one
-      of them fails, dbt does not rebuild the models that read this one.
+      no row, and the model is empty while no load has taken the rates. core.fx_rates_daily takes
+      these rates first for a reporting currency of KZT, and else for a currency that the Bank of
+      Italy lacks, such as RUB and BYN, through the tenge (macros/rates.sql). rate_date,
+      base_currency and quote_currency are its key. Its tests guard the marts: when one of them
+      fails, dbt does not rebuild the models that read this one.
     data_tests:
       - unique_combination:
           arguments:

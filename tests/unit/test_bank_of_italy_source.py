@@ -164,7 +164,7 @@ def bank(monkeypatch):
     for name in names:
         sys.modules.pop(name, None)
     module = importlib.import_module("agoranomos_pipelines.bank_of_italy")
-    monkeypatch.setattr(module.rates, "read_core", lambda: state["core"])
+    monkeypatch.setattr(module.rates, "read_core", lambda code: state["core"])
     monkeypatch.setattr(module, "sleep", sleep)
     monkeypatch.setattr(module, "monotonic", lambda: made["clock"][0])
     monkeypatch.setenv("AGORANOMOS_REPORTING_CURRENCY", "GBP")
@@ -428,14 +428,13 @@ def test_a_load_is_due_until_one_has_taken_the_day_in_rome(bank):
     assert not module.due(NOW)
 
 
-# What the core says after a change of the reporting currency to GBP, which no account has, before
-# the ECB has a rate in the core (rates.read_core).
+# What the core says of the rates of the bank after a change of the reporting currency to GBP,
+# which no account has (rates.read_core).
 CHANGED_TO_GBP = {
     "view_currency": "GBP",
     "first_without": date(2025, 5, 14),
     "days_without": 548,
     "first_day": date(2023, 10, 1),
-    "holds_preferred": False,
 }
 
 
@@ -461,16 +460,17 @@ def test_a_load_asks_the_core_for_the_history_in_its_window_and_when_it_is_due(b
     assert not module.due(NOW)
 
 
-def test_the_core_takes_the_rates_of_the_ecb_so_the_bank_takes_no_history(bank):
-    # Until C2c of #222 the model takes the rates of the ECB alone once it has one
-    # (rates.PREFERRED): a load of the bank then keeps its usual window.
+def test_a_bank_that_the_setting_does_not_name_takes_no_history(bank, monkeypatch):
+    # With AGORANOMOS_RATES_SOURCE=ecb the model takes the rates of the ECB alone (rates.chain):
+    # a load of the bank, whose DAG may be unpaused, keeps its usual window every day.
     module, state, made = bank
+    monkeypatch.setenv("AGORANOMOS_RATES_SOURCE", "ecb")
     state.update(
         loads=1,
         reloads=[("EUR", date(2026, 11, 13), date(2026, 11, 12))],
-        core=module.rates.CoreRates(**{**CHANGED_TO_GBP, "holds_preferred": True}),
+        core=module.rates.CoreRates(**CHANGED_TO_GBP),
     )
-    assert module.rates.PREFERRED == "ecb"
+    assert module.rates.preferred() == "ecb"
     assert not module.due(NOW)
     module.load(NOW)
     [(rows, _)] = made["pipelines"][-1].runs

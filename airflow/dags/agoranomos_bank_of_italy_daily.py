@@ -8,12 +8,14 @@ yesterday in Rome (agoranomos_pipelines/bank_of_italy.py), and, when the core la
 reporting currency, the history again, as the load of the ECB does (agoranomos_pipelines/rates.py).
 The first task, due, skips the run when a load has taken the day already and the core needs no
 history. Each load updates the asset of the rates, and the transform runs after it (ADR-0039),
-pins the load, accepts it and cleans it from the raw layer: the model reads none of these rates
-yet, and the ECB stays the source of core.fx_rates_daily until C2c of #222.
+pins the load, takes its rates into core.fx_rates_daily in the order that AGORANOMOS_RATES_SOURCE
+gives, first unless it names nbk or ecb (dbt/macros/rates.sql), accepts it and cleans it from the
+raw layer. With ecb alone, a load takes its usual window and never the history again.
 
 The DAG starts paused: the demo keeps its own rates and asks the bank nothing, so a deployment with
-the demo alone, and the stack tests, need no network. A repeat is safe: each load replaces the days
-that it covers.
+the demo alone, and the stack tests, need no network. A deployment with a real source unpauses it,
+with agoranomos_nbk_daily and agoranomos_ecb_daily, as its guide of the setup says. A repeat is
+safe: each load replaces the days that it covers.
 """
 
 from __future__ import annotations

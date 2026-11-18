@@ -2,13 +2,13 @@ models:
   - name: stg_bank_of_italy__rates_daily
     description: >-
       The exchange rates of the Bank of Italy against the euro, one row for each day of quotation
-      and currency: the value of one euro, the base_currency, in quote_currency. A currency that
-      the bank lists for several countries has one row, and a currency without a rate on the day,
-      N.A. in the answer of the bank, has none. A weekend or a closing day of TARGET has no row,
-      and the model is empty while no load has taken the rates. No model reads it yet: the ECB
-      stays the source of core.fx_rates_daily. rate_date, base_currency and quote_currency are its
-      key. Its tests guard the marts: when one of them fails, dbt does not rebuild the models that
-      read this one.
+      and currency: the value of one euro, the base_currency, in quote_currency. A currency that the
+      bank lists for several countries has one row, and a currency without a rate on the day, N.A.
+      in the answer of the bank, has none. A weekend or a closing day of TARGET has no row, and the
+      model is empty while no load has taken the rates. core.fx_rates_daily takes these rates first,
+      unless AGORANOMOS_RATES_SOURCE sets another order (macros/rates.sql). rate_date, base_currency
+      and quote_currency are its key. Its tests guard the marts: when one of them fails, dbt does
+      not rebuild the models that read this one.
     data_tests:
       - unique_combination:
           arguments:

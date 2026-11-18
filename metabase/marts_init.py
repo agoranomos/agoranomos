@@ -36,8 +36,10 @@ rows, and metabase_reader and ai_reader may not read staging.
   and the view ops.ops_rates: the views take the new currency as they are built again. The job
   then reads ops.ops_rates, and when the core cannot give the rates of some days in the new
   currency, as the raw layer has lost the loads of the rates that the core accepted, it says so in
-  a line of warning, which ./agoranomos up shows: the next load of the rates takes their history
-  again (agoranomos_pipelines/rates.py).
+  a line of warning, which ./agoranomos up shows: the next load of the rates of their source takes
+  their history again (agoranomos_pipelines/rates.py). The order of the sources of the rates,
+  AGORANOMOS_RATES_SOURCE, reaches dbt here too, so the rates of the new currency come from the
+  same sources as in the runs of the transform.
 
 Once dbt has ended well, the job drops the relations of earlier releases in LEFTOVERS that the
 warehouse holds, each by its name and its kind, and names each in its log: no model of this
@@ -198,9 +200,10 @@ def gaps_line(connection: Any, currency: str) -> str | None:
     return (
         f"warning: the core holds no rate into {currency} on {days} days from {first} on, of the "
         "currencies of the accounts, as their loads of the rates are accepted and have left the "
-        "raw layer: the next load of the rates takes their history again, agoranomos_ecb_daily "
-        "or with the demo alone agoranomos_demo_daily, and until the transform reads it, the "
-        f"amounts of those days in {currency} are empty (ADR-0042)"
+        "raw layer: the next load of the rates of their source takes their history again, "
+        "agoranomos_bank_of_italy_daily, agoranomos_nbk_daily or agoranomos_ecb_daily, or with "
+        "the demo alone agoranomos_demo_daily, and until the transform reads it, the amounts of "
+        f"those days in {currency} are empty (ADR-0042)"
     )
 
 

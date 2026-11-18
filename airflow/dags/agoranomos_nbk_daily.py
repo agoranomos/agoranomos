@@ -10,12 +10,15 @@ history again from those days, after reading the core as the transformer role
 (agoranomos_pipelines/rates.py). The first task, due, skips the run when a load has taken the day
 already and the core needs no history. Each load updates the asset of the rates of the NBK, and
 the transform runs after it (ADR-0039), which pins the load, accepts it and removes its rows from
-raw_nbk as for any other source; the model does not read these rates yet, and core.fx_rates_daily
-keeps taking those of the ECB, or of the demo.
+raw_nbk as for any other source. core.fx_rates_daily takes these rates in the order that
+AGORANOMOS_RATES_SOURCE gives (dbt/macros/rates.sql): first for a reporting currency of KZT, and
+else for a currency that the Bank of Italy lacks, such as RUB and BYN, through the tenge. With ecb
+alone, a load takes its usual window and never the history again.
 
 The DAG starts paused: the demo keeps its own rates and asks the NBK nothing, so a deployment with
-the demo alone, and the stack tests, need no network. A repeat is safe: each load replaces the days
-that it covers.
+the demo alone, and the stack tests, need no network. A deployment with a real source unpauses it,
+with agoranomos_bank_of_italy_daily and agoranomos_ecb_daily, as its guide of the setup says. A
+repeat is safe: each load replaces the days that it covers.
 """
 
 from __future__ import annotations

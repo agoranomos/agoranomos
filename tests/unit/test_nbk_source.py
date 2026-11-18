@@ -185,7 +185,7 @@ def nbk(monkeypatch):
     for name in names:
         sys.modules.pop(name, None)
     module = importlib.import_module("agoranomos_pipelines.nbk")
-    monkeypatch.setattr(module.rates, "read_core", lambda: state["core"])
+    monkeypatch.setattr(module.rates, "read_core", lambda code: state["core"])
     monkeypatch.setattr(
         module, "time", types.SimpleNamespace(monotonic=clock.monotonic, sleep=clock.sleep)
     )
@@ -494,14 +494,13 @@ def test_a_load_is_due_until_one_has_taken_the_day_in_astana(nbk):
     assert not module.due(NOW)
 
 
-# What the core says after a change of the reporting currency to KZT, which no account has, when
-# it holds no rate of the ECB, as with the demo alone (rates.read_core).
+# What the core says of the rates of the NBK after a change of the reporting currency to KZT,
+# which no account has, and so to the NBK as the first source of auto (rates.read_core).
 CHANGED_TO_KZT = {
     "view_currency": "KZT",
     "first_without": date(2025, 5, 14),
     "days_without": 548,
     "first_day": date(2023, 10, 1),
-    "holds_preferred": False,
 }
 
 
@@ -527,14 +526,15 @@ def test_a_load_takes_the_history_again_when_the_core_lacks_the_rates(nbk):
     assert not module.due(NOW)
 
 
-def test_a_load_takes_no_history_while_the_core_takes_the_rates_of_the_ecb(nbk):
-    # The model takes the rates of the ECB alone once the core holds one (rates.PREFERRED): the
-    # NBK takes its usual window.
+def test_a_load_takes_no_history_when_the_setting_does_not_name_the_nbk(nbk, monkeypatch):
+    # With AGORANOMOS_RATES_SOURCE=ecb the model takes the rates of the ECB alone (rates.chain):
+    # the NBK, whose DAG may be unpaused, takes its usual window every day.
     module, state, made = nbk
+    monkeypatch.setenv("AGORANOMOS_RATES_SOURCE", "ecb")
     state.update(
         loads=1,
         reloads=[("KZT", date(2026, 11, 12), date(2026, 11, 11))],
-        core=module.rates.CoreRates(**{**CHANGED_TO_KZT, "holds_preferred": True}),
+        core=module.rates.CoreRates(**CHANGED_TO_KZT),
     )
     module.load(NOW)
     [(rows, _)] = made["pipelines"][0].runs

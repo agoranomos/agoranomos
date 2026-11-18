@@ -30,8 +30,10 @@ or earlier (agoranomos_pipelines/rates.py). All end today in Astana, as the set 
 before it. The journal gives the first load and a load of the history the kind history, and a
 later load the kind window (ADR-0038).
 
-The model does not read these rates yet: core.fx_rates_daily takes those of the ECB, or of the
-demo (dbt/macros/rates.sql)."""
+A source that the setting AGORANOMOS_RATES_SOURCE does not name, as with ecb alone, takes no
+history but its first (rates.chain). core.fx_rates_daily takes these rates first for a reporting
+currency of KZT, and else for a currency that the Bank of Italy lacks, such as RUB and BYN, through
+the tenge (dbt/macros/rates.sql)."""
 
 from __future__ import annotations
 

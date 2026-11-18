@@ -20,8 +20,10 @@ an earlier load missed, comes again and replaces a carried one in core.fx_rates_
 When the core lacks rates into the reporting currency on days whose loads it has accepted, as
 after a change of AGORANOMOS_REPORTING_CURRENCY, a load takes the history again from the first of
 those days, or earlier (agoranomos_pipelines/rates.py). All end yesterday in Frankfurt, where the
-ECB publishes. The journal gives the first load and a load of the history the kind history, and a
-later load the kind window (ADR-0038)."""
+ECB publishes. core.fx_rates_daily takes these rates after those of the two banks, for a currency
+and a day that the first source of AGORANOMOS_RATES_SOURCE did not publish, or alone with ecb
+(dbt/macros/rates.sql). The journal gives the first load and a load of the history the kind
+history, and a later load the kind window (ADR-0038)."""
 
 from __future__ import annotations
 

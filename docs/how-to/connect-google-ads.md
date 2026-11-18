@@ -1,6 +1,6 @@
 # Connect Google Ads
 
-This guide connects the Google Ads accounts of your business to agoranomos: the load reads their campaigns, statistics and conversions every day into the warehouse, and the model, the dashboards and the MCP servers show them beside the demo, or in its place ([ADR-0032](../adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md)). With it, you turn on the reference rates of the European Central Bank, which convert the money of the accounts into the reporting currency.
+This guide connects the Google Ads accounts of your business to agoranomos: the load reads their campaigns, statistics and conversions every day into the warehouse, and the model, the dashboards and the MCP servers show them beside the demo, or in its place ([ADR-0032](../adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md)). With it, you turn on the exchange rates of the Bank of Italy, of the National Bank of Kazakhstan and of the European Central Bank, which convert the money of the accounts into the reporting currency, in the order that `AGORANOMOS_RATES_SOURCE` sets ([The rates](../reference/configuration.md#the-rates)).
 
 No load has reached a real Google Ads account yet: the connector is tested against a stand-in of the API, so compare the first load with the Google Ads UI.
 
@@ -73,10 +73,10 @@ A campaign with conversion goals of its own, chosen for the campaign or a custom
 ## 5. Start the loads
 
 1. Run `./agoranomos up`, which gives the new settings to the container that runs the tasks.
-2. In the Airflow UI, unpause the DAGs `agoranomos_ecb_daily`, `agoranomos_google_ads_daily` and `agoranomos_google_ads_history`, and `agoranomos_demo_transform` if the demo did not unpause it. Each starts paused, so that a deployment without Google Ads asks Google and the ECB nothing.
-3. Trigger `agoranomos_ecb_daily` and then `agoranomos_google_ads_daily` once, or wait for 06:47 and 10:37 UTC. The first load of Google Ads takes the usual window of each account, the last 90 days, and the transform runs after each of the two loads.
+2. In the Airflow UI, unpause the DAGs of the rates, `agoranomos_bank_of_italy_daily`, `agoranomos_nbk_daily` and `agoranomos_ecb_daily`, or with `AGORANOMOS_RATES_SOURCE=ecb` the last alone, then `agoranomos_google_ads_daily` and `agoranomos_google_ads_history`, and `agoranomos_demo_transform` if the demo did not unpause it. Each starts paused, so that a deployment without Google Ads asks Google and the banks nothing.
+3. Trigger the DAGs of the rates and then `agoranomos_google_ads_daily` once, or wait for their schedules: 06:47 UTC for the ECB, 07:17 for the Bank of Italy, 11:13 for the NBK and 10:37 for Google Ads. The first load of each bank takes its 37 months, one request a second, about 15 minutes for the Bank of Italy and 20 for the NBK. The first load of Google Ads takes the usual window of each account, the last 90 days, and the transform runs after each load.
 
-After the transform, the Ops collection of Metabase shows the loads of `ecb` and `google_ads` ([Watch the pipeline](watch-the-pipeline.md)), and the marts have the rows of the platform `google_ads` for the last 90 days.
+After the transform, the Ops collection of Metabase shows the loads of `bank_of_italy`, `nbk`, `ecb` and `google_ads` ([Watch the pipeline](watch-the-pipeline.md)), and the marts have the rows of the platform `google_ads` for the last 90 days.
 
 ### When the history arrives
 
@@ -109,6 +109,6 @@ The load reads each answer of the API as it arrives, a row at a time, into a fil
 Two failures come after the load:
 
 - **The account in quarantine with `totals_differ`**: on a day of the load, the impressions, clicks or spend of the campaigns of the account do not add up to the totals of the account, which the load asks Google for in a request of their own (G0a of [ADR-0035](../adr/0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md)). The run of the transform leaves the account out: the core and the marts keep its data as it was, and the card **Accounts in quarantine** of the Ops collection gives the days and the sums of both sides ([Watch the pipeline](watch-the-pipeline.md#when-an-account-is-in-quarantine)). The account comes back with the first load that adds up. When it does not, compare the days with the Google Ads UI: no real account has checked yet that the campaigns of Google add up to its totals exactly, which the check expects.
-- **The account in quarantine with `missing_rate`**: the account pays in a currency that the ECB does not publish, such as the tenge (KZT), so the core has no rate of it into the reporting currency. The run of the transform leaves the account out, and the core and the marts keep its data as it was, until a source of its rates comes: the rates of the National Bank of Kazakhstan are planned for v0.6 ([ADR-0032](../adr/0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md), [ADR-0042](../adr/0042-take-the-rates-from-the-bank-of-italy-and-the-national-bank-of-kazakhstan.md)).
+- **The account in quarantine with `missing_rate`**: the account pays in a currency that no source of `AGORANOMOS_RATES_SOURCE` publishes, or whose DAG of the rates is still paused, so the core has no rate of it into the reporting currency. The run of the transform leaves the account out, and the core and the marts keep its data as it was, until a source of its rates comes: unpause the DAGs of the rates and trigger them ([The rates](../reference/configuration.md#the-rates), [ADR-0042](../adr/0042-take-the-rates-from-the-bank-of-italy-and-the-national-bank-of-kazakhstan.md)).
 
 Campaign names come from anyone who can edit the account: agoranomos keeps them as data, and an AI client that reads them should treat them so too ([Talk to your data](talk-to-your-data.md)).

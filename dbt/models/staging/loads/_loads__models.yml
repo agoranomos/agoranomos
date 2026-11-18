@@ -1,19 +1,18 @@
 models:
   - name: stg_loads__newest_days
     description: >-
-      The newest pinned load of each account and day of each source, one row each, which the
-      staging models of the facts read their rows by (ADR-0038, ADR-0046): of the loads in
-      core.loads with the status pinned or accepted whose window covers the day, a whole load, of
-      the kind window or history, before one of the kind intraday whatever their load IDs
-      (ADR-0051), and of one rank the one with the largest load ID, compared as a number, when it
-      is a pinned one; the core holds the days of an accepted load.
-      The task of the pin of each run of the transform writes core.loads before the
-      tasks of dbt, so the run reads the loads that were whole at its start, and a load that ends
-      later waits for the next run. Each run fills the table anew before the staging models of the
-      facts. The account is as the journal names it: the ID of a property for demo_web, and EUR,
-      the base of the rates, for demo_fx, ecb and bank_of_italy. source, account_id and day are
-      its key. Its tests guard the marts: when one of them fails, dbt does not rebuild the models
-      that read this one.
+      The newest pinned load of each account and day of each source, one row each, which the staging
+      models of the facts read their rows by (ADR-0038, ADR-0046): of the loads in core.loads with
+      the status pinned or accepted whose window covers the day, a whole load, of the kind window or
+      history, before one of the kind intraday whatever their load IDs (ADR-0051), and of one rank
+      the one with the largest load ID, compared as a number, when it is a pinned one; the core
+      holds the days of an accepted load. The task of the pin of each run of the transform writes
+      core.loads before the tasks of dbt, so the run reads the loads that were whole at its start,
+      and a load that ends later waits for the next run. Each run fills the table anew before the
+      staging models of the facts. The account is as the journal names it: the ID of a property for
+      demo_web, and EUR, the base of the rates, for demo_fx, ecb and bank_of_italy, and KZT for nbk.
+      source, account_id and day are its key. Its tests guard the marts: when one of them fails, dbt
+      does not rebuild the models that read this one.
     data_tests:
       - unique_combination:
           arguments:

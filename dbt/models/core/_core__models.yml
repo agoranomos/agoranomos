@@ -907,9 +907,11 @@ models:
   - name: core_fx_rates_daily
     description: >-
       The rates into the reporting currency: one row for each calendar day, each currency of the
-      accounts and each reporting currency, with the last rate that the source published on or
+      accounts and each reporting currency, with the last rate that the sources published on or
       before the day. rate_date, currency and reporting_currency are its key. Each deployment takes
-      the rates from the source itself, which rate_source names.
+      the rates from the sources itself, in the order that its setting AGORANOMOS_RATES_SOURCE
+      gives: rate_source names the source of the rate of the currency, and cross_source the source
+      of the second leg of a rate that goes through the base currency of another source.
     columns:
       - name: rate_date
         description: >-
@@ -923,27 +925,49 @@ models:
       - name: rate_into_reporting_currency
         description: >-
           The value of one unit of currency in reporting_currency on the day, through the base
-          currency of the source with no rounding: an amount in currency times this rate is the
-          amount in reporting_currency. The reporting currency has the rate 1.
+          currency of the first source of the rates with no rounding: an amount in currency times
+          this rate is the amount in reporting_currency. The rate of the reporting currency itself
+          is that of the same day, or of the last day before it on which one was published. The
+          reporting currency has the rate 1.
       - name: base_currency
         description: >-
-          The base currency of the source of the rate, against which it publishes its rates, such
-          as EUR for the reference rates of the euro; none where currency is the reporting
-          currency.
+          The base currency of the source of the rate, against which it publishes its rates, EUR for
+          the Bank of Italy, the European Central Bank and the demo, and KZT for the National Bank
+          of Kazakhstan; none where currency is the reporting currency.
       - name: base_rate
         description: >-
           The rate of currency against base_currency as the source published it, in the convention
-          of the source, such as the units of currency for one euro for the reference rates of the
-          euro; none where currency is the reporting currency.
+          of the source: the units of currency for one euro for the Bank of Italy, the European
+          Central Bank and the demo, and the tenge for one unit of currency for the National Bank of
+          Kazakhstan; none where currency is the reporting currency.
       - name: rate_source
         description: >-
-          The source of the rate, such as ecb for the European Central Bank or demo_fx for the
-          demo, or identity where currency is the reporting currency.
+          The source of the rate of currency: bank_of_italy for the Bank of Italy, whose rates it
+          calls indicative and no financial benchmark, nbk for the National Bank of Kazakhstan, ecb
+          for the European Central Bank or demo_fx for the demo, or identity where currency is the
+          reporting currency.
       - name: published_on
         description: >-
           The day of the publication of the rate, rate_date or an earlier day for a carried rate;
           none where currency is the reporting currency.
       - name: is_carried_forward
         description: >-
-          Whether the rate is the last one published before the day, on a day without a
-          publication, such as a weekend or a holiday.
+          Whether the rate is the last one published before the day, on a day without a publication,
+          such as a weekend or a holiday.
+      - name: cross_source
+        description: >-
+          The source of the second leg of a rate that goes through the base currency of its source,
+          the rate of base_currency against the base currency of the first source of the rates, such
+          as bank_of_italy for a rate of RUB of nbk through KZT into the euro; none for a rate
+          against the base currency of the first source.
+      - name: cross_rate
+        description: >-
+          The rate of the second leg as cross_source published it, in its convention, such as the
+          tenge for one euro of the Bank of Italy, or the tenge for one euro of the National Bank of
+          Kazakhstan; none for a rate against the base currency of the first source.
+      - name: cross_published_on
+        description: >-
+          The day of the publication of the second leg, the day of the publication of the rate or
+          the last day before it on which cross_source published one, as the National Bank of
+          Kazakhstan publishes on every calendar day and the Bank of Italy on the business days of
+          TARGET; none for a rate against the base currency of the first source.

@@ -1,33 +1,47 @@
-"""rates: what the loads of the sources of the rates share (ADR-0042): when a load takes the history
-of the rates again, as after a change of AGORANOMOS_REPORTING_CURRENCY.
+"""rates: what the loads of the sources of the rates share (ADR-0042): the order of the sources
+that the setting AGORANOMOS_RATES_SOURCE gives, and when a load takes the history of the rates
+again, as after a change of AGORANOMOS_REPORTING_CURRENCY.
+
+The setting names the first source of the rates, auto by default: the National Bank of Kazakhstan
+(nbk) for a reporting currency of KZT, the Bank of Italy (bank_of_italy) for another. After the
+first come the other bank, for a currency that the first lacks, and the European Central Bank
+(ecb); ecb alone keeps the reference rates of the ECB. The model of the rates takes them in this
+order (dbt/macros/rates.sql, rates_chain), and the demo only without a rate of any of them.
 
 core.fx_rates_daily keeps the rates of the currencies of the accounts and of the reporting currency
 only, and the raw layer keeps only the loads that the core has not accepted (ADR-0035, ADR-0046).
 For the days whose loads the core has accepted, a run of the transform takes the rates from the rows
 that the table holds, of any reporting currency (core_fx_rates_daily): a new reporting currency
 gets them if it is a currency of an account, or the reporting currency before beside a row of the
-euro, and else none, and its amounts of those days are empty. The view ops.ops_rates names the
-first such day and how many there are: from the first to the last day of the facts of the accounts
-of each currency but the reporting currency, the days on which the currency has no rate into the
-reporting currency. A load of a source of the rates reads it, and while it names a day, the load
-takes the history of the rates again, from a week before that day, or from the first day of
-core.fx_rates_daily when that is earlier, to its usual last day, with the kind history in its
-journal (ADR-0038). The next run of the transform pins it, reads every rate of those days, computes
-them in the reporting currency, and accepts and cleans it as any other load.
+euro, and else none, and its amounts of those days are empty. The view ops.ops_rates has a row for
+each source of the rates, which names the first day without a rate of the currencies of that
+source and how many there are: from the first to the last day of the facts of the accounts of each
+currency but the reporting currency, the days on which the currency has no rate into the reporting
+currency. The source of a currency is the first in the order that the core holds a rate of it
+from, and for a currency without one the first source of the order, or the demo while the core
+holds a rate of it and none of a source of the order, in any reporting currency: so after a change
+of the reporting currency the source of the deployment takes the history. A load of a source of the
+rates reads its row, and while it names a day, the load takes the history of the rates again,
+from a week before that day, or from the first day of core.fx_rates_daily when that is earlier, to
+its usual last day, with the kind history in its journal (ADR-0038). The next run of the transform
+pins it, reads every rate of those days, computes them in the reporting currency, and accepts and
+cleans it as any other load. A load of the history fills only the days and currencies that the
+core holds no rate of, so the rates that the core holds keep their source.
 
 The load takes no history:
+- for a source that the setting does not name, as with ecb alone, or for the demo once the core
+  holds a rate of a real source: the model reads none of its rates then, so its DAG, unpaused or
+  not, never takes its history again day after day;
 - while the view does not exist, lacks these columns, as before the first run of the transform of
   this release, or was built in another reporting currency than that of the task: the next run of
   the transform, or marts-init at ./agoranomos up, builds it in the reporting currency;
 - while a load of the history of the source waits for the core: whole, and not accepted, as its
   run of the transform has not ended or failed; that run computes its days, and a load of the
-  history after another would bring the same;
-- for a source other than the ECB once the core holds a rate of the ECB, as the model takes the
-  rates of the ECB alone then (rates_source of dbt/macros/rates.sql).
+  history after another would bring the same.
 
-So while a source lacks the rate of a currency on some of those days, each of its loads takes the
-history again, once a day, until the core holds them. A failure to read the core costs the history
-and not the load: the load takes its usual window, and the next one asks again.
+So while a source lacks the rate of one of its currencies on some of those days, each of its loads
+takes the history again, once a day, until the core holds them. A failure to read the core costs
+the history and not the load: the load takes its usual window, and the next one asks again.
 
 The view and core.fx_rates_daily are read as transformer, which writes the core and reads it, in a
 transaction that only reads, and the journal of the source and core.loads as loader, through the
@@ -45,35 +59,56 @@ from datetime import date, timedelta
 log = logging.getLogger(__name__)
 
 CURRENCY = "AGORANOMOS_REPORTING_CURRENCY"
-# The source whose rates the model takes once the core holds one of them (rates_source).
-PREFERRED = "ecb"
+SETTING = "AGORANOMOS_RATES_SOURCE"
+# The sources of the rates in their order, for each value of the setting, as rates_chain of
+# dbt/macros/rates.sql gives them; auto is nbk for a reporting currency of KZT, and else
+# bank_of_italy.
+CHAINS = {
+    "bank_of_italy": ("bank_of_italy", "nbk", "ecb"),
+    "nbk": ("nbk", "bank_of_italy", "ecb"),
+    "ecb": ("ecb",),
+}
+# The demo, which serves only a deployment without a rate of a source of the order.
+DEMO = "demo_fx"
 # How many days before the first day without a rate the history starts, so that its first day has
 # a rate published on or before it: the longest stretch without a publication of the ECB is four
 # days, from Good Friday to Easter Monday.
 LEAD_DAYS = 7
-# What the load reads of the core, as transformer: the row of the view, and the first day of the
-# table with whether it holds a rate of the preferred source. rate_source has no index, and the
-# scan of EXISTS ends at its first match.
+# What the load reads of the core, as transformer: the rows of the view, one for each source, and
+# the first day of the table.
 VIEW = (
-    "SELECT reporting_currency::text, first_day_without_rate, days_without_rate FROM ops.ops_rates"
+    "SELECT reporting_currency::text, rate_source, first_day_without_rate_of_source, "
+    "days_without_rate_of_source FROM ops.ops_rates"
 )
-TABLE = (
-    "SELECT min(rate_date), EXISTS (SELECT FROM core.fx_rates_daily WHERE rate_source = %s) "
-    "FROM core.fx_rates_daily"
-)
+TABLE = "SELECT min(rate_date) FROM core.fx_rates_daily"
 
 
 @dataclass(frozen=True)
 class CoreRates:
-    """What the core says of its rates: the reporting currency of ops.ops_rates, the first day
-    without a rate that it names, if any, and how many such days there are; the first day of
-    core.fx_rates_daily, if it holds a row; and whether it holds a rate of the preferred source."""
+    """What the core says of the rates of a source: the reporting currency of ops.ops_rates, the
+    first day without a rate of the currencies of the source that it names, if any, and how many
+    such days there are; and the first day of core.fx_rates_daily, if it holds a row."""
 
     view_currency: str
     first_without: date | None
     days_without: int
     first_day: date | None
-    holds_preferred: bool
+
+
+def chain(environ: Mapping[str, str] = os.environ) -> tuple[str, ...]:
+    """The sources of the rates in their order, as the setting gives them; ValueError for a value
+    that is none of auto, bank_of_italy, nbk and ecb, which ./agoranomos refuses before a start."""
+    setting = environ.get(SETTING) or "auto"
+    if setting == "auto":
+        setting = "nbk" if (environ.get(CURRENCY) or "USD") == "KZT" else "bank_of_italy"
+    if setting not in CHAINS:
+        raise ValueError(f"{SETTING} must be auto, bank_of_italy, nbk or ecb, not {setting!r}")
+    return CHAINS[setting]
+
+
+def preferred(environ: Mapping[str, str] = os.environ) -> str:
+    """The first source of the rates of the setting, whose rates the model takes first."""
+    return chain(environ)[0]
 
 
 def transformer_password() -> str:
@@ -81,9 +116,10 @@ def transformer_password() -> str:
     return os.environ["DBT_ENV_SECRET_WAREHOUSE_PASSWORD"]
 
 
-def read_core() -> CoreRates | None:
-    """What the core says of its rates, as transformer, or None while ops.ops_rates does not exist
-    or lacks the columns of the days without a rate."""
+def read_core(code: str) -> CoreRates | None:
+    """What the core says of the rates of the source code, as transformer, or None while
+    ops.ops_rates does not exist, lacks the columns of the days without a rate of a source, or has
+    no row. A view without a row of the source names no day of it."""
     # Imported here and not at the top: the DAG processor parses the files of the DAGs often.
     from psycopg2 import errors
 
@@ -96,15 +132,17 @@ def read_core() -> CoreRates | None:
                 cursor.execute(VIEW)
             except (errors.UndefinedTable, errors.UndefinedColumn):
                 return None
-            row = cursor.fetchone()
-            if row is None:
+            rows = cursor.fetchall()
+            if not rows:
                 return None
-            view_currency, first_without, days_without = row
-            cursor.execute(TABLE, (PREFERRED,))
-            first_day, holds_preferred = cursor.fetchone()
-    return CoreRates(
-        view_currency.strip(), first_without, int(days_without or 0), first_day, holds_preferred
-    )
+            view_currency = rows[0][0]
+            first_without, days_without = None, 0
+            for _, source, first, days in rows:
+                if source == code:
+                    first_without, days_without = first, int(days or 0)
+            cursor.execute(TABLE)
+            (first_day,) = cursor.fetchone()
+    return CoreRates(view_currency.strip(), first_without, days_without, first_day)
 
 
 def waiting_sql(code: str, journal: str | None, loads: str | None) -> str:
@@ -158,14 +196,29 @@ def history_from(
     code: str,
     *,
     environ: Mapping[str, str] = os.environ,
-    read: Callable[[], CoreRates | None] | None = None,
+    read: Callable[[str], CoreRates | None] | None = None,
 ) -> date | None:
     """The first day of a load of the history of the rates of the source code, whose dlt pipeline
     is pipeline, or None when the core needs none (the docstring of the module). read gives what
-    the core says, read_core by default."""
+    the core says of a source, read_core by default."""
     currency = environ.get(CURRENCY) or "USD"
     try:
-        core = (read or read_core)()
+        order = chain(environ)
+    except ValueError as error:
+        log.warning("%s: the load takes its usual window", error)
+        return None
+    if code not in order and code != DEMO:
+        log.info(
+            "%s=%s takes the rates from %s, not from %s: the load takes its usual window and no "
+            "history",
+            SETTING,
+            environ.get(SETTING) or "auto",
+            ", ".join(order),
+            code,
+        )
+        return None
+    try:
+        core = (read or read_core)(code)
     except Exception as error:  # any failure to read the core costs the history, not the load
         log.warning(
             "Could not read the rates of the core as transformer (%s): the load takes its usual "
@@ -188,14 +241,6 @@ def history_from(
         )
         return None
     if core.first_without is None:
-        return None
-    if code != PREFERRED and core.holds_preferred:
-        log.info(
-            "The core lacks rates into %s, and takes them from %s, not from %s",
-            currency,
-            PREFERRED,
-            code,
-        )
         return None
     try:
         pending = waiting(pipeline, code)
