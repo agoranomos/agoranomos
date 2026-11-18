@@ -23,6 +23,22 @@ SET pg_stat_statements.track_utility = off;
 -- Run again, this file would print a notice for every object that exists already.
 SET client_min_messages = warning;
 
+-- A start can come while a run of the transform writes, and a GRANT or a REVOKE below on all the
+-- tables of a schema fails with "tuple concurrently updated" when a node of the run renames,
+-- replaces or drops one of them at the same moment. Each node that writes holds the advisory lock
+-- of dbt/macros/marts_init.sql, shared, in the transaction in which it writes, so this session
+-- takes it, exclusive, as marts-init does, and keeps it until the file ends: it waits for the nodes
+-- that write now, at most 11 minutes, and says so, and the nodes that come after it wait for it.
+-- The key is that of marts_init_lock().
+SELECT pg_try_advisory_lock(1634168690) AS locked \gset
+\if :locked
+\else
+\echo 'db-init: waiting for the run of the transform that writes now'
+SET lock_timeout = '11min';
+SELECT pg_advisory_lock(1634168690) AS locked \gset
+RESET lock_timeout;
+\endif
+
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 -- The extension gives PUBLIC its views and the functions behind them, which show the calls and the
 -- timings of every statement. Only the superuser reads them, as the Ops collection is to do.

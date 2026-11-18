@@ -1,9 +1,9 @@
 """Stack tests of the one-shot job marts-init (metabase/marts_init.py, ADR-0039, ADR-0044): every
 start loads the seeds and builds the views of marts again from them, before metabase-init, as
-transformer; a view keeps its grants and its comment; the job waits for a node of the transform
-that writes, through the lock of dbt/macros/marts_init.sql; and it drops the relations of earlier
-releases that no model builds or reads, but one that a view needs. They need no demo: the views
-exist over an empty core too."""
+transformer; a view keeps its grants and its comment; the job, and db-init before it, wait for a
+node of the transform that writes, through the lock of dbt/macros/marts_init.sql; and it drops the
+relations of earlier releases that no model builds or reads, but one that a view needs. They need
+no demo: the views exist over an empty core too."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import subprocess
 import time
 
 import marts_init
+import pytest
 from stack_helpers import (
     REPO_ROOT,
     compose,
@@ -98,10 +99,18 @@ def test_a_start_loads_the_seeds_before_it_builds_the_views(env):
     assert shown_platforms(env, columns) == rows
 
 
-def test_marts_init_waits_for_a_node_of_the_transform_that_writes(env):
+@pytest.mark.parametrize(
+    ("job", "done"),
+    [
+        ("marts-init", "marts-init: done"),
+        ("db-init", "db-init: the platform and warehouse instances are up to date"),
+    ],
+)
+def test_the_job_waits_for_a_node_of_the_transform_that_writes(env, job, done):
     # A node of a run of the transform holds the lock, shared, in the transaction in which it
-    # writes; a stand-in holds it for HOLD seconds. marts-init asks for it, exclusive, waits, and
-    # builds once the node is done.
+    # writes; a stand-in holds it for HOLD seconds. The job asks for it, exclusive, waits, and goes
+    # on once the node is done: marts-init builds the views, and db-init gives its grants on all the
+    # tables of a schema, which fail when a node renames one of them at the same moment.
     holder = subprocess.Popen(
         [
             "docker",
@@ -128,29 +137,29 @@ def test_marts_init_waits_for_a_node_of_the_transform_that_writes(env):
         stderr=subprocess.DEVNULL,
         env={**os.environ, "PGPASSWORD": env["WAREHOUSE_POSTGRES_PASSWORD"]},
     )
-    job = None
+    process = None
     try:
         wait_for(lambda: locks(env) == (1, 0), 30, 0.5, "the stand-in did not take the lock")
         started = time.monotonic()
-        job = subprocess.Popen(
-            ["docker", "compose", "run", "--rm", "--no-deps", "-T", "marts-init"],
+        process = subprocess.Popen(
+            ["docker", "compose", "run", "--rm", "--no-deps", "-T", job],
             cwd=REPO_ROOT,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
         )
-        wait_for(lambda: locks(env) == (1, 1), 60, 0.5, "marts-init did not wait for the lock")
+        wait_for(lambda: locks(env) == (1, 1), 60, 0.5, f"{job} did not wait for the lock")
         assert holder.wait(timeout=HOLD + 30) == 0
-        output, _ = job.communicate(timeout=600)
+        output, _ = process.communicate(timeout=600)
         waited = time.monotonic() - started
     finally:
-        for process in (holder, job):
-            if process is not None and process.poll() is None:
-                process.kill()
-                process.wait()
-    assert job.returncode == 0, f"marts-init exited with {job.returncode}"
-    assert "marts-init: waiting for the run of the transform that writes now" in output
-    assert "marts-init: done" in output
+        for running in (holder, process):
+            if running is not None and running.poll() is None:
+                running.kill()
+                running.wait()
+    assert process.returncode == 0, f"{job} exited with {process.returncode}"
+    assert f"{job}: waiting for the run of the transform that writes now" in output
+    assert done in output
     assert waited >= HOLD / 2
     assert locks(env) == (0, 0)
 
