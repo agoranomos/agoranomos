@@ -75,9 +75,12 @@ class StandInClient:
     def execute_sql(self, sql):
         self.pipeline.queries.append(sql)
         # The queries of the plan of the history: the windows of core.loads and of the journal,
-        # and the whole loads that no pin took yet.
+        # the newest loads of each kind and outcome in core.loads, and the whole loads that no pin
+        # took yet.
         if sql.startswith("SELECT account_id, window_from, window_to FROM core.loads "):
             return self.pipeline.state["core_windows"]
+        if sql.startswith("SELECT account_id, kind, outcome, max(finished_at) FROM core.loads "):
+            return self.pipeline.state.get("attempts", [])
         if sql.startswith("SELECT count(DISTINCT j._dlt_load_id) "):
             return [(self.pipeline.state["waiting"],)]
         if sql.startswith("SELECT j.account_id, j.window_from, j.window_to "):
@@ -369,7 +372,11 @@ def ads(monkeypatch, tmp_path):
     extensions = tmp_path / "model"
     extensions.mkdir()
     (extensions / "clients.toml").write_text(CLIENTS, encoding="utf-8")
-    names = ("agoranomos_pipelines.google_ads", "agoranomos_pipelines.loads")
+    names = (
+        "agoranomos_pipelines.google_ads",
+        "agoranomos_pipelines.history",
+        "agoranomos_pipelines.loads",
+    )
     for name in names:
         sys.modules.pop(name, None)
     module = importlib.import_module("agoranomos_pipelines.google_ads")

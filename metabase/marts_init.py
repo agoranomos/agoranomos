@@ -9,26 +9,37 @@ of the core, and metabase-init waits for it, so that Metabase finds the views of
 runs dbt of the Airflow image as transformer, as nobody, with the dbt project read-only, on the
 network data alone, and writes nothing but the target and the logs of dbt, on a tmpfs.
 
-What it builds, with the var rebuild_views:
+What it builds, with the var rebuild_views, always the seeds of the base package first: a view of
+marts carries the rows of the seed of the platforms in its text (dbt/macros/platforms.sql), so a
+view built from the seed table as the release before left it would lack the platforms that this
+release adds, and a mart that joins them would lose their accounts until a second start. Loading a
+seed truncates its table and fills it again; nothing reads the seed tables at query time but the
+nodes of a run of the transform, which wait for the lock below, as the views of marts carry the
+rows, and metabase_reader and ai_reader may not read staging.
 
 * Where the snapshots that the views read exist, the versions of the campaigns of the core that
-  ad_campaign_names reads, the views of marts alone, dbt run --select marts: they read the core,
-  which no run drops. Their tests run in the next run of the transform, the gate G1 (ADR-0039), as
-  data to fix is no reason to keep the stack from starting.
-* Where they do not, as in a new warehouse or one of v0.4, dbt build --select +marts: the seeds,
-  the views of staging, the models of the core and the snapshots that the views read, in the order
-  of the graph and with their tests (#187), over the loads that the transform has pinned, none in a
-  new warehouse, the settings of the deployment and the sources that no load has written yet
-  through empty queries (dbt/macros/relation_or_empty.sql). dbt snapshot alone would fail on a
-  warehouse without the views of staging, and the views of marts without the snapshots.
+  ad_campaign_names reads, the seeds and the views of marts alone, in one dbt build with
+  --exclude-resource-type test unit_test, which dbt 1.12 has for build (docs.getdbt.com, "Resource
+  type", as of November 2026): dbt loads each seed before the views that read it, in the order of
+  the graph, and a seed that fails fails the job. The views read the core, which no run drops.
+  Their tests and those of the seeds run in the next run of the transform, the gate G1 (ADR-0039),
+  as data to fix is no reason to keep the stack from starting.
+* Where they do not, as in a new warehouse or one of v0.4, dbt build --select +marts with the
+  seeds: the views of staging, the models of the core and the snapshots that the views read, in
+  the order of the graph and with their tests (#187), over the loads that the transform has
+  pinned, none in a new warehouse, the settings of the deployment and the sources that no load has
+  written yet through empty queries (dbt/macros/relation_or_empty.sql). dbt snapshot alone would
+  fail on a warehouse without the views of staging, and the views of marts without the snapshots.
 * Where core.fx_rates_daily holds rates and none in the reporting currency of .env, as after a
   change of AGORANOMOS_REPORTING_CURRENCY, also core_fx_rates_daily, with the var recompute_rates,
   which computes every day of the rates in the new currency from what the core holds (ADR-0042),
   and the view ops.ops_rates: the views take the new currency as they are built again. The job
   then reads ops.ops_rates, and when the core cannot give the rates of some days in the new
   currency, as the raw layer has lost the loads of the rates that the core accepted, it says so in
-  a line of warning, which ./agoranomos up shows: the next load of the rates takes their history
-  again (agoranomos_pipelines/rates.py).
+  a line of warning, which ./agoranomos up shows: the next load of the rates of their source takes
+  their history again (agoranomos_pipelines/rates.py). The order of the sources of the rates,
+  AGORANOMOS_RATES_SOURCE, reaches dbt here too, so the rates of the new currency come from the
+  same sources as in the runs of the transform.
 
 Once dbt has ended well, the job drops the relations of earlier releases in LEFTOVERS that the
 warehouse holds, each by its name and its kind, and names each in its log: no model of this
@@ -73,6 +84,11 @@ WAIT_FOR_LOCK = "SET lock_timeout = '11min'"
 # The snapshots of the versions of the core (dbt/snapshots) that the views of marts read, and
 # that a build of +marts builds: the other snapshots wait for the transform.
 SNAPSHOTS = ("dim_campaign_versions",)
+# The seeds of the base package, those of the dbt project agoranomos and of no package that it
+# installs: an intersection of two methods of selection of dbt.
+SEEDS = "package:agoranomos,resource_type:seed"
+# What a build of the views leaves to the next run of the transform where the snapshots exist.
+TESTS = ("test", "unit_test")
 RATES = "core_fx_rates_daily"
 # The view of Ops of the rates, which names the days without a rate in the reporting currency.
 OPS_RATES = "ops_rates"
@@ -128,18 +144,20 @@ class State:
 
 
 def command(state: State, dbt: str = DBT, project: str = PROJECT, work: str = WORK) -> list[str]:
-    """The call of dbt for the state of the warehouse."""
-    selected = ["marts"] if state.snapshots else ["+marts"]
+    """The call of dbt for the state of the warehouse: one build, the seeds of the base package
+    first, and without tests where the snapshots exist."""
+    selected = [SEEDS, "marts" if state.snapshots else "+marts"]
     variables: dict[str, bool] = {"rebuild_views": True}
     if state.other_currency:
         variables["recompute_rates"] = True
         if state.snapshots:
             selected.append(RATES)
         selected.append(OPS_RATES)
+    excluded = ["--exclude-resource-type", *TESTS] if state.snapshots else []
     return [
         dbt,
         "--no-use-colors",
-        "run" if state.snapshots else "build",
+        "build",
         "--project-dir",
         project,
         "--profiles-dir",
@@ -150,6 +168,7 @@ def command(state: State, dbt: str = DBT, project: str = PROJECT, work: str = WO
         f"{work}/logs",
         "--select",
         *selected,
+        *excluded,
         "--vars",
         json.dumps(variables),
     ]
@@ -158,7 +177,7 @@ def command(state: State, dbt: str = DBT, project: str = PROJECT, work: str = WO
 def described(state: State, currency: str) -> str:
     """The line that says what the job builds, and why."""
     if state.snapshots:
-        line = "building the views of marts again"
+        line = "building the views of marts again from the seeds of the base package"
     else:
         line = (
             "the snapshots that the views of marts read do not exist yet: building the views "
@@ -181,9 +200,10 @@ def gaps_line(connection: Any, currency: str) -> str | None:
     return (
         f"warning: the core holds no rate into {currency} on {days} days from {first} on, of the "
         "currencies of the accounts, as their loads of the rates are accepted and have left the "
-        "raw layer: the next load of the rates takes their history again, agoranomos_ecb_daily "
-        "or with the demo alone agoranomos_demo_daily, and until the transform reads it, the "
-        f"amounts of those days in {currency} are empty (ADR-0042)"
+        "raw layer: the next load of the rates of their source takes their history again, "
+        "agoranomos_bank_of_italy_daily, agoranomos_nbk_daily or agoranomos_ecb_daily, or with "
+        "the demo alone agoranomos_demo_daily, and until the transform reads it, the amounts of "
+        f"those days in {currency} are empty (ADR-0042)"
     )
 
 

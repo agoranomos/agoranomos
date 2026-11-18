@@ -1224,7 +1224,7 @@ def test_the_check_of_the_memory_limits_names_each_setting_and_no_value(cli):
     # Every *_MEMORY setting of .env, also one that .env.example does not have, on one line each.
     cli.run("init")
     names = [key for key in cli.read_env() if key.endswith("_MEMORY")]
-    assert len(names) == 12
+    assert len(names) == 13
     values = {name: f"4242{index}" for index, name in enumerate(names)}
     set_env(cli, **values)
     with cli.env_path.open("a", encoding="utf-8") as env:
@@ -4572,27 +4572,99 @@ def test_preflight_accepts_a_folder_that_compose_reads_as_a_path(cli, setting, v
 
 
 @pytest.mark.parametrize(
-    ("value", "outcome"),
+    ("value", "source", "outcome"),
     [
-        ("USD", "pass"),
-        ("EUR", "pass"),
-        ("GBP", "pass"),
-        ("ZAR", "pass"),
-        ("KZT", "stop"),
-        ("BGN", "stop"),
-        ("usd", "stop"),
-        ("", "pass"),
+        ("USD", "", "pass"),
+        ("EUR", "auto", "pass"),
+        ("GBP", "auto", "pass"),
+        ("ZAR", "auto", "pass"),
+        # ADR-0042: the sources of auto, bank_of_italy and nbk are both banks, so the tenge, RUB of
+        # the NBK and ARS of the Bank of Italy too, whatever comes first.
+        ("KZT", "auto", "pass"),
+        ("KZT", "bank_of_italy", "pass"),
+        ("RUB", "auto", "pass"),
+        ("ARS", "nbk", "pass"),
+        # The ECB alone publishes no rate of the tenge.
+        ("KZT", "ecb", "stop"),
+        ("USD", "ecb", "pass"),
+        # Neither bank has a rate of the lev, which the euro replaced in 2026, nor of a code that
+        # is not one of ISO 4217.
+        ("BGN", "auto", "stop"),
+        ("JOB", "auto", "stop"),
+        ("usd", "auto", "stop"),
+        ("U*D", "auto", "stop"),
+        ("", "", "pass"),
     ],
 )
-def test_preflight_stops_on_a_reporting_currency_without_rates(cli, value, outcome):
-    # ADR-0032: EUR or a currency of the reference rates of the ECB, which publishes no rate of the
-    # tenge, and none of the lev since 2026. Empty is the default, USD.
+def test_preflight_stops_on_a_reporting_currency_without_rates(cli, value, source, outcome):
+    # ADR-0042: a currency that the sources of AGORANOMOS_RATES_SOURCE give. Empty is the default,
+    # USD with auto.
     cli.run("init")
-    set_env(cli, AGORANOMOS_REPORTING_CURRENCY=value)
+    set_env(cli, AGORANOMOS_REPORTING_CURRENCY=value, AGORANOMOS_RATES_SOURCE=source)
     result = cli.run("preflight")
     check_limit(result, outcome, "AGORANOMOS_REPORTING_CURRENCY")
-    if outcome == "stop":
+    if outcome == "stop" and source == "ecb":
         assert "EUR or a currency of the reference rates of the ECB" in result.stderr
+    elif outcome == "stop":
+        assert "a currency of the Bank of Italy or of the National Bank of Kazakhstan" in (
+            result.stderr
+        )
+
+
+@pytest.mark.parametrize(
+    ("value", "outcome"),
+    [
+        ("auto", "pass"),
+        ("bank_of_italy", "pass"),
+        ("nbk", "pass"),
+        ("ecb", "pass"),
+        ("", "pass"),
+        ("boi", "stop"),
+        ("ECB", "stop"),
+    ],
+)
+def test_preflight_stops_on_another_source_of_the_rates(cli, value, outcome):
+    # ADR-0042: the four values of the setting, which dbt and the loads of the rates read; empty is
+    # the default, auto.
+    cli.run("init")
+    set_env(cli, AGORANOMOS_RATES_SOURCE=value)
+    result = cli.run("preflight")
+    check_limit(result, outcome, "AGORANOMOS_RATES_SOURCE")
+    if outcome == "stop":
+        assert "AGORANOMOS_RATES_SOURCE in .env must be auto, bank_of_italy, nbk or ecb" in (
+            result.stderr
+        )
+        # One problem, not a second one of the reporting currency.
+        assert "AGORANOMOS_REPORTING_CURRENCY in .env" not in result.stderr
+
+
+def test_the_currencies_of_the_banks_are_codes_of_iso_4217_of_their_answers():
+    # The list of ./agoranomos, as of 12 November 2026: the currencies with a rate in the answers
+    # of that day of the Bank of Italy and of the NBK, which the unit tests of their loads read,
+    # that are codes of ISO 4217, and their bases; the ECB's are among them.
+    import csv
+    import json
+    import re
+    from xml.etree import ElementTree
+
+    script = (REPO_ROOT / "agoranomos").read_text(encoding="utf-8")
+    listed = {
+        name: set(re.search(rf'^{name}="([^"]*)"$', script, flags=re.M).group(1).split())
+        for name in ("BANK_CURRENCIES", "ECB_CURRENCIES")
+    }
+    fixtures = REPO_ROOT / "tests" / "unit" / "fixtures"
+    answer = json.loads((fixtures / "bank_of_italy" / "daily_rates_2026-11-12.json").read_text())
+    italy = {item["isoCode"] for item in answer["rates"] if item["avgRate"] != "N.A."}
+    # A recorded feed of the NBK, which declares no document type (nbk.py).
+    feed = ElementTree.parse(fixtures / "nbk" / "2026-11-12.xml").getroot()  # noqa: S314
+    kazakhstan = {item.findtext("title") for item in feed.iter("item")}
+    seed = REPO_ROOT / "dbt" / "seeds" / "seed_iso_4217_currencies.csv"
+    with seed.open(encoding="utf-8") as rows:
+        iso = {row["currency_code"] for row in csv.DictReader(rows)}
+    assert listed["BANK_CURRENCIES"] == (italy | kazakhstan | {"EUR", "KZT"}) & iso
+    assert {"RUB", "BYN", "KZT", "ARS", "VND"} <= listed["BANK_CURRENCIES"]
+    assert listed["ECB_CURRENCIES"] < listed["BANK_CURRENCIES"]
+    assert len(listed["ECB_CURRENCIES"]) == 30
 
 
 @pytest.mark.parametrize(
@@ -4629,6 +4701,69 @@ def test_preflight_stops_on_a_manager_account_of_google_ads_that_is_not_ten_digi
     add_env(cli, GOOGLE_ADS_LOGIN_CUSTOMER_ID=value)
     result = cli.run("preflight")
     check_limit(result, outcome, "GOOGLE_ADS_LOGIN_CUSTOMER_ID")
+
+
+# Stand-ins of a token and of an App Secret of Meta, made up here: real ones would be secrets.
+META_TOKEN = "StandInTokenOfMeta0123456789secret"
+META_SECRET = "app-secret-app-secret-app-secret"
+
+
+@pytest.mark.parametrize(
+    ("values", "outcome", "word"),
+    [
+        ({"META_ADS_ACCESS_TOKEN": META_TOKEN}, "pass", "META_ADS"),
+        (
+            {
+                "META_ADS_ACCESS_TOKEN": META_TOKEN,
+                "META_ADS_APP_ID": "123456789012345",
+                "META_ADS_APP_SECRET": META_SECRET,
+            },
+            "pass",
+            "META_ADS",
+        ),
+        (
+            {"META_ADS_ACCESS_TOKEN": f"'{META_TOKEN} with a space'"},
+            "stop",
+            "META_ADS_ACCESS_TOKEN",
+        ),
+        ({"META_ADS_ACCESS_TOKEN": f"<{META_TOKEN}>"}, "stop", "META_ADS_ACCESS_TOKEN"),
+        (
+            {"META_ADS_ACCESS_TOKEN": META_TOKEN, "META_ADS_APP_ID": "123456789012345"},
+            "stop",
+            "go together",
+        ),
+        (
+            {"META_ADS_ACCESS_TOKEN": META_TOKEN, "META_ADS_APP_SECRET": META_SECRET},
+            "stop",
+            "go together",
+        ),
+        (
+            {
+                "META_ADS_ACCESS_TOKEN": META_TOKEN,
+                "META_ADS_APP_ID": "app-1",
+                "META_ADS_APP_SECRET": META_SECRET,
+            },
+            "stop",
+            "META_ADS_APP_ID in .env must be the digits",
+        ),
+        (
+            {"META_ADS_APP_ID": "123456789012345", "META_ADS_APP_SECRET": META_SECRET},
+            "stop",
+            "need META_ADS_ACCESS_TOKEN",
+        ),
+    ],
+)
+def test_preflight_checks_the_form_of_the_settings_of_meta_and_never_prints_them(
+    cli, values, outcome, word
+):
+    # ADR-0050: the script checks the form of the token and of the App Secret, never their value,
+    # and no message shows either. The template keeps them commented out, so a person adds them.
+    cli.run("init")
+    add_env(cli, **values)
+    result = cli.run("preflight")
+    check_limit(result, outcome, word)
+    for secret in (META_TOKEN, META_SECRET):
+        assert secret not in result.stdout + result.stderr
 
 
 def test_preflight_stops_on_keep_daily_of_zeros(cli):
@@ -5727,8 +5862,9 @@ GAPS_ROW = "built\n{source}\x1fGBP\x1f{day}\x1f{age}\x1f{late}\x1f{first}\x1f{da
 GAPS_WARNING = (
     "the core holds no rate into GBP on {days} of the facts from 2025-05-14 on, as after a change "
     "of AGORANOMOS_REPORTING_CURRENCY, so the amounts of those days in GBP are empty. The next "
-    "load of the rates takes their history again: trigger agoranomos_ecb_daily, or with the demo "
-    "alone agoranomos_demo_daily, in Airflow to take it now (ADR-0042)"
+    "load of the rates of their source takes their history again: trigger "
+    "agoranomos_bank_of_italy_daily, agoranomos_nbk_daily or agoranomos_ecb_daily, or with the "
+    "demo alone agoranomos_demo_daily, in Airflow to take it now (ADR-0042)"
 )
 
 
@@ -5836,6 +5972,64 @@ def test_status_reads_the_days_without_a_rate_only_from_a_view_that_has_them():
     [with_gaps, without] = sql.split("\\else\n")
     assert "first_day_without_rate, days_without_rate" in with_gaps
     assert "days_without_rate" not in without
+
+
+def test_status_says_how_old_the_last_rate_of_each_source_is(cli, tmp_path):
+    # ADR-0042: a row for each source of the order whose rates the core holds, with the DAG of
+    # each that is late; the first source before its first rate, as on a deployment of v0.5 before
+    # the first load of the Bank of Italy; the days without a rate once.
+    cli.run("init")
+    rows = "\n".join(
+        [
+            "built",
+            "bank_of_italy\x1fUSD\x1f2026-11-02\x1f6\x1ft\x1f2025-05-14\x1f2",
+            "ecb\x1fUSD\x1f2026-11-09\x1f1\x1ff\x1f2025-05-14\x1f2",
+            "nbk\x1fUSD\x1f2026-11-02\x1f5\x1ft\x1f2025-05-14\x1f2",
+        ]
+    )
+    result = cli.run("status", FAKE_PS_FILE=ps_file(tmp_path, STATUS_TABLE), FAKE_RATES_OUTPUT=rows)
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    first = lines.index(
+        "Rates: the last rate of bank_of_italy into USD is of 2026-11-02, 6 business days ago "
+        "(ADR-0042)."
+    )
+    assert lines[first + 1 : first + 3] == [
+        "Rates: the last rate of ecb into USD is of 2026-11-09, 1 business day ago (ADR-0042).",
+        "Rates: the last rate of nbk into USD is of 2026-11-02, 5 business days ago (ADR-0042).",
+    ]
+    assert lines[first + 3].startswith("Backups:")
+    assert "The runs of agoranomos_bank_of_italy_daily in Airflow say why" in result.stderr
+    assert "The runs of agoranomos_nbk_daily in Airflow say why" in result.stderr
+    assert "agoranomos_ecb_daily in Airflow say why" not in result.stderr
+    assert result.stderr.count("the core holds no rate into USD on 2 days") == 1
+    rows = "\n".join(
+        [
+            "built",
+            "bank_of_italy\x1fUSD\x1f\x1f\x1f\x1f\x1f0",
+            "ecb\x1fUSD\x1f2026-11-09\x1f1\x1ff\x1f\x1f0",
+        ]
+    )
+    result = cli.run("status", FAKE_PS_FILE=ps_file(tmp_path, STATUS_TABLE), FAKE_RATES_OUTPUT=rows)
+    assert (
+        "Rates: the core holds no rate of bank_of_italy into USD yet, the first source of "
+        "AGORANOMOS_RATES_SOURCE: unpause agoranomos_bank_of_italy_daily in Airflow (ADR-0042)."
+    ) in result.stdout.splitlines()
+    assert result.stderr == ""
+
+
+def test_status_says_that_the_demo_has_no_rate_into_a_new_reporting_currency(cli, tmp_path):
+    # ops.ops_rates gives the days without a rate to the demo on the demo stack after a change of
+    # the reporting currency, which its next load takes again; the demo is no source of the order.
+    cli.run("init")
+    rows = "built\ndemo_fx\x1fGBP\x1f\x1f\x1f\x1f2025-05-14\x1f2"
+    result = cli.run("status", FAKE_PS_FILE=ps_file(tmp_path, STATUS_TABLE), FAKE_RATES_OUTPUT=rows)
+    assert result.returncode == 0, result.stderr
+    assert "Rates: the core holds no rate of demo_fx into GBP yet (ADR-0042)." in (
+        result.stdout.splitlines()
+    )
+    assert "AGORANOMOS_RATES_SOURCE" not in result.stdout
+    assert result.stderr.count("the core holds no rate into GBP on 2 days") == 1
 
 
 def test_status_names_the_dag_of_the_rates_of_the_demo_when_they_are_late(cli, tmp_path):

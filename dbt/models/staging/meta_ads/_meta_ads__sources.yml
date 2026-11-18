@@ -1,0 +1,119 @@
+sources:
+  - name: raw_meta_ads
+    description: >-
+      The Meta ad accounts of the deployment that extensions/model/clients.toml names, which the DAG
+      agoranomos_meta_ads_daily loads with dlt from the Marketing API (ADR-0050), each answer as the
+      API gives it, in the shape of demo_social: nested objects joined by __, and the lists of a row
+      in child tables of their own. Every field is text, as the API writes numbers and money as
+      strings, and the dates are dates. The DAG starts paused, so a deployment without Meta has no
+      table here, and the models that read these tables then read none.
+    schema: raw_meta_ads
+    # No freshness check of dbt: the Ops collection shows the last load of each account, from
+    # _agoranomos_loads (models/ops/ops_loads.sql).
+    config:
+      freshness: null
+    tables:
+      - name: _agoranomos_loads
+        description: >-
+          The journal of the loads of Meta: one row for each account in each load, written in the
+          same run as the rows of the load, so under its _dlt_load_id. An account that the load took
+          has the status loaded, the day of the load in the time zone of the account (as_of), the
+          first and last day of the window that the load took (window_from, window_to), the moment
+          of the load (loaded_at) and the kind of the load, window or history. An account whose
+          requests to the API failed has the status failed, the text of the error, the moment of the
+          attempt (now), and no day and no loaded_at, as nothing was loaded. The staging models
+          read, for each account and day, the rows of the newest pinned load whose window covers
+          the day.
+      - name: _dlt_loads
+        description: >-
+          The loads of dlt into raw_meta_ads, one row each: a load is whole once it has its row
+          here, with status 0, which dlt writes after the last table of the load. The pin of each
+          run of the transform takes whole loads only.
+      - name: ad_accounts
+        description: >-
+          Each ad account as GET act_<id> gives it: its ID with and without the prefix act_, its
+          name, currency, time zone, status and business. Each load appends the row of each account
+          that it read under its own _dlt_load_id, and staging reads the row of the newest pinned
+          load of each account, so an account whose load failed keeps the row of the load before.
+      - name: campaigns
+        description: >-
+          The campaigns of each account, with status, configured_status and effective_status, from
+          the edge campaigns filtered on every value of effective_status, so that the archived and
+          the deleted ones come too, as far as the API returns them. Each load appends the full
+          list of each account under its own _dlt_load_id, and staging reads the list of the newest
+          pinned load of each account.
+      - name: adsets
+        description: >-
+          The ad sets of each account, its ad groups, with status, configured_status,
+          effective_status and optimization goal, from the edge adsets filtered on every value of
+          effective_status. Each load appends the full list of each account under its own
+          _dlt_load_id, and staging reads the list of the newest pinned load of each account.
+      - name: ads
+        description: >-
+          The ads of each account, with status, configured_status and effective_status, from the
+          edge ads filtered on every value of effective_status. Each load appends the full list of
+          each account under its own _dlt_load_id, and staging reads the list of the newest pinned
+          load of each account.
+      - name: insights_account
+        description: >-
+          The totals of each account by day, from the insights at the level of the account, which
+          include the statistics of every campaign, ad set and ad of the account, active, archived
+          or deleted: impressions, link clicks and spend, as strings. The transform checks the
+          statistics of the campaigns against them (G0a). Each load appends its rows under its own
+          _dlt_load_id, and staging reads, for each account and day, those of the newest pinned
+          load whose window covers the day.
+      - name: insights_campaign
+        description: >-
+          The insights of each account at the level of campaigns, one row for each campaign and day
+          with any metric, in the currency and the time zone of the account, filtered on every value
+          of campaign.effective_status, with the attribution setting of the row. Each load appends
+          its rows under its own _dlt_load_id, and staging reads, for each account and day, those of
+          the newest pinned load whose window covers the day, with their actions.
+      - name: insights_campaign__actions
+        description: >-
+          The actions of each row of insights_campaign, one row each, with the count of the
+          attribution setting of the row in value and the windows 1d_click, 7d_click and 1d_view in
+          _1d_click, _7d_click and _1d_view where Meta gives them; its _dlt_parent_id is the _dlt_id
+          of its row.
+      - name: insights_campaign__action_values
+        description: >-
+          The values of the actions of each row of insights_campaign, one row each, in the currency
+          of the account, with the value of the attribution setting of the row in value and the
+          windows in _1d_click, _7d_click and _1d_view where Meta gives them; its _dlt_parent_id is
+          the _dlt_id of its row.
+      - name: insights_adset
+        description: >-
+          The insights of each account at the level of ad sets, one row for each ad set and day
+          with any metric, in the currency and the time zone of the account, filtered on every value
+          of adset.effective_status, with the attribution setting of the row. Each load appends its
+          rows under its own _dlt_load_id, and staging reads, for each account and day, those of the
+          newest pinned load whose window covers the day, with their actions.
+      - name: insights_adset__actions
+        description: >-
+          The actions of each row of insights_adset, one row each, with the count of the
+          attribution setting of the row in value and the windows in _1d_click, _7d_click and
+          _1d_view where Meta gives them; its _dlt_parent_id is the _dlt_id of its row.
+      - name: insights_adset__action_values
+        description: >-
+          The values of the actions of each row of insights_adset, one row each, in the currency of
+          the account, with the value of the attribution setting of the row in value and the
+          windows in _1d_click, _7d_click and _1d_view where Meta gives them; its _dlt_parent_id is
+          the _dlt_id of its row.
+      - name: insights_ad
+        description: >-
+          The insights of each account at the level of ads, one row for each ad and day with any
+          metric, in the currency and the time zone of the account, filtered on every value of
+          ad.effective_status, with the attribution setting of the row. Each load appends its rows
+          under its own _dlt_load_id, and staging reads, for each account and day, those of the
+          newest pinned load whose window covers the day, with their actions.
+      - name: insights_ad__actions
+        description: >-
+          The actions of each row of insights_ad, one row each, with the count of the attribution
+          setting of the row in value and the windows in _1d_click, _7d_click and _1d_view where
+          Meta gives them; its _dlt_parent_id is the _dlt_id of its row.
+      - name: insights_ad__action_values
+        description: >-
+          The values of the actions of each row of insights_ad, one row each, in the currency of the
+          account, with the value of the attribution setting of the row in value and the windows in
+          _1d_click, _7d_click and _1d_view where Meta gives them; its _dlt_parent_id is the _dlt_id
+          of its row.

@@ -360,6 +360,24 @@ def test_ai_reader_reads_marts_only_and_loses_what_it_had_in_staging():
         assert runs(text, statement), f"warehouse.sql must also run {statement}"
 
 
+def test_warehouse_sql_waits_for_the_nodes_of_the_transform_that_write_before_its_grants():
+    # A GRANT or a REVOKE on all the tables of a schema fails when a node of a run of the transform
+    # renames, replaces or drops one of them at the same moment. The file takes the lock that each
+    # node that writes holds, with the key of dbt/macros/marts_init.sql, exclusive, before the
+    # first of them, waits at most 11 minutes for it, and keeps it until the session ends.
+    macro = (POSTGRES.parent / "dbt" / "macros" / "marts_init.sql").read_text(encoding="utf-8")
+    [key] = re.findall(r"return\((\d+)\)", macro)
+    text = code("warehouse.sql")
+    tried = f"SELECT pg_try_advisory_lock({key}) AS locked \\gset\n"
+    taken = f"SET lock_timeout = '11min';\nSELECT pg_advisory_lock({key}) AS locked \\gset\n"
+    assert tried in text
+    assert taken + "RESET lock_timeout;\n" in text
+    bulk = re.search(r"\bON ALL TABLES IN SCHEMA\b", text)
+    assert bulk is not None
+    assert text.index(tried) < text.index(taken) < bulk.start()
+    assert "advisory_unlock" not in text
+
+
 def test_metabase_reader_gets_its_limits_on_every_start():
     # A query of Metabase that runs longer than five minutes is canceled, so that a dashboard or
     # a question cannot hold the warehouse, and Metabase holds at most 20 connections, more than
@@ -415,9 +433,20 @@ def test_the_cleanup_of_the_results_of_celery_deletes_the_old_ones_and_does_noth
     assert normalized("celery_results.sql") == CELERY_RESULTS_CLEANUP
 
 
-# The sources that dlt loads: the platforms of the demo, the rates of the ECB and Google Ads
-# (ADR-0032).
-SOURCES = ("demo_search", "demo_social", "demo_video", "demo_web", "demo_fx", "ecb", "google_ads")
+# The sources that dlt loads: the platforms of the demo, the rates of the ECB, Google Ads
+# (ADR-0032), Meta (ADR-0050) and the rates of the Bank of Italy and of the NBK (ADR-0042).
+SOURCES = (
+    "demo_search",
+    "demo_social",
+    "demo_video",
+    "demo_web",
+    "demo_fx",
+    "ecb",
+    "bank_of_italy",
+    "google_ads",
+    "meta_ads",
+    "nbk",
+)
 
 
 @pytest.mark.parametrize("source", SOURCES)

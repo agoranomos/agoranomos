@@ -7,19 +7,24 @@ month 36 months before yesterday, as Google Ads keeps data by day for 37 months 
 runs after each run of the transform that succeeded, on the asset TRANSFORMED, one run at a time,
 and starts at most one portion of the history: the newest calendar quarter that an account lacks
 days of, for every account that lacks days of it, as a run of agoranomos_google_ads_daily with the
-accounts and the days as its parameters (agoranomos_pipelines/google_ads.py, plan). That load
+accounts and the days as its parameters (agoranomos_pipelines/google_ads.py, plan, and
+agoranomos_pipelines/history.py, the planner that the history of Meta shares). That load
 updates the asset of Google Ads, the transform takes it, pins it into core.loads with the kind
 history and creates the partitions of its months before it writes the core, and its end starts the
 next portion, so that each portion goes from raw to the core whole before the next one, from the
 new quarters to the old ones. The plan starts nothing while a run of the load is queued or
 running, while a whole load waits for the run of the transform that pins it, or once every account
 that has had its usual window holds its history; it reads the journal of the loads and core.loads
-as the loader role, and asks the API nothing.
+as the loader role, and asks the API nothing. The history of Meta plans apart, and its portion may
+run at the same time as one of Google Ads (agoranomos_meta_ads_history).
 
 The DAG starts paused: a deployment unpauses it with agoranomos_google_ads_daily, once its key and
 its accounts are in place ([Connect Google Ads](docs/how-to/connect-google-ads.md)). A run of the
-load of a portion that fails for an account leaves the days of that account to the next plan,
-after the next run of the transform that succeeds. Ops shows the progress (ops.ops_history).
+load of a portion that fails for an account fails its task, which updates no asset, so the next
+plan comes after the next run of the transform that succeeds, which another load starts. The
+account then holds up no other: the portions go on without it, and its quarter comes again once
+the other accounts hold their history and a load of its usual window has loaded it since
+(agoranomos_pipelines/history.py, failures). Ops shows the progress (ops.ops_history).
 """
 
 from __future__ import annotations

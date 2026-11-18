@@ -2,11 +2,13 @@ seeds:
   - name: seed_ad_platforms
     description: >-
       The platforms that the data of the model comes from, one row each: their codes, the names
-      that the marts show, and what kind of data each gives. The demo platforms are fictional, and
+      that the marts show, what kind of data each gives, and its window of restatements, which the
+      daily load of its connector takes again (ADR-0038). The demo platforms are fictional, and
       mimics names the API whose shape each follows; the codes of real platforms come with their
-      connectors.
+      connectors. The windows are code of the base package, in this seed alone, and a deployment
+      has no setting for them.
     config:
-      column_types: {is_demo: boolean}
+      column_types: {is_demo: boolean, restatement_window_days: integer}
     columns:
       - name: platform
         description: '{{ doc("platform") }}'
@@ -28,13 +30,19 @@ seeds:
         description: '{{ doc("mimics") }}'
       - name: is_demo
         description: '{{ doc("is_demo") }}'
+      - name: restatement_window_days
+        description: '{{ doc("restatement_window_days") }}'
   - name: seed_conversion_actions
     description: >-
       The conversion actions that the base package knows, one row for each platform and action:
       their names, their categories, and whether each is primary, that is, counts in the
       conversions of a campaign. A deployment overrides a row in
       extensions/model/conversion_actions.toml. It has no action of Google Ads, whose account says
-      which of its actions count; any other action that neither names is not primary.
+      which of its actions count; any other action that neither names is not primary. The action
+      types of Meta are those of the reference of AdsActionStats of the Marketing API v27.0, as
+      read on 15 November 2026: the purchases and the leads of the pixel are primary, and the
+      types that the reference lists as grouped, such as omni_purchase and lead ("All offsite
+      leads plus all On-Facebook leads"), are not, as they count the actions of the pixel again.
     config:
       # Text, as the IDs of some platforms are numbers and those of others are not.
       column_types: {conversion_action_id: text, is_primary: boolean}

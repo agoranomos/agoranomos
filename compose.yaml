@@ -41,6 +41,10 @@ x-airflow: &airflow
     # and in the DAG processor; metadata-export gets it too, for the currency of the fields of
     # Metabase.
     AGORANOMOS_REPORTING_CURRENCY: ${AGORANOMOS_REPORTING_CURRENCY:-USD}
+    # The sources of the rates in their order (ADR-0042), which dbt reads with env_var() for the
+    # rates of the core, and the loads of the rates for their history
+    # (agoranomos_pipelines/rates.py); marts-init gets it too.
+    AGORANOMOS_RATES_SOURCE: ${AGORANOMOS_RATES_SOURCE:-auto}
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?run ./agoranomos init}
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
@@ -468,7 +472,8 @@ services:
   # (airflow/plugins/agoranomos_oom.py); on Docker Desktop for macOS, which has no Yama, a task can still stop it.
   airflow-scheduler:
     <<: *airflow
-    # It runs the tasks, so it gets the limit of the tasks; with CeleryExecutor the worker does.
+    # It runs the tasks, so it gets the limit of the tasks. With CeleryExecutor the worker runs them,
+    # with a limit of its own, and this service gets a smaller one (compose.celery.yaml).
     mem_limit: ${AIRFLOW_TASKS_MEMORY:-1280m}
     memswap_limit: ${AIRFLOW_TASKS_MEMORY:-1280m}
     command: ["scheduler"]
@@ -484,6 +489,11 @@ services:
       # google_ads (ADR-0032): empty until a deployment connects it.
       GOOGLE_ADS_SERVICE_ACCOUNT_KEY: ${GOOGLE_ADS_SERVICE_ACCOUNT_KEY:-}
       GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${GOOGLE_ADS_LOGIN_CUSTOMER_ID:-}
+      # The token of the system user of Meta, and the App ID and App Secret of a token that
+      # expires, for the load of meta_ads (ADR-0050): empty until a deployment connects it.
+      META_ADS_ACCESS_TOKEN: ${META_ADS_ACCESS_TOKEN:-}
+      META_ADS_APP_ID: ${META_ADS_APP_ID:-}
+      META_ADS_APP_SECRET: ${META_ADS_APP_SECRET:-}
       # The addresses of Apprise for the alerts (ADR-0045): the listener of the plugin
       # agoranomos_alerts runs in the scheduler in both variants, and the task of the watcher where
       # the tasks run; the worker of the CeleryExecutor gets them from here too. Empty, nothing is
@@ -736,9 +746,12 @@ services:
       # No usage telemetry from dbt; the image sets the same.
       DBT_ENGINE_SEND_ANONYMOUS_USAGE_STATS: "False"
       DO_NOT_TRACK: "1"
-      # The reporting currency of the marts (ADR-0025), which dbt renders into the views, and the
-      # password of transformer, whose values dbt hides in its logs.
+      # The reporting currency of the marts (ADR-0025), which dbt renders into the views, the
+      # sources of the rates in their order, in which it computes the rates of the core in a new
+      # reporting currency (ADR-0042), and the password of transformer, whose values dbt hides in
+      # its logs.
       AGORANOMOS_REPORTING_CURRENCY: ${AGORANOMOS_REPORTING_CURRENCY:-USD}
+      AGORANOMOS_RATES_SOURCE: ${AGORANOMOS_RATES_SOURCE:-auto}
       DBT_ENV_SECRET_WAREHOUSE_PASSWORD: ${WAREHOUSE_TRANSFORMER_PASSWORD:?run ./agoranomos init}
     volumes:
       - ./dbt:/opt/agoranomos/dbt:ro

@@ -27,6 +27,7 @@ nav = [
     { "Back up and restore" = "how-to/back-up-and-restore.md" },
     { "See the demo" = "how-to/see-the-demo.md" },
     { "Connect Google Ads" = "how-to/connect-google-ads.md" },
+    { "Connect Meta" = "how-to/connect-meta.md" },
     { "Manage clients and accounts" = "how-to/manage-clients-and-accounts.md" },
     { "Read the advertising dashboard" = "how-to/read-the-advertising-dashboard.md" },
     { "Talk to your data" = "how-to/talk-to-your-data.md" },
@@ -92,6 +93,8 @@ nav = [
     { "ADR-0047: Leave amcheck out of the maintenance of the warehouse" = "adr/0047-leave-amcheck-out-of-the-maintenance.md" },
     { "ADR-0048: Count the one-shot jobs that can run at the same time in the memory budget" = "adr/0048-count-the-one-shot-jobs-that-can-run-at-the-same-time.md" },
     { "ADR-0049: Keep JIT off for the transform at the limit of one server" = "adr/0049-keep-jit-off-for-the-transform-at-the-limit-of-one-server.md" },
+    { "ADR-0050: Connect Meta with an app and a system user of the deployment" = "adr/0050-connect-meta-with-an-app-and-a-system-user-of-the-deployment.md" },
+    { "ADR-0051: Take the current day as a load of the kind intraday in the one transform" = "adr/0051-take-the-current-day-as-a-load-of-the-kind-intraday.md" },
   ] },
 ]
 

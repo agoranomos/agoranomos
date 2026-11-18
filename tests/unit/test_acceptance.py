@@ -51,11 +51,24 @@ def test_the_cleanup_names_the_account_of_each_raw_table_as_staging_reads_it():
     # A row goes by load and account, so the account of each table must be the one through which
     # staging finds its load: a wrong column would keep rows, or take those of another account.
     found = read_by_staging()
-    assert len(found) == 7
-    assert sum(len(tables) for tables in found.values()) == 40
-    assert found == acceptance.ACCOUNTS
+    assert len(found) == 10
+    assert sum(len(tables) for tables in found.values()) == 50
+    staged = {
+        schema: tables
+        for schema, tables in acceptance.ACCOUNTS.items()
+        if schema not in acceptance.NOT_STAGED_YET
+    }
+    assert found == staged
+    # Every raw schema that the cleanup names is one that staging reads.
+    assert frozenset() == acceptance.NOT_STAGED_YET
+    # The tables of Meta are those of demo_social, with the totals of the account beside them,
+    # and name the account as demo_social does, so that its staging calls the same macros.
+    meta = acceptance.ACCOUNTS["raw_meta_ads"]
+    assert meta == {**acceptance.ACCOUNTS["raw_demo_social"], "insights_account": "r.account_id"}
     assert acceptance.ACCOUNTS["raw_demo_search"]["customer_clients"] == "r.customer_client__id"
     assert acceptance.ACCOUNTS["raw_ecb"] == {"rates_daily": None}
+    assert acceptance.ACCOUNTS["raw_bank_of_italy"] == {"rates_daily": None}
+    assert acceptance.ACCOUNTS["raw_nbk"] == {"rates_daily": None}
 
 
 def dag_timeouts() -> dict[str, timedelta]:
@@ -81,9 +94,14 @@ def test_a_load_that_did_not_end_waits_longer_than_any_run_of_a_dag_lives():
         "agoranomos_demo_history",
         "agoranomos_demo_daily",
         "agoranomos_ecb_daily",
+        "agoranomos_bank_of_italy_daily",
         "agoranomos_google_ads_daily",
+        "agoranomos_meta_ads_daily",
+        "agoranomos_nbk_daily",
     ):
         assert name in timeouts, name
+    # The history of the Bank of Italy is about 800 requests at one a second.
+    assert timeouts["agoranomos_bank_of_italy_daily"] == timedelta(hours=2)
     assert max(timeouts.values()) < acceptance.UNFINISHED_AFTER
     assert timedelta(days=1) == acceptance.UNFINISHED_AFTER
 

@@ -56,9 +56,10 @@ WINDOW_DAYS = "staging.int_window_days"
 
 # The rows of a load that has no row in _dlt_loads and none in core.loads, a load that stopped half
 # way, go once its load id, the moment when dlt began to extract it, is older than this: longer than
-# the dagrun_timeout of every DAG that loads, seven hours for Google Ads and an hour for the others,
-# so that no load that is still running loses a row (ADR-0046). tests/unit/test_acceptance.py
-# compares it with the DAGs.
+# the dagrun_timeout of every DAG that loads, seven hours for Google Ads and Meta, four for the
+# rates of the NBK, two for those of the Bank of Italy and an hour for the others, so that no load
+# that is still running loses a row (ADR-0046). tests/unit/test_acceptance.py compares it with the
+# DAGs.
 UNFINISHED_AFTER = timedelta(days=1)
 
 # How long the cleanup waits for the lock of a table before it deletes instead: a load in progress
@@ -81,6 +82,7 @@ SEARCH = "r.customer__id"
 SOCIAL = "r.account_id"
 VIDEO = "r.advertiser_id"
 ACCOUNTS: dict[str, dict[str, str | None]] = {
+    "raw_bank_of_italy": {"rates_daily": None},
     "raw_demo_fx": {"rates_daily": None},
     "raw_demo_search": {
         "customer_clients": "r.customer_client__id",
@@ -131,7 +133,22 @@ ACCOUNTS: dict[str, dict[str, str | None]] = {
         "ad_stats": SEARCH,
         "ad_conversions": SEARCH,
     },
+    # Meta (ADR-0050), in the shape of demo_social, with the totals of each account beside it.
+    "raw_meta_ads": {
+        "ad_accounts": SOCIAL,
+        "campaigns": SOCIAL,
+        "adsets": SOCIAL,
+        "ads": SOCIAL,
+        "insights_account": SOCIAL,
+        "insights_campaign": SOCIAL,
+        "insights_adset": SOCIAL,
+        "insights_ad": SOCIAL,
+    },
+    "raw_nbk": {"rates_daily": None},
 }
+# The raw schemas that the cleanup names before staging reads them, which
+# tests/unit/test_acceptance.py leaves out of its comparison with the staging models: none today.
+NOT_STAGED_YET: frozenset[str] = frozenset()
 
 # The acceptance (ADR-0046). The bound is the newest pin that this run read: the latest pinned_at
 # of the loads of the days of the run. Pins go one after another, so every row pinned at or before

@@ -25,6 +25,10 @@ For a fictional platform of the demo, the API whose shape its data follows, with
 Whether the platform is a fictional one of the demo.
 {% enddocs %}
 
+{% docs restatement_window_days %}
+The window of restatements of the platform, in days: how many of its recent days, up to the last that a load takes, each daily load takes again, as the platform may still change them, such as 90 for Google Ads, whose conversions keep coming for up to 90 days after a click. An older day changes only when a load takes it again, after a stop of the loads or as a portion of the history.
+{% enddocs %}
+
 {% docs client_id %}
 The ID of a client of the business, a brand, shop or legal entity, as the settings of the model name it: those of the deployment in extensions/model/clients.toml, or the file of the demo. In a row of an account or of its data, the client that the account belongs to; unassigned for an account that no setting names.
 {% enddocs %}
@@ -93,8 +97,20 @@ How many times the ads of the row, of its campaign, its ad group or its ad, were
 What the ads of the row, of its campaign, its ad group or its ad, cost on the day, as the ad platform reports it in its statistics, in the currency of the account (see currency), exact to six decimal places. Also called cost or ad spend. It is not the amount that the platform invoices, which can differ from it, for example by taxes or later credits, and the platform can still change it for recent days.
 {% enddocs %}
 
+{% docs total_impressions %}
+How many times the ads of the account were shown on the day, as the ad platform totals them for the account over all its campaigns, in a report of the account apart from those of its campaigns. Each run compares them with the sum of the campaigns of the account (G0a).
+{% enddocs %}
+
+{% docs total_clicks %}
+How many times the ads of the account were clicked on the day with a click that leads to the site, as the ad platform totals them for the account over all its campaigns: the clicks of Google and the link clicks of Meta, as in clicks. Each run compares them with the sum of the campaigns of the account (G0a).
+{% enddocs %}
+
+{% docs total_spend %}
+What the ads of the account cost on the day, as the ad platform totals it for the account over all its campaigns, in the currency of the account, to six decimal places. Each run compares it with the sum of the campaigns of the account (G0a).
+{% enddocs %}
+
 {% docs spend_reporting %}
-The spend of the row in the reporting currency (see reporting_currency), at the rate of its report_date in fx_rates_daily, to six decimal places. A sum over accounts in different currencies is right in this column.
+The spend of the row in the reporting currency (see reporting_currency), at the rate of its report_date in fx_rates_daily, whose rate_source and cross_source name the sources of the rate, to six decimal places. A sum over accounts in different currencies is right in this column.
 {% enddocs %}
 
 {% docs conversions %}
@@ -106,7 +122,7 @@ The value of the conversions of the row, as the ad platform reports it, in the c
 {% enddocs %}
 
 {% docs conversion_value_reporting %}
-The conversion value of the row in the reporting currency (see reporting_currency), at the rate of its report_date in fx_rates_daily, to six decimal places.
+The conversion value of the row in the reporting currency (see reporting_currency), at the rate of its report_date in fx_rates_daily, whose rate_source and cross_source name the sources of the rate, to six decimal places.
 {% enddocs %}
 
 {% docs platform_conversions %}
@@ -130,7 +146,7 @@ The conversions of the primary conversion actions of the deployment (is_primary)
 {% enddocs %}
 
 {% docs fx_rate_into_reporting_currency %}
-The rate of the day of the row from the currency of the row into the reporting currency, from core.fx_rates_daily, with no rounding: an amount of the row times this rate is the amount of the columns that end in _reporting. The reporting currency has the rate 1; none on a day that has no rate.
+The rate of the day of the row from the currency of the row into the reporting currency, from core.fx_rates_daily, which names its sources, with no rounding: an amount of the row times this rate is the amount of the columns that end in _reporting. The reporting currency has the rate 1; none on a day that has no rate.
 {% enddocs %}
 
 {% docs fx_rate_date %}
@@ -346,7 +362,7 @@ The revenue that web analytics records for the sessions, in the currency of the 
 {% enddocs %}
 
 {% docs total_revenue_reporting %}
-The total revenue of the row in the reporting currency (see reporting_currency), at the rate of its report_date in fx_rates_daily, to six decimal places.
+The total revenue of the row in the reporting currency (see reporting_currency), at the rate of its report_date in fx_rates_daily, whose rate_source and cross_source name the sources of the rate, to six decimal places.
 {% enddocs %}
 
 {% docs rate_date %}
@@ -354,15 +370,19 @@ The day of the rate.
 {% enddocs %}
 
 {% docs rate %}
-How many units of one currency one unit of another is worth on the day, to eight decimal places. In the rates into the reporting currency, as in core.fx_rates_daily, the value of one unit of currency in reporting_currency, through the reference rates of the euro, such as 1.08320000 from EUR to USD; in the rates of a source, the value of one unit of base_currency in quote_currency.
+How many units of one currency one unit of another is worth on the day, to eight decimal places. In the rates into the reporting currency, as in core.fx_rates_daily, the value of one unit of currency in reporting_currency, through the base currency of the first source of the rates, such as 1.08320000 from EUR to USD; in the rates of a source, the value of one unit of base_currency in quote_currency; for the National Bank of Kazakhstan, whose base is one tenge, not rounded to eight places but with the digits of the division, at least 16 significant ones, such as 0.0022484036 and more from KZT to USD on 12 November 2026.
 {% enddocs %}
 
 {% docs rate_into_reporting_currency %}
-The value of one unit of currency in reporting_currency on the day, through the reference rates of the euro, to eight decimal places, such as 1.08320000 from EUR to USD: an amount in currency times this rate is the amount in the reporting currency. The reporting currency has the rate 1.
+The value of one unit of currency in reporting_currency on the day, through the base currency of the first source of the rates with no rounding on the way, to eight decimal places, such as 1.08320000 from EUR to USD: an amount in currency times this rate is the amount in the reporting currency. The reporting currency has the rate 1.
 {% enddocs %}
 
 {% docs rate_source %}
-Where the rate comes from: the code of the source of the rates, ecb for the European Central Bank or demo_fx for the demo, or identity where the two currencies are one.
+Where the rate comes from: the code of the source of the rates, bank_of_italy for the Bank of Italy, nbk for the National Bank of Kazakhstan, ecb for the European Central Bank or demo_fx for the demo, or identity where the two currencies are one. The deployment sets the order of the sources (AGORANOMOS_RATES_SOURCE), and a rate that goes through the base currency of another source has the source of that second leg in cross_source. The Bank of Italy calls its rates indicative and no financial benchmark under Regulation (EU) 2016/1011; the NBK allows their use with the source named, under its data licence.
+{% enddocs %}
+
+{% docs cross_source %}
+The source of the second leg of a rate that goes through the base currency of its source, the rate of that base currency against the base currency of the first source of the rates, such as bank_of_italy for a rate of RUB of nbk through KZT into the euro; none for a rate against the base currency of the first source and for the reporting currency.
 {% enddocs %}
 
 {% docs is_carried_forward %}
@@ -370,7 +390,11 @@ Whether the rate is the last published one before the day, on a day without a pu
 {% enddocs %}
 
 {% docs base_currency %}
-The currency that a rate of the source is given for one unit of, EUR for the reference rates of the euro.
+The currency that a rate of the source is given for one unit of, EUR for the reference rates of the euro and KZT for the official rates of the National Bank of Kazakhstan.
+{% enddocs %}
+
+{% docs base_rate %}
+The rate of quote_currency against base_currency in the convention of the source: for the National Bank of Kazakhstan, the price in tenge of one unit of quote_currency, the price that the NBK publishes for quant units divided by quant, such as 444.76 for USD on 12 November 2026.
 {% enddocs %}
 
 {% docs quote_currency %}
@@ -411,6 +435,14 @@ The ID of a load, _dlt_load_id of dlt, as core.loads holds it: a time in seconds
 
 {% docs load_sk %}
 The load that gives the day of the row, load_sk of core.loads: for an account and a day, the newest load that the runs pinned whose window covers the day.
+{% enddocs %}
+
+{% docs is_partial_day %}
+Whether the day is still in progress in its account, as a load of the kind intraday read it at the moment of its load: the impressions, clicks and spend of the campaigns so far, and no conversions, until a load of the kind window or history replaces the day whole (ADR-0051). Only the statistics of campaigns have a partial day.
+{% enddocs %}
+
+{% docs load_kind %}
+The kind of a load, as core.loads holds it: window for the usual window of an account, which a daily load takes, history for a load of the days before it, intraday for a load of its current day, whose day is partial (ADR-0051).
 {% enddocs %}
 
 {% docs day_key %}

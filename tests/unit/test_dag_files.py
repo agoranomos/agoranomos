@@ -41,9 +41,13 @@ def test_no_dag_file_imports_another():
         "agoranomos_demo_daily",
         "agoranomos_demo_history",
         "agoranomos_demo_transform",
+        "agoranomos_bank_of_italy_daily",
         "agoranomos_ecb_daily",
         "agoranomos_google_ads_daily",
         "agoranomos_google_ads_history",
+        "agoranomos_meta_ads_daily",
+        "agoranomos_meta_ads_history",
+        "agoranomos_nbk_daily",
         "agoranomos_selfcheck",
     } <= stems
     for path in DAG_FILES:
@@ -56,14 +60,19 @@ ASSETS = DAGS / "agoranomos_pipelines" / "assets.py"
 # The asset of the rates of the ECB, as the DAG of the rates updates it and the stack test of the
 # schedule of the transform, tests/stack/test_transform_schedule.py, makes an event of it.
 RAW_ECB = "postgres://warehouse-db:5432/warehouse/raw_ecb/rates_daily"
+# The asset of the rates of the Bank of Italy (ADR-0042), as its DAG updates it.
+RAW_BANK_OF_ITALY = "postgres://warehouse-db:5432/warehouse/raw_bank_of_italy/rates_daily"
+RAW_NBK = "postgres://warehouse-db:5432/warehouse/raw_nbk/rates_daily"
 
 
-def test_the_transform_runs_when_the_demo_the_rates_or_google_ads_have_loaded():
-    # Any of three conditions (ADR-0039): all five assets of the demo, the asset of the rates of
-    # the ECB, or that of Google Ads (ADR-0032). The five of the demo stay one condition, so that
-    # one run of the history or of the daily load starts one run of the transform, after its last
-    # platform, and not one after its first platform and one more for the other four, the first
-    # reading tables whose days the loads still replace. One run at a time, as before.
+def test_the_transform_runs_when_the_demo_the_rates_google_ads_or_meta_have_loaded():
+    # Any of six conditions (ADR-0039): all five assets of the demo, the asset of the rates of the
+    # ECB, that of the rates of the Bank of Italy (ADR-0042), that of Google Ads (ADR-0032), that of
+    # Meta (ADR-0050), or that of the rates of the NBK (ADR-0042). The five of the demo stay
+    # one condition, so that one run of the history or of the daily load starts one run of the
+    # transform, after its last platform, and not one after its first platform and one more for
+    # the other four, the first reading tables whose days the loads still replace. One run at a
+    # time, as before.
     text = (DAGS / "agoranomos_demo_transform.py").read_text(encoding="utf-8")
     assert "schedule=LOADED" in text
     assert "max_active_runs=1" in text
@@ -73,7 +82,12 @@ def test_the_transform_runs_when_the_demo_the_rates_or_google_ads_have_loaded():
     assets = ASSETS.read_text(encoding="utf-8")
     assert "DEMO_LOADED = AssetAll(*RAW_DEMO_PLATFORMS.values())" in assets
     assert f'RAW_ECB = Asset("{RAW_ECB}")' in assets
-    assert "LOADED = AssetAny(DEMO_LOADED, RAW_ECB, RAW_GOOGLE_ADS)" in assets
+    assert f'RAW_BANK_OF_ITALY = Asset("{RAW_BANK_OF_ITALY}")' in assets
+    assert f'RAW_NBK = Asset("{RAW_NBK}")' in assets
+    assert (
+        "LOADED = AssetAny(DEMO_LOADED, RAW_ECB, RAW_BANK_OF_ITALY, RAW_GOOGLE_ADS, RAW_META_ADS, "
+        "RAW_NBK)"
+    ) in assets
     assert "DEMO_LOADED |" not in assets
 
 
@@ -407,6 +421,85 @@ def test_the_load_of_the_rates_of_the_ecb_runs_after_midnight_in_frankfurt():
     )
 
 
+BANK_OF_ITALY_DAILY = DAGS / "agoranomos_bank_of_italy_daily.py"
+
+
+def test_the_load_of_the_rates_of_the_bank_of_italy_imports_dlt_in_its_tasks_and_no_cosmos():
+    # As the load of the ECB: the DAG processor parses the file often.
+    found = imports(BANK_OF_ITALY_DAILY)
+    assert ("agoranomos_pipelines.assets", ["RAW_BANK_OF_ITALY"]) in found
+    assert [module for module, _ in found if module.split(".")[0] == "cosmos"] == []
+    tree = ast.parse(BANK_OF_ITALY_DAILY.read_text(encoding="utf-8"))
+    top = [
+        node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert not [
+        m for m in top if m.split(".")[0] == "dlt" or m.endswith((".bank_of_italy", ".loads"))
+    ]
+
+
+def test_the_load_of_the_rates_of_the_bank_of_italy_updates_its_asset_and_starts_paused():
+    # The task of the load updates the asset of the rates, on which the transform runs
+    # (ADR-0039), and the DAG starts paused, so the demo and the stack tests ask the bank nothing.
+    assert decorators(BANK_OF_ITALY_DAILY)["load_bank_of_italy"] == [
+        "task(task_id='load_bank_of_italy', outlets=[RAW_BANK_OF_ITALY])"
+    ]
+    tree = ast.parse(BANK_OF_ITALY_DAILY.read_text(encoding="utf-8"))
+    paused = [
+        node.value.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.keyword) and node.arg == "is_paused_upon_creation"
+    ]
+    assert paused == [True]
+    assert "due() >> load_bank_of_italy()" in BANK_OF_ITALY_DAILY.read_text(encoding="utf-8")
+
+
+def test_the_load_of_the_rates_of_the_bank_of_italy_runs_after_midnight_in_rome():
+    # 07:17 UTC is 08:17 in CET and 09:17 in CEST: after the load of the ECB, and before the daily
+    # load of the demo.
+    text = BANK_OF_ITALY_DAILY.read_text(encoding="utf-8")
+    assert 'SCHEDULE = CronTriggerTimetable("17 7 * * *", timezone="UTC")' in text
+
+
+NBK_DAILY = DAGS / "agoranomos_nbk_daily.py"
+
+
+def test_the_load_of_the_rates_of_the_nbk_imports_dlt_in_its_tasks_and_no_cosmos():
+    # As the load of the ECB: the DAG processor parses the file often, and a broken manifest of
+    # dbt must not break its import.
+    found = imports(NBK_DAILY)
+    assert ("agoranomos_pipelines.assets", ["RAW_NBK"]) in found
+    assert [module for module, _ in found if module.split(".")[0] == "cosmos"] == []
+    tree = ast.parse(NBK_DAILY.read_text(encoding="utf-8"))
+    top = [
+        node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert not [m for m in top if m.split(".")[0] == "dlt" or m.endswith((".nbk", ".loads"))]
+
+
+def test_the_load_of_the_rates_of_the_nbk_updates_its_asset_and_starts_paused():
+    # The task of the load updates the asset of the rates of the NBK, on which the transform runs
+    # (ADR-0039). The demo asks the NBK nothing, so the DAG starts paused, as that of the ECB.
+    assert decorators(NBK_DAILY)["load_nbk"] == ["task(task_id='load_nbk', outlets=[RAW_NBK])"]
+    tree = ast.parse(NBK_DAILY.read_text(encoding="utf-8"))
+    paused = [
+        node.value.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.keyword) and node.arg == "is_paused_upon_creation"
+    ]
+    assert paused == [True]
+
+
+def test_the_load_of_the_rates_of_the_nbk_runs_after_the_fixing_in_astana():
+    # 11:13 UTC is 16:13 in Astana, UTC+5, after the fixing of 15:30 and the cross rates of 16:00.
+    text = NBK_DAILY.read_text(encoding="utf-8")
+    assert 'SCHEDULE = CronTriggerTimetable("13 11 * * *", timezone="UTC")' in text
+
+
 GOOGLE_ADS_DAILY = DAGS / "agoranomos_google_ads_daily.py"
 
 
@@ -486,6 +579,90 @@ def test_a_run_of_the_load_of_google_ads_takes_a_portion_of_the_history_from_its
     assert any("portion=portion" in call for call in calls if call.startswith("google_ads.load("))
 
 
+META_ADS_DAILY = DAGS / "agoranomos_meta_ads_daily.py"
+
+
+def test_the_load_of_meta_imports_dlt_in_its_task_and_no_cosmos():
+    found = imports(META_ADS_DAILY)
+    assert ("agoranomos_pipelines.assets", ["RAW_META_ADS"]) in found
+    assert [module for module, _ in found if module.split(".")[0] == "cosmos"] == []
+    tree = ast.parse(META_ADS_DAILY.read_text(encoding="utf-8"))
+    top = [
+        node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert not [m for m in top if m.split(".")[0] == "dlt" or m.endswith((".meta_ads", ".loads"))]
+
+
+def test_the_load_of_meta_starts_paused_masks_its_secrets_and_keeps_a_token_in_a_variable():
+    # A deployment unpauses it once its token and accounts are in place (ADR-0050). The task masks
+    # the token and the App Secret of .env, and gives the load the Variables of Airflow, which keep
+    # a token that a refresh gave, and mask_secret, with which it masks that token.
+    text = META_ADS_DAILY.read_text(encoding="utf-8")
+    keywords = {
+        node.arg: ast.unparse(node.value)
+        for node in ast.walk(ast.parse(text))
+        if isinstance(node, ast.keyword)
+    }
+    assert keywords["is_paused_upon_creation"] == "True"
+    assert keywords["max_active_runs"] == "1"
+    assert keywords["catchup"] == "False"
+    assert "for name in (meta_ads.TOKEN, meta_ads.APP_SECRET):" in text
+    assert "mask_secret(os.environ[name].strip())" in text
+    assert keywords["variables"] == "Variable"
+    assert keywords["mask"] == "mask_secret"
+    assert (
+        "airflow.sdk",
+        ["CronTriggerTimetable", "Param", "Variable", "dag", "get_current_context", "task"],
+    ) in imports(META_ADS_DAILY)
+
+
+def test_the_load_of_meta_runs_before_that_of_google_ads_and_keeps_its_watermarks():
+    # 10:07 UTC: after midnight from UTC-10 east, and half an hour before the load of Google Ads,
+    # so that the run of the transform after it ends before that load. The asset state store of
+    # its asset is the cache of the watermarks (ADR-0038).
+    text = META_ADS_DAILY.read_text(encoding="utf-8")
+    assert 'SCHEDULE = CronTriggerTimetable("7 10 * * *", timezone="UTC")' in text
+    assert 'CronTriggerTimetable("37 10 * * *"' in GOOGLE_ADS_DAILY.read_text(encoding="utf-8")
+    assert decorators(META_ADS_DAILY)["load_meta_ads"] == [
+        "task(task_id='load_meta_ads', outlets=[RAW_META_ADS])"
+    ]
+    assert 'cache=context["asset_state_store"][RAW_META_ADS]' in text
+    assets = ASSETS.read_text(encoding="utf-8")
+    assert (
+        'RAW_META_ADS = Asset("postgres://warehouse-db:5432/warehouse/raw_meta_ads/'
+        'insights_campaign")'
+    ) in assets
+
+
+def test_a_run_of_the_load_of_meta_takes_a_portion_of_the_history_from_its_parameters():
+    # As for Google Ads, so that C1c of #221 adds the planner alone. An account of Meta is digits.
+    text = META_ADS_DAILY.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    [params] = [
+        node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign) and ast.unparse(node.targets[0]) == "PARAMS"
+    ]
+    found = {
+        ast.literal_eval(key): {k.arg: ast.literal_eval(k.value) for k in value.keywords}
+        | {"default": ast.literal_eval(value.args[0])}
+        for key, value in zip(params.keys, params.values, strict=True)
+    }
+    assert set(found) == {"accounts", "window_from", "window_to"}
+    assert found["accounts"]["default"] == []
+    assert found["accounts"]["items"] == {"type": "string", "pattern": "^[0-9]{1,20}$"}
+    for day in ("window_from", "window_to"):
+        assert found[day]["default"] is None
+        assert (found[day]["type"], found[day]["format"]) == (["null", "string"], "date")
+    calls = [ast.unparse(node) for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    assert (
+        "meta_ads.portion_of(params['accounts'], params['window_from'], params['window_to'])"
+    ) in calls
+    assert any("portion=portion" in call for call in calls if call.startswith("meta_ads.load("))
+
+
 GOOGLE_ADS_HISTORY = DAGS / "agoranomos_google_ads_history.py"
 
 
@@ -531,6 +708,71 @@ def test_the_history_of_google_ads_plans_a_portion_after_each_transform_that_suc
     assert 'TRANSFORMED = Asset("agoranomos_transformed")' in assets
 
 
+META_ADS_HISTORY = DAGS / "agoranomos_meta_ads_history.py"
+
+
+def test_the_history_of_meta_plans_a_portion_after_each_transform_that_succeeded():
+    # As the history of Google Ads, with the planner that both share (history.py): a portion is a
+    # run of the load of Meta with its parameters, which starts nothing while a run of that load is
+    # queued or running. The DAG starts paused and imports dlt in its task only.
+    text = META_ADS_HISTORY.read_text(encoding="utf-8")
+    found = imports(META_ADS_HISTORY)
+    assert ("agoranomos_pipelines.assets", ["TRANSFORMED"]) in found
+    assert (
+        "airflow.providers.standard.operators.trigger_dagrun",
+        ["TriggerDagRunOperator"],
+    ) in found
+    assert [module for module, _ in found if module.split(".")[0] == "cosmos"] == []
+    tree = ast.parse(text)
+    top = [
+        node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert not [
+        m
+        for m in top
+        if m.split(".")[0] == "dlt" or m.endswith((".meta_ads", ".loads", ".history"))
+    ]
+    keywords = {
+        node.arg: ast.unparse(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.keyword)
+    }
+    assert 'dag_id="agoranomos_meta_ads_history",' in text
+    assert keywords["schedule"] == "TRANSFORMED"
+    assert keywords["max_active_runs"] == "1"
+    assert keywords["is_paused_upon_creation"] == "True"
+    assert keywords["catchup"] == "False"
+    assert keywords["trigger_dag_id"] == "LOAD"
+    assert 'LOAD = "agoranomos_meta_ads_daily"' in text
+    assert keywords["conf"] == "plan()"
+    assert keywords["fail_when_dag_is_paused"] == "True"
+    assert keywords["openlineage_inject_parent_info"] == "False"
+    assert keywords["tags"] == "['agoranomos', 'meta_ads']"
+    assert decorators(META_ADS_HISTORY)["plan"] == ["task.short_circuit(task_id='plan')"]
+    assert 'context["ti"].get_dr_count(dag_id=LOAD, states=["queued", "running"])' in text
+    assert 'meta_ads.plan(context["dag_run"].run_after)' in text
+    assert "return None if portion is None else portion.conf()" in text
+    # The plan reads the warehouse as loader, and no secret of Meta.
+    assert 'mask_secret(loads.credentials()["password"])' in text
+    assert "TOKEN" not in text
+
+
+def test_the_two_histories_have_the_same_shape():
+    # One planner, two DAGs that differ only in their platform: their schedule, their runs and
+    # their timeouts are the same.
+    def settings(path):
+        return {
+            node.arg: ast.unparse(node.value)
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+            if isinstance(node, ast.keyword)
+            and node.arg not in ("dag_id", "tags", "trigger_dag_id")
+        }
+
+    assert settings(GOOGLE_ADS_HISTORY) == settings(META_ADS_HISTORY)
+
+
 TEN_MINUTES = "timedelta(minutes=10)"
 
 
@@ -541,11 +783,32 @@ TEN_MINUTES = "timedelta(minutes=10)"
         ("agoranomos_demo_daily.py", "timedelta(minutes=1)", None, TEN_MINUTES, "hours=1"),
         ("agoranomos_ecb_daily.py", "timedelta(minutes=5)", TEN_MINUTES, TEN_MINUTES, "hours=1"),
         (
+            "agoranomos_bank_of_italy_daily.py",
+            "timedelta(minutes=5)",
+            TEN_MINUTES,
+            "timedelta(minutes=30)",
+            "hours=2",
+        ),
+        (
             "agoranomos_google_ads_daily.py",
             TEN_MINUTES,
             "timedelta(minutes=20)",
             "timedelta(hours=2)",
             "hours=7",
+        ),
+        (
+            "agoranomos_meta_ads_daily.py",
+            TEN_MINUTES,
+            "timedelta(minutes=20)",
+            "timedelta(hours=2)",
+            "hours=7",
+        ),
+        (
+            "agoranomos_nbk_daily.py",
+            "timedelta(minutes=5)",
+            TEN_MINUTES,
+            "timedelta(hours=1)",
+            "hours=4",
         ),
     ],
 )
@@ -555,10 +818,11 @@ def test_the_loads_retry_with_a_growing_wait_and_end_within_their_timeout(
     # ADR-0039: the DAGs of the loads retry with an exponential backoff, also after a new column
     # waited past the lock timeout of loader for a run of the transform (ADR-0046), and a run ends
     # within its timeout, an hour, and for Google Ads, whose load of many accounts, or whose window
-    # after a long stop, takes long, its three tries of two hours and the waits between them, so
-    # that a load never lives longer: the cleanup of the rows of a load that did not end is to wait
-    # at least that long. Airflow 3.3.2 takes a multiplier for the backoff, so True would be 1, a
-    # constant wait.
+    # after a long stop, takes long, its three tries of two hours and the waits between them, and
+    # for the Bank of Italy, whose history is about 800 requests at one a second, its three tries
+    # of half an hour and their waits within two hours, so that a load never lives longer: the
+    # cleanup of the rows of a load that did not end is to wait at least that long. Airflow 3.3.2
+    # takes a multiplier for the backoff, so True would be 1, a constant wait.
     keywords = {
         node.arg: node.value
         for node in ast.walk(ast.parse((DAGS / name).read_text(encoding="utf-8")))

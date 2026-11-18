@@ -98,8 +98,8 @@ services:
   airflow-apiserver:
     environment: *airflow-celery-environment
 
-  # It runs no task here: the worker, which extends the scheduler of compose.yaml, gets the limit of
-  # the tasks from there.
+  # It runs no task here, so it gets a smaller limit than in compose.yaml; the worker, which runs
+  # the tasks, gets a limit of its own (below).
   airflow-scheduler:
     mem_limit: ${AIRFLOW_SCHEDULER_MEMORY:-640m}
     memswap_limit: ${AIRFLOW_SCHEDULER_MEMORY:-640m}
@@ -111,6 +111,8 @@ services:
       WAREHOUSE_LOADER_PASSWORD: ""
       DBT_ENV_SECRET_WAREHOUSE_PASSWORD: ""
       GOOGLE_ADS_SERVICE_ACCOUNT_KEY: ""
+      META_ADS_ACCESS_TOKEN: ""
+      META_ADS_APP_SECRET: ""
     depends_on:
       broker:
         condition: service_healthy
@@ -130,6 +132,12 @@ services:
     extends:
       file: compose.yaml
       service: airflow-scheduler
+    # Its own limit, in place of AIRFLOW_TASKS_MEMORY, the limit of the scheduler of compose.yaml,
+    # which runs the tasks of the LocalExecutor: the worker peaked at 1,175 MiB in a run of the
+    # transform of the demo (CI, 13 November 2026), which the formula of
+    # docs/reference/system-requirements.md turns into 1,536 MiB.
+    mem_limit: ${AIRFLOW_WORKER_MEMORY:-1536m}
+    memswap_limit: ${AIRFLOW_WORKER_MEMORY:-1536m}
     command: ["celery", "worker"]
     environment:
       <<: [*airflow-celery-environment, *airflow-celery-queue-environment]

@@ -9,7 +9,7 @@
 {#- The reasons of quarantine, as codes, in the order of the checks: the newest pinned load of the
     account failed for it; the loads name an account that no list gives; two rows share a key, or
     a list gives the account twice; a row misses a part of its key; the currency of the account is
-    not one of ISO 4217; its time zone is not one of IANA; the source of the rates has no rate of
+    not one of ISO 4217; its time zone is not one of IANA; no source of the rates has a rate of
     its currency into the reporting currency (ADR-0042); a spend has more than six decimal places;
     a measure is missing or below zero; a load holds rows outside its window; the rows of the
     campaigns of a load do not add up to the totals of the account that the platform gives in the
@@ -86,7 +86,8 @@
     of the decimal places read as they are: each table with the column of its spend as text, and
     whether that spend is in micros, as cost_micros of Google is. A table of conversions or of
     sessions has no spend. The account and the day of a row are those of newest_load_sources. The
-    connector of Google Ads also loads the totals of each account, which demo_search does not. -#}
+    connectors of Google Ads and of Meta also load the totals of each account, which demo_search
+    and demo_social do not. -#}
 {% macro quarantine_raw_tables() -%}
 {%- set google = [
     ('campaign_stats', 'metrics__cost_micros', true),
@@ -118,7 +119,30 @@
         ('ad_conversions', none, false),
         ('customer_stats', 'metrics__cost_micros', true),
     ],
+    'raw_meta_ads': [
+        ('insights_campaign', 'spend', false),
+        ('insights_adset', 'spend', false),
+        ('insights_ad', 'spend', false),
+        ('insights_account', 'spend', false),
+    ],
 }) -}}
+{%- endmacro %}
+
+{#- The columns of the account and the day of the fact tables of a source that is not of the demo,
+    with their types, for the empty query of a table that no load has written yet
+    (relation_or_empty): the columns that newest_load_sources names, and the load. -#}
+{% macro quarantine_raw_keys(source_name) -%}
+{%- set keys = {
+    'raw_google_ads': {'customer__id': 'text', 'segments__date': 'date'},
+    'raw_meta_ads': {'account_id': 'text', 'date_start': 'date'},
+} -%}
+{%- if source_name not in keys -%}
+    {{- exceptions.raise_compiler_error('quarantine_raw_keys knows no source ' ~ source_name) -}}
+{%- endif -%}
+{%- set found = {} -%}
+{%- do found.update(keys[source_name]) -%}
+{%- do found.update({'_dlt_load_id': 'text'}) -%}
+{{- return(found) -}}
 {%- endmacro %}
 
 {#- The columns of the table of the failures, in their order, as each statement inserts them. -#}
@@ -191,9 +215,13 @@ left join {{ loads }} as l
     it, an account that a list gives twice, a currency outside ISO 4217 or a time zone outside
     IANA, which a cast to char(3) would cut silently in the core (ADR-0038), and an account that
     the pinned loads name and no list gives, which the core cannot convert or place in a day
-    (ADR-0035, "a known account for each fact"). lists are the staging models of the accounts and
-    the properties, each with the column of its account; currencies and time_zones the seeds. -#}
-{% macro quarantine_account_findings(lists, currencies, time_zones, days, loads) -%}
+    (ADR-0035, "a known account for each fact"). A load of the kind intraday takes no list
+    (ADR-0051), so an account that this run reads from such loads alone is known when the core
+    holds it from a list before, as accounts, core.dim_account as the runs before this one left
+    it, says; the dimensions keep what the core holds of it. lists are the staging models of the
+    accounts and the properties, each with the column of its account; currencies and time_zones
+    the seeds. -#}
+{% macro quarantine_account_findings(lists, currencies, time_zones, days, loads, accounts) -%}
 with listed as (
     {%- for relation, account in lists %}
     {%- if not loop.first %}
@@ -230,9 +258,17 @@ newest_pinned as (
 ),
 
 named as (
-    select distinct source, account_id
-    from {{ days }}
-    where source in ('{{ quarantine_sources() | join("', '") }}')
+    select distinct d.source, d.account_id
+    from {{ days }} as d
+    where d.source in ('{{ quarantine_sources() | join("', '") }}')
+        and (
+            d.load_kind <> 'intraday'
+            or not exists (
+                select
+                from {{ accounts }} as k
+                where k.platform = d.source and k.account_id = d.account_id and not k.is_stub
+            )
+        )
 )
 
 select
@@ -271,17 +307,17 @@ where unknown_time_zone
 {%- endmacro %}
 
 {#- The check of the rates (ADR-0042): an account whose currency has no rate into the reporting
-    currency at the source of the rates, neither among the rates of the loads that this run reads
-    nor in core.fx_rates_daily as the runs before this one left it, so that the core takes no fact
-    that a view could not convert, and no rate of 1 or 0 stands for a missing one. Only the
-    accounts that the pinned loads of this run name, as only they write the core; a currency
-    outside ISO 4217 has a reason of its own, and the reporting currency needs no rate. A day of a
-    currency that has a rate but none on or before that day is a gap, which the test of G3 finds
-    after the write of the rates. lists are the staging models of the accounts and the properties,
-    each with the column of its account; currencies the seed of ISO 4217; days the table
-    stg_loads__newest_days; ecb and demo the staging models of the rates of the ECB and of the
-    demo, and rates core.fx_rates_daily (macros/rates.sql). -#}
-{% macro quarantine_rate_findings(lists, currencies, days, ecb, demo, rates) -%}
+    currency from any source of the order of AGORANOMOS_RATES_SOURCE (rates_chain), neither among
+    the rates of the loads that this run reads nor in core.fx_rates_daily as the runs before this
+    one left it, so that the core takes no fact that a view could not convert, and no rate of 1 or
+    0 stands for a missing one. Only the accounts that the pinned loads of this run name, as only
+    they write the core; a currency outside ISO 4217 has a reason of its own, and the reporting
+    currency needs no rate. A day of a currency that has a rate but none on or before that day is
+    a gap, which the test of G3 finds after the write of the rates. lists are the staging models
+    of the accounts and the properties, each with the column of its account; currencies the seed
+    of ISO 4217; days the table stg_loads__newest_days; staged the staging models of the rates of
+    each source by its code, rates core.fx_rates_daily and loads core.loads (macros/rates.sql). -#}
+{% macro quarantine_rate_findings(lists, currencies, days, staged, rates, loads) -%}
 with listed as (
     {%- for relation, account in lists %}
     {%- if not loop.first %}
@@ -298,12 +334,11 @@ named as (
     where source in ('{{ quarantine_sources() | join("', '") }}')
 ),
 
-published as (
-    {{ rates_published(ecb, demo, rates) }}
-),
-
 rated as (
-    select currency from ({{ rates_into_reporting('published') }}) as read_rates
+    select distinct currency
+    from (
+        {{ rates_known(staged, rates, days, loads, 'select currency from listed') }}
+    ) as known
     union
     select currency::text
     from {{ rates }}
@@ -317,7 +352,7 @@ select distinct
     'missing_rate'::text as reason,
     'rates'::text as checked,
     'no rate of ' || l.currency || ' into ' || {{ reporting_currency() }}
-        || ' from the source of the rates, ' || {{ rates_source(ecb, rates) }} as detail
+        || ' from ' || {{ rates_named(staged, rates) }} as detail
 from listed as l
 join named as n
     on n.source = l.source and n.account_id = l.account_id
@@ -419,9 +454,7 @@ group by f.source, f.account_id, d.load_id, c.reason
     {%- if source_name.startswith('raw_demo_') -%}
         {%- set relation = demo_source(source_name, table) -%}
     {%- else -%}
-        {%- set columns = {
-            'customer__id': 'text', 'segments__date': 'date', '_dlt_load_id': 'text',
-        } -%}
+        {%- set columns = quarantine_raw_keys(source_name) -%}
         {%- if spend is not none -%}
             {%- do columns.update({spend: 'text'}) -%}
         {%- endif -%}
@@ -480,11 +513,11 @@ where c.failed
 {%- endmacro %}
 
 {#- G0a, against the platform (ADR-0035): for each load that this run reads for an account of a
-    source whose loads bring the totals of each account by day, as the connector of Google Ads does,
-    the impressions, the clicks and the spend of the rows of its campaigns, summed by day, against
-    the totals that the platform gives for the account in the same load, on each day of the
-    windows that the load gives the account; a day that the load holds no row of on one side
-    counts as zero there. A sum that differs from its total by more than the share of the
+    source whose loads bring the totals of each account by day, as the connectors of Google Ads and
+    Meta do, the impressions, the clicks and the spend of the rows of its campaigns, summed by
+    day, against the totals that the platform gives for the account in the same load, on each day
+    of the windows that the load gives the account; a day that the load holds no row of on one
+    side counts as zero there. A sum that differs from its total by more than the share of the
     platform in var('platform_totals_tolerance'), zero for one that it does not name, is
     totals_differ: a read of the API that lost part of an account, which no check inside the
     warehouse can see. A load that holds no totals at all, as one of a connector before the
@@ -609,7 +642,10 @@ group by source, account_id, load_id
     tables core.dim_account and the fact of the core of that kind as the runs before this one left
     them. The ad platforms compare the spend of the statistics of campaigns, and web analytics,
     which has no spend, the sessions, for an empty window only. The days of the core are bounded by
-    those of the windows, so that PostgreSQL reads only the partitions of the windows. -#}
+    those of the windows, so that PostgreSQL reads only the partitions of the windows. A load of
+    the kind intraday is not checked, and the partial rows of the core do not count in what it
+    holds (ADR-0051): a partial day is below the day that it becomes, so the check would hold an
+    account on the first cycle of each day, and with it every load that the account has pinned. -#}
 {% macro quarantine_collapse_findings(
     relations, days, accounts, facts, measure='spend', checked='campaign_stats',
     account='account_id', fall=true
@@ -618,6 +654,7 @@ with window_days as (
     select source, account_id, day, load_id
     from {{ days }}
     where source in ('{{ quarantine_sources() | join("', '") }}')
+        and load_kind <> 'intraday'
 ),
 
 held as (
@@ -631,6 +668,9 @@ held as (
         on a.account_sk = f.account_sk
     where f.report_date >= (select min(day) from window_days)
         and f.report_date <= (select max(day) from window_days)
+        {%- if facts.identifier in partial_day_facts() %}
+        and not f.is_partial_day
+        {%- endif %}
     group by a.platform, a.account_id, f.report_date
 ),
 

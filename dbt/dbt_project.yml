@@ -123,10 +123,13 @@ vars:
   # platform whose loads bring such totals; a platform that it does not name has zero. Zero for
   # Google, whose two sides are whole counts and whole micros of cost, so that a difference is no
   # rounding; a platform that rounds each row, such as Yandex, or cuts decimal places, such as
-  # TikTok, is to get a share of its own. Not checked yet on a live account: the stand of #217
-  # sets it.
+  # TikTok, is to get a share of its own. One hundredth for Meta, whose spend is an estimate as a
+  # numeric string on each row, so that the rounding of the campaigns may not sum to that of the
+  # account (ADR-0050): a small day can differ by more than that, and a loss below it passes. Not
+  # checked yet on a live account: the stands of #217 and #220 set them.
   platform_totals_tolerance:
     google_ads: 0
+    meta_ads: 0.01
   # The share of the rows of a fact of the core in the windows of a run whose entity, a campaign, an
   # ad group or an ad, has no row in its dimension, above which G2 fails the run
   # (tests/generic/few_without_a_dimension.sql, ADR-0035). Each entity that the statistics name gets
@@ -167,3 +170,9 @@ seeds:
       columns: true
     +quote_columns: false
     +pre-hook: "{{ wait_for_marts_init() }}"
+    seed_ad_platforms:
+      # The column of the windows, which the table of the seed of an earlier release lacks
+      # (macros/platforms.sql). Hooks add up, so the seed waits for marts-init too. Here and not in
+      # seeds/_seeds.yml, where dbt renders the config when it parses the project, without the
+      # macros of the project.
+      +pre-hook: "{{ add_platform_columns(this) }}"

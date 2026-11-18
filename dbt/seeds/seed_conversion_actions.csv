@@ -12,3 +12,17 @@ demo_social,omni_purchase,Purchases (all surfaces),purchase,false
 demo_social,offsite_conversion.fb_pixel_lead,Leads (pixel),lead,true
 demo_video,complete_payment,Complete payments,purchase,true
 demo_video,conversion,Conversions (the optimization event),other,false
+meta_ads,link_click,Link clicks,other,false
+meta_ads,landing_page_view,Landing page views,other,false
+meta_ads,offsite_conversion.fb_pixel_purchase,Purchases (pixel),purchase,true
+meta_ads,omni_purchase,Purchases (all surfaces),purchase,false
+meta_ads,onsite_conversion.purchase,Purchases on Facebook,purchase,false
+meta_ads,offsite_conversion.fb_pixel_lead,Leads (pixel),lead,true
+meta_ads,lead,Leads (offsite and on Facebook),lead,false
+meta_ads,onsite_conversion.lead_grouped,Leads on Facebook,lead,false
+meta_ads,offsite_conversion.fb_pixel_add_to_cart,Adds to cart (pixel),add_to_cart,false
+meta_ads,omni_add_to_cart,Adds to cart (all surfaces),add_to_cart,false
+meta_ads,offsite_conversion.fb_pixel_complete_registration,Registrations (pixel),sign_up,false
+meta_ads,omni_complete_registration,Registrations (all surfaces),sign_up,false
+meta_ads,mobile_app_install,Mobile app installs,app_install,false
+meta_ads,omni_app_install,App installs (all surfaces),app_install,false

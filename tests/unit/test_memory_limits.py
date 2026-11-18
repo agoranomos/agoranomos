@@ -202,9 +202,12 @@ def variant(
 ) -> dict[str, int]:
     """The limit of each service of a variant in a mode, in MiB, with the defaults, or with the
     values of settings for the settings of .env that it names: the services of the profiles of the
-    mode. The Celery overlay sets the limits of the services that it adds and of the scheduler,
-    which runs no task there; the worker extends the scheduler of compose.yaml, and takes its
-    limit, that of the tasks."""
+    mode. The Celery overlay sets the limits of the services that it adds, the broker and the
+    worker, and of the scheduler, which runs no task there. The worker extends the scheduler of
+    compose.yaml, and its own limit takes the place of the one that it would take from there. A
+    reading of the text does not follow extends, so a worker without a limit of its own would be
+    missing here, and test_the_services_of_the_variants_are_the_ones_that_have_limits would
+    fail."""
     values = settings or {}
 
     def value(limit: Limit) -> int:
@@ -220,7 +223,7 @@ def variant(
         for service, limit in limits("compose.celery.yaml").items()
         if limit.profiles & active
     }
-    return {**chosen, "airflow-worker": value(base["airflow-scheduler"]), **overlay}
+    return {**chosen, **overlay}
 
 
 def test_every_limit_is_also_the_limit_of_swap():
@@ -379,6 +382,16 @@ def test_the_reference_gives_the_sum_of_the_agency_profile():
     assert f"{total:,} MiB" in page.split("## Profiles", 1)[1].split("\n## ", 1)[0]
 
 
+@pytest.mark.parametrize("mode", sorted(MODES))
+@pytest.mark.parametrize("executor", sorted(BUDGET_MIB))
+def test_the_reference_gives_the_sum_of_each_variant_in_each_mode(executor, mode):
+    # The section "Memory limits" of docs/reference/system-requirements.md states the sum of the
+    # defaults of each variant in each mode, which a change of a limit changes with it.
+    page = (REPO_ROOT / "docs" / "reference" / "system-requirements.md").read_text(encoding="utf-8")
+    section = page.split("\n## Memory limits\n", 1)[1].split("\n## ", 1)[0]
+    assert f"{budgeted(executor, mode):,} MiB" in section
+
+
 def test_the_reference_gives_the_defaults_of_env_example():
     # The table of docs/reference/configuration.md, which a new measurement changes with the rest.
     page = (REPO_ROOT / "docs" / "reference" / "configuration.md").read_text(encoding="utf-8")
@@ -389,13 +402,15 @@ def test_the_reference_gives_the_defaults_of_env_example():
 
 # The listener of the alerts runs in the scheduler, and the watcher in the service that runs the
 # tasks, and each imports Apprise for its first send, which takes about 20 MiB in a process
-# (ADR-0045). The highest peaks of the two services, in the table of
-# docs/reference/system-requirements.md: the scheduler of the CeleryExecutor, which runs no task,
-# 422 MiB before the alerts, and the service of the tasks, the scheduler with the LocalExecutor and
-# the worker with the CeleryExecutor, which takes its limit, 976 MiB with Apprise in it already.
-# Apprise counts on top of both.
+# (ADR-0045). The highest peaks of the scheduler in each variant, in the table of
+# docs/reference/system-requirements.md: with the CeleryExecutor, where it runs no task, 422 MiB
+# before the alerts, and with the LocalExecutor, where it runs the tasks, 976 MiB with Apprise in
+# it already. Apprise counts on top of both, and on top of the highest peak of the worker of the
+# CeleryExecutor, which runs the tasks there: 1,175 MiB in a run of the transform of the demo (CI,
+# 13 November 2026).
 APPRISE_MIB = 20
 PEAKS_BEFORE_THE_ALERTS_MIB = {"celery": 422, "local": 976}
+WORKER_PEAK_MIB = 1175
 
 
 def formula(peak: int) -> int:
@@ -405,7 +420,8 @@ def formula(peak: int) -> int:
 
 
 def test_the_formula_of_a_limit_is_that_of_the_reference():
-    assert [formula(peak) for peak in (20, 204, 205, 422, 963)] == [256, 256, 384, 640, 1280]
+    peaks = (20, 204, 205, 422, 963, 974, 1175)
+    assert [formula(peak) for peak in peaks] == [256, 256, 384, 640, 1280, 1280, 1536]
 
 
 @pytest.mark.parametrize("executor", sorted(PEAKS_BEFORE_THE_ALERTS_MIB))
@@ -413,7 +429,14 @@ def test_the_scheduler_has_room_for_apprise_in_each_variant(executor):
     peak = PEAKS_BEFORE_THE_ALERTS_MIB[executor]
     limit = variant(executor)["airflow-scheduler"]
     assert limit >= formula(peak + APPRISE_MIB), f"{executor}: {limit} MiB"
-    if executor == "celery":
-        # The worker runs the task of the watcher, with the limit of the tasks.
-        tasks = variant("local")["airflow-scheduler"]
-        assert variant("celery")["airflow-worker"] == tasks
+
+
+def test_the_worker_has_a_limit_of_its_own_with_room_for_apprise():
+    # The worker of the CeleryExecutor runs the task of the watcher. It extends the scheduler of
+    # compose.yaml, whose limit is that of the tasks of the LocalExecutor, and the overlay gives it
+    # a setting of its own, as it peaks higher than that scheduler (system-requirements.md).
+    worker = limits("compose.celery.yaml")["airflow-worker"]
+    assert worker.setting == "AIRFLOW_WORKER_MEMORY"
+    assert limits("compose.yaml")["airflow-scheduler"].setting == "AIRFLOW_TASKS_MEMORY"
+    limit = variant("celery")["airflow-worker"]
+    assert limit >= formula(WORKER_PEAK_MIB + APPRISE_MIB), f"{limit} MiB"
