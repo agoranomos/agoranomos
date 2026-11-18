@@ -1,14 +1,15 @@
 """The history of the loads (ADR-0038, "The first load"): the kind of each load in core.loads, which
 the pin copies from the journal of the load, the view of the progress in the schema ops, the asset
-that the last task of a run of the transform that succeeded updates, and the history of Google Ads,
-which runs on that asset, in a running stack.
+that the last task of a run of the transform that succeeded updates, and the histories of Google Ads
+and of Meta, which run on that asset, with the planner that they share, in a running stack.
 
-No load reaches Google here: the DAGs of Google Ads stay paused but for one run of the history,
-whose plan reads the warehouse and asks the API nothing. That test names an account of google_ads
-of its own in extensions/model/clients.toml, with an ID of the placeholder of the guides, which no
+No load reaches Google or Meta here: their DAGs stay paused but for one run of each history, whose
+plan reads the warehouse and asks the API nothing. That test names an account of its platform of
+its own in extensions/model/clients.toml, with an ID of the placeholder of the guides, which no
 load ever took, so the plan finds no usual window and starts nothing; it takes the file out again
 and pauses the DAG in its finally. If it is killed before that, delete
-extensions/model/clients.toml and pause agoranomos_google_ads_history by hand. The demo takes its
+extensions/model/clients.toml and pause agoranomos_google_ads_history and
+agoranomos_meta_ads_history by hand. The demo takes its
 history in one load of each platform, of the kind history, and a daily load of the demo its usual
 window.
 
@@ -34,8 +35,6 @@ from airflow_api import (
 from stack_helpers import REPO_ROOT, wait_for, warehouse, warehouse_output
 
 TRANSFORM = "agoranomos_demo_transform"
-LOAD = "agoranomos_google_ads_daily"
-HISTORY = "agoranomos_google_ads_history"
 # The asset of a run of the transform in which every task succeeded (assets.py).
 TRANSFORMED = "agoranomos_transformed"
 # The rows of each whole load of a schema of raw, by load and account, with the kind that its
@@ -45,14 +44,19 @@ JOURNAL = (
     "FROM {dataset}._agoranomos_loads AS j "
     "JOIN {dataset}._dlt_loads AS l ON l.load_id = j._dlt_load_id AND l.status = 0"
 )
-# An account of google_ads of the test, with the ten digits that the guides show.
+# The DAG of the load and that of the history of each real platform, and an account of the
+# platform for the test, with the ID that its guide shows.
+PLATFORMS = {
+    "google_ads": ("agoranomos_google_ads_daily", "agoranomos_google_ads_history", "1234567890"),
+    "meta_ads": ("agoranomos_meta_ads_daily", "agoranomos_meta_ads_history", "1234567890123456"),
+}
 CLIENTS = """\
 [clients.history-test]
 name = "History of the stack test"
 
 [[accounts]]
-platform = "google_ads"
-account_id = "1234567890"
+platform = "{platform}"
+account_id = "{account_id}"
 client = "history-test"
 """
 
@@ -159,48 +163,56 @@ def test_a_run_of_the_transform_that_succeeded_ends_by_updating_its_asset(
     assert len(events) == 1, len(events)
 
 
-def test_the_load_of_google_ads_takes_the_parameters_of_a_run_of_the_history(airflow_url, token):
+@pytest.mark.parametrize("platform", sorted(PLATFORMS))
+def test_the_load_of_a_platform_takes_the_parameters_of_a_run_of_its_history(
+    airflow_url, token, platform
+):
     # A scheduled run has the defaults, and takes the usual window; the history DAG runs on the
     # asset of the transform. Both start paused.
-    for dag_id in (LOAD, HISTORY):
+    load, history, _ = PLATFORMS[platform]
+    for dag_id in (load, history):
         wait_for_dag(airflow_url, token, dag_id)
-    status, details = api(airflow_url, token, "GET", f"/api/v2/dags/{LOAD}/details")
+    status, details = api(airflow_url, token, "GET", f"/api/v2/dags/{load}/details")
     assert status == 200, details
     params = {name: param["value"] for name, param in details["params"].items()}
     assert params == {"accounts": [], "window_from": None, "window_to": None}
-    status, details = api(airflow_url, token, "GET", f"/api/v2/dags/{HISTORY}/details")
+    status, details = api(airflow_url, token, "GET", f"/api/v2/dags/{history}/details")
     assert status == 200, details
     assert TRANSFORMED in str(details["asset_expression"]), details["asset_expression"]
     assert details["max_active_runs"] == 1
 
 
-def test_the_history_of_google_ads_starts_nothing_before_the_usual_window(env, airflow_url, token):
+@pytest.mark.parametrize("platform", sorted(PLATFORMS))
+def test_the_history_of_a_platform_starts_nothing_before_the_usual_window(
+    env, airflow_url, token, platform
+):
     # An account that no load has taken waits for its usual window, which the daily load takes:
     # the plan reads the journal and core.loads as loader, finds no window, and the task that
     # would start the load of a portion is skipped. No run of the load starts.
+    load, history, account_id = PLATFORMS[platform]
     folder = env.get("AGORANOMOS_EXTENSIONS_DIR") or "./extensions"
     path = (REPO_ROOT / folder).resolve() / "model" / "clients.toml"
     assert not path.exists(), "extensions/model/clients.toml is in the way of this test"
-    wait_for_dag(airflow_url, token, HISTORY)
-    assert is_paused(airflow_url, token, HISTORY), f"{HISTORY} is to start paused"
-    loads_before = len(dag_runs(airflow_url, token, LOAD, limit=50))
-    path.write_text(CLIENTS, encoding="utf-8")
+    wait_for_dag(airflow_url, token, history)
+    assert is_paused(airflow_url, token, history), f"{history} is to start paused"
+    loads_before = len(dag_runs(airflow_url, token, load, limit=50))
+    path.write_text(CLIENTS.format(platform=platform, account_id=account_id), encoding="utf-8")
     try:
-        unpause(airflow_url, token, HISTORY)
-        run = trigger(airflow_url, token, HISTORY)
-        run = wait_for_run(airflow_url, token, HISTORY, run["dag_run_id"], timeout=300)
+        unpause(airflow_url, token, history)
+        run = trigger(airflow_url, token, history)
+        run = wait_for_run(airflow_url, token, history, run["dag_run_id"], timeout=300)
         states = {i["task_id"]: i["state"] for i in task_instances(airflow_url, token, run)}
         assert run["state"] == "success", states
         assert states == {"plan": "success", "load_portion": "skipped"}
-        assert len(dag_runs(airflow_url, token, LOAD, limit=50)) == loads_before
+        assert len(dag_runs(airflow_url, token, load, limit=50)) == loads_before
     finally:
         # A run that an event of the asset queued while the DAG was paused runs once it is
         # unpaused, and ends before the DAG is paused again and the file goes.
         wait_for(
-            lambda: not is_busy(airflow_url, token, HISTORY),
+            lambda: not is_busy(airflow_url, token, history),
             300,
             interval=5,
-            message=f"the runs of {HISTORY} did not end",
+            message=f"the runs of {history} did not end",
         )
-        pause(airflow_url, token, HISTORY)
+        pause(airflow_url, token, history)
         path.unlink(missing_ok=True)

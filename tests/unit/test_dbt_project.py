@@ -89,6 +89,25 @@ def test_the_project_pins_the_dbt_line_of_the_image():
     assert re.search(r"^dbt-core==1\.12\.\d+$", pins, flags=re.MULTILINE)
 
 
+def test_the_hooks_are_in_the_project_file_alone():
+    # dbt 1.12.6 renders a hook in a properties file when it parses the project, where the macros
+    # of the project are not defined, so every command of dbt failed on the pre-hook of the seed of
+    # the platforms in seeds/_seeds.yml (checked on 17 November 2026). dbt_project.yml keeps its
+    # hooks for the run, as the config blocks of the SQL files do.
+    files = [
+        *(DBT / "models").rglob("*.yml"),
+        *SEEDS.glob("*.yml"),
+        *(DBT / "snapshots").glob("*.yml"),
+    ]
+    for path in sorted(files):
+        text = path.read_text(encoding="utf-8")
+        hook = re.search(r"^\s*\+?(pre|post)[-_]hook\s*:", text, flags=re.MULTILINE)
+        assert hook is None, path.relative_to(DBT)
+    project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
+    assert "    seed_ad_platforms:\n" in project
+    assert '+pre-hook: "{{ add_platform_columns(this) }}"' in project
+
+
 def yaml_files() -> list[Path]:
     return sorted((DBT / "models").rglob("*.yml"))
 
@@ -318,6 +337,7 @@ LISTED_COLUMNS = {
     "ad_platform",
     "attribution_setting",
     "conversion_category",
+    "cross_source",
     "currency",
     "kind",
     "mimics",
@@ -597,17 +617,34 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
     rows = {r["platform"]: r for r in seed_rows("seed_ad_platforms")}
     from agoranomos_pipelines.demo import platforms
 
-    # And the real sources, which mimic nothing: the rates of the ECB and Google Ads (ADR-0032).
-    assert set(rows) == {*platforms.PLATFORMS, "ecb", "google_ads"}
+    # And the real sources, which mimic nothing: the rates of the ECB, Google Ads (ADR-0032), Meta
+    # (ADR-0050), and the rates of the Bank of Italy and of the NBK (ADR-0042).
+    assert set(rows) == {
+        *platforms.PLATFORMS,
+        "bank_of_italy",
+        "ecb",
+        "google_ads",
+        "meta_ads",
+        "nbk",
+    }
     for code, platform in platforms.PLATFORMS.items():
         assert rows[code]["mimics"] == platform.mimics
         assert rows[code]["is_demo"] == "true"
+    assert rows["bank_of_italy"] == {
+        "platform": "bank_of_italy",
+        "platform_name": "Bank of Italy",
+        "kind": "exchange_rates",
+        "mimics": "",
+        "is_demo": "false",
+        "restatement_window_days": "14",
+    }
     assert rows["ecb"] == {
         "platform": "ecb",
         "platform_name": "European Central Bank",
         "kind": "exchange_rates",
         "mimics": "",
         "is_demo": "false",
+        "restatement_window_days": "14",
     }
     assert rows["google_ads"] == {
         "platform": "google_ads",
@@ -615,6 +652,23 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
         "kind": "ads",
         "mimics": "",
         "is_demo": "false",
+        "restatement_window_days": "90",
+    }
+    assert rows["meta_ads"] == {
+        "platform": "meta_ads",
+        "platform_name": "Meta Ads",
+        "kind": "ads",
+        "mimics": "",
+        "is_demo": "false",
+        "restatement_window_days": "28",
+    }
+    assert rows["nbk"] == {
+        "platform": "nbk",
+        "platform_name": "National Bank of Kazakhstan",
+        "kind": "exchange_rates",
+        "mimics": "",
+        "is_demo": "false",
+        "restatement_window_days": "14",
     }
 
 
@@ -895,13 +949,28 @@ def test_staging_reads_the_newest_pinned_load_of_each_account_and_day():
     assert "where a.source = '{{ source }}' and a.status = 'accepted' and a.outcome = 'loaded'" in (
         pinned
     )
-    assert "on oldest.account_id = a.account_id and a.load_id::numeric > oldest.load_number" in (
-        pinned
-    )
+    # Of one rank, whole or intraday, the accepted loads newer than the oldest pinned one count;
+    # an accepted whole load counts on the days of a pinned intraday load whatever their load IDs
+    # (ADR-0051).
+    assert (
+        "on oldest.account_id = a.account_id and oldest.is_intraday = (a.kind = 'intraday')\n"
+        "            and a.load_id::numeric > oldest.load_number"
+    ) in pinned
     assert "min(load_id::numeric) as load_number" in pinned
+    assert "group by account_id, kind = 'intraday'" in pinned
+    assert (
+        "            a.account_id, a.load_id, a.kind, greatest(a.window_from, i.window_from),\n"
+        "            least(a.window_to, i.window_to), a.status\n"
+    ) in pinned
+    assert "and i.status = 'pinned' and i.outcome = 'loaded' and i.kind = 'intraday'" in pinned
     assert "select distinct on (l.account_id, w.day)" in pinned
-    assert "order by l.account_id, w.day, l.load_id::numeric desc" in pinned
+    # A whole load before an intraday one, and then the largest load ID.
+    assert "order by l.account_id, w.day, l.kind = 'intraday', l.load_id::numeric desc" in pinned
     assert pinned.rstrip().endswith("where d.status = 'pinned'")
+    # The lists leave out the loads of the kind intraday, which take none.
+    lists = text[text.index("{% macro newest_lists(") :]
+    lists = lists[: lists.index("{%- endmacro %}")]
+    assert lists.count("kind <> 'intraday'") == 2
     # The pin is the one thing that reads the raw journals and _dlt_loads to choose loads.
     assert "_dlt_loads" not in pinned
     assert "_agoranomos_loads" not in pinned
@@ -952,10 +1021,10 @@ def test_the_pin_copies_each_whole_load_once_and_skips_a_source_without_tables()
         "invocation_id,\n    kind\n"
     ) in text
     assert "    l.inserted_at, '{{ invocation_id }}'::uuid,\n" in text
-    # The kind of the load, window or history (ADR-0038), from a journal that has the column, and
-    # window from one that does not, or from a row without it.
+    # The kind of the load, window, history (ADR-0038) or intraday (ADR-0051), from a journal that
+    # has the column, and window from one that does not, or from a row without it or with another.
     assert (
-        "{% if kinds %}case when j.kind = 'history' then 'history' else 'window' end"
+        "{% if kinds %}case when j.kind in ('history', 'intraday') then j.kind else 'window' end"
         "{% else %}'window'{% endif %}"
     ) in text
     assert "adapter.get_columns_in_relation(journal)" in text
@@ -1006,8 +1075,20 @@ def test_the_pin_makes_the_partitions_of_the_facts_that_each_source_is_to_write(
     assert len(partitioned) == 5, sorted(partitioned)
     assert {fact for listed in facts.values() for fact in listed} == partitioned
     assert facts["raw_demo_web"] == ["web_sessions_daily"]
-    assert facts["raw_demo_fx"] == facts["raw_ecb"] == []
-    for source in ("raw_demo_search", "raw_demo_social", "raw_demo_video", "raw_google_ads"):
+    assert (
+        facts["raw_demo_fx"]
+        == facts["raw_ecb"]
+        == facts["raw_bank_of_italy"]
+        == facts["raw_nbk"]
+        == []
+    )
+    for source in (
+        "raw_demo_search",
+        "raw_demo_social",
+        "raw_demo_video",
+        "raw_google_ads",
+        "raw_meta_ads",
+    ):
         assert sorted(facts[source]) == sorted(partitioned - {"web_sessions_daily"}), source
     rates = (MIGRATIONS / "0007_create_the_rates.sql").read_text(encoding="utf-8")
     assert "PARTITION BY" not in rates
@@ -1015,7 +1096,8 @@ def test_the_pin_makes_the_partitions_of_the_facts_that_each_source_is_to_write(
 
 def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_does():
     # For the demo, as the fact tables of platforms.py hold them, through which each load records
-    # its windows; Google Ads has the shape of demo_search, and the rates of the ECB, one account.
+    # its windows; Google Ads has the shape of demo_search, Meta that of demo_social, and the rates
+    # of the ECB and of the Bank of Italy, one account.
     from agoranomos_pipelines.demo import platforms
 
     text = (DBT / "macros" / "newest_load.sql").read_text(encoding="utf-8")
@@ -1025,8 +1107,11 @@ def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_do
     }
     assert set(keys) == {
         *(platform.dataset for platform in platforms.PLATFORMS.values()),
+        "raw_bank_of_italy",
         "raw_ecb",
         "raw_google_ads",
+        "raw_meta_ads",
+        "raw_nbk",
     }
 
     def plain(sql):
@@ -1046,7 +1131,11 @@ def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_do
                 assert prefix.count("/") == 1, platform.code
                 assert account == f"split_part({plain(fact.account_sql)}, '/', 2)", platform.code
     assert keys["raw_google_ads"] == keys["raw_demo_search"]
+    assert keys["raw_meta_ads"] == keys["raw_demo_social"]
     assert keys["raw_ecb"] == (None, "cast(r.time_period as date)")
+    assert keys["raw_bank_of_italy"] == (None, "cast(r.reference_date as date)")
+    # The NBK writes its day as DD.MM.YYYY, in the column date of each item (nbk.py).
+    assert keys["raw_nbk"] == (None, "to_date(r.date, 'DD.MM.YYYY')")
 
 
 def test_every_table_of_the_demo_can_be_missing():
@@ -1286,7 +1375,7 @@ def test_the_intermediate_models_have_their_critical_tests():
 
 
 # The ad platforms of the model, whose staging the facts of ads of the core read.
-AD_PLATFORMS = ("demo_search", "demo_social", "demo_video", "google_ads")
+AD_PLATFORMS = ("demo_search", "demo_social", "demo_video", "google_ads", "meta_ads")
 # The tests of the sums of G2: what each compares, the fact of the core, and the staging models.
 G2_SUMS = [
     *(
@@ -1429,16 +1518,104 @@ def test_the_staging_of_the_ecb_has_the_critical_tests_of_the_rates_of_the_demo(
     assert "severity" not in ecb
 
 
-def test_the_rates_take_the_ecb_alone_once_it_has_any_and_the_loads_show_it_before_a_load():
-    # Never a fictional rate of the demo on a day on which the ECB publishes none (ADR-0032): the
-    # rates of the core take the ECB once it has a rate in staging or in the core.
+def test_the_rates_take_no_rate_of_the_demo_once_a_real_source_has_one():
+    # Never a fictional rate of the demo on a day on which a real source publishes none
+    # (ADR-0032, ADR-0042): the demo is a candidate only while no source of the order has a rate,
+    # in staging or in the core.
     rates = (DBT / "macros" / "rates.sql").read_text(encoding="utf-8")
+    assert "{%- set links = chain + ['demo_fx'] -%}" in rates
     assert (
-        "    when exists (select from {{ ecb }}) or exists (select from {{ rates }} where "
-        "rate_source = 'ecb')\n        then 'ecb'\n    else 'demo_fx'\n"
+        "    {%- if code == 'demo_fx' %}\n        and not (select found from real)\n"
+        "    {%- endif %}\n"
     ) in rates
     loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
     assert "('raw_ecb', 'ecb')," in loads
+    assert "('raw_bank_of_italy', 'bank_of_italy')," in loads
+
+
+NBK = STAGING / "nbk"
+# The columns that the load of the NBK writes, every one text (nbk.py).
+NBK_COLUMNS = ("date", "fullname", "title", "description", "quant", "index", "change")
+
+
+def test_the_staging_of_the_nbk_reads_its_feed_through_its_shape_even_before_a_load():
+    # The DAG of the rates of the NBK starts paused, so the model reads an empty query of the same
+    # columns until a load writes the table (ADR-0042).
+    text = (DAGS_PIPELINES / "nbk.py").read_text(encoding="utf-8")
+    assert 'DAY_COLUMN = "date"\n' in text
+    assert 'FIELDS = ("fullname", "title", "description", "quant", "index", "change")\n' in text
+    text = (NBK / "stg_nbk__rates_daily.sql").read_text(encoding="utf-8")
+    comment, *_ = text.splitlines()
+    assert comment.startswith("-- stg_nbk__rates_daily.sql: ")
+    columns = dict(re.findall(r"'(\w+)': '([\w ]+)'", text))
+    assert columns == dict.fromkeys((*NBK_COLUMNS, "_dlt_load_id"), "text")
+    call = "{{ nbk_rates(newest_load(relation_or_empty(source('raw_nbk', 'rates_daily'), {"
+    assert text.count(call) == 1
+    assert text.rstrip().endswith("}), 'raw_nbk', ref('stg_loads__newest_days')), 'nbk') }}")
+
+
+def test_the_shape_of_the_nbk_gives_the_rates_of_one_tenge_and_the_tenge_of_one_unit():
+    # rates_published reads the units of quote_currency for one unit of base_currency, so for the
+    # base KZT the rate is quant over the price in tenge of quant units, with no rounding to eight
+    # places; base_rate keeps the convention of the NBK, the tenge for one unit (ADR-0042).
+    macro = (DBT / "macros" / "shapes" / "nbk_rates.sql").read_text(encoding="utf-8")
+    assert "{% macro nbk_rates(relation, platform) %}" in macro
+    assert "cast('KZT' as text) as base_currency," in macro
+    assert "title as quote_currency," in macro
+    assert "units / price as rate," in macro
+    assert "price / units as base_rate," in macro
+    assert "'{{ platform }}' as rate_source" in macro
+    assert "to_date(\"date\", 'DD.MM.YYYY') as rate_date," in macro
+    assert "where price > 0 and units > 0" in macro
+    body = macro[macro.index("{% macro") :]
+    assert "numeric(" not in body
+    assert "round(" not in body
+    # The direction in which rates_known divides: the rate of the reporting currency over that of
+    # the currency, each the units for one unit of the base; the rate of the NBK from its price, as
+    # a row of the core keeps it.
+    rates = (DBT / "macros" / "rates.sql").read_text(encoding="utf-8")
+    assert "r.amount / c.amount as rate_into_reporting_currency" in rates
+    assert "b.rate / p.base_rate as amount," in rates
+    assert "(case when {{ code }} = 'nbk' then 1 / {{ value }} else {{ value }} end)" in rates
+
+
+def test_the_sources_of_the_nbk_are_the_tables_that_its_load_writes():
+    text = (NBK / "_nbk__sources.yml").read_text(encoding="utf-8")
+    [source] = re.findall(r"^  - name: (\w+)\n    description:", text, flags=re.MULTILINE)
+    assert source == "raw_nbk"
+    assert re.search(r"^    schema: raw_nbk$", text, flags=re.MULTILINE)
+    pattern = r"^      - name: (\w+)\n        description:"
+    assert set(re.findall(pattern, text, flags=re.MULTILINE)) == {
+        "rates_daily",
+        "_agoranomos_loads",
+        "_dlt_loads",
+    }
+
+
+def test_the_staging_of_the_nbk_has_the_tests_of_the_rates_and_of_its_base_rate():
+    nbk = (NBK / "_nbk__models.yml").read_text(encoding="utf-8").split("    data_tests:", 1)[1]
+    ecb = (ECB / "_ecb__models.yml").read_text(encoding="utf-8").split("    data_tests:", 1)[1]
+    base_rate = (
+        "      - name: base_rate\n"
+        "        description: '{{ doc(\"base_rate\") }}'\n"
+        "        data_tests: [not_null, non_negative]\n"
+    )
+    assert base_rate in nbk
+    assert nbk.replace(base_rate, "") == ecb
+    loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
+    assert "('raw_nbk', 'nbk')," in loads
+    # The rates of the core and the check of G1 read the rates of the NBK, as those of every source
+    # of the order (ADR-0042), and nothing else does.
+    readers = sorted(
+        path.relative_to(DBT).as_posix()
+        for path in (DBT / "models").rglob("*.sql")
+        if "stg_nbk__rates_daily" in path.read_text(encoding="utf-8")
+    )
+    assert readers == [
+        "models/core/core_fx_rates_daily.sql",
+        "models/intermediate/int_g1_failures.sql",
+        "models/staging/nbk/stg_nbk__rates_daily.sql",
+    ]
 
 
 GOOGLE_ADS = STAGING / "google_ads"
@@ -1593,6 +1770,200 @@ def test_every_union_of_the_platforms_reads_google_ads_and_the_loads_show_it():
     assert "('raw_google_ads', 'google_ads')," in loads
 
 
+META_ADS = STAGING / "meta_ads"
+# The staging models of Meta, each one call of a macro of the shape that demo_social mimics, over
+# the tables of raw_meta_ads, through relation_or_empty, as the DAG starts paused (ADR-0050), with
+# the level of a report where it is not that of campaigns; the totals of the accounts, which the
+# demo does not have, the connector alone reads.
+META_ADS_MODELS = {
+    **{
+        model: (
+            macro,
+            [table.replace("raw_demo_social", "raw_meta_ads") for table in tables],
+            *level,
+        )
+        for model, (macro, tables, *level) in SHAPED["demo_social"].items()
+    },
+    "account_totals": ("meta_totals", ["insights_account"]),
+}
+
+
+def meta_ads_columns() -> dict[str, set[str]]:
+    """The columns that dlt makes of the fields of each table of the load of Meta, as
+    meta_ads.columns hints them: the business of an account as its ID and name, and no column for
+    the lists of actions, which become child tables. dlt is not in the development environment, so
+    the fields come from the text of the source."""
+    source = ast.parse((DAGS_PIPELINES / "meta_ads.py").read_text(encoding="utf-8"))
+    constants = {
+        node.targets[0].id: node.value
+        for node in source.body
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+    }
+    named = {name: ast.literal_eval(constants[name]) for name in ("STATS", "ACTIONS", "ACCOUNT")}
+
+    def fields(node):
+        found = []
+        for item in node.elts:
+            if isinstance(item, ast.Starred):
+                found += named[item.value.id]
+            else:
+                found.append(ast.literal_eval(item))
+        return found
+
+    tables = {
+        ast.literal_eval(key): fields(value)
+        for key, value in zip(constants["FIELDS"].keys, constants["FIELDS"].values, strict=True)
+    }
+    hinted = {}
+    for table, names in tables.items():
+        columns = set()
+        for name in names:
+            if name in ("actions", "action_values"):
+                continue
+            columns |= {"business__id", "business__name"} if name == "business" else {name}
+        hinted[table] = columns
+    return hinted
+
+
+def test_each_staging_model_of_meta_ads_is_one_call_of_the_shape_that_the_demo_shares():
+    found = {path.name for path in META_ADS.glob("*.sql")}
+    assert found == {f"stg_meta_ads__{model}.sql" for model in META_ADS_MODELS}
+    for model, (macro, tables, *level) in META_ADS_MODELS.items():
+        text = (META_ADS / f"stg_meta_ads__{model}.sql").read_text(encoding="utf-8")
+        assert text.startswith(f"-- stg_meta_ads__{model}.sql: "), model
+        relations = [f"relation_or_empty(source('raw_meta_ads', '{table}'), {{" for table in tables]
+        by_load = model in BY_LOAD
+        reader = "newest_load" if by_load else "newest_list"
+        assert text.count(f"{{{{ {macro}({reader}({relations[0]}") == 1, model
+        loads = "ref('stg_loads__newest_days')" if by_load else "source('core', 'loads')"
+        assert f"}}), 'raw_meta_ads', {loads})" in text, model
+        # The child tables of the actions follow the rows of their insights, in this order.
+        assert [text.index(relation) for relation in relations] == sorted(
+            text.index(relation) for relation in relations
+        ), model
+        assert text.count("relation_or_empty(") == len(tables), model
+        arguments = ", ".join(["'meta_ads'", *(f"'{name}'" for name in level)])
+        assert text.rstrip().endswith(f"), {arguments}) }}}}"), model
+        assert "depends_on" not in text, model
+    macros = (DBT / "macros" / "shapes" / "meta_v26.sql").read_text(encoding="utf-8")
+
+    def shape(name):
+        body = macros[macros.index(f"{{% macro {name}(") :]
+        return body[: body.index("{% endmacro %}")]
+
+    assert "{% macro meta_totals(relation, platform) %}" in macros
+    totals = shape("meta_totals")
+    # The clicks of the totals are the link clicks, as those of the campaigns are.
+    assert "{{ to_count('inline_link_clicks') }} as total_clicks" in totals
+    assert "{{ to_count('inline_link_clicks') }} as clicks" in shape("meta_stats")
+    assert "_dlt_load_id as load_id" in totals
+
+
+def test_the_columns_of_the_empty_tables_of_meta_ads_are_the_fields_of_its_requests():
+    # The empty query of a table before the first load has the columns that dlt makes from the
+    # fields of its request, with the load and the ID of each row, which the actions join; a child
+    # table of actions has the columns that the macros read.
+    hinted = meta_ads_columns()
+    child = {"action_type", "value", "_dlt_parent_id", "_dlt_id"}
+    for model, (_, tables, *_) in META_ADS_MODELS.items():
+        text = (META_ADS / f"stg_meta_ads__{model}.sql").read_text(encoding="utf-8")
+        for table in tables:
+            start = text.index(f"relation_or_empty(source('raw_meta_ads', '{table}'), {{")
+            body = text[start : text.index("})", start)]
+            columns = set(re.findall(r"'(\w+)': '[\w ]+'", body))
+            wanted = child if "__" in table else hinted[table] | {"_dlt_load_id", "_dlt_id"}
+            assert columns == wanted, (model, table, sorted(columns ^ wanted))
+            assert ("'date_start': 'date'" in body) is ("date_start" in wanted), (model, table)
+
+
+def test_the_staging_of_meta_ads_has_the_tests_of_the_staging_of_demo_social():
+    # The same macros give the same columns, and the same critical tests guard both. The totals of
+    # the accounts, which the demo does not have, come last.
+    demo = (STAGING / "demo_social" / "_demo_social__models.yml").read_text(encoding="utf-8")
+    text = (META_ADS / "_meta_ads__models.yml").read_text(encoding="utf-8")
+    ads, totals = text.split("  - name: stg_meta_ads__account_totals\n")
+    tested = {
+        name: column_tests(column)
+        for name, column in blocks("    columns:\n" + totals.split("    columns:\n")[1], 6).items()
+    }
+    assert {name for name, tests in tested.items() if tests} == set(STATS_KEY[:3])
+
+    def tests(text):
+        return [
+            line
+            for line in text.replace("demo_social", "meta_ads").splitlines()
+            if "description" not in line and not line.startswith("      ")
+        ]
+
+    assert [
+        b.split("    data_tests:", 1)[1].split("  - name:", 1)[0]
+        for b in ads.split("  - name: stg_")[1:]
+    ] == [
+        b.split("    data_tests:", 1)[1].split("  - name:", 1)[0]
+        for b in demo.replace("demo_social", "meta_ads").split("  - name: stg_")[1:]
+    ]
+    assert tests(ads) == tests(demo)
+
+
+def test_the_sources_of_meta_ads_are_the_tables_that_its_load_writes():
+    # The tables of demo_social with the totals of the account, the child tables of the actions
+    # of each level of insights, the journal and the loads of dlt.
+    text = (META_ADS / "_meta_ads__sources.yml").read_text(encoding="utf-8")
+    [source] = re.findall(r"^  - name: (\w+)\n    description:", text, flags=re.MULTILINE)
+    assert source == "raw_meta_ads"
+    assert re.search(r"^    schema: raw_meta_ads$", text, flags=re.MULTILINE)
+    pattern = r"^      - name: (\w+)\n        description:"
+    demo = (STAGING / "demo_social" / "_demo_social__sources.yml").read_text(encoding="utf-8")
+    assert set(re.findall(pattern, text, flags=re.MULTILINE)) == {
+        *re.findall(pattern, demo, flags=re.MULTILINE),
+        "insights_account",
+    }
+    assert set(meta_ads_columns()) <= set(re.findall(pattern, text, flags=re.MULTILINE))
+
+
+def test_every_union_of_the_platforms_reads_meta_ads_and_the_loads_show_it():
+    unions = {
+        "int_conversion_actions__resolved": ["stg_meta_ads__campaign_conversions"],
+        "int_accounts__current": ["stg_meta_ads__accounts", "stg_meta_ads__campaign_stats"],
+        "int_campaigns__current": ["stg_meta_ads__campaigns", "stg_meta_ads__campaign_stats"],
+        "int_ad_groups__current": ["stg_meta_ads__ad_groups", "stg_meta_ads__ad_group_stats"],
+        "int_ads__current": ["stg_meta_ads__ads", "stg_meta_ads__ad_stats"],
+    }
+    for model, staged in unions.items():
+        text = (INTERMEDIATE / f"{model}.sql").read_text(encoding="utf-8")
+        for name in staged:
+            assert f"from {{{{ ref('{name}') }}}}" in text, (model, name)
+        if model != "int_conversion_actions__resolved" and model != "int_accounts__current":
+            assert "{{ newest_lists('raw_meta_ads', source('core', 'loads')) }}" in text, model
+    totals = (DBT / "models" / "core" / "platform_totals_daily.sql").read_text(encoding="utf-8")
+    assert "from {{ ref('stg_meta_ads__account_totals') }}" in totals
+    loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
+    assert "('raw_meta_ads', 'meta_ads')," in loads
+
+
+def test_the_action_types_of_meta_ads_count_a_purchase_once():
+    # ADR-0050: the action types of the seed come from the reference of AdsActionStats; the
+    # purchases and the leads of the pixel are primary, and the grouped types that count the same
+    # actions again are not, as for demo_social.
+    rows = [r for r in seed_rows("seed_conversion_actions") if r["platform"] == "meta_ads"]
+    primary = {r["conversion_action_id"] for r in rows if r["is_primary"] == "true"}
+    assert primary == {
+        "offsite_conversion.fb_pixel_purchase",
+        "offsite_conversion.fb_pixel_lead",
+    }
+    found = {r["conversion_action_id"]: r["conversion_category"] for r in rows}
+    for grouped in ("omni_purchase", "lead", "onsite_conversion.lead_grouped"):
+        assert grouped in found, grouped
+        assert grouped not in primary, grouped
+    demo = {
+        r["conversion_action_id"]: (r["conversion_category"], r["is_primary"])
+        for r in seed_rows("seed_conversion_actions")
+        if r["platform"] == "demo_social"
+    }
+    meta = {r["conversion_action_id"]: (r["conversion_category"], r["is_primary"]) for r in rows}
+    assert {action: meta[action] for action in demo} == demo
+
+
 PROJECT_FILE = DBT / "dbt_project.yml"
 SNAPSHOTS = DBT / "snapshots"
 SNAPSHOTS_FILE = SNAPSHOTS / "_snapshots.yml"
@@ -1664,7 +2035,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 319, counted
+    assert counted == 379, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text
@@ -1754,14 +2125,30 @@ def dimension_tables() -> dict[str, dict]:
 
 
 # The rates of the core, which the model core_fx_rates_daily writes under the name of its table, as
-# a mart has the name (ADR-0042).
+# a mart has the name (ADR-0042), and the migration that adds the second leg of a rate to it.
 RATES_MIGRATION = "0007_create_the_rates.sql"
+RATES_LEG_MIGRATION = "0010_add_the_second_leg_of_a_rate.sql"
 RATES_MODEL = "core_fx_rates_daily"
+ADDED = re.compile(
+    r"^ALTER TABLE core\.(\w+)\n  ADD COLUMN (\w+) ([a-z]+(?:\(\d+(?:,\d+)?\))?)", flags=re.M
+)
 
 
 def rates_table() -> dict:
-    """The table of the rates of the core, as migration 0007 creates it."""
-    return migration_tables({RATES_MIGRATION: {"fx_rates_daily"}})["fx_rates_daily"]
+    """The table of the rates of the core, as migration 0007 creates it and 0010 adds to it: its
+    columns in order, its key, the types of the added columns, and the comments of the table and of
+    its columns, those of 0010 in place of those of 0007."""
+    table = migration_tables({RATES_MIGRATION: {"fx_rates_daily"}})["fx_rates_daily"]
+    text = (MIGRATIONS / RATES_LEG_MIGRATION).read_text(encoding="utf-8")
+    table["added"] = {}
+    for name, column, kind in ADDED.findall(text):
+        if name == "fx_rates_daily":
+            table["columns"].append(column)
+            table["added"][column] = kind
+    for kind, name, column, body in COMMENT.findall(text):
+        if name == "fx_rates_daily":
+            table["comments"][None if kind == "TABLE" else column] = body.replace("''", "'")
+    return table
 
 
 FACT_CREATE = re.compile(
@@ -1769,23 +2156,36 @@ FACT_CREATE = re.compile(
     flags=re.M | re.S,
 )
 FACT_COLUMN = re.compile(r"^  (\w+) ([a-z]+(?:\(\d+(?:,\d+)?\))?)")
+# A column that a later migration adds to a table, as the core changes by addition (ADR-0044).
+ADD_COLUMN = re.compile(
+    r"^ALTER TABLE core\.(\w+)\n  ADD COLUMN (\w+) ([a-z]+(?:\(\d+(?:,\d+)?\))?)", flags=re.M
+)
 
 
 def fact_tables() -> dict[str, dict]:
-    """The facts of the core, as migration 0005 creates them: for each, its columns in order with
-    their types, without a collation, and the comments of the table and of its columns."""
-    text = (MIGRATIONS / "0005_create_the_facts.sql").read_text(encoding="utf-8")
+    """The facts of the core, as migration 0005 creates them and the later migrations add to
+    them: for each, its columns in order with their types, without a collation, and the comments
+    of the table and of its columns, the newest of each."""
     tables: dict[str, dict] = {}
-    for name, body in FACT_CREATE.findall(text):
-        columns = {
-            found.group(1): found.group(2)
-            for found in map(FACT_COLUMN.match, body.splitlines())
-            if found and found.group(1) not in ("PRIMARY", "CHECK", "UNIQUE")
-        }
-        tables[name] = {"columns": list(columns), "types": columns, "comments": {}}
-    for kind, table, column, body in COMMENT.findall(text):
-        if table in tables:
-            tables[table]["comments"][None if kind == "TABLE" else column] = body.replace("''", "'")
+    for path in sorted(MIGRATIONS.glob("*.sql")):
+        if path.name < "0005":
+            continue
+        text = path.read_text(encoding="utf-8")
+        for name, body in FACT_CREATE.findall(text):
+            columns = {
+                found.group(1): found.group(2)
+                for found in map(FACT_COLUMN.match, body.splitlines())
+                if found and found.group(1) not in ("PRIMARY", "CHECK", "UNIQUE")
+            }
+            tables[name] = {"columns": list(columns), "types": columns, "comments": {}}
+        for table, column, data_type in ADD_COLUMN.findall(text):
+            if table in tables:
+                tables[table]["columns"].append(column)
+                tables[table]["types"][column] = data_type
+        for kind, table, column, body in COMMENT.findall(text):
+            if table in tables:
+                comment = body.replace("''", "'")
+                tables[table]["comments"][None if kind == "TABLE" else column] = comment
     return tables
 
 
@@ -1881,26 +2281,42 @@ def test_the_rates_of_the_core_merge_the_days_that_a_run_brings():
         for found in map(FACT_COLUMN.match, body.splitlines())
         if found and found.group(1) not in ("PRIMARY", "CHECK", "UNIQUE")
     }
+    columns |= table["added"]
     assert list(columns) == table["columns"]
     for column, kind in columns.items():
         assert re.search(rf" as {re.escape(kind)}\) as {column},?\n", text), column
     assert set(referenced(text)) == {
+        "stg_bank_of_italy__rates_daily",
+        "stg_nbk__rates_daily",
         "stg_ecb__rates_daily",
         "stg_demo_fx__rates_daily",
         "stg_loads__newest_days",
         "int_window_days",
         "dim_account",
+        # The kind of each load, so that a load of the history fills only what the core lacks.
+        "source:core.loads",
     }
     assert "round(" not in text
     assert "published_on < rate_date as is_carried_forward" in text
     assert "{{ 'true' if var('recompute_rates') else 'false' }}" in text
     assert "\n  recompute_rates: false\n" in PROJECT_FILE.read_text(encoding="utf-8")
     rates = (DBT / "macros" / "rates.sql").read_text(encoding="utf-8")
-    assert "or exists (select from {{ rates }} where rate_source = 'ecb')" in rates
-    assert "r.rate / c.rate as rate_into_reporting_currency" in rates
-    # A load of the ECB reads the last 14 days again (ADR-0042).
-    ecb = (DAGS_PIPELINES / "ecb.py").read_text(encoding="utf-8")
-    assert "\nWINDOW_DAYS = 14\n" in ecb
+    # The setting gives the order of the sources (ADR-0042), and the demo serves only without a
+    # rate of one of them.
+    assert "env_var('AGORANOMOS_RATES_SOURCE', 'auto')" in rates
+    assert "'bank_of_italy': ['bank_of_italy', 'nbk', 'ecb']," in rates
+    assert "'nbk': ['nbk', 'bank_of_italy', 'ecb']," in rates
+    assert "'ecb': ['ecb']," in rates
+    assert "select exists (select from publications where source <> 'demo_fx') as found" in rates
+    # The rate of the reporting currency over that of the currency, each in the convention of the
+    # first source: for the euro the units of a currency for one euro, for the tenge the tenge for
+    # one unit, so that a published rate is divided once.
+    assert "r.amount / c.amount as rate_into_reporting_currency" in rates
+    assert "c.amount / r.amount as rate_into_reporting_currency" in rates
+    assert "round(" not in rates
+    # A load of the ECB reads the last 14 days again (ADR-0042), its window in the seed.
+    ecb = {r["platform"]: r for r in seed_rows("seed_ad_platforms")}["ecb"]
+    assert ecb["restatement_window_days"] == "14"
 
 
 def test_the_views_of_the_core_take_their_accounts_from_one_place():
@@ -1921,7 +2337,7 @@ def test_the_views_of_the_core_take_their_accounts_from_one_place():
         assert "join {{ ref('dim_account') }} as d" in text, view
         # The accounts whose newest list this run reads, of every platform of the ads, and the
         # entities of the core that such a list no longer names (ADR-0036).
-        for source in ("raw_demo_search", "raw_demo_social", "raw_demo_video", "raw_google_ads"):
+        for source in (*(f"raw_{code}" for code in SHAPED_ADS), "raw_google_ads", "raw_meta_ads"):
             assert f"{{{{ newest_lists('{source}', source('core', 'loads')) }}}}" in text, view
         assert f"from {{{{ source('core', '{dimension}') }}}} as k" in text, view
         assert "when l.account_id is not null then false" in text, view
@@ -2120,7 +2536,7 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
     for statement, kind in zip(by_kind, kinds, strict=True):
         assert statement.count("quarantine_insert(this, quarantine_attributed(") == 1, kind
         assert f"quarantine_fact_findings('{kind}', [" in statement, kind
-        codes = ["demo_web"] if kind == "sessions_daily" else [*SHAPED_ADS, "google_ads"]
+        codes = ["demo_web"] if kind == "sessions_daily" else [*SHAPED_ADS, *REAL_ADS]
         read = re.findall(r"ref\('(stg_\w+)'\)", statement)
         assert read == [*(f"stg_{code}__{kind}" for code in codes), *["stg_loads__newest_days"] * 2]
     raw, totals, collapse, sessions, rates, stop = statements[len(kinds) : -1]
@@ -2128,7 +2544,8 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
     assert raw.count("quarantine_insert(") == 1
     assert (
         "quarantine_totals_findings([(ref('stg_google_ads__campaign_stats'), "
-        "ref('stg_google_ads__account_totals'))], ref('stg_loads__newest_days'))"
+        "ref('stg_google_ads__account_totals')), (ref('stg_meta_ads__campaign_stats'), "
+        "ref('stg_meta_ads__account_totals'))], ref('stg_loads__newest_days'))"
     ) in totals
     assert "quarantine_collapse_findings([" in collapse
     assert "source('core', 'dim_account'), source('core', 'ad_stats_campaign_daily'))" in collapse
@@ -2143,8 +2560,10 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
     # before the stop, which counts it.
     assert "quarantine_rate_findings([" in rates
     assert (
-        "ref('stg_ecb__rates_daily'), ref('stg_demo_fx__rates_daily'), "
-        "source('core', 'fx_rates_daily'))"
+        "{'bank_of_italy': ref('stg_bank_of_italy__rates_daily'), "
+        "'nbk': ref('stg_nbk__rates_daily'), 'ecb': ref('stg_ecb__rates_daily'), "
+        "'demo_fx': ref('stg_demo_fx__rates_daily')}, source('core', 'fx_rates_daily'), "
+        "source('core', 'loads'))"
     ) in rates
     assert "quarantine_stop_findings(this, source('core', 'loads'))" in stop
     # dbt orders the model after what the statements read: a line depends_on, or a ref of its
@@ -2160,8 +2579,9 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
     assert "-- depends_on: {{ source('core', 'fx_rates_daily') }}" in model
 
 
-# The ad platforms of the demo.
+# The ad platforms of the demo, and the real ones.
 SHAPED_ADS = ["demo_search", "demo_social", "demo_video"]
+REAL_ADS = ["google_ads", "meta_ads"]
 
 
 def test_g1_reads_the_fact_tables_of_raw_of_each_source_that_names_an_account():
@@ -2184,11 +2604,15 @@ def test_g1_reads_the_fact_tables_of_raw_of_each_source_that_names_an_account():
         assert [table for table, _, _ in tables[dataset]] == [
             fact.table for fact in platforms.PLATFORMS[code].facts
         ], code
-    # The connector of Google Ads also loads the totals of each account, which demo_search does
-    # not.
+    # The connectors of Google Ads and of Meta also load the totals of each account, which
+    # demo_search and demo_social do not.
     assert tables["raw_google_ads"] == [
         *tables["raw_demo_search"],
         ("customer_stats", "metrics__cost_micros", True),
+    ]
+    assert tables["raw_meta_ads"] == [
+        *tables["raw_demo_social"],
+        ("insights_account", "spend", False),
     ]
     # The spend of each table, as the shape of its platform reads it.
     shapes = {
@@ -2196,6 +2620,7 @@ def test_g1_reads_the_fact_tables_of_raw_of_each_source_that_names_an_account():
         "raw_demo_social": "meta_v26.sql",
         "raw_demo_video": "tiktok_v1_3.sql",
         "raw_google_ads": "google_ads_v25.sql",
+        "raw_meta_ads": "meta_v26.sql",
     }
     for dataset, shape in shapes.items():
         text = (DBT / "macros" / "shapes" / shape).read_text(encoding="utf-8")
@@ -2210,9 +2635,10 @@ def test_g0a_checks_the_campaigns_of_an_account_against_its_totals_on_each_day()
     # ADR-0035: the impressions, clicks and spend of the rows of the campaigns of a load, summed by
     # account and day, against the totals that the platform gives for the account in the same
     # load, a day without a row on one side as zero, within the share of the platform in the vars,
-    # zero for Google; a load with no totals at all, as one of a connector before them, passes.
+    # zero for Google and a hundredth for Meta, whose spend is an estimate on each row (ADR-0050);
+    # a load with no totals at all, as one of a connector before them, passes.
     project = PROJECT_FILE.read_text(encoding="utf-8")
-    assert "\n  platform_totals_tolerance:\n    google_ads: 0\n" in project
+    assert "\n  platform_totals_tolerance:\n    google_ads: 0\n    meta_ads: 0.01\n" in project
     text = macro_text("quarantine_totals_findings")
     assert "{%- set tolerances = var('platform_totals_tolerance', {}) -%}" in text
     assert "when w.source = '{{ platform }}' then {{ share | float }}" in text
@@ -2247,7 +2673,8 @@ def test_the_facts_of_statistics_take_all_the_conversions_of_the_platform():
     facts = facts[: facts.index("{%- endmacro %}")]
     assert "cast(r.all_conversions as numeric(18,6)) as all_conversions" in facts
     assert "cast(r.all_conversion_value as numeric(18,6)) as all_conversion_value" in facts
-    assert "\nwhere " not in facts
+    # No row is left out but those of a partial day, which only the campaigns take (ADR-0051).
+    assert re.findall(r"\nwhere .*", facts) == ["\nwhere not d.is_partial_day"]
     google = (DBT / "macros" / "shapes" / "google_ads_v25.sql").read_text(encoding="utf-8")
     stats = google[google.index("{% macro google_ads_stats(") :]
     stats = stats[: stats.index("{% endmacro %}")]
@@ -2307,6 +2734,7 @@ def test_g1a_and_the_stop_of_a_source_follow_adr_0035():
         "dim_ad",
         "dim_conversion_action",
         "ad_stats_campaign_daily",
+        "ad_stats_campaign_daily_restatements",
         "web_sessions_daily",
         "fx_rates_daily",
     ]
@@ -2359,6 +2787,9 @@ def fact_config(fact: str) -> tuple[str, str]:
     return text[text.index("{{ config(\n") : end], text[end + len("\n) }}\n") :]
 
 
+# The facts whose rows can be of a partial day, of a load of the kind intraday (ADR-0051).
+PARTIAL_DAY_FACTS = {"ad_stats_campaign_daily"}
+
 # The lower bound of the windows of a run, as SQL that PostgreSQL computes when a statement runs.
 WINDOW_START = (
     "(select min(window_from) from core.loads where status = 'pinned' and outcome = 'loaded')"
@@ -2405,9 +2836,11 @@ def test_the_facts_of_the_core_replace_whole_days_of_the_windows():
         wanted.append(("fact_empty_days", f"{rows}, {days}"))
         assert hooks == wanted, fact
         # The grain of the fact: its key between the account and the day, its other IDs and its
-        # measures, which with the currency and the load are its columns, and its journal.
+        # measures, which with the currency and the load are its columns, and its journal; the
+        # facts that take a partial day have its flag too (ADR-0051).
         key, others, measures, journal = grains[fact]
         columns = ["account_sk", *key, *others, "report_date", *measures, "currency", "load_sk"]
+        columns += ["is_partial_day"] if fact in PARTIAL_DAY_FACTS else []
         assert sorted(columns) == sorted(facts[fact]["columns"]), fact
         assert journal is (fact in journals), fact
 
@@ -2431,6 +2864,9 @@ def test_the_rows_of_a_fact_take_the_columns_and_the_types_of_its_table():
         assert f"{{{{ {macro}(" in body, fact
         found = []
         for kind, column in cast.findall(facts_macro(macro)):
+            # The flag of the partial day goes only into the campaigns (ADR-0051).
+            if column == "is_partial_day" and fact not in PARTIAL_DAY_FACTS:
+                continue
             found += [(id_, kind) for id_ in ids] if column == "{{ id }}" else [(column, kind)]
         assert found == list(facts[fact]["types"].items()), fact
         # The rows join the days of the windows on their key of one column.
@@ -2524,3 +2960,56 @@ def test_g2_compares_every_fact_with_staging_and_its_entities_with_their_dimensi
             assert "few_without_a_dimension" not in block, fact
     project = PROJECT_FILE.read_text(encoding="utf-8")
     assert "\n  dimensionless_share: 0.001\n" in project
+
+
+def test_a_partial_day_is_a_day_of_the_campaigns_only_and_no_restatement():
+    # ADR-0051: the day of a load of the kind intraday is partial, a day of the fact of campaigns
+    # alone, whose rows carry the flag; no other fact reads it, so none empties it, and the journal
+    # of restatements skips a partial row that a whole load replaces.
+    days = (INTERMEDIATE / "int_window_days.sql").read_text(encoding="utf-8")
+    assert "    (l.kind = 'intraday')::boolean as is_partial_day,\n" in days
+    assert facts_returned("partial_day_facts") == sorted(PARTIAL_DAY_FACTS)
+    where = facts_macro("fact_days_where")
+    assert "{%- if fact not in partial_day_facts() %} and not is_partial_day{% endif %}" in where
+    assert "where {{ fact_days_where(fact) }}) as days" in facts_macro("fact_days")
+    assert "    where {{ fact_days_where(fact.identifier) }}\n" in facts_macro("fact_sums_differ")
+    stats = facts_macro("fact_stats_rows")
+    assert (
+        "    {%- if level == 'campaign' %},\n"
+        "    cast(d.is_partial_day as boolean) as is_partial_day\n"
+        "    {%- endif %}\n"
+    ) in stats
+    assert "{%- if level != 'campaign' %}\nwhere not d.is_partial_day\n{%- endif %}\n" in stats
+    for macro in ("fact_conversions_rows", "fact_sessions_rows"):
+        assert facts_macro(macro).rstrip().endswith("where not d.is_partial_day"), macro
+    assert (
+        "    {%- if this.identifier in partial_day_facts() %}\n    and not f.is_partial_day\n"
+    ) in facts_macro("fact_restatements")
+
+
+def test_g1a_leaves_out_the_loads_of_the_current_day_and_g0a_checks_only_loads_with_totals():
+    # ADR-0051: G1a skips a load of the kind intraday, and the partial rows of the core do not
+    # count in what it holds; G0a checks a load against the totals of the same load, which a load
+    # of the current day does not bring, so it checks none of them as the code stands.
+    collapse = macro_text("quarantine_collapse_findings")
+    assert "        and load_kind <> 'intraday'\n),\n\nheld as (" in collapse
+    assert (
+        "        {%- if facts.identifier in partial_day_facts() %}\n"
+        "        and not f.is_partial_day\n        {%- endif %}\n"
+    ) in collapse
+    totals = macro_text("quarantine_totals_findings")
+    assert "join totalled as t\n        on t.source = d.source and t.load_id = d.load_id" in totals
+    assert "kind" not in totals
+    # An intraday load takes no list: an account that a run reads from such loads alone is known
+    # when the core holds it from a list before, and else unknown_account, as any account.
+    accounts = macro_text("quarantine_account_findings")
+    assert (
+        "            d.load_kind <> 'intraday'\n            or not exists (\n"
+        "                select\n                from {{ accounts }} as k\n"
+        "                where k.platform = d.source and k.account_id = d.account_id "
+        "and not k.is_stub\n"
+    ) in accounts
+    model = G1.read_text(encoding="utf-8")
+    assert (
+        "        source('core', 'loads'),\n        source('core', 'dim_account'),\n    ),\n"
+    ) in model

@@ -162,7 +162,7 @@ def sources(monkeypatch):
     for name in names:
         sys.modules.pop(name, None)
     module = importlib.import_module("agoranomos_pipelines.demo.sources")
-    monkeypatch.setattr(module.rates, "read_core", lambda: loads["core"])
+    monkeypatch.setattr(module.rates, "read_core", lambda code: loads["core"])
     monkeypatch.setenv("AGORANOMOS_REPORTING_CURRENCY", "GBP")
     yield module, pipelines, loads
     for name in names:
@@ -636,10 +636,11 @@ def test_a_daily_load_is_due_when_an_account_has_no_load_of_its_day(sources, cap
     assert module.due(NOW) is True
 
 
-def lacking(module, first_without, first_day, holds_ecb=False):
-    """What the core says after a change of the reporting currency to GBP, which no account of the
-    demo has, once the cleanup has deleted the loads of the rates that it accepted."""
-    return module.rates.CoreRates("GBP", first_without, 548, first_day, holds_ecb)
+def lacking(module, first_without, first_day):
+    """What the core says of the rates of the demo after a change of the reporting currency to GBP,
+    which no account of the demo has, once the cleanup has deleted the loads of the rates that it
+    accepted."""
+    return module.rates.CoreRates("GBP", first_without, 548, first_day)
 
 
 def test_the_rates_take_their_history_again_when_the_core_lacks_the_new_currency(sources):
@@ -668,13 +669,14 @@ def test_the_rates_take_their_history_again_when_the_core_lacks_the_new_currency
     assert {row["kind"] for row in pipelines[-1].runs[-1][0][module.LOADS]} == {"window"}
 
 
-def test_the_rates_of_the_demo_take_no_history_without_a_gap_or_with_the_ecb(sources):
+def test_the_rates_of_the_demo_take_no_history_without_a_gap_of_their_own(sources):
+    # ops.ops_rates names no day of the demo once the core holds a rate of a real source, as the
+    # model takes none of the demo then (ops_rates.sql).
     module, pipelines, loads = sources
     loaded(loads, "demo_fx", 1)
     for core in (
         None,
-        module.rates.CoreRates("GBP", None, 0, date(2025, 3, 30), False),
-        lacking(module, date(2025, 4, 6), date(2025, 3, 30), holds_ecb=True),
+        module.rates.CoreRates("GBP", None, 0, date(2025, 3, 30)),
     ):
         loads["core"] = core
         module.load_daily("demo_fx", NOW)

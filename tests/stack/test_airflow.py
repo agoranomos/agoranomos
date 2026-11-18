@@ -23,10 +23,16 @@ SELFCHECK = "agoranomos_selfcheck"
 DEMO_HISTORY = "agoranomos_demo_history"
 DEMO_TRANSFORM = "agoranomos_demo_transform"
 DEMO_DAILY = "agoranomos_demo_daily"
-# The loads of the rates of the ECB and of Google Ads, which start paused (ADR-0032).
+# The loads of the rates of the ECB and of the Bank of Italy, of Google Ads and of Meta, which
+# start paused (ADR-0032, ADR-0042, ADR-0050).
 ECB_DAILY = "agoranomos_ecb_daily"
+BANK_OF_ITALY_DAILY = "agoranomos_bank_of_italy_daily"
 GOOGLE_ADS_DAILY = "agoranomos_google_ads_daily"
 GOOGLE_ADS_HISTORY = "agoranomos_google_ads_history"
+META_ADS_DAILY = "agoranomos_meta_ads_daily"
+META_ADS_HISTORY = "agoranomos_meta_ads_history"
+# The load of the rates of the NBK, which starts paused too (ADR-0042).
+NBK_DAILY = "agoranomos_nbk_daily"
 EXTENSION_CHECK = "ci_extension_check"
 FIXTURE = REPO_ROOT / "tests" / "stack" / "fixtures" / f"{EXTENSION_CHECK}.py"
 EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
@@ -372,8 +378,12 @@ def test_the_dag_processor_reports_no_import_error(airflow_url, token):
         DEMO_TRANSFORM,
         DEMO_DAILY,
         ECB_DAILY,
+        BANK_OF_ITALY_DAILY,
         GOOGLE_ADS_DAILY,
         GOOGLE_ADS_HISTORY,
+        META_ADS_DAILY,
+        META_ADS_HISTORY,
+        NBK_DAILY,
     ):
         wait_for_dag(airflow_url, token, dag_id)
     status, body = api(airflow_url, token, "GET", "/api/v2/importErrors?bundle_name=agoranomos")
@@ -381,11 +391,23 @@ def test_the_dag_processor_reports_no_import_error(airflow_url, token):
     assert body["total_entries"] == 0, [error["filename"] for error in body["import_errors"]]
 
 
-@pytest.mark.parametrize("dag_id", [ECB_DAILY, GOOGLE_ADS_DAILY, GOOGLE_ADS_HISTORY])
+@pytest.mark.parametrize(
+    "dag_id",
+    [
+        ECB_DAILY,
+        BANK_OF_ITALY_DAILY,
+        GOOGLE_ADS_DAILY,
+        GOOGLE_ADS_HISTORY,
+        META_ADS_DAILY,
+        META_ADS_HISTORY,
+        NBK_DAILY,
+    ],
+)
 def test_the_loads_of_the_real_sources_stay_paused(airflow_url, token, dag_id):
-    # The demo keeps its own rates and asks Google and the ECB nothing (ADR-0032): no job of the
-    # stack unpauses these DAGs, and the stack tests run without the network. The history of
-    # Google Ads, which test_history.py runs once, is paused again after it.
+    # The demo keeps its own rates and asks Google, Meta, the ECB, the Bank of Italy and the NBK
+    # nothing (ADR-0032, ADR-0042, ADR-0050): no job of the stack unpauses these DAGs, and the stack
+    # tests run without the network. The histories of Google Ads and of Meta, which test_history.py
+    # runs once each, are paused again after it.
     wait_for_dag(airflow_url, token, dag_id)
     status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}")
     assert status == 200, body

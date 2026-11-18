@@ -20,7 +20,9 @@ sources:
         description: >-
           The registry of the accounts of the core, which the model dim_account writes, as the runs
           before this one left it: the checks of G1a in int_g1_failures read it before this run
-          writes the core, to find the accounts of the rows of core.ad_stats_campaign_daily.
+          writes the core, to find the accounts of the rows of core.ad_stats_campaign_daily, and
+          the checks of the accounts to know an account that this run reads from loads of the kind
+          intraday alone, which take no list.
       - name: dim_campaign
         description: >-
           The campaigns of the core, which the model dim_campaign writes, as the runs before this
@@ -48,6 +50,14 @@ sources:
           account with what this table holds on the same days, before this run writes the core,
           and the test assert_every_account_with_data_is_in_the_settings finds the accounts that
           the settings no longer name and that this table holds rows of.
+      - name: ad_stats_campaign_daily_restatements
+        description: >-
+          The journal of restatements of the campaigns in the core: one row for each row of
+          core.ad_stats_campaign_daily that a load changed or removed when it replaced the days of
+          its window, with its old values, the load that had written it and the one that replaced
+          it, which the hook fact_restatements of the model core_ad_stats_campaign_daily writes in
+          the transaction of the write. The view ops_restatements reads its replacements of the
+          last 35 days.
       - name: web_sessions_daily
         description: >-
           The sessions of web analytics by day in the core, as the runs before this one left them:

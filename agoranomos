@@ -53,6 +53,22 @@ MCP_SERVER_NAME=agoranomos-metabase
 # which the SQL removes from every text, with the others.
 FIELD_SEPARATOR=$(printf '\037')
 
+# The currencies that the sources of the rates give a rate of (ADR-0042), as of 12 November 2026:
+# those of the Bank of Italy and of the National Bank of Kazakhstan, of their answers of that day
+# (tests/unit/fixtures), that are codes of ISO 4217, with their bases EUR and KZT; and EUR with the
+# reference rates of the ECB.
+BANK_CURRENCIES="
+  AED AFN ALL AMD AOA ARS AUD AWG AZN BAM BBD BDT BHD BIF BMD BND BOB BRL BSD BTN BWP BYN BZD CAD
+  CDF CHF CLP CNY COP CRC CUP CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD
+  GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JPY KES KGS KHR KMF KRW KWD KYD KZT LAK
+  LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR
+  NZD OMR PAB PEN PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD
+  SSP STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD UYU UZS VES VND VUV WST XAF
+  XCD XCG XDR XOF XPF YER ZAR ZMW ZWG"
+ECB_CURRENCIES="
+  EUR AUD BRL CAD CHF CNY CZK DKK GBP HKD HUF IDR ILS INR ISK JPY KRW MXN MYR NOK NZD PHP PLN RON
+  SEK SGD THB TRY USD ZAR"
+
 # The settings that init generates when they are empty.
 SECRET_KEYS="WAREHOUSE_POSTGRES_PASSWORD PLATFORM_POSTGRES_PASSWORD AIRFLOW_DB_PASSWORD
 METABASE_DB_PASSWORD METABASE_READER_PASSWORD WAREHOUSE_LOADER_PASSWORD
@@ -1136,18 +1152,63 @@ EOF
       problem "$folder_setting in .env must be an absolute path or start with ./, ../ or ~/, because Compose reads anything else as the name of a volume: write ./$(setting "$folder_setting" folder)"
     fi
   done
-  # The reporting currency (ADR-0025, ADR-0032): EUR, or a currency of the reference rates of the
-  # ECB as of October 2026. The rates of the demo cover USD, EUR and GBP only, and another currency
-  # needs those of the ECB, which the DAG agoranomos_ecb_daily loads once it is unpaused.
-  case "$(setting AGORANOMOS_REPORTING_CURRENCY USD)" in
-    EUR | AUD | BRL | CAD | CHF | CNY | CZK | DKK | GBP | HKD | HUF | IDR | ILS | INR | ISK | JPY | KRW | MXN | MYR | NOK | NZD | PHP | PLN | RON | SEK | SGD | THB | TRY | USD | ZAR) ;;
-    *) problem "AGORANOMOS_REPORTING_CURRENCY in .env must be EUR or a currency of the reference rates of the ECB, such as USD or GBP" ;;
+  # The sources of the rates (ADR-0042), and the reporting currency (ADR-0025): one that the
+  # sources of the setting give. With auto, bank_of_italy or nbk, both banks are in the order, so
+  # any currency of either; with ecb, EUR or a currency of the reference rates of the ECB. The rates
+  # of the demo cover USD, EUR and GBP only, and another currency needs a real source, whose DAGs
+  # load once they are unpaused.
+  rates_source=$(setting AGORANOMOS_RATES_SOURCE auto)
+  reporting_currency=$(setting AGORANOMOS_REPORTING_CURRENCY USD)
+  case "$rates_source" in
+    auto | bank_of_italy | nbk) rates_currencies=$BANK_CURRENCIES ;;
+    ecb) rates_currencies=$ECB_CURRENCIES ;;
+    *)
+      problem "AGORANOMOS_RATES_SOURCE in .env must be auto, bank_of_italy, nbk or ecb"
+      rates_currencies=""
+      ;;
   esac
+  rates_given=""
+  case "$reporting_currency" in
+    [A-Z][A-Z][A-Z])
+      for rates_code in $rates_currencies; do
+        [ "$rates_code" != "$reporting_currency" ] || rates_given=1
+      done
+      ;;
+  esac
+  if [ -z "$rates_given" ]; then
+    if [ "$rates_source" = ecb ]; then
+      problem "AGORANOMOS_REPORTING_CURRENCY in .env must be EUR or a currency of the reference rates of the ECB, such as USD or GBP, with AGORANOMOS_RATES_SOURCE=ecb"
+    else
+      case "$rates_source" in
+        auto | bank_of_italy | nbk) problem "AGORANOMOS_REPORTING_CURRENCY in .env must be a currency of the Bank of Italy or of the National Bank of Kazakhstan, such as USD, EUR or KZT, as a code of ISO 4217 in capitals" ;;
+      esac
+    fi
+  fi
   # The manager account of Google Ads (ADR-0032): ten digits without hyphens, or empty.
   case "$(setting GOOGLE_ADS_LOGIN_CUSTOMER_ID '')" in
     '' | [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
     *) problem "GOOGLE_ADS_LOGIN_CUSTOMER_ID in .env must be the ten digits of a manager account of Google Ads, without hyphens, or empty" ;;
   esac
+  # Meta (ADR-0050): the form of the token and of the App Secret, one word without spaces, quotes
+  # or angle brackets, as the load checks it, and never their values, which no message prints; the
+  # App ID is digits, and goes with the App Secret and the token, for a token that expires.
+  meta_token=$(setting META_ADS_ACCESS_TOKEN '')
+  meta_app_id=$(setting META_ADS_APP_ID '')
+  meta_app_secret=$(setting META_ADS_APP_SECRET '')
+  case "$meta_token" in
+    *[[:space:][:cntrl:]\"\'\<\>]*) problem "META_ADS_ACCESS_TOKEN in .env must be the token of the system user of Meta, one word without spaces or quotes" ;;
+  esac
+  case "$meta_app_secret" in
+    *[[:space:][:cntrl:]\"\'\<\>]*) problem "META_ADS_APP_SECRET in .env must be the App Secret of the app of Meta, one word without spaces or quotes" ;;
+  esac
+  case "$meta_app_id" in
+    *[!0-9]*) problem "META_ADS_APP_ID in .env must be the digits of the App ID of the app of Meta, or empty" ;;
+  esac
+  if { [ -n "$meta_app_id" ] && [ -z "$meta_app_secret" ]; } || { [ -z "$meta_app_id" ] && [ -n "$meta_app_secret" ]; }; then
+    problem "META_ADS_APP_ID and META_ADS_APP_SECRET in .env go together, for a token of Meta that expires, or both stay empty"
+  elif [ -n "$meta_app_secret" ] && [ -z "$meta_token" ]; then
+    problem "META_ADS_APP_ID and META_ADS_APP_SECRET in .env need META_ADS_ACCESS_TOKEN, the token that the load refreshes"
+  fi
   # The daily scan of Metabase (ADR-0037): a whole hour, as Metabase starts a daily scan at the
   # start of an hour. metabase-init checks it too, for a start through plain docker compose.
   case "$(setting METABASE_SCAN_TIME 12:00)" in
@@ -1870,7 +1931,8 @@ migrations_status() {
 }
 
 # The SQL of the rates of the core (ADR-0042), which status runs as postgres: a line built once
-# the transform has built the view ops.ops_rates, then its row: the source, the reporting currency,
+# the transform has built the view ops.ops_rates, then its rows, one for each source of the rates,
+# or one without a source: the source, the reporting currency,
 # the day of the last rate, how many business days ago, t when that is more than 3, the first day
 # without a rate into the reporting currency and how many such days there are. The view of a
 # release before this one has neither of the last two, and no row while the core holds no
@@ -1897,12 +1959,25 @@ FROM ops.ops_rates;
 SQL
 }
 
-# What status says of the rates of the core, from the lines of rates_sql ($1): the day of the last
-# rate that the source published into the reporting currency and how many business days ago, with a
-# warning when that is more than 3, as the view ops.ops_rates says (ADR-0042), and the DAG of the
-# loads of the source, or that the core holds none yet; and a warning when days of the facts have
-# no rate into the reporting currency, as after a change of it, which the next load of the rates
-# takes again.
+# The DAG of the loads of a source of the rates ($1).
+rate_dag() {
+  case "$1" in
+    bank_of_italy) printf '%s\n' agoranomos_bank_of_italy_daily ;;
+    nbk) printf '%s\n' agoranomos_nbk_daily ;;
+    ecb) printf '%s\n' agoranomos_ecb_daily ;;
+    demo_fx) printf '%s\n' agoranomos_demo_daily ;;
+    *) printf '%s\n' "the DAG of its loads" ;;
+  esac
+}
+
+# What status says of the rates of the core, from the lines of rates_sql ($1), one for each source
+# of the rates (ADR-0042): the day of the last rate that the source published into the reporting
+# currency and how many business days ago, with a warning when that is more than 3, as the view
+# ops.ops_rates says, and the DAG of the loads of the source; that the first source of the order
+# has no rate in the core yet, as before the first load of the Bank of Italy on a deployment of
+# v0.5, or that the demo has none into the reporting currency, as after a change of it on the demo
+# stack; or that the core holds none yet; and a warning when days of the facts have no rate into
+# the reporting currency, as after a change of it, which the next load of the rates takes again.
 rates_summary() {
   case "$1" in
     built*) ;;
@@ -1911,28 +1986,35 @@ rates_summary() {
       return 0
       ;;
   esac
-  rate_line=$(printf '%s\n' "$1" | awk -v separator="$FIELD_SEPARATOR" 'index($0, separator) { print; exit }')
-  rate_source="" rate_currency="" rate_day="" rate_age="" rate_late="" rate_gap_day="" rate_gap_days=""
-  IFS=$FIELD_SEPARATOR read -r rate_source rate_currency rate_day rate_age rate_late rate_gap_day rate_gap_days << EOF
-$rate_line
-EOF
-  if [ -z "$rate_source" ]; then
+  rate_lines=$(printf '%s\n' "$1" | awk -v separator="$FIELD_SEPARATOR" 'index($0, separator)')
+  rates_currency="" rates_gap_day="" rates_gap_days=""
+  if [ -z "$rate_lines" ]; then
     say "Rates: the core holds no rate that a source published, so only the accounts in the reporting currency enter it (ADR-0042)."
-  else
-    case "$rate_age" in 1) rate_days="1 business day" ;; *) rate_days="$rate_age business days" ;; esac
-    say "Rates: the last rate of $rate_source into $rate_currency is of $rate_day, $rate_days ago (ADR-0042)."
-    if [ "$rate_late" = t ]; then
-      case "$rate_source" in
-        ecb) rate_dag=agoranomos_ecb_daily ;;
-        demo_fx) rate_dag=agoranomos_demo_daily ;;
-        *) rate_dag="the DAG of its loads" ;;
-      esac
-      warn "the last rate of $rate_source is $rate_days old, more than 3: its loads brought no newer one, and the core carries it to each day since. The runs of $rate_dag in Airflow say why"
-    fi
+    return 0
   fi
-  case "$rate_gap_days" in '' | 0) return 0 ;; esac
-  case "$rate_gap_days" in 1) rate_gap="1 day" ;; *) rate_gap="$rate_gap_days days" ;; esac
-  warn "the core holds no rate into $rate_currency on $rate_gap of the facts from $rate_gap_day on, as after a change of AGORANOMOS_REPORTING_CURRENCY, so the amounts of those days in $rate_currency are empty. The next load of the rates takes their history again: trigger agoranomos_ecb_daily, or with the demo alone agoranomos_demo_daily, in Airflow to take it now (ADR-0042)"
+  # The read at the end of the lines empties its variables: the days without a rate, the same on
+  # every line, are kept apart.
+  while IFS=$FIELD_SEPARATOR read -r rate_source rate_currency rate_day rate_age rate_late rate_gap_day rate_gap_days; do
+    rates_currency=$rate_currency rates_gap_day=$rate_gap_day rates_gap_days=$rate_gap_days
+    if [ -z "$rate_source" ]; then
+      say "Rates: the core holds no rate that a source published, so only the accounts in the reporting currency enter it (ADR-0042)."
+    elif [ -z "$rate_day" ] && [ "$rate_source" = demo_fx ]; then
+      say "Rates: the core holds no rate of demo_fx into $rate_currency yet (ADR-0042)."
+    elif [ -z "$rate_day" ]; then
+      say "Rates: the core holds no rate of $rate_source into $rate_currency yet, the first source of AGORANOMOS_RATES_SOURCE: unpause $(rate_dag "$rate_source") in Airflow (ADR-0042)."
+    else
+      case "$rate_age" in 1) rate_days="1 business day" ;; *) rate_days="$rate_age business days" ;; esac
+      say "Rates: the last rate of $rate_source into $rate_currency is of $rate_day, $rate_days ago (ADR-0042)."
+      if [ "$rate_late" = t ]; then
+        warn "the last rate of $rate_source is $rate_days old, more than 3: its loads brought no newer one, and the core carries it to each day since. The runs of $(rate_dag "$rate_source") in Airflow say why"
+      fi
+    fi
+  done << EOF
+$rate_lines
+EOF
+  case "$rates_gap_days" in '' | 0) return 0 ;; esac
+  case "$rates_gap_days" in 1) rate_gap="1 day" ;; *) rate_gap="$rates_gap_days days" ;; esac
+  warn "the core holds no rate into $rates_currency on $rate_gap of the facts from $rates_gap_day on, as after a change of AGORANOMOS_REPORTING_CURRENCY, so the amounts of those days in $rates_currency are empty. The next load of the rates of their source takes their history again: trigger agoranomos_bank_of_italy_daily, agoranomos_nbk_daily or agoranomos_ecb_daily, or with the demo alone agoranomos_demo_daily, in Airflow to take it now (ADR-0042)"
 }
 
 # What status says of the rates of the core (ADR-0042), while warehouse-db runs, by the table that

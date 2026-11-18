@@ -147,7 +147,7 @@ def ecb(monkeypatch):
     for name in names:
         sys.modules.pop(name, None)
     module = importlib.import_module("agoranomos_pipelines.ecb")
-    monkeypatch.setattr(module.rates, "read_core", lambda: state["core"])
+    monkeypatch.setattr(module.rates, "read_core", lambda code: state["core"])
     monkeypatch.setenv("AGORANOMOS_REPORTING_CURRENCY", "GBP")
     yield module, state, made
     for name in names:
@@ -325,7 +325,6 @@ CHANGED_TO_GBP = {
     "first_without": date(2025, 5, 14),
     "days_without": 548,
     "first_day": date(2023, 9, 1),
-    "holds_preferred": True,
 }
 
 
@@ -353,7 +352,7 @@ def test_a_load_takes_the_history_again_when_the_core_lacks_the_rates_of_the_new
     # day, as the view then names none.
     state.update(waiting=1)
     assert not module.due(NOW)
-    state.update(waiting=0, core=module.rates.CoreRates("GBP", None, 0, date(2023, 9, 1), True))
+    state.update(waiting=0, core=module.rates.CoreRates("GBP", None, 0, date(2023, 9, 1)))
     assert not module.due(NOW)
 
 

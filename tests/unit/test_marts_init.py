@@ -86,43 +86,62 @@ def run_job(rows, returncode=0, fail_on="", environ=ENVIRON, kinds=None):
     return code, connection, dbt
 
 
-def selected(argv: list[str]) -> tuple[str, list[str], dict]:
-    """The command of dbt, what it selects and its vars."""
-    start = argv.index("--select") + 1
-    end = argv.index("--vars")
-    return argv[2], argv[start:end], json.loads(argv[end + 1])
+def flag(argv: list[str], name: str) -> list[str]:
+    """The values of a flag of a call of dbt, up to the next flag, or [] without it."""
+    if name not in argv:
+        return []
+    start = argv.index(name) + 1
+    end = next((i for i in range(start, len(argv)) if argv[i].startswith("--")), len(argv))
+    return argv[start:end]
+
+
+def selected(argv: list[str]) -> tuple[str, list[str], list[str], dict]:
+    """The command of dbt, what it selects, the kinds of node that it leaves out and its vars."""
+    [variables] = flag(argv, "--vars")
+    return (
+        argv[2],
+        flag(argv, "--select"),
+        flag(argv, "--exclude-resource-type"),
+        json.loads(variables),
+    )
+
+
+SEEDS = "package:agoranomos,resource_type:seed"
 
 
 @pytest.mark.parametrize(
-    ("snapshots", "other", "verb", "nodes", "variables"),
+    ("snapshots", "other", "nodes", "excluded", "variables"),
     [
-        (True, False, "run", ["marts"], {"rebuild_views": True}),
-        (False, False, "build", ["+marts"], {"rebuild_views": True}),
+        (True, False, [SEEDS, "marts"], ["test", "unit_test"], {"rebuild_views": True}),
+        (False, False, [SEEDS, "+marts"], [], {"rebuild_views": True}),
         (
             True,
             True,
-            "run",
-            ["marts", "core_fx_rates_daily", "ops_rates"],
+            [SEEDS, "marts", "core_fx_rates_daily", "ops_rates"],
+            ["test", "unit_test"],
             {"rebuild_views": True, "recompute_rates": True},
         ),
         (
             False,
             True,
-            "build",
-            ["+marts", "ops_rates"],
+            [SEEDS, "+marts", "ops_rates"],
+            [],
             {"rebuild_views": True, "recompute_rates": True},
         ),
     ],
 )
 def test_the_job_builds_what_the_state_of_the_warehouse_asks(
-    capsys, snapshots, other, verb, nodes, variables
+    capsys, snapshots, other, nodes, excluded, variables
 ):
     # After a change of the reporting currency, the job reads the days without a rate: none here.
     code, connection, dbt = run_job([(True,), (snapshots, other)] + [(None, 0)] * other)
     assert code == 0
     [argv] = dbt.calls
     assert argv[0] == mi.DBT
-    assert selected(argv) == (verb, nodes, variables)
+    # One build, the seeds of the base package first, whose rows the views carry in their text:
+    # with their tests on a warehouse without the snapshots, and without where they exist, as the
+    # next run of the transform runs them.
+    assert selected(argv) == ("build", nodes, excluded, variables)
     # The project is read-only: dbt writes its target and logs on the tmpfs.
     assert argv[argv.index("--target-path") + 1] == f"{mi.WORK}/target"
     assert argv[argv.index("--log-path") + 1] == f"{mi.WORK}/logs"
@@ -148,9 +167,10 @@ def test_a_new_reporting_currency_without_older_rates_is_a_warning_and_no_failur
     assert (
         "marts-init: warning: the core holds no rate into EUR on 548 days from 2025-05-14 on, of "
         "the currencies of the accounts, as their loads of the rates are accepted and have left "
-        "the raw layer: the next load of the rates takes their history again, "
-        "agoranomos_ecb_daily or with the demo alone agoranomos_demo_daily, and until the "
-        "transform reads it, the amounts of those days in EUR are empty (ADR-0042)\n"
+        "the raw layer: the next load of the rates of their source takes their history again, "
+        "agoranomos_bank_of_italy_daily, agoranomos_nbk_daily or agoranomos_ecb_daily, or with "
+        "the demo alone agoranomos_demo_daily, and until the transform reads it, the amounts of "
+        "those days in EUR are empty (ADR-0042)\n"
     ) in out
     assert out.endswith("marts-init: done\n")
     # A view that cannot be read is a warning too.
@@ -287,7 +307,8 @@ def test_the_job_says_nothing_of_leftovers_when_there_are_none(capsys):
     statements = [sql for sql, _ in connection.executed]
     assert statements[statements.index("dbt") + 1 :] == [mi.KINDS]
     assert capsys.readouterr().out == (
-        "marts-init: building the views of marts again\nmarts-init: done\n"
+        "marts-init: building the views of marts again from the seeds of the base package\n"
+        "marts-init: done\n"
     )
 
 
@@ -406,6 +427,22 @@ def test_the_snapshots_are_those_that_the_views_of_marts_read():
         if name in snapshots
     }
     assert tuple(sorted(read)) == mi.SNAPSHOTS
+
+
+def test_the_seeds_that_the_job_loads_are_those_of_the_dbt_project():
+    # The seeds of the project agoranomos, and no seed of a package that it installs, with the
+    # seed whose rows the views of marts carry among them.
+    project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
+    [name] = re.findall(r"^name: (\w+)$", project, flags=re.MULTILINE)
+    assert f"package:{name},resource_type:seed" == mi.SEEDS
+    seeds = {path.stem for path in (DBT / "seeds").glob("*.csv")}
+    read = {
+        seed
+        for path in (DBT / "models" / "marts").glob("*.sql")
+        for seed in re.findall(r"ref\('(seed_\w+)'\)", path.read_text(encoding="utf-8"))
+    }
+    assert read == {"seed_ad_platforms"}
+    assert read <= seeds
 
 
 def test_the_warehouse_is_the_one_of_the_profile_of_dbt():
