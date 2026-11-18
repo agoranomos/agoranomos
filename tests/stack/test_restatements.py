@@ -10,14 +10,19 @@ and outside Airflow, as raw_loads.py does: their usual windows, 90 and 28 days u
 each account, which the history took, with the numbers that the core holds, as a load of the demo as
 of the same moment gives the same rows. Before the run of the transform that reads them, it changes
 by hand, in the core, the spend and the conversions of one campaign of one account of demo_search on
-the first and on the last day of its window, as the superuser, so that the load changes those rows
-back and the journal keeps the rows as the test changed them. Each is a row that no journal holds
-yet: the view takes the new value of a row of the journal from the next row of the same campaign and
-day, which a change by hand breaks, so a second change of the same row would cancel the change of
-the load before it, as the second run of the tests on the same stack does on a push to main and
-every week. The run accepts the loads, as a daily run does, and the core is as before; the journal
-keeps its rows, as it keeps every restatement. If the test is killed between the change and the run,
-run agoranomos_demo_transform by hand: it reads the loads and writes the rows back.
+the oldest and on the newest day of its window that has a row that no journal holds, as the
+superuser, so that the load changes those rows back and the journal keeps the rows as the test
+changed them. The view takes the new value of a row of the journal from the next row of the same
+campaign and day, or else from the fact, which a change by hand breaks: a change of a row that the
+journal holds would also change the change of the load before it. On a new stack these days are the
+first and the last of the window. On the second run of the tests on the same stack, on a push to
+main and every week, the journal holds the rows that the first run changed, and when a midnight of
+the account came between the two runs, the daily load of the demo in between took the window as of
+a day later, and the conversions of many of its days, which mature for 90 days, changed: so the
+test takes the days nearest to the first and to the last that have such a row. The run accepts the
+loads, as a daily run does, and the core is as before; the journal keeps its rows, as it keeps every
+restatement. If the test is killed between the change and the run, run agoranomos_demo_transform by
+hand: it reads the loads and writes the rows back.
 
 The assertions print platforms, ages, days, counts and sums, never a secret.
 """
@@ -62,18 +67,19 @@ VIEW = (
     "conversions_shift, spend_change_reporting FROM ops.ops_restatements "
     "WHERE platform = '{platform}' AND load_kind = 'window' ORDER BY age_days"
 )
-# The campaign with the most spend of the account on a day whose row no journal holds, and the
-# currency of the row. Three campaigns of the account run every day, so a second run of the tests
-# finds one.
+# Of the days of a window of the account that have a row that no journal holds, the oldest or the
+# newest, as order says, ASC or DESC: the day, the campaign of the row with the most spend on it,
+# and the currency of the row.
 TOP_CAMPAIGN = (
-    "SELECT f.campaign_id, f.currency FROM core.ad_stats_campaign_daily AS f "  # noqa: S608 (constants)
+    "SELECT f.report_date, f.campaign_id, f.currency "  # noqa: S608 (constants)
+    "FROM core.ad_stats_campaign_daily AS f "
     "JOIN core.dim_account AS a ON a.account_sk = f.account_sk "
     f"WHERE a.platform = '{SOURCE}' AND a.account_id = '{ACCOUNT}' "
-    "AND f.report_date = DATE '{day}' AND NOT EXISTS ("
+    "AND f.report_date BETWEEN DATE '{first}' AND DATE '{last}' AND NOT EXISTS ("
     "SELECT FROM core.ad_stats_campaign_daily_restatements AS j "
     "WHERE j.account_sk = f.account_sk AND j.campaign_id = f.campaign_id "
     "AND j.report_date = f.report_date) "
-    "ORDER BY f.spend DESC, f.campaign_id LIMIT 1"
+    "ORDER BY f.report_date {order}, f.spend DESC, f.campaign_id LIMIT 1"
 )
 CHANGE = (
     "UPDATE core.ad_stats_campaign_daily AS f "  # noqa: S608 (constants of this file)
@@ -164,8 +170,12 @@ def replaced(env, airflow_url, token):
     changed = {}
     done = False
     try:
-        for day in (first, last):
-            [(campaign, currency)] = rows(env, TOP_CAMPAIGN.format(day=day))
+        for order in ("ASC", "DESC"):
+            [(found, campaign, currency)] = rows(
+                env, TOP_CAMPAIGN.format(first=first, last=last, order=order)
+            )
+            day = date.fromisoformat(found)
+            assert day not in changed, (day, "the only day of the window with such a row")
             warehouse_output(env, CHANGE.format(campaign=campaign, day=day))
             changed[day] = (campaign, currency.strip())
         run = transform(airflow_url, token)
