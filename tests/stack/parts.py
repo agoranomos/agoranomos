@@ -28,8 +28,9 @@ The minutes of a file below are those of amd64 with the CeleryExecutor, the slow
 and then of the other five.
 """
 
-# The six groups, each about 40 minutes in the job of its combination on a pull request, with the
-# files of every combination, and two of them, a part, at most 90 minutes in each combination.
+# The six groups. With the files of every combination, the first run of the tests of the job of
+# a group on a pull request took 30 to 57 minutes on 18 November 2026 (44356389537), and that of a
+# part, two groups, 53 to 87 in each combination (44356412101).
 GROUPS: tuple[tuple[str, ...], ...] = (
     # 1: the rates and the dimensions of the core.
     (

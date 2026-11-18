@@ -124,8 +124,9 @@ jobs:
     # test file twice until 13 November 2026, when the celery variant on amd64 reached the 360
     # minutes that GitHub gives a job at most, after a first run of 209 minutes; three parts of
     # tests/stack/parts.py then took 53 to 145 minutes in the first run of a part, after more files
-    # came. In those times, a job of a pull request takes about 45 minutes of tests in its first
-    # run, and a part about 90 at most, with a second run of a few minutes. Each task of the
+    # came. With the groups of ADR-0052, on 18 November 2026, a job of a pull request took 56 to 72
+    # minutes, 41 to 52 of them in the first run of the tests, and a part 64 to 103, 53 to 86 of
+    # them in the first run, with a second run of a few minutes. Each task of the
     # transform runs a process of dbt for its node; one dbt build in the watcher mode of Cosmos
     # (ADR-0039) is to replace them, and is not built yet.
     timeout-minutes: 240
@@ -337,8 +338,9 @@ jobs:
     # come before the first test. One job ran every test file twice until 13 November 2026, when it
     # took 336 minutes on amd64 and 310 on arm64 on main b0578c4, near the 360 that GitHub gives a
     # job at most; three parts then took 58 to 106 minutes in the first run of a part, after more
-    # files came. The selections of ADR-0052 take about as long as those of local mode. The job gets
-    # the timeout of the jobs of local mode.
+    # files came. With the selections of ADR-0052, on 18 November 2026, a job of a pull request
+    # took 47 and 80 minutes, and a part 77 to 103. The job gets the timeout of the jobs of local
+    # mode.
     timeout-minutes: 240
     permissions:
       contents: read
