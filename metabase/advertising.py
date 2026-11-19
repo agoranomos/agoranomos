@@ -12,10 +12,17 @@ campaigns that the filter of the campaign offers (ADR-0037). The time grouping c
 question groups its days, as a template tag of the type temporal-unit, and filters nothing. A KPI
 is the ratio of sums that the marts declare for the metrics of Metabase (metrics.py), written into
 the SQL from the same declaration, so every card computes it as the metric does. The overview
-leads with the KPIs, each compared with the period before by the grouping of time, then the trend,
-the platforms, the clients and the top campaigns; a click on a campaign opens the tab of ad groups
-and ads with the filter of the campaign set. Its card of the loads reads the view ops.ops_loads, as
-the Ops collection does (ops.py).
+leads with the KPIs, each compared with the period before by the grouping of time, then the card of
+today, the trend, the platforms, the clients and the top campaigns; a click on a campaign opens the
+tab of ad groups and ads with the filter of the campaign set. Its card of the loads reads the view
+ops.ops_loads, as the Ops collection does (ops.py).
+
+A day still in progress in its account, which only a load of the kind intraday took, is a partial
+day, whose rows the statistics of the campaigns mark with is_partial_day, and no other mart has
+(ADR-0051). The card Today, as of the load, reads those rows alone, with the time of their load and
+every filter of its mart but the period; every other question on the statistics of the campaigns
+leaves them out, so that a period, a KPI and its comparison take whole days, as the metrics do
+(metrics.py).
 
 The conversions of the statistics of the campaigns are those of the primary conversion actions of
 the deployment, conversions_primary, which every platform has, Meta included, and the tab of the
@@ -129,6 +136,12 @@ MART_FILTERS = {
     AD_CONVERSIONS: AD_FILTERS,
     WEB_SESSIONS: ("period", "client"),
 }
+# The partial days (ADR-0051): the column of the statistics of the campaigns that marks the rows of
+# a day still in progress, which no other mart has, and the filters of the card of today, those of
+# its mart but the period, as the day of each account is its current one.
+PARTIAL_DAY = metrics.PARTIAL_DAY
+PARTIAL_MARTS = frozenset({AD_STATS})
+TODAY_FILTERS = tuple(name for name in MART_FILTERS[AD_STATS] if name != "period")
 # The filters that link: in every question, each is on the field of its column in the statistics
 # of the campaigns, and the SQL of a question on another mart names its own column through the
 # alias of the tag. Metabase 0.64.1 finds the values of a linked filter for each field of the
@@ -198,7 +211,8 @@ ABOUT = (
     "metric of each platform, as its account shows them. The value of the conversions, and so "
     "ROAS, is that of the own metric of each platform, none on Meta. The key events come from web "
     "analytics, which dates each by its event and credits it to one source, so they differ from "
-    "the conversions of the platforms."
+    "the conversions of the platforms. Every card but Today, as of the load, counts the days that "
+    "a whole load took: a day still in progress shows on that card alone."
 )
 WITHOUT_PERFORMANCE_MAX = (
     "The ad groups and the ads come from reports of their own of each platform. Performance Max "
@@ -227,9 +241,15 @@ def sql(*lines: str) -> str:
     return "\n".join(line for line in lines if line)
 
 
-def where(*filters: str) -> str:
-    """The WHERE clause of a question: the template tag of each filter, which Metabase replaces."""
-    return "WHERE " + " AND ".join(f"{{{{{name}}}}}" for name in filters)
+def where(mart: str, *, today: bool = False) -> str:
+    """The WHERE clause of a question on a mart: the days that it takes, and the template tag of
+    each of its filters, which Metabase replaces. On the statistics of the campaigns, a question
+    takes the whole days, or, for the card of today, the partial days alone."""
+    names = TODAY_FILTERS if today else MART_FILTERS[mart]
+    conditions = [f"{{{{{name}}}}}" for name in names]
+    if mart in PARTIAL_MARTS:
+        conditions.insert(0, PARTIAL_DAY if today else f"NOT {PARTIAL_DAY}")
+    return "WHERE " + " AND ".join(conditions)
 
 
 def totals(*columns: str) -> list[str]:
@@ -250,20 +270,26 @@ def over_time(mart: str, *selected: str, by: str = "") -> str:
     return sql(
         "SELECT " + ", ".join(["{{unit}} AS report_date", *([by] if by else []), *selected]),
         f"FROM {MART_SCHEMA}.{mart}",
-        where(*MART_FILTERS[mart]),
+        where(mart),
         f"GROUP BY {group}",
         f"ORDER BY {group}",
     )
 
 
 def grouped(
-    mart: str, keys: tuple[str, ...], selected: list[str], order: str, limit: int = 0
+    mart: str,
+    keys: tuple[str, ...],
+    selected: list[str],
+    order: str,
+    limit: int = 0,
+    today: bool = False,
 ) -> str:
-    """A question of a mart by some of its columns, in an order."""
+    """A question of a mart by some of its columns, in an order: of the whole days, or with today
+    of the partial days alone."""
     return sql(
         "SELECT " + ", ".join([*keys, *selected]),
         f"FROM {MART_SCHEMA}.{mart}",
-        where(*MART_FILTERS[mart]),
+        where(mart, today=today),
         f"GROUP BY {', '.join(keys)}",
         f"ORDER BY {order}",
         f"LIMIT {limit}" if limit else "",
@@ -274,9 +300,10 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
     """The questions of the dashboard, by tab and in the order of its cards, with their place on
     its grid of 24 columns, from the KPIs that the marts declare, by their slugs. key is the key of
     a question in the package, which the registry of the content keeps; mart is the mart that it
-    reads, whose display names give the titles of its columns, and whose filters it takes; and
-    columns are the columns of the answer, in their order. A card of text has a text and no key.
-    The descriptions say what each counts, as facts for people and AI clients."""
+    reads, whose display names give the titles of its columns, and whose filters it takes, unless
+    filters names its own; and columns are the columns of the answer, in their order. A card of
+    text has a text and no key. The descriptions say what each counts, as facts for people and AI
+    clients."""
     ctr, cpc, cpm = kpis["ctr"], kpis["cpc"], kpis["cpm"]
     cpa, rate, roas = kpis["cost_per_conversion"], kpis["conversion_rate"], kpis["roas"]
     # The KPIs of the primary actions, of the statistics of the campaigns alone.
@@ -375,6 +402,42 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
         ),
         {
             "tab": OVERVIEW,
+            "key": "today",
+            "name": "Today, as of the load",
+            "description": (
+                "The spend, in the reporting currency, the clicks and the impressions of each "
+                "account on its partial days: its current day, in its time zone, and the day "
+                "before until the daily load takes it, as the newest load of the current day read "
+                "them, and when that load ended. A partial day has no conversions, and the other "
+                "cards leave it out until a whole load replaces it. Empty while no load of the "
+                "current day has come."
+            ),
+            "display": "table",
+            "mart": AD_STATS,
+            "filters": TODAY_FILTERS,
+            "columns": (
+                "report_date",
+                "platform_name",
+                "account_name",
+                "spend_reporting",
+                "clicks",
+                "impressions",
+                "last_loaded_at",
+            ),
+            "query": grouped(
+                AD_STATS,
+                ("report_date", "platform_name", "account_name"),
+                [
+                    *totals("spend_reporting", "clicks", "impressions"),
+                    "max(loaded_at) AS last_loaded_at",
+                ],
+                "report_date DESC, spend_reporting DESC",
+                today=True,
+            ),
+            "layout": {"row": 6, "col": 0, "size_x": 24, "size_y": 5},
+        },
+        {
+            "tab": OVERVIEW,
             "key": "trend",
             "name": "Spend and conversions over time",
             "description": (
@@ -393,9 +456,13 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
                 },
             },
             "query": over_time(AD_STATS, *totals("spend_reporting", "conversions_primary")),
-            "layout": {"row": 6, "col": 0, "size_x": 16, "size_y": 6},
+            "layout": {"row": 11, "col": 0, "size_x": 16, "size_y": 6},
         },
-        {"tab": OVERVIEW, "text": ABOUT, "layout": {"row": 6, "col": 16, "size_x": 8, "size_y": 6}},
+        {
+            "tab": OVERVIEW,
+            "text": ABOUT,
+            "layout": {"row": 11, "col": 16, "size_x": 8, "size_y": 6},
+        },
         {
             "tab": OVERVIEW,
             "key": "platforms",
@@ -419,7 +486,7 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
                 [*totals("spend_reporting", "conversions_primary"), ratio(cpp), ratio(roas)],
                 "spend_reporting DESC",
             ),
-            "layout": {"row": 12, "col": 0, "size_x": 12, "size_y": 6},
+            "layout": {"row": 17, "col": 0, "size_x": 12, "size_y": 6},
         },
         {
             "tab": OVERVIEW,
@@ -438,7 +505,7 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
             "query": grouped(
                 AD_STATS, ("client_name",), totals("spend_reporting"), "spend_reporting DESC"
             ),
-            "layout": {"row": 12, "col": 12, "size_x": 12, "size_y": 6},
+            "layout": {"row": 17, "col": 12, "size_x": 12, "size_y": 6},
         },
         {
             "tab": OVERVIEW,
@@ -466,7 +533,7 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
                 limit=10,
             ),
             "click": content.Click("campaign_name", AD_GROUPS_AND_ADS, "campaign"),
-            "layout": {"row": 18, "col": 0, "size_x": 16, "size_y": 7},
+            "layout": {"row": 23, "col": 0, "size_x": 16, "size_y": 7},
         },
         {
             "tab": OVERVIEW,
@@ -484,7 +551,7 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
                 "FROM ops.ops_loads",
                 "ORDER BY last_loaded_at, platform, account_id",
             ),
-            "layout": {"row": 18, "col": 16, "size_x": 8, "size_y": 7},
+            "layout": {"row": 23, "col": 16, "size_x": 8, "size_y": 7},
         },
         {
             "tab": PLATFORMS,
@@ -713,9 +780,10 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
 
 
 def filters_of(question: Mapping[str, Any]) -> tuple[str, ...]:
-    """The filters of a question: those of its mart, and the time grouping when it groups by it."""
+    """The filters of a question: its own, as the card of today has, or else those of its mart,
+    and the time grouping when it groups by it."""
     mart = question.get("mart")
-    names = MART_FILTERS.get(mart, ())
+    names = question.get("filters", MART_FILTERS.get(mart, ()))
     if "{{unit}}" in question["query"]:
         names = ("period", "unit", *names[1:])
     return names

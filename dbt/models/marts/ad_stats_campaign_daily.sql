@@ -12,7 +12,9 @@
 -- grouped by the key of the row would sum the whole history for every question, as PostgreSQL
 -- carries no filter of a period across a join (B16). The primary actions are an array that the
 -- query reads once, so that the lookup is a condition of the index. The columns of v0.4 come
--- first, in their order, and the later ones after them. Metabase reads the marts layer only.
+-- first, in their order, and the later ones after them. A row of a day still in progress in its
+-- account, which only a load of the kind intraday took, carries is_partial_day (ADR-0051).
+-- Metabase reads the marts layer only.
 -- The test of the primary actions reads the view of the conversions by action, which dbt orders
 -- before it: depends_on: {{ ref('ad_conversions_campaign_daily') }}
 select
@@ -46,7 +48,8 @@ select
     r.published_on as fx_rate_date,
     r.is_carried_forward as is_fx_rate_carried_forward,
     l.finished_at as loaded_at,
-    a.is_active as is_account_active
+    a.is_active as is_account_active,
+    f.is_partial_day
 from {{ ref('core_ad_stats_campaign_daily') }} as f
 left join {{ ref('dim_account') }} as a
     on a.account_sk = f.account_sk

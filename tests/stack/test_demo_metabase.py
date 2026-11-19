@@ -57,12 +57,12 @@ DAILY = "agoranomos_demo_daily"
 DAGS = (LOAD, TRANSFORM, DAILY)
 # The last day of the mart, and the sums of a client in the 30 days that end on it, in the
 # reporting currency, as the questions of the demo add them up for the period and the client of
-# their filters.
+# their filters, of the whole days (ADR-0051).
 LAST_DAY = "SELECT max(report_date) FROM marts.ad_stats_campaign_daily"
 CLIENT = "SELECT min(client_name) FROM marts.ad_stats_campaign_daily"
 SPEND = (
-    "SELECT sum(spend_reporting) FROM marts.ad_stats_campaign_daily "
-    "WHERE report_date BETWEEN '{start}' AND '{end}' AND client_name = '{client}'"
+    "SELECT sum(spend_reporting) FROM marts.ad_stats_campaign_daily WHERE NOT is_partial_day "
+    "AND report_date BETWEEN '{start}' AND '{end}' AND client_name = '{client}'"
 )
 SESSIONS = (
     "SELECT sum(sessions) FROM marts.web_sessions_daily "

@@ -438,7 +438,7 @@ The load that gives the day of the row, load_sk of core.loads: for an account an
 {% enddocs %}
 
 {% docs is_partial_day %}
-Whether the day is still in progress in its account, as a load of the kind intraday read it at the moment of its load: the impressions, clicks and spend of the campaigns so far, and no conversions, until a load of the kind window or history replaces the day whole (ADR-0051). Only the statistics of campaigns have a partial day.
+Whether the day is still in progress in its account, as a load of the kind intraday read it at the moment of its load: the impressions, clicks and spend of the campaigns so far, and no conversions (none, not zero), until a load of the kind window or history replaces the day whole (ADR-0051). Only the statistics of campaigns have a partial day: the statistics of ad groups and of ads, and the conversions by action, have no row of it.
 {% enddocs %}
 
 {% docs load_kind %}

@@ -40,6 +40,7 @@ COLUMNS = {
         "conversions_primary",
         "spend_reporting",
         "conversion_value_reporting",
+        "is_partial_day",
     ),
     ad.AD_GROUP_STATS: (
         "report_date",
@@ -148,6 +149,10 @@ def test_the_dashboard_has_its_tabs_and_each_card_is_on_one():
         "key-events",
     ]
     assert {(p.row, p.size_x, p.size_y) for p in first} == {(0, 6, 3), (3, 6, 3)}
+    # Then the card of today, across the tab, above the trend.
+    today, trend = by_tab["Overview"][8:10]
+    assert (today.question, today.row, today.col, today.size_x) == ("today", 6, 0, 24)
+    assert (trend.question, trend.row) == ("trend", today.row + today.size_y)
     # No two cards of a tab overlap on its grid of 24 columns.
     for tab, cards in by_tab.items():
         cells = [
@@ -197,6 +202,9 @@ def test_each_question_takes_the_filters_of_its_mart():
             assert names == [], question.key  # the loads, from ops.ops_loads
         elif mart == ad.WEB_SESSIONS:
             assert set(names) <= {"period", "unit", "client"}, question.key
+        elif question.key == "today":
+            # Every filter of its mart but the period: the day of each account is its current one.
+            assert names == ["client", "platform", "account", "campaign", "state"]
         else:
             assert {"period", "client", "platform", "account", "campaign"} <= set(names)
             # The state of a campaign is a column of the statistics of the campaigns alone.
@@ -235,6 +243,65 @@ def test_each_linked_filter_is_on_one_field_of_one_mart_in_every_question():
         tag = ct.template_tag(package(), built[key], client)
         assert tag.get("alias") == alias, key
         assert tag["dimension"][1] == FIELDS[(ad.LINKED_MART, "client_name")][0], key
+
+
+def test_the_card_of_today_reads_the_partial_days_alone_with_the_time_of_their_load():
+    # ADR-0051: the partial rows of the statistics of the campaigns, with spend in the reporting
+    # currency, clicks and impressions by platform and account, and when their load ended, for each
+    # partial day: the current day of each account, and the day before until the daily load.
+    by_key = {q["key"]: q for q in ad.questions(ad.kpis_of(export())) if "key" in q}
+    today = by_key["today"]
+    assert (today["tab"], today["name"], today["display"]) == (
+        "Overview",
+        "Today, as of the load",
+        "table",
+    )
+    assert today["query"] == (
+        "SELECT report_date, platform_name, account_name, sum(spend_reporting) AS spend_reporting, "
+        "sum(clicks) AS clicks, sum(impressions) AS impressions, max(loaded_at) AS last_loaded_at\n"
+        "FROM marts.ad_stats_campaign_daily\n"
+        "WHERE is_partial_day AND {{client}} AND {{platform}} AND {{account}} AND {{campaign}} "
+        "AND {{state}}\n"
+        "GROUP BY report_date, platform_name, account_name\n"
+        "ORDER BY report_date DESC, spend_reporting DESC"
+    )
+    [built] = [q for q in package().questions if q.key == "today"]
+    assert [c.name for c in built.columns] == list(today["columns"])
+    assert [(c.base_type, c.database_type) for c in built.columns] == [
+        ("type/Date", "date"),
+        ("type/Text", "text"),
+        ("type/Text", "text"),
+        ("type/Decimal", "numeric"),
+        ("type/Decimal", "numeric"),
+        ("type/Decimal", "numeric"),
+        ("type/DateTimeWithLocalTZ", "timestamptz"),
+    ]
+    settings = built.visualization_settings["column_settings"]
+    assert settings['["name","spend_reporting"]'] == {
+        "column_title": "Spend Reporting",
+        "number_style": "currency",
+        "currency": CURRENCY,
+    }
+    assert settings['["name","last_loaded_at"]'] == {"column_title": "Last Load"}
+    # No grouping of time and no period: the dashboard maps neither onto the card.
+    assert {f.name for f in built.filters} == set(ad.TODAY_FILTERS)
+    assert "period" not in ad.TODAY_FILTERS
+    assert "{{unit}}" not in built.query
+
+
+def test_every_other_question_on_the_campaigns_takes_whole_days():
+    # A period, a KPI and its comparison count the days that a whole load took, as the metrics do
+    # (ADR-0051); the other marts have no partial day, so their questions do not name the column.
+    for question in ad.questions(ad.kpis_of(export())):
+        if "key" not in question or question["key"] == "today":
+            continue
+        query = question["query"]
+        if question["mart"] == ad.AD_STATS:
+            assert "\nWHERE NOT is_partial_day AND {{period}} AND " in query, question["key"]
+            assert query.count("is_partial_day") == 1, question["key"]
+        else:
+            assert "is_partial_day" not in query, question["key"]
+    assert {ad.AD_STATS} == ad.PARTIAL_MARTS
 
 
 def test_a_kpi_of_a_question_is_the_ratio_of_its_metric():
@@ -397,8 +464,8 @@ def test_the_dashboard_comes_once_with_its_tabs_and_an_edit_goes_back(stand):
     edits = []
     ensure(edits.append)
     assert edits == [
-        "revert of an edit: dashboard advertising/advertising cards: 25 cards, 7 filters and 5 "
-        "tabs (not as the code says) -> 25 cards and 7 filters on 5 tabs"
+        "revert of an edit: dashboard advertising/advertising cards: 26 cards, 7 filters and 5 "
+        "tabs (not as the code says) -> 26 cards and 7 filters on 5 tabs"
     ]
     tabs = {tab["name"]: tab["id"] for tab in board["tabs"]}
     assert list(tabs) == list(ad.TABS)

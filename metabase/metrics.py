@@ -5,8 +5,11 @@ Metrics as metrics of Metabase, and as terms of its glossary (ADR-0034, content.
 Each metric is a ratio of sums over its mart: the sum of the column numerator divided by the sum of
 the column denominator, times scale, over the rows that a question selects, never an average of the
 ratio of each row. Metabase divides by NULLIF of the denominator, so a sum of zero gives no value. A
-mart that Metabase does not show yet, before the first run of the transform, gets its metrics at the
-next start after it.
+metric takes whole days only: on a mart whose rows can be of a day still in progress in its account,
+which only a load of the kind intraday took, the statistics of the campaigns with is_partial_day, it
+leaves those rows out, as the cards of the dashboard Advertising do but its card of today, so that a
+metric and a card of one period give one number (ADR-0051). A mart that Metabase does not show yet,
+before the first run of the transform, gets its metrics at the next start after it.
 
 A metric of Metabase belongs to one table, so a KPI that several marts declare is a metric of each,
 and every one of them is named <KPI> (<level>), such as CTR (Campaigns) and CTR (Ad Groups): the
@@ -38,6 +41,9 @@ FORMATS = ("percent", "currency", "number")
 KEYS = {"name", "description", "numerator", "denominator", "scale", "format", "currency"}
 # The decimals of a value of each format.
 DECIMALS = 2
+# The column of a mart that marks the rows of a day still in progress in its account (ADR-0051),
+# which the metrics of a mart that has it leave out.
+PARTIAL_DAY = "is_partial_day"
 
 Log = Callable[[str], None]
 
@@ -56,6 +62,8 @@ class Declared:
     currency: str | None
     level: str
     scope: str
+    # Whether the mart has the column PARTIAL_DAY, whose rows the metric leaves out.
+    whole_days: bool = False
 
     @property
     def slug(self) -> str:
@@ -114,6 +122,7 @@ def declared(document: Mapping[str, Any]) -> list[Declared]:
                 currency=entry.get("currency"),
                 level=level,
                 scope=scope,
+                whole_days=PARTIAL_DAY in columns,
             )
             problem = problem_of(metric, columns)
             if problem:
@@ -159,7 +168,8 @@ def field_ref(fields: Fields, table: str, column: str) -> list[Any]:
 
 def query_of(metric: Declared, table_id: int, fields: Fields) -> dict[str, Any]:
     """The inner query of a metric, in the legacy form of MBQL: one aggregation, named by its
-    slug, and no breakout."""
+    slug, and no breakout, over the whole days of its mart, the rows whose PARTIAL_DAY is false,
+    where the mart has the column."""
     ratio: list[Any] = [
         "/",
         ["sum", field_ref(fields, metric.table, metric.numerator)],
@@ -168,7 +178,13 @@ def query_of(metric: Declared, table_id: int, fields: Fields) -> dict[str, Any]:
     if metric.scale != 1:
         ratio = ["*", ratio, metric.scale]
     named = {"name": metric.slug, "display-name": metric.kpi}
-    return {"source-table": table_id, "aggregation": [["aggregation-options", ratio, named]]}
+    query: dict[str, Any] = {
+        "source-table": table_id,
+        "aggregation": [["aggregation-options", ratio, named]],
+    }
+    if metric.whole_days:
+        query["filter"] = ["=", field_ref(fields, metric.table, PARTIAL_DAY), False]
+    return query
 
 
 def settings_of(metric: Declared) -> dict[str, Any]:
