@@ -49,7 +49,7 @@ jobs:
       contents: read
     env:
       # renovate: datasource=github-releases depName=docker/compose
-      COMPOSE_VERSION: v5.7.0
+      COMPOSE_VERSION: v5.7.1
     steps:
       # Every tag, to check out the release to upgrade from.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
