@@ -54,7 +54,8 @@ V01_DASHBOARD = "Ad spend (demo)"
 LOAD = "agoranomos_demo_history"
 TRANSFORM = "agoranomos_demo_transform"
 DAILY = "agoranomos_demo_daily"
-DAGS = (LOAD, TRANSFORM, DAILY)
+INTRADAY = "agoranomos_demo_intraday"
+DAGS = (LOAD, TRANSFORM, DAILY, INTRADAY)
 # The last day of the mart, and the sums of a client in the 30 days that end on it, in the
 # reporting currency, as the questions of the demo add them up for the period and the client of
 # their filters, of the whole days (ADR-0051).

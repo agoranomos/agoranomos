@@ -211,8 +211,16 @@ CROSS JOIN LATERAL (SELECT substr(a.account_id, 11)::bigint * 10000000 + n AS id
     substr(a.account_id, 11)::bigint * 100000 + (n - 1) % {profile.ad_groups} + 1 AS group_id) AS e
 JOIN core.dim_ad_group AS g ON g.account_sk = a.account_sk AND g.ad_group_id = e.group_id
 WHERE {ACCOUNTS} AND a.first_report_date IS NOT NULL;
--- A rate for each day of the period and each currency of the accounts into the reporting currency,
--- where none is there.
+{rates_sql(first, last, reporting)}
+COMMIT;
+"""  # noqa: S608 (numbers, dates and constants of this file)
+
+
+def rates_sql(first: date, last: date, reporting: str) -> str:
+    """A rate for each day from first to last and each currency of the accounts into the
+    reporting currency, where none is there. The model takes no rate of the source synthetic as
+    published, so it carries none of them over a later day (macros/rates.sql)."""
+    return f"""
 INSERT INTO core.fx_rates_daily (rate_date, currency, reporting_currency,
     rate_into_reporting_currency, base_currency, base_rate, rate_source, published_on,
     is_carried_forward)
@@ -225,8 +233,19 @@ SELECT d::date, x.currency, '{reporting}',
 FROM generate_series(date '{first}', date '{last}', interval '1 day') AS d
 CROSS JOIN (VALUES ('USD'), ('EUR')) AS x (currency)
 ON CONFLICT DO NOTHING;
-COMMIT;
-"""  # noqa: S608 (numbers, dates and constants of this file)
+"""  # noqa: S608 (dates and constants of this file)
+
+
+def extend_rates(env: dict[str, str], last: date) -> None:
+    """Give each currency of the accounts a synthetic rate on every day after the last that the
+    rates of the profile hold, through last, as a source of the rates publishes one each day."""
+    held = warehouse_output(
+        env, "SELECT max(rate_date) FROM core.fx_rates_daily WHERE rate_source = 'synthetic'"
+    )
+    reporting = env.get("AGORANOMOS_REPORTING_CURRENCY") or "USD"
+    first = date.fromisoformat(held) + timedelta(days=1)
+    if first <= last:
+        warehouse_output(env, rates_sql(first, last, reporting))
 
 
 def partitions_sql(first: date, last: date) -> str:

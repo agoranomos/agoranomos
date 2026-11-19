@@ -108,6 +108,8 @@ from dlt.sources.helpers.requests import Client, HTTPError, RequestException
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 
+from agoranomos_pipelines import intraday
+
 # The planner of the history, which the load of Meta shares, under the names that this module had
 # before.
 from agoranomos_pipelines.history import HISTORY_MONTHS as HISTORY_MONTHS
@@ -483,9 +485,7 @@ def intraday_days(now: datetime, time_zone: str, whole: date) -> tuple[date, dat
     zone, and the day before while no whole load covers it, whole being the last day that one
     covers, so that between midnight in the account and the daily load the day before goes on
     growing (ADR-0051). Both come in one request."""
-    current = today(now, time_zone)
-    before = current - timedelta(days=1)
-    return (current if whole >= before else before), current
+    return intraday.days(today(now, time_zone), whole)
 
 
 # The key of the watermarks of the accounts in the asset state store of the asset of the load.

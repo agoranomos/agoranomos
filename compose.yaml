@@ -873,6 +873,9 @@ services:
       METADATA_EXPORT: /opt/agoranomos/metadata/metadata.json
       METADATA_OVERRIDES: /opt/agoranomos/extensions/metadata/overrides.toml
       CONTENT_REGISTRY: /var/tmp/agoranomos-content.json
+      # The period of the short cycle of the current day (ADR-0051): with 0 its DAG has no schedule,
+      # and the job leaves it paused.
+      AGORANOMOS_INTRADAY_HOURS: ${AGORANOMOS_INTRADAY_HOURS:-3}
     volumes:
       - ./metabase:/opt/agoranomos/metabase:ro
       - metadata-export:/opt/agoranomos/metadata:ro

@@ -25,8 +25,9 @@ and cleans nothing, and the next run reads its loads again. The DAG runs when ea
 platforms of the demo has loaded since its last run, each load updating the asset of its main table,
 after each load of the rates of the ECB, and after each load of Google Ads (ADR-0032, ADR-0039), the
 loads of its short cycle of the current day among them, which update an asset of their own
-(agoranomos_google_ads_intraday, ADR-0051), one run at a time: a run takes the events of the loads
-that ended while the run before it ran. A load of the kind intraday is pinned, read, accepted and
+(agoranomos_google_ads_intraday, ADR-0051), and after each load of the short cycle of the demo
+(agoranomos_demo_intraday), one run at a time: a run takes the events of the loads that ended while
+the run before it ran. A load of the kind intraday is pinned, read, accepted and
 cleaned like any load: a day that only such a load took is partial in the core, and a whole load of
 the day replaces it, whatever their load IDs. A repeat is safe: the settings are loaded again, dbt
 rebuilds the models, and the acceptance and the cleanup find what is left to do. The DAG starts

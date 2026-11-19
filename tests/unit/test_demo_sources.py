@@ -763,3 +763,148 @@ def test_a_dataset_of_this_release_is_never_dropped(sources):
     module.load_history("demo_search", NOW)
     assert not any(pipeline.dropped for pipeline in pipelines)
     assert not any(pipeline.transactions for pipeline in pipelines)
+
+
+def intraday_run(module, pipelines):
+    """The rows of each table of the run of the last load of the current day, and the journal of
+    each account in it."""
+    rows, _ = pipelines[-1].runs[-1]
+    return rows, {row["account_id"]: row for row in rows[module.LOADS]}
+
+
+def so_far(rows, account_id, day):
+    """The impressions, clicks and cost of each campaign of an account on a day in the rows of
+    campaign_stats."""
+    return {
+        row["campaign"]["id"]: tuple(
+            int(row["metrics"][field]) for field in ("impressions", "clicks", "costMicros")
+        )
+        for row in rows
+        if row["customer"]["id"] == account_id and row["segments"]["date"] == day.isoformat()
+    }
+
+
+def test_the_short_cycle_loads_the_current_day_of_demo_search_so_far(sources):
+    # ADR-0051: for each account that a whole load has taken up to yesterday, its current day so
+    # far, in campaign_stats, and a row of the kind intraday in the journal, in one run: no list,
+    # no other table, no conversions.
+    module, pipelines, loads = sources
+    from agoranomos_pipelines.demo import common, search, world
+
+    loaded(loads, "demo_search", 0)
+    counts = module.load_intraday(NOW)
+    assert len(pipelines[-1].runs) == 1
+    rows, journal = intraday_run(module, pipelines)
+    assert set(rows) == {"campaign_stats", module.LOADS}
+    assert pipelines[-1].dataset_name == "raw_demo_search"
+    assert counts == {"campaign_stats": len(rows["campaign_stats"])}
+    _, hints = pipelines[-1].runs[-1]
+    assert hints["campaign_stats"]["write_disposition"] == "append"
+    assert set(journal) == {account.account_id for account in search.accounts()}
+    for account in search.accounts():
+        today = common.local_today(NOW, account.time_zone)
+        row = journal[account.account_id]
+        assert (row["kind"], row["window_from"], row["window_to"]) == ("intraday", today, today)
+        assert (row["as_of"], row["now"], row["status"]) == (today, NOW, "loaded")
+        found = so_far(rows["campaign_stats"], account.account_id, today)
+        assert found, account.account_id
+        # The final numbers of the day, as a load sees them on its first day, times the share of
+        # the day that has passed in the time zone of the account.
+        elapsed, length = common.passed(NOW, account.time_zone, today)
+        assert 0 < elapsed < length
+        for campaign in world.campaigns_of(account.account_id, today, today):
+            final = world.final(campaign, today)
+            if final is None:
+                assert campaign.campaign_id not in found
+                continue
+            wanted = tuple(
+                common.matured(value, 0, common.DELIVERY) * elapsed // length
+                for value in (final.impressions, final.clicks, final.spend_micros)
+            )
+            assert found[campaign.campaign_id] == wanted, campaign.campaign_id
+    for row in rows["campaign_stats"]:
+        assert set(row) == {"customer", "campaign", "metrics", "segments"}
+        assert set(row["metrics"]) == {"impressions", "clicks", "costMicros"}
+        assert set(row["campaign"]) == {"resourceName", "id", "name"}
+
+
+def test_the_short_cycle_takes_the_day_before_while_no_whole_load_covers_it(sources):
+    # After midnight in the account and before the daily load, the day before is whole on the
+    # platform: its numbers are those that the daily load takes of it, without the conversions.
+    module, pipelines, loads = sources
+    from agoranomos_pipelines.demo import common, search
+
+    loaded(loads, "demo_search", 1)
+    module.load_intraday(NOW)
+    rows, journal = intraday_run(module, pipelines)
+    daily = list(
+        search.stats(NOW, first=lambda account: common.last_final_day(NOW, account.time_zone))
+    )
+    for account in search.accounts():
+        today = common.local_today(NOW, account.time_zone)
+        yesterday = today - timedelta(days=1)
+        row = journal[account.account_id]
+        assert (row["window_from"], row["window_to"]) == (yesterday, today)
+        before = so_far(rows["campaign_stats"], account.account_id, yesterday)
+        assert before == so_far(daily, account.account_id, yesterday), account.account_id
+        assert so_far(rows["campaign_stats"], account.account_id, today)
+
+
+def test_a_moment_gives_the_same_rows_and_a_later_one_no_lower_numbers(sources):
+    module, pipelines, loads = sources
+    from agoranomos_pipelines.demo import common, search
+
+    loaded(loads, "demo_search", 0)
+    module.load_intraday(NOW)
+    first, _ = intraday_run(module, pipelines)
+    module.load_intraday(NOW)
+    again, _ = intraday_run(module, pipelines)
+    assert again["campaign_stats"] == first["campaign_stats"]
+    later = NOW + timedelta(hours=3)
+    module.load_intraday(later)
+    after, _ = intraday_run(module, pipelines)
+    for account in search.accounts():
+        today = common.local_today(NOW, account.time_zone)
+        assert today == common.local_today(later, account.time_zone)
+        was = so_far(first["campaign_stats"], account.account_id, today)
+        now = so_far(after["campaign_stats"], account.account_id, today)
+        assert set(was) <= set(now)
+        for campaign, numbers in was.items():
+            assert all(a <= b for a, b in zip(numbers, now[campaign], strict=True)), campaign
+        assert sum(n[2] for n in now.values()) > sum(n[2] for n in was.values())
+
+
+def test_the_short_cycle_waits_for_the_first_whole_load_of_an_account(sources, caplog):
+    module, pipelines, loads = sources
+
+    caplog.set_level("INFO")
+    # No load yet: nothing is loaded, and the API of no platform is asked.
+    assert module.load_intraday(NOW) is None
+    assert all(not pipeline.runs for pipeline in pipelines)
+    assert "raw_demo_search has had no whole load yet" in caplog.text
+    # An account that no whole load has taken is left out.
+    loaded(loads, "demo_search", 0, skip={"4170000012"})
+    module.load_intraday(NOW)
+    rows, journal = intraday_run(module, pipelines)
+    assert set(journal) == {"4170000011"}
+    assert {row["customer"]["id"] for row in rows["campaign_stats"]} == {"4170000011"}
+    # A dataset that a release before v0.5 loaded waits for the daily load, which starts over.
+    runs = sum(len(pipeline.runs) for pipeline in pipelines)
+    loads["earlier"].add("raw_demo_search")
+    assert module.load_intraday(NOW) is None
+    assert sum(len(pipeline.runs) for pipeline in pipelines) == runs
+    assert not any(pipeline.dropped for pipeline in pipelines)
+
+
+def test_the_short_cycle_goes_by_copy_as_loader_and_logs_no_secret(sources, caplog):
+    module, pipelines, loads = sources
+
+    caplog.set_level("INFO")
+    loaded(loads, "demo_search", 0)
+    module.load_intraday(NOW)
+    assert pipelines[-1].formats == ["csv"]
+    assert pipelines[-1].options["pipeline_name"] == "agoranomos_demo_search"
+    _, credentials, _ = pipelines[-1].options["destination"]
+    assert credentials["username"] == "loader"
+    assert "rows of the current day into raw_demo_search.campaign_stats" in caplog.text
+    assert "loader-password" not in caplog.text

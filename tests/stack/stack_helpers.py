@@ -532,6 +532,36 @@ def warehouse_output(env: dict[str, str], sql: str, role: str = "postgres") -> s
     return result.stdout.strip()
 
 
+# The tables of elementary 0.26.1 in ops that grow with each run of dbt, as the DAG of maintenance
+# lists them (OPS_TABLES of airflow/dags/agoranomos_pipelines/maintenance.py), and the size on disk
+# of each relation of ops, with its indexes and TOAST.
+ELEMENTARY_TABLES = (
+    "dbt_invocations",
+    "dbt_run_results",
+    "dbt_source_freshness_results",
+    "elementary_test_results",
+    "test_result_rows",
+)
+OPS_SIZES = (
+    "SELECT c.relname, pg_total_relation_size(c.oid) FROM pg_catalog.pg_class AS c "
+    "JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace "
+    "WHERE n.nspname = 'ops' AND c.relkind IN ('r', 'p', 'm')"
+)
+
+
+def ops_sizes(env: dict[str, str]) -> dict[str, int]:
+    """The bytes on disk of each table of the schema ops, by name."""
+    found = warehouse_output(env, OPS_SIZES).splitlines()
+    return {name: int(size) for name, size in (line.split("|") for line in found)}
+
+
+def ops_growth(before: dict[str, int], after: dict[str, int]) -> tuple[int, int]:
+    """The bytes that the tables of elementary that grow, and the whole schema ops, grew by from
+    one ops_sizes() to another, as a run of the transform adds its rows (ADR-0029)."""
+    tables = sum(after.get(name, 0) - before.get(name, 0) for name in ELEMENTARY_TABLES)
+    return tables, sum(after.values()) - sum(before.values())
+
+
 # The number of rows of a table of ad statistics and the sums of its measures; totals() adds the
 # table. The sums of no rows are NULL, and coalesce makes them 0.
 TOTALS = (

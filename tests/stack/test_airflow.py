@@ -23,6 +23,8 @@ SELFCHECK = "agoranomos_selfcheck"
 DEMO_HISTORY = "agoranomos_demo_history"
 DEMO_TRANSFORM = "agoranomos_demo_transform"
 DEMO_DAILY = "agoranomos_demo_daily"
+# The short cycle of the current day of the demo (ADR-0051).
+DEMO_INTRADAY = "agoranomos_demo_intraday"
 # The loads of the rates of the ECB and of the Bank of Italy, of Google Ads and of Meta, which
 # start paused (ADR-0032, ADR-0042, ADR-0050).
 ECB_DAILY = "agoranomos_ecb_daily"
@@ -380,6 +382,7 @@ def test_the_dag_processor_reports_no_import_error(airflow_url, token):
         DEMO_HISTORY,
         DEMO_TRANSFORM,
         DEMO_DAILY,
+        DEMO_INTRADAY,
         ECB_DAILY,
         BANK_OF_ITALY_DAILY,
         GOOGLE_ADS_DAILY,

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Iterator, Sequence
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from itertools import pairwise
 from zoneinfo import ZoneInfo
 
@@ -68,6 +68,21 @@ def last_final_day(now: datetime, time_zone: str) -> date:
 def history_first_day(now: datetime, time_zone: str) -> date:
     """The first day of the history that the first load takes for an account of the time zone."""
     return last_final_day(now, time_zone) - timedelta(days=HISTORY_DAYS - 1)
+
+
+def passed(now: datetime, time_zone: str, day: date) -> tuple[int, int]:
+    """How much of a day in a time zone has passed at the moment now, in microseconds, none before
+    it starts and all of it after it ends, and how long the day is: 24 hours, but 23 or 25 on a day
+    when the clocks change. The share of a number of the current day that a load of the kind
+    intraday shows (search.intraday_stats)."""
+    zone = ZoneInfo(time_zone)
+    # In UTC: two moments of the same time zone subtract as clock times, which leaves the change of
+    # the clocks out.
+    start = datetime.combine(day, time(), zone).astimezone(UTC)
+    end = datetime.combine(day + timedelta(days=1), time(), zone).astimezone(UTC)
+    length = (end - start) // timedelta(microseconds=1)
+    elapsed = (now.astimezone(UTC) - start) // timedelta(microseconds=1)
+    return min(max(elapsed, 0), length), length
 
 
 def age(now: datetime, time_zone: str, day: date) -> int:
