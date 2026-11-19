@@ -12,11 +12,15 @@ agoranomos_pipelines/history.py, the planner that the history of Meta shares). T
 updates the asset of Google Ads, the transform takes it, pins it into core.loads with the kind
 history and creates the partitions of its months before it writes the core, and its end starts the
 next portion, so that each portion goes from raw to the core whole before the next one, from the
-new quarters to the old ones. The plan starts nothing while a run of the load is queued or
-running, while a whole load waits for the run of the transform that pins it, or once every account
-that has had its usual window holds its history; it reads the journal of the loads and core.loads
-as the loader role, and asks the API nothing. The history of Meta plans apart, and its portion may
-run at the same time as one of Google Ads (agoranomos_meta_ads_history).
+new quarters to the old ones. The plan starts nothing while a run of the load is queued or running,
+while a load that has ended waits for the run of the transform that pins it, a load of the short
+cycle of the current day among them, or once every account that has had its usual window holds its
+history; it reads the journal of the loads and core.loads as the loader role, and asks the API
+nothing. The windows of the loads of the short cycle (agoranomos_google_ads_intraday, ADR-0051) are
+not days of the history: an account that only such loads have taken lacks no day of it. A run of the
+transform that such a load started starts the plan too, which then waits as above, so it starts no
+second portion while one runs or waits for its pin. The history of Meta plans apart, and its portion
+may run at the same time as one of Google Ads (agoranomos_meta_ads_history).
 
 The DAG starts paused: a deployment unpauses it with agoranomos_google_ads_daily, once its key and
 its accounts are in place ([Connect Google Ads](docs/how-to/connect-google-ads.md)). A run of the

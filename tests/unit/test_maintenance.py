@@ -68,6 +68,8 @@ def test_the_journals_keep_13_months_as_their_comments_say():
         assert comment.endswith(f"kept {maintenance.JOURNAL_MONTHS} months."), journal
     assert maintenance.LOADS_MONTHS == 13
     assert maintenance.DLT_LOADS_DAYS == 90
+    # The rows of the loads of the kind intraday: the proposal of ADR-0051.
+    assert maintenance.INTRADAY_DAYS == 14
 
 
 @pytest.mark.parametrize(
@@ -138,9 +140,15 @@ def test_the_loader_and_transformer_passwords_are_masked():
 def test_the_cleanup_of_dlt_loads_keeps_what_a_load_dlt_and_the_pin_read():
     query = maintenance.dlt_loads_delete("raw_demo_search", has_state=True, has_journal=True)
     flat = " ".join(query.split())
-    # Old rows only, by the time of the row.
-    assert 'DELETE FROM "raw_demo_search"._dlt_loads AS d WHERE d.inserted_at < now() - ' in flat
-    assert "make_interval(days => %(days)s)" in flat
+    # Old rows only, by the time of the row, and those of the loads of the kind intraday sooner
+    # (ADR-0051), which no watermark reads.
+    assert (
+        'DELETE FROM "raw_demo_search"._dlt_loads AS d WHERE (d.inserted_at < now() - '
+        "make_interval(days => %(days)s) OR (d.inserted_at < now() - "
+        "make_interval(days => %(intraday_days)s) AND EXISTS (SELECT FROM "
+        '"raw_demo_search"._agoranomos_loads AS i WHERE i._dlt_load_id = d.load_id '
+        "AND i.kind = 'intraday'))) AND NOT EXISTS (SELECT FROM kept"
+    ) in flat
     # The newest whole load, for loads.has_loads().
     assert (
         '(SELECT load_id FROM "raw_demo_search"._dlt_loads WHERE status = 0'
@@ -154,10 +162,11 @@ def test_the_cleanup_of_dlt_loads_keeps_what_a_load_dlt_and_the_pin_read():
         " ON l.load_id = s._dlt_load_id AND l.status = 0 ORDER BY s.pipeline_name, l.load_id DESC"
         in flat
     )
-    # The newest day and the last day loaded of each account, as loads.recorded() reads them.
+    # The newest day and the last day loaded of each account, as loads.recorded() reads them, of
+    # the whole loads.
     assert "max(as_of) AS as_of, max(window_to) AS window_to" in flat
     assert "(w.as_of = b.as_of OR w.window_to = b.window_to)" in flat
-    assert "WHERE j.status = 'loaded'" in flat
+    assert "WHERE j.status = 'loaded' AND j.kind IS DISTINCT FROM 'intraday'" in flat
     # The loads that no run has pinned, by source, load and account.
     assert (
         "WHERE NOT EXISTS (SELECT FROM core.loads AS p WHERE p.source = 'demo_search'"
@@ -166,9 +175,20 @@ def test_the_cleanup_of_dlt_loads_keeps_what_a_load_dlt_and_the_pin_read():
     assert "NOT EXISTS (SELECT FROM kept WHERE kept.load_id = d.load_id)" in flat
 
 
+def test_the_cleanup_of_dlt_loads_of_a_journal_without_kinds_reads_every_load_as_a_window():
+    # As the pin reads a journal without the column kind (pin_loads.sql).
+    query = maintenance.dlt_loads_delete(
+        "raw_demo_search", has_state=True, has_journal=True, has_kind=False
+    )
+    assert "kind" not in query
+    assert "WHERE d.inserted_at < now() - make_interval(days => %(days)s)\n" in query
+    assert "max(as_of) AS as_of, max(window_to) AS window_to" in query
+
+
 def test_the_cleanup_of_dlt_loads_of_a_schema_without_a_journal_keeps_the_newest_and_the_state():
     query = maintenance.dlt_loads_delete("raw_settings", has_state=True, has_journal=False)
     assert "_agoranomos_loads" not in query
+    assert "intraday" not in query
     assert "core.loads" not in query
     assert "_dlt_pipeline_state" in query
     query = maintenance.dlt_loads_delete("raw_settings", has_state=False, has_journal=False)
@@ -207,6 +227,35 @@ def test_the_cleanup_of_core_loads_takes_old_accepted_rows_that_nothing_reads():
         'AND NOT EXISTS (SELECT FROM "raw_demo_search"._dlt_loads AS d WHERE d.load_id = l.load_id)'
     )
     assert "_dlt_loads" not in maintenance.core_loads_delete(None)
+
+
+def test_the_cleanup_of_core_loads_takes_old_accepted_intraday_rows_that_no_fact_reads():
+    # ADR-0051: no watermark reads a row of the kind intraday, so it goes once it is 14 days old,
+    # but while a partial day of the fact of campaigns still holds its rows.
+    query = " ".join(maintenance.core_intraday_loads_delete('"raw_google_ads"._dlt_loads').split())
+    assert query.startswith("DELETE FROM core.loads AS l WHERE l.source = %(source)s")
+    assert "AND l.status = 'accepted'" in query
+    assert "AND l.kind = 'intraday'" in query
+    assert "l.finished_at < now() - make_interval(days => %(days)s)" in query
+    assert (
+        "AND NOT EXISTS (SELECT FROM core.ad_stats_campaign_daily AS f JOIN core.dim_account AS a"
+        " ON a.account_sk = f.account_sk WHERE a.platform = l.source AND a.account_id ="
+        " l.account_id AND f.report_date BETWEEN l.window_from AND l.window_to"
+        " AND f.load_sk = l.load_sk)" in query
+    )
+    assert (
+        "AND NOT EXISTS (SELECT FROM core.loads AS p WHERE p.source = l.source AND p.account_id ="
+        " l.account_id AND p.status = 'pinned' AND p.outcome = 'loaded'"
+        " AND p.load_id::numeric < l.load_id::numeric)" in query
+    )
+    assert query.endswith(
+        'AND NOT EXISTS (SELECT FROM "raw_google_ads"._dlt_loads AS d WHERE d.load_id = l.load_id)'
+    )
+    assert "_dlt_loads" not in maintenance.core_intraday_loads_delete(None)
+    # The newest of an account goes too: no window starts from it.
+    assert "n.kind" not in query
+    # The rows of the kind window keep their 13 months, and those of the kind history stay.
+    assert "'intraday'" not in maintenance.core_loads_delete(None)
 
 
 def stats(**changed):

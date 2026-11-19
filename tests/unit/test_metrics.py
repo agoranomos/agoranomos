@@ -196,6 +196,31 @@ def test_a_metric_is_a_ratio_of_sums_with_no_breakout():
     }
 
 
+def test_a_metric_of_a_mart_with_partial_days_takes_whole_days_only():
+    # ADR-0051: a metric and a card of the dashboard of one period give one number, so a metric of
+    # the statistics of the campaigns leaves out the rows of a day still in progress; a mart
+    # without the column has no partial day, and its metrics no filter.
+    [ctr] = mx.declared(export(CTR, columns=(*COLUMNS, "is_partial_day")))
+    fields = {
+        ("ad_stats_campaign_daily", "clicks"): (11, "type/BigInteger"),
+        ("ad_stats_campaign_daily", "impressions"): (12, "type/BigInteger"),
+        ("ad_stats_campaign_daily", "is_partial_day"): (14, "type/Boolean"),
+    }
+    assert ctr.whole_days
+    query = mx.query_of(ctr, 7, fields)
+    assert query["filter"] == ["=", ["field", 14, {"base-type": "type/Boolean"}], False]
+    [plain] = mx.declared(export(CTR))
+    assert query["aggregation"] == mx.query_of(plain, 7, fields)["aggregation"]
+    [ads] = mx.declared(export(CTR, table="ad_stats_ad_daily", level="Ads"))
+    assert not ads.whole_days
+    assert "filter" not in mx.query_of(ads, 7, {(ads.table, c): f for (_, c), f in fields.items()})
+    # Of the marts of the KPIs, only the statistics of the campaigns have the column.
+    text = MARTS_YAML.read_text(encoding="utf-8")
+    models = re.split(r"^  - name: ", text, flags=re.M)[1:]
+    having = sorted(m.split("\n", 1)[0] for m in models if "      - name: is_partial_day\n" in m)
+    assert having == ["ad_stats_campaign_daily"]
+
+
 def test_the_metrics_and_their_terms_come_once_and_an_edit_goes_back(metabase, tmp_path):
     state, client = metabase
     registry = ct.Registry(tmp_path / "content.json")

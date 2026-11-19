@@ -35,6 +35,13 @@ RAW_BANK_OF_ITALY = Asset("postgres://warehouse-db:5432/warehouse/raw_bank_of_it
 # updates.
 RAW_GOOGLE_ADS = Asset("postgres://warehouse-db:5432/warehouse/raw_google_ads/campaign_stats")
 
+# The asset of the current day of Google Ads (ADR-0051), which each load of the short cycle
+# updates: a load of the kind intraday into the same tables, under an asset of its own, so that the
+# asset state store of RAW_GOOGLE_ADS keeps the watermarks of the daily load alone. Both are loads
+# of campaign_stats, and an address of PostgreSQL names one asset, so this one has a name and no
+# address.
+RAW_GOOGLE_ADS_INTRADAY = Asset("agoranomos_google_ads_intraday")
+
 # The asset of the insights of Meta (ADR-0050), in the same form, which each of its loads updates.
 RAW_META_ADS = Asset("postgres://warehouse-db:5432/warehouse/raw_meta_ads/insights_campaign")
 
@@ -49,8 +56,16 @@ RAW_NBK = Asset("postgres://warehouse-db:5432/warehouse/raw_nbk/rates_daily")
 TRANSFORMED = Asset("agoranomos_transformed")
 
 # The condition on which the transform runs (ADR-0039): the demo has loaded, or the rates of the ECB
-# or of the Bank of Italy have, or Google Ads or Meta has, or the rates of the NBK have. A source
-# that joins the model adds its asset here. The transform allows one run at a time: while a run is
-# queued or running, Airflow keeps the events that come, and starts one run for all of them once it
-# ends.
-LOADED = AssetAny(DEMO_LOADED, RAW_ECB, RAW_BANK_OF_ITALY, RAW_GOOGLE_ADS, RAW_META_ADS, RAW_NBK)
+# or of the Bank of Italy have, or Google Ads or Meta has, or the rates of the NBK have, or the
+# short cycle of Google Ads has (ADR-0051). A source that joins the model adds its asset here. The
+# transform allows one run at a time: while a run is queued or running, Airflow keeps the events
+# that come, and starts one run for all of them once it ends.
+LOADED = AssetAny(
+    DEMO_LOADED,
+    RAW_ECB,
+    RAW_BANK_OF_ITALY,
+    RAW_GOOGLE_ADS,
+    RAW_META_ADS,
+    RAW_NBK,
+    RAW_GOOGLE_ADS_INTRADAY,
+)

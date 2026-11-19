@@ -607,7 +607,7 @@ def test_the_journal_of_the_whole_loads_is_read_by_account(sources):
         "SELECT j.account_id, max(j.as_of), max(j.window_to) "
         'FROM "raw_demo_video"."_agoranomos_loads" AS j JOIN "raw_demo_video"."_dlt_loads" AS l '
         "ON l.load_id = j._dlt_load_id AND l.status = 0 "
-        "WHERE j.status = 'loaded' GROUP BY j.account_id"
+        "WHERE j.status = 'loaded' AND j.kind IS DISTINCT FROM 'intraday' GROUP BY j.account_id"
     )
     assert set(last) == {"7300000000000000001"}
     # Loads, and no journal yet: none of the accounts has a last day.

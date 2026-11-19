@@ -32,6 +32,7 @@ Build in Metabase, through the MCP server `agoranomos-metabase`, with the accoun
     - money across accounts only in the columns that end in `_reporting`;
     - ratios such as CTR, CPC, CPA and ROAS from sums, never as an average of ratios;
     - `report_date` as the day in the time zone of the account.
+    - whole days for a period of `ad_stats_campaign_daily`: leave out the rows with `is_partial_day`, a day still in progress that a load of the current day took, with no conversions, as the dashboard **Advertising** and the metrics do; only its card **Today, as of the load** shows them ([ADR-0051](../../../docs/adr/0051-take-the-current-day-as-a-load-of-the-kind-intraday.md)).
 
     The skill `explain-a-metric` has the details.
 4. Look at what exists first: the dashboard **Advertising** of the collection **agoranomos / Advertising** ([Read the advertising dashboard](../../../docs/how-to/read-the-advertising-dashboard.md)), the dashboards of the collection **agoranomos / Demo**, and anything similar in Workspace. Reuse or copy before you build new.

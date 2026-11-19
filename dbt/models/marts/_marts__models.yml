@@ -12,6 +12,10 @@ models:
       such metric; conversions_primary is the sum of the conversions of the primary conversion
       actions of the deployment, which ad_conversions_campaign_daily has by action. A row whose
       measures are all zero is not kept. Its platforms are those of ad_platforms with the kind ads.
+      A row of a day still in progress in its account, which only a load of the kind intraday
+      took, has is_partial_day, with impressions, clicks and spend so far and no conversions, until
+      a whole load replaces the day; the metrics of Metabase and every card of the dashboard
+      Advertising but Today, as of the load, leave those rows out, so they count whole days only.
       Its tests read the days of the windows that the run of the transform pinned.
     config:
       # The table that dbt builds has exactly these columns, with these types, or the build fails.
@@ -27,11 +31,12 @@ models:
           # of numerator over the sum of denominator, times scale, over the rows that a question
           # selects. The marts of ad groups and ads take the first six, each by its anchor; the
           # two of the primary conversion actions are of this level alone, as conversions_primary
-          # is none at the levels of ad groups and ads (ADR-0037).
+          # is none at the levels of ad groups and ads (ADR-0037). A metric of this mart leaves out
+          # the rows of a partial day, is_partial_day (metabase/metrics.py, ADR-0051).
           metric_level: Campaigns
           metric_scope: >-
-            Over the statistics of every campaign, Performance Max included: the total of the
-            accounts.
+            Over the statistics of every campaign, Performance Max included, on whole days: the
+            total of the accounts, without the rows of a day still in progress (is_partial_day).
           metrics:
             - &ctr
               name: CTR
@@ -461,6 +466,15 @@ models:
           meta:
             metabase:
               display_name: Account Is Active
+              semantic_type: type/Category
+              has_field_values: list
+      - name: is_partial_day
+        data_type: boolean
+        description: '{{ doc("is_partial_day") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Is Partial Day
               semantic_type: type/Category
               has_field_values: list
   - name: ad_conversions_campaign_daily

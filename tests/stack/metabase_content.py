@@ -83,6 +83,46 @@ def item(
     return get(metabase_url, session, f"/api/{entry['model']}/{entry['entity_id']}{suffix}")
 
 
+def defaults(
+    board: dict[str, Any], dashcard: dict[str, Any], **values: Any
+) -> list[dict[str, Any]]:
+    """The filters of a card of a dashboard with the default values of the dashboard, and the
+    values given, by the slugs of its filters."""
+    shapes = {p["id"]: p for p in board["parameters"]}
+    found = []
+    for mapping in dashcard["parameter_mappings"]:
+        shape = shapes[mapping["parameter_id"]]
+        value = values.get(shape["id"], shape.get("default"))
+        if value is not None:
+            found.append(
+                {
+                    "id": shape["id"],
+                    "type": shape["type"],
+                    "value": value,
+                    "target": mapping["target"],
+                }
+            )
+    return found
+
+
+def answer(
+    metabase_url: str,
+    session: dict[str, str],
+    board: dict[str, Any],
+    dashcard: dict[str, Any],
+    **values: Any,
+) -> dict[str, Any]:
+    """The answer of a card of a dashboard, with its filters as defaults() gives them: its columns
+    and its rows."""
+    path = (
+        f"/api/dashboard/{board['id']}/dashcard/{dashcard['id']}/card/{dashcard['card_id']}/query"
+    )
+    body = {"parameters": defaults(board, dashcard, **values)}
+    found = call(metabase_url, session, "POST", path, body)
+    assert found.get("status") == "completed", (dashcard["card"]["name"], found.get("status"))
+    return found["data"]
+
+
 def group_ids(metabase_url: str, session: dict[str, str]) -> tuple[set[str], str]:
     """The IDs of the groups of Administrators, and the ID of All Users, as the graph of the
     permissions names them."""

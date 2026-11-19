@@ -4,7 +4,8 @@ any load. Its day is partial in core.ad_stats_campaign_daily until a whole load 
 the journal of restatements does not record, and no other fact, list, dimension or check of G1a
 takes it.
 
-No connector writes such a load yet, so the tests write their own into raw_demo_search as loader,
+The short cycle of Google Ads writes such loads, but the stack of the tests has no account of it,
+and that of the demo is planned, so the tests write their own into raw_demo_search as loader,
 the owner of raw, as tests/stack/test_core_facts.py writes a changed day: rows of the statistics of
 the campaigns of one account on the day after the last day that its whole loads took, which the
 test calls today, made from the rows of the core of its last day, with no conversions, a row in
@@ -20,10 +21,12 @@ reads, accepts and cleans the loads of the step, so that the next step starts fr
 then holds:
 
 1. an intraday load alone: today partial, nothing in the other facts or in a journal, and the lists
-   and the dimensions as they were;
+   and the dimensions as they were; the card Today, as of the load, of the dashboard Advertising
+   answers the partial rows, and its KPI Spend and the metrics leave them out;
 2. an intraday load lower than the partial day that the core holds: no quarantine;
 3. a whole load of today, lower still, and an intraday load with a larger load ID, together: the
-   day whole from the whole load, no row of the journal, and no quarantine;
+   day whole from the whole load, no row of the journal, and no quarantine; the card of today
+   answers no row, and the KPI Spend counts today;
 4. an intraday load after the whole load was accepted: the day stays whole.
 
 The finally deletes the loads of the tests from raw, _dlt_loads, the journal and core.loads, and
@@ -41,8 +44,10 @@ import time
 from datetime import date, timedelta
 from decimal import Decimal
 
+import advertising as ad
 import pytest
 from airflow_api import is_busy, trigger, unpause, wait_for_dag, wait_for_run
+from metabase_content import answer, get, item, post
 from raw_loads import columns_of, last_moment, load_platform, transform_keeping_raw
 from stack_helpers import wait_for, warehouse_output
 
@@ -119,6 +124,28 @@ DIMENSIONS = {
         "FROM core.dim_campaign_versions WHERE account_sk = {sk} ORDER BY 1, 3"
     ),
 }
+
+
+# The partial rows of the mart of the campaigns, as the card of today adds them up: the day, the
+# platform, the account, the spend in the reporting currency, the clicks and the impressions.
+PARTIAL = (
+    "SELECT report_date, platform_name, account_name, sum(spend_reporting), sum(clicks), "
+    "sum(impressions) FROM marts.ad_stats_campaign_daily WHERE is_partial_day GROUP BY 1, 2, 3 "
+    "ORDER BY 1, 2, 3"
+)
+# The spend of the whole days of the mart in a period, by day, as the KPI Spend adds it up by day.
+WHOLE_SPEND = (
+    "SELECT report_date, sum(spend_reporting) FROM marts.ad_stats_campaign_daily "
+    "WHERE NOT is_partial_day AND report_date BETWEEN DATE '{start}' AND DATE '{end}' "
+    "GROUP BY 1 ORDER BY 1"
+)
+# The CTR of the whole days of the mart, as the metric CTR (Campaigns) computes it.
+WHOLE_CTR = (
+    "SELECT round(sum(clicks)::numeric / nullif(sum(impressions), 0), 6) "
+    "FROM marts.ad_stats_campaign_daily WHERE NOT is_partial_day"
+)
+TODAY = "Today, as of the load"
+TOLERANCE = Decimal("0.000001")
 
 
 def rows(env, sql, role="postgres"):
@@ -273,6 +300,79 @@ def quarantine(env):
     return rows(env, "SELECT reason FROM ops.ops_quarantine", "metabase_reader")
 
 
+def shown(data):
+    """The rows of an answer of Metabase: the first column, the day, as a date, the numbers as
+    decimals, and the rest as they come."""
+    found = []
+    for day, *rest in data["rows"]:
+        values = [str(day)[:10]]
+        for value in rest:
+            is_number = isinstance(value, int | float) and not isinstance(value, bool)
+            values.append(Decimal(str(value)) if is_number else value)
+        found.append(tuple(values))
+    return found
+
+
+def close(found, wanted):
+    """Whether two lists of rows are equal, their numbers within TOLERANCE."""
+    if len(found) != len(wanted):
+        return False
+    for got, want in zip(found, wanted, strict=True):
+        for a, b in zip(got, want, strict=True):
+            if isinstance(a, Decimal):
+                if abs(a - Decimal(b)) > TOLERANCE:
+                    return False
+            elif a != b:
+                return False
+    return True
+
+
+def check_the_dashboard(env, metabase_url, session, first: date, last: date):
+    """The card of today of the dashboard Advertising answers the partial rows of the mart, with
+    the time of their load, and takes the filter of the account; the KPI Spend of the days from
+    first to last counts the whole days alone, as the metric CTR (Campaigns) does (ADR-0051)."""
+    board = item(metabase_url, session, f"{ad.ADVERTISING_KEY}/{ad.DASHBOARD}")
+    cards = {d["card"]["name"]: d for d in board["dashcards"] if d["card_id"] is not None}
+    wanted = rows(env, PARTIAL, "metabase_reader")
+    data = answer(metabase_url, session, board, cards[TODAY])
+    assert [c["name"] for c in data["cols"]] == [
+        "report_date",
+        "platform_name",
+        "account_name",
+        "spend_reporting",
+        "clicks",
+        "impressions",
+        "last_loaded_at",
+    ]
+    found = shown(data)
+    assert close(sorted(r[:6] for r in found), sorted(wanted)), (found, wanted)
+    assert all(r[6] for r in found), "a row of the card of today has no time of its load"
+    accounts = {r[2] for r in wanted}
+    for account in accounts:
+        of_account = shown(answer(metabase_url, session, board, cards[TODAY], account=[account]))
+        assert sorted(r[:6] for r in of_account) == sorted(r[:6] for r in found if r[2] == account)
+    others = rows(env, "SELECT account_name FROM marts.ad_accounts ORDER BY 1", "metabase_reader")
+    other = next(name for (name,) in others if name not in accounts)
+    assert answer(metabase_url, session, board, cards[TODAY], account=[other])["rows"] == []
+    # The KPI Spend, by day, over the whole days alone.
+    spend = shown(
+        answer(metabase_url, session, board, cards["Spend"], period=f"{first}~{last}", unit="day")
+    )
+    whole = rows(env, WHOLE_SPEND.format(start=first, end=last), "metabase_reader")
+    assert close(spend, whole), (spend, whole)
+    # The metric of the CTR of the campaigns, over the whole days alone.
+    metrics = get(metabase_url, session, "/api/metric")
+    [ctr] = [
+        m
+        for m in metrics["data"]
+        if m["name"] == "CTR (Campaigns)" and m.get("collection", {}).get("name") == "Metrics"
+    ]
+    [[value]] = post(metabase_url, session, f"/api/card/{ctr['id']}/query", {})["data"]["rows"]
+    expected = warehouse_output(env, WHOLE_CTR, "metabase_reader")
+    assert abs(Decimal(str(value)) - Decimal(expected)) <= TOLERANCE, (value, expected)
+    return wanted
+
+
 @pytest.fixture(scope="module")
 def idle(env, airflow_url, token):
     """No run of the transform is queued or running, and no load waits in core.loads, so that a
@@ -292,7 +392,9 @@ def idle(env, airflow_url, token):
     assert warehouse_output(env, pinned) == "0", "loads stay pinned after a run of the transform"
 
 
-def test_a_partial_day_stays_below_the_whole_day_that_replaces_it(env, airflow_url, token, idle):
+def test_a_partial_day_stays_below_the_whole_day_that_replaces_it(
+    env, airflow_url, token, metabase_url, session, idle
+):
     sk = warehouse_output(env, SK)
     last = date.fromisoformat(warehouse_output(env, LAST_DAY))
     today = last + timedelta(days=1)
@@ -347,6 +449,12 @@ def test_a_partial_day_stays_below_the_whole_day_that_replaces_it(env, airflow_u
         assert rows(env, kind) == [("intraday", "accepted")]
         # The lists and the dimensions as they were: the run read no list of the account.
         assert dimensions(env, sk) == before
+        # The card of today answers the partial rows of today, of this account alone, and the KPI
+        # Spend and the metrics leave them out.
+        assert spend(whole) > 0, "the partial day has no spend"
+        partial = check_the_dashboard(env, metabase_url, session, last, today)
+        clicks = sum(k for _, _, k, _ in whole)
+        assert [(r[0], r[4]) for r in partial] == [(str(today), str(clicks))]
 
         # 2. A lower intraday load: G1a does not check it, and the day stays partial.
         lower = scaled(whole, 4)
@@ -378,6 +486,8 @@ def test_a_partial_day_stays_below_the_whole_day_that_replaces_it(env, airflow_u
             f"AND l.load_id IN ('{window}', '{later}')",
         )
         assert journaled == "0"
+        # The card of today answers no row, and the KPI Spend counts the whole day.
+        assert check_the_dashboard(env, metabase_url, session, last, today) == []
 
         # 4. An intraday load after the whole load was accepted: the day stays whole.
         accepted = (

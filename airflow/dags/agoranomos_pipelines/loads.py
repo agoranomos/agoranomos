@@ -70,8 +70,11 @@ TEXT, DATE, TIMESTAMP = {"data_type": "text"}, {"data_type": "date"}, {"data_typ
 # secret, the moment of the attempt (now), and no day and no loaded_at: it loaded nothing, so the
 # staging models and the next load pass it over, and the Ops collection shows the last load that
 # was. Each row has the kind of its load too: window for the usual window of the account, history
-# for a load of the days before it (ADR-0038, "The first load"), which the pin copies into
-# core.loads, where a row without it, of a source that does not write it, takes window. A load is
+# for a load of the days before it (ADR-0038, "The first load"), or intraday for a load of its
+# current day, and of the day before while no whole load covers it, every few hours (ADR-0051),
+# which the pin copies into core.loads, where a row without it, of a source that does not write
+# it, takes window. A load of the kind window or history is whole, as it takes whole days; one of
+# the kind intraday takes days still in progress, so no watermark counts it. A load is
 # whole once _dlt_loads has its row with status 0, which dlt writes after the last table of the
 # load. The journal of the releases before v0.5, _agoranomos_reloads, went with their merges: a
 # dataset that holds it was loaded in their shape (OLD_JOURNAL). dlt writes a timestamp as a
@@ -93,7 +96,7 @@ LOAD_HINTS = {
     },
 }
 LOADED, FAILED = "loaded", "failed"
-WINDOW, HISTORY = "window", "history"
+WINDOW, HISTORY, INTRADAY = "window", "history", "intraday"
 
 
 def own(hints: dict) -> dict:
@@ -179,7 +182,9 @@ def recorded(pipeline) -> dict[str, tuple[date, date]]:
     first load. A load counts once _dlt_loads has its row with status 0, as for the staging models:
     the rows of a load that stopped half way are not read, so the next load takes their days again.
     A row of a failed account has no day, and an account whose loads all failed has no record, as
-    one that no load took yet."""
+    one that no load took yet. A load of the kind intraday does not count: it takes days still in
+    progress, and after a stop it would set the last day loaded to today, so that the next window
+    left out the days of the stop (ADR-0051). A row without a kind is of the kind window."""
     try:
         with pipeline.sql_client() as client:
             journal = client.make_qualified_table_name(LOADS)
@@ -189,7 +194,8 @@ def recorded(pipeline) -> dict[str, tuple[date, date]]:
                 "SELECT j.account_id, max(j.as_of), max(j.window_to) "  # noqa: S608
                 f"FROM {journal} AS j JOIN {loads} AS l "
                 "ON l.load_id = j._dlt_load_id AND l.status = 0 "
-                f"WHERE j.status = '{LOADED}' GROUP BY j.account_id"
+                f"WHERE j.status = '{LOADED}' AND j.kind IS DISTINCT FROM '{INTRADAY}' "
+                "GROUP BY j.account_id"
             )
     except DatabaseUndefinedRelation:
         return {}

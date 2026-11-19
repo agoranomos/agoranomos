@@ -234,6 +234,10 @@ def where(*filters: str) -> str:
 
 AD_WHERE = where(*AD_FILTERS)
 WEB_WHERE = where(*WEB_FILTERS)
+# The statistics of the campaigns on whole days only: a day still in progress in its account, which
+# only a load of the kind intraday took, has is_partial_day, and the questions leave it out, as the
+# dashboard Advertising does but its card of today (advertising.py, ADR-0051).
+STATS_WHERE = AD_WHERE.replace("WHERE ", "WHERE NOT is_partial_day AND ", 1)
 # The ratios, as SQL over the sums of the rows of the answer, each null where its divisor is 0.
 # The conversions are those of the primary conversion actions of the deployment,
 # conversions_primary, which every platform has, Meta included (ADR-0037); the value of the
@@ -268,7 +272,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "query": sql(
             "SELECT sum(spend_reporting) AS spend_reporting",
             f"FROM {MART_SCHEMA}.{AD_STATS}",
-            AD_WHERE,
+            STATS_WHERE,
         ),
         "layout": {"row": 0, "col": 0, "size_x": 6, "size_y": 3},
     },
@@ -286,7 +290,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "query": sql(
             "SELECT sum(conversions_primary) AS conversions_primary",
             f"FROM {MART_SCHEMA}.{AD_STATS}",
-            AD_WHERE,
+            STATS_WHERE,
         ),
         "layout": {"row": 0, "col": 6, "size_x": 6, "size_y": 3},
     },
@@ -301,7 +305,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "display": "scalar",
         "mart": AD_STATS,
         "columns": ("cost_per_conversion",),
-        "query": sql(f"SELECT {CPA}", f"FROM {MART_SCHEMA}.{AD_STATS}", AD_WHERE),
+        "query": sql(f"SELECT {CPA}", f"FROM {MART_SCHEMA}.{AD_STATS}", STATS_WHERE),
         "layout": {"row": 0, "col": 12, "size_x": 6, "size_y": 3},
     },
     {
@@ -315,7 +319,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "display": "scalar",
         "mart": AD_STATS,
         "columns": ("roas",),
-        "query": sql(f"SELECT {ROAS}", f"FROM {MART_SCHEMA}.{AD_STATS}", AD_WHERE),
+        "query": sql(f"SELECT {ROAS}", f"FROM {MART_SCHEMA}.{AD_STATS}", STATS_WHERE),
         "layout": {"row": 0, "col": 18, "size_x": 6, "size_y": 3},
     },
     {
@@ -334,7 +338,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "query": sql(
             "SELECT report_date, platform_name, sum(spend_reporting) AS spend_reporting",
             f"FROM {MART_SCHEMA}.{AD_STATS}",
-            AD_WHERE,
+            STATS_WHERE,
             "GROUP BY report_date, platform_name",
             "ORDER BY report_date, platform_name",
         ),
@@ -355,7 +359,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "query": sql(
             "SELECT client_name, sum(spend_reporting) AS spend_reporting",
             f"FROM {MART_SCHEMA}.{AD_STATS}",
-            AD_WHERE,
+            STATS_WHERE,
             "GROUP BY client_name",
             "ORDER BY spend_reporting DESC",
         ),
@@ -388,7 +392,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             f"  {CTR}, sum(spend_reporting) AS spend_reporting,",
             f"  sum(conversions_primary) AS conversions_primary, {CPA}, {ROAS}",
             f"FROM {MART_SCHEMA}.{AD_STATS}",
-            AD_WHERE,
+            STATS_WHERE,
             "GROUP BY platform_name",
             "ORDER BY spend_reporting DESC",
         ),
@@ -420,7 +424,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "  sum(conversions_primary) AS conversions_primary,",
             f"  {CPA}, {ROAS}",
             f"FROM {MART_SCHEMA}.{AD_STATS}",
-            AD_WHERE,
+            STATS_WHERE,
             "GROUP BY platform, account_id, campaign_id, campaign_name, platform_name, client_name",
             "ORDER BY spend_reporting DESC",
             "LIMIT 20",
