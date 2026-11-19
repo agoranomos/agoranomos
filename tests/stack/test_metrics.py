@@ -47,7 +47,10 @@ def test_the_metrics_of_each_level_compute_the_ratios_of_its_mart(
     names = {kpi: f"{kpi} ({level})" for kpi in RATIOS}
     assert set(names.values()) <= set(found), sorted(set(names.values()) - set(found))
     sql = "SELECT " + ", ".join(f"round({ratio}, 6)" for ratio in RATIOS.values())
-    wanted = warehouse_output(env, f"{sql} FROM {mart}").split("|")
+    # A metric of the campaigns takes the whole days, without the rows of a partial day, which no
+    # other mart has (ADR-0051).
+    whole = " WHERE NOT is_partial_day" if level == "Campaigns" else ""
+    wanted = warehouse_output(env, f"{sql} FROM {mart}{whole}").split("|")
     for (kpi, _), expected in zip(RATIOS.items(), wanted, strict=True):
         name = names[kpi]
         metric = found[name]

@@ -2414,6 +2414,18 @@ def test_each_question_filters_on_the_fields_of_the_mart_that_it_reads(airflow, 
         assert card_of(metabase, question["name"])["parameters"] == []
 
 
+def test_the_questions_on_the_campaigns_take_whole_days():
+    # A day still in progress in its account, which only a load of the kind intraday took, stays
+    # out of every question of the demo, as out of the dashboard Advertising (ADR-0051); the other
+    # marts have no partial day.
+    for question in di.QUESTIONS:
+        query = question["query"]
+        if question["mart"] == di.AD_STATS:
+            assert "\nWHERE NOT is_partial_day AND {{period}} AND " in query, question["key"]
+        else:
+            assert "is_partial_day" not in query, question["key"]
+
+
 def test_each_dashboard_sets_the_filters_of_each_of_its_cards(airflow, metabase):
     assert di.main(env_for(airflow, metabase)) == 0
     for key, (name, _) in di.DASHBOARDS.items():

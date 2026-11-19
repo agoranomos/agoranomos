@@ -1,6 +1,6 @@
 # Run agoranomos locally
 
-This guide starts agoranomos on your own machine in local mode: the warehouse, Airflow and Metabase, with the demo, reachable from this machine only ([ADR-0011](../adr/0011-local-and-server-modes.md)). It is for engineers who want to try the stack or work on it. To be guided through the demo step by step instead, follow the tutorial [Run agoranomos locally with demo data](../tutorials/run-locally-with-demo-data.md).
+This guide starts agoranomos on your own machine in local mode: the warehouse, Airflow and Metabase, with the demo, reachable from this machine only ([ADR-0011](../adr/0011-local-and-server-modes.md)), or through an SSH tunnel when the machine is another one of yours ([below](#run-it-on-another-machine-of-yours)). It is for engineers who want to try the stack or work on it. To be guided through the demo step by step instead, follow the tutorial [Run agoranomos locally with demo data](../tutorials/run-locally-with-demo-data.md).
 
 !!! note "Pre-alpha"
 
@@ -43,6 +43,22 @@ cd agoranomos
 It shows the address of Airflow and of Metabase, the user name of the Airflow admin, `admin`, the email of the Metabase admin, from `AGORANOMOS_ADMIN_EMAIL`, and the settings of `.env` that hold their passwords, `AIRFLOW_ADMIN_PASSWORD` and `METABASE_ADMIN_PASSWORD`. It never prints a password: open `.env`, which only you can read, and copy it from there.
 
 Keep a copy of `.env` in a password manager. It holds the keys without which the connections that Airflow and Metabase save cannot be read back, for example from a backup.
+
+## Run it on another machine of yours
+
+Local mode also suits a machine of your own that you reach over SSH, such as a spare computer at home, when nothing is to be open to the network: Airflow and Metabase listen on `127.0.0.1` of that machine only, so its firewall can keep every port but SSH closed. Start the stack there as [above](#start-the-stack), then open an SSH tunnel from your own machine and keep it open while you work (`-N` runs no command on the other machine, so the session is only the tunnel):
+
+```bash
+ssh -N -L 3000:127.0.0.1:3000 -L 8080:127.0.0.1:8080 <user>@<machine>
+```
+
+Then open `http://127.0.0.1:3000` and `http://127.0.0.1:8080` on your own machine. Give the tunnel the same port at both ends: Metabase builds its links from `METABASE_PORT`, as `http://localhost:<METABASE_PORT>` ([Configuration](../reference/configuration.md#server-mode)), and `./agoranomos ai connect` prints the address of its MCP server on that port too, so with another port on your side they point at the wrong address. If your own machine uses these ports already, such as for a stack of its own, `ssh` only warns that it cannot listen on them, and the addresses open what listens there. Then set other ports in the `.env` of the other machine, such as `METABASE_PORT=13000` and `AIRFLOW_PORT=18080`, run `./agoranomos up` there, and use them at both ends:
+
+```bash
+ssh -N -L 13000:127.0.0.1:13000 -L 18080:127.0.0.1:18080 <user>@<machine>
+```
+
+The backups stay on that machine: add `ops` to `COMPOSE_PROFILES` for one every day ([Back up every day](back-up-and-restore.md#back-up-every-day)), and copy them elsewhere if its data matters ([Copy the backups to another machine](back-up-and-restore.md#copy-the-backups-to-another-machine)).
 
 ## Look around
 
