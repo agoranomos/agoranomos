@@ -40,6 +40,7 @@ def test_no_dag_file_imports_another():
     assert {
         "agoranomos_demo_daily",
         "agoranomos_demo_history",
+        "agoranomos_demo_intraday",
         "agoranomos_demo_transform",
         "agoranomos_bank_of_italy_daily",
         "agoranomos_ecb_daily",
@@ -67,11 +68,11 @@ RAW_NBK = "postgres://warehouse-db:5432/warehouse/raw_nbk/rates_daily"
 
 
 def test_the_transform_runs_when_the_demo_the_rates_google_ads_or_meta_have_loaded():
-    # Any of seven conditions (ADR-0039): all five assets of the demo, the asset of the rates of the
+    # Any of eight conditions (ADR-0039): all five assets of the demo, the asset of the rates of the
     # ECB, that of the rates of the Bank of Italy (ADR-0042), that of Google Ads (ADR-0032), that of
     # Meta (ADR-0050), that of the rates of the NBK (ADR-0042), or that of the short cycle of the
-    # current day of Google Ads (ADR-0051). The five of the demo stay
-    # one condition, so that one run of the history or of the daily load starts one run of the
+    # current day of Google Ads or of the demo (ADR-0051). The five of the demo stay one
+    # condition, so that one run of the history or of the daily load starts one run of the
     # transform, after its last platform, and not one after its first platform and one more for
     # the other four, the first reading tables whose days the loads still replace. One run at a
     # time, as before.
@@ -88,9 +89,11 @@ def test_the_transform_runs_when_the_demo_the_rates_google_ads_or_meta_have_load
     assert f'RAW_NBK = Asset("{RAW_NBK}")' in assets
     assert (
         "LOADED = AssetAny(\n    DEMO_LOADED,\n    RAW_ECB,\n    RAW_BANK_OF_ITALY,\n"
-        "    RAW_GOOGLE_ADS,\n    RAW_META_ADS,\n    RAW_NBK,\n    RAW_GOOGLE_ADS_INTRADAY,\n)"
+        "    RAW_GOOGLE_ADS,\n    RAW_META_ADS,\n    RAW_NBK,\n    RAW_GOOGLE_ADS_INTRADAY,\n"
+        "    RAW_DEMO_INTRADAY,\n)"
     ) in assets
     assert 'RAW_GOOGLE_ADS_INTRADAY = Asset("agoranomos_google_ads_intraday")' in assets
+    assert 'RAW_DEMO_INTRADAY = Asset("agoranomos_demo_intraday")' in assets
     assert "DEMO_LOADED |" not in assets
 
 

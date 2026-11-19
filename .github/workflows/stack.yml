@@ -169,6 +169,17 @@ jobs:
       # listens, a send fails at once and nothing leaves the runner.
       - name: Send the alerts to a local address
         run: echo 'AGORANOMOS_ALERT_URLS=json://127.0.0.1:8925/stack-tests' >> .env
+      # The short cycle of the current day of the demo (ADR-0051) runs by hand in the tests, as its
+      # stack test runs it: on its schedule, of 3 hours by default, it would load at once when
+      # demo-init unpauses it after the history, and every 3 hours after, each load with a run of
+      # the transform in the middle of the tests that count the runs of the transform or read the
+      # raw layer, as the daily load would, which the tests pause. With 0 the DAG has no schedule
+      # and demo-init leaves it paused; tests/stack/test_demo_intraday.py checks the schedule of
+      # the other values in its file.
+      - name: Run the short cycle of the demo by hand
+        run: |
+          sed -i 's|^AGORANOMOS_INTRADAY_HOURS=.*|AGORANOMOS_INTRADAY_HOURS=0|' .env
+          grep -qx 'AGORANOMOS_INTRADAY_HOURS=0' .env
       - name: Put a test DAG into the extensions folder
         run: |
           mkdir -p extensions/dags
@@ -372,6 +383,17 @@ jobs:
       # listens, a send fails at once and nothing leaves the runner.
       - name: Send the alerts to a local address
         run: echo 'AGORANOMOS_ALERT_URLS=json://127.0.0.1:8925/stack-tests' >> .env
+      # The short cycle of the current day of the demo (ADR-0051) runs by hand in the tests, as its
+      # stack test runs it: on its schedule, of 3 hours by default, it would load at once when
+      # demo-init unpauses it after the history, and every 3 hours after, each load with a run of
+      # the transform in the middle of the tests that count the runs of the transform or read the
+      # raw layer, as the daily load would, which the tests pause. With 0 the DAG has no schedule
+      # and demo-init leaves it paused; tests/stack/test_demo_intraday.py checks the schedule of
+      # the other values in its file.
+      - name: Run the short cycle of the demo by hand
+        run: |
+          sed -i 's|^AGORANOMOS_INTRADAY_HOURS=.*|AGORANOMOS_INTRADAY_HOURS=0|' .env
+          grep -qx 'AGORANOMOS_INTRADAY_HOURS=0' .env
       - name: Put a test DAG into the extensions folder
         run: |
           mkdir -p extensions/dags

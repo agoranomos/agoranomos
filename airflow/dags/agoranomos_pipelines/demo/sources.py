@@ -20,7 +20,10 @@ history again, with the kind history, when the core lacks rates into the reporti
 whose loads it has accepted, as after a change of AGORANOMOS_REPORTING_CURRENCY
 (agoranomos_pipelines/rates.py). A dataset that a release before v0.5 loaded, with its merges and
 its journal _agoranomos_reloads, is dropped by the next load, which loads the history again
-(start_over)."""
+(start_over). The short cycle of the current day loads demo_search alone, the platform in the shape
+of Google Ads, as a load of the kind intraday (load_intraday, ADR-0051): the statistics of its
+campaigns on the current day of each account, and on the day before while no whole load covers it,
+with the journal and no list."""
 
 from __future__ import annotations
 
@@ -34,7 +37,7 @@ from datetime import UTC, date, datetime, timedelta
 import dlt
 
 from agoranomos_pipelines import rates
-from agoranomos_pipelines.demo import fx
+from agoranomos_pipelines.demo import fx, search
 from agoranomos_pipelines.demo.common import local_today
 from agoranomos_pipelines.demo.platforms import LOAD_ORDER, PLATFORMS, gap
 from agoranomos_pipelines.demo.world import Account
@@ -43,6 +46,7 @@ from agoranomos_pipelines.loads import (
     DATE,
     DLT_SETTINGS,
     HISTORY,
+    INTRADAY,
     LOAD_HINTS,
     LOADED,
     LOADS,
@@ -64,6 +68,9 @@ log = logging.getLogger(__name__)
 # The platform of the rates of the demo, whose loads take the history of the rates again when the
 # core needs it (rates_history).
 RATES = fx.PLATFORM
+# The platform of the demo that has a short cycle of the current day, in the shape of Google Ads,
+# whose short cycle is the one that the base package builds (ADR-0051).
+INTRADAY_PLATFORM = search.PLATFORM
 # The IDs of the tables of the ad groups and of the ads of demo_search.
 SEARCH_AD_GROUP = {"customer__id": TEXT, "campaign__id": TEXT, "ad_group__id": TEXT}
 SEARCH_AD = {**SEARCH_AD_GROUP, "ad_group_ad__ad__id": TEXT, "ad_group_ad__ad__name": TEXT}
@@ -236,8 +243,20 @@ def journal(
     account that takes its history, every account without first, or those of history with it,
     and window for the others (ADR-0038). A load of the demo fails whole or not at all, so every
     row is one of a loaded account."""
-    platform = PLATFORMS[code]
-    zones = {account.account_id: account.time_zone for account in platform.module.accounts()}
+    windows = PLATFORMS[code].module.windows(now, first)
+    kinds = {
+        account_id: HISTORY if first is None or account_id in (history or ()) else WINDOW
+        for account_id in windows
+    }
+    return journal_rows(code, now, windows, kinds)
+
+
+def journal_rows(
+    code: str, now: datetime, windows: dict[str, tuple[date, date]], kinds: dict[str, str]
+) -> list[dict[str, object]]:
+    """The rows of _agoranomos_loads of a load of a platform at now: for each account, its window,
+    the day of now in its time zone, and the kind of its load."""
+    zones = {account.account_id: account.time_zone for account in PLATFORMS[code].module.accounts()}
     loaded_at = datetime.now(UTC)
     return [
         {
@@ -248,9 +267,9 @@ def journal(
             "now": now,
             "loaded_at": loaded_at,
             "status": LOADED,
-            "kind": HISTORY if first is None or account_id in (history or ()) else WINDOW,
+            "kind": kinds[account_id],
         }
-        for account_id, (start, end) in sorted(platform.module.windows(now, first).items())
+        for account_id, (start, end) in sorted(windows.items())
     ]
 
 
@@ -455,3 +474,52 @@ def load_daily(code: str, now: datetime) -> dict[str, int]:
         if account_id not in last or (again is not None and again < usual(account_id))
     )
     return load(code, now, first=first, history=new)
+
+
+def load_intraday(now: datetime) -> dict[str, int] | None:
+    """The short cycle of the current day of the demo at now (ADR-0051): for each account of
+    demo_search that a whole load has taken, the statistics of its campaigns on its current day,
+    and on the day before while no whole load covers it, so far at now (search.intraday_stats),
+    into campaign_stats, with a row of the kind intraday for each account in _agoranomos_loads, in
+    one run, and no list, as the short cycle of Google Ads takes none. Return the rows that dlt
+    reports, or None when no account has had a whole load yet, or the dataset was loaded by a
+    release before v0.5, whose next daily load starts over: such a load waits for the daily load,
+    and writes nothing."""
+    code = INTRADAY_PLATFORM
+    platform = PLATFORMS[code]
+    last = last_loads(code)
+    if not last:
+        log.info("%s has had no whole load yet: no current day to load", platform.dataset)
+        return None
+    windows = search.intraday_windows(now, {account: end for account, (_, end) in last.items()})
+    os.environ.update(DLT_SETTINGS)
+    with open_pipeline(code) as pipeline:
+        stats = search.intraday_stats(now, windows)
+        resources = [
+            dlt.resource(
+                or_marker(stats),
+                name=platform.main_table,
+                **own(TABLE_HINTS[(code, platform.main_table)]),
+            ),
+            # In the same run as the statistics, so under the same _dlt_load_id.
+            dlt.resource(
+                journal_rows(code, now, windows, dict.fromkeys(windows, INTRADAY)),
+                name=LOADS,
+                **own(LOAD_HINTS),
+            ),
+        ]
+        run(pipeline, resources)
+        counts = row_counts(pipeline)
+    for account_id, (first, end) in sorted(windows.items()):
+        log.info(
+            "%s: the current day from %s to %s, as of %s", account_id, first, end, now.isoformat()
+        )
+    for table, rows in sorted(counts.items()):
+        log.info(
+            "Loaded %d rows of the current day into %s.%s, as of %s",
+            rows,
+            platform.dataset,
+            table,
+            now.isoformat(),
+        )
+    return counts

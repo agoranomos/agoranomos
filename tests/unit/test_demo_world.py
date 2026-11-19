@@ -32,6 +32,27 @@ def test_a_moment_without_a_time_zone_is_refused():
         common.local_today(datetime(2026, 10, 12, 5, 0), "UTC")
 
 
+def test_the_share_of_a_day_that_has_passed_is_that_of_the_time_zone_of_the_account():
+    # 05:00 UTC is 01:00 in New York: an hour of its 12 October, all of its 11th, and nothing of
+    # its 13th.
+    hour = 3_600_000_000
+    day = 24 * hour
+    assert common.passed(NOW, "America/New_York", date(2026, 10, 12)) == (hour, day)
+    assert common.passed(NOW, "America/New_York", date(2026, 10, 11)) == (day, day)
+    assert common.passed(NOW, "America/New_York", date(2026, 10, 13)) == (0, day)
+    # A day when the clocks change is 23 or 25 hours long: Berlin moves them on 29 March and back
+    # on 25 October 2026, New York on 8 March and 1 November.
+    moment = datetime(2026, 3, 29, 12, 0, tzinfo=UTC)
+    assert common.passed(moment, "Europe/Berlin", date(2026, 3, 29)) == (13 * hour, 23 * hour)
+    moment = datetime(2026, 10, 25, 23, 0, tzinfo=UTC)
+    assert common.passed(moment, "Europe/Berlin", date(2026, 10, 25)) == (25 * hour, 25 * hour)
+    moment = datetime(2026, 11, 1, 16, 0, tzinfo=UTC)
+    assert common.passed(moment, "America/New_York", date(2026, 11, 1)) == (12 * hour, 25 * hour)
+    # The microseconds of the moment count, so that a moment gives one share.
+    later = NOW + timedelta(microseconds=7)
+    assert common.passed(later, "America/New_York", date(2026, 10, 12)) == (hour + 7, day)
+
+
 def test_a_curve_rises_along_its_points_and_ends_at_the_final_value():
     curve = ((1, 600), (2, 700), (7, 850), (90, 1000))
     assert [common.share(curve, n) for n in (0, 1, 2, 3, 7, 48, 90, 400)] == [

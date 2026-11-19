@@ -4,7 +4,9 @@ profile.
 It runs the demo pipeline once: agoranomos_demo_history, which loads the history of the fictional
 platforms of the demo generator into raw_demo_<platform>, and then agoranomos_demo_transform, which
 the five assets of the history start. Then it unpauses agoranomos_demo_daily, which brings the new
-days every day, if that DAG has never run. Then it makes the demo visible in Metabase: it syncs the
+days every day, and agoranomos_demo_intraday, which brings the current day every few hours
+(ADR-0051), each if that DAG has never run, the second unless AGORANOMOS_INTRADAY_HOURS is 0, which
+leaves it without a schedule. Then it makes the demo visible in Metabase: it syncs the
 schema of the warehouse, applies the metadata of the marts (metadata.py), as metabase-init does,
 and puts the demo, its questions and its two dashboards, Advertising overview and Web analytics,
 in the collection agoranomos / Demo as the code says (content.py, ADR-0018): an edit is reverted
@@ -22,9 +24,9 @@ a successful run of the transform after it does not run the pipeline again and l
 state of both DAGs as it is, unless the raw tables of the demo are in the shape of a release before
 v0.5, which merged the days of each load in place: then it runs the history again, whose loads drop
 those tables and load them anew, each load under its own id (ADR-0038). A start that finds a run of
-the daily load leaves its pause state as it is too. The content of Metabase is found by the entity
-IDs that Metabase gave it, in the registry of the content, never by name, but for the one move of
-the collection of an earlier release.
+the daily load, or of the short cycle, leaves the pause state of that DAG as it is too. The content
+of Metabase is found by the entity IDs that Metabase gave it, in the registry of the content, never
+by name, but for the one move of the collection of an earlier release.
 
 The whole job has one deadline, DEADLINE seconds from its start, which every wait shares, and a
 step that runs out of time names itself; ./agoranomos up waits longer than that for the stack.
@@ -68,12 +70,17 @@ from metabase_init import (
 LOAD_DAG = "agoranomos_demo_history"
 TRANSFORM_DAG = "agoranomos_demo_transform"
 DAILY_DAG = "agoranomos_demo_daily"
+INTRADAY_DAG = "agoranomos_demo_intraday"
 # The transform runs when each platform of the demo has loaded since its last run: it waits for
 # one asset of each (airflow/dags/agoranomos_pipelines/assets.py), and the events of some of them
-# start no run. An event of the rates of the ECB or of Google Ads starts a run on its own, and the
-# job counts the events of the demo alone: the two DAGs start paused, and a run that one of them
-# starts counts as a run once Airflow has created it, within a loop of the scheduler.
+# start no run. An event of the rates of the ECB, of Google Ads or of the short cycle of the demo
+# starts a run on its own, and the job counts the events of the five platforms alone: the DAGs of
+# the first two start paused, that of the short cycle until the job unpauses it after the
+# pipeline, and a run that one of them starts counts as a run once Airflow has created it, within
+# a loop of the scheduler.
 TRANSFORM_ASSETS = 5
+# The setting of the period of the short cycle of the current day, in hours, 0 for none.
+INTRADAY_SETTING = "AGORANOMOS_INTRADAY_HOURS"
 # The demo as a package of the content (content.py): its key in the registry, and its name, the
 # name of its collection in agoranomos.
 DEMO_KEY = "demo"
@@ -659,10 +666,15 @@ class Config:
     metadata_export: str
     metadata_overrides: str
     content_registry: str
+    # Whether the short cycle of the current day has a schedule: AGORANOMOS_INTRADAY_HOURS of .env,
+    # which ./agoranomos checks before up, is not 0 (ADR-0051). Without it, the default of 3.
+    short_cycle: bool = True
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
-        return cls(**read_settings(env, ENV_NAMES, urls=("airflow_url", "metabase_url")))
+        settings = read_settings(env, ENV_NAMES, urls=("airflow_url", "metabase_url"))
+        hours = (env.get(INTRADAY_SETTING) or "").strip()
+        return cls(**settings, short_cycle=hours != "0")
 
 
 class Deadline:
@@ -750,7 +762,7 @@ def transform_is_busy(airflow: Airflow) -> bool:
 
 def wait_for_dags(airflow: Airflow, deadline: Deadline) -> None:
     """Wait until the DAG processor has loaded the demo DAGs; until then Airflow answers 404."""
-    for dag_id in (LOAD_DAG, TRANSFORM_DAG, DAILY_DAG):
+    for dag_id in (LOAD_DAG, TRANSFORM_DAG, DAILY_DAG, INTRADAY_DAG):
         wait_until(
             lambda dag_id=dag_id: airflow.call("GET", f"/api/v2/dags/{dag_id}", missing_ok=True),
             deadline,
@@ -906,6 +918,20 @@ def start_daily_load(airflow: Airflow) -> bool:
     if count_runs(airflow, DAILY_DAG):
         return False
     airflow.call("PATCH", f"/api/v2/dags/{DAILY_DAG}", {"is_paused": False})
+    return True
+
+
+def start_intraday_load(airflow: Airflow) -> bool:
+    """Unpause the short cycle of the current day if it has never run, after the pipeline, and
+    return True if it did, as start_daily_load does for the daily load. Unpaused, the DAG makes a
+    run at once, for the last time of its schedule, which loads the current day of demo_search, and
+    its asset starts a run of the transform, which the job does not wait for. A DAG that has run
+    keeps its pause state, so a pause that a person made stays. With AGORANOMOS_INTRADAY_HOURS=0
+    the DAG has no schedule and never runs by itself, so the job does not call this, and a pause
+    stays too (Config.short_cycle)."""
+    if count_runs(airflow, INTRADAY_DAG):
+        return False
+    airflow.call("PATCH", f"/api/v2/dags/{INTRADAY_DAG}", {"is_paused": False})
     return True
 
 
@@ -1334,6 +1360,11 @@ def main(env: Mapping[str, str] | None = None) -> int:
         ran = run_demo_pipeline(airflow, deadline, again=bool(earlier))
         if start_daily_load(airflow):
             log(f"unpaused {DAILY_DAG}, which loads the new days of the demo every day")
+        if config.short_cycle and start_intraday_load(airflow):
+            log(
+                f"unpaused {INTRADAY_DAG}, which loads the current day of the demo every "
+                "AGORANOMOS_INTRADAY_HOURS hours"
+            )
         server, hint = "Metabase", Metabase.logs_hint
         ensure_synced(metabase, database["id"], tables, deadline, ran)
         metadata.apply(
