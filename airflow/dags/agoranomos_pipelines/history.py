@@ -13,13 +13,16 @@ the month 36 months before yesterday (ADR-0034), and for Meta never before the 3
 the API refuses a start date (meta_ads.oldest).
 
 The plan of a source reads, as the role loader, the windows of the whole loads of each account in
-the journal _agoranomos_loads of its raw dataset and in core.loads, of every kind (known_windows),
-and asks the API of the platform nothing. It starts nothing while a whole load of the source waits
-for the run of the transform that pins it (waiting), before the first load of an account, whose
-usual window comes first, or once every account holds its days back to the first day. Each source
-plans on its own: the loads of two sources may run at the same time, as their APIs and quotas are
-apart, and the one transform takes them one run at a time (max_active_runs of the transform, and
-the pin of ADR-0046, which reads only the loads that have ended).
+the journal _agoranomos_loads of its raw dataset and in core.loads, of the kinds window and
+history, and not those of the kind intraday, which take days still in progress (known_windows,
+ADR-0051), and asks the API of the platform nothing. It starts nothing while a whole load of the
+source waits for the run of the transform that pins it (waiting), before the first load of an
+account, whose usual window comes first, or once every account holds its days back to the first
+day. Each source plans on its own: the loads of two sources may run at the same time, as their
+APIs and quotas are apart, and the one transform takes them one run at a time (max_active_runs of
+the transform, and the pin of ADR-0046, which reads only the loads that have ended). A load of the
+kind intraday that has ended and waits for its pin holds the plan back as any such load does
+(waiting), for one run of the transform.
 
 An account that the newest load of its history failed for, an error of its API or a Meta account
 that ran out of the time of its portion, is set aside (failures), so that it never holds up the
@@ -45,7 +48,7 @@ from datetime import date, datetime, timedelta
 
 from dlt.destinations.exceptions import DatabaseUndefinedRelation
 
-from agoranomos_pipelines.loads import FAILED, HISTORY, LOADED, LOADS, WINDOW, has_loads
+from agoranomos_pipelines.loads import FAILED, HISTORY, INTRADAY, LOADED, LOADS, WINDOW, has_loads
 
 log = logging.getLogger(__name__)
 
@@ -232,14 +235,17 @@ def known_windows(
 ) -> dict[str, list[tuple[date, date]]]:
     """The windows of the whole loads of each account of a source, those that _dlt_loads marks
     whole in the journal of the dataset of pipeline and those that core.loads holds, which loader
-    may read, of every kind; an empty list for an account that no whole load took yet."""
+    may read, of the kinds window and history; an empty list for an account that no whole load took
+    yet. A load of the kind intraday holds days still in progress: an account with no other load
+    would otherwise look like one that lacks every day before today (ADR-0051)."""
     wanted = checked(source, account_ids)
     found: dict[str, list[tuple[date, date]]] = {account_id: [] for account_id in wanted}
     # IDs of checked digits, and a checked code.
     listed = ", ".join(f"'{account_id}'" for account_id in wanted)
     queries = [
         "SELECT account_id, window_from, window_to FROM core.loads "  # noqa: S608
-        f"WHERE source = '{source}' AND outcome = '{LOADED}' AND account_id IN ({listed})"
+        f"WHERE source = '{source}' AND outcome = '{LOADED}' AND kind <> '{INTRADAY}' "
+        f"AND account_id IN ({listed})"
     ]
     journaled = has_loads(pipeline)
     with pipeline.sql_client() as client:
@@ -251,7 +257,8 @@ def known_windows(
                 "SELECT j.account_id, j.window_from, j.window_to "  # noqa: S608
                 f"FROM {journal} AS j JOIN {loads} AS l "
                 "ON l.load_id = j._dlt_load_id AND l.status = 0 "
-                f"WHERE j.status = '{LOADED}' AND j.account_id IN ({listed})"
+                f"WHERE j.status = '{LOADED}' AND j.kind IS DISTINCT FROM '{INTRADAY}' "
+                f"AND j.account_id IN ({listed})"
             )
         for sql in queries:
             try:

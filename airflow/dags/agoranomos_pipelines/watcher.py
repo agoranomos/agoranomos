@@ -4,9 +4,10 @@ the alerts that it sends of it through Apprise (ADR-0045):
 - quarantine: each account and reason of ops.ops_quarantine, which the last run of the transform
   kept out of the core (ADR-0035), by the code of the reason, the platform and the account;
 - late: each active account of a source whose last day that the core pinned, the largest
-  window_to of its loaded loads in core.loads, is before the day that the lag of its platform
-  expects: a day ends at midnight in the time zone of the account, and the core is to hold it
-  LAG_DAYS later;
+  window_to of its loaded whole loads in core.loads, of the kinds window and history, is before the
+  day that the lag of its platform expects: a day ends at midnight in the time zone of the account,
+  and the core is to hold it LAG_DAYS later. A load of the kind intraday, of a day still in
+  progress, does not count (ADR-0051): it would hide a daily load that stopped;
 - backup: the status that the backup service of the ops profile publishes in the volume
   backup-status, as its health check judges it: backup_failed when its last run failed, and
   backup_late when its last good backup is more than 26 hours old, or there is none 26 hours after
@@ -383,7 +384,7 @@ LATE_SQL = (
     "SELECT l.source, l.account_id, max(l.window_to), a.time_zone"
     " FROM core.loads AS l"
     " LEFT JOIN core.dim_account AS a ON a.platform = l.source AND a.account_id = l.account_id"
-    " WHERE l.outcome = 'loaded' AND coalesce(a.is_active, true)"
+    " WHERE l.outcome = 'loaded' AND l.kind <> 'intraday' AND coalesce(a.is_active, true)"
     " GROUP BY l.source, l.account_id, a.time_zone"
 )
 

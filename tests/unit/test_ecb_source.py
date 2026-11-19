@@ -294,7 +294,7 @@ def test_a_window_starts_after_the_last_whole_load(ecb):
         "SELECT j.account_id, max(j.as_of), max(j.window_to) "
         'FROM "raw_ecb"."_agoranomos_loads" AS j JOIN "raw_ecb"."_dlt_loads" AS l '
         "ON l.load_id = j._dlt_load_id AND l.status = 0 "
-        "WHERE j.status = 'loaded' GROUP BY j.account_id"
+        "WHERE j.status = 'loaded' AND j.kind IS DISTINCT FROM 'intraday' GROUP BY j.account_id"
     )
 
 

@@ -131,3 +131,24 @@ def test_the_view_of_the_restatements_reads_the_journal_of_the_campaigns_of_35_d
     # The ad platforms whose loads write the fact of the campaigns, from the macro of the pin.
     sources = """l.source in ('{{ fact_sources("ad_stats_campaign_daily") | join("', '") }}')"""
     assert sources in text
+
+
+def test_the_view_of_the_loads_counts_the_whole_loads_with_the_last_intraday_load_beside():
+    # ADR-0051: a load of the kind intraday takes days in progress, so the last day loaded, the
+    # last load, its hours and the count are of the whole loads, and would else hide a daily load
+    # that stopped; the last load of the current day comes beside them. A row without a kind is of
+    # the kind window.
+    text = (OPS_MODELS / "ops_loads.sql").read_text(encoding="utf-8")
+    assert "kind is not distinct from 'intraday' as is_intraday" in text
+    for line in (
+        "max(window_to) filter (where not is_intraday) as last_day_loaded,",
+        "max(loaded_at) filter (where not is_intraday) as last_loaded_at,",
+        "(extract(epoch from now() - max(loaded_at) filter (where not is_intraday)) / 3600)",
+        "count(*) filter (where not is_intraday) as loads,",
+        "max(loaded_at) filter (where is_intraday) as last_intraday_at,",
+        ") as hours_since_intraday",
+    ):
+        assert line in text, line
+    # The columns that the questions of Ops read keep their names.
+    read = {name for question in ops.QUESTIONS for name in question["columns"]}
+    assert {"last_day_loaded", "last_loaded_at", "hours_since_load", "loads"} <= read

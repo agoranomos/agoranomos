@@ -82,6 +82,24 @@ KEPT_CORE_LOADS = [
     ("b4", "1600000000.5"),
     ("b4", "1690000000.0"),
 ]
+# Rows of the kind intraday of core.loads of the source of the test (ADR-0051): (account, load,
+# status, days ago). No row of a fact names them, as the source of the test has no account in the
+# core, and _dlt_loads of its raw schema holds none of them.
+INTRADAY_CORE_LOADS = [
+    # c1: the old accepted one goes, the newest of the account too, and the young one stays.
+    ("c1", "1690000100.0", "accepted", 20),
+    ("c1", "1690000200.0", "accepted", 3),
+    # c2: a pinned load is older than an old accepted one, which staging can still read.
+    ("c2", "1690000100.0", "pinned", 20),
+    ("c2", "1690000150.0", "accepted", 20),
+    # c3: the one load of the account goes, as no window starts from it.
+    ("c3", "1690000100.0", "accepted", 15),
+]
+KEPT_INTRADAY_CORE_LOADS = [
+    ("c1", "1690000200.0"),
+    ("c2", "1690000100.0"),
+    ("c2", "1690000150.0"),
+]
 # What loads.recorded(), the restore of the state of dlt and the pin read in a raw schema {s}.
 RECORDED = (
     "SELECT string_agg(account_id || '|' || as_of || '|' || window_to, ',' ORDER BY account_id)"
@@ -183,6 +201,14 @@ def raw_schema_sql(schema, source):
             f" '{account}', current_date - 5, current_date - 4, 'loaded',"
             f" now() - interval '{months} months', gen_random_uuid(), '{status}',"
             f" {'now()' if status == 'accepted' else 'NULL'});"
+        )
+    for account, load_id, status, days in INTRADAY_CORE_LOADS:
+        lines.append(
+            "INSERT INTO core.loads (source, load_id, account_id, window_from, window_to, outcome,"  # noqa: S608 (names, dates and a tag of the test)
+            f" finished_at, invocation_id, status, accepted_at, kind) VALUES ('{source}',"
+            f" '{load_id}', '{account}', current_date - 1, current_date, 'loaded',"
+            f" now() - interval '{days} days', gen_random_uuid(), '{status}',"
+            f" {'now()' if status == 'accepted' else 'NULL'}, 'intraday');"
         )
     return " ".join(lines)
 
@@ -439,6 +465,13 @@ def test_core_loads_keep_what_staging_and_the_next_window_read(env, run):
         f" FROM core.loads WHERE source = '{run.tag}' AND account_id LIKE 'b%'",
     ).split(",")
     assert left == [f"{account}|{load}" for account, load in KEPT_CORE_LOADS]
+    # Of the kind intraday, those older than 14 days that nothing reads go (ADR-0051).
+    intraday = sql(
+        env,
+        "SELECT string_agg(account_id || '|' || load_id, ',' ORDER BY account_id, load_id)"  # noqa: S608 (names, dates and a tag of the test)
+        f" FROM core.loads WHERE source = '{run.tag}' AND account_id LIKE 'c%'",
+    ).split(",")
+    assert intraday == [f"{account}|{load}" for account, load in KEPT_INTRADAY_CORE_LOADS]
     # The rows of the loads of the stop stay pinned: no run has accepted them.
     pinned = sql(
         env,
@@ -490,7 +523,7 @@ def test_ops_records_the_steps_of_the_maintenance(env, run):
     for table in maintenance.FACTS:
         assert f"analyze_the_facts|core.{table}|" in steps, table
     assert f"clean_dlt_loads|{run.schema}._dlt_loads|4" in steps
-    assert f"clean_core_loads|core.loads of {run.tag}|2" in steps
+    assert f"clean_core_loads|core.loads of {run.tag}|4" in steps
     # The partitions that the tests dropped, and the months of the journal that they made, at
     # least: a stack that started in an earlier month has more.
     made = {step.split("|")[1] for step in steps if step.startswith("make_partitions|")}

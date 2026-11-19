@@ -22,15 +22,18 @@ deletes, as loader, the rows of the accepted loads from the raw layer, and those
 not end and began more than a day ago (ADR-0035, ADR-0046,
 agoranomos_pipelines/acceptance.py). A run with a failed or a skipped task of dbt accepts nothing
 and cleans nothing, and the next run reads its loads again. The DAG runs when each of the five
-platforms of the demo has loaded since its last run, each load updating the asset of its main
-table, after each load of the rates of the ECB, and after each load of Google Ads (ADR-0032,
-ADR-0039), one run at a time: a run takes the events of the loads that ended while the run before
-it ran. A repeat is safe: the settings are loaded again, dbt rebuilds the models, and the
-acceptance and the cleanup find what is left to do. The DAG starts paused. With the demo profile,
-the one-shot demo-init job unpauses it and runs agoranomos_demo_history on the first start;
-without it, unpause this DAG in the Airflow UI before you trigger a load. The DAG keeps the word
-demo in its id for now, as the Ops collection and the demo name it; a change of its own is to
-rename it.
+platforms of the demo has loaded since its last run, each load updating the asset of its main table,
+after each load of the rates of the ECB, and after each load of Google Ads (ADR-0032, ADR-0039), the
+loads of its short cycle of the current day among them, which update an asset of their own
+(agoranomos_google_ads_intraday, ADR-0051), one run at a time: a run takes the events of the loads
+that ended while the run before it ran. A load of the kind intraday is pinned, read, accepted and
+cleaned like any load: a day that only such a load took is partial in the core, and a whole load of
+the day replaces it, whatever their load IDs. A repeat is safe: the settings are loaded again, dbt
+rebuilds the models, and the acceptance and the cleanup find what is left to do. The DAG starts
+paused. With the demo profile, the one-shot demo-init job unpauses it and runs
+agoranomos_demo_history on the first start; without it, unpause this DAG in the Airflow UI before
+you trigger a load. The DAG keeps the word demo in its id for now, as the Ops collection and the
+demo name it; a change of its own is to rename it.
 
 Cosmos renders its tasks from the manifest that metadata-export writes on every start (ADR-0027),
 so a change of the dbt project reaches the DAG at the next ./agoranomos up; its tasks of dbt run at

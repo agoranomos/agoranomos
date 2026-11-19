@@ -45,6 +45,7 @@ def test_no_dag_file_imports_another():
         "agoranomos_ecb_daily",
         "agoranomos_google_ads_daily",
         "agoranomos_google_ads_history",
+        "agoranomos_google_ads_intraday",
         "agoranomos_meta_ads_daily",
         "agoranomos_meta_ads_history",
         "agoranomos_nbk_daily",
@@ -66,9 +67,10 @@ RAW_NBK = "postgres://warehouse-db:5432/warehouse/raw_nbk/rates_daily"
 
 
 def test_the_transform_runs_when_the_demo_the_rates_google_ads_or_meta_have_loaded():
-    # Any of six conditions (ADR-0039): all five assets of the demo, the asset of the rates of the
+    # Any of seven conditions (ADR-0039): all five assets of the demo, the asset of the rates of the
     # ECB, that of the rates of the Bank of Italy (ADR-0042), that of Google Ads (ADR-0032), that of
-    # Meta (ADR-0050), or that of the rates of the NBK (ADR-0042). The five of the demo stay
+    # Meta (ADR-0050), that of the rates of the NBK (ADR-0042), or that of the short cycle of the
+    # current day of Google Ads (ADR-0051). The five of the demo stay
     # one condition, so that one run of the history or of the daily load starts one run of the
     # transform, after its last platform, and not one after its first platform and one more for
     # the other four, the first reading tables whose days the loads still replace. One run at a
@@ -85,9 +87,10 @@ def test_the_transform_runs_when_the_demo_the_rates_google_ads_or_meta_have_load
     assert f'RAW_BANK_OF_ITALY = Asset("{RAW_BANK_OF_ITALY}")' in assets
     assert f'RAW_NBK = Asset("{RAW_NBK}")' in assets
     assert (
-        "LOADED = AssetAny(DEMO_LOADED, RAW_ECB, RAW_BANK_OF_ITALY, RAW_GOOGLE_ADS, RAW_META_ADS, "
-        "RAW_NBK)"
+        "LOADED = AssetAny(\n    DEMO_LOADED,\n    RAW_ECB,\n    RAW_BANK_OF_ITALY,\n"
+        "    RAW_GOOGLE_ADS,\n    RAW_META_ADS,\n    RAW_NBK,\n    RAW_GOOGLE_ADS_INTRADAY,\n)"
     ) in assets
+    assert 'RAW_GOOGLE_ADS_INTRADAY = Asset("agoranomos_google_ads_intraday")' in assets
     assert "DEMO_LOADED |" not in assets
 
 
@@ -539,7 +542,7 @@ def test_the_load_of_google_ads_keeps_its_watermarks_in_the_state_of_its_asset()
     # concrete outlet of the task, as the store needs.
     text = GOOGLE_ADS_DAILY.read_text(encoding="utf-8")
     assert decorators(GOOGLE_ADS_DAILY)["load_google_ads"] == [
-        "task(task_id='load_google_ads', outlets=[RAW_GOOGLE_ADS])"
+        "task(task_id='load_google_ads', outlets=[RAW_GOOGLE_ADS], pool=LOAD_POOL)"
     ]
     assert 'cache=context["asset_state_store"][RAW_GOOGLE_ADS]' in text
 

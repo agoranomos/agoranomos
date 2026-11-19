@@ -4,7 +4,8 @@ any load. Its day is partial in core.ad_stats_campaign_daily until a whole load 
 the journal of restatements does not record, and no other fact, list, dimension or check of G1a
 takes it.
 
-No connector writes such a load yet, so the tests write their own into raw_demo_search as loader,
+The short cycle of Google Ads writes such loads, but the stack of the tests has no account of it,
+and that of the demo is planned, so the tests write their own into raw_demo_search as loader,
 the owner of raw, as tests/stack/test_core_facts.py writes a changed day: rows of the statistics of
 the campaigns of one account on the day after the last day that its whole loads took, which the
 test calls today, made from the rows of the core of its last day, with no conversions, a row in

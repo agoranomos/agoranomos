@@ -172,6 +172,7 @@ def test_airflow_init_cleans_its_database_last_in_two_calls(tmp_path):
         ["users", "create"],
         ["pools", "set"],
         ["pools", "set"],
+        ["pools", "set"],
         ["db", "clean"],
         ["db", "clean"],
     ]

@@ -3,9 +3,11 @@ safe to repeat, so that a step that fails leaves its work to the next run:
 
 - the retention of ADR-0044: the logs of Airflow older than 30 days, the rows of the runs of dbt in
   the schema ops older than 90 days, the rows of _dlt_loads older than 90 days that no load, no
-  state of dlt and no pin needs any more, the accepted rows of the kind window of core.loads older
-  than 13 months, the months of the journals of restatements older than 13 months, and the
-  Variables that the watcher mode of Cosmos leaves behind for a run older than 90 days;
+  state of dlt and no pin needs any more, and those of the loads of the kind intraday older than 14
+  days, the accepted rows of the kind window of core.loads older than 13 months, and those of the
+  kind intraday older than 14 days that no fact reads (ADR-0051), the months of the journals of
+  restatements older than 13 months, and the Variables that the watcher mode of Cosmos leaves
+  behind for a run older than 90 days;
 - the upkeep of the partitions of the core (ADR-0036, ADR-0039): the partitions of the current
   month and the two after it, ANALYZE ONLY of the parents of the facts, which autovacuum does not
   analyze, and VACUUM (FREEZE) of the months of the facts that have left the window of
@@ -100,6 +102,11 @@ FROZEN_DAYS = 92
 # to 14 months.
 JOURNAL_MONTHS = 13
 LOADS_MONTHS = 13
+# How long the accepted rows of the kind intraday of core.loads stay, and the rows of their loads in
+# _dlt_loads (ADR-0051): eight loads a day for each account at the default period, which no
+# watermark reads and which a whole load replaces within a day, would otherwise stay for good.
+# 14 days is the proposal of ADR-0051, open to the maintainer.
+INTRADAY_DAYS = 14
 # How long the rows of _dlt_loads stay (ADR-0044), but those that a load, dlt or a pin still needs.
 DLT_LOADS_DAYS = 90
 # The Airflow Variables in which the producer of the watcher mode of Cosmos 1.16.0 keeps the backup
@@ -274,6 +281,16 @@ def log_notices(connection) -> None:
 
 def table_exists(cursor, name: str) -> bool:
     cursor.execute("SELECT to_regclass(%s) IS NOT NULL", (name,))
+    return bool(cursor.fetchone()[0])
+
+
+def column_exists(cursor, name: str, column: str) -> bool:
+    """Whether the table of that name has the column, by the catalog."""
+    cursor.execute(
+        "SELECT EXISTS (SELECT FROM pg_attribute WHERE attrelid = to_regclass(%s)"
+        " AND attname = %s AND attnum > 0 AND NOT attisdropped)",
+        (name, column),
+    )
     return bool(cursor.fetchone()[0])
 
 
@@ -588,23 +605,27 @@ def drop_month(cursor, table: str, month: date, attempts: int, wait: float, erro
     return False
 
 
-def dlt_loads_delete(schema: str, has_state: bool, has_journal: bool) -> str:
-    """The DELETE of the rows of <schema>._dlt_loads older than DLT_LOADS_DAYS, as %(days)s, but
-    those that a load, dlt or a pin still reads:
+def dlt_loads_delete(schema: str, has_state: bool, has_journal: bool, has_kind: bool = True) -> str:
+    """The DELETE of the rows of <schema>._dlt_loads older than DLT_LOADS_DAYS, as %(days)s, and of
+    the loads of the kind intraday in its journal older than INTRADAY_DAYS, as %(intraday_days)s,
+    but those that a load, dlt or a pin still reads:
 
     - the newest whole load of the schema, so that loads.has_loads() finds one;
     - the load of the newest state of each pipeline that dlt restores, as it joins
       _dlt_pipeline_state with the whole loads of _dlt_loads and takes the largest load_id
       (dlt 1.32.0, SqlJobClientBase.get_stored_state);
     - the loads that hold the newest day (as_of) and the last day loaded (window_to) of each
-      account in the journal, from which loads.recorded() starts the next window of the account,
-      so that no stop makes a source load its whole history again;
+      account in the journal, of the whole loads, which loads.recorded() reads, and from which it
+      starts the next window of the account, so that no stop makes a source load its whole history
+      again;
     - each load with a row of the journal that core.loads does not hold yet, which the next pin is
       to take, as the pin takes only the loads that _dlt_loads marks whole (pin_loads.sql).
 
     A load that core.loads holds is read through core.loads, and its row here only serves to pin it,
     so it goes; the pin needs both this row and the journal, so no later pin takes it again, and
-    core.loads keeps it. The schema and its tables are names of the catalog, quoted."""
+    core.loads keeps it. A journal without the column kind, has_kind false, holds loads of the kind
+    window alone, as the pin reads it. The schema and its tables are names of the catalog,
+    quoted."""
     if not re.fullmatch(r"raw_[a-z0-9_]+", schema):
         raise ValueError(f"{schema} is not the name of a raw schema of dlt")
     # The names below are those of the schema, checked above, and of the tables of dlt and of the
@@ -627,6 +648,7 @@ def dlt_loads_delete(schema: str, has_state: bool, has_journal: bool) -> str:
             f" FROM {journal} AS j"
             f" JOIN {loads} AS l ON l.load_id = j._dlt_load_id AND l.status = 0"
             " WHERE j.status = 'loaded'"
+            + (" AND j.kind IS DISTINCT FROM 'intraday'" if has_kind else "")
         )
         kept.append(
             f"SELECT w._dlt_load_id FROM ({whole}) AS w"  # noqa: S608
@@ -642,20 +664,31 @@ def dlt_loads_delete(schema: str, has_state: bool, has_journal: bool) -> str:
         )
     # Each in parentheses, as a branch of a union with its own ORDER BY or LIMIT needs.
     union = "\n    UNION\n    ".join(f"({query})" for query in kept)
+    old = "d.inserted_at < now() - make_interval(days => %(days)s)"
+    if has_journal and has_kind:
+        # A load of the kind intraday, which no watermark reads, once core.loads holds it.
+        old = (
+            f"({old}\n        OR (d.inserted_at < now() - make_interval(days => %(intraday_days)s)"
+            f" AND EXISTS (SELECT FROM {quoted}._agoranomos_loads AS i"
+            " WHERE i._dlt_load_id = d.load_id AND i.kind = 'intraday')))"
+        )
     return (
         f"WITH kept (load_id) AS (\n    {union}\n)\n"
         f"DELETE FROM {quoted}._dlt_loads AS d\n"
-        "WHERE d.inserted_at < now() - make_interval(days => %(days)s)\n"
+        f"WHERE {old}\n"
         "    AND NOT EXISTS (SELECT FROM kept WHERE kept.load_id = d.load_id)"
     )
 
 
-def clean_dlt_loads(run_id: str, days: int = DLT_LOADS_DAYS) -> dict[str, int]:
-    """Delete the rows of _dlt_loads older than days in each raw schema of loader, but those that
-    dlt_loads_delete keeps, as loader, each schema in a transaction of its own, and return how many
-    rows each lost. A delete takes ROW EXCLUSIVE, which the insert of a load does not wait for. The
-    journal keeps its rows, and the other tables of raw keep theirs until the run of the transform
-    that accepts their load deletes them (acceptance.py, ADR-0046)."""
+def clean_dlt_loads(
+    run_id: str, days: int = DLT_LOADS_DAYS, intraday_days: int = INTRADAY_DAYS
+) -> dict[str, int]:
+    """Delete the rows of _dlt_loads older than days in each raw schema of loader, and those of
+    the loads of the kind intraday older than intraday_days, but those that dlt_loads_delete keeps,
+    as loader, each schema in a transaction of its own, and return how many rows each lost. A
+    delete takes ROW EXCLUSIVE, which the insert of a load does not wait for. The journal keeps its
+    rows, and the other tables of raw keep theirs until the run of the transform that accepts their
+    load deletes them (acceptance.py, ADR-0046)."""
     deleted: dict[str, int] = {}
     steps: list[Step] = []
     with connected(loader_credentials()) as connection:
@@ -674,7 +707,13 @@ def clean_dlt_loads(run_id: str, days: int = DLT_LOADS_DAYS) -> dict[str, int]:
             with connection, connection.cursor() as cursor:
                 has_state = table_exists(cursor, f"{schema}._dlt_pipeline_state")
                 has_journal = table_exists(cursor, f"{schema}._agoranomos_loads")
-                cursor.execute(dlt_loads_delete(schema, has_state, has_journal), {"days": days})
+                has_kind = has_journal and column_exists(
+                    cursor, f"{schema}._agoranomos_loads", "kind"
+                )
+                cursor.execute(
+                    dlt_loads_delete(schema, has_state, has_journal, has_kind),
+                    {"days": days, "intraday_days": intraday_days},
+                )
                 deleted[schema] = cursor.rowcount
             steps.append(
                 Step(
@@ -730,10 +769,46 @@ def core_loads_delete(raw_loads: str | None) -> str:
     return query
 
 
-def clean_core_loads(run_id: str, months: int = LOADS_MONTHS) -> dict[str, int]:
+def core_intraday_loads_delete(raw_loads: str | None) -> str:
+    """The DELETE of the accepted rows of the kind intraday of core.loads of the source %(source)s
+    that finished more than INTRADAY_DAYS days ago, as %(days)s, but those that a run or a load
+    still reads (ADR-0051):
+
+    - a load whose rows a fact still holds: a partial day of core.ad_stats_campaign_daily, the one
+      fact with partial days, that no whole load has replaced, as that of an account that left the
+      deployment on a day in progress, found by the surrogate of the load on the days of its window;
+    - each accepted load newer than the oldest pinned load of its account, which can still win a
+      day of a pinned one in staging (pinned_loads in newest_load.sql);
+    - a load whose row _dlt_loads of its raw schema, raw_loads, still holds, as the next pin would
+      take it again as a new load: the cleanup of _dlt_loads removes that row first.
+
+    No watermark reads a row of the kind intraday, so the newest of an account goes too."""
+    query = (
+        "DELETE FROM core.loads AS l\n"
+        "WHERE l.source = %(source)s\n"
+        "    AND l.status = 'accepted'\n"
+        "    AND l.kind = 'intraday'\n"
+        "    AND l.finished_at < now() - make_interval(days => %(days)s)\n"
+        "    AND NOT EXISTS (SELECT FROM core.ad_stats_campaign_daily AS f"
+        " JOIN core.dim_account AS a ON a.account_sk = f.account_sk"
+        " WHERE a.platform = l.source AND a.account_id = l.account_id"
+        " AND f.report_date BETWEEN l.window_from AND l.window_to AND f.load_sk = l.load_sk)\n"
+        "    AND NOT EXISTS (SELECT FROM core.loads AS p WHERE p.source = l.source"
+        " AND p.account_id = l.account_id AND p.status = 'pinned' AND p.outcome = 'loaded'"
+        " AND p.load_id::numeric < l.load_id::numeric)"
+    )
+    if raw_loads is not None:
+        query += f"\n    AND NOT EXISTS (SELECT FROM {raw_loads} AS d WHERE d.load_id = l.load_id)"
+    return query
+
+
+def clean_core_loads(
+    run_id: str, months: int = LOADS_MONTHS, days: int = INTRADAY_DAYS
+) -> dict[str, int]:
     """Delete the accepted rows of the kind window of core.loads older than months that
-    core_loads_delete does not keep, as transformer, each source in a transaction of its own, and
-    return how many rows each lost. A source whose raw schema has a table _dlt_loads that
+    core_loads_delete does not keep, and those of the kind intraday older than days that
+    core_intraday_loads_delete does not keep, as transformer, each source in a transaction of its
+    own, and return how many rows each lost. A source whose raw schema has a table _dlt_loads that
     transformer may not read keeps its rows: the cleanup cannot tell whether a pin would take them
     again."""
     deleted: dict[str, int] = {}
@@ -742,8 +817,10 @@ def clean_core_loads(run_id: str, months: int = LOADS_MONTHS) -> dict[str, int]:
         with connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT DISTINCT source FROM core.loads WHERE status = 'accepted'"
-                " AND finished_at < now() - make_interval(months => %s) ORDER BY 1",
-                (months,),
+                " AND (finished_at < now() - make_interval(months => %s)"
+                " OR (kind = 'intraday' AND finished_at < now() - make_interval(days => %s)))"
+                " ORDER BY 1",
+                (months, days),
             )
             sources = [row[0] for row in cursor.fetchall()]
         for source in sources:
@@ -771,11 +848,13 @@ def clean_core_loads(run_id: str, months: int = LOADS_MONTHS) -> dict[str, int]:
                         source,
                     )
                     continue
-                cursor.execute(
-                    core_loads_delete(f'"raw_{source}"._dlt_loads' if exists else None),
-                    {"source": source, "months": months},
-                )
+                raw_loads = f'"raw_{source}"._dlt_loads' if exists else None
+                cursor.execute(core_loads_delete(raw_loads), {"source": source, "months": months})
                 deleted[source] = cursor.rowcount
+                cursor.execute(
+                    core_intraday_loads_delete(raw_loads), {"source": source, "days": days}
+                )
+                deleted[source] += cursor.rowcount
             steps.append(
                 Step(
                     datetime.now(UTC),
@@ -786,10 +865,12 @@ def clean_core_loads(run_id: str, months: int = LOADS_MONTHS) -> dict[str, int]:
                 )
             )
             log.info(
-                "Deleted %d accepted rows older than %d months of %s from core.loads",
+                "Deleted %d accepted rows of %s from core.loads, of the kind window older than %d "
+                "months and of the kind intraday older than %d days",
                 deleted[source],
-                months,
                 source,
+                months,
+                days,
             )
         record_steps(connection, run_id, steps)
     return deleted
