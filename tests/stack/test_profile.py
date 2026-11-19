@@ -26,7 +26,7 @@ import threading
 import time
 import urllib.parse
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -449,9 +449,12 @@ def test_a_run_of_the_short_cycle_beside_the_core_of_the_profile(
     # transform first, and then their current day; they stay in the core, as on a stack with the
     # demo. scripts/memory_report.py around this test gives the memory of the tasks and of the
     # warehouse. A run gives every account the client of the settings, which the synthetic
-    # accounts lack, so the test gives theirs back after each run.
+    # accounts lack, so the test gives theirs back after each run. The rates of the profile end
+    # yesterday, and the model carries none of them over the current day, so they get the days
+    # through tomorrow in UTC, which holds the current day of every time zone.
     chosen, found = profile
     overview = [d for d in cards(board) if tab_name(board, d) == ad.OVERVIEW]
+    synthetic.extend_rates(env, datetime.now(UTC).date() + timedelta(days=1))
     unpause(airflow_url, token, TRANSFORM)
     try:
         run_in_tasks(env, YESTERDAY, datetime.now(UTC).isoformat(), DEMO_SEARCH)
