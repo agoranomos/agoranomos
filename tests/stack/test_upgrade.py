@@ -39,8 +39,18 @@ from typing import Any
 import marts_init
 import metadata
 import pytest
+from agoranomos_pipelines import watcher
 from agoranomos_pipelines.demo import platforms
-from airflow_api import dag_runs, is_busy, pause, trigger, unpause, wait_for_dag, wait_for_run
+from airflow_api import (
+    api,
+    dag_runs,
+    is_busy,
+    pause,
+    trigger,
+    unpause,
+    wait_for_dag,
+    wait_for_run,
+)
 from metabase_content import item, registry, warehouse_database_id
 from stack_helpers import (
     REPO_ROOT,
@@ -74,6 +84,9 @@ BACKUPS = REPO_ROOT / (
 HISTORY = "agoranomos_demo_history"
 TRANSFORM = "agoranomos_demo_transform"
 DAILY = "agoranomos_demo_daily"
+# The short cycle of the current day of the demo, which demo-init unpauses on a start that finds it
+# without a run, and whose asset starts a run of the transform on its own (ADR-0051).
+INTRADAY = "agoranomos_demo_intraday"
 # The journal of the loads of the releases before v0.5, whose loads merged the days in place, and
 # the journal of the loads that append (airflow/dags/agoranomos_pipelines/loads.py).
 OLD_JOURNAL = "_agoranomos_reloads"
@@ -105,6 +118,9 @@ MANIFEST = "/opt/agoranomos/manifest/manifest.json"
 # its loads, the state of its pipeline and the versions of its schema (dlt.common.schema.typing of
 # dlt 1.32.0, as of November 2026).
 DLT_TABLES = ("_dlt_loads", "_dlt_pipeline_state", "_dlt_version")
+# The tables that the migrations of the core create, as schema.name: the journals, the registries,
+# the facts and the table of the migrations itself, whether a model of dbt writes them or not.
+MIGRATED = re.compile(r"^CREATE TABLE (?:IF NOT EXISTS )?(\w+\.\w+) \(", flags=re.MULTILINE)
 # The extensions that db-init creates in the warehouse on every start, such as pg_stat_statements,
 # and the relations of each extension of the warehouse, by extension.
 EXTENSIONS = re.findall(
@@ -256,7 +272,11 @@ def built_by_the_code(env) -> set[str]:
     """The relations that the current code builds or reads, as schema.name: the models, seeds and
     snapshots of every package of the dbt project of the checkout, and its sources, from the
     manifest that metadata-export writes for Airflow; the tables of dlt in the dataset of each
-    source, a raw schema; and the relations of the extensions that db-init creates."""
+    source, a raw schema; the tables that the migrations of the core create, such as the journals
+    of restatements of the ad groups and of the ads, which the hooks of the facts write and no
+    model names, and core.schema_migrations, which db-init writes; the state of the alerts, which
+    the DAG agoranomos_watcher creates; and the relations of the extensions that db-init
+    creates."""
     result = compose("exec", "-T", "airflow-scheduler", "cat", MANIFEST, check=False)
     assert result.returncode == 0, f"cannot read {MANIFEST}: exit code {result.returncode}"
     found = json.loads(result.stdout)
@@ -273,6 +293,9 @@ def built_by_the_code(env) -> set[str]:
         for schema in {schema for schema, _ in sources if schema.startswith("raw_")}
         for table in DLT_TABLES
     }
+    for path in sorted(MIGRATIONS.glob("[0-9][0-9][0-9][0-9]_*.sql")):
+        names |= set(MIGRATED.findall(path.read_text(encoding="utf-8")))
+    names.add(watcher.TABLE)
     for line in warehouse_output(env, OF_EXTENSIONS).splitlines():
         extension, schema, name = line.split("|")
         if extension in EXTENSIONS:
@@ -631,13 +654,27 @@ def test_the_demo_goes_on_after_the_upgrade(env, airflow_url, token):
     old = saved["relations"]
     since = saved["at"]
     # The start of the upgrade ran the history again when the raw tables of the demo had the shape
-    # of a release before v0.5, and the transform after it; every run since is green.
+    # of a release before v0.5, and the transform after it. From a release of v0.5 on, the raw
+    # tables have the shape of the current code: demo-init runs no history again, and no run of
+    # the transform follows the start, but the one that the short cycle of the current day starts,
+    # where the current code has it and the start unpaused it. A run of the transform that such a
+    # load started ends first, and every run since is green.
     history = [r for r in dag_runs(airflow_url, token, HISTORY, 50) if started(r) >= since]
     if any(f"{d}.{OLD_JOURNAL}" in old for d in DATASETS):
         assert history, "the upgrade did not run the history of the demo again"
+    intraday = []
+    if api(airflow_url, token, "GET", f"/api/v2/dags/{INTRADAY}")[0] == 200:
+        intraday = [r for r in dag_runs(airflow_url, token, INTRADAY, 50) if started(r) >= since]
+    wait_for(
+        lambda: not is_busy(airflow_url, token, TRANSFORM, assets=len(platforms.PLATFORMS)),
+        2400,
+        interval=10,
+        message="the runs of the transform that the upgrade started did not end",
+    )
     transforms = [r for r in dag_runs(airflow_url, token, TRANSFORM, 50) if started(r) >= since]
-    assert transforms, "no run of the transform since the upgrade"
-    states = [(r["dag_id"], r["dag_run_id"], r["state"]) for r in history + transforms]
+    if history or intraday:
+        assert transforms, "no run of the transform after the loads of the upgrade"
+    states = [(r["dag_id"], r["dag_run_id"], r["state"]) for r in history + intraday + transforms]
     assert [s for s in states if s[2] != "success"] == []
     # A daily load and a run of the transform after it, as the next day brings them.
     wait_for_dag(airflow_url, token, DAILY)

@@ -64,9 +64,14 @@ class Connection:
 class Dbt:
     """A fake subprocess.run of dbt: it records the call and the connection that holds the lock."""
 
-    def __init__(self, connection: Connection | None, returncode: int = 0) -> None:
+    def __init__(
+        self, connection: Connection | None, returncode: int = 0, later: int | None = None
+    ) -> None:
         self.connection = connection
+        # The exit code of the first call, the build of the views of marts, and of the calls after
+        # it, the build of the views of ops, the same unless later says otherwise.
         self.returncode = returncode
+        self.later = returncode if later is None else later
         self.calls: list[list[str]] = []
 
     def __call__(self, argv: list[str], **options: object) -> subprocess.CompletedProcess:
@@ -76,12 +81,14 @@ class Dbt:
         self.calls.append(argv)
         if self.connection is not None:
             self.connection.executed.append(("dbt", ()))
-        return subprocess.CompletedProcess(argv, self.returncode)
+        return subprocess.CompletedProcess(
+            argv, self.returncode if len(self.calls) == 1 else self.later
+        )
 
 
-def run_job(rows, returncode=0, fail_on="", environ=ENVIRON, kinds=None):
+def run_job(rows, returncode=0, fail_on="", environ=ENVIRON, kinds=None, later=None):
     connection = Connection(rows, fail_on, kinds)
-    dbt = Dbt(connection, returncode)
+    dbt = Dbt(connection, returncode, later)
     code = mi.main([], environ, lambda env: connection, dbt)
     return code, connection, dbt
 
@@ -134,7 +141,7 @@ def test_the_job_builds_what_the_state_of_the_warehouse_asks(
     capsys, snapshots, other, nodes, excluded, variables
 ):
     # After a change of the reporting currency, the job reads the days without a rate: none here.
-    code, connection, dbt = run_job([(True,), (snapshots, other)] + [(None, 0)] * other)
+    code, connection, dbt = run_job([(True,), (snapshots, other, False)] + [(None, 0)] * other)
     assert code == 0
     [argv] = dbt.calls
     assert argv[0] == mi.DBT
@@ -150,7 +157,10 @@ def test_the_job_builds_what_the_state_of_the_warehouse_asks(
     # The lock first, then the state, then dbt, and the lock goes with the connection.
     assert connection.autocommit is True
     assert connection.executed[0] == ("SELECT pg_try_advisory_lock(%s)", (mi.LOCK,))
-    assert connection.executed[1] == (mi.STATE, (list(mi.SNAPSHOTS), len(mi.SNAPSHOTS), "EUR"))
+    assert connection.executed[1] == (
+        mi.STATE,
+        (list(mi.SNAPSHOTS), len(mi.SNAPSHOTS), "EUR", list(mi.ELEMENTARY), len(mi.ELEMENTARY)),
+    )
     assert connection.closed
     out = capsys.readouterr().out
     assert out.endswith("marts-init: done\n")
@@ -160,7 +170,7 @@ def test_the_job_builds_what_the_state_of_the_warehouse_asks(
 def test_a_new_reporting_currency_without_older_rates_is_a_warning_and_no_failure(capsys):
     # The core cannot give the rates of the days whose loads it accepted in the new currency:
     # ops.ops_rates names them, and the job says so, in a line that ./agoranomos up shows.
-    code, connection, _ = run_job([(True,), (True, True), ("2025-05-14", 548)])
+    code, connection, _ = run_job([(True,), (True, True, False), ("2025-05-14", 548)])
     assert code == 0
     assert connection.executed[-1] == (mi.GAPS, ())
     out = capsys.readouterr().out
@@ -174,14 +184,14 @@ def test_a_new_reporting_currency_without_older_rates_is_a_warning_and_no_failur
     ) in out
     assert out.endswith("marts-init: done\n")
     # A view that cannot be read is a warning too.
-    code, _, _ = run_job([(True,), (True, True)], fail_on=mi.GAPS)
+    code, _, _ = run_job([(True,), (True, True, False)], fail_on=mi.GAPS)
     assert code == 0
     assert (
         "marts-init: warning: cannot read ops.ops_rates: RuntimeError: canceling statement due to "
         "lock timeout\n"
     ) in capsys.readouterr().out
     # The same start without a change of the currency reads nothing more.
-    _, connection, _ = run_job([(True,), (True, False)])
+    _, connection, _ = run_job([(True,), (True, False, False)])
     assert mi.GAPS not in [sql for sql, _ in connection.executed]
 
 
@@ -193,7 +203,7 @@ def test_the_view_of_the_rates_has_the_columns_that_the_job_reads():
 
 
 def test_the_job_waits_for_the_nodes_of_the_transform_that_write(capsys):
-    code, connection, dbt = run_job([(False,), (True, False)])
+    code, connection, dbt = run_job([(False,), (True, False, False)])
     assert code == 0
     assert [sql for sql, _ in connection.executed[:4]] == [
         "SELECT pg_try_advisory_lock(%s)",
@@ -218,12 +228,109 @@ def test_a_lock_that_does_not_come_fails_the_job_before_dbt(capsys):
 
 
 def test_a_failed_dbt_fails_the_job_with_its_exit_code(capsys):
-    code, connection, _ = run_job([(True,), (True, False)], returncode=2)
+    code, connection, _ = run_job([(True,), (True, False, False)], returncode=2)
     assert code == 2
     assert connection.closed
     assert capsys.readouterr().err == "marts-init: dbt exited with 2: the lines above say why\n"
     # Nothing is dropped after a failed build, which may not have built the views of staging again.
     assert mi.KINDS not in [sql for sql, _ in connection.executed]
+
+
+@pytest.mark.parametrize(("snapshots", "other"), [(True, False), (False, False), (True, True)])
+def test_the_job_builds_the_views_of_ops_where_a_transform_has_made_elementary(
+    capsys, snapshots, other
+):
+    # After an upgrade, a view of ops that the release adds, such as ops.ops_restatements of v0.6,
+    # exists from the start, and the Ops collection does not wait a day for a run of the transform.
+    rows = [(True,), (snapshots, other, True)] + [(None, 0)] * other
+    code, connection, dbt = run_job(rows)
+    assert code == 0
+    first, second = dbt.calls
+    variables = {"rebuild_views": True} | ({"recompute_rates": True} if other else {})
+    assert selected(second) == ("build", [mi.OPS], ["test", "unit_test"], variables)
+    assert selected(first)[1][:2] == [SEEDS, "marts" if snapshots else "+marts"]
+    for name in ("--target-path", "--log-path", "--project-dir", "--profiles-dir"):
+        assert second[second.index(name) + 1] == first[first.index(name) + 1]
+    # Both builds run under the lock, before the drops.
+    statements = [sql for sql, _ in connection.executed]
+    assert statements.count("dbt") == 2
+    assert statements.index(mi.KINDS) > len(statements) - 1 - statements[::-1].index("dbt")
+    out = capsys.readouterr().out
+    assert (
+        "marts-init: building the views of ops of the base package, which the Ops collection "
+        "reads\n"
+    ) in out
+    assert out.endswith("marts-init: done\n")
+
+
+def test_the_job_leaves_the_views_of_ops_to_the_first_transform_on_a_new_warehouse(capsys):
+    code, _, dbt = run_job([(True,), (False, False, False)])
+    assert code == 0
+    assert len(dbt.calls) == 1
+    assert "views of ops" not in capsys.readouterr().out
+
+
+def test_a_build_of_the_views_of_ops_that_fails_is_a_warning(capsys):
+    code, connection, dbt = run_job([(True,), (True, False, True)], later=1)
+    assert code == 0
+    assert len(dbt.calls) == 2
+    # The drops come all the same.
+    assert mi.KINDS in [sql for sql, _ in connection.executed]
+    out = capsys.readouterr().out
+    assert (
+        "marts-init: warning: dbt exited with 1 on the views of ops, as the lines above say, so "
+        "the questions of the Ops collection on a view of ops that this release adds or changes "
+        "show an error until the next run of the transform builds it\n"
+    ) in out
+    assert out.endswith("marts-init: done\n")
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize(
+    ("error", "line"),
+    [
+        (
+            subprocess.TimeoutExpired("dbt", mi.DBT_TIMEOUT),
+            "marts-init: warning: dbt did not build the views of ops within 1800 seconds, so",
+        ),
+        (
+            FileNotFoundError("dbt"),
+            f"marts-init: warning: cannot run dbt ({mi.DBT}) for the views of ops: "
+            "FileNotFoundError, so",
+        ),
+    ],
+)
+def test_a_build_of_the_views_of_ops_that_hangs_or_cannot_run_is_a_warning(capsys, error, line):
+    connection = Connection([(True,), (True, False, True)])
+    calls = []
+
+    def run(argv, **options):
+        calls.append(argv)
+        if len(calls) == 2:
+            raise error
+        return subprocess.CompletedProcess(argv, 0)
+
+    assert mi.main([], ENVIRON, lambda env: connection, run) == 0
+    out = capsys.readouterr().out
+    assert line in out
+    assert out.endswith("marts-init: done\n")
+
+
+def test_the_views_of_ops_are_the_models_of_the_folder_ops_and_read_those_tables():
+    # The selector names the folder of the views of ops in the project agoranomos.
+    project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
+    [name] = re.findall(r"^name: (\w+)$", project, flags=re.MULTILINE)
+    folder = mi.OPS.split(",path:", 1)[1]
+    assert f"package:{name},path:{folder}" == mi.OPS
+    models = sorted((DBT / folder).glob("*.sql"))
+    assert models, folder
+    # The tables of elementary that the job looks for are those that the views of ops read.
+    read = {
+        table
+        for path in models
+        for table in re.findall(r"ref\('elementary', '(\w+)'\)", path.read_text(encoding="utf-8"))
+    }
+    assert tuple(sorted(read)) == mi.ELEMENTARY
 
 
 # The three relations of v0.4 that the upgrade from v0.4.5 left on 11 November 2026, with the kind
@@ -278,7 +385,7 @@ def test_the_job_drops_after_dbt_what_is_left_with_its_kind_and_names_each(capsy
         ("staging.int_ad_stats_ad_group__unioned", None),
         ("staging.int_ad_platforms__unioned", "v"),
     ]
-    code, connection, _ = run_job([(True,), (False, False)], kinds=kinds)
+    code, connection, _ = run_job([(True,), (False, False, False)], kinds=kinds)
     assert code == 0
     statements = [sql for sql, _ in connection.executed]
     after = statements[statements.index("dbt") + 1 :]
@@ -302,7 +409,7 @@ def test_the_job_drops_after_dbt_what_is_left_with_its_kind_and_names_each(capsy
 
 
 def test_the_job_says_nothing_of_leftovers_when_there_are_none(capsys):
-    code, connection, _ = run_job([(True,), (True, False)])
+    code, connection, _ = run_job([(True,), (True, False, False)])
     assert code == 0
     statements = [sql for sql, _ in connection.executed]
     assert statements[statements.index("dbt") + 1 :] == [mi.KINDS]
@@ -320,7 +427,7 @@ def test_a_relation_of_the_name_and_of_another_kind_stays():
         ("staging.int_ad_stats_ad_group__unioned", "m"),
         ("staging.int_ad_platforms__unioned", "r"),
     ]
-    code, connection, _ = run_job([(True,), (True, False)], kinds=kinds)
+    code, connection, _ = run_job([(True,), (True, False, False)], kinds=kinds)
     assert code == 0
     assert not any(sql.startswith("DROP") for sql, _ in connection.executed)
 
@@ -328,7 +435,7 @@ def test_a_relation_of_the_name_and_of_another_kind_stays():
 def test_a_drop_that_fails_is_a_warning_and_the_others_go_on(capsys):
     kinds = [(name, mi.RELKINDS[kind]) for name, kind in mi.LEFTOVERS]
     code, connection, _ = run_job(
-        [(True,), (True, False)],
+        [(True,), (True, False, False)],
         fail_on="DROP TABLE IF EXISTS staging.int_ad_stats_ad_group__unioned",
         kinds=kinds,
     )
@@ -348,7 +455,7 @@ def test_a_drop_that_fails_is_a_warning_and_the_others_go_on(capsys):
 
 
 def test_a_catalog_that_cannot_be_read_after_dbt_is_a_warning(capsys):
-    code, connection, _ = run_job([(True,), (True, False)], fail_on="FROM unnest(")
+    code, connection, _ = run_job([(True,), (True, False, False)], fail_on="FROM unnest(")
     assert code == 0
     assert connection.closed
     out = capsys.readouterr().out
@@ -359,14 +466,14 @@ def test_a_catalog_that_cannot_be_read_after_dbt_is_a_warning(capsys):
 
 
 def test_a_dbt_that_hangs_or_is_missing_fails_the_job(capsys):
-    connection = Connection([(True,), (True, False)])
+    connection = Connection([(True,), (True, False, False)])
 
     def hangs(argv, **options):
         raise subprocess.TimeoutExpired(argv, mi.DBT_TIMEOUT)
 
     assert mi.main([], ENVIRON, lambda env: connection, hangs) == 1
     assert "dbt did not end within 1800 seconds" in capsys.readouterr().err
-    connection = Connection([(True,), (True, False)])
+    connection = Connection([(True,), (True, False, False)])
 
     def missing(argv, **options):
         raise FileNotFoundError(argv[0])
@@ -394,7 +501,7 @@ def test_a_warehouse_out_of_reach_or_no_password_fails_the_job_in_one_line(capsy
 
 
 def test_the_reporting_currency_is_usd_by_default():
-    _, connection, _ = run_job([(True,), (True, False)], environ={mi.PASSWORD: "x"})
+    _, connection, _ = run_job([(True,), (True, False, False)], environ={mi.PASSWORD: "x"})
     assert connection.executed[1][1][2] == "USD"
 
 
