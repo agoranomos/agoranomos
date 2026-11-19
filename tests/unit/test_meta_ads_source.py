@@ -1290,7 +1290,7 @@ def test_the_plan_of_the_history_reads_the_loads_of_meta_and_asks_meta_nothing(m
     queries = made["pipelines"][0].queries
     assert (
         "SELECT account_id, window_from, window_to FROM core.loads "
-        "WHERE source = 'meta_ads' AND outcome = 'loaded' "
+        "WHERE source = 'meta_ads' AND outcome = 'loaded' AND kind <> 'intraday' "
         "AND account_id IN ('1111111111111111', '2222222222222222')"
     ) in queries
     assert any('FROM "raw_meta_ads"."_agoranomos_loads" AS j' in query for query in queries)

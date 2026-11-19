@@ -24,6 +24,11 @@ others: the load takes them, records the failed account in its journal, and the 
 end, without a retry, with one line that lists the accounts and their errors (ADR-0035); the next
 load takes the days that they missed.
 A repeat is safe: each load replaces the days that it covers.
+
+Its load runs in the pool google_ads_load of one slot, which airflow-init sets on every start, with
+that of agoranomos_google_ads_intraday, which loads the current day of each account every few hours
+as a load of the kind intraday (ADR-0051): two loads never write raw_google_ads at the same time,
+and a load of this DAG, whole days, replaces the partial days of the short cycle in the core.
 """
 
 from __future__ import annotations
@@ -64,9 +69,13 @@ PARAMS = {
         description="The last day of a run of the history, such as 2026-03-31; empty for none.",
     ),
 }
+# The pool of the loads of Google Ads, which airflow-init sets on every start: one slot, so that
+# this load and that of the short cycle, agoranomos_google_ads_intraday, never write raw_google_ads
+# under one pipeline of dlt at the same time (ADR-0051).
+LOAD_POOL = "google_ads_load"
 
 
-@task(task_id="load_google_ads", outlets=[RAW_GOOGLE_ADS])
+@task(task_id="load_google_ads", outlets=[RAW_GOOGLE_ADS], pool=LOAD_POOL)
 def load_google_ads() -> None:
     # dlt and google-auth are imported here and not at the top: the DAG processor parses this file
     # often.
@@ -97,7 +106,8 @@ def load_google_ads() -> None:
     schedule=SCHEDULE,
     start_date=START,
     catchup=False,
-    # A run of the history and a scheduled run wait for each other.
+    # A run of the history and a scheduled run wait for each other, and the short cycle for both,
+    # in the pool of the loads.
     max_active_runs=1,
     is_paused_upon_creation=True,
     params=PARAMS,

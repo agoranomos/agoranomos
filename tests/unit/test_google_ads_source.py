@@ -10,6 +10,8 @@ import base64
 import importlib
 import itertools
 import json
+import re
+import sqlite3
 import sys
 import types
 from datetime import UTC, date, datetime, timedelta
@@ -74,6 +76,9 @@ class StandInClient:
 
     def execute_sql(self, sql):
         self.pipeline.queries.append(sql)
+        # A warehouse in SQLite, when a test gives one, answers every query (Warehouse).
+        if "warehouse" in self.pipeline.state:
+            return self.pipeline.state["warehouse"](sql)
         # The queries of the plan of the history: the windows of core.loads and of the journal,
         # the newest loads of each kind and outcome in core.loads, and the whole loads that no pin
         # took yet.
@@ -647,8 +652,8 @@ def test_the_plan_waits_for_a_load_that_no_run_of_the_transform_pinned(ads, capl
 
 def test_the_plan_takes_the_windows_of_the_journal_and_of_the_core(ads, caplog):
     # The history goes back to the first day of the month 36 months before yesterday in UTC, from
-    # the windows of the whole loads of every kind; the core holds those of the loads that the
-    # cleanup of raw will have removed.
+    # the windows of the whole loads of the kinds window and history, and none of the kind intraday
+    # (ADR-0051); the core holds those of the loads that the cleanup of raw will have removed.
     module, state, made, extensions = ads
     state.update(
         loads=2,
@@ -666,7 +671,7 @@ def test_the_plan_takes_the_windows_of_the_journal_and_of_the_core(ads, caplog):
     queries = made["pipelines"][0].queries
     assert (
         "SELECT account_id, window_from, window_to FROM core.loads "
-        "WHERE source = 'google_ads' AND outcome = 'loaded' "
+        "WHERE source = 'google_ads' AND outcome = 'loaded' AND kind <> 'intraday' "
         "AND account_id IN ('1111111111', '2222222222')"
     ) in queries
     assert (
@@ -674,7 +679,8 @@ def test_the_plan_takes_the_windows_of_the_journal_and_of_the_core(ads, caplog):
         'FROM "raw_google_ads"."_agoranomos_loads" AS j '
         'JOIN "raw_google_ads"."_dlt_loads" AS l '
         "ON l.load_id = j._dlt_load_id AND l.status = 0 "
-        "WHERE j.status = 'loaded' AND j.account_id IN ('1111111111', '2222222222')"
+        "WHERE j.status = 'loaded' AND j.kind IS DISTINCT FROM 'intraday' "
+        "AND j.account_id IN ('1111111111', '2222222222')"
     ) in queries
     assert made["requests"] == []
     # Once every account holds its days back to the limit, nothing.
@@ -1044,14 +1050,14 @@ def test_an_account_whose_loads_all_failed_takes_its_usual_window(ads):
         "2222222222": (date(2026, 7, 31), date(2026, 10, 28)),
     }
     # The journal counts the loads that dlt finished, with their row in _dlt_loads: the days of a
-    # load that stopped half way are taken again.
+    # load that stopped half way are taken again. A load of the kind intraday does not count.
     [query] = [q for q in made["pipelines"][0].queries if "_agoranomos_loads" in q]
     assert query == (
         "SELECT j.account_id, max(j.as_of), max(j.window_to) "
         'FROM "raw_google_ads"."_agoranomos_loads" AS j '
         'JOIN "raw_google_ads"."_dlt_loads" AS l '
         "ON l.load_id = j._dlt_load_id AND l.status = 0 "
-        "WHERE j.status = 'loaded' GROUP BY j.account_id"
+        "WHERE j.status = 'loaded' AND j.kind IS DISTINCT FROM 'intraday' GROUP BY j.account_id"
     )
 
 
@@ -1103,7 +1109,7 @@ def test_the_window_starts_after_the_last_day_that_the_core_accepted(ads):
     assert query == (
         "SELECT account_id, max(window_to) FROM core.loads "
         "WHERE source = 'google_ads' AND status = 'accepted' AND outcome = 'loaded' "
-        "AND account_id IN ('1111111111', '2222222222') GROUP BY account_id"
+        "AND kind <> 'intraday' AND account_id IN ('1111111111', '2222222222') GROUP BY account_id"
     )
 
 
@@ -1471,3 +1477,303 @@ def test_a_load_whose_answer_breaks_off_once_loads_the_account_with_its_rows_onc
         assert counts[table] == 2, table
     record = {row["account_id"]: row for row in rows["_agoranomos_loads"]}
     assert {row["status"] for row in record.values()} == {"loaded"}
+
+
+# The short cycle of the current day (ADR-0051).
+
+DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+class Warehouse:
+    """The tables that the readers of the watermarks query, in SQLite: core.loads, and the journal
+    and _dlt_loads of raw_google_ads, so that a test runs their SQL as it is. SQLite takes the SQL
+    of these readers but SELECT FROM without columns, which PostgreSQL allows, and which the
+    stand-in reads as SELECT 1 FROM. A day goes in and comes back as a date."""
+
+    def __init__(self):
+        self.db = sqlite3.connect(":memory:")
+        for schema in ("core", "raw_google_ads"):
+            self.db.execute(f"ATTACH DATABASE ':memory:' AS {schema}")
+        self.db.execute(
+            "CREATE TABLE core.loads (source, load_id, account_id, window_from, window_to, "
+            "outcome, status, kind, finished_at)"
+        )
+        self.db.execute(
+            "CREATE TABLE raw_google_ads._agoranomos_loads "
+            "(account_id, as_of, window_from, window_to, status, kind, _dlt_load_id)"
+        )
+        self.db.execute("CREATE TABLE raw_google_ads._dlt_loads (load_id, status)")
+
+    def load(self, load_id, account_id, first, last, kind="window", pinned=True):
+        """A whole load of an account in the journal, with its row in _dlt_loads, and, once a run
+        of the transform pinned and accepted it, in core.loads."""
+        self.db.execute(
+            "INSERT INTO raw_google_ads._agoranomos_loads VALUES (?, ?, ?, ?, 'loaded', ?, ?)",
+            (
+                account_id,
+                (last + timedelta(days=1)).isoformat(),
+                first.isoformat(),
+                last.isoformat(),
+                kind,
+                load_id,
+            ),
+        )
+        self.db.execute("INSERT INTO raw_google_ads._dlt_loads VALUES (?, 0)", (load_id,))
+        if pinned:
+            self.db.execute(
+                "INSERT INTO core.loads VALUES "
+                "('google_ads', ?, ?, ?, ?, 'loaded', 'accepted', ?, ?)",
+                (load_id, account_id, first.isoformat(), last.isoformat(), kind, load_id),
+            )
+
+    def __call__(self, sql):
+        try:
+            rows = self.db.execute(sql.replace("SELECT FROM", "SELECT 1 FROM")).fetchall()
+        except sqlite3.OperationalError as error:
+            if "no such table" in str(error):
+                raise UndefinedRelation(sql) from None
+            raise
+        return [
+            tuple(
+                date.fromisoformat(value)
+                if isinstance(value, str) and DAY.fullmatch(value)
+                else value
+                for value in row
+            )
+            for row in rows
+        ]
+
+
+# The whole loads of the two accounts up to their yesterday at NOW: the 27th in Los Angeles, the
+# 28th in Berlin, as recorded() gives them, the day of the load and its last day.
+WHOLE = [
+    ("1111111111", date(2026, 10, 28), date(2026, 10, 27)),
+    ("2222222222", date(2026, 10, 29), date(2026, 10, 28)),
+]
+
+
+def test_an_intraday_load_takes_the_current_day_in_the_time_zone_of_each_account(ads):
+    # ADR-0051: at 02:00 UTC on 29 October it is still the 28th in Los Angeles and the 29th in
+    # Berlin. A whole load covers the day before of each, so each takes its current day alone, as
+    # a load of the kind intraday, into campaign_stats and the journal, and nothing else.
+    module, state, made, extensions = ads
+    state.update(loads=1, reloads=WHOLE)
+    counts = module.load_intraday(NOW, extensions)
+    assert counts == {"campaign_stats": 2}
+    [(rows, hints)] = made["pipelines"][0].runs
+    assert set(rows) == {"campaign_stats", "_agoranomos_loads"}
+    # The hints of the table, the columns of the conversions among them, which stay empty.
+    types = {name: c["data_type"] for name, c in hints["campaign_stats"]["columns"].items()}
+    assert types == {name: c["data_type"] for name, c in module.columns("campaign_stats").items()}
+    assert "metrics__conversions" in types
+    assert hints["campaign_stats"]["write_disposition"] == "append"
+    record = {row["account_id"]: row for row in rows["_agoranomos_loads"]}
+    assert {
+        account_id: (row["window_from"], row["window_to"], row["as_of"], row["kind"], row["status"])
+        for account_id, row in record.items()
+    } == {
+        "1111111111": (
+            date(2026, 10, 28),
+            date(2026, 10, 28),
+            date(2026, 10, 28),
+            "intraday",
+            "loaded",
+        ),
+        "2222222222": (
+            date(2026, 10, 29),
+            date(2026, 10, 29),
+            date(2026, 10, 29),
+            "intraday",
+            "loaded",
+        ),
+    }
+    stats = {
+        url.split("/customers/")[1].split("/")[0]: gaql
+        for url, gaql, _ in made["requests"]
+        if " FROM campaign WHERE " in gaql
+    }
+    assert stats["1111111111"].endswith("BETWEEN '2026-10-28' AND '2026-10-28'")
+    assert stats["2222222222"].endswith("BETWEEN '2026-10-29' AND '2026-10-29'")
+    assert [row["customer"]["id"] for row in rows["campaign_stats"]] == ["1111111111", "2222222222"]
+
+
+def test_the_current_day_is_the_day_of_the_account_at_the_moment_of_the_read(ads):
+    module, _, _, _ = ads
+    assert module.today(NOW, "America/Los_Angeles") == date(2026, 10, 28)
+    assert module.today(NOW, "Europe/Berlin") == date(2026, 10, 29)
+    assert module.today(NOW, "Pacific/Kiritimati") == date(2026, 10, 29)
+    # The last hour of the day in Los Angeles, the first in Berlin of the next.
+    late = datetime(2026, 10, 29, 6, 30, tzinfo=UTC)
+    assert module.today(late, "America/Los_Angeles") == date(2026, 10, 28)
+    assert module.today(late, "Asia/Tokyo") == date(2026, 10, 29)
+
+
+def test_an_intraday_load_asks_two_requests_for_each_account(ads):
+    # ADR-0051: the customer, for its time zone, and the impressions, clicks and cost of its
+    # campaigns, without conversions, which a day in progress does not have yet: two operations of
+    # the quota for each account, against twelve for a daily load. No list, no totals.
+    module, state, made, extensions = ads
+    state.update(loads=1, reloads=WHOLE)
+    module.load_intraday(NOW, extensions)
+    assert requested(made) == ["1111111111", "1111111111", "2222222222", "2222222222"]
+    customer, stats = [gaql for url, gaql, _ in made["requests"] if "1111111111" in url]
+    assert customer == module.query("customers")
+    assert stats == (
+        "SELECT customer.id, campaign.resource_name, campaign.id, campaign.name, "
+        "metrics.impressions, metrics.clicks, metrics.cost_micros, segments.date FROM campaign "
+        "WHERE segments.date BETWEEN '2026-10-28' AND '2026-10-28'"
+    )
+    assert "conversions" not in stats
+
+
+def test_an_intraday_load_takes_the_day_before_while_no_whole_load_covers_it(ads):
+    # ADR-0051, "The day before, after midnight": between midnight in the account and the daily
+    # load, the day before goes on growing, in the same request as the current day.
+    module, state, made, extensions = ads
+    state.update(
+        loads=1,
+        reloads=[
+            ("1111111111", date(2026, 10, 27), date(2026, 10, 26)),
+            ("2222222222", date(2026, 10, 28), date(2026, 10, 27)),
+        ],
+    )
+    module.load_intraday(NOW, extensions)
+    [(rows, _)] = made["pipelines"][0].runs
+    windows = {
+        row["account_id"]: (row["window_from"], row["window_to"])
+        for row in rows["_agoranomos_loads"]
+    }
+    assert windows == {
+        "1111111111": (date(2026, 10, 27), date(2026, 10, 28)),
+        "2222222222": (date(2026, 10, 28), date(2026, 10, 29)),
+    }
+    assert len(made["requests"]) == 4
+    # The last day that a whole load covers, accepted in the core or whole in the journal, the
+    # later of the two.
+    core = {"1111111111": date(2026, 10, 27)}
+    journal = {"1111111111": (date(2026, 10, 27), date(2026, 10, 26))}
+    assert module.whole_end("1111111111", core, journal) == date(2026, 10, 27)
+    assert module.whole_end("1111111111", {}, journal) == date(2026, 10, 26)
+    assert module.whole_end("2222222222", core, journal) is None
+    assert module.intraday_days(NOW, "Europe/Berlin", date(2026, 10, 28)) == (
+        date(2026, 10, 29),
+        date(2026, 10, 29),
+    )
+    assert module.intraday_days(NOW, "Europe/Berlin", date(2026, 9, 1)) == (
+        date(2026, 10, 28),
+        date(2026, 10, 29),
+    )
+
+
+def test_an_intraday_load_leaves_an_account_without_a_whole_load_for_its_first_daily_load(
+    ads, caplog
+):
+    # The check of the accounts of the transform knows an account of an intraday load from the
+    # list of a whole load (dbt/macros/quarantine.sql), so an account that none has taken waits.
+    module, state, made, extensions = ads
+    state.update(loads=1, reloads=WHOLE[1:])
+    with caplog.at_level("INFO"):
+        module.load_intraday(NOW, extensions)
+    assert set(requested(made)) == {"2222222222"}
+    assert "1 Google Ads accounts (1111111111) have had no whole load yet" in caplog.text
+    # With no whole load at all, nothing: no sign-in, no request, no run of dlt.
+    made["requests"].clear()
+    made["pipelines"].clear()
+    made.pop("signed")
+    state.update(loads=None, reloads=[])
+    assert module.load_intraday(NOW, extensions) is None
+    assert made["requests"] == []
+    assert "signed" not in made
+    assert [pipeline.runs for pipeline in made["pipelines"]] == [[]]
+
+
+def test_an_intraday_load_records_only_the_accounts_that_it_took_and_fails_at_the_end(ads):
+    # A failed account leaves no row: a row of the status failed would hold it in quarantine
+    # (load_failed) with its daily window, for a day that the next cycle reads again.
+    module, state, made, extensions = ads
+    state.update(loads=1, reloads=WHOLE, failing={"2222222222"})
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load_intraday(NOW, extensions)
+    assert str(raised.value) == f"1 of 2 Google Ads accounts failed, the other 1 is loaded: {ERROR}"
+    [(rows, _)] = made["pipelines"][0].runs
+    assert [row["account_id"] for row in rows["_agoranomos_loads"]] == ["1111111111"]
+    assert {row["customer"]["id"] for row in rows["campaign_stats"]} == {"1111111111"}
+    # When every account fails, nothing is written.
+    made["pipelines"].clear()
+    state["failing"] = {"1111111111", "2222222222"}
+    with pytest.raises(module.AccountsFailed, match="none is loaded"):
+        module.load_intraday(NOW, extensions)
+    assert [pipeline.runs for pipeline in made["pipelines"]] == [[]]
+
+
+def test_the_readers_of_the_watermarks_leave_the_intraday_loads_out(ads):
+    # ADR-0051: no reader of window_to counts a load of the kind intraday, in the SQL that it runs.
+    module, state, made, extensions = ads
+    state.update(loads=1, reloads=WHOLE, accepted=[("2222222222", date(2026, 10, 28))])
+    module.load(NOW, extensions)
+    queries = made["pipelines"][0].queries
+    assert (
+        "SELECT account_id, max(window_to) FROM core.loads WHERE source = 'google_ads' "
+        "AND status = 'accepted' AND outcome = 'loaded' AND kind <> 'intraday' "
+        "AND account_id IN ('1111111111', '2222222222') GROUP BY account_id"
+    ) in queries
+    assert (
+        "SELECT j.account_id, max(j.as_of), max(j.window_to) "
+        'FROM "raw_google_ads"."_agoranomos_loads" AS j '
+        'JOIN "raw_google_ads"."_dlt_loads" AS l '
+        "ON l.load_id = j._dlt_load_id AND l.status = 0 "
+        "WHERE j.status = 'loaded' AND j.kind IS DISTINCT FROM 'intraday' GROUP BY j.account_id"
+    ) in queries
+
+
+def test_a_stop_of_120_days_still_closes_by_itself_after_an_intraday_load(ads):
+    # ADR-0051: the core accepted the whole days of the account in Berlin up to 30 June, then the
+    # loads stopped for 120 days, and on the first day back an intraday load of 29 October came
+    # first, which the core accepted, in core.loads and in the journal. The last accepted day stays
+    # 30 June, so the daily window starts on 1 July, and not 90 days back, which would lose 30 days.
+    module, state, made, extensions = ads
+    warehouse = Warehouse()
+    berlin = "2222222222"
+    warehouse.load("1751328000.1", berlin, date(2026, 4, 2), date(2026, 6, 30))
+    warehouse.load("1761696000.2", berlin, date(2026, 10, 29), date(2026, 10, 29), "intraday")
+    state.update(warehouse=warehouse)
+    pipeline = made["pipelines"]
+    with module.open_pipeline() as opened:
+        assert module.accepted(opened, [berlin]) == {berlin: date(2026, 6, 30)}
+        assert module.recorded(opened) == {berlin: (date(2026, 7, 1), date(2026, 6, 30))}
+    module.load(NOW, extensions)
+    [(rows, _)] = pipeline[-1].runs
+    record = {row["account_id"]: row for row in rows["_agoranomos_loads"]}
+    assert (record[berlin]["window_from"], record[berlin]["window_to"]) == (
+        date(2026, 7, 1),
+        date(2026, 10, 28),
+    )
+    # The account in Los Angeles, which no load took, takes its usual window.
+    assert record["1111111111"]["window_from"] == date(2026, 7, 30)
+    # Without the kind, the intraday load would set the last day to 29 October.
+    [query] = [q for q in pipeline[-1].queries if q.startswith("SELECT account_id, max(window_to)")]
+    assert warehouse(query.replace(" AND kind <> 'intraday'", "")) == [(berlin, date(2026, 10, 29))]
+
+
+def test_the_history_leaves_an_account_that_only_intraday_loads_took_without_a_gap(ads):
+    # ADR-0051: the windows of the plan of the history are those of the whole loads; an intraday
+    # load of an account that no whole load took does not make it look like one that lacks every
+    # day before today.
+    module, state, _, extensions = ads
+    warehouse = Warehouse()
+    warehouse.load("1761600000.1", "2222222222", date(2026, 7, 31), date(2026, 10, 28))
+    warehouse.load("1761696000.2", "1111111111", date(2026, 10, 28), date(2026, 10, 28), "intraday")
+    state.update(warehouse=warehouse)
+    assert module.plan(NOW, extensions) == module.Portion(
+        ("2222222222",), date(2026, 7, 1), date(2026, 7, 30)
+    )
+    # A whole load that no run of the transform pinned holds the plan back, an intraday one too.
+    warehouse.load(
+        "1761700000.3",
+        "2222222222",
+        date(2026, 10, 29),
+        date(2026, 10, 29),
+        "intraday",
+        pinned=False,
+    )
+    assert module.plan(NOW, extensions) is None

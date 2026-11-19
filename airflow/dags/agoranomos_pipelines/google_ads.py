@@ -56,6 +56,20 @@ cache of the warehouse, which stays the truth: the cache never moves a window, a
 of the warehouse alone it would be newer than the data, and a load says in its log when the two
 differ (watermarks).
 
+The short cycle (ADR-0051): every few hours, the DAG agoranomos_google_ads_intraday loads the
+current day of each account in its time zone, and the day before while no whole load, of the kind
+window or history, covers it, as a load of the kind intraday (load_intraday): two requests for each
+account, its customer, for its time zone, and the impressions, clicks and cost of its campaigns on
+those days, without conversions, which Google dates by click and adds later, so that a partial day
+has none, not zero. It takes no list, no totals, no ad group and no ad, keeps no watermark, and
+takes only the accounts that a whole load has taken: before the first, the check of the accounts
+of the transform would not know the account from a list. Its rows go into campaign_stats, with a
+row of the kind intraday for each account in the journal, and staging takes a whole load of a day
+before an intraday one, whatever their load IDs (dbt/macros/newest_load.sql). No watermark counts
+an intraday load: the last day that the core accepted, the journal (loads.recorded) and the windows
+of the plan of the history (history.known_windows) read the whole loads alone, so that after a stop
+an intraday load of the first day back does not shorten the next window.
+
 A load reads each account whole before dlt sees any of it, into a file for each table on disk, and
 reads each answer of the API as it arrives, a row at a time, so that a task holds a row and a piece
 of an answer and not a month of rows (ADR-0038). An error of the API on one account, such as the
@@ -109,6 +123,7 @@ from agoranomos_pipelines.loads import (
     DLT_SETTINGS,
     FAILED,
     HISTORY,
+    INTRADAY,
     LOAD_HINTS,
     LOADED,
     LOADS,
@@ -264,6 +279,14 @@ RESOURCES = {
     "ad_conversions": "ad_group_ad",
     "conversion_actions": "conversion_action",
 }
+# The fields of the statistics of the campaigns in a load of the kind intraday (ADR-0051): those of
+# campaign_stats but the conversions, which a day in progress does not have yet. dlt writes the rows
+# into campaign_stats under its hints, so the columns of the conversions stay empty, none and not
+# zero.
+INTRADAY_FIELDS = (
+    "customer.id, campaign.resource_name, campaign.id, campaign.name, metrics.impressions, "
+    "metrics.clicks, metrics.cost_micros, segments.date"
+)
 # The tables of the lists of each account, and the fact tables: each load appends its rows to both,
 # in the order of their requests: the totals of the account right before the statistics of its
 # campaigns, which G0a checks against them.
@@ -387,7 +410,13 @@ def sign_in() -> service_account.Credentials:
 
 def yesterday(now: datetime, time_zone: str) -> date:
     """The last day that a load at now takes of an account: yesterday in its time zone."""
-    return now.astimezone(ZoneInfo(time_zone)).date() - timedelta(days=1)
+    return today(now, time_zone) - timedelta(days=1)
+
+
+def today(now: datetime, time_zone: str) -> date:
+    """The current day of an account at now, in its time zone: the day of a load, and the last day
+    of a load of the kind intraday."""
+    return now.astimezone(ZoneInfo(time_zone)).date()
 
 
 def window(last: date, last_end: date | None) -> tuple[date, date]:
@@ -405,8 +434,10 @@ def window(last: date, last_end: date | None) -> tuple[date, date]:
 
 def accepted(pipeline, account_ids: Iterable[str]) -> dict[str, date]:
     """The last day that the core accepted for each account: the end of the window of its newest
-    accepted load in core.loads, which loader may read (ADR-0038); none for an account of which
-    the core accepted no load."""
+    accepted whole load in core.loads, which loader may read (ADR-0038); none for an account of
+    which the core accepted no whole load. A load of the kind intraday does not count: after a stop
+    of 120 days, one of the first day back would set the last day to today, and the next window
+    would start 90 days back and leave out 30 days for good (ADR-0051)."""
     # IDs of checked digits, and constants of this module.
     wanted = ", ".join(f"'{account_id}'" for account_id in checked(account_ids))
     try:
@@ -414,7 +445,7 @@ def accepted(pipeline, account_ids: Iterable[str]) -> dict[str, date]:
             rows = client.execute_sql(
                 "SELECT account_id, max(window_to) FROM core.loads "  # noqa: S608
                 f"WHERE source = '{CODE}' AND status = 'accepted' AND outcome = '{LOADED}' "
-                f"AND account_id IN ({wanted}) GROUP BY account_id"
+                f"AND kind <> '{INTRADAY}' AND account_id IN ({wanted}) GROUP BY account_id"
             )
     except DatabaseUndefinedRelation:
         return {}
@@ -427,12 +458,34 @@ def last_day(
     """The day after which the window of an account starts: the last that the core accepted for
     it, or, while the core has accepted no load of the account, as before the first run of the
     transform that read one, the last day of its newest whole load in the journal; none when neither
-    knows the account, which then takes its usual window."""
+    knows the account, which then takes its usual window. Both are of the whole loads alone
+    (accepted, loads.recorded)."""
     if account_id in core:
         return core[account_id]
     if account_id in journal:
         return journal[account_id][1]
     return None
+
+
+def whole_end(
+    account_id: str, core: dict[str, date], journal: dict[str, tuple[date, date]]
+) -> date | None:
+    """The last day that a whole load of an account covers, accepted in the core or whole in the
+    journal, pinned or not: the short cycle takes the day before today while this is earlier. None
+    when no whole load has taken the account, which the short cycle then leaves for its first daily
+    load."""
+    known = [day for day in (core.get(account_id), journal.get(account_id, (None, None))[1]) if day]
+    return max(known) if known else None
+
+
+def intraday_days(now: datetime, time_zone: str, whole: date) -> tuple[date, date]:
+    """The days of a load of the kind intraday of an account at now: its current day in its time
+    zone, and the day before while no whole load covers it, whole being the last day that one
+    covers, so that between midnight in the account and the daily load the day before goes on
+    growing (ADR-0051). Both come in one request."""
+    current = today(now, time_zone)
+    before = current - timedelta(days=1)
+    return (current if whole >= before else before), current
 
 
 # The key of the watermarks of the accounts in the asset state store of the asset of the load.
@@ -538,6 +591,16 @@ def query(table: str, days: tuple[date, date] | None = None) -> str:
         first, last = days
         text += f" WHERE segments.date BETWEEN '{first.isoformat()}' AND '{last.isoformat()}'"
     return text
+
+
+def intraday_query(days: tuple[date, date]) -> str:
+    """The GAQL of the statistics of the campaigns of a load of the kind intraday over its days."""
+    first, last = days
+    # GAQL of the fields above and of dates, never text from outside.
+    return (
+        f"SELECT {INTRADAY_FIELDS} FROM campaign "  # noqa: S608
+        f"WHERE segments.date BETWEEN '{first.isoformat()}' AND '{last.isoformat()}'"
+    )
 
 
 class BrokenAnswer(ValueError):
@@ -803,6 +866,21 @@ def written(api: Api, account_id: str, gaql: str, file: TextIO) -> None:
     retried(write, undo)
 
 
+def read_customer(api: Api, account_id: str) -> dict:
+    """The row of customers of an account, as the API gives it, with its time zone: one request,
+    asked again when its answer breaks off."""
+    rows = retried(
+        lambda: [
+            row
+            for row in api.search(account_id, query("customers"))
+            if row["customer"]["id"] == account_id
+        ]
+    )
+    if not rows:
+        raise GoogleAdsError(f"Google Ads account {account_id}: the API returned no customer")
+    return rows[0]
+
+
 def read_account(
     api: Api,
     account_id: str,
@@ -822,16 +900,7 @@ def read_account(
     answer that is not whole JSON, or one that breaks off at each attempt, raises GoogleAdsError
     and leaves nothing of the account: a window replaces whole days, and a part of one would lose
     the rest (ADR-0035)."""
-    rows = retried(
-        lambda: [
-            row
-            for row in api.search(account_id, query("customers"))
-            if row["customer"]["id"] == account_id
-        ]
-    )
-    if not rows:
-        raise GoogleAdsError(f"Google Ads account {account_id}: the API returned no customer")
-    customer = rows[0]
+    customer = read_customer(api, account_id)
     last_day_of_account = yesterday(now, customer["customer"]["timeZone"])
     if days is None:
         first, last = window(last_day_of_account, last_end)
@@ -859,12 +928,75 @@ def read_account(
     return Read(customer, (first, last), files)
 
 
+def read_intraday(api: Api, account_id: str, now: datetime, whole: date, staging: Path) -> Read:
+    """Read the current day of an account, and the day before while no whole load covers it,
+    whole being the last day that one covers (intraday_days): its customer, which gives its time
+    zone, and then the statistics of its campaigns on those days, without conversions, into a file
+    in the folder of the account under staging, a row at a time, as read_account does. An error of
+    the API, or an answer that breaks at each attempt, raises GoogleAdsError and leaves nothing of
+    the account."""
+    customer = read_customer(api, account_id)
+    days = intraday_days(now, customer["customer"]["timeZone"], whole)
+    # The ID is checked digits.
+    folder = staging / account_id
+    folder.mkdir()
+    path = folder / "campaign_stats.jsonl"
+    try:
+        with path.open("w", encoding="utf-8") as file:
+            written(api, account_id, intraday_query(days), file)
+    except GoogleAdsError:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+    return Read(customer, days, {"campaign_stats": path})
+
+
 def staged_rows(read: dict[str, Read], table: str) -> Iterator[dict]:
     """The rows of a table of each account read, from its file, as the API gave them."""
     for account in read.values():
         with account.files[table].open(encoding="utf-8") as file:
             for line in file:
                 yield json.loads(line)
+
+
+def journal_rows(
+    read: dict[str, Read], failed: dict[str, GoogleAdsError], now: datetime, kind: str
+) -> list[dict]:
+    """The rows of the journal of a load of the kind kind at now, by account: each account read
+    with its window, and each failed account with its error."""
+    loaded_at = datetime.now(UTC)
+    rows = [
+        {
+            "account_id": account_id,
+            # The day of the load in the time zone of the account, also for a portion of the
+            # history, whose window ends long before it.
+            "as_of": today(now, account.customer["customer"]["timeZone"]),
+            "window_from": account.window[0],
+            "window_to": account.window[1],
+            "now": now,
+            "loaded_at": loaded_at,
+            "status": LOADED,
+            "error": None,
+            "kind": kind,
+        }
+        for account_id, account in read.items()
+    ] + [
+        # Nothing was loaded: no day and no loaded_at, so that recorded(), the staging models
+        # and ops_loads pass the row over, as they do for an account that no load took; now
+        # keeps the attempt.
+        {
+            "account_id": account_id,
+            "as_of": None,
+            "window_from": None,
+            "window_to": None,
+            "now": now,
+            "loaded_at": None,
+            "status": FAILED,
+            "error": str(error),
+            "kind": kind,
+        }
+        for account_id, error in failed.items()
+    ]
+    return sorted(rows, key=lambda row: row["account_id"])
 
 
 def failure_line(failed: dict[str, GoogleAdsError], loaded: int) -> str:
@@ -959,41 +1091,7 @@ def load(
                         or_marker(staged_rows(read, table)), name=table, **own(HINTS[table])
                     )
                 )
-        loaded_at = datetime.now(UTC)
-        record = [
-            {
-                "account_id": account_id,
-                # The day of the load in the time zone of the account, also for a portion of the
-                # history, whose window ends long before it.
-                "as_of": yesterday(now, account.customer["customer"]["timeZone"])
-                + timedelta(days=1),
-                "window_from": account.window[0],
-                "window_to": account.window[1],
-                "now": now,
-                "loaded_at": loaded_at,
-                "status": LOADED,
-                "error": None,
-                "kind": kind,
-            }
-            for account_id, account in read.items()
-        ] + [
-            # Nothing was loaded: no day and no loaded_at, so that recorded(), the staging models
-            # and ops_loads pass the row over, as they do for an account that no load took; now
-            # keeps the attempt.
-            {
-                "account_id": account_id,
-                "as_of": None,
-                "window_from": None,
-                "window_to": None,
-                "now": now,
-                "loaded_at": None,
-                "status": FAILED,
-                "error": str(error),
-                "kind": kind,
-            }
-            for account_id, error in failed.items()
-        ]
-        record.sort(key=lambda row: row["account_id"])
+        record = journal_rows(read, failed, now, kind)
         # In the same run as the facts, so under the same _dlt_load_id: a load that does not end
         # whole has no row in _dlt_loads, and its windows are read by nobody.
         resources.append(dlt.resource(record, name=LOADS, **own(LOAD_HINTS)))
@@ -1005,6 +1103,73 @@ def load(
             remember(cache, cached, read)
     for table, rows in sorted(counts.items()):
         log.info("Loaded %d rows into %s.%s, as of %s", rows, DATASET, table, now.isoformat())
+    log.info("%d requests to the Google Ads API for %d accounts", api.requests, len(wanted))
+    if failed:
+        raise AccountsFailed(failure_line(failed, len(read)))
+    return counts
+
+
+def load_intraday(now: datetime, extensions: Path = EXTENSIONS) -> dict[str, int] | None:
+    """Load the current day of the accounts of the deployment at now, the moment of the read, as a
+    load of the kind intraday (ADR-0051): for each account of clients.toml that a whole load has
+    taken, its customer and the statistics of its campaigns on its current day, and on the day
+    before while no whole load covers it (read_intraday), each read whole before dlt sees any of
+    it, into campaign_stats and the journal, in one run. Return the rows of each table that dlt
+    reports, or None when no account has had a whole load yet, which loads nothing and asks the
+    API nothing. The watermarks stay as they were.
+    When an account failed, the load takes the other accounts and raises AccountsFailed at the
+    end. A failed account leaves no row in the journal: a row of the status failed would make the
+    newest pinned load of the account a failed one, which holds the account in quarantine
+    (load_failed), its daily window with it, for a day in progress that the next cycle reads
+    again; when every account failed, nothing is written."""
+    warn_of_the_sunset(now)
+    named = accounts(extensions)
+    os.environ.update(DLT_SETTINGS)
+    with open_pipeline() as pipeline, tempfile.TemporaryDirectory(prefix="google-ads-") as staging:
+        journal = recorded(pipeline) if has_loads(pipeline) else {}
+        core = accepted(pipeline, named)
+        wholes = {account_id: whole_end(account_id, core, journal) for account_id in named}
+        first = sorted(account_id for account_id, end in wholes.items() if end is None)
+        if first:
+            log.info(
+                "%d Google Ads accounts (%s) have had no whole load yet: the current day of each "
+                "comes after its first daily load",
+                len(first),
+                ", ".join(first),
+            )
+        wanted = {account_id: end for account_id, end in wholes.items() if end is not None}
+        if not wanted:
+            log.info("No Google Ads account has had a whole load yet: no current day to load")
+            return None
+        api = Api(sign_in(), login_customer_id())
+        read: dict[str, Read] = {}
+        failed: dict[str, GoogleAdsError] = {}
+        for account_id, whole in wanted.items():
+            try:
+                read[account_id] = read_intraday(api, account_id, now, whole, Path(staging))
+            except GoogleAdsError as error:
+                log.error("%s; the load goes on with the other accounts", error)
+                failed[account_id] = error
+        counts: dict[str, int] = {}
+        if read:
+            stats = staged_rows(read, "campaign_stats")
+            resources = [
+                dlt.resource(
+                    or_marker(stats), name="campaign_stats", **own(HINTS["campaign_stats"])
+                ),
+                # In the same run as the statistics, so under the same _dlt_load_id.
+                dlt.resource(journal_rows(read, {}, now, INTRADAY), name=LOADS, **own(LOAD_HINTS)),
+            ]
+            run(pipeline, resources)
+            counts = row_counts(pipeline)
+    for table, rows in sorted(counts.items()):
+        log.info(
+            "Loaded %d rows of the current day into %s.%s, as of %s",
+            rows,
+            DATASET,
+            table,
+            now.isoformat(),
+        )
     log.info("%d requests to the Google Ads API for %d accounts", api.requests, len(wanted))
     if failed:
         raise AccountsFailed(failure_line(failed, len(read)))

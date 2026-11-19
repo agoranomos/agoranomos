@@ -415,7 +415,7 @@ def test_a_window_starts_after_the_last_whole_load(bank):
         'FROM "raw_bank_of_italy"."_agoranomos_loads" AS j '
         'JOIN "raw_bank_of_italy"."_dlt_loads" AS l '
         "ON l.load_id = j._dlt_load_id AND l.status = 0 "
-        "WHERE j.status = 'loaded' GROUP BY j.account_id"
+        "WHERE j.status = 'loaded' AND j.kind IS DISTINCT FROM 'intraday' GROUP BY j.account_id"
     )
 
 

@@ -2,8 +2,10 @@ models:
   - name: ops_loads
     description: >-
       The last load of each account of each platform, one row each, from the journal that each load
-      writes (_agoranomos_loads): the last day that a load took, when it was loaded, and how many
-      hours ago, as of the moment that the view is read. The accounts of demo_web are its
+      writes (_agoranomos_loads): the last day that a whole load, of the kind window or history,
+      took, when it was loaded, and how many hours ago, as of the moment that the view is read, and
+      beside them the last load of the kind intraday, of the current day of the account, which the
+      short cycle of Google Ads takes every few hours (ADR-0051). The accounts of demo_web are its
       properties, and demo_fx, ecb and bank_of_italy have one account each, EUR, the base of
       their rates; ecb, bank_of_italy, google_ads and meta_ads have none until their first load.
       The Ops collection of Metabase shows it (ADR-0029).
@@ -14,16 +16,30 @@ models:
         description: '{{ doc("account_id") }}'
       - name: last_day_loaded
         description: >-
-          The last day that a load took for the account, in the time zone of the account:
-          yesterday of the account at the moment of the load.
+          The last day that a whole load took for the account, in the time zone of the account:
+          yesterday of the account at the moment of the load. A load of the kind intraday does not
+          count.
       - name: last_loaded_at
-        description: The moment of the last load of the account, with its time zone.
+        description: >-
+          The moment of the last whole load of the account, with its time zone. A load of the kind
+          intraday does not count.
       - name: hours_since_load
         description: >-
-          The hours from the last load of the account to the moment that the view is read, to one
-          decimal place.
+          The hours from the last whole load of the account to the moment that the view is read, to
+          one decimal place.
       - name: loads
-        description: How many loads of the account the journal holds, the first load among them.
+        description: >-
+          How many whole loads of the account the journal holds, the first load among them, and no
+          load of the kind intraday.
+      - name: last_intraday_at
+        description: >-
+          The moment of the last load of the kind intraday of the account, which took its current
+          day, and the day before while no whole load covered it, with its time zone; none for an
+          account that the short cycle has not taken, as on every platform but Google Ads.
+      - name: hours_since_intraday
+        description: >-
+          The hours from the last load of the kind intraday of the account to the moment that the
+          view is read, to one decimal place; none without such a load.
   - name: ops_rates
     description: >-
       The rates of the core into the reporting currency, one row for each source of the rates

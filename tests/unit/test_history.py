@@ -344,12 +344,14 @@ def test_the_plan_of_a_source_reads_its_own_journal_and_its_rows_of_core_loads(
         "AND p.account_id = j.account_id)",
         'SELECT count(*) FROM "DATASET"."_dlt_loads" WHERE status = 0',
         "SELECT account_id, window_from, window_to FROM core.loads "
-        "WHERE source = 'SOURCE' AND outcome = 'loaded' AND account_id IN ('ONE', 'TWO')",
+        "WHERE source = 'SOURCE' AND outcome = 'loaded' AND kind <> 'intraday' "
+        "AND account_id IN ('ONE', 'TWO')",
         "SELECT j.account_id, j.window_from, j.window_to "
         'FROM "DATASET"."_agoranomos_loads" AS j '
         'JOIN "DATASET"."_dlt_loads" AS l '
         "ON l.load_id = j._dlt_load_id AND l.status = 0 "
-        "WHERE j.status = 'loaded' AND j.account_id IN ('ONE', 'TWO')",
+        "WHERE j.status = 'loaded' AND j.kind IS DISTINCT FROM 'intraday' "
+        "AND j.account_id IN ('ONE', 'TWO')",
         "SELECT account_id, kind, outcome, max(finished_at) FROM core.loads "
         "WHERE source = 'SOURCE' AND account_id IN ('ONE', 'TWO') "
         "GROUP BY account_id, kind, outcome",

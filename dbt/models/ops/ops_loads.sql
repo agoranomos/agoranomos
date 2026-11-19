@@ -2,7 +2,10 @@
 -- same run as its rows (_agoranomos_loads). It reads the sources only, so that it shows the loads
 -- also when a model of staging fails. A journal that no load has written, as those of the ECB, of
 -- the Bank of Italy, of Google Ads, of Meta and of the NBK, whose DAGs start paused, or of the demo
--- in a deployment without it, is empty.
+-- in a deployment without it, is empty. The last day loaded, the last load and the count are of
+-- the whole loads, of the kinds window and history, and a row without a kind is of the kind window;
+-- the last load of the kind intraday, of the current day of the account, comes beside them, as it
+-- takes days still in progress and would hide a daily load that stopped (ADR-0051).
 with loads as (
     {%- for source_name, platform in [
         ('raw_bank_of_italy', 'bank_of_italy'),
@@ -19,7 +22,12 @@ with loads as (
     {%- if not loop.first %}
     union all
     {%- endif %}
-    select '{{ platform }}' as platform, account_id, window_to, loaded_at
+    select
+        '{{ platform }}' as platform,
+        account_id,
+        window_to,
+        loaded_at,
+        kind is not distinct from 'intraday' as is_intraday
     from {{ newest_load_table(source_name, '_agoranomos_loads') }}
     {%- endfor %}
 )
@@ -27,10 +35,17 @@ with loads as (
 select
     platform,
     account_id,
-    max(window_to) as last_day_loaded,
-    max(loaded_at) as last_loaded_at,
+    max(window_to) filter (where not is_intraday) as last_day_loaded,
+    max(loaded_at) filter (where not is_intraday) as last_loaded_at,
     -- When the view is read, not when it was built.
-    round((extract(epoch from now() - max(loaded_at)) / 3600)::numeric, 1) as hours_since_load,
-    count(*) as loads
+    round(
+        (extract(epoch from now() - max(loaded_at) filter (where not is_intraday)) / 3600)::numeric,
+        1
+    ) as hours_since_load,
+    count(*) filter (where not is_intraday) as loads,
+    max(loaded_at) filter (where is_intraday) as last_intraday_at,
+    round(
+        (extract(epoch from now() - max(loaded_at) filter (where is_intraday)) / 3600)::numeric, 1
+    ) as hours_since_intraday
 from loads
 group by platform, account_id

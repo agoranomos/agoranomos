@@ -45,6 +45,10 @@ x-airflow: &airflow
     # rates of the core, and the loads of the rates for their history
     # (agoranomos_pipelines/rates.py); marts-init gets it too.
     AGORANOMOS_RATES_SOURCE: ${AGORANOMOS_RATES_SOURCE:-auto}
+    # The hours between two loads of the current day (ADR-0051), which the DAG processor reads when
+    # it parses the DAG of the short cycle, and its tasks when they run: a divisor of 24, or 0 for
+    # none (agoranomos_pipelines/intraday.py).
+    AGORANOMOS_INTRADAY_HOURS: ${AGORANOMOS_INTRADAY_HOURS:-3}
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?run ./agoranomos init}
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
@@ -341,6 +345,17 @@ services:
         main()
         # The pool of the loads of the demo, one at a time: those of the history and of the daily load.
         sys.argv = ["airflow", "pools", "set", "demo_load", "1", "The loads of the demo, one at a time"]
+        main()
+        # The pool of the loads of Google Ads, one at a time: the daily load, its runs of the history
+        # and the short cycle of the current day (ADR-0051).
+        sys.argv = [
+            "airflow",
+            "pools",
+            "set",
+            "google_ads_load",
+            "1",
+            "The loads of Google Ads, one at a time (ADR-0051)",
+        ]
         main()
         # The user ai, as which the MCP server of Airflow signs in (ADR-0030): while its switch is on,
         # it has the role Viewer alone and the password of .env, set again on every start, so that a

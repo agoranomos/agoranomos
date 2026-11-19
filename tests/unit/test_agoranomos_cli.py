@@ -4690,6 +4690,29 @@ def test_preflight_stops_on_a_time_of_the_scan_that_metabase_cannot_keep(cli, va
 
 @pytest.mark.parametrize(
     ("value", "outcome"),
+    [
+        *((value, "pass") for value in ("", "0", "1", "2", "3", "4", "6", "8", "12", "24")),
+        *((value, "stop") for value in ("5", "7", "48", "-3", "03", "three", "3h")),
+    ],
+)
+def test_preflight_stops_on_a_period_of_the_current_day_that_does_not_divide_24_hours(
+    cli, value, outcome
+):
+    # ADR-0051: the loads of the short cycle fall at the same hours every day, or 0 turns them
+    # off. Empty is the default, 3. The DAG refuses the same values.
+    cli.run("init")
+    set_env(cli, AGORANOMOS_INTRADAY_HOURS=value)
+    result = cli.run("preflight")
+    check_limit(result, outcome, "AGORANOMOS_INTRADAY_HOURS")
+    if outcome == "stop":
+        assert (
+            "AGORANOMOS_INTRADAY_HOURS in .env must be 1, 2, 3, 4, 6, 8, 12 or 24, the hours "
+            "between two loads of the current day, or 0 for none"
+        ) in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("value", "outcome"),
     [("", "pass"), ("1234567890", "pass"), ("123-456-7890", "stop"), ("123456789", "stop")],
 )
 def test_preflight_stops_on_a_manager_account_of_google_ads_that_is_not_ten_digits(

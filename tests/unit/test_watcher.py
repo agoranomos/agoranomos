@@ -7,6 +7,7 @@ stand-ins for Airflow, as in test_alerts_plugin.py; the sending itself is a stan
 import ast
 import importlib.util
 import re
+import sqlite3
 import sys
 import types
 from datetime import UTC, date, datetime, timedelta
@@ -93,6 +94,36 @@ def test_an_account_is_late_when_the_core_lacks_the_day_that_its_lag_expects(
             "late",
         )
         assert problem.detail.startswith(f"last day {last_day.isoformat()}, expected ")
+
+
+def test_the_late_check_counts_the_whole_loads_and_not_those_of_the_current_day():
+    # ADR-0051: the core accepted the whole days of an account in Berlin up to 30 June, and the
+    # daily load stopped; a load of the kind intraday of 7 November does not make the account
+    # fresh. The query runs as it is on the tables of the core in SQLite.
+    db = sqlite3.connect(":memory:")
+    db.execute("ATTACH DATABASE ':memory:' AS core")
+    db.execute(
+        "CREATE TABLE core.loads (source, account_id, window_from, window_to, outcome, kind)"
+    )
+    db.execute("CREATE TABLE core.dim_account (platform, account_id, time_zone, is_active)")
+    db.executemany(
+        "INSERT INTO core.loads VALUES ('google_ads', '1234567890', ?, ?, 'loaded', ?)",
+        [
+            ("2026-04-02", "2026-06-30", "window"),
+            ("2026-11-06", "2026-11-07", "intraday"),
+        ],
+    )
+    db.execute(
+        "INSERT INTO core.dim_account VALUES ('google_ads', '1234567890', 'Europe/Berlin', 1)"
+    )
+    rows = [
+        (source, account_id, date.fromisoformat(last), zone)
+        for source, account_id, last, zone in db.execute(watcher.LATE_SQL).fetchall()
+    ]
+    assert rows == [("google_ads", "1234567890", date(2026, 6, 30), "Europe/Berlin")]
+    [problem] = watcher.late_problems(rows, NOW)
+    assert problem.detail == "last day 2026-06-30, expected 2026-11-05"
+    assert "l.kind <> 'intraday'" in watcher.LATE_SQL
 
 
 def test_every_source_of_the_base_package_has_a_lag():
