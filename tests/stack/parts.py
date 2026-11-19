@@ -87,8 +87,8 @@ GROUPS: tuple[tuple[str, ...], ...] = (
         "test_quarantine.py",  # 14, and 14 to 15
         "test_meta_ads.py",  # 8, and 6 to 9
         "test_restatements.py",  # 8, and 6 to 7
-        # Two runs of the transform and a load: about 20 minutes, an estimate from the runs of
-        # test_partial_day.py, until a run of the Stack workflow measures it.
+        # Two runs of the transform and a load: 14 minutes in server mode on arm64, the only
+        # combination that has run it (44590000799, 19 November 2026).
         "test_demo_intraday.py",
         "test_airflow.py",
         "test_metrics.py",
