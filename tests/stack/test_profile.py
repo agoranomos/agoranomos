@@ -1,8 +1,9 @@
 """Stack tests of a profile of ADR-0040 on synthetic data (synthetic.py), which measure through the
 API of Metabase what the records leave to a measurement: each card of the dashboard Advertising
 against the threshold of 2 seconds of ADR-0037, the first values of its linked filters on the view
-of the campaigns, the scan of the values of fields, twenty clients at once, and a run of the
-transform beside a core of that size.
+of the campaigns, the scan of the values of fields, twenty clients at once, a run of the transform
+beside a core of that size, and a run of the short cycle of the current day, with the cards of the
+overview while it runs (ADR-0051).
 
 They run only when AGORANOMOS_PROFILE names a profile of synthetic.py, agency or limit, on a stack
 without the demo that may take the rows: the workflow Profile runs them on a schedule and by hand
@@ -25,6 +26,7 @@ import threading
 import time
 import urllib.parse
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -32,9 +34,10 @@ import advertising as ad
 import metabase_init
 import pytest
 import synthetic
-from airflow_api import trigger, unpause, wait_for_run
+from airflow_api import api, trigger, unpause, wait_for_run
 from metabase_content import item, warehouse_database_id
-from stack_helpers import http_json, wait_for
+from raw_loads import run_in_tasks
+from stack_helpers import http_json, ops_growth, ops_sizes, wait_for
 
 PROFILE = os.environ.get("AGORANOMOS_PROFILE", "")
 pytestmark = pytest.mark.skipif(
@@ -52,6 +55,29 @@ OPENS = 3
 # The longest that a query of Metabase may run: MB_DB_QUERY_TIMEOUT_MINUTES of 5 (ADR-0037).
 QUERY_TIMEOUT = 300
 TRANSFORM = "agoranomos_demo_transform"
+# The short cycle of the current day takes the accounts that a whole load has taken, and the stack
+# of a profile has no demo: the test of the short cycle loads yesterday of the two accounts of
+# demo_search first, as a daily load of the demo writes it, with the lists of the accounts, and
+# then their current day as the DAG agoranomos_demo_intraday loads it, outside Airflow, so that no
+# asset event starts a run of the transform (agoranomos_pipelines/demo/sources.py).
+DEMO_SEARCH = "demo_search"
+YESTERDAY = """
+import sys
+from datetime import datetime
+
+from agoranomos_pipelines.demo import common, sources
+
+now = datetime.fromisoformat(sys.argv[1])
+sources.load(sys.argv[2], now, first=lambda account: common.last_final_day(now, account.time_zone))
+"""
+CURRENT_DAY = """
+import sys
+from datetime import datetime
+
+from agoranomos_pipelines.demo import sources
+
+assert sources.load_intraday(datetime.fromisoformat(sys.argv[1]))
+"""
 
 
 def report(title: str, lines: list[str]) -> str:
@@ -384,6 +410,100 @@ def test_a_run_of_the_transform_beside_the_core_of_the_profile(env, airflow_url,
             "| State | Duration | Load before → after |",
             "|---|---:|---|",
             f"| {run['state']} | {time.monotonic() - started:.0f} s | {before} → {load()} |",
+        ],
+    )
+    assert run["state"] == "success", run["state"]
+
+
+def quantile(values: list[float], share: float) -> float:
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, int(share * len(ordered)))] if ordered else 0.0
+
+
+def run_now(airflow_url, token, run) -> dict[str, Any]:
+    status, body = api(
+        airflow_url, token, "GET", f"/api/v2/dags/{TRANSFORM}/dagRuns/{run['dag_run_id']}"
+    )
+    assert status == 200, body
+    return body
+
+
+def seconds(run) -> float:
+    started, ended = (
+        datetime.fromisoformat(run[key].replace("Z", "+00:00"))
+        for key in ("start_date", "end_date")
+    )
+    return (ended - started).total_seconds()
+
+
+@pytest.mark.transform
+@pytest.mark.usefixtures("no_cache")
+def test_a_run_of_the_short_cycle_beside_the_core_of_the_profile(
+    env, airflow_url, token, metabase_url, session, board, profile
+):
+    # Row 13 of the register: a run of the transform that reads a load of the kind intraday alone,
+    # as each cycle makes one, on a warehouse whose core holds the profile, and how the cards of
+    # the overview answer, one client after another with the cache off, before it and while it
+    # runs (ADR-0051), as B7 measured the readers beside a window of 90 days at the limit. The
+    # stack has no demo, so the two accounts of demo_search get yesterday and a run of the
+    # transform first, and then their current day; they stay in the core, as on a stack with the
+    # demo. scripts/memory_report.py around this test gives the memory of the tasks and of the
+    # warehouse. A run gives every account the client of the settings, which the synthetic
+    # accounts lack, so the test gives theirs back after each run. The rates of the profile end
+    # yesterday, and the model carries none of them over the current day, so they get the days
+    # through tomorrow in UTC, which holds the current day of every time zone.
+    chosen, found = profile
+    overview = [d for d in cards(board) if tab_name(board, d) == ad.OVERVIEW]
+    synthetic.extend_rates(env, datetime.now(UTC).date() + timedelta(days=1))
+    unpause(airflow_url, token, TRANSFORM)
+    try:
+        run_in_tasks(env, YESTERDAY, datetime.now(UTC).isoformat(), DEMO_SEARCH)
+        whole = trigger(airflow_url, token, TRANSFORM)
+        whole = wait_for_run(airflow_url, token, TRANSFORM, whole["dag_run_id"], timeout=3600)
+    finally:
+        synthetic.restore_accounts(env)
+    assert whole["state"] == "success", whole["state"]
+    run_in_tasks(env, CURRENT_DAY, datetime.now(UTC).isoformat())
+    # The cards of the overview, one after another, before the run and while it runs.
+    quiet: list[float] = []
+    started = time.monotonic()
+    for _ in range(REPEATS):
+        quiet += [run_card(metabase_url, session, board, dashcard) for dashcard in overview]
+    quiet_wall = time.monotonic() - started
+    sizes = ops_sizes(env)
+    before = load()
+    busy: list[float] = []
+    try:
+        run = trigger(airflow_url, token, TRANSFORM)
+        started = time.monotonic()
+        while run["state"] not in ("success", "failed"):
+            for dashcard in overview:
+                busy.append(run_card(metabase_url, session, board, dashcard))
+                run = run_now(airflow_url, token, run)
+                if run["state"] in ("success", "failed"):
+                    break
+        busy_wall = time.monotonic() - started
+    finally:
+        synthetic.restore_accounts(env)
+    elementary, schema = ops_growth(sizes, ops_sizes(env))
+    lost = 1 - (len(busy) / busy_wall) / (len(quiet) / quiet_wall)
+    report(
+        f"A run of the short cycle, {shape(chosen, found)}",
+        [
+            "| State | Duration | Bytes of the tables of elementary | Bytes of ops | "
+            "Load before → after |",
+            "|---|---:|---:|---:|---|",
+            f"| {run['state']} | {seconds(run):.0f} s | {elementary:,} | {schema:,} | "
+            f"{before} → {load()} |",
+            "",
+            "| Cards of the overview | Queries | Median | 95th percentile | Queries a second |",
+            "|---|---:|---:|---:|---:|",
+            f"| Before the run | {len(quiet)} | {statistics.median(quiet):.2f} s | "
+            f"{quantile(quiet, 0.95):.2f} s | {len(quiet) / quiet_wall:.2f} |",
+            f"| While it runs | {len(busy)} | {statistics.median(busy):.2f} s | "
+            f"{quantile(busy, 0.95):.2f} s | {len(busy) / busy_wall:.2f} |",
+            "",
+            f"The cards answered {lost:.0%} fewer queries a second while the run went.",
         ],
     )
     assert run["state"] == "success", run["state"]

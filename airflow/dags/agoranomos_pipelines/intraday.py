@@ -15,7 +15,7 @@ next one comes (waited_too_long).
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 SETTING = "AGORANOMOS_INTRADAY_HOURS"
 DEFAULT_HOURS = 3
@@ -64,3 +64,12 @@ def waited_too_long(run_after: datetime, now: datetime, hours: int) -> bool:
     hours hours, after which the next run comes: such a run ends without a load. A run by hand of
     a DAG without a schedule, at 0, never waits too long."""
     return hours > 0 and now - run_after > timedelta(hours=hours)
+
+
+def days(current: date, whole: date) -> tuple[date, date]:
+    """The first and the last day of a load of the kind intraday of an account whose current day,
+    in its time zone, is current: that day, and the day before while no whole load covers it, whole
+    being the last day that one covers, so that between midnight in the account and the daily load
+    the day before goes on growing (ADR-0051). Both come in one read."""
+    before = current - timedelta(days=1)
+    return (current if whole >= before else before), current

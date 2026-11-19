@@ -5,9 +5,10 @@ name: Profile
 # fills at the density of the profile, then the stack tests of tests/stack/test_profile.py, which
 # time each card of the dashboard Advertising against the threshold of 2 seconds of ADR-0037, the
 # first values of its linked filters, the scan of the values of fields and 20 clients of Metabase
-# at once, and a run of the transform. scripts/memory_report.py samples the containers during each
-# step and appends its table to the summary of the job, as do the tests with their times, so that
-# the summary holds the measurement of the profile.
+# at once, a run of the transform, and a run of the short cycle of the current day with the cards
+# of the overview while it goes (ADR-0051). scripts/memory_report.py samples the containers during
+# each step and appends its table to the summary of the job, as do the tests with their times, so
+# that the summary holds the measurement of the profile.
 # The profile agency is the working profile, 15,000 rows of ads a day over 400 days; limit is the
 # limit of one server, 80,000 a day over 100 days, which fits the 14 GB of SSD of a runner, with the
 # limits of the agency, as a runner has 16 GB of memory and the limit asks for a server of 32 GB
@@ -110,12 +111,20 @@ jobs:
       - name: Measure Metabase on the profile
         env:
           TITLE: Profile ${{ env.AGORANOMOS_PROFILE }}, the cards, the filters, the scan and 20 clients
-        run: AGORANOMOS_PROFILE_REPORT="$GITHUB_STEP_SUMMARY" uv run python scripts/memory_report.py --title "$TITLE" --output "$GITHUB_STEP_SUMMARY" -- uv run pytest tests/stack/test_profile.py -v -m "not transform"
+        run: AGORANOMOS_PROFILE_REPORT="$GITHUB_STEP_SUMMARY" uv run python scripts/memory_report.py --title "$TITLE" --output "$GITHUB_STEP_SUMMARY" -- uv run pytest tests/stack/test_profile.py -v -rP -m "not transform"
       - name: Measure a run of the transform beside the profile
         if: ${{ !cancelled() }}
         env:
           TITLE: Profile ${{ env.AGORANOMOS_PROFILE }}, a run of the transform
-        run: AGORANOMOS_PROFILE_REPORT="$GITHUB_STEP_SUMMARY" uv run python scripts/memory_report.py --title "$TITLE" --output "$GITHUB_STEP_SUMMARY" -- uv run pytest tests/stack/test_profile.py -v -m transform
+        run: AGORANOMOS_PROFILE_REPORT="$GITHUB_STEP_SUMMARY" uv run python scripts/memory_report.py --title "$TITLE" --output "$GITHUB_STEP_SUMMARY" -- uv run pytest tests/stack/test_profile.py -v -rP -m transform -k "not short_cycle"
+      # After the run above, which reads no load: a whole day of the two accounts of demo_search
+      # and a run that accepts it, then a load of their current day and the run of the transform
+      # that reads it alone, as each cycle of the short cycle makes one.
+      - name: Measure a run of the short cycle beside the profile
+        if: ${{ !cancelled() }}
+        env:
+          TITLE: Profile ${{ env.AGORANOMOS_PROFILE }}, a run of the short cycle
+        run: AGORANOMOS_PROFILE_REPORT="$GITHUB_STEP_SUMMARY" uv run python scripts/memory_report.py --title "$TITLE" --output "$GITHUB_STEP_SUMMARY" -- uv run pytest tests/stack/test_profile.py -v -rP -m transform -k short_cycle
       - name: Collect the logs
         if: ${{ failure() }}
         run: |

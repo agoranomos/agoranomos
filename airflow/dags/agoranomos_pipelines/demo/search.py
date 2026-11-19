@@ -4,15 +4,17 @@ numbers as JSON numbers. Every row has the name of its campaign as of the load, 
 metrics has no row, and the conversions by action come in a report of their own, as
 segments.conversion_action cannot be selected with the metrics of cost (ADR-0025). The ad groups
 (FROM ad_group) and the ads (FROM ad_group_ad) have the same two reports, and a Performance Max
-campaign has neither (ADR-0034)."""
+campaign has neither (ADR-0034). The short cycle of the current day reads the statistics of the
+campaigns alone, without conversions, as that of Google Ads does (intraday_stats, ADR-0051)."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
 
+from agoranomos_pipelines import intraday
 from agoranomos_pipelines.demo import world
-from agoranomos_pipelines.demo.common import DELIVERY, matured
+from agoranomos_pipelines.demo.common import DELIVERY, age, days, local_today, matured, passed
 
 PLATFORM = "demo_search"
 API = "Google Ads API v25"
@@ -304,3 +306,57 @@ def records(now, first=None, skip=frozenset()) -> dict[str, Iterator[dict[str, o
 
 def windows(now: datetime, first=None) -> dict[str, tuple[date, date]]:
     return world.windows(PLATFORM, now, first)
+
+
+def intraday_windows(now: datetime, whole: dict[str, date]) -> dict[str, tuple[date, date]]:
+    """The days of a load of the kind intraday at now of each account that a whole load has taken,
+    whole giving the last day that one covers for each: the current day of the account in its time
+    zone, and the day before while no whole load covers it (intraday.days). An account that no
+    whole load has taken is left out, and waits for the daily load."""
+    return {
+        account.account_id: intraday.days(
+            local_today(now, account.time_zone), whole[account.account_id]
+        )
+        for account in accounts()
+        if account.account_id in whole
+    }
+
+
+def intraday_stats(now: datetime, windows: dict[str, tuple[date, date]]) -> Iterator[dict]:
+    """The statistics of the campaigns of a load of the kind intraday at now, over the days of
+    each account in windows, as the short cycle of Google Ads reads them (ADR-0051): the
+    impressions, clicks and cost of each campaign so far, which are its numbers of the day as a
+    load sees them at the age of the day, 0 for the current day and 1 for the day before, times the
+    share of the day that has passed at now in the time zone of the account (common.passed), so
+    all of the day before. They have no conversions, which a day in progress does not have yet. The
+    same moment gives the same rows, a later moment of the same day no lower numbers, and the day
+    before what the daily load takes of it the next morning, but its conversions. A row without
+    metrics is left out, as on Google Ads."""
+    name_day = as_of(now)
+    for account in accounts():
+        if account.account_id not in windows:
+            continue
+        first, last = windows[account.account_id]
+        for campaign in world.campaigns_of(account.account_id, first, last):
+            for day in days(first, last):
+                final = world.final(campaign, day)
+                if final is None:
+                    continue
+                elapsed, length = passed(now, account.time_zone, day)
+                days_old = age(now, account.time_zone, day)
+                numbers = {
+                    field: matured(value, days_old, DELIVERY) * elapsed // length
+                    for field, value in (
+                        ("impressions", final.impressions),
+                        ("clicks", final.clicks),
+                        ("costMicros", final.spend_micros),
+                    )
+                }
+                if not any(numbers.values()):
+                    continue  # a day without metrics has no row
+                yield {
+                    "customer": {"id": account.account_id},
+                    "campaign": campaign_part(campaign, name_day),
+                    "metrics": {field: str(value) for field, value in numbers.items()},
+                    "segments": {"date": day.isoformat()},
+                }

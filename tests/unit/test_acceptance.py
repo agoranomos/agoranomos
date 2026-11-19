@@ -93,6 +93,7 @@ def test_a_load_that_did_not_end_waits_longer_than_any_run_of_a_dag_lives():
     for name in (
         "agoranomos_demo_history",
         "agoranomos_demo_daily",
+        "agoranomos_demo_intraday",
         "agoranomos_ecb_daily",
         "agoranomos_bank_of_italy_daily",
         "agoranomos_google_ads_daily",
@@ -101,8 +102,9 @@ def test_a_load_that_did_not_end_waits_longer_than_any_run_of_a_dag_lives():
         "agoranomos_nbk_daily",
     ):
         assert name in timeouts, name
-    # The short cycle of the current day ends within an hour (ADR-0051).
+    # The short cycles of the current day end within an hour (ADR-0051).
     assert timeouts["agoranomos_google_ads_intraday"] <= timedelta(hours=1)
+    assert timeouts["agoranomos_demo_intraday"] <= timedelta(hours=1)
     # The history of the Bank of Italy is about 800 requests at one a second.
     assert timeouts["agoranomos_bank_of_italy_daily"] == timedelta(hours=2)
     assert max(timeouts.values()) < acceptance.UNFINISHED_AFTER

@@ -16,8 +16,10 @@ from stack_helpers import (
     wait_for,
 )
 
-# The daily load of the demo, which the first start unpauses.
+# The daily load of the demo and its short cycle of the current day, which the first start
+# unpauses (ADR-0051).
 DAILY = "agoranomos_demo_daily"
+INTRADAY = "agoranomos_demo_intraday"
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -82,29 +84,33 @@ def token(env, airflow_url):
 
 @pytest.fixture(scope="session")
 def daily_load_paused(airflow_url, token):
-    """The daily load of the demo, paused from the first module that asks for it, in its
-    pytestmark, to the end of the tests, and then as it was. Its schedule could start a run, and
-    the transform after it, in the middle of a test that counts runs or compares the warehouse
-    with the demo generator: the tests of the daily load run it themselves. A run that is queued
-    or running ends first, as a paused DAG starts none. Not autouse: test_helpers.py runs this
-    file with tests of its own, which have a token of their own and no stack. With --part,
-    a_part_pauses_the_daily_load asks for it before the first test."""
+    """The daily load of the demo and its short cycle of the current day, paused from the first
+    module that asks for them, in its pytestmark, to the end of the tests, and then as they were.
+    Their schedules could start a run, and the transform after it, in the middle of a test that
+    counts runs or compares the warehouse with the demo generator: the tests of the daily load
+    and of the short cycle run them themselves. A run that is queued or running ends first, as a
+    paused DAG starts none. Not autouse: test_helpers.py runs this file with tests of its own,
+    which have a token of their own and no stack. With --part, a_part_pauses_the_daily_load asks
+    for it before the first test."""
     if not DEMO:
         yield
         return
-    wait_for_dag(airflow_url, token, DAILY)
-    was_paused = is_paused(airflow_url, token, DAILY)
-    if not was_paused:
-        wait_for(
-            lambda: not is_busy(airflow_url, token, DAILY),
-            900,
-            interval=5,
-            message=f"the runs of {DAILY} did not end",
-        )
-        pause(airflow_url, token, DAILY)
+    paused = {}
+    for dag_id in (DAILY, INTRADAY):
+        wait_for_dag(airflow_url, token, dag_id)
+        paused[dag_id] = is_paused(airflow_url, token, dag_id)
+        if not paused[dag_id]:
+            wait_for(
+                lambda dag_id=dag_id: not is_busy(airflow_url, token, dag_id),
+                900,
+                interval=5,
+                message=f"the runs of {dag_id} did not end",
+            )
+            pause(airflow_url, token, dag_id)
     yield
-    if not was_paused:
-        unpause(airflow_url, token, DAILY)
+    for dag_id, was_paused in paused.items():
+        if not was_paused:
+            unpause(airflow_url, token, dag_id)
 
 
 @pytest.fixture(scope="session", autouse=True)

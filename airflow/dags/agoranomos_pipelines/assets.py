@@ -24,6 +24,12 @@ RAW_DEMO_PLATFORMS = {code: Asset(asset_uri(platform)) for code, platform in PLA
 # the five become conditions of their own (ADR-0039).
 DEMO_LOADED = AssetAll(*RAW_DEMO_PLATFORMS.values())
 
+# The asset of the current day of the demo (ADR-0051), which each load of its short cycle updates:
+# a load of the kind intraday into the main table of demo_search, under an asset of its own, which
+# starts a run of the transform alone, as no load of the other platforms comes with it. An address
+# of PostgreSQL names one asset, that of demo_search, so this one has a name and no address.
+RAW_DEMO_INTRADAY = Asset("agoranomos_demo_intraday")
+
 # The asset of the rates of the ECB (ADR-0032), in the same form, which each of its loads updates.
 RAW_ECB = Asset("postgres://warehouse-db:5432/warehouse/raw_ecb/rates_daily")
 
@@ -57,9 +63,9 @@ TRANSFORMED = Asset("agoranomos_transformed")
 
 # The condition on which the transform runs (ADR-0039): the demo has loaded, or the rates of the ECB
 # or of the Bank of Italy have, or Google Ads or Meta has, or the rates of the NBK have, or the
-# short cycle of Google Ads has (ADR-0051). A source that joins the model adds its asset here. The
-# transform allows one run at a time: while a run is queued or running, Airflow keeps the events
-# that come, and starts one run for all of them once it ends.
+# short cycle of Google Ads or of the demo has (ADR-0051). A source that joins the model adds its
+# asset here. The transform allows one run at a time: while a run is queued or running, Airflow
+# keeps the events that come, and starts one run for all of them once it ends.
 LOADED = AssetAny(
     DEMO_LOADED,
     RAW_ECB,
@@ -68,4 +74,5 @@ LOADED = AssetAny(
     RAW_META_ADS,
     RAW_NBK,
     RAW_GOOGLE_ADS_INTRADAY,
+    RAW_DEMO_INTRADAY,
 )
