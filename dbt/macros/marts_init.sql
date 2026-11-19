@@ -11,10 +11,12 @@
     run of the DAG takes it, which sets DBT_JOB_RUN_ID: the nodes of marts-init itself, and dbt by
     hand, do not. A node waits longer than the lock timeout of transformer, 1 minute: up to 10
     minutes, the execution timeout of a task of the transform, and then fails, and the next run
-    repeats it. -#}
+    repeats it. The one-shot job db-init, which runs before marts-init, takes the lock the same
+    way while it runs postgres/warehouse.sql, whose grants on all the tables of a schema fail when
+    a node renames, replaces or drops one of them at the same moment. -#}
 
-{#- The key of the lock, a number of PostgreSQL's bigint, which metabase/marts_init.py holds too:
-    the letters agor in ASCII. -#}
+{#- The key of the lock, a number of PostgreSQL's bigint, which metabase/marts_init.py and
+    postgres/warehouse.sql hold too: the letters agor in ASCII. -#}
 {% macro marts_init_lock() -%}
     {{- return(1634168690) -}}
 {%- endmacro %}

@@ -224,6 +224,21 @@ def test_dbt_gets_the_reporting_currency_wherever_it_runs_and_no_other_service_d
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
+def test_dbt_and_the_loads_get_the_sources_of_the_rates_and_no_other_service_does(env, variant):
+    # ADR-0042: dbt reads the order of the sources of the rates with env_var() in the tasks and in
+    # the DAG processor of every Airflow service, the loads of the rates read it for their history
+    # (agoranomos_pipelines/rates.py), and marts-init computes the rates of the core with it.
+    # metadata-export renders no rate. It is no secret, so a failed assertion may print it.
+    wanted = env.get("AGORANOMOS_RATES_SOURCE") or "auto"
+    holders = {
+        name: service["environment"]["AGORANOMOS_RATES_SOURCE"]
+        for name, service in rendered(variant).items()
+        if "AGORANOMOS_RATES_SOURCE" in (service.get("environment") or {})
+    }
+    assert holders == dict.fromkeys(airflow_names(variant) | {"marts-init"}, wanted)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
 def test_only_the_api_server_publishes_a_port_of_airflow(variant):
     for name, service in airflow_services(variant).items():
         published = [port["published"] for port in service.get("ports", [])]
@@ -615,6 +630,7 @@ def test_marts_init_reaches_the_warehouse_alone_and_holds_one_secret(env, varian
     }
     environment = service["environment"]
     assert sorted(environment) == [
+        "AGORANOMOS_RATES_SOURCE",
         "AGORANOMOS_REPORTING_CURRENCY",
         "DBT_ENGINE_SEND_ANONYMOUS_USAGE_STATS",
         "DBT_ENV_SECRET_WAREHOUSE_PASSWORD",

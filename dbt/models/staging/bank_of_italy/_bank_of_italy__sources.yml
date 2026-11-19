@@ -1,0 +1,39 @@
+sources:
+  - name: raw_bank_of_italy
+    description: >-
+      The exchange rates of the Bank of Italy against the euro, which the DAG
+      agoranomos_bank_of_italy_daily loads with dlt from the REST API of the portal of the
+      exchange rates of the bank (ADR-0042). The DAG starts paused, so a deployment with the demo
+      alone has no table here, and the models that read these tables then read none. The core
+      takes these rates first, unless AGORANOMOS_RATES_SOURCE sets another order.
+    schema: raw_bank_of_italy
+    # No freshness check of dbt: the Ops collection shows the last load, from _agoranomos_loads
+    # (models/ops/ops_loads.sql).
+    config:
+      freshness: null
+    tables:
+      - name: _agoranomos_loads
+        description: >-
+          The journal of the loads of the rates of the Bank of Italy: one row for each load,
+          written in the same run as the rates of the load, so under its _dlt_load_id, with the
+          account EUR, the base of the rates, the status loaded, the day of the load in Rome
+          (as_of), the first and last day of the window that the load took (window_from,
+          window_to), and the moment of the load (loaded_at). The staging model reads, for each
+          day, the rates of the newest pinned load whose window covers the day.
+      - name: _dlt_loads
+        description: >-
+          The loads of dlt into raw_bank_of_italy, one row each: a load is whole once it has its
+          row here, with status 0, which dlt writes after the last table of the load. The pin of
+          each run of the transform takes whole loads only.
+      - name: rates_daily
+        description: >-
+          The daily exchange rates of the Bank of Italy against the euro, from dailyRates, one row
+          for each item of an answer, as the bank names its fields, every one text: the country,
+          the name of the currency, its ISO code (iso_code) and its code of the bank (uic_code),
+          the amount of the currency for one euro on the day of reference_date, in avg_rate, or
+          N.A. when the bank has no rate of the currency that day, and the convention of the
+          rate, as text and as a code. A currency that several countries use, such as XOF, has a
+          row for each of them. A weekend or a closing day of TARGET has no row. Each load appends
+          its rows under its own _dlt_load_id, and staging reads, for each day, those of the
+          newest pinned load whose window covers the day. The bank calls these rates indicative
+          and no financial benchmark under Regulation (EU) 2016/1011.

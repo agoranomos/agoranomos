@@ -225,14 +225,14 @@ dbt-common==1.39.0 \
     #   dbt-adapters
     #   dbt-core
     #   dbt-postgres
-dbt-core==1.12.6 \
-    --hash=sha256:a14fb6724a557dea781afa19171869a1b0b286a396d5dc012e74b8bd3596325e \
-    --hash=sha256:e4378ecde4740d6b6a5b706ad25162272e28dc20ee8390c42c1ebd637752574f
+dbt-core==1.12.7 \
+    --hash=sha256:1467f0195b91deac5215942920fddf39b4efa9cb9e7b4be51d899d7362fb4a4d \
+    --hash=sha256:9e83a113858310b09bc3af336f1cf1afe2f49c115d86a46f89473ab0e81b9c01
     # via
     #   -r dbt-requirements.in
     #   dbt-postgres
-dbt-core-experimental-parser==2.0.5 \
-    --hash=sha256:b6ad345dc5bf187d8324d2f643ba6aad274eeb51e5c3b7c17780ea62338b069c
+dbt-core-experimental-parser==2.0.11 \
+    --hash=sha256:3ad5c7a65bae2f5dfab4dfe1f3a6a224a12ede18dbd5274cf56d1b4ad69c5cb8
     # via dbt-core
 dbt-extractor==0.6.0 \
     --hash=sha256:05bcfab7ebd70296ceb31742e8333ba66a2c939de44e61a7088bebafa939aaf6 \

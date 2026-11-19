@@ -123,6 +123,7 @@ from agoranomos_pipelines.loads import (
     run,
 )
 from agoranomos_pipelines.settings.files import load_settings
+from agoranomos_pipelines.windows import restatement_window_days
 
 log = logging.getLogger(__name__)
 
@@ -144,7 +145,6 @@ LOGIN = "GOOGLE_ADS_LOGIN_CUSTOMER_ID"
 # A customer ID of Google Ads: ten digits, without the hyphens that the UI shows. The ID goes into
 # the URL of each request and the SQL of the scope of the entities, so nothing else may.
 ACCOUNT_ID = re.compile(r"\d{10}")
-WINDOW_DAYS = 90
 # A window longer than this goes in a request for each calendar month.
 ONE_REQUEST_DAYS = 92
 # The retries of a request are explicit, as the contract of the sources asks (ADR-0004): five
@@ -392,11 +392,12 @@ def yesterday(now: datetime, time_zone: str) -> date:
 
 def window(last: date, last_end: date | None) -> tuple[date, date]:
     """The days of a load of an account whose last day is last, as ADR-0038 gives them,
-    [min(last + 1 - WINDOW_DAYS, last_end + 1), last], where last_end is the last day that the
-    core accepted for the account (last_day): the last WINDOW_DAYS when none is known yet, as the
-    history comes after them in portions, else the days from the day after it, or from the first
-    of the last WINDOW_DAYS when that is earlier, so that a stop of any length closes by itself."""
-    usual = last - timedelta(days=WINDOW_DAYS - 1)
+    [min(last + 1 - W, last_end + 1), last], where W is the window of restatements of Google Ads in
+    the seed of the platforms (windows.py), read now, and last_end the last day that the core
+    accepted for the account (last_day): the last W days when none is known yet, as the history
+    comes after them in portions, else the days from the day after it, or from the first of the
+    last W days when that is earlier, so that a stop of any length closes by itself."""
+    usual = last - timedelta(days=restatement_window_days(CODE) - 1)
     if last_end is None:
         return usual, last
     return min(last_end + timedelta(days=1), usual), last

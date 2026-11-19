@@ -5,19 +5,21 @@ The workflow Upgrade runs it in two steps. AGORANOMOS_UPGRADE=before runs on the
 previous release, once the checkout holds the current code and before ./agoranomos up: it records
 the relations of the warehouse with their oids, the migrations of the core that it has applied,
 the backups, the rows of the marts, the dashboards of the package and the tables and fields of the
-marts as Metabase knows them. AGORANOMOS_UPGRADE=after, once ./agoranomos up has upgraded the
-stack, checks what the upgrade must do: db-init applied and recorded every migration that waited,
+marts as Metabase knows them, and the rates of the core. AGORANOMOS_UPGRADE=after, once
+./agoranomos up has upgraded the stack, checks what the upgrade must do: db-init applied and
+recorded every migration that waited, the rates that the core held keep their rows and their
+source, with no load of their history again (ADR-0042),
 up took a backup before them whose manifest names them, marts-init built the views of the marts
-and dropped the relations of the release that no model builds or reads, every card of the
-dashboards of the package answers, on the same tables and fields of Metabase, the metadata of the
-marts is applied, the raw tables of the demo are in the shape of the current code, no relation of
-the release stays that the current code neither builds nor reads, and the demo goes on, with a
-daily load and a run of the transform. AGORANOMOS_UPGRADE_FILE
-names the file in which the first step leaves what it found for the second. With
-AGORANOMOS_UPGRADE_SUMMARY, the second step appends to that file, such as the summary of a job of
-CI, the rows of the marts before and after, and the relations of the previous release that the
-upgrade left as they were. Without these variables the tests skip: they need a stack of the
-previous release, which no other run of the stack tests has.
+from the seeds of the current code and dropped the relations of the release that no model builds or
+reads, every card of the dashboards of the package answers, on the same tables and fields of
+Metabase, the metadata of the marts is applied, the raw tables of the demo are in the shape of the
+current code, no relation of the release stays that the current code neither builds nor reads, and
+the demo goes on, with a daily load and a run of the transform. AGORANOMOS_UPGRADE_FILE names the
+file in which the first step leaves what it found for the second. With AGORANOMOS_UPGRADE_SUMMARY,
+the second step appends to that file, such as the summary of a job of CI, the rows of the marts
+before and after, and the relations of the previous release that the upgrade left as they were.
+Without these variables the tests skip: they need a stack of the previous release, which no other
+run of the stack tests has.
 
 The assertions print names, numbers, states and kinds of relations, never a secret.
 """
@@ -48,6 +50,8 @@ from stack_helpers import (
     leaked,
     read_env,
     secrets,
+    seed_platforms,
+    shown_platforms,
     wait_for,
     warehouse_output,
 )
@@ -276,6 +280,41 @@ def built_by_the_code(env) -> set[str]:
     return names
 
 
+# The rates of the core in the columns of migration 0007, as a digest of the rows up to a day, with
+# their number and their last day, and the loads of the history of the sources of the rates that
+# core.loads holds (ADR-0042).
+RATE_COLUMNS = (
+    "rate_date, currency, reporting_currency, rate_into_reporting_currency, base_currency, "
+    "base_rate, rate_source, published_on, is_carried_forward"
+)
+RATES_UP_TO = (
+    "SELECT coalesce(md5(string_agg(r::text, '|' ORDER BY r.rate_date, r.currency, "
+    "r.reporting_currency)), ''), count(*) FROM (SELECT {columns} FROM core.fx_rates_daily "
+    "WHERE rate_date <= '{last}') AS r"
+)
+RATES_LAST = "SELECT coalesce(max(rate_date)::text, '') FROM core.fx_rates_daily"
+RATE_SOURCES = "('demo_fx', 'ecb', 'bank_of_italy', 'nbk')"
+RATE_HISTORIES = (
+    "SELECT count(*) FROM core.loads "  # noqa: S608 (constants of this file)
+    f"WHERE source IN {RATE_SOURCES} AND kind = 'history'"
+)
+
+
+def core_rates(env) -> dict[str, Any]:
+    """The rates of the core as RATES_UP_TO gives them up to their last day, and the loads of the
+    history of the rates."""
+    last = warehouse_output(env, RATES_LAST)
+    digest, count = warehouse_output(
+        env, RATES_UP_TO.format(columns=RATE_COLUMNS, last=last or "1900-01-01")
+    ).split("|")
+    return {
+        "last": last,
+        "digest": digest,
+        "rows": int(count),
+        "histories": int(warehouse_output(env, RATE_HISTORIES)),
+    }
+
+
 def recorded() -> dict[str, Any]:
     assert FOUND.exists(), f"{FOUND} is missing: run the step before the upgrade first"
     return json.loads(FOUND.read_text(encoding="utf-8"))
@@ -310,6 +349,7 @@ def test_before_the_upgrade_record_the_stack_of_the_previous_release(env, metaba
                     line for b in boards.values() for line in unanswered(metabase_url, session, b)
                 ],
                 "marts": metabase_marts(metabase_url, session),
+                "rates": core_rates(env),
             },
             indent=2,
             sort_keys=True,
@@ -331,6 +371,43 @@ def test_db_init_applied_and_recorded_every_migration_of_the_checkout(env):
     assert {int(v): name for v, name in saved["migrations"].items()} == {
         v: found[v][0] for v in found if v not in waiting
     }
+
+
+@after_only
+def test_the_rates_that_the_core_held_keep_their_rows_and_their_source(env):
+    # ADR-0042 and the decision of the maintainer of 16 November 2026 (C2c of #222): the update
+    # rewrites no row of core.fx_rates_daily, relabels none, and loads the history of no source of
+    # the rates again. Migration 0010 adds the second leg of a rate, which no row of before has. A
+    # run of the transform after the update may add the rows of later days, and rewrites none of
+    # these, as the demo gives the same rates for the same days.
+    saved = recorded()["rates"]
+    assert saved["rows"] > 0, "the previous release held no rate in the core"
+    digest, count = warehouse_output(
+        env, RATES_UP_TO.format(columns=RATE_COLUMNS, last=saved["last"])
+    ).split("|")
+    assert (digest, int(count)) == (saved["digest"], saved["rows"])
+    crossed = warehouse_output(
+        env,
+        "SELECT count(*) FROM core.fx_rates_daily "  # noqa: S608 (a date of this test)
+        f"WHERE rate_date <= '{saved['last']}' AND (cross_source IS NOT NULL "
+        "OR cross_rate IS NOT NULL OR cross_published_on IS NOT NULL)",
+    )
+    assert crossed == "0", crossed
+    assert int(warehouse_output(env, RATE_HISTORIES)) == saved["histories"]
+    # ops.ops_rates, as the first run of the transform of this release builds it, names no day of
+    # the facts without a rate, so no load takes the history of the rates again.
+    built = warehouse_output(
+        env,
+        "SELECT count(*) FROM pg_attribute WHERE attrelid = to_regclass('ops.ops_rates') "
+        "AND attname = 'days_without_rate_of_source' AND NOT attisdropped",
+    )
+    if built == "1":
+        gaps = warehouse_output(
+            env, "SELECT coalesce(sum(days_without_rate_of_source), 0) FROM ops.ops_rates"
+        )
+        assert gaps == "0", gaps
+    rows, last = saved["rows"], saved["last"]
+    summarize([f"Rates of the core before the update: {rows} rows up to {last}, unchanged"])
 
 
 @after_only
@@ -391,6 +468,18 @@ def test_marts_init_built_the_views_of_the_marts_in_place_of_those_of_the_releas
     )
     old = {key: value for key, value in saved["relations"].items() if key.startswith("marts.")}
     assert [key for key, (_, oid) in old.items() if marts.get(key, ("", 0))[1] == oid] == []
+
+
+@after_only
+def test_marts_init_built_the_views_from_the_seeds_of_the_checkout(env):
+    # The views carry the rows of the seed of the platforms in their text, and a run of the
+    # transform keeps a view that exists: marts-init loaded the seed of the current code before it
+    # built them, so the first start of the release shows every platform that it brings, and no
+    # row of the seed of the previous release.
+    columns, rows = seed_platforms()
+    shown = shown_platforms(env, columns)
+    assert sorted(rows - shown) == []
+    assert sorted(shown - rows) == []
 
 
 @after_only

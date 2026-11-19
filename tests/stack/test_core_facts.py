@@ -29,7 +29,7 @@ from decimal import Decimal
 
 import pytest
 from airflow_api import is_busy, trigger, unpause, wait_for_dag, wait_for_run
-from raw_loads import last_moment, load_platform, transform_keeping_raw
+from raw_loads import columns_of, last_moment, load_platform, transform_keeping_raw
 from stack_helpers import REPO_ROOT, active_variant, compose, wait_for, warehouse_output
 
 pytestmark = [
@@ -136,17 +136,6 @@ def dbt(*args: str):
         "--log-path",
         f"{WORK}/logs",
         check=False,
-    )
-
-
-def columns_of(env, table):
-    """The columns of a table of raw_demo_search but the load and the row id, which dlt gives."""
-    return warehouse_output(
-        env,
-        "SELECT string_agg(column_name, ', ' ORDER BY ordinal_position) "  # noqa: S608 (names of the demo)
-        "FROM information_schema.columns WHERE table_schema = 'raw_demo_search' "
-        f"AND table_name = '{table}' AND column_name NOT IN ('_dlt_load_id', '_dlt_id')",
-        "loader",
     )
 
 

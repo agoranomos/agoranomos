@@ -16,7 +16,7 @@ Marketing data moves through agoranomos in one direction, from ad platforms to d
 
 ```mermaid
 flowchart TB
-    sources["<b>Sources</b><br/>Google Ads, the rates of the ECB,<br/>demo generator of fictional platforms<br/>planned: more ad platforms, GA4, CRM, files"]
+    sources["<b>Sources</b><br/>Google Ads, the rates of the Bank of Italy,<br/>the NBK and the ECB, demo generator of fictional platforms<br/>planned: more ad platforms, GA4, CRM, files"]
     dlt["<b>dlt</b><br/>incremental load"]
     airflow["<b>Apache Airflow</b><br/>schedules loads,<br/>dbt builds and<br/>the daily maintenance"]
 
@@ -164,7 +164,7 @@ Decision records: [ADR-0007: Give AI clients least-privilege access through MCP]
 
 The stack runs as one Docker Compose project, split into profiles so that you start only what you need:
 
-* `core`: both PostgreSQL instances, Airflow and Metabase, and the one-shot jobs that set them up on every start: `db-init` (the roles, databases and schemas, and the migrations of the core that the warehouse has not applied yet), `airflow-init` (the migration of the metadata database, the admin, and the deletion of its rows older than 90 days), `metadata-export` (the export of the metadata of the marts from dbt), `marts-init` (the views of the marts, which dbt builds again as `transformer` after the migrations, the rates of the core in a new reporting currency, and the drop of the relations of an earlier release that no model builds or reads, [Configuration](../reference/configuration.md#the-views-of-the-marts)) and `metabase-init` (the first setup of Metabase, its connection to the warehouse, and the metadata of the marts). The CeleryExecutor variant of Airflow, which `compose.celery.yaml` adds, puts the Valkey broker and a worker in it.
+* `core`: both PostgreSQL instances, Airflow and Metabase, and the one-shot jobs that set them up on every start: `db-init` (the roles, databases and schemas, and the migrations of the core that the warehouse has not applied yet), `airflow-init` (the migration of the metadata database, the admin, and the deletion of its rows older than 90 days), `metadata-export` (the export of the metadata of the marts from dbt), `marts-init` (the seeds and the views of the marts, which dbt loads and builds again as `transformer` after the migrations, the rates of the core in a new reporting currency, and the drop of the relations of an earlier release that no model builds or reads, [Configuration](../reference/configuration.md#the-views-of-the-marts)) and `metabase-init` (the first setup of Metabase, its connection to the warehouse, and the metadata of the marts). The CeleryExecutor variant of Airflow, which `compose.celery.yaml` adds, puts the Valkey broker and a worker in it.
 * `demo`: the one-shot `demo-init` job, which makes the demo ready on the first start; `.env` turns it on by default ([See the demo](../how-to/see-the-demo.md)).
 * `server`: the `proxy` service of server mode, Caddy in front of Metabase on ports 80 and 443; `./agoranomos init --server` turns it on ([ADR-0019](../adr/0019-open-only-metabase-in-server-mode.md)).
 * `ops`: the `backup` service, which takes a backup of the databases every day; `./agoranomos init --server` turns it on ([ADR-0020](../adr/0020-back-up-the-databases-every-day.md)).

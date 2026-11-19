@@ -1,11 +1,20 @@
+import platform
 from pathlib import Path
 
 import pytest
 import stack_helpers
 from airflow_api import is_busy, is_paused, pause, unpause, wait_for_dag
-from parts import EVERY_PART, PARTS
-from services import DEMO
-from stack_helpers import NamesOnly, Secret, SecretHeaders, http_json, load_env, wait_for
+from parts import EVERY_JOB, GROUPS, PARTS, files_of_a_part
+from services import DEMO, SERVER
+from stack_helpers import (
+    NamesOnly,
+    Secret,
+    SecretHeaders,
+    active_variant,
+    http_json,
+    load_env,
+    wait_for,
+)
 
 # The daily load of the demo, which the first start unpauses.
 DAILY = "agoranomos_demo_daily"
@@ -15,10 +24,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--part",
         type=int,
-        choices=range(1, len(PARTS) + 1),
+        choices=range(len(PARTS) + 1),
         metavar="N",
-        help="run the files of part N of the stack tests and those of every part (parts.py), "
-        "as each job of the Stack workflow does",
+        help="run the files of part N of the stack tests and test_compose.py (parts.py), as each "
+        "job of the Stack workflow on main does, or with 0 what the job of a pull request runs "
+        "for the combination of this stack",
     )
 
 
@@ -26,6 +36,21 @@ def selected_part(config: pytest.Config) -> int | None:
     # None also when this file is not a conftest.py that pytest reads before the command line, as
     # when pytest collects tests/stack from a directory above it, and so has no --part.
     return config.getoption("part", default=None)
+
+
+# The names that platform.machine() gives the two architectures of the stack (ADR-0010): Linux
+# says x86_64 and aarch64, macOS x86_64 and arm64.
+ARCHITECTURES = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
+
+
+def combination() -> tuple[str, str, str]:
+    """The mode, the architecture and the variant of the stack of the checkout, as
+    parts.PULL_REQUEST names them: the mode and the variant from .env, the architecture of this
+    machine, which the images of the stack are built for."""
+    machine = platform.machine()
+    if machine.lower() not in ARCHITECTURES:
+        raise pytest.UsageError(f"--part 0: the stack has no images for the architecture {machine}")
+    return ("server" if SERVER else "local", ARCHITECTURES[machine.lower()], active_variant())
 
 
 @pytest.fixture(scope="session")
@@ -115,8 +140,8 @@ def session(env, metabase_url):
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """With --part, keep the tests of the files of that part and of every part (parts.py), and stop
-    when a test file of tests/stack is in no part, which would run in no job of the Stack workflow.
+    """With --part, keep the tests of the files that it selects (parts.py), and stop when a test
+    file of tests/stack is in no group, which would run in no job of the Stack workflow.
 
     Skip the tests of the mark demo while .env does not list the demo profile (pyproject.toml):
     they read the data of the fictional platforms or the content of the demo in Metabase, which the
@@ -125,11 +150,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     part = selected_part(config)
     if part is not None:
         here = Path(__file__).parent
-        listed = {name for files in (*PARTS, EVERY_PART) for name in files}
+        listed = {name for files in (*GROUPS, EVERY_JOB) for name in files}
         unlisted = sorted({i.path.name for i in items if i.path.parent == here} - listed)
         if unlisted:
-            raise pytest.UsageError(f"tests/stack/parts.py puts {unlisted} in no part")
-        chosen = {*PARTS[part - 1], *EVERY_PART}
+            raise pytest.UsageError(f"tests/stack/parts.py puts {unlisted} in no group")
+        chosen = files_of_a_part(part, combination() if part == 0 else None)
         others = [i for i in items if i.path.parent == here and i.path.name not in chosen]
         if others:
             config.hook.pytest_deselected(items=others)
