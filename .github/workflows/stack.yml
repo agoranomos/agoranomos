@@ -17,15 +17,19 @@ name: Stack
 # the transform of test_dbt_metadata.py and starts the stack again, the start after the first run
 # of the transform that a deployment has, before the stack tests, which it runs with -m "not demo":
 # the tests that need the demo carry the mark demo (pyproject.toml), and skip without it.
-# One job of each combination ran every stack test twice, until on 13 November 2026 that took
-# longer than the 6 hours that GitHub gives a job at most. So the test files are in three parts,
-# which tests/stack/parts.py lists, balanced by their time, and each job of local mode with the
-# demo and of server mode runs one part, with --part, on a stack of its own: 12 jobs of local mode
-# and 6 of server mode, which with the job no-demo are 19 jobs at the same time. The job no-demo,
-# which has no demo to load and transform, runs every file. The organization is on GitHub Free,
-# which runs at most 20 jobs on GitHub-hosted runners at the same time (the limits of GitHub
-# Actions on docs.github.com, read on 13 November 2026), so the jobs of a run wait for a runner
-# while those of another run of the stack, or of CI, hold them.
+# The test files are in six groups, which tests/stack/parts.py lists, balanced by their time
+# (ADR-0052), and each job of local mode with the demo and of server mode runs a selection of them
+# on a stack of its own. A pull request runs each file once: one job for each of the six
+# combinations, with --part 0, runs the group of its combination and the files whose result can
+# differ by combination, which with the job no-demo are 7 jobs. A push to main, the weekly run and
+# a manual one run every file in every combination: three jobs for each combination, each of a part
+# of two groups, with --part 1 to 3, 12 jobs of local mode and 6 of server mode, which with the job
+# no-demo are 19 jobs at the same time. The job no-demo, which has no demo to load and transform,
+# runs every file. Until 18 November 2026 a pull request ran the 19 jobs too, and so every file in
+# each of the six combinations. The organization is on GitHub Free, which runs at most 20 jobs on
+# GitHub-hosted runners at the same time (the limits of GitHub Actions on docs.github.com, read on
+# 13 November 2026), so the jobs of a run wait for a runner while those of another run of the
+# stack, or of CI, hold them.
 # The workflow runs on a pull request, where the jobs start when it changes the stack,
 # on a push to main that does, every week, which catches what changes around the repository, such
 # as the images of the runners, and by hand. The job passed is a required check of main: it reports
@@ -100,7 +104,7 @@ jobs:
           echo "stack=$stack" | tee -a "$GITHUB_OUTPUT"
 
   local:
-    name: Local mode (${{ matrix.arch }}, ${{ matrix.variant }}, part ${{ matrix.part }})
+    name: Local mode (${{ matrix.arch }}, ${{ matrix.variant }}${{ matrix.part != 0 && format(', part {0}', matrix.part) || '' }})
     needs: changes
     if: ${{ needs.changes.outputs.stack == 'true' }}
     strategy:
@@ -108,29 +112,23 @@ jobs:
       matrix:
         arch: [amd64, arm64]
         variant: [local, celery]
-        part: [1, 2, 3]
+        # Part 0, the job of a pull request: the group of its combination and the files of every
+        # combination. Parts 1 to 3, of the other events: every file (tests/stack/parts.py).
+        part: ${{ fromJSON(github.event_name == 'pull_request' && '[0]' || '[1, 2, 3]') }}
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     # The first start builds the Airflow image and makes the demo ready, with a run of the transform
-    # of the model; each of the two runs of the tests of a part runs the transform more, with the
-    # hooks of elementary (ADR-0028, ADR-0029), on the four CPUs of a runner of a public
-    # repository. One job ran every test file before the parts, and took 57 to 108 minutes in
-    # October 2026: in the weekly run of 26 October, 72 minutes on amd64 and 57 on arm64 with the
-    # local variant, and 88 and 63 with the celery variant; on the pushes to main of 29 October, 106
-    # and 108 minutes on amd64 with the local variant. Since the core of v0.5 (#281, #283), each run
-    # of the transform takes about 14 minutes: a pull request, whose second run of the tests leaves
-    # out the mark transform, took 87 to 97 minutes on 7 November 2026, and a push to main, which
-    # runs it twice, 138 and 139 minutes on arm64 and reached 150 minutes on amd64 on 7 and 8
-    # November; with 240 minutes, 163 to 216 minutes on main 8bb634e on 9 November, and the facts of
-    # the core add about 7 % to each run of the transform. With 300 minutes, the celery variant on
-    # amd64 reached the limit on main 94c9758 on 10 November: its two runs of the tests took 146 and
-    # 138 minutes, where each run of the other jobs took 79 to 110. With 360 minutes, the most that
-    # GitHub gives a job, it reached the limit again on main b0578c4 on 13 November, after a first
-    # run of 209 minutes, where the other jobs of local mode took 326 to 348 minutes. In the times of
-    # each test of that run, a run of the tests of a part of tests/stack/parts.py takes 69 to 70
-    # minutes with the celery variant on amd64 and 49 to 57 in the other jobs: with the 14 minutes
-    # before the first test, about 155 minutes for the slowest job on a push to main, and 90 on a
-    # pull request. Each task of the transform runs a process of dbt for its node; one dbt build in
-    # the watcher mode of Cosmos (ADR-0039) is to replace them, and is not built yet.
+    # of the model, about 14 minutes before the first test; the first run of the tests runs the
+    # transform more, with the hooks of elementary (ADR-0028, ADR-0029), on the four CPUs of a runner
+    # of a public repository, about 14 minutes each time. The twelve files that run it take 190 to
+    # 300 minutes of a combination, and the other files 10 (tests/stack/parts.py). One job ran every
+    # test file twice until 13 November 2026, when the celery variant on amd64 reached the 360
+    # minutes that GitHub gives a job at most, after a first run of 209 minutes; three parts of
+    # tests/stack/parts.py then took 53 to 145 minutes in the first run of a part, after more files
+    # came. With the groups of ADR-0052, on 18 November 2026, a job of a pull request took 56 to 72
+    # minutes, 41 to 52 of them in the first run of the tests, and a part 64 to 103, 53 to 86 of
+    # them in the first run, with a second run of a few minutes. Each task of the
+    # transform runs a process of dbt for its node; one dbt build in the watcher mode of Cosmos
+    # (ADR-0039) is to replace them, and is not built yet.
     timeout-minutes: 240
     permissions:
       contents: read
@@ -196,13 +194,13 @@ jobs:
           TITLE: Local mode (${{ matrix.arch }}, ${{ matrix.variant }}, part ${{ matrix.part }}), the stack tests
           PART: ${{ matrix.part }}
         run: uv run python scripts/memory_report.py --title "$TITLE" --output "$GITHUB_STEP_SUMMARY" -- uv run pytest tests/stack -v --part "$PART"
-      # A pull request takes the tests of the mark transform in the run above only: they load and
-      # transform the demo, which is 41 of the 45 minutes of a run on amd64, and none of them failed
-      # here alone in the 186 runs up to 31 October 2026, while the comparison of the containers did,
-      # and a test of another file. A push to main and the weekly run take every test again.
+      # The tests of the mark transform run in the run above only: they load and transform the demo,
+      # which is most of the time of a run, and the start again changes nothing that they read. None
+      # of them failed here alone in the 186 runs of pull requests up to 31 October 2026, while the
+      # comparison of the containers did, and a test of another file. A push to main and the weekly
+      # run took them again until 18 November 2026 (ADR-0052).
       - name: Start again (nothing changes)
         env:
-          MARKS: ${{ github.event_name == 'pull_request' && 'not transform' || '' }}
           PART: ${{ matrix.part }}
         run: |
           sha256sum .env > env.sha256
@@ -211,7 +209,7 @@ jobs:
           sha256sum --check env.sha256
           docker compose ps --quiet --status running | sort > containers-after.txt
           diff containers-before.txt containers-after.txt
-          uv run pytest tests/stack -v --part "$PART" -m "$MARKS"
+          uv run pytest tests/stack -v --part "$PART" -m "not transform"
       - name: Collect the logs
         if: ${{ failure() }}
         run: |
@@ -298,11 +296,9 @@ jobs:
         env:
           TITLE: Local mode (amd64, local, no demo), the stack tests
         run: uv run python scripts/memory_report.py --title "$TITLE" --output "$GITHUB_STEP_SUMMARY" -- uv run pytest tests/stack -v -m "not demo"
-      # As in the job local, a pull request takes the tests of the mark transform in the run above
-      # only: here the two of test_dbt_metadata.py, which rebuild the empty model.
+      # As in the job local, the tests of the mark transform run in the run above only: here the two
+      # of test_dbt_metadata.py, which rebuild the empty model.
       - name: Start again (nothing changes)
-        env:
-          MARKS: ${{ github.event_name == 'pull_request' && 'not demo and not transform' || 'not demo' }}
         run: |
           sha256sum .env > env.sha256
           docker compose ps --quiet --status running | sort > containers-before.txt
@@ -310,7 +306,7 @@ jobs:
           sha256sum --check env.sha256
           docker compose ps --quiet --status running | sort > containers-after.txt
           diff containers-before.txt containers-after.txt
-          uv run pytest tests/stack -v -m "$MARKS"
+          uv run pytest tests/stack -v -m "not demo and not transform"
       - name: Collect the logs
         if: ${{ failure() }}
         run: |
@@ -325,29 +321,25 @@ jobs:
           retention-days: 3
 
   server:
-    name: Server mode (${{ matrix.arch }}, part ${{ matrix.part }})
+    name: Server mode (${{ matrix.arch }}${{ matrix.part != 0 && format(', part {0}', matrix.part) || '' }})
     needs: changes
     if: ${{ needs.changes.outputs.stack == 'true' }}
     strategy:
       fail-fast: false
       matrix:
         arch: [amd64, arm64]
-        part: [1, 2, 3]
+        # As in the job local: part 0 on a pull request, parts 1 to 3 on the other events.
+        part: ${{ fromJSON(github.event_name == 'pull_request' && '[0]' || '[1, 2, 3]') }}
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
-    # A cold build of the Airflow and Caddy images, two runs of the tests of a part, with runs of the
-    # transform of the model, with the hooks of elementary (ADR-0028, ADR-0029), and the question of
-    # 70 seconds of test_server.py in part 3, and, from the backups on, the round trip of a backup
-    # with two restores. One job ran every test file before the parts: 110 minutes on amd64 on
-    # 20 October 2026, of which each run of the stack tests took 45 to 46, and 69 to 108 minutes on
-    # amd64 from 26 to 29 October. Since the core of v0.5 (#281, #283), a pull request took 90 and
-    # 127 minutes on 7 November 2026, and a push to main, whose second run of the tests takes the
-    # mark transform too, reached 140 minutes on both architectures on 7 and 8 November; with 240
-    # minutes, 158 and 166 minutes on main 8bb634e on 9 November; with 300 minutes, 192 minutes on
-    # amd64 and 221 on arm64 on main 94c9758 on 10 November; with 360 minutes, the most that GitHub
-    # gives a job, 336 minutes on amd64 and 310 on arm64 on main b0578c4 on 13 November. In the times
-    # of each test of that run, a run of the tests of a part of tests/stack/parts.py takes 49 to 55
-    # minutes, and the round trip 3: with the 12 minutes before the first test, about 125 minutes
-    # on a push to main, and 75 on a pull request. The job gets the timeout of the jobs of local
+    # A cold build of the Airflow and Caddy images, two runs of the tests of its selection of
+    # tests/stack/parts.py, with runs of the transform of the model, with the hooks of elementary
+    # (ADR-0028, ADR-0029), and the question of 70 seconds of test_server.py, and, in part 0 and
+    # part 1, the round trip of a backup with two restores, in about 3 minutes. About 12 minutes
+    # come before the first test. One job ran every test file twice until 13 November 2026, when it
+    # took 336 minutes on amd64 and 310 on arm64 on main b0578c4, near the 360 that GitHub gives a
+    # job at most; three parts then took 58 to 106 minutes in the first run of a part, after more
+    # files came. With the selections of ADR-0052, on 18 November 2026, a job of a pull request
+    # took 47 and 80 minutes, and a part 77 to 103. The job gets the timeout of the jobs of local
     # mode.
     timeout-minutes: 240
     permissions:
@@ -398,13 +390,9 @@ jobs:
           TITLE: Server mode (${{ matrix.arch }}, part ${{ matrix.part }}), the stack tests
           PART: ${{ matrix.part }}
         run: uv run python scripts/memory_report.py --title "$TITLE" --output "$GITHUB_STEP_SUMMARY" -- uv run pytest tests/stack -v --part "$PART"
-      # A pull request takes the tests of the mark transform in the run above only: they load and
-      # transform the demo, which is 41 of the 45 minutes of a run on amd64, and none of them failed
-      # here alone in the 186 runs up to 31 October 2026, while the comparison of the containers did,
-      # and a test of another file. A push to main and the weekly run take every test again.
+      # As in the job local, the tests of the mark transform run in the run above only.
       - name: Start again (nothing changes)
         env:
-          MARKS: ${{ github.event_name == 'pull_request' && 'not transform' || '' }}
           PART: ${{ matrix.part }}
         run: |
           sha256sum .env > env.sha256
@@ -413,14 +401,17 @@ jobs:
           sha256sum --check env.sha256
           docker compose ps --quiet --status running | sort > containers-after.txt
           diff containers-before.txt containers-after.txt
-          uv run pytest tests/stack -v --part "$PART" -m "$MARKS"
+          uv run pytest tests/stack -v --part "$PART" -m "not transform"
       # The round trip of a backup (ADR-0020): a refused restore of a damaged backup; a mark in
       # each database and a backup; a restore of Metabase into the running stack, then the tests of
       # the site again; the volumes of the stack removed, a restore on empty volumes, and the marks
       # again. memory_report.py measures both restores, whose peaks the databases must hold. The
-      # tests that run a restore are destructive by design and run only with their opt-in. Each
-      # part runs it, on the stack that its tests leave, in about 3 minutes.
+      # tests that run a restore are destructive by design and run only with their opt-in. It runs
+      # once for each architecture in a run, in the job of a pull request and in part 1 of the other
+      # events, on the stack that their tests leave, in about 3 minutes; until 18 November 2026
+      # each part ran it (ADR-0052).
       - name: Back up, restore into the running stack, remove the volumes, and restore
+        if: ${{ matrix.part <= 1 }}
         env:
           AGORANOMOS_ROUNDTRIP_FILE: ${{ runner.temp }}/roundtrip.json
           LIVE: Server mode, a restore of Metabase into the running stack

@@ -15,11 +15,11 @@ superuser, so that the load changes those rows back and the journal keeps the ro
 changed them. The view takes the new value of a row of the journal from the next row of the same
 campaign and day, or else from the fact, which a change by hand breaks: a change of a row that the
 journal holds would also change the change of the load before it. On a new stack these days are the
-first and the last of the window. On the second run of the tests on the same stack, on a push to
-main and every week, the journal holds the rows that the first run changed, and when a midnight of
-the account came between the two runs, the daily load of the demo in between took the window as of
-a day later, and the conversions of many of its days, which mature for 90 days, changed: so the
-test takes the days nearest to the first and to the last that have such a row. The run accepts the
+first and the last of the window. On a second run of the test on the same stack, as a person can
+make, the journal holds the rows that the first run changed, and when a midnight of the account
+came between the two runs, the daily load of the demo in between took the window as of a day
+later, and the conversions of many of its days, which mature for 90 days, changed: so the test
+takes the days nearest to the first and to the last that have such a row. The run accepts the
 loads, as a daily run does, and the core is as before; the journal keeps its rows, as it keeps every
 restatement. If the test is killed between the change and the run, run agoranomos_demo_transform by
 hand: it reads the loads and writes the rows back.

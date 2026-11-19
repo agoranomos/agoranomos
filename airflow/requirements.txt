@@ -13,7 +13,7 @@ giturlparse==0.16.0
 pathvalidate==3.3.1
 requirements-parser==0.13.1
 semver==3.1.1
-simplejson==4.2.0
+simplejson==4.3.0
 
 # Packages pinned above the constraints of Airflow, for a security fix that the constraints of the
 # base image do not have yet: airflow/Dockerfile takes their lines out of the constraints. Remove

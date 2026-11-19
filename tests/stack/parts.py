@@ -1,79 +1,147 @@
-"""The parts of the stack tests: the Stack workflow runs each part on a stack of its own, in a job
-of its own, in every variant, mode and architecture, so that no job comes near the 6 hours that
-GitHub gives a job at most. Each job starts its stack, runs the tests of its part, starts the stack
-again and runs them a second time, as one job ran all of them before.
+"""The groups of the stack tests (ADR-0052): which test files each job of the Stack workflow runs.
 
-uv run pytest tests/stack --part N runs the files of part N and those of every part, in the order
-of pytest. With --part, conftest.py stops with an error when a test file of tests/stack is in no
-part, and tests/unit/test_stack_parts.py checks that each one is in exactly one entry below and
-that the jobs of the Stack workflow run every part. A new test file goes into the part that the
-minutes below leave the shortest, and a file whose tests take long may move to another.
+Each file is in one of the six groups below. A pull request runs each file once: each of its jobs
+of local mode with the demo and of server mode, one for each combination of mode, architecture and
+variant of Airflow, runs the group of its combination (PULL_REQUEST) and the files whose result can
+differ by combination (EVERY_COMBINATION), which so run in every one of those jobs. A push to main,
+the weekly run and a manual one run every file in every combination: three jobs for each, a part
+each, of two groups (PARTS). test_compose.py runs in every job (EVERY_JOB). Each job starts its
+stack, runs its files, starts the stack again and runs its files a second time without the mark
+transform. The job without the demo runs every file, with -m "not demo".
 
-The parts are balanced by the time of their files in the two runs of the stack tests of each job of
-run 43342339715 of the Stack workflow, on main b0578c4 on 13 November 2026, which ran every file in
-one job: a run of all of them took 148 to 169 minutes, and 209 on amd64 with the CeleryExecutor,
-with each run of the transform of the demo about 14 minutes. The files that run the transform, the
-first three of each part below, took 200 of those 209 minutes. test_meta_ads.py, which came later,
-runs the transform once and has no measured time yet, nor has test_restatements.py, which runs it
-once too, and test_partial_day.py, which came later still, runs it five times.
+uv run pytest tests/stack --part N runs the files of part N and test_compose.py, in the order of
+pytest, and --part 0 what the job of a pull request runs for the combination of the stack: its
+mode and variant from .env, and the architecture of the machine. With --part, conftest.py stops
+with an error when a test file of tests/stack is in no group, and tests/unit/test_stack_parts.py
+checks that each one is in exactly one group, that each group is in one part and is the group of
+one combination, and that the jobs of the Stack workflow run the parts and the combinations. A new
+test file goes into the group that the minutes below leave the shortest, and into
+EVERY_COMBINATION when its result can differ by mode, architecture or variant; a file whose tests
+take long may move to another group.
+
+The groups are balanced by the time of their files in the first run of the stack tests of each
+job, the median of three runs of the Stack workflow: 44287729476, of pull request #344 on 18
+November 2026, and 44059201169 and 44169804259, on main f775113 and 560986a on 17 November, the
+newest that ran every file in every combination. The twelve files that run the transform, each run
+of which takes about 14 minutes, took 190 to 300 minutes of a combination, and the other files 10.
+The minutes of a file below are those of amd64 with the CeleryExecutor, the slowest combination,
+and then of the other five.
 """
 
-# Each part, test_compose.py included: 69 to 70 minutes on amd64 with the CeleryExecutor, and 49 to
-# 57 in the other jobs, in each run of the tests. The minutes of a file are those of amd64 with the
-# CeleryExecutor, and then of the other jobs.
-PARTS: tuple[tuple[str, ...], ...] = (
-    # The core, the rates, the databases and the backups.
+# The six groups. With the files of every combination, the first run of the tests of the job of
+# a group on a pull request took 30 to 57 minutes on 18 November 2026 (44356389537), and that of a
+# part, two groups, 53 to 87 in each combination (44356412101).
+GROUPS: tuple[tuple[str, ...], ...] = (
+    # 1: the rates and the dimensions of the core.
     (
-        "test_rates.py",  # 25 minutes, and 17 to 20
-        "test_core_facts.py",  # 24, and 18 to 20
-        "test_core_dimensions.py",  # 16 to 17, and 11 to 13
-        "test_meta_ads.py",  # one run of the transform, not measured yet
-        "test_backup.py",
+        "test_rates.py",  # 24 minutes, and 20 to 27
+        "test_core_dimensions.py",  # 16, and 12 to 18
+        "test_transform_schedule.py",  # 7, and 7 to 8
+        "test_ai_servers.py",
         "test_backup_before_a_migration.py",
-        "test_backup_roundtrip.py",
-        "test_core_tables.py",
-        "test_databases.py",
-        "test_maintenance.py",
-        "test_retention.py",
-        "test_upgrade.py",
-        "test_warehouse_settings.py",
     ),
-    # The loads, the cleanup of the raw layer and Airflow.
+    # 2: the partial day, the retention and the backups.
     (
-        "test_raw_cleanup.py",  # 47, and 33 to 38
-        "test_demo_load.py",  # 11, and 8 to 9
-        "test_dbt_metadata.py",  # 8, and 6
-        "test_partial_day.py",  # five runs of the transform, not measured yet
-        "test_restatements.py",  # one run of the transform, not measured yet
-        "test_airflow.py",
-        "test_airflow_image.py",
-        "test_alerts.py",
+        "test_partial_day.py",  # 39, and 29 to 37
+        "test_backup.py",
+        "test_backup_roundtrip.py",
         "test_celery.py",
-        "test_helpers.py",
+        "test_core_tables.py",
+        "test_demo_metabase.py",
         "test_history.py",
         "test_inactive_accounts.py",
-        "test_marts_init.py",
-        "test_profile.py",
-        "test_variants.py",
+        "test_metabase.py",
+        "test_retention.py",
     ),
-    # The transform and Metabase.
+    # 3: the facts of the core, the loads of the demo and the metadata.
     (
-        "test_demo_transform.py",  # 43 to 45, and 31 to 36
-        "test_quarantine.py",  # 15 to 16, and 11 to 13
-        "test_transform_schedule.py",  # 8, and 6
+        "test_core_facts.py",  # 24, and 19 to 27
+        "test_demo_load.py",  # 13, and 8 to 9
+        "test_dbt_metadata.py",  # 10, and 6 to 8
         "test_advertising.py",
         "test_ai_access.py",
-        "test_ai_servers.py",
-        "test_demo_metabase.py",
-        "test_metabase.py",
+        "test_marts_init.py",
         "test_metabase_metadata.py",
-        "test_metrics.py",
         "test_ops.py",
+    ),
+    # 4: the transform, the alerts and the image.
+    (
+        "test_demo_transform.py",  # 39, and 39 to 41
+        "test_airflow_image.py",
+        "test_alerts.py",
+        "test_helpers.py",
+        "test_maintenance.py",
+        "test_upgrade.py",
+        "test_variants.py",
+        "test_warehouse_settings.py",
+    ),
+    # 5: the cleanup of the raw layer, the databases and the proxy.
+    (
+        "test_raw_cleanup.py",  # 59, and 36 to 45
+        "test_databases.py",
+        "test_profile.py",
         "test_server.py",
+    ),
+    # 6: the quarantine, Meta, the restatements and Airflow.
+    (
+        "test_quarantine.py",  # 14, and 14 to 15
+        "test_meta_ads.py",  # 8, and 6 to 9
+        "test_restatements.py",  # 8, and 6 to 7
+        "test_airflow.py",
+        "test_metrics.py",
     ),
 )
 
-# The files that check the whole stack as the tests of each part leave it: test_compose.py finds
+# The parts of a push to main, of the weekly run and of a manual one, by the numbers of their
+# groups: each combination runs every part, so every file once.
+PARTS: tuple[tuple[int, ...], ...] = ((1, 2), (3, 4), (5, 6))
+
+# The group that the job of each combination runs on a pull request, by (mode, architecture,
+# variant): each group in one combination, so each file once. Server mode runs the LocalExecutor
+# only. The groups that take longest in the slowest combinations go to the faster ones.
+PULL_REQUEST: dict[tuple[str, str, str], int] = {
+    ("local", "amd64", "local"): 1,
+    ("local", "amd64", "celery"): 2,
+    ("local", "arm64", "local"): 3,
+    ("local", "arm64", "celery"): 4,
+    ("server", "amd64", "local"): 5,
+    ("server", "arm64", "local"): 6,
+}
+
+# The files whose result can differ by combination, which a pull request runs in the job of every
+# combination too: what runs the tasks, the Celery variant and the image of each architecture
+# (test_airflow.py, test_airflow_image.py, test_celery.py, and test_retention.py, whose logs the
+# service that runs the tasks deletes), the alerts from both of those services, the proxy, the
+# backup service and the AI access of server mode (test_alerts.py, test_server.py, test_backup.py,
+# test_ai_access.py, test_metabase.py), and the container of the MCP servers of local mode
+# (test_ai_servers.py). The others check the model, the warehouse or the content of Metabase, which
+# are the same in every combination.
+EVERY_COMBINATION: tuple[str, ...] = (
+    "test_ai_access.py",
+    "test_ai_servers.py",
+    "test_airflow.py",
+    "test_airflow_image.py",
+    "test_alerts.py",
+    "test_backup.py",
+    "test_celery.py",
+    "test_metabase.py",
+    "test_retention.py",
+    "test_server.py",
+)
+
+# The files that check the whole stack as the tests of each job leave it: test_compose.py finds
 # every service healthy, every one-shot job done, and no service restarted or killed at its memory
 # limit, which in the second run of the tests covers the first.
-EVERY_PART: tuple[str, ...] = ("test_compose.py",)
+EVERY_JOB: tuple[str, ...] = ("test_compose.py",)
+
+
+def files_of_a_part(part: int, combination: tuple[str, str, str] | None = None) -> set[str]:
+    """The files that --part runs: those of the two groups of a part, or, with part 0, the group of
+    a combination on a pull request and the files of every combination; and test_compose.py."""
+    if part == 0:
+        if combination is None:
+            raise ValueError("part 0 runs the group of a combination, and none was given")
+        chosen = {*GROUPS[PULL_REQUEST[combination] - 1], *EVERY_COMBINATION}
+    else:
+        chosen = {name for group in PARTS[part - 1] for name in GROUPS[group - 1]}
+    return chosen | set(EVERY_JOB)
