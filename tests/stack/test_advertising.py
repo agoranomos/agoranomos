@@ -13,7 +13,7 @@ from decimal import Decimal
 
 import advertising as ad
 import pytest
-from metabase_content import call, item, registry
+from metabase_content import answer, call, item, registry
 from stack_helpers import warehouse_output
 
 pytestmark = [
@@ -21,41 +21,12 @@ pytestmark = [
     pytest.mark.usefixtures("daily_load_paused"),
 ]
 TOLERANCE = Decimal("0.000001")
+TODAY = "Today, as of the load"
 
 
 @pytest.fixture(scope="module")
 def board(metabase_url, session):
     return item(metabase_url, session, f"{ad.ADVERTISING_KEY}/{ad.DASHBOARD}")
-
-
-def defaults(board, dashcard, **values):
-    """The filters of a card with the default values of the dashboard, and the values given."""
-    shapes = {p["id"]: p for p in board["parameters"]}
-    found = []
-    for mapping in dashcard["parameter_mappings"]:
-        shape = shapes[mapping["parameter_id"]]
-        value = values.get(shape["id"], shape.get("default"))
-        if value is not None:
-            found.append(
-                {
-                    "id": shape["id"],
-                    "type": shape["type"],
-                    "value": value,
-                    "target": mapping["target"],
-                }
-            )
-    return found
-
-
-def answer(metabase_url, session, board, dashcard, **values):
-    path = (
-        f"/api/dashboard/{board['id']}/dashcard/{dashcard['id']}/card/{dashcard['card_id']}/query"
-    )
-    found = call(
-        metabase_url, session, "POST", path, {"parameters": defaults(board, dashcard, **values)}
-    )
-    assert found.get("status") == "completed", (dashcard["card"]["name"], found.get("status"))
-    return found["data"]
 
 
 def clients_in_the_marts(env, metabase_url, session, board):
@@ -76,7 +47,10 @@ def test_the_dashboard_has_its_tabs_and_every_card_answers(metabase_url, session
     assert len(cards) == len(registry_keys())
     for dashcard in cards:
         rows = answer(metabase_url, session, board, dashcard)["rows"]
-        assert rows, dashcard["card"]["name"]
+        # The demo has no partial day, so the card of today answers with no row
+        # (tests/stack/test_partial_day.py writes one).
+        name = dashcard["card"]["name"]
+        assert rows or name == TODAY, name
 
 
 def test_every_card_answers_with_a_client_and_a_campaign(env, metabase_url, session, board):
@@ -110,7 +84,8 @@ def registry_keys():
 def test_a_kpi_of_the_dashboard_is_the_ratio_of_sql_over_the_mart(
     env, metabase_url, session, board
 ):
-    # Results by platform, with no filter: each KPI of each platform as SQL computes it.
+    # Results by platform, with no filter: each KPI of each platform as SQL computes it, over the
+    # whole days (ADR-0051).
     [dashcard] = [
         d for d in board["dashcards"] if d.get("card", {}).get("name") == "Results by platform"
     ]
@@ -122,7 +97,7 @@ def test_a_kpi_of_the_dashboard_is_the_ratio_of_sql_over_the_mart(
         "round(sum(spend_reporting) / nullif(sum(conversions), 0), 6), "
         "round(sum(spend_reporting) / nullif(sum(conversions_primary), 0), 6), "
         "sum(conversions_primary) "
-        "FROM marts.ad_stats_campaign_daily GROUP BY platform_name"
+        "FROM marts.ad_stats_campaign_daily WHERE NOT is_partial_day GROUP BY platform_name"
     )
     for line in warehouse_output(env, sql).splitlines():
         platform, ctr, cpa, primary_cpa, primary = line.split("|")
