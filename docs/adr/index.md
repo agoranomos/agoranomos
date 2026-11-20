@@ -99,3 +99,4 @@ agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0050](0050-connect-meta-with-an-app-and-a-system-user-of-the-deployment.md) | Connect Meta with an app and a system user of the deployment | accepted | 2026-11-14 |
 | [0051](0051-take-the-current-day-as-a-load-of-the-kind-intraday.md) | Take the current day as a load of the kind intraday in the one transform | accepted | 2026-11-14 |
 | [0052](0052-run-each-stack-test-once-on-a-pull-request.md) | Run each stack test once on a pull request, and every one in every combination on main | accepted | 2026-11-18 |
+| [0054](0054-connect-ga4-with-a-service-account-of-the-deployment.md) | Connect GA4 with a service account of the deployment | proposed | 2026-11-20 |
