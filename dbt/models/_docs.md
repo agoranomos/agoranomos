@@ -449,6 +449,10 @@ The load that gives the day of the row, load_sk of core.loads: for an account an
 Whether the day is still in progress in its account, as a load of the kind intraday read it at the moment of its load: the impressions, clicks and spend of the campaigns so far, and no conversions (none, not zero), until a load of the kind window or history replaces the day whole (ADR-0051). Only the statistics of campaigns have a partial day: the statistics of ad groups and of ads, and the conversions by action, have no row of it.
 {% enddocs %}
 
+{% docs is_final %}
+Whether the row is final, as no daily load takes its day again: true when the day on which the load that wrote the row ended, in the time zone of the account or the property, is at least the window of restatements of its platform after the day of the row, the days of restatement_window_days in ad_platforms, as a daily load takes again only the days of that window. A recent row is not final because its platform may still change the day, often its conversions, and the next daily load takes the day again. The column follows the load and not the calendar: a day that a load took within the window before a stop of the stack longer than the window stays not final, as no load takes it again. A row that a load of the history took when its day was already older than the window is final at once, and a partial day (is_partial_day) is never final. A row whose load or platform the warehouse no longer holds is not final, rather than none.
+{% enddocs %}
+
 {% docs load_kind %}
 The kind of a load, as core.loads holds it: window for the usual window of an account, which a daily load takes, history for a load of the days before it, intraday for a load of its current day, whose day is partial (ADR-0051).
 {% enddocs %}
