@@ -477,6 +477,55 @@ def test_the_primary_conversions_of_a_campaign_are_a_lateral_join_of_one_row():
     )
 
 
+def test_each_view_of_a_fact_ends_with_whether_its_row_is_final():
+    # ADR-0037 lists is_final among the service columns of a view, and a new column comes last.
+    # C8a of #228: final by the load that wrote the row, at least the window of restatements of
+    # its platform after the day, from the rows of the seed that the view holds in its text, and
+    # never on a partial day; false, not none, without a load or a platform, so that a filter on
+    # the column never drops a row silently. One expression, which reads only the joins that the
+    # view has already, so that a question that does not read the column plans as before.
+    age = "(l.finished_at at time zone a.time_zone)::date - f.report_date\n"
+    final = (
+        "    coalesce(\n"
+        "        {age}"
+        "            >= p.restatement_window_days,\n"
+        "        false\n"
+        "    ) as is_final\n"
+        "from "
+    )
+    marts = DBT / "models" / "marts"
+    text = (marts / "_marts__models.yml").read_text(encoding="utf-8")
+    described = blocks(text, 2)
+    docs = (DBT / "models" / "_docs.md").read_text(encoding="utf-8")
+    assert "{% docs is_final %}\n" in docs
+    for name in FACT_MARTS:
+        view = (marts / f"{name}.sql").read_text(encoding="utf-8")
+        whole = "not f.is_partial_day\n        and " if name in PARTIAL_DAY_FACTS else ""
+        body = "\n".join(line for line in view.splitlines() if not line.startswith("--"))
+        columns = body.split("\nfrom ", 1)[0] + "\nfrom "
+        assert columns.endswith(final.format(age=whole + age)), name
+        assert columns.count("is_final") == 1, name
+        assert "platforms(ref('seed_ad_platforms'))" in view, name
+        assert "left join {{ source('core', 'loads') }} as l\n    on l.load_sk = f.load_sk" in view
+        # The last column of the contract, with its doc block and its metadata.
+        last = blocks(described[name], 6)
+        assert list(last)[-1] == "is_final", name
+        assert last["is_final"] == (
+            "      - name: is_final\n"
+            "        data_type: boolean\n"
+            "        description: '{{ doc(\"is_final\") }}'\n"
+            "        config:\n"
+            "          meta:\n"
+            "            metabase:\n"
+            "              display_name: Is Final\n"
+            "              semantic_type: type/Category\n"
+            "              has_field_values: list\n"
+        ), name
+    # The views of the entities have no day of a load.
+    for name in set(MART_KEYS) - set(FACT_MARTS):
+        assert "is_final" not in described[name], name
+
+
 def test_a_run_keeps_a_view_of_the_marts_that_exists():
     # ADR-0039: a run of the transform leaves a view of marts that exists as it is, and its tests
     # run; a relation of another kind, a table of v0.4, becomes a view, and rebuild_views builds
