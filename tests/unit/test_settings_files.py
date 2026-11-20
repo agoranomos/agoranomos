@@ -4,6 +4,8 @@ demo in the base package (ADR-0024)."""
 
 import os
 import re
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -74,7 +76,7 @@ def test_no_files_are_no_settings_but_the_demo(tmp_path):
     assert {c["origin"] for c in settings.clients} == {"demo"}
     assert {a["origin"] for a in settings.account_clients} == {"demo"}
     assert settings.conversion_actions == ()
-    assert files.load_settings(tmp_path / "missing", None) == files.Settings((), (), ())
+    assert files.load_settings(tmp_path / "missing", None) == files.Settings((), (), (), ())
 
 
 def test_the_demo_file_maps_every_account_of_the_demo_to_its_client():
@@ -227,7 +229,7 @@ def test_a_file_that_is_not_utf_8_or_too_large_is_refused(tmp_path):
     with pytest.raises(files.SettingsError, match=f"{size}at most$"):
         files.load_settings(tmp_path, None)
     write(tmp_path, "clients.toml", b"#" * files.LIMIT)
-    assert files.load_settings(tmp_path, None) == files.Settings((), (), ())
+    assert files.load_settings(tmp_path, None) == files.Settings((), (), (), ())
 
 
 class Endless:
@@ -334,3 +336,193 @@ def test_a_client_of_the_deployment_wins_over_the_demo_in_the_model_not_here(tmp
     settings = files.load_settings(tmp_path, DEMO)
     origins = sorted(c["origin"] for c in settings.clients if c["client_id"] == "tarnwick")
     assert origins == ["demo", "extensions"]
+
+
+# The rates of the deployment (rates.toml, ADR-0042), checked against the codes of ISO 4217 of
+# the seed of the dbt project, which compose.yaml mounts where CURRENCIES points.
+SEED = Path(files.__file__).resolve().parents[4] / "dbt" / "seeds" / "seed_iso_4217_currencies.csv"
+RATES = """
+[[rates]]
+currency = "USD"
+quote = "KZT"
+rate = 470.25
+from = 2026-11-01
+to = 2026-11-30
+
+[[rates]]
+currency = "EUR"
+quote = "USD"
+rate = 1.0832123456
+from = 2026-10-01
+to = 2026-10-31
+
+[[rates]]
+currency = "USD"
+quote = "KZT"
+rate = 468
+from = 2026-12-01
+to = 2026-12-31
+"""
+# One entry, which the parameters change one key of.
+ENTRY = {
+    "currency": '"USD"',
+    "quote": '"KZT"',
+    "rate": "470.25",
+    "from": "2026-11-01",
+    "to": "2026-11-30",
+}
+
+
+@pytest.fixture
+def seed(monkeypatch):
+    monkeypatch.setattr(files, "CURRENCIES", SEED)
+
+
+def entry(**changed: str | None) -> str:
+    """One [[rates]] entry of ENTRY, with the keys of changed in place of its own, and without a
+    key whose value is None."""
+    keys = {**ENTRY, **changed}
+    return "[[rates]]\n" + "".join(f"{k} = {v}\n" for k, v in keys.items() if v is not None)
+
+
+def test_the_rates_of_a_deployment_become_rows_with_the_rate_as_written(tmp_path, seed):
+    write(tmp_path, "rates.toml", RATES)
+    rates = files.load_settings(tmp_path, None).rates
+    assert rates == (
+        {
+            "currency": "USD",
+            "quote_currency": "KZT",
+            "rate": "470.25",
+            "first_day": date(2026, 11, 1),
+            "last_day": date(2026, 11, 30),
+            "origin": "extensions",
+        },
+        {
+            "currency": "EUR",
+            "quote_currency": "USD",
+            # Ten decimal places, exact: no float touches the rate on its way to raw.
+            "rate": "1.0832123456",
+            "first_day": date(2026, 10, 1),
+            "last_day": date(2026, 10, 31),
+            "origin": "extensions",
+        },
+        {
+            "currency": "USD",
+            "quote_currency": "KZT",
+            "rate": "468",
+            "first_day": date(2026, 12, 1),
+            "last_day": date(2026, 12, 31),
+            "origin": "extensions",
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "rate",
+    ["0.1234567891", "1234567890.1", "0.10", "1e3", "12.3456789000", "9999999999.9999999999"],
+)
+def test_a_rate_keeps_its_digits_exact(tmp_path, seed, rate):
+    write(tmp_path, "rates.toml", entry(rate=rate))
+    [found] = files.load_settings(tmp_path, None).rates
+    assert Decimal(found["rate"]) == Decimal(rate)
+    assert "e" not in found["rate"].lower(), found["rate"]
+
+
+def test_no_file_of_rates_and_an_empty_one_are_no_rates(tmp_path, seed):
+    assert files.load_settings(tmp_path, None).rates == ()
+    write(tmp_path, "rates.toml", "")
+    assert files.load_settings(tmp_path, None).rates == ()
+    write(tmp_path, "rates.toml", "rates = []\n")
+    assert files.load_settings(tmp_path, None).rates == ()
+
+
+def test_a_file_without_an_entry_reads_no_list_of_currencies(tmp_path, monkeypatch):
+    monkeypatch.setattr(files, "CURRENCIES", tmp_path / "missing.csv")
+    write(tmp_path, "rates.toml", "# no rate yet\n")
+    assert files.load_settings(tmp_path, None).rates == ()
+    write(tmp_path, "rates.toml", entry())
+    line = mistake(tmp_path)
+    assert line == (
+        "rates.toml: cannot read the codes of ISO 4217 of the base package: FileNotFoundError"
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        (entry(currency='"usd"'), r"^rates.toml: rates\[1\].currency: a code of a currency of"),
+        (entry(currency='"XYZ"'), r"^rates.toml: rates\[1\].currency: a code of a currency of"),
+        (entry(quote='"KZ"'), r"^rates.toml: rates\[1\].quote: a code of a currency of ISO 4217"),
+        (entry(quote="1"), r"^rates.toml: rates\[1\].quote: a text in quotes is expected"),
+        (entry(quote='"USD"'), r"^rates.toml: rates\[1\]: quote is the same currency as currency$"),
+        (entry(rate="0"), r"^rates.toml: rates\[1\].rate: a number above zero is expected$"),
+        (entry(rate="-470.25"), r"^rates.toml: rates\[1\].rate: a number above zero is expected$"),
+        (entry(rate="nan"), r"^rates.toml: rates\[1\].rate: a number above zero is expected$"),
+        (entry(rate="inf"), r"^rates.toml: rates\[1\].rate: a number above zero is expected$"),
+        (entry(rate='"470.25"'), r"^rates.toml: rates\[1\].rate: a number is expected, not str$"),
+        (entry(rate="true"), r"^rates.toml: rates\[1\].rate: a number is expected, not bool$"),
+        (
+            entry(rate="0.12345678901"),
+            r"^rates.toml: rates\[1\].rate: a rate may have 10 decimal places at most$",
+        ),
+        (
+            entry(rate="12345678901"),
+            r"^rates.toml: rates\[1\].rate: a rate may have 10 digits before the decimal point",
+        ),
+        (entry(**{"from": '"2026-11-01"'}), r"^rates.toml: rates\[1\].from: a date of TOML is"),
+        (
+            entry(to="2026-11-30T00:00:00"),
+            r"^rates.toml: rates\[1\].to: a date of TOML is expected, such as 2026-11-01$",
+        ),
+        (entry(to="2026-10-31"), r"^rates.toml: rates\[1\]: from is after to$"),
+        (entry(to=None), r"^rates.toml: rates\[1\]: to is missing$"),
+        (entry(rate=None), r"^rates.toml: rates\[1\]: rate is missing$"),
+        (
+            entry() + "note = 1\n",
+            r"^rates.toml: rates\[1\].note: unknown property; use currency, from, quote, rate, to$",
+        ),
+        (
+            entry() + entry(**{"from": "2026-11-30", "to": "2026-12-31"}),
+            r"^rates.toml: rates\[2\]: the days of USD overlap those of rates\[1\]$",
+        ),
+        ('[rates]\ncurrency = "USD"\n', r"^rates.toml: rates: an array of tables is expected"),
+        ('[[rate]]\ncurrency = "USD"\n', r"^rates.toml: rate: unknown property; use rates$"),
+        ("[[rates]]\nrate = 1.\n", r"^rates.toml: the file is not valid TOML \(at line 2"),
+    ],
+)
+def test_a_mistake_in_rates_toml_is_one_line_that_says_where(tmp_path, seed, text, message):
+    write(tmp_path, "rates.toml", text)
+    line = mistake(tmp_path)
+    assert re.search(message, line), line
+    assert line.isascii(), line
+    assert line.isprintable(), line
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        entry(rate="470.987654321012"),
+        entry(rate="-470.987654"),
+        entry(to="2026-10-31", rate="470.987654"),
+        entry(quote='"470.987654"'),
+        entry(rate="470.987654") + entry(rate="470.987654"),
+    ],
+)
+def test_a_mistake_in_rates_toml_never_repeats_a_rate(tmp_path, seed, text):
+    write(tmp_path, "rates.toml", text)
+    line = mistake(tmp_path)
+    assert line.startswith("rates.toml: "), line
+    assert "470" not in line, line
+    assert "987654" not in line, line
+
+
+def test_the_entries_of_two_currencies_may_share_their_days(tmp_path, seed):
+    write(tmp_path, "rates.toml", entry() + entry(currency='"EUR"'))
+    assert len(files.load_settings(tmp_path, None).rates) == 2
+
+
+def test_the_codes_of_iso_4217_are_those_of_the_seed():
+    codes = files.iso_currencies(SEED)
+    assert {"USD", "EUR", "KZT", "GBP", "RUB"} <= codes
+    assert all(files.CURRENCY.fullmatch(code) for code in codes)
+    assert Path("/opt/agoranomos/dbt/seeds/seed_iso_4217_currencies.csv") == files.CURRENCIES

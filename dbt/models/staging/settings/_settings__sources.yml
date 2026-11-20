@@ -3,8 +3,9 @@ sources:
     description: >-
       The settings of the model: the clients of the business and the accounts of each, from
       extensions/model/clients.toml of the deployment and from the file of the clients of the demo
-      in the base package, and the conversion actions that the deployment names in
-      extensions/model/conversion_actions.toml. The first task of the transform checks the files
+      in the base package, the conversion actions that the deployment names in
+      extensions/model/conversion_actions.toml, and the rates that it gives in
+      extensions/model/rates.toml. The first task of the transform checks the files
       and loads them with dlt before dbt runs.
     schema: raw_settings
     # The settings load at the start of every run of the transform: no freshness.
@@ -22,4 +23,9 @@ sources:
       - name: conversion_actions
         description: >-
           The conversion actions that the settings of the deployment name, one row each. Each load
+          replaces the table.
+      - name: rates
+        description: >-
+          The rates that the settings of the deployment give, one row for each entry of
+          extensions/model/rates.toml, with the rate in text as the file writes it. Each load
           replaces the table.

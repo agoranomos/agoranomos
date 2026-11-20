@@ -1,9 +1,9 @@
 """The settings of the model as a dlt source, loaded into raw_settings as the loader role by the
-first task of the transform, so that the dbt run that follows uses the files as they are
-(ADR-0024). Each load replaces the three tables, truncated and inserted in place, so the schema
-needs no staging schema; a table that the files leave without a row is emptied too, so that a
-setting that a person removed goes, and exists on a new warehouse, for the staging views of dbt
-that read it. A mistake in a file stops the load before anything is written."""
+first task of the transform, so that the dbt run that follows uses the files as they are (ADR-0024,
+ADR-0042). Each load replaces the four tables, truncated and inserted in place, so the schema needs
+no staging schema; a table that the files leave without a row is emptied too, so that a setting that
+a person removed goes, and exists on a new warehouse, for the staging views of dbt that read it. A
+mistake in a file stops the load before anything is written."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ EXTENSIONS = Path("/opt/agoranomos/extensions/model")
 DEMO_CLIENTS = Path(__file__).resolve().parents[1] / "demo" / "clients.toml"
 PIPELINE, DATASET = "agoranomos_settings", "raw_settings"
 TEXT = {"data_type": "text", "nullable": False}
+DATE = {"data_type": "date", "nullable": False}
 # The columns of each table, in their order, with their hints.
 COLUMNS = {
     "clients": {"client_id": TEXT, "client_name": TEXT, "origin": TEXT},
@@ -32,6 +33,16 @@ COLUMNS = {
         "conversion_action_id": TEXT,
         "is_primary": {"data_type": "bool", "nullable": False},
         "conversion_category": {"data_type": "text", "nullable": True},
+        "origin": TEXT,
+    },
+    # The rate as text, as the file writes it, which the model casts to numeric: no float on the
+    # way to the warehouse.
+    "rates": {
+        "currency": TEXT,
+        "quote_currency": TEXT,
+        "rate": TEXT,
+        "first_day": DATE,
+        "last_day": DATE,
         "origin": TEXT,
     },
 }

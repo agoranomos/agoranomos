@@ -41,7 +41,7 @@ from decimal import Decimal
 import pytest
 from agoranomos_pipelines import rates
 from agoranomos_pipelines.demo import platforms
-from airflow_api import is_busy, trigger, unpause, wait_for_dag, wait_for_run
+from airflow_api import is_busy, task_instances, trigger, unpause, wait_for_dag, wait_for_run
 from raw_loads import last_moment, load_platform, run_in_tasks, transform_keeping_raw
 from stack_helpers import (
     REPO_ROOT,
@@ -400,6 +400,292 @@ def test_a_recompute_of_every_day_writes_what_the_core_holds(env, core_rates):
     sql = compiled_rates("recompute", dbt_vars="{recompute_rates: true}")
     assert "when true\n" in sql, "the var did not reach the SQL"
     assert warehouse_output(env, f"SELECT count(*) FROM ({sql}) AS w") == "0"  # noqa: S608 (the SQL of dbt)
+
+
+# The rates of the file of the deployment (ADR-0042, C7 of #227). The checks of the model put
+# entries into raw_settings.rates, which the staging view stg_settings__rates reads, as the task
+# load_settings writes them, compute the rows that the model would merge from the SQL that dbt
+# compiles, and write them into the table as a run would, in one transaction as postgres that ends
+# in ROLLBACK, so the core and the settings are as before.
+FILE_RATES = "raw_settings.rates"
+# A row that the model would merge, as the checks print it.
+FILE_ROW = (
+    "'written|' || rate_date || '|' || currency || '|' || rate_into_reporting_currency || '|' "
+    "|| base_currency || '|' || base_rate || '|' || rate_source || '|' || published_on || '|' "
+    "|| is_carried_forward || '|' || coalesce(cross_source, '')"
+)
+# The task that loads the settings of the model into raw_settings, as its task does.
+LOAD_SETTINGS = """
+from agoranomos_pipelines.settings import source
+
+print(source.load()["rates"])
+"""
+
+
+def file_entries(*entries):
+    """SQL that puts entries of the file into raw_settings.rates, each a currency, a quote, a rate
+    in text and its first and last day, with the columns of dlt that the table has."""
+    rows = [
+        {
+            "currency": currency,
+            "quote_currency": quote,
+            "rate": rate,
+            "first_day": str(first),
+            "last_day": str(last),
+            "origin": "extensions",
+            "_dlt_load_id": "0",
+            "_dlt_id": f"c7-{number}",
+        }
+        for number, (currency, quote, rate, first, last) in enumerate(entries)
+    ]
+    return (
+        f"INSERT INTO {FILE_RATES} SELECT * FROM "  # noqa: S608 (constants and codes of this file)
+        f"json_populate_recordset(NULL::{FILE_RATES}, '{json.dumps(rows)}');"
+    )
+
+
+def merged(sql):
+    """SQL that writes the rows that the compiled model gives into core.fx_rates_daily, as the
+    merge of a run does."""
+    return (
+        f"CREATE TEMP TABLE merged AS {sql}; "  # noqa: S608 (constants of this file and the SQL of dbt)
+        f"DELETE FROM {CORE_RATES} AS t USING merged AS m WHERE (t.rate_date, t.currency, "
+        "t.reporting_currency) = (m.rate_date, m.currency, m.reporting_currency); "
+        f"INSERT INTO {CORE_RATES} SELECT * FROM merged; DROP TABLE merged;"
+    )
+
+
+@pytest.fixture(scope="module")
+def file_sql(env, core_rates):
+    """The SQL of the model of the rates and of the view ops.ops_rates as dbt compiles them, and
+    the last day of the rates of the demo that staging reads, around which the entries lie."""
+    found = warehouse_output(env, f"SELECT count(*) FROM {FILE_RATES}")  # noqa: S608 (a constant)
+    assert found == "0", "raw_settings.rates holds rates: extensions/model/rates.toml is in the way"
+    last = date.fromisoformat(warehouse_output(env, f"SELECT max(day) FROM {RATE_DAYS}"))  # noqa: S608 (constants of this file)
+    ops = compiled_node("ops-rates", "ops_rates", "models/ops/ops_rates.sql")
+    return compiled_rates("file"), ops, last
+
+
+def entry_days(first, last):
+    return [first + timedelta(days=n) for n in range((last - first).days + 1)]
+
+
+def test_a_rate_of_the_file_goes_before_the_sources_on_the_days_of_its_entry(env, file_sql):
+    # Each day of the entry takes the rate of the file, exact, with the source deployment, its
+    # quote in base_currency, its first day as published_on and never the flag of a carried rate,
+    # a weekend too; the model writes no other row, so the days around it keep the rates of the
+    # sources, as an entry of a currency that no account has, and one of the reporting currency.
+    currency, other = reporting(env), other_currency(env)
+    sql, _, last = file_sql
+    first_day, last_day = last - timedelta(days=30), last - timedelta(days=20)
+    entries = file_entries(
+        (other, currency, "1.2345678901", first_day, last_day),
+        ("JPY", currency, "0.0066", first_day, last_day),
+        (currency, other, "0.9", first_day, last_day),
+    )
+    output = warehouse_output(
+        env,
+        f"BEGIN; {entries} SELECT {FILE_ROW} FROM ({sql}) AS w ORDER BY rate_date, currency; "  # noqa: S608 (constants of this file and the SQL of dbt)
+        "ROLLBACK",
+    )
+    rate = "1.2345678901"
+    expected = [
+        [str(day), other, rate, currency, rate, "deployment", str(first_day), "false", ""]
+        for day in entry_days(first_day, last_day)
+    ]
+    assert written(output) == expected, output.splitlines()[-4:]
+    around = table(
+        env,
+        f"SELECT rate_date, rate_source FROM {CORE_RATES} WHERE reporting_currency = '{currency}' "  # noqa: S608 (constants of this file and codes of .env)
+        f"AND currency = '{other}' AND rate_date IN "
+        f"(date '{first_day - timedelta(days=1)}', date '{last_day + timedelta(days=1)}') "
+        "ORDER BY rate_date",
+    )
+    assert [row[1] for row in around] == ["demo_fx", "demo_fx"], around
+
+
+def test_a_rate_of_the_file_in_another_quote_goes_through_its_rate_into_the_reporting_currency(
+    env, file_sql
+):
+    # ADR-0042, one rounding: the rate of the file times the rate of its quote into the reporting
+    # currency, through the euro, of the last publication of the quote on or before the day, in one
+    # division, with that rate of the quote kept as the second leg of the row.
+    currency, other = reporting(env), other_currency(env)
+    sql, _, last = file_sql
+    first_day, last_day = last - timedelta(days=30), last - timedelta(days=20)
+    entries = file_entries((other, "GBP", "0.9", first_day, last_day))
+    output = warehouse_output(
+        env,
+        f"BEGIN; {entries} "  # noqa: S608 (constants of this file, codes of .env and the SQL of dbt)
+        f"WITH w AS ({sql}), published AS ({PUBLISHED_RATES}) "
+        "SELECT 'written|' || count(*) || '|' || count(*) FILTER (WHERE w.rate_source <> "
+        "'deployment' OR w.base_currency <> 'GBP' OR w.base_rate <> 0.9 OR w.is_carried_forward "
+        "OR w.cross_source IS DISTINCT FROM 'demo_fx' OR w.cross_rate <> pg.rate "
+        "OR w.cross_published_on <> (SELECT max(p.rate_date) FROM published AS p "
+        "WHERE p.currency = 'GBP' AND p.rate_date <= w.rate_date) "
+        "OR abs(w.rate_into_reporting_currency - 0.9 * pr.rate / pg.rate) >= 1e-12) || '|' "
+        "|| count(*) FILTER (WHERE pg.rate IS NULL OR pr.rate IS NULL) "
+        "FROM w LEFT JOIN published AS pg "
+        "ON pg.rate_date = w.cross_published_on AND pg.currency = 'GBP' "
+        "LEFT JOIN published AS pr "
+        f"ON pr.rate_date = w.cross_published_on AND pr.currency = '{currency}'; ROLLBACK",
+    )
+    days = len(entry_days(first_day, last_day))
+    assert written(output) == [[str(days), "0", "0"]], output.splitlines()[-3:]
+
+
+def test_a_changed_rate_of_the_file_reaches_every_day_of_its_entry_older_than_14_days_too(
+    env, file_sql
+):
+    # Each run computes every day of the entries: once the core has accepted the loads of the
+    # rates of those days, and the run reads only the last 14 days of the rates, a changed rate
+    # still reaches each of them, and no other row changes, as the rates of the sources do not
+    # carry over a day of the file.
+    currency, other = reporting(env), other_currency(env)
+    sql, _, last = file_sql
+    first_day, last_day = last - timedelta(days=40), last - timedelta(days=30)
+    output = warehouse_output(
+        env,
+        f"BEGIN; {file_entries((other, currency, '1.1', first_day, last_day))} {merged(sql)} "  # noqa: S608 (constants of this file, codes of .env and the SQL of dbt)
+        f"DELETE FROM {RATE_DAYS} AND day < (SELECT max(day) - 13 FROM {RATE_DAYS}); "
+        f"UPDATE {FILE_RATES} SET rate = '1.3' WHERE _dlt_id = 'c7-0'; "
+        f"SELECT {FILE_ROW} FROM ({sql}) AS w ORDER BY rate_date, currency; ROLLBACK",
+    )
+    expected = [
+        [
+            str(day),
+            other,
+            "1.3",
+            currency,
+            "1.3000000000",
+            "deployment",
+            str(first_day),
+            "false",
+            "",
+        ]
+        for day in entry_days(first_day, last_day)
+    ]
+    assert written(output) == expected, output.splitlines()[-4:]
+
+
+def test_the_days_of_a_removed_entry_wait_for_their_source_and_then_take_its_rate(env, file_sql):
+    # Point 5 of #227: a day that the file no longer covers keeps the rate of the file while the
+    # run cannot read the rate of the source, as raw no longer holds it; ops.ops_rates counts it
+    # off the file and among the days without a rate of demo_fx, whose next load takes the history
+    # again from it (agoranomos_pipelines/rates.py); a run that reads that load writes the rate of
+    # the source again, as the core held it before the entry.
+    currency, other = reporting(env), other_currency(env)
+    sql, ops, last = file_sql
+    first_day, last_day = last - timedelta(days=40), last - timedelta(days=30)
+    days = len(entry_days(first_day, last_day))
+    keys = (
+        f"reporting_currency = '{currency}' AND currency = '{other}' "
+        f"AND rate_date BETWEEN date '{first_day}' AND date '{last_day}'"
+    )
+    output = warehouse_output(
+        env,
+        f"BEGIN; CREATE TEMP TABLE kept AS SELECT * FROM {CORE_RATES} WHERE {keys}; "  # noqa: S608 (constants of this file, codes of .env and the SQL of dbt)
+        f"{file_entries((other, currency, '1.1', first_day, last_day))} {merged(sql)} "
+        "SAVEPOINT accepted; "
+        f"DELETE FROM {RATE_DAYS} AND day < (SELECT max(day) - 13 FROM {RATE_DAYS}); "
+        f"DELETE FROM {FILE_RATES} WHERE _dlt_id = 'c7-0'; "
+        f"SELECT 'written|' || count(*) FROM ({sql}) AS w; "
+        f"SELECT 'kept|' || count(*) FROM {CORE_RATES} WHERE {keys} "
+        "AND rate_source = 'deployment'; "
+        "SELECT 'ops|' || coalesce(rate_source, '') || '|' "
+        "|| coalesce(first_day_off_the_file::text, '') || '|' || days_off_the_file || '|' "
+        "|| coalesce(first_day_without_rate_of_source::text, '') || '|' "
+        f"|| days_without_rate_of_source FROM ({ops}) AS o ORDER BY rate_source; "
+        # The load of the history of the source brings the rates of those days to staging again.
+        "ROLLBACK TO SAVEPOINT accepted; "
+        f"DELETE FROM {FILE_RATES} WHERE _dlt_id = 'c7-0'; "
+        f"CREATE TEMP TABLE back AS {sql}; "
+        "SELECT 'back|' || count(*) || '|' || (SELECT count(*) FROM kept) || '|' || count(*) "
+        "FILTER (WHERE NOT EXISTS (SELECT FROM kept AS k "
+        "WHERE row(k.*) IS NOT DISTINCT FROM row(b.*))) "
+        f"FROM back AS b WHERE b.currency = '{other}'; ROLLBACK",
+    )
+    lines = output.splitlines()
+    tagged = {
+        tag: [line.split("|")[1:] for line in lines if line.startswith(f"{tag}|")]
+        for tag in ("written", "kept", "ops", "back")
+    }
+    assert tagged["written"] == [["0"]], lines[-6:]
+    assert tagged["kept"] == [[str(days)]], lines[-6:]
+    [row] = [row for row in tagged["ops"] if row[0] == "demo_fx"]
+    assert row[1:3] == [str(first_day), str(days)], tagged["ops"]
+    assert row[3] <= str(first_day), tagged["ops"]
+    assert int(row[4]) >= days, tagged["ops"]
+    assert "deployment" not in [row[0] for row in tagged["ops"]], tagged["ops"]
+    assert tagged["back"] == [[str(days), str(days), "0"]], lines[-3:]
+
+
+def rates_file(env):
+    """extensions/model/rates.toml in the extensions folder that .env names."""
+    folder = env.get("AGORANOMOS_EXTENSIONS_DIR") or "./extensions"
+    return (REPO_ROOT / folder).resolve() / "model" / "rates.toml"
+
+
+@pytest.fixture
+def written_file(env, built):
+    """A file of rates that the test writes, removed at the end, with the settings loaded again
+    without it, so that raw_settings.rates is empty as before."""
+    path = rates_file(env)
+    assert not path.exists(), "extensions/model/rates.toml is in the way of this test"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        yield path
+    finally:
+        path.unlink(missing_ok=True)
+        run_in_tasks(env, LOAD_SETTINGS)
+        found = warehouse_output(env, f"SELECT count(*) FROM {FILE_RATES}")  # noqa: S608 (a constant)
+        assert found == "0", found
+
+
+def test_the_task_of_the_settings_loads_the_rates_of_the_file_exactly(env, written_file):
+    # The rate goes to raw as the file writes it, in text, and the staging view gives it as an
+    # exact numeric, ten decimal places too.
+    other = other_currency(env)
+    written_file.write_text(
+        f'[[rates]]\ncurrency = "{other}"\nquote = "GBP"\nrate = 0.8512345678\n'
+        "from = 2026-10-01\nto = 2026-10-31\n",
+        encoding="utf-8",
+    )
+    result = run_in_tasks(env, LOAD_SETTINGS)
+    assert result.stdout.strip().splitlines()[-1] == "1", result.stdout.splitlines()[-1:]
+    row = warehouse_output(
+        env,
+        "SELECT currency || '|' || quote_currency || '|' || rate || '|' || first_day || '|' "
+        "|| last_day || '|' || origin FROM staging.stg_settings__rates",
+    )
+    assert row == f"{other}|GBP|0.8512345678|2026-10-01|2026-10-31|extensions", row
+
+
+def test_a_mistake_in_the_file_of_rates_fails_the_task_of_the_settings(
+    env, airflow_url, token, written_file
+):
+    # A mistake stops the run at its first task, before any write: no task of dbt runs, so the
+    # rates of the core and the marts keep their data.
+    written_file.write_text(
+        '[[rates]]\ncurrency = "EUR"\nquote = "EUR"\nrate = 1.2\n'
+        "from = 2026-10-01\nto = 2026-10-31\n",
+        encoding="utf-8",
+    )
+    counts = (
+        f"SELECT (SELECT count(*) FROM {CORE_RATES}), "  # noqa: S608 (a constant)
+        "(SELECT count(*) FROM marts.fx_rates_daily), "
+        "(SELECT count(*) FROM marts.ad_stats_campaign_daily)"
+    )
+    before = warehouse_output(env, counts)
+    unpause(airflow_url, token, TRANSFORM)
+    run = trigger(airflow_url, token, TRANSFORM)
+    run = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=600)
+    assert run["state"] == "failed", run["state"]
+    states = {i["task_id"]: i["state"] for i in task_instances(airflow_url, token, run)}
+    assert states["load_settings"] == "failed", states["load_settings"]
+    ran = [task for task, state in states.items() if state == "success"]
+    assert not ran, ran
+    assert warehouse_output(env, counts) == before
 
 
 # A reporting currency that is neither a currency of an account of the demo nor that of the stack,

@@ -210,6 +210,8 @@ The exchange rates into the reporting currency come from the sources that `AGORA
 
 The DAGs are `agoranomos_bank_of_italy_daily`, `agoranomos_nbk_daily` and `agoranomos_ecb_daily`. A deployment with a real source unpauses the three, or with `ecb` the last alone: the first source gives the rates, the second the currencies that the first lacks, and the ECB a day that the first did not publish, as when its load of that day failed. A DAG that the setting does not name loads its window if it is unpaused, which the model does not read, and never takes its history again. `dbt`, the tasks of Airflow and `marts-init` get the setting from `compose.yaml`. A change takes effect at the next run of the transform: the rates that the core holds keep their source, and the new days come in the new order ([The rates](data-model.md#the-rates)).
 
+The rates that the deployment gives in `extensions/model/rates.toml` go before every source of the order on the days of their entries ([Give your own rates](#give-your-own-rates)).
+
 The rates of the Bank of Italy are indicative, its answers say, and no financial benchmark under Regulation (EU) 2016/1011. Its portal states no terms of its own; the policy of the statistics of the ESCB on the site of the bank allows their reuse with the source quoted and the data not modified, and whether that policy covers the rates of the portal is an open question of [ADR-0042](../adr/0042-take-the-rates-from-the-bank-of-italy-and-the-national-bank-of-kazakhstan.md), which the maintainer has asked the bank about. The columns `rate_source` and `cross_source` of the rates quote the source of each rate. The data licence of the National Bank of Kazakhstan allows the use of its rates with the source named, and the ECB asks to be cited as the source of its reference rates.
 
 ## Alerts
@@ -382,16 +384,37 @@ A stack from before the name went to lower case keeps the name of its warehouse 
 
 ## The settings of the model
 
-The model of advertising statistics reads two settings files of the deployment, in `model/` in the extensions folder, which releases never change ([The data model](data-model.md)). Both are optional.
+The model of advertising statistics reads three settings files of the deployment, in `model/` in the extensions folder, which releases never change ([The data model](data-model.md)). Each is optional.
 
 | File | What it holds |
 |---|---|
 | `clients.toml` | The clients of the business, `[clients.<id>]` with a `name`, and the ad accounts of each, `[[accounts]]` with `platform`, `account_id` and `client` ([ADR-0024](../adr/0024-one-deployment-is-one-business.md)). An account that the file does not name belongs to the client `unassigned`. |
 | `conversion_actions.toml` | Which conversion actions count in the `conversions_primary` of a campaign: `[[actions]]` with `platform`, `conversion_action_id`, `is_primary` and, optionally, `conversion_category`; an entry sets whether the action is primary, and its category when it names one, in place of the row of the base package, or of what a Google Ads account says, for the same action ([ADR-0025](../adr/0025-model-advertising-statistics-once.md)). |
+| `rates.toml` | The deployment's own rates, such as agreed ones, which go before the sources of the rates on the days of their entries: `[[rates]]` with `currency`, `quote`, `rate`, `from` and `to`, one unit of `currency` worth `rate` units of `quote` on each day from `from` to `to` ([Give your own rates](#give-your-own-rates), [ADR-0042](../adr/0042-take-the-rates-from-the-bank-of-italy-and-the-national-bank-of-kazakhstan.md)). |
 
-The first task of each run of `agoranomos_demo_transform`, `load_settings`, reads both files, with the clients of the demo from a file of the same form in the base package, checks them and loads them as the `loader` role into `raw_settings`, in place of what was there; the dbt run that follows uses them. So a change takes effect at the next run of the transform, which you can trigger in Airflow, and needs no `./agoranomos up`. The Airflow services mount the folder read-only.
+The first task of each run of `agoranomos_demo_transform`, `load_settings`, reads the three files, with the clients of the demo from a file of the same form in the base package, checks them and loads them as the `loader` role into `raw_settings`, in place of what was there; the dbt run that follows uses them. So a change takes effect at the next run of the transform, which you can trigger in Airflow, and needs no `./agoranomos up`. The Airflow services mount the folder read-only.
 
 Each file is UTF-8 TOML of at most 256 KiB. A client ID is lower-case letters, digits, `-` and `_`, at most 64 characters, starting with a letter or a digit, and `unassigned` is reserved; a name is one line of at most 100 characters, and an account ID or an action ID at most 200. A key that the file does not allow, an account or an action listed twice, an account of a client that the file does not name, a text over its limit or with control characters, and a mistake in the TOML are errors: the task fails with one line that names the file and the entry, such as `clients.toml: [clients.Acme]: a client ID is lower-case letters, digits, - and _, at most 64 characters`, nothing is written, no task of dbt runs, and the marts keep their data. The line names a key or an ID of the file only where it says where the mistake is, and repeats no value. The files are data: the task parses them, and nothing in them runs.
+
+### Give your own rates
+
+A deployment that has agreed rates with its clients, or keeps rates of its own, gives them in `extensions/model/rates.toml`, one entry for each rate and range of days:
+
+```toml
+[[rates]]
+currency = "USD"      # the currency of the accounts that the rate converts
+quote = "KZT"         # the currency in which the rate is given
+rate = 470.25         # the units of quote for one unit of currency
+from = 2026-11-01     # the first day, a date of TOML
+to = 2026-11-30       # the last day, a date of TOML; required
+```
+
+- **What it changes.** On each day from `from` to `to`, the rate of `currency` into the reporting currency is the rate of the file, before every source of `AGORANOMOS_RATES_SOURCE`, in `core.fx_rates_daily` and so in every mart, with `rate_source` `deployment` ([The rates](data-model.md#the-rates)). A day outside every entry takes the sources as before. An entry of a currency that no account has, or of the reporting currency itself, changes nothing.
+- **The quote.** A `quote` in the reporting currency is the rate itself. Another `quote` goes through the rate of that currency into the reporting currency that the sources give on the day, the last on or before it, in one division, and the row keeps that rate as its second leg in `cross_source`, `cross_rate` and `cross_published_on`. The quote must be a currency of which the first source of the rates, a source with its base, or the demo gives a rate: the test `assert_each_quote_of_the_file_of_rates_has_a_rate` fails the run for one of which none does. For a past day whose loads of the rates the core has already accepted, a quote in the reporting currency always applies at the next run, and another may wait for the history of the rates, as below.
+- **The checks.** `currency` and `quote` are codes of ISO 4217 and differ; `rate` is a number above zero with at most 10 decimal places and 10 digits before the point, read exactly, never as a float; `from` and `to` are dates, `from` on or before `to`, and `to` is required, so that an agreed rate never runs on for years unnoticed; and two entries of one currency may not share a day. A mistake fails `load_settings` with one line, such as `rates.toml: rates[2]: the days of USD overlap those of rates[1]`, which never repeats a rate.
+- **A change.** Each run of the transform computes every day of every entry again, so a changed rate reaches each day of its entry at the next run, however old the day.
+- **An entry that goes, or shrinks.** The core keeps the rate of the file on the days that the file no longer covers until a load of their source brings their rates again: the raw layer no longer holds the rates of a day that the core has accepted. `ops.ops_rates` counts such a day as off the file, `./agoranomos status` warns about it, and the next load of the rates of its source takes the history from it, as after a change of the reporting currency; trigger that DAG in Airflow to take it now.
+- **Where it shows.** `ops.ops_rates` has a row of the source `deployment` with the last day that the file covers, which `./agoranomos status` names, and no age, as an agreed rate is never late.
 
 ## Secrets
 

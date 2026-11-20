@@ -67,3 +67,30 @@ models:
         description: '{{ doc("conversion_category") }}'
       - name: origin
         description: '{{ doc("origin") }}'
+  - name: stg_settings__rates
+    description: >-
+      The rates that the deployment gives in extensions/model/rates.toml, such as agreed ones, one
+      row for each entry: one unit of currency is worth rate units of quote_currency on each day
+      from first_day to last_day. They go before the sources of the rates in core.fx_rates_daily
+      (ADR-0042). The first task of the transform checks that the entries of a currency do not
+      overlap, so currency and first_day are its key. Its tests guard the marts: when one of them
+      fails, dbt does not rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [currency, first_day]
+    columns:
+      - name: currency
+        description: '{{ doc("currency") }}'
+        data_tests: [not_null]
+      - name: quote_currency
+        description: '{{ doc("quote_currency") }}'
+      - name: rate
+        description: '{{ doc("rate") }}'
+      - name: first_day
+        description: '{{ doc("first_day") }}'
+        data_tests: [not_null]
+      - name: last_day
+        description: '{{ doc("last_day") }}'
+      - name: origin
+        description: '{{ doc("origin") }}'

@@ -16,7 +16,8 @@
     * nbk: the National Bank of Kazakhstan, then the Bank of Italy for a currency that the first
       lacks, through the euro, then the European Central Bank;
     * ecb: the European Central Bank alone, for a deployment that keeps its reference rates.
-    The rates of a file of the deployment, planned for v0.7, are to come first. -#}
+    The rates of the file of the deployment, extensions/model/rates.toml, come before every source
+    of the order on the days of their entries (core_fx_rates_daily). -#}
 {% macro rates_chain() -%}
     {%- set setting = env_var('AGORANOMOS_RATES_SOURCE', 'auto') or 'auto' -%}
     {%- if setting == 'auto' -%}
@@ -104,13 +105,25 @@ end)
       base of the first source, of the same day or of the last day before it on which a source of
       the order published it, and that of the currency, in one division; for the base itself as
       the reporting currency, the rate of the currency alone, so that the tenge of a currency of
-      the NBK is the price that it published. -#}
+      the NBK is the price that it published. The row gives that division too, as
+      rate_numerator over rate_denominator, so that a rate of the file of the deployment in
+      another currency than the reporting one goes through it in one division as well.
+    * The rows of the file of the deployment (rate_source deployment, core_fx_rates_daily) are no
+      publication of a source, and none of them counts here, but for the rate of their quote,
+      their second leg, which they keep as its source published it. A day on which the core holds
+      the rate of the base currency of the first source from the file, and staging reads no rate
+      of the reporting currency, has no rate of the reporting currency against the base: the row
+      of the base keeps none, and the rate of an earlier day does not carry over it. -#}
 {% macro rates_known(staged, rates, days, loads, wanted) -%}
     {%- set chain = rates_chain() -%}
     {%- set first = chain[0] -%}
     {%- set second = chain[1] if chain | length > 2 else none -%}
     {%- set base = rates_base(first) -%}
     {%- set links = chain + ['demo_fx'] -%}
+    {%- set same_base = [] -%}
+    {%- for code in links if rates_base(code) == base -%}
+        {%- do same_base.append(code) -%}
+    {%- endfor -%}
     {%- set reported = env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') -%}
 with read_days as (
     select distinct on (d.source, d.day)
@@ -229,6 +242,19 @@ held as (
         and h.base_currency = '{{ base }}'
         and h.currency = h.base_currency
         and h.reporting_currency <> h.currency
+    union all
+    -- The rate of the quote of a rate of the file of the deployment, its second leg, as a source
+    -- with the base of the first source published it.
+    select
+        h.cross_published_on,
+        h.cross_source,
+        '{{ base }}',
+        h.base_currency::text,
+        {{ rates_from_published('h.cross_source', 'h.cross_rate') }},
+        h.cross_rate
+    from {{ rates }} as h
+    where h.rate_source = 'deployment'
+        and h.cross_source in ('{{ same_base | join("', '") }}')
 ),
 
 published as (
@@ -414,12 +440,23 @@ chosen as (
 {%- if base != reported %},
 
 -- The rate of the reporting currency against the base of the first source on each calendar day,
--- that of its last day of publication on or before it.
+-- that of its last day of publication on or before it; none when that last day is a day whose rate
+-- of the base the core holds from the file of the deployment, and no source gives that rate.
 reporting_days as (
     select c.day, max(r.rate_date) over (order by c.day) as published_on
     from calendar as c
-    left join chosen as r
-        on r.rate_date = c.day and r.currency = {{ reporting_currency() }}
+    left join (
+        select rate_date
+        from chosen
+        where currency = {{ reporting_currency() }}
+        union
+        select rate_date
+        from {{ rates }}
+        where rate_source = 'deployment'
+            and currency = '{{ base }}'
+            and reporting_currency = {{ reporting_currency() }}
+    ) as r
+        on r.rate_date = c.day
 ),
 
 reporting_rates as (
@@ -437,12 +474,20 @@ select
     c.base_rate,
     {%- if base == reported and base == 'EUR' %}
     1 / c.amount as rate_into_reporting_currency,
+    cast(1 as numeric) as rate_numerator,
+    c.amount as rate_denominator,
     {%- elif base == reported %}
     c.amount as rate_into_reporting_currency,
+    c.amount as rate_numerator,
+    cast(1 as numeric) as rate_denominator,
     {%- elif base == 'EUR' %}
     r.amount / c.amount as rate_into_reporting_currency,
+    r.amount as rate_numerator,
+    c.amount as rate_denominator,
     {%- else %}
     c.amount / r.amount as rate_into_reporting_currency,
+    c.amount as rate_numerator,
+    r.amount as rate_denominator,
     {%- endif %}
     c.source as rate_source,
     c.cross_source,

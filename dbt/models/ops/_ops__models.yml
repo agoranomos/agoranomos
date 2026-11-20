@@ -59,8 +59,14 @@ models:
       rows, the first of them and how many, of all the currencies on every row, and of those of the
       source of the row. A currency without a rate belongs to the first source of the order, or to
       the demo while the core holds a rate of it and none of a source of the order, in any reporting
-      currency. The next load of that source takes their history again. ./agoranomos status warns
-      when a rate is late, and when a day has no rate.
+      currency. The next load of that source takes their history again. And the file of the
+      deployment, extensions/model/rates.toml: a row of the source deployment while it has an
+      entry, with the last day that it covers and no age, as a rate that the deployment gives is
+      never late; and the days off the file, on which the core holds a rate of the file that the
+      file no longer gives, as after an entry is removed, or does not hold a rate that the file
+      gives, which count among the days without a rate of the source of their currency, so that
+      its next load takes their history again. ./agoranomos status warns when a rate is late, when
+      a day has no rate, and when a day is off the file.
     columns:
       - name: reporting_currency
         description: '{{ doc("reporting_currency") }}'
@@ -70,7 +76,8 @@ models:
         description: >-
           The day of the last rate that the source published, as core.fx_rates_daily holds it, of
           a currency or of the second leg of a rate; none while it holds no such rate into the
-          reporting currency.
+          reporting currency. For the source deployment, the last day that an entry of the file of
+          the deployment covers.
       - name: business_days_since_rate
         description: >-
           How many days, Monday to Friday, there are after last_rate_date up to the day on which
@@ -78,7 +85,8 @@ models:
       - name: is_late
         description: >-
           Whether business_days_since_rate is more than 3: the loads of the rates brought no newer
-          rate for more than 3 business days.
+          rate for more than 3 business days. Never for the source deployment, whose rates are
+          not published.
       - name: first_day_without_rate
         description: >-
           The first day, from the first day of the facts of the accounts of each currency but the
@@ -91,14 +99,27 @@ models:
           reporting currency in the core: 0 when each of them has one.
       - name: first_day_without_rate_of_source
         description: >-
-          The first day without a rate, as first_day_without_rate, of the currencies whose newest
-          rate in the core comes from the source of the row, or, for the first source of the order,
-          of those without a rate in the core; none when every such day has one. The next load of
-          the source takes the history of the rates again from it (agoranomos_pipelines/rates.py).
+          The first day without a rate, as first_day_without_rate, or off the file, as
+          first_day_off_the_file, of the currencies whose newest rate in the core comes from the
+          source of the row, or, for the first source of the order, of those without a rate in the
+          core; none when every such day has one. The next load of the source takes the history of
+          the rates again from it (agoranomos_pipelines/rates.py).
       - name: days_without_rate_of_source
         description: >-
-          How many calendar days without a rate, as days_without_rate, the currencies of
+          How many calendar days without a rate or off the file the currencies of
           first_day_without_rate_of_source have: 0 when each of them has one.
+      - name: first_day_off_the_file
+        description: >-
+          The first day of the facts of a currency but the reporting currency on which the core
+          holds a rate of the file of the deployment, extensions/model/rates.toml, that the file no
+          longer gives, or with another quote or rate, or does not hold the rate that the file
+          gives, as for a quote of which no source gives a rate; none when there is no such day.
+          The core keeps the rate of the file on such a day until a load of the source of its
+          currency brings the rate of that day again.
+      - name: days_off_the_file
+        description: >-
+          How many calendar days off the file there are, as first_day_off_the_file: 0 when there
+          is none.
   - name: ops_history
     description: >-
       How far back the loads of each account of each platform reach, one row each, from the loads
