@@ -63,7 +63,7 @@ The backups stay on that machine: add `ops` to `COMPOSE_PROFILES` for one every 
 ## Look around
 
 - In Metabase, open the collection **agoranomos / Demo** and its dashboards **Advertising overview (demo)** and **Web analytics (demo)**: [See the demo](see-the-demo.md) explains what they show.
-- In Airflow, open the DAGs `agoranomos_demo_history` and `agoranomos_demo_transform`, which loaded the demo data and built the model from it, and `agoranomos_demo_daily`, which brings each new day. To check the executor, unpause the DAG `agoranomos_selfcheck` and trigger it: its one task runs where the executor runs tasks.
+- In Airflow, open the DAGs `agoranomos_demo_history` and `agoranomos_demo_transform`, which loaded the demo data and built the model from it, `agoranomos_demo_daily`, which brings each new day, and `agoranomos_demo_intraday`, which brings the current day every few hours. To check the executor, unpause the DAG `agoranomos_selfcheck` and trigger it: its one task runs where the executor runs tasks.
 
 ## Add your own DAG
 
