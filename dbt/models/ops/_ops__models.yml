@@ -419,9 +419,9 @@ models:
       - name: account_id
         description: '{{ doc("account_id") }}'
       - name: first_day
-        description: The first day of the totals of the account that the comparison took.
+        description: '{{ doc("first_day") }}'
       - name: last_day
-        description: The last day of the totals of the account that the comparison took.
+        description: '{{ doc("last_day") }}'
       - name: days
         description: How many days of the account have totals of the platform in those 90 days.
       - name: days_differing

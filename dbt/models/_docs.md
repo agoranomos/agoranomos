@@ -402,11 +402,11 @@ The currency in which a rate gives the value of one unit of another currency, su
 {% enddocs %}
 
 {% docs first_day %}
-The first day on which the rate of the file of the deployment holds, from in its entry of extensions/model/rates.toml.
+The first day of the range of days that the row covers: of a rate of the file of the deployment, from in its entry of extensions/model/rates.toml, the first day on which the rate holds; of a comparison of the core with the totals of a platform, the first day of the totals of the account that it took.
 {% enddocs %}
 
 {% docs last_day %}
-The last day on which the rate of the file of the deployment holds, to in its entry of extensions/model/rates.toml.
+The last day of the range of days that the row covers: of a rate of the file of the deployment, to in its entry of extensions/model/rates.toml, the last day on which the rate holds; of a comparison of the core with the totals of a platform, the last day of the totals of the account that it took.
 {% enddocs %}
 
 {% docs airflow_dag_id %}
