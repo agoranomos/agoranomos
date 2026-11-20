@@ -1,7 +1,7 @@
 -- Advertising statistics by day and ad on every platform, a view over the core (ADR-0037): one
 -- row of core.ad_stats_ad_daily, with the names and states of its dimensions, money in the
--- currency of the account and in the reporting currency at the rate of its day, and when its load
--- ended, as ad_stats_campaign_daily has them. An ad without a name on its platform, such as a
+-- currency of the account and in the reporting currency at the rate of its day, when its load
+-- ended and whether the row is final, as ad_stats_campaign_daily has them. An ad without a name on its platform, such as a
 -- responsive search ad of Google, shows its ID. The conversions of the primary actions are none
 -- at this level: the conversions by action of ads are a module (ADR-0036).
 -- The test of the ads against their ad groups reads the view of ad groups, which dbt orders before
@@ -41,7 +41,12 @@ select
     r.published_on as fx_rate_date,
     r.is_carried_forward as is_fx_rate_carried_forward,
     l.finished_at as loaded_at,
-    a.is_active as is_account_active
+    a.is_active as is_account_active,
+    coalesce(
+        (l.finished_at at time zone a.time_zone)::date - f.report_date
+            >= p.restatement_window_days,
+        false
+    ) as is_final
 from {{ ref('core_ad_stats_ad_daily') }} as f
 left join {{ ref('dim_account') }} as a
     on a.account_sk = f.account_sk

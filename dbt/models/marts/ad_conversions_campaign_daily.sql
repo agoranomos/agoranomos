@@ -1,8 +1,8 @@
 -- Conversions by day, campaign and conversion action on every platform, a view over the core
 -- (ADR-0037): one row of core.ad_conversions_campaign_daily, with the names of its dimensions, the
 -- category of its action and whether the action is primary, money in the currency of the account
--- and in the reporting currency at the rate of its day, and when its load ended, as
--- ad_stats_campaign_daily has them.
+-- and in the reporting currency at the rate of its day, when its load ended and whether the row
+-- is final, as ad_stats_campaign_daily has them.
 select
     f.report_date,
     a.platform,
@@ -31,7 +31,12 @@ select
     r.published_on as fx_rate_date,
     r.is_carried_forward as is_fx_rate_carried_forward,
     l.finished_at as loaded_at,
-    a.is_active as is_account_active
+    a.is_active as is_account_active,
+    coalesce(
+        (l.finished_at at time zone a.time_zone)::date - f.report_date
+            >= p.restatement_window_days,
+        false
+    ) as is_final
 from {{ ref('core_ad_conversions_campaign_daily') }} as f
 left join {{ ref('dim_account') }} as a
     on a.account_sk = f.account_sk

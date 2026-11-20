@@ -13,7 +13,13 @@
 -- carries no filter of a period across a join (B16). The primary actions are an array that the
 -- query reads once, so that the lookup is a condition of the index. The columns of v0.4 come
 -- first, in their order, and the later ones after them. A row of a day still in progress in its
--- account, which only a load of the kind intraday took, carries is_partial_day (ADR-0051).
+-- account, which only a load of the kind intraday took, carries is_partial_day (ADR-0051). A row
+-- is final, is_final, when the day on which its load ended, in the time zone of the account, is
+-- at least the window of restatements of its platform after the day of the row, and the day is
+-- whole: a daily load takes again only the days of the window, so no later load changes the row
+-- (ADR-0037, ADR-0038). It follows the load and not the calendar, so a day that a load took young
+-- before a stop of the stack longer than the window is never final. A row whose load or platform
+-- the view does not find is not final, rather than none.
 -- Metabase reads the marts layer only.
 -- The test of the primary actions reads the view of the conversions by action, which dbt orders
 -- before it: depends_on: {{ ref('ad_conversions_campaign_daily') }}
@@ -49,7 +55,13 @@ select
     r.is_carried_forward as is_fx_rate_carried_forward,
     l.finished_at as loaded_at,
     a.is_active as is_account_active,
-    f.is_partial_day
+    f.is_partial_day,
+    coalesce(
+        not f.is_partial_day
+        and (l.finished_at at time zone a.time_zone)::date - f.report_date
+            >= p.restatement_window_days,
+        false
+    ) as is_final
 from {{ ref('core_ad_stats_campaign_daily') }} as f
 left join {{ ref('dim_account') }} as a
     on a.account_sk = f.account_sk
