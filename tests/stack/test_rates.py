@@ -517,8 +517,13 @@ def test_a_new_reporting_currency_takes_the_history_of_the_rates_again(
         assert int(days) > 0
         assert int(warehouse_output(env, UNRATED_FACTS.format(currency=NEW_CURRENCY))) > 0
         # The views of the marts go back to the currency of the stack at once, so that the run of
-        # the transform below, in that currency, tests them as they are; ops.ops_rates stays in GBP.
+        # the transform below, in that currency, tests them as they are. marts-init builds every
+        # view of ops again with them, ops.ops_rates in the currency of the stack too, so a run in
+        # GBP builds it again in GBP, as the start in GBP left it for the load below.
         marts_init()
+        dbt_run("gaps", NEW_CURRENCY, "ops_rates")
+        [[shown, first_without, _]] = table(env, GAPS)
+        assert (shown, first_without) == (NEW_CURRENCY, str(first_fact)), (shown, first_without)
         # The next load of the rates of the demo, as its task makes it in GBP, reads ops.ops_rates
         # as transformer and takes the history again, from a week before the first day without a
         # rate or from the first day of the table, with the kind history.

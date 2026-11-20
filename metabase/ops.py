@@ -12,8 +12,11 @@ of maintenance fills and the transform creates (ADR-0039): the disk, the steps o
 and the monthly comparison of the core with the totals of the platforms.
 Metabase reads them as metabase_reader, which may read these views and tables and no table of
 elementary. The connection shows only the schema marts in Metabase, and a native question reads any
-schema that its role may read. Until the first run of the transform has built them, the questions
-show the error of PostgreSQL that the relation does not exist.
+schema that its role may read. On a new warehouse, until the first run of the transform has built
+them, the questions show the error of PostgreSQL that the relation does not exist. Once a run has
+made the tables of elementary, marts-init builds the views and tables of ops on every start, before
+metabase-init, so that a view or a column that a release adds is there from the start of the
+release (marts_init.py).
 """
 
 from __future__ import annotations

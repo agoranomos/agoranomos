@@ -41,21 +41,33 @@ rows, and metabase_reader and ai_reader may not read staging.
   AGORANOMOS_RATES_SOURCE, reaches dbt here too, so the rates of the new currency come from the
   same sources as in the runs of the transform.
 
-Once dbt has ended well, the job drops the relations of earlier releases in LEFTOVERS that the
-warehouse holds, each by its name and its kind, and names each in its log: no model of this
-release builds or reads them, and no build of dbt takes them with it. On a warehouse of v0.4 the
-build has by then built the views of staging again, and the views of v0.4 that read those
-relations went with the views that they read. A drop that fails, as for a view of a deployment
+Once dbt has ended well, where a run of the transform has made the tables of elementary that the
+views of ops read, the job builds the views and tables of ops of the base package (dbt/models/ops)
+too, in a dbt build of their own: the Ops collection of metabase-init reads them (ops.py,
+ADR-0029), and a view that the release adds, or a column that it adds to one, would otherwise make
+a question of Pipeline health fail until the next run of the transform, up to a day later. dbt
+builds them again on every run of the transform anyway, as the override of the views is for marts
+alone. A build of them that fails is a warning and no failure, as the views of marts are built:
+the questions on such a view show the error of PostgreSQL until a run of the transform builds it,
+as on a new warehouse, where no run has made the tables of elementary yet and the job leaves the
+views of ops to the first one.
+
+Then the job drops the relations of earlier releases in LEFTOVERS that the warehouse holds, each
+by its name and its kind, and names each in its log: no model of this release builds or reads
+them, and no build of dbt takes them with it. On a warehouse of v0.4 the build has by then built
+the views of staging again, and the views of v0.4 that read those relations went with the views
+that they read. A drop that fails, as for a view of a deployment
 over one of them, is a warning, and the relation stays until a start that can drop it.
 
 The job takes the advisory lock of dbt/macros/marts_init.sql first, exclusive, on a connection of
-its own, and keeps it until dbt ends and the drops are done: the nodes of a run of the transform
-that write take it, shared, so the job waits for those that write when it starts, and the nodes
-that come after wait for the job, as max_active_runs of the DAG does not reach a service outside
-Airflow. dbt runs without DBT_JOB_RUN_ID, so its own nodes do not take the lock.
+its own, and keeps it until both builds of dbt end and the drops are done: the nodes of a run of
+the transform that write take it, shared, so the job waits for those that write when it starts,
+and the nodes that come after wait for the job, as max_active_runs of the DAG does not reach a
+service outside Airflow. dbt runs without DBT_JOB_RUN_ID, so its own nodes do not take the lock.
 
 The file uses the standard library, and psycopg2 of the virtual environment of dbt, whose Python
-runs it. Its own problems are one line that names the step, and the exit code is that of dbt.
+runs it. Its own problems are one line that names the step, and the exit code is that of the
+build of the views of marts.
 """
 
 from __future__ import annotations
@@ -89,6 +101,13 @@ SNAPSHOTS = ("dim_campaign_versions",)
 SEEDS = "package:agoranomos,resource_type:seed"
 # What a build of the views leaves to the next run of the transform where the snapshots exist.
 TESTS = ("test", "unit_test")
+# The views and tables of ops of the base package, which the Ops collection reads: the models of
+# dbt/models/ops, and none of the models of elementary, which share the schema.
+OPS = "package:agoranomos,path:models/ops"
+# The tables of elementary in ops that the views of ops read, which the task elementary of a run of
+# the transform makes (ADR-0029): without them, as in a new warehouse, the views of ops wait for
+# that run.
+ELEMENTARY = ("dbt_invocations", "dbt_run_results", "elementary_test_results")
 RATES = "core_fx_rates_daily"
 # The view of Ops of the rates, which names the days without a rate in the reporting currency.
 OPS_RATES = "ops_rates"
@@ -96,14 +115,18 @@ GAPS = "SELECT first_day_without_rate, days_without_rate FROM ops.ops_rates"
 # How long dbt may take: a build of the whole graph over empty tables takes minutes on a slow
 # machine.
 DBT_TIMEOUT = 1800
-# Whether those snapshots exist in core, and whether the rates of the core are of another reporting
-# currency only. transformer reads the catalog and core.fx_rates_daily, which it writes.
+# Whether those snapshots exist in core, whether the rates of the core are of another reporting
+# currency only, and whether those tables of elementary exist in ops. transformer reads the catalog
+# and core.fx_rates_daily, which it writes.
 STATE = (
     "SELECT (SELECT count(*) FROM pg_catalog.pg_class AS c "
     "JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace "
     "WHERE n.nspname = 'core' AND c.relname = ANY(%s)) = %s, "
     "EXISTS (SELECT FROM core.fx_rates_daily) "
-    "AND NOT EXISTS (SELECT FROM core.fx_rates_daily WHERE reporting_currency = %s)"
+    "AND NOT EXISTS (SELECT FROM core.fx_rates_daily WHERE reporting_currency = %s), "
+    "(SELECT count(*) FROM pg_catalog.pg_class AS c "
+    "JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace "
+    "WHERE n.nspname = 'ops' AND c.relname = ANY(%s)) = %s"
 )
 # The relations of earlier releases that no model, seed or snapshot of this release builds or
 # reads, and that an upgrade would otherwise leave, by name and kind; never a pattern, so that
@@ -136,11 +159,12 @@ class JobError(RuntimeError):
 
 @dataclass(frozen=True)
 class State:
-    """What the warehouse holds that decides the build: the snapshots of the core, and rates in
-    another reporting currency only."""
+    """What the warehouse holds that decides the build: the snapshots of the core, rates in
+    another reporting currency only, and the tables of elementary that the views of ops read."""
 
     snapshots: bool
     other_currency: bool
+    ops: bool = False
 
 
 def command(state: State, dbt: str = DBT, project: str = PROJECT, work: str = WORK) -> list[str]:
@@ -154,6 +178,29 @@ def command(state: State, dbt: str = DBT, project: str = PROJECT, work: str = WO
             selected.append(RATES)
         selected.append(OPS_RATES)
     excluded = ["--exclude-resource-type", *TESTS] if state.snapshots else []
+    return build(selected, excluded, variables, dbt, project, work)
+
+
+def ops_command(
+    state: State, dbt: str = DBT, project: str = PROJECT, work: str = WORK
+) -> list[str]:
+    """The call of dbt that builds the views and tables of ops after the views of marts, with the
+    vars of the build before it, and without tests, as the next run of the transform runs them."""
+    variables: dict[str, bool] = {"rebuild_views": True}
+    if state.other_currency:
+        variables["recompute_rates"] = True
+    return build([OPS], ["--exclude-resource-type", *TESTS], variables, dbt, project, work)
+
+
+def build(
+    selected: Sequence[str],
+    excluded: Sequence[str],
+    variables: Mapping[str, bool],
+    dbt: str,
+    project: str,
+    work: str,
+) -> list[str]:
+    """A dbt build of the read-only project, with its target and its logs on the tmpfs."""
     return [
         dbt,
         "--no-use-colors",
@@ -170,7 +217,7 @@ def command(state: State, dbt: str = DBT, project: str = PROJECT, work: str = WO
         *selected,
         *excluded,
         "--vars",
-        json.dumps(variables),
+        json.dumps(dict(variables)),
     ]
 
 
@@ -242,9 +289,39 @@ def lock_and_read(connection: Any, currency: str, log: Callable[[str], None]) ->
             cursor.execute(WAIT_FOR_LOCK)
             cursor.execute("SELECT pg_advisory_lock(%s)", (LOCK,))
             cursor.execute("RESET lock_timeout")
-        cursor.execute(STATE, (list(SNAPSHOTS), len(SNAPSHOTS), currency))
-        snapshots, other_currency = cursor.fetchone()
-    return State(snapshots=bool(snapshots), other_currency=bool(other_currency))
+        cursor.execute(
+            STATE,
+            (list(SNAPSHOTS), len(SNAPSHOTS), currency, list(ELEMENTARY), len(ELEMENTARY)),
+        )
+        snapshots, other_currency, ops = cursor.fetchone()
+    return State(snapshots=bool(snapshots), other_currency=bool(other_currency), ops=bool(ops))
+
+
+def build_ops(state: State, run: Run, log: Callable[[str], None]) -> None:
+    """Build the views and tables of ops, where the tables of elementary that they read exist;
+    a build that fails is a line of warning, and the job goes on."""
+    if not state.ops:
+        return
+    log("building the views of ops of the base package, which the Ops collection reads")
+    later = (
+        "so the questions of the Ops collection on a view of ops that this release adds or "
+        "changes show an error until the next run of the transform builds it"
+    )
+    try:
+        result = run(ops_command(state), timeout=DBT_TIMEOUT, check=False)
+    except subprocess.TimeoutExpired:
+        log(f"warning: dbt did not build the views of ops within {DBT_TIMEOUT} seconds, {later}")
+        return
+    except OSError as error:
+        log(
+            f"warning: cannot run dbt ({DBT}) for the views of ops: {type(error).__name__}, {later}"
+        )
+        return
+    if result.returncode != 0:
+        log(
+            f"warning: dbt exited with {result.returncode} on the views of ops, as the lines above "
+            f"say, {later}"
+        )
 
 
 def drop_statement(name: str, kind: str) -> str:
@@ -328,6 +405,7 @@ def main(
                 file=sys.stderr,
             )
             return result.returncode if result.returncode > 0 else 1
+        build_ops(state, run, log)
         try:
             drop_leftovers(connection, log)
         except Exception as error:

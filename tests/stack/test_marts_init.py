@@ -2,7 +2,8 @@
 start loads the seeds and builds the views of marts again from them, before metabase-init, as
 transformer; a view keeps its grants and its comment; the job, and db-init before it, wait for a
 node of the transform that writes, through the lock of dbt/macros/marts_init.sql; and it drops the
-relations of earlier releases that no model builds or reads, but one that a view needs. They need
+relations of earlier releases that no model builds or reads, but one that a view needs; and, once
+a run of the transform has made the tables of elementary, it builds the views of ops too. They need
 no demo: the views exist over an empty core too."""
 
 from __future__ import annotations
@@ -43,6 +44,14 @@ STAGING = (
     "SELECT n.nspname || '.' || c.relname FROM pg_catalog.pg_class AS c "
     "JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace "
     "WHERE n.nspname = 'staging' ORDER BY c.relname"
+)
+
+# The views and tables of ops of the dbt project, and those of them that the warehouse holds.
+OPS = sorted(path.stem for path in (REPO_ROOT / "dbt" / "models" / "ops").glob("*.sql"))
+IN_OPS = (
+    "SELECT c.relname FROM pg_catalog.pg_class AS c "
+    "JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace "
+    "WHERE n.nspname = 'ops' AND c.relkind IN ('r', 'p', 'v') ORDER BY c.relname"
 )
 
 
@@ -97,6 +106,28 @@ def test_a_start_loads_the_seeds_before_it_builds_the_views(env):
     assert result.returncode == 0, job_failed("marts-init", result)
     assert "marts-init: building the views of marts again from the seeds" in result.stdout
     assert shown_platforms(env, columns) == rows
+
+
+def test_a_start_builds_the_views_of_ops_once_a_transform_has_made_elementary(env):
+    # A view of ops that the warehouse lacks, as after an upgrade to a release that adds it, such
+    # as ops.ops_restatements of v0.6: the job builds it, so the question of the Ops collection on
+    # it answers from the start. Without a run of the transform, as on a stack without the demo
+    # that has loaded nothing, the tables of elementary that the views of ops read do not exist,
+    # and the job leaves the views of ops to that run.
+    found = set(warehouse_output(env, IN_OPS).split())
+    made = set(marts_init.ELEMENTARY) <= found
+    if made:
+        warehouse_output(env, "DROP VIEW IF EXISTS ops.ops_restatements")
+    result = compose("run", "--rm", "--no-deps", "-T", "marts-init", check=False)
+    assert result.returncode == 0, job_failed("marts-init", result)
+    built = "marts-init: building the views of ops of the base package" in result.stdout
+    assert built == made
+    assert "marts-init: warning:" not in result.stdout
+    if made:
+        found = set(warehouse_output(env, IN_OPS).split())
+        assert [name for name in OPS if name not in found] == []
+        for name in OPS:
+            warehouse_output(env, f"SELECT FROM ops.{name} LIMIT 0", role="metabase_reader")
 
 
 @pytest.mark.parametrize(
