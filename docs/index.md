@@ -36,8 +36,8 @@ agoranomos is open-source marketing BI out of the box: ad platforms → PostgreS
 </div>
 
 <figure class="ag-shot" markdown="span">
-    ![The dashboard Advertising in Metabase on the demo data: its tabs and filters, the spend, the conversions and the other KPIs of the last 12 weeks, and the spend and the conversions over time](assets/screenshots/advertising-overview-light.webp#only-light){ width="1440" height="900" loading="lazy" }
-    ![The dashboard Advertising in Metabase on the demo data, in the dark theme of Metabase: its tabs and filters, the spend, the conversions and the other KPIs of the last 12 weeks, and the spend and the conversions over time](assets/screenshots/advertising-overview-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
+    ![The dashboard Advertising in Metabase on the demo data: its tabs and filters, the spend, the conversions and the other KPIs of the last 12 weeks, the spend, the clicks and the impressions of the current day as of its load, and the top of the chart of the spend and the conversions over time](assets/screenshots/advertising-overview-light.webp#only-light){ width="1440" height="900" loading="lazy" }
+    ![The dashboard Advertising in Metabase on the demo data, in the dark theme of Metabase: its tabs and filters, the spend, the conversions and the other KPIs of the last 12 weeks, the spend, the clicks and the impressions of the current day as of its load, and the top of the chart of the spend and the conversions over time](assets/screenshots/advertising-overview-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
     <figcaption>Metabase · the dashboard Advertising · demo data</figcaption>
 </figure>
 
