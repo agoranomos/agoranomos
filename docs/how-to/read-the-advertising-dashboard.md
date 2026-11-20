@@ -3,8 +3,8 @@
 The collection **agoranomos / Advertising** in Metabase holds the dashboard **Advertising**: the spend, the results and the KPIs of every ad platform of the deployment, on five tabs, for the period, the client, the platform, the account and the campaign of its filters ([ADR-0034](../adr/0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md)).
 
 <figure class="ag-shot" markdown="span">
-    ![The tab Overview of the dashboard Advertising in Metabase: the filters, the KPIs of the last week compared with the week before, and the spend and the conversions over time](../assets/screenshots/advertising-overview-light.webp#only-light){ width="1440" height="900" loading="lazy" }
-    ![The tab Overview of the dashboard Advertising in Metabase: the filters, the KPIs of the last week compared with the week before, and the spend and the conversions over time, in the dark theme](../assets/screenshots/advertising-overview-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
+    ![The tab Overview of the dashboard Advertising in Metabase: the filters, the KPIs of the last week compared with the week before, the card Today, as of the load, with the spend, the clicks and the impressions of each account on the current day, and the top of the chart of the spend and the conversions over time](../assets/screenshots/advertising-overview-light.webp#only-light){ width="1440" height="900" loading="lazy" }
+    ![The tab Overview of the dashboard Advertising in Metabase: the filters, the KPIs of the last week compared with the week before, the card Today, as of the load, with the spend, the clicks and the impressions of each account on the current day, and the top of the chart of the spend and the conversions over time, in the dark theme](../assets/screenshots/advertising-overview-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
     <figcaption>Metabase · agoranomos / Advertising · the tab Overview · demo data</figcaption>
 </figure>
 
