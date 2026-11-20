@@ -18,6 +18,25 @@
 --   the order (rates_known). A day without a publication takes the last rate published before
 --   it, with is_carried_forward; a currency has no row before the first rate published of it.
 -- * The reporting currency has the rate 1 on every day, whether or not a source publishes rates.
+-- * The rates of the file of the deployment, extensions/model/rates.toml (stg_settings__rates), go
+--   before every source on each day of their entries, for a currency of the accounts but the
+--   reporting currency: rate_source deployment, base_currency the quote of the entry, base_rate
+--   its rate, published_on its first day, and never carried forward, as the rate holds for the
+--   whole range by agreement. A quote in the reporting currency is the rate itself; another quote
+--   goes through its own rate into the reporting currency, the last that the order of the
+--   sources gives on or before the day against the base of the first source, in one division,
+--   and the row keeps that rate as its second leg (cross_source, cross_rate, cross_published_on).
+--   The file is small, so each run computes every day of its entries from the first day of the
+--   table, or of what the run reads, to the last day that the run computes, and a changed rate
+--   reaches each day of its entry. A day whose second leg no rate gives keeps the row that the
+--   table holds, and ops_rates names it.
+-- * A day that the file no longer covers keeps the rate of the file until a load of its source
+--   brings its rate again: the raw layer no longer holds the rate of the source for a day that
+--   the core has accepted, and the rates of the sources do not carry over a day of the file
+--   (marks). ops_rates counts such a day off the file, among the days without a rate of its
+--   source, so the next load of the source takes the history of the rates again from it
+--   (agoranomos_pipelines/rates.py), and the run that reads that load writes the rate of the
+--   source.
 {{ config(
     alias='fx_rates_daily',
     unique_key=['rate_date', 'currency', 'reporting_currency'],
@@ -96,9 +115,46 @@ days as (
 
 -- The rates known on their days of publication, of the loads that this run reads and of the
 -- table on the days that it does not read, each currency from the first source of the order
--- that has it (rates_known).
+-- that has it (rates_known), and the quotes of the file of the deployment for its second legs.
 known as (
-    {{ rates_known(staged, this, ref('stg_loads__newest_days'), source('core', 'loads'), 'select currency from currencies') }}
+    {{ rates_known(staged, this, ref('stg_loads__newest_days'), source('core', 'loads'), 'select currency from currencies union select quote_currency from ' ~ ref('stg_settings__rates')) }}
+),
+
+-- The rates known of the currencies of the accounts, and a mark without a rate on each day whose
+-- rate of the sources the run cannot know: a day on which the table holds the rate of the file of
+-- the deployment, which keeps no rate of a source, and which no load that the run reads covers.
+-- The rate of an earlier day does not carry over a mark, so such a day, and the days after it
+-- without a publication, keep the rows that the table holds.
+marks as (
+    select
+        published_on,
+        currency,
+        base_currency,
+        base_rate,
+        rate_into_reporting_currency,
+        rate_source,
+        cross_source,
+        cross_rate,
+        cross_published_on
+    from known
+    where currency in (select currency from currencies)
+    union all
+    select
+        e.rate_date,
+        e.currency::text,
+        cast(null as text),
+        cast(null as numeric),
+        cast(null as numeric),
+        cast(null as text),
+        cast(null as text),
+        cast(null as numeric),
+        cast(null as date)
+    from existing as e
+    where e.rate_source = 'deployment'
+        and not exists (select from read_days as r where r.day = e.rate_date)
+        and not exists (
+            select from known as k where k.currency = e.currency and k.published_on = e.rate_date
+        )
 ),
 
 -- For each currency, the last rate known before the first day that the run computes, which its
@@ -114,7 +170,7 @@ before as (
         k.cross_source,
         k.cross_rate,
         k.cross_published_on
-    from known as k
+    from marks as k
     where k.published_on < (select first_day from bounds)
     order by k.currency, k.published_on desc
 ),
@@ -137,7 +193,7 @@ series as (
         k.cross_published_on
     from days as d
     cross join currencies as c
-    left join known as k
+    left join marks as k
         on k.currency = c.currency and k.published_on = d.rate_date
     where c.currency <> {{ reporting_currency() }}
     union all
@@ -207,7 +263,131 @@ computed as (
         cross_published_on
     from carried
     where published_on is not null
+        and rate_into_reporting_currency is not null
         and rate_date >= (select first_day from bounds)
+),
+
+-- The days of the entries of the file of the deployment that the run computes, for the currencies
+-- of the accounts but the reporting currency: from the first day of the table, or of what the run
+-- reads, to the last day that it computes.
+given_days as (
+    select
+        cast(d.day as date) as rate_date,
+        f.currency::text as currency,
+        f.quote_currency::text as quote_currency,
+        f.rate,
+        f.first_day
+    from {{ ref('stg_settings__rates') }} as f
+    cross join lateral generate_series(
+        cast(greatest(f.first_day, least(
+            (select min(day) from read_days),
+            (select min(report_date) from window_days),
+            (select min(rate_date) from existing)
+        )) as timestamp),
+        cast(least(f.last_day, (select last_day from bounds)) as timestamp),
+        interval '1 day'
+    ) as d (day)
+    where f.currency in (select currency from currencies)
+        and f.currency <> {{ reporting_currency() }}
+        and (select last_day from bounds) is not null
+),
+
+-- The days on which each source published, as this run knows them: from what staging reads and
+-- the table holds of it, as a rate of a currency or as the second leg of one.
+publication_days as (
+    select rate_source as source, published_on as day
+    from known
+    union
+    select rate_source, published_on
+    from {{ this }}
+    where not is_carried_forward
+        and rate_source not in ('identity', 'deployment')
+    union
+    select cross_source, cross_published_on
+    from {{ this }}
+    where cross_source is not null
+),
+
+-- The rates of the file: in the reporting currency as they are; in another quote, through the
+-- last rate of the quote into the reporting currency that the order of the sources gives on or
+-- before the day against the base of the first source, its second leg, in one division. That
+-- rate counts only when its source published nothing after it up to the day: on a day whose loads
+-- the core has accepted, the run may know an older rate of the quote and not the newest, as when
+-- the core holds the rate of the base from the file and so none of the reporting currency
+-- (rates_known), and the row keeps what the table holds.
+given as (
+    select
+        d.rate_date,
+        d.currency,
+        case
+            when d.quote_currency = {{ reporting_currency() }} then d.rate
+            else d.rate * l.rate_numerator / l.rate_denominator
+        end as rate_into_reporting_currency,
+        d.quote_currency as base_currency,
+        d.rate as base_rate,
+        'deployment' as rate_source,
+        d.first_day as published_on,
+        false as is_carried_forward,
+        l.rate_source as cross_source,
+        l.base_rate as cross_rate,
+        l.published_on as cross_published_on
+    from given_days as d
+    left join lateral (
+        select k.rate_source, k.base_rate, k.published_on, k.rate_numerator, k.rate_denominator
+        from known as k
+        where d.quote_currency <> {{ reporting_currency() }}
+            and k.currency = d.quote_currency
+            and k.cross_source is null
+            and k.published_on <= d.rate_date
+        order by k.published_on desc
+        limit 1
+    ) as l on true
+    where d.quote_currency = {{ reporting_currency() }}
+        or (
+            l.rate_source is not null
+            and not exists (
+                select
+                from publication_days as p
+                where p.source = l.rate_source
+                    and p.day > l.published_on
+                    and p.day <= d.rate_date
+            )
+        )
+),
+
+-- Each day and currency with the rate of the file where it gives one, and else with the rate of
+-- the sources.
+merged as (
+    select
+        rate_date,
+        currency,
+        rate_into_reporting_currency,
+        base_currency,
+        base_rate,
+        rate_source,
+        published_on,
+        is_carried_forward,
+        cross_source,
+        cross_rate,
+        cross_published_on
+    from given
+    union all
+    select
+        c.rate_date,
+        c.currency,
+        c.rate_into_reporting_currency,
+        c.base_currency,
+        c.base_rate,
+        c.rate_source,
+        c.published_on,
+        c.is_carried_forward,
+        c.cross_source,
+        c.cross_rate,
+        c.cross_published_on
+    from computed as c
+    where not exists (
+        select from given as g where g.rate_date = c.rate_date and g.currency = c.currency
+    )
 ),
 
 typed as (
@@ -224,7 +404,7 @@ typed as (
         cast(cross_source as text) as cross_source,
         cast(cross_rate as numeric(20,10)) as cross_rate,
         cast(cross_published_on as date) as cross_published_on
-    from computed
+    from merged
 )
 
 select t.*

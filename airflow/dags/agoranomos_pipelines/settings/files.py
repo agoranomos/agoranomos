@@ -1,6 +1,7 @@
 """The settings of the model that a deployment keeps in its extensions folder, in the subfolder
-model: which client each account belongs to (clients.toml, ADR-0024) and which conversion actions
-count as conversions (conversion_actions.toml, ADR-0025); and the clients of the demo, in a file of
+model: which client each account belongs to (clients.toml, ADR-0024), which conversion actions count
+as conversions (conversion_actions.toml, ADR-0025) and its own rates, such as agreed ones, which go
+before the sources of the rates (rates.toml, ADR-0042); and the clients of the demo, in a file of
 the same form in the base package. The files are data: they are parsed as TOML and checked, and
 nothing in them runs. A mistake stops the load with one line that names the file and the entry,
 before anything is written. The line shows a key or an ID of the file only where it says where the
@@ -8,13 +9,17 @@ mistake is, in quotes and cut short when TOML would quote it, and never repeats 
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import re
 import stat
 import tomllib
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +48,15 @@ PLACE = re.compile(r" \((at line \d+, column \d+|at end of document)\)$")
 
 ACCOUNT_KEYS = {"platform", "account_id", "client"}
 ACTION_KEYS = {"platform", "conversion_action_id", "is_primary", "conversion_category"}
+RATE_KEYS = {"currency", "quote", "rate", "from", "to"}
+# The codes of ISO 4217, the seed of the dbt project, which compose.yaml mounts read-only into the
+# Airflow services; the model checks the currencies of the accounts against the same list.
+CURRENCIES = Path("/opt/agoranomos/dbt/seeds/seed_iso_4217_currencies.csv")
+# A code of a currency, three upper-case letters.
+CURRENCY = re.compile(r"[A-Z]{3}")
+# The decimal places and the digits before the point that a rate may have, those of base_rate of
+# core.fx_rates_daily, numeric(20,10).
+RATE_PLACES, RATE_DIGITS = 10, 10
 
 
 class SettingsError(ValueError):
@@ -51,11 +65,12 @@ class SettingsError(ValueError):
 
 @dataclass(frozen=True)
 class Settings:
-    """The rows of the three tables of raw_settings, each a dict of its columns in their order."""
+    """The rows of the four tables of raw_settings, each a dict of its columns in their order."""
 
     clients: tuple[dict[str, Any], ...]
     account_clients: tuple[dict[str, Any], ...]
     conversion_actions: tuple[dict[str, Any], ...]
+    rates: tuple[dict[str, Any], ...]
 
 
 def shown(value: str) -> str:
@@ -75,9 +90,13 @@ def under(path: str, key: str) -> str:
     return f"{path}.{shown(key)}" if path else shown(key)
 
 
-def read_toml(path: Path, name: str) -> dict[str, Any] | None:
+def read_toml(
+    path: Path, name: str, parse_float: Callable[[str], Any] = float
+) -> dict[str, Any] | None:
     """A settings file as TOML, or None when there is none. Only a regular file is read, so that a
-    named pipe cannot block the load, and at most LIMIT bytes of it, whatever its size says."""
+    named pipe cannot block the load, and at most LIMIT bytes of it, whatever its size says.
+    parse_float makes a number with a point or an exponent, a float unless the file wants it
+    exact."""
     try:
         found = os.stat(path)
     except FileNotFoundError:
@@ -105,7 +124,7 @@ def read_toml(path: Path, name: str) -> dict[str, Any] | None:
         )
     try:
         # utf-8-sig, so that the mark that some editors put at the start of a file does no harm.
-        return tomllib.loads(data.decode("utf-8-sig"))
+        return tomllib.loads(data.decode("utf-8-sig"), parse_float=parse_float)
     except UnicodeDecodeError:
         raise SettingsError(f"{name}: the file is not UTF-8") from None
     except tomllib.TOMLDecodeError as error:
@@ -248,10 +267,104 @@ def conversion_actions_of(document: dict[str, Any], name: str) -> list[dict[str,
     return found
 
 
-def load_settings(extensions: Path, demo_clients: Path | None) -> Settings:
+def iso_currencies(path: Path) -> frozenset[str]:
+    """The codes of ISO 4217, from the seed of the dbt project."""
+    try:
+        with path.open(encoding="utf-8", newline="") as handle:
+            return frozenset(row["currency_code"] for row in csv.DictReader(handle))
+    except (OSError, KeyError, csv.Error) as error:
+        raise SettingsError(
+            f"rates.toml: cannot read the codes of ISO 4217 of the base package: "
+            f"{type(error).__name__}"
+        ) from None
+
+
+def currency_of(where: str, value: Any, currencies: frozenset[str]) -> str:
+    """A code of ISO 4217."""
+    if not isinstance(value, str):
+        raise SettingsError(f"{where}: a text in quotes is expected, not {type(value).__name__}")
+    if not CURRENCY.fullmatch(value) or value not in currencies:
+        raise SettingsError(f"{where}: a code of a currency of ISO 4217 is expected, such as USD")
+    return value
+
+
+def rate_of(where: str, value: Any) -> Decimal:
+    """A rate above zero, exact, with at most RATE_PLACES decimal places and RATE_DIGITS digits
+    before the point. The file is read with parse_float=Decimal, so no float touches it."""
+    if isinstance(value, bool) or not isinstance(value, int | Decimal):
+        raise SettingsError(f"{where}: a number is expected, not {type(value).__name__}")
+    found = Decimal(value)
+    if not found.is_finite() or found <= 0:
+        raise SettingsError(f"{where}: a number above zero is expected")
+    exponent = found.normalize().as_tuple().exponent
+    if isinstance(exponent, int) and exponent < -RATE_PLACES:
+        raise SettingsError(f"{where}: a rate may have {RATE_PLACES} decimal places at most")
+    if found >= Decimal(10) ** RATE_DIGITS:
+        raise SettingsError(
+            f"{where}: a rate may have {RATE_DIGITS} digits before the decimal point at most"
+        )
+    return found
+
+
+def day_of(where: str, value: Any) -> date:
+    """A date of TOML, such as 2026-11-01, without a time."""
+    if isinstance(value, datetime) or not isinstance(value, date):
+        raise SettingsError(f"{where}: a date of TOML is expected, such as 2026-11-01")
+    return value
+
+
+def rates_of(
+    document: dict[str, Any], name: str, currencies: Callable[[], frozenset[str]]
+) -> list[dict[str, Any]]:
+    """The rates of a file of rates, one entry for each rate and range of days; currencies gives
+    the codes of ISO 4217, read once and only for a file that has an entry."""
+    known(name, "", document, {"rates"}, set())
+    entries = document.get("rates", [])
+    if not isinstance(entries, list):
+        raise SettingsError(f"{name}: rates: an array of tables is expected, as [[rates]]")
+    found: list[dict[str, Any]] = []
+    spans: dict[str, list[tuple[date, date, int]]] = {}
+    codes = currencies() if entries else frozenset()
+    for index, entry in enumerate(entries, start=1):
+        path = f"rates[{index}]"
+        known(name, path, entry, RATE_KEYS, RATE_KEYS)
+        currency = currency_of(f"{name}: {path}.currency", entry["currency"], codes)
+        quote = currency_of(f"{name}: {path}.quote", entry["quote"], codes)
+        if quote == currency:
+            raise SettingsError(f"{name}: {path}: quote is the same currency as currency")
+        rate = rate_of(f"{name}: {path}.rate", entry["rate"])
+        first = day_of(f"{name}: {path}.from", entry["from"])
+        last = day_of(f"{name}: {path}.to", entry["to"])
+        if first > last:
+            raise SettingsError(f"{name}: {path}: from is after to")
+        for other_first, other_last, other in spans.get(currency, []):
+            if first <= other_last and other_first <= last:
+                raise SettingsError(
+                    f"{name}: {path}: the days of {currency} overlap those of rates[{other}]"
+                )
+        spans.setdefault(currency, []).append((first, last, index))
+        found.append(
+            {
+                "currency": currency,
+                "quote_currency": quote,
+                # As text, so that the warehouse takes it as it is written, to the last place.
+                "rate": format(rate, "f"),
+                "first_day": first,
+                "last_day": last,
+                "origin": "extensions",
+            }
+        )
+    return found
+
+
+def load_settings(
+    extensions: Path, demo_clients: Path | None, currencies: Path | None = None
+) -> Settings:
     """The settings of the deployment in the folder extensions (the subfolder model of the
-    extensions folder), and the clients of the demo, each checked; a missing file is no settings."""
-    clients, mapped, actions = [], [], []
+    extensions folder), and the clients of the demo, each checked; a missing file is no settings.
+    currencies is the seed of the codes of ISO 4217, CURRENCIES by default, read only for a file
+    of rates that has an entry."""
+    clients, mapped, actions, rates = [], [], [], []
     document = read_toml(extensions / "clients.toml", "clients.toml")
     if document is not None:
         found, accounts = clients_of(document, "clients.toml", "extensions")
@@ -267,4 +380,8 @@ def load_settings(extensions: Path, demo_clients: Path | None) -> Settings:
     document = read_toml(extensions / "conversion_actions.toml", "conversion_actions.toml")
     if document is not None:
         actions += conversion_actions_of(document, "conversion_actions.toml")
-    return Settings(tuple(clients), tuple(mapped), tuple(actions))
+    # Every number of the file of rates as an exact Decimal, never a float.
+    document = read_toml(extensions / "rates.toml", "rates.toml", parse_float=Decimal)
+    if document is not None:
+        rates += rates_of(document, "rates.toml", lambda: iso_currencies(currencies or CURRENCIES))
+    return Settings(tuple(clients), tuple(mapped), tuple(actions), tuple(rates))

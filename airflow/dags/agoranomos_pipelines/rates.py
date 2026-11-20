@@ -28,6 +28,14 @@ pins it, reads every rate of those days, computes them in the reporting currency
 cleans it as any other load. A load of the history fills only the days and currencies that the
 core holds no rate of, so the rates that the core holds keep their source.
 
+The rates of the file of the deployment, extensions/model/rates.toml, go before every source
+(core_fx_rates_daily), and a day that the file covers, as the core holds its rate, needs no
+history. A day whose rate the core holds from the file where the file no longer gives it, as after
+an entry is removed, or does not hold as the file gives it, as for a quote whose rate the core
+lacks on a day that it has accepted, is a day off the file: the view counts it among the days
+without a rate of the source of its currency, so the next load of that source takes the history
+from it as above, and the run that reads that load writes the rate of the source, or of the file.
+
 The load takes no history:
 - for a source that the setting does not name, as with ecb alone, or for the demo once the core
   holds a rate of a real source: the model reads none of its rates then, so its DAG, unpaused or

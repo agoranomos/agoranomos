@@ -6041,6 +6041,51 @@ def test_status_says_how_old_the_last_rate_of_each_source_is(cli, tmp_path):
     assert result.stderr == ""
 
 
+def test_status_names_the_file_of_rates_and_the_days_off_it(cli, tmp_path):
+    # ADR-0042 (C7 of #227): a row of the source deployment while extensions/model/rates.toml has
+    # an entry, with the last day that it covers and no age, and a warning for the days on which
+    # the core holds a rate that the file no longer gives, which the next load of their source
+    # takes again; status does not read the file itself.
+    cli.run("init")
+    rows = "\n".join(
+        [
+            "built",
+            "demo_fx\x1fUSD\x1f2026-11-13\x1f1\x1ff\x1f\x1f0\x1f2026-10-10\x1f11",
+            "deployment\x1fUSD\x1f2026-11-30\x1f\x1ff\x1f\x1f0\x1f2026-10-10\x1f11",
+        ]
+    )
+    result = cli.run("status", FAKE_PS_FILE=ps_file(tmp_path, STATUS_TABLE), FAKE_RATES_OUTPUT=rows)
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    first = lines.index(
+        "Rates: the last rate of demo_fx into USD is of 2026-11-13, 1 business day ago (ADR-0042)."
+    )
+    assert lines[first + 1] == (
+        "Rates: extensions/model/rates.toml gives rates up to 2026-11-30, which go before the "
+        "sources of the rates on the days of its entries (ADR-0042)."
+    )
+    assert result.stderr.count("on 11 days of the facts from 2026-10-10 on, the core holds") == 1
+    assert "extensions/model/rates.toml no longer gives" in result.stderr
+    assert "holds no rate into" not in result.stderr
+    assert "late" not in result.stderr
+    # Every day as the file gives it: no warning.
+    rows = "built\ndeployment\x1fUSD\x1f2026-11-30\x1f\x1ff\x1f\x1f0\x1f\x1f0"
+    result = cli.run("status", FAKE_PS_FILE=ps_file(tmp_path, STATUS_TABLE), FAKE_RATES_OUTPUT=rows)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+
+
+def test_status_reads_the_days_off_the_file_only_from_a_view_that_has_them():
+    # The view of v0.6 has no such columns, until the first run of the transform of this release
+    # builds it again.
+    script = (REPO_ROOT / "agoranomos").read_text(encoding="utf-8")
+    sql = script.split("\nrates_sql() {\n", 1)[1].split("\n}\n", 1)[0]
+    assert "attname = 'days_off_the_file'" in sql
+    [with_off, older] = sql.split("\\elif :gaps\n")
+    assert "first_day_off_the_file, days_off_the_file" in with_off
+    assert "days_off_the_file" not in older
+
+
 def test_status_says_that_the_demo_has_no_rate_into_a_new_reporting_currency(cli, tmp_path):
     # ops.ops_rates gives the days without a rate to the demo on the demo stack after a change of
     # the reporting currency, which its next load takes again; the demo is no source of the order.

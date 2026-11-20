@@ -1481,6 +1481,20 @@ def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
             {"int_window_days", RATES_MODEL},
             False,
         ),
+        # ADR-0042 (C7 of #227): a rate of the file of the deployment in a quote of which no
+        # source gives a rate could not be converted.
+        "assert_each_quote_of_the_file_of_rates_has_a_rate": (
+            {
+                "stg_settings__rates",
+                "dim_account",
+                RATES_MODEL,
+                "stg_bank_of_italy__rates_daily",
+                "stg_nbk__rates_daily",
+                "stg_ecb__rates_daily",
+                "stg_demo_fx__rates_daily",
+            },
+            False,
+        ),
         # G2 (ADR-0035): a fact that does not hold the sums of staging lost or doubled rows.
         **{
             f"assert_the_core_holds_the_{what}_of_staging": (
@@ -2084,7 +2098,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 379, counted
+    assert counted == 382, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text
@@ -2174,9 +2188,11 @@ def dimension_tables() -> dict[str, dict]:
 
 
 # The rates of the core, which the model core_fx_rates_daily writes under the name of its table, as
-# a mart has the name (ADR-0042), and the migration that adds the second leg of a rate to it.
+# a mart has the name (ADR-0042), the migration that adds the second leg of a rate to it, and the
+# one that describes the rates of the file of the deployment in it.
 RATES_MIGRATION = "0007_create_the_rates.sql"
 RATES_LEG_MIGRATION = "0010_add_the_second_leg_of_a_rate.sql"
+RATES_FILE_MIGRATION = "0011_describe_the_rates_of_the_deployment.sql"
 RATES_MODEL = "core_fx_rates_daily"
 ADDED = re.compile(
     r"^ALTER TABLE core\.(\w+)\n  ADD COLUMN (\w+) ([a-z]+(?:\(\d+(?:,\d+)?\))?)", flags=re.M
@@ -2186,17 +2202,18 @@ ADDED = re.compile(
 def rates_table() -> dict:
     """The table of the rates of the core, as migration 0007 creates it and 0010 adds to it: its
     columns in order, its key, the types of the added columns, and the comments of the table and of
-    its columns, those of 0010 in place of those of 0007."""
+    its columns, those of 0010 in place of those of 0007, and those of 0011 in place of both."""
     table = migration_tables({RATES_MIGRATION: {"fx_rates_daily"}})["fx_rates_daily"]
-    text = (MIGRATIONS / RATES_LEG_MIGRATION).read_text(encoding="utf-8")
     table["added"] = {}
-    for name, column, kind in ADDED.findall(text):
-        if name == "fx_rates_daily":
-            table["columns"].append(column)
-            table["added"][column] = kind
-    for kind, name, column, body in COMMENT.findall(text):
-        if name == "fx_rates_daily":
-            table["comments"][None if kind == "TABLE" else column] = body.replace("''", "'")
+    for migration in (RATES_LEG_MIGRATION, RATES_FILE_MIGRATION):
+        text = (MIGRATIONS / migration).read_text(encoding="utf-8")
+        for name, column, kind in ADDED.findall(text):
+            if name == "fx_rates_daily":
+                table["columns"].append(column)
+                table["added"][column] = kind
+        for kind, name, column, body in COMMENT.findall(text):
+            if name == "fx_rates_daily":
+                table["comments"][None if kind == "TABLE" else column] = body.replace("''", "'")
     return table
 
 
@@ -2344,6 +2361,8 @@ def test_the_rates_of_the_core_merge_the_days_that_a_run_brings():
         "dim_account",
         # The kind of each load, so that a load of the history fills only what the core lacks.
         "source:core.loads",
+        # The rates of the file of the deployment, which go before the sources (C7 of #227).
+        "stg_settings__rates",
     }
     assert "round(" not in text
     assert "published_on < rate_date as is_carried_forward" in text
@@ -2612,7 +2631,7 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
         "{'bank_of_italy': ref('stg_bank_of_italy__rates_daily'), "
         "'nbk': ref('stg_nbk__rates_daily'), 'ecb': ref('stg_ecb__rates_daily'), "
         "'demo_fx': ref('stg_demo_fx__rates_daily')}, source('core', 'fx_rates_daily'), "
-        "source('core', 'loads'))"
+        "source('core', 'loads'), ref('stg_settings__rates'))"
     ) in rates
     assert "quarantine_stop_findings(this, source('core', 'loads'))" in stop
     # dbt orders the model after what the statements read: a line depends_on, or a ref of its

@@ -101,14 +101,14 @@ def test_each_table_is_replaced_with_the_hints_of_its_columns(source, tmp_path):
     [pipeline] = pipelines
     [(rows, hints)] = pipeline.runs
     assert pipeline.formats == ["csv"]
-    assert list(hints) == ["clients", "account_clients", "conversion_actions"]
+    assert list(hints) == ["clients", "account_clients", "conversion_actions", "rates"]
     for table, hint in hints.items():
         assert hint["write_disposition"] == "replace", table
         # No primary key: dlt would need a table of its own to merge on it, which loader may not.
         assert "primary_key" not in hint, table
         assert set(hint["columns"]) == set(module.COLUMNS[table]), table
         for column, schema in hint["columns"].items():
-            assert schema["data_type"] in ("text", "bool"), (table, column)
+            assert schema["data_type"] in ("text", "bool", "date"), (table, column)
             nullable = (table, column) == ("conversion_actions", "conversion_category")
             assert schema["nullable"] is nullable, (table, column)
         for row in rows[table]:
@@ -147,6 +147,47 @@ def test_a_table_without_a_row_is_still_replaced(source, tmp_path):
     module.load(tmp_path / "missing", None)
     rows, _ = pipelines[-1].runs[-1]
     assert rows == {table: [MARKER] for table in module.COLUMNS}
+
+
+def test_the_rates_of_the_file_load_with_the_rate_as_text_and_the_days_as_dates(
+    source, tmp_path, monkeypatch
+):
+    # ADR-0042: the rate goes to raw as the file writes it, which the staging view casts to an
+    # exact numeric, so no float touches it; a mistake in the file stops the load as any other.
+    module, pipelines = source
+    from agoranomos_pipelines.settings import files
+
+    monkeypatch.setattr(
+        files, "CURRENCIES", REPO / "dbt" / "seeds" / "seed_iso_4217_currencies.csv"
+    )
+    write(
+        tmp_path,
+        "rates.toml",
+        '[[rates]]\ncurrency = "EUR"\nquote = "USD"\nrate = 1.0832123456\n'
+        "from = 2026-11-01\nto = 2026-11-30\n",
+    )
+    counts = module.load(tmp_path, None)
+    assert counts["rates"] == 1
+    rows, hints = pipelines[-1].runs[-1]
+    [row] = rows["rates"]
+    assert row["rate"] == "1.0832123456"
+    assert (row["first_day"].isoformat(), row["last_day"].isoformat()) == (
+        "2026-11-01",
+        "2026-11-30",
+    )
+    columns = hints["rates"]["columns"]
+    assert {c: columns[c]["data_type"] for c in columns} == {
+        "currency": "text",
+        "quote_currency": "text",
+        "rate": "text",
+        "first_day": "date",
+        "last_day": "date",
+        "origin": "text",
+    }
+    write(tmp_path, "rates.toml", '[[rates]]\ncurrency = "EUR"\nquote = "EUR"\n')
+    with pytest.raises(files.SettingsError, match=r"^rates.toml: rates\[1\]: "):
+        module.load(tmp_path, None)
+    assert len(pipelines) == 1
 
 
 def test_a_mistake_in_a_file_stops_the_load_before_anything_is_written(source, tmp_path):
@@ -188,7 +229,7 @@ def test_a_load_logs_counts_and_tables_and_no_secret_or_setting(source, tmp_path
     caplog.set_level("INFO")
     write(tmp_path, "clients.toml", CLIENTS)
     counts = module.load(tmp_path, module.DEMO_CLIENTS)
-    assert counts == {"clients": 3, "account_clients": 7, "conversion_actions": 0}
+    assert counts == {"clients": 3, "account_clients": 7, "conversion_actions": 0, "rates": 0}
     assert "Loaded 3 rows into raw_settings.clients" in caplog.text
     assert "Loaded 0 rows into raw_settings.conversion_actions" in caplog.text
     assert "loader-password" not in caplog.text
@@ -258,7 +299,10 @@ def test_the_file_overrides_the_flag_of_google_ads_which_overrides_the_seed():
 
 
 # The staging of the settings in dbt: one view of each table, with the columns that the load
-# writes, in its order.
+# writes, in its order, and the casts of the columns that the load writes as text.
+CAST = {("rates", "rate"): "cast(rate as numeric) as rate"}
+
+
 def test_the_staging_of_the_settings_selects_the_columns_that_the_load_writes(source):
     module, _ = source
     found = {path.name for path in STAGING.glob("*.sql")}
@@ -266,13 +310,14 @@ def test_the_staging_of_the_settings_selects_the_columns_that_the_load_writes(so
     # The table goes through relation_or_empty, with the type of each column of the load, so that
     # the model builds before the first run of the transform loads the settings, as marts-init
     # does on a new warehouse (docs/reference/configuration.md#the-views-of-the-marts).
-    types = {"text": "text", "bool": "boolean"}
+    types = {"text": "text", "bool": "boolean", "date": "date"}
     for table, columns in module.COLUMNS.items():
         path = STAGING / f"stg_settings__{table}.sql"
         lines = path.read_text(encoding="utf-8").splitlines()
         assert lines[0].startswith(f"-- {path.name}: "), path.name
         body = " ".join(line.strip() for line in lines if not line.startswith("--"))
-        select = ", ".join(columns)
+        # The rate of the file goes to raw as text and comes out as an exact numeric.
+        select = ", ".join(CAST.get((table, c), c) for c in columns)
         empty = ", ".join(f"'{c}': '{types[hint['data_type']]}'" for c, hint in columns.items())
         assert body == (
             f"select {select} from {{{{ relation_or_empty(source('raw_settings', '{table}'), {{ "  # noqa: S608
@@ -295,6 +340,7 @@ KEYS = {
     "clients": ["client_id", "origin"],
     "account_clients": ["platform", "account_id", "origin"],
     "conversion_actions": ["platform", "conversion_action_id"],
+    "rates": ["currency", "first_day"],
 }
 
 

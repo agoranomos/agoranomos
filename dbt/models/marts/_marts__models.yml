@@ -1618,7 +1618,9 @@ models:
       core.fx_rates_daily: one row for each day and currency, from the sources in the order that
       the deployment sets, the Bank of Italy, the National Bank of Kazakhstan and the European
       Central Bank, which rate_source and cross_source name, the last published one carried over a
-      day without a publication (is_carried_forward). The Bank of Italy calls its rates indicative
+      day without a publication (is_carried_forward), or the rate that the deployment gives for the
+      day in its file of rates, which goes first (rate_source deployment). The Bank of Italy calls
+      its rates indicative
       and no financial benchmark under Regulation (EU) 2016/1011. rate_date, currency and
       reporting_currency together are its key, and it holds the one reporting currency of the
       deployment.

@@ -25,6 +25,15 @@
 --   and none of a source of the order in any reporting currency, as on the demo stack: a load of
 --   that source then takes their history again. Each fact gives the first and the last day of an
 --   account through its index of the account and the day.
+-- * The rates of the file of the deployment, extensions/model/rates.toml (stg_settings__rates): a
+--   row of the source deployment while the file has an entry, with the last day that it covers
+--   and no age, as a rate that the deployment gives is never late. And the days off the file: of
+--   the facts of a currency, those on which the core holds the rate of the file where the file no
+--   longer gives it, or gives another, as after an entry is removed or shrinks, and those on
+--   which the file gives a rate that the core does not hold, as for a quote without a rate. They
+--   count among the days without a rate of the source of their currency, so that its next load
+--   takes their history again (core_fx_rates_daily), and not among first_day_without_rate and
+--   days_without_rate, as the core holds a rate on them.
 {%- set chain = rates_chain() %}
 {%- set links = chain + ['demo_fx'] %}
 with rates as (
@@ -160,23 +169,57 @@ spans_by_source as (
     ) as n on true
 ),
 
+-- The entries of the file of the deployment, of the currencies of the facts, within their days.
+given as (
+    select
+        g.currency::text as currency,
+        g.quote_currency::text as quote_currency,
+        g.rate,
+        greatest(g.first_day, s.first_day) as first_day,
+        least(g.last_day, s.last_day) as last_day
+    from {{ ref('stg_settings__rates') }} as g
+    join spans as s on s.currency = g.currency
+    where g.first_day <= s.last_day
+        and g.last_day >= s.first_day
+),
+
+-- Each day of the facts of each currency without a rate, or off the file: a rate of the file that
+-- the file no longer gives as the core holds it, or a rate of the file that the core does not hold.
 missing as (
-    select s.source, cast(d.day as date) as day
+    select s.source, d.day, r.rate_date is not null as off_the_file
     from spans_by_source as s
-    cross join lateral generate_series(
-        cast(s.first_day as timestamp), cast(s.last_day as timestamp), interval '1 day'
-    ) as d (day)
-    where not exists (
-        select
-        from rates as r
-        where r.rate_date = cast(d.day as date)
-            and r.currency = s.currency
-    )
+    cross join lateral (
+        select cast(day as date) as day
+        from generate_series(
+            cast(s.first_day as timestamp), cast(s.last_day as timestamp), interval '1 day'
+        ) as day
+    ) as d
+    left join rates as r
+        on r.rate_date = d.day and r.currency = s.currency
+    left join given as g
+        on g.currency = s.currency and d.day between g.first_day and g.last_day
+    where r.rate_date is null
+        or (
+            (r.rate_source = 'deployment' or g.currency is not null)
+            and not (
+                r.rate_source = 'deployment'
+                and g.currency is not null
+                and r.base_currency = g.quote_currency
+                and r.base_rate = g.rate
+            )
+        )
 ),
 
 gaps as (
     select min(day) as first_day, count(distinct day) as days
     from missing
+    where not off_the_file
+),
+
+off_the_file as (
+    select min(day) as first_day, count(distinct day) as days
+    from missing
+    where off_the_file
 ),
 
 gaps_by_source as (
@@ -185,7 +228,8 @@ gaps_by_source as (
     group by source
 ),
 
--- The rows: the sources listed and those whose currencies lack a rate, or one without a source.
+-- The rows: the sources listed and those whose currencies lack a rate, or one without a source;
+-- and the file of the deployment while it has an entry.
 rows as (
     select source from listed
     union
@@ -193,20 +237,30 @@ rows as (
     union all
     select cast(null as text)
     where not exists (select from listed) and not exists (select from gaps_by_source)
+    union all
+    select 'deployment'
+    where exists (select from {{ ref('stg_settings__rates') }})
 )
 
 select
     cast({{ reporting_currency() }} as char(3)) as reporting_currency,
     o.source::text as rate_source,
-    a.published_on as last_rate_date,
+    case
+        when o.source = 'deployment'
+            then (select max(last_day) from {{ ref('stg_settings__rates') }})
+        else a.published_on
+    end as last_rate_date,
     a.business_days::integer as business_days_since_rate,
-    a.business_days > 3 as is_late,
+    case when o.source = 'deployment' then false else a.business_days > 3 end as is_late,
     g.first_day as first_day_without_rate,
     g.days::integer as days_without_rate,
     s.first_day as first_day_without_rate_of_source,
-    coalesce(s.days, 0)::integer as days_without_rate_of_source
+    coalesce(s.days, 0)::integer as days_without_rate_of_source,
+    f.first_day as first_day_off_the_file,
+    f.days::integer as days_off_the_file
 from rows as o
 cross join gaps as g
+cross join off_the_file as f
 left join aged as a on a.source = o.source
 left join gaps_by_source as s on s.source = coalesce(o.source, (select source from serving))
 order by o.source is distinct from (select source from serving), o.source
