@@ -1,9 +1,10 @@
 -- Advertising statistics by day and ad on every platform, a view over the core (ADR-0037): one
 -- row of core.ad_stats_ad_daily, with the names and states of its dimensions, money in the
 -- currency of the account and in the reporting currency at the rate of its day, when its load
--- ended and whether the row is final, as ad_stats_campaign_daily has them. An ad without a name on its platform, such as a
--- responsive search ad of Google, shows its ID. The conversions of the primary actions are none
--- at this level: the conversions by action of ads are a module (ADR-0036).
+-- ended and whether the row is final, as ad_stats_campaign_daily has them. An ad without a name
+-- on its platform, such as a responsive search ad of Google, shows its ID. The conversions of the
+-- primary actions are none at this level: the conversions by action of ads are a module
+-- (ADR-0036).
 -- The test of the ads against their ad groups reads the view of ad groups, which dbt orders before
 -- it: depends_on: {{ ref('ad_stats_ad_group_daily') }}
 select
