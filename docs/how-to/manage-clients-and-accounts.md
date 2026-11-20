@@ -19,7 +19,7 @@ A deployment of agoranomos is one business, which groups its ad accounts and its
 
 3. Trigger `agoranomos_demo_transform` in Airflow to see the change now, or wait for the run after the next load: a change takes effect at the next run of the transform. A mistake in the file fails the first task of that run with one line that names the file and the entry, and the marts keep their data.
 
-The load of Google Ads reads only the accounts that the file names, so its next load takes the history of a new account, its last 36 months ([Connect Google Ads](connect-google-ads.md)).
+The load of Google Ads reads only the accounts that the file names, so its next daily load takes the last 90 days of a new account, and its 36 months follow by quarters in the background ([When the history arrives](connect-google-ads.md#when-the-history-arrives)).
 
 The load of Meta reads only the accounts of `meta_ads` that the file names, each by the digits of the ad account without `act_`, such as `1234567890123456`, and its next load takes the last 28 days of a new account, which the marts show after the next run of the transform ([Connect Meta](connect-meta.md)).
 

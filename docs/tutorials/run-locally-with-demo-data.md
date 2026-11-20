@@ -93,7 +93,7 @@ It takes about half an hour, most of it the first start.
     - `load_settings` loaded the settings of the model, such as which client each account belongs to;
     - `pin` pinned the loads that had ended, the five of the history, which the tasks after it read, so that a load that ends during a run waits for the next one;
     - `elementary` built the tables in which each task of dbt records how it went, which the Ops collection shows;
-    - each task after them built one model or seed of dbt and ran its tests: from a view of the data of each platform, through the steps that the platforms share, to the marts, such as `ad_stats_campaign_daily`, which the advertising dashboard reads.
+    - each task after them built one model or seed of dbt and ran its tests: from a view of the data of each platform, through the steps that the platforms share and the tables of the core, to the marts, views over the core, such as `ad_stats_campaign_daily`, which the advertising dashboard reads.
 4. Look at the DAG `agoranomos_demo_daily`. It brings each new day of the demo every day at 09:17 UTC, and the transform runs again after it. Its first run came right after the history and usually found every account loaded already, so it skipped its loads.
 
 <figure class="ag-shot" markdown="span">
