@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.6.0](https://github.com/agoranomos/agoranomos/compare/v0.5.0...v0.6.0) (2026-11-20)
+
+
+### Features
+
+* **dbt:** take Meta into the core and the marts ([#337](https://github.com/agoranomos/agoranomos/issues/337)) ([4a0fb12](https://github.com/agoranomos/agoranomos/commit/4a0fb1227b8eaf23fa2e48e3e2d66b6b8d4acbf4))
+* **demo:** load the current day of the demo ([#361](https://github.com/agoranomos/agoranomos/issues/361)) ([32611c6](https://github.com/agoranomos/agoranomos/commit/32611c6ff8f5910f8af653ea250e258c102b1f46))
+* **google-ads:** load the current day every few hours ([#360](https://github.com/agoranomos/agoranomos/issues/360)) ([a08180d](https://github.com/agoranomos/agoranomos/commit/a08180dec6c210a30d10c77506b5dfcd755f6756))
+* **metabase:** show today on the dashboard Advertising ([#359](https://github.com/agoranomos/agoranomos/issues/359)) ([c558e92](https://github.com/agoranomos/agoranomos/commit/c558e92768b05fa73f5e203b589d79a9aed742bf))
+* **meta:** load the history of Meta by quarters in the background ([#336](https://github.com/agoranomos/agoranomos/issues/336)) ([09620f6](https://github.com/agoranomos/agoranomos/commit/09620f6449206a304f66a61fdfd6ce238e6feadd))
+* **meta:** load the Meta ad accounts into raw ([5dcafc4](https://github.com/agoranomos/agoranomos/commit/5dcafc4a83a03023550fe4705550e344efcdc54b))
+* **meta:** load the Meta ad accounts into the raw layer ([#334](https://github.com/agoranomos/agoranomos/issues/334)) ([5dcafc4](https://github.com/agoranomos/agoranomos/commit/5dcafc4a83a03023550fe4705550e344efcdc54b))
+* **model:** write the partial day of the campaigns ([#346](https://github.com/agoranomos/agoranomos/issues/346)) ([560986a](https://github.com/agoranomos/agoranomos/commit/560986ab8c41fdddd6a7b1ed4e422e7c27c1a8a2))
+* **ops:** show the restatements of the platforms in Ops ([#345](https://github.com/agoranomos/agoranomos/issues/345)) ([ad9d067](https://github.com/agoranomos/agoranomos/commit/ad9d067624528358a47caa4f7f55a5a60e5d1413))
+* **rates:** load the official rates of the National Bank of Kazakhstan ([#339](https://github.com/agoranomos/agoranomos/issues/339)) ([3c4c07d](https://github.com/agoranomos/agoranomos/commit/3c4c07d3224e5cef377f8500b3b22bb7806b4815))
+* **rates:** load the official rates of the NBK ([3c4c07d](https://github.com/agoranomos/agoranomos/commit/3c4c07d3224e5cef377f8500b3b22bb7806b4815))
+* **rates:** load the rates of the Bank of Italy ([#340](https://github.com/agoranomos/agoranomos/issues/340)) ([2664e6a](https://github.com/agoranomos/agoranomos/commit/2664e6a941a34a34dd714fc177925077e61c6d4c))
+* **rates:** take the rates from the source that the deployment sets ([#348](https://github.com/agoranomos/agoranomos/issues/348)) ([8385ffc](https://github.com/agoranomos/agoranomos/commit/8385ffca4ff78160e9f1c796d18f06c3c0506d20))
+
+
+### Bug Fixes
+
+* **db-init:** wait for the transform that writes ([#352](https://github.com/agoranomos/agoranomos/issues/352)) ([bedfebc](https://github.com/agoranomos/agoranomos/commit/bedfebc614883ac97d80e1962a8f338b7434bd87))
+* **docs:** keep the footer above the navigation ([#331](https://github.com/agoranomos/agoranomos/issues/331)) ([5bc98f7](https://github.com/agoranomos/agoranomos/commit/5bc98f7f47c02a2fae548fdb1cc2e5bb1eb708a4))
+* **history:** go on without an account whose history failed ([#338](https://github.com/agoranomos/agoranomos/issues/338)) ([ee1509f](https://github.com/agoranomos/agoranomos/commit/ee1509f569c2f64521b32f364bdb43041cc0934c))
+* **marts:** load the seeds before building the views ([#347](https://github.com/agoranomos/agoranomos/issues/347)) ([3669f37](https://github.com/agoranomos/agoranomos/commit/3669f37590caffc76ed7cb4100867e1c3583d477))
+* **stack:** build the views of ops at every start ([#362](https://github.com/agoranomos/agoranomos/issues/362)) ([10933be](https://github.com/agoranomos/agoranomos/commit/10933be343f2c61f8e564a19e7eae2a266f763ce))
+* **stack:** change a row of no journal in the test of restatements ([#350](https://github.com/agoranomos/agoranomos/issues/350)) ([df70e06](https://github.com/agoranomos/agoranomos/commit/df70e069fce1bc3ef27dbd53adcceea4011f56ca))
+* **stack:** change rows of no journal nearest the edges of the window ([#351](https://github.com/agoranomos/agoranomos/issues/351)) ([2bde240](https://github.com/agoranomos/agoranomos/commit/2bde2407dc94c46ef1fe24072a96fb623b934d46))
+
+
+### Documentation
+
+* **adr:** accept ADR-0052 ([#355](https://github.com/agoranomos/agoranomos/issues/355)) ([fda49db](https://github.com/agoranomos/agoranomos/commit/fda49db8c1938ce486a9dfb1b3d525eb442b9fd4))
+* **adr:** note dbt Core 1.12.7 in ADR-0005 ([#354](https://github.com/agoranomos/agoranomos/issues/354)) ([9fa8ffc](https://github.com/agoranomos/agoranomos/commit/9fa8ffc3b498911e045a54c8c92436edf3e9fa77))
+* run local mode on another machine ([#341](https://github.com/agoranomos/agoranomos/issues/341)) ([0b1e3b9](https://github.com/agoranomos/agoranomos/commit/0b1e3b9d02f7247b1bd024fedf87a015782653eb))
+
 ## [0.5.0](https://github.com/agoranomos/agoranomos/compare/v0.4.5...v0.5.0) (2026-11-15)
 
 
