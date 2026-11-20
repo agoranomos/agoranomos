@@ -555,12 +555,13 @@ body {
   }
 
   /*
-    The sidebar sticks, so it is positioned, and the column a window high that it draws would lie
-    over the left of the footer at the end of a page. The footer is positioned above it.
+    The column is a window high from the top of the sidebar, so at the end of a page it would reach
+    below the main area: over the footer, and on a page shorter than the window past the end of the
+    document, where it showed under the footer and made the page scroll. The main area clips it at
+    its bottom edge. A clip makes no scroll container, so the sidebar still sticks to the window.
   */
-  .md-footer {
-    position: relative;
-    z-index: 1;
+  .md-main {
+    overflow-y: clip;
   }
 
   .md-sidebar--secondary {
