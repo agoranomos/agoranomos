@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.7.0](https://github.com/agoranomos/agoranomos/compare/v0.6.0...v0.7.0) (2026-11-21)
+
+
+### Features
+
+* **marts:** mark the days that no load changes any more ([#372](https://github.com/agoranomos/agoranomos/issues/372)) ([5823133](https://github.com/agoranomos/agoranomos/commit/5823133ec307d861ddad02ff13f576673f2bc49c))
+* **rates:** take the rates of a deployment from a file ([#373](https://github.com/agoranomos/agoranomos/issues/373)) ([2f4334b](https://github.com/agoranomos/agoranomos/commit/2f4334bc6e28fe5f39c6be3d3d8121484a44a7ba))
+
+
+### Bug Fixes
+
+* **docs:** end the navigation column at the footer ([#363](https://github.com/agoranomos/agoranomos/issues/363)) ([88491b4](https://github.com/agoranomos/agoranomos/commit/88491b4daade16b1c1b2f4062a8c5fe5c906efff))
+
+
+### Documentation
+
+* bring the docs up to date with v0.6.0 ([#366](https://github.com/agoranomos/agoranomos/issues/366)) ([d8818f2](https://github.com/agoranomos/agoranomos/commit/d8818f2b281230c20988dd5a7ec68d2a40f68818))
+* retake the Overview tab with the card of today ([#367](https://github.com/agoranomos/agoranomos/issues/367)) ([38e6e13](https://github.com/agoranomos/agoranomos/commit/38e6e13db228fd5b1bf2793aacb54ab004798ac5)), closes [#358](https://github.com/agoranomos/agoranomos/issues/358)
+* show the core and Meta in the pipeline picture ([#365](https://github.com/agoranomos/agoranomos/issues/365)) ([0ee4c16](https://github.com/agoranomos/agoranomos/commit/0ee4c16c6f5f5dd82d53355caae9d186f8e2ab97))
+
 ## [0.6.0](https://github.com/agoranomos/agoranomos/compare/v0.5.0...v0.6.0) (2026-11-20)
 
 
