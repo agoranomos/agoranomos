@@ -96,6 +96,7 @@ nav = [
     { "ADR-0050: Connect Meta with an app and a system user of the deployment" = "adr/0050-connect-meta-with-an-app-and-a-system-user-of-the-deployment.md" },
     { "ADR-0051: Take the current day as a load of the kind intraday in the one transform" = "adr/0051-take-the-current-day-as-a-load-of-the-kind-intraday.md" },
     { "ADR-0052: Run each stack test once on a pull request, and every one in every combination on main" = "adr/0052-run-each-stack-test-once-on-a-pull-request.md" },
+    { "ADR-0054: Connect GA4 with a service account of the deployment" = "adr/0054-connect-ga4-with-a-service-account-of-the-deployment.md" },
   ] },
 ]
 
