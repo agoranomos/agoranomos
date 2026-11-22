@@ -124,7 +124,7 @@ SEEDS = "package:agoranomos,resource_type:seed"
         (
             True,
             True,
-            [SEEDS, "marts", "core_fx_rates_daily", "ops_rates"],
+            [SEEDS, "marts", "stg_settings__rates", "core_fx_rates_daily", "ops_rates"],
             ["test", "unit_test"],
             {"rebuild_views": True, "recompute_rates": True},
         ),
@@ -247,7 +247,14 @@ def test_the_job_builds_the_views_of_ops_where_a_transform_has_made_elementary(
     assert code == 0
     first, second = dbt.calls
     variables = {"rebuild_views": True} | ({"recompute_rates": True} if other else {})
-    assert selected(second) == ("build", [mi.OPS], ["test", "unit_test"], variables)
+    # With the view of the rates of the file, which ops.ops_rates reads and which an upgrade
+    # starts without.
+    assert selected(second) == (
+        "build",
+        ["stg_settings__rates", mi.OPS],
+        ["test", "unit_test"],
+        variables,
+    )
     assert selected(first)[1][:2] == [SEEDS, "marts" if snapshots else "+marts"]
     for name in ("--target-path", "--log-path", "--project-dir", "--profiles-dir"):
         assert second[second.index(name) + 1] == first[first.index(name) + 1]

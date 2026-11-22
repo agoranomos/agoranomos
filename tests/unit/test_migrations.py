@@ -56,6 +56,9 @@ CHECKSUMS = {
     "0010_add_the_second_leg_of_a_rate.sql": (
         "c82804e56923514ba448364cfc00deffc10d553679509bb537e355ea8afd18de"
     ),
+    "0011_describe_the_rates_of_the_deployment.sql": (
+        "8a182bc84224fcfb292ee768d325271f92eac6695722ed016a291e9aa0ef0681"
+    ),
 }
 
 
@@ -359,6 +362,17 @@ def test_the_second_leg_of_a_rate_is_three_columns_that_go_together():
         "AND cross_published_on <= rate_date );"
     ) in text
     assert not re.search(r"\b(GRANT|REVOKE|UPDATE|DELETE|DEFAULT)\b", text)
+
+
+def test_the_rates_of_the_deployment_change_only_the_comments_of_the_rates():
+    # ADR-0042 (C7 of #227): a rate of the file of the deployment fits the columns of 0007 and
+    # 0010, rate_source deployment in free text, so the migration describes it and changes no
+    # column, no row and no right.
+    text = code(MIGRATIONS / "0011_describe_the_rates_of_the_deployment.sql", keep_strings=True)
+    starts = statement_starts(MIGRATIONS / "0011_describe_the_rates_of_the_deployment.sql")
+    assert starts
+    assert all(s.startswith("COMMENT ON ") and " core.fx_rates_daily" in s for s in starts)
+    assert "deployment for a rate that the deployment gives in extensions/model/rates.toml" in text
 
 
 def test_each_fact_has_the_trigger_of_the_freeze_and_each_journal_has_none():

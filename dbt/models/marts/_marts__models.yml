@@ -12,11 +12,13 @@ models:
       such metric; conversions_primary is the sum of the conversions of the primary conversion
       actions of the deployment, which ad_conversions_campaign_daily has by action. A row whose
       measures are all zero is not kept. Its platforms are those of ad_platforms with the kind ads.
-      A row of a day still in progress in its account, which only a load of the kind intraday
-      took, has is_partial_day, with impressions, clicks and spend so far and no conversions, until
-      a whole load replaces the day; the metrics of Metabase and every card of the dashboard
-      Advertising but Today, as of the load, leave those rows out, so they count whole days only.
-      Its tests read the days of the windows that the run of the transform pinned.
+      A row of a day still in progress in its account, which only a load of the kind intraday took,
+      has is_partial_day, with impressions, clicks and spend so far and no conversions, until a
+      whole load replaces the day; the metrics of Metabase and every card of the dashboard
+      Advertising but Today, as of the load, leave those rows out, so they count whole days only. A
+      row is final, is_final, when the load that wrote it ended at least the window of restatements
+      of its platform after its day, so that no later load changes it. Its tests read the days of
+      the windows that the run of the transform pinned.
     config:
       # The table that dbt builds has exactly these columns, with these types, or the build fails.
       contract:
@@ -477,6 +479,15 @@ models:
               display_name: Is Partial Day
               semantic_type: type/Category
               has_field_values: list
+      - name: is_final
+        data_type: boolean
+        description: '{{ doc("is_final") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Is Final
+              semantic_type: type/Category
+              has_field_values: list
   - name: ad_conversions_campaign_daily
     description: >-
       Conversions by day, campaign and conversion action on every platform, a view over
@@ -490,8 +501,10 @@ models:
       metric leaves out, which all_conversions counts. Money is in the currency of the account
       (currency) and in the reporting currency (reporting_currency), at the rate of the day of the
       row (fx_rate_into_reporting_currency); add up money across accounts with the columns that end
-      in _reporting. Its platforms are those of ad_platforms with the kind ads. Its tests read the
-      days of the windows that the run of the transform pinned.
+      in _reporting. Its platforms are those of ad_platforms with the kind ads. A row is final,
+      is_final, when the load that wrote it ended at least the window of restatements of its
+      platform after its day, so that no later load changes it. Its tests read the days of the
+      windows that the run of the transform pinned.
     config:
       contract:
         enforced: true
@@ -789,6 +802,15 @@ models:
               display_name: Account Is Active
               semantic_type: type/Category
               has_field_values: list
+      - name: is_final
+        data_type: boolean
+        description: '{{ doc("is_final") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Is Final
+              semantic_type: type/Category
+              has_field_values: list
   - name: web_sessions_daily
     description: >-
       Sessions of web analytics by day, property, source, medium and campaign, a view over
@@ -799,8 +821,10 @@ models:
       names its platform and account (ad_platform, ad_account_id). Revenue is in the currency of the
       property (currency) and in the reporting currency (reporting_currency), at the rate of the day
       of the row; add up revenue across properties with total_revenue_reporting. Its platforms are
-      those of ad_platforms with the kind web_analytics. Its tests read the days of the windows that
-      the run of the transform pinned.
+      those of ad_platforms with the kind web_analytics. A row is final, is_final, when the load
+      that wrote it ended at least the window of restatements of its platform after its day, so that
+      no later load changes it. Its tests read the days of the windows that the run of the transform
+      pinned.
     config:
       contract:
         enforced: true
@@ -1076,6 +1100,15 @@ models:
           meta:
             metabase:
               display_name: Account Is Active
+              semantic_type: type/Category
+              has_field_values: list
+      - name: is_final
+        data_type: boolean
+        description: '{{ doc("is_final") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Is Final
               semantic_type: type/Category
               has_field_values: list
   - name: ad_platforms
@@ -1585,7 +1618,9 @@ models:
       core.fx_rates_daily: one row for each day and currency, from the sources in the order that
       the deployment sets, the Bank of Italy, the National Bank of Kazakhstan and the European
       Central Bank, which rate_source and cross_source name, the last published one carried over a
-      day without a publication (is_carried_forward). The Bank of Italy calls its rates indicative
+      day without a publication (is_carried_forward), or the rate that the deployment gives for the
+      day in its file of rates, which goes first (rate_source deployment). The Bank of Italy calls
+      its rates indicative
       and no financial benchmark under Regulation (EU) 2016/1011. rate_date, currency and
       reporting_currency together are its key, and it holds the one reporting currency of the
       deployment.
@@ -1682,8 +1717,10 @@ models:
       conversions_primary is none at this level, as the conversions by action of ad groups are a
       module. The ad groups of a campaign can add up to less than ad_stats_campaign_daily, as a
       campaign of Performance Max has none. A row whose measures are all zero is not kept. Its
-      platforms are those of ad_platforms with the kind ads. Its tests read the days of the windows
-      that the run of the transform pinned.
+      platforms are those of ad_platforms with the kind ads. A row is final, is_final, when the load
+      that wrote it ended at least the window of restatements of its platform after its day, so that
+      no later load changes it. Its tests read the days of the windows that the run of the transform
+      pinned.
     config:
       # The table that dbt builds has exactly these columns, with these types, or the build fails.
       contract:
@@ -2072,6 +2109,15 @@ models:
               display_name: Account Is Active
               semantic_type: type/Category
               has_field_values: list
+      - name: is_final
+        data_type: boolean
+        description: '{{ doc("is_final") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Is Final
+              semantic_type: type/Category
+              has_field_values: list
   - name: ad_stats_ad_daily
     description: >-
       Advertising statistics by day and ad on every platform, a view over core.ad_stats_ad_daily.
@@ -2084,7 +2130,9 @@ models:
       in _reporting. conversions is the own metric of conversions of the platform, and none on Meta;
       conversions_primary is none at this level, as the conversions by action of ads are a module. A
       row whose measures are all zero is not kept. Its platforms are those of ad_platforms with the
-      kind ads. Its tests read the days of the windows that the run of the transform pinned.
+      kind ads. A row is final, is_final, when the load that wrote it ended at least the window of
+      restatements of its platform after its day, so that no later load changes it. Its tests read
+      the days of the windows that the run of the transform pinned.
     config:
       # The table that dbt builds has exactly these columns, with these types, or the build fails.
       contract:
@@ -2495,6 +2543,15 @@ models:
           meta:
             metabase:
               display_name: Account Is Active
+              semantic_type: type/Category
+              has_field_values: list
+      - name: is_final
+        data_type: boolean
+        description: '{{ doc("is_final") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Is Final
               semantic_type: type/Category
               has_field_values: list
   - name: ad_groups

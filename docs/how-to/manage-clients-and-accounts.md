@@ -44,6 +44,26 @@ So a mistake in the file, such as a removed entry or a typo in an account ID, er
 
 The demo names its accounts in a file of the same form in the base package. An entry of `extensions/model/clients.toml` wins over it, so a deployment can give an account of the demo a client of its own, but cannot take an account of the demo out ([The data model](../reference/data-model.md#clients)).
 
+## Give your own rates
+
+When the business has agreed rates with a client, such as a rate of the month for its invoices, give them in `extensions/model/rates.toml`, and they go before the sources of the rates on the days of their entries ([Give your own rates](../reference/configuration.md#give-your-own-rates)):
+
+1. Open `extensions/model/rates.toml`, and create the file if it is not there.
+2. Add an entry `[[rates]]` for each rate and range of days, with `currency`, the currency of the accounts that it converts, `quote`, the currency in which it is given, `rate`, the units of `quote` for one unit of `currency`, and the first and the last day, `from` and `to`:
+
+    ```toml
+    [[rates]]
+    currency = "USD"
+    quote = "KZT"
+    rate = 470.25
+    from = 2026-11-01
+    to = 2026-11-30
+    ```
+
+3. Trigger `agoranomos_demo_transform` in Airflow to see the change now, or wait for the run after the next load. The amounts in the reporting currency of those days take the rate, and `fx_rates_daily` shows it with the source `deployment`.
+
+Give the rate in the reporting currency where you can: it then applies to any day at the next run. A rate in another currency goes through the rate of that currency that the sources give, which the core may need to load again for a day of the past ([The rates](../reference/data-model.md#the-rates)). An entry that you delete or shorten keeps its rate on its days until the next load of the rates of their source brings their rates again, and `./agoranomos status` warns until then.
+
 ## Keep the file in git
 
-Keep the extensions folder in a git repository of your own ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)), so that the clients and the accounts of your deployment have a history and can be reviewed, and an entry that went by mistake can be put back as it was.
+Keep the extensions folder in a git repository of your own ([ADR-0013](../adr/0013-keep-extensions-apart-from-the-base-package.md)), so that the clients, the accounts and the rates of your deployment have a history and can be reviewed, and an entry that went by mistake can be put back as it was.

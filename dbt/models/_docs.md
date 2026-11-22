@@ -370,7 +370,7 @@ The day of the rate.
 {% enddocs %}
 
 {% docs rate %}
-How many units of one currency one unit of another is worth on the day, to eight decimal places. In the rates into the reporting currency, as in core.fx_rates_daily, the value of one unit of currency in reporting_currency, through the base currency of the first source of the rates, such as 1.08320000 from EUR to USD; in the rates of a source, the value of one unit of base_currency in quote_currency; for the National Bank of Kazakhstan, whose base is one tenge, not rounded to eight places but with the digits of the division, at least 16 significant ones, such as 0.0022484036 and more from KZT to USD on 12 November 2026.
+How many units of one currency one unit of another is worth on the day, to eight decimal places. In the rates into the reporting currency, as in core.fx_rates_daily, the value of one unit of currency in reporting_currency, through the base currency of the first source of the rates, such as 1.08320000 from EUR to USD; in the rates of a source, the value of one unit of base_currency in quote_currency; for the National Bank of Kazakhstan, whose base is one tenge, not rounded to eight places but with the digits of the division, at least 16 significant ones, such as 0.0022484036 and more from KZT to USD on 12 November 2026; in the rates of the file of the deployment, extensions/model/rates.toml, the value of one unit of currency in quote_currency as the file writes it, with up to ten decimal places.
 {% enddocs %}
 
 {% docs rate_into_reporting_currency %}
@@ -378,11 +378,11 @@ The value of one unit of currency in reporting_currency on the day, through the 
 {% enddocs %}
 
 {% docs rate_source %}
-Where the rate comes from: the code of the source of the rates, bank_of_italy for the Bank of Italy, nbk for the National Bank of Kazakhstan, ecb for the European Central Bank or demo_fx for the demo, or identity where the two currencies are one. The deployment sets the order of the sources (AGORANOMOS_RATES_SOURCE), and a rate that goes through the base currency of another source has the source of that second leg in cross_source. The Bank of Italy calls its rates indicative and no financial benchmark under Regulation (EU) 2016/1011; the NBK allows their use with the source named, under its data licence.
+Where the rate comes from: the code of the source of the rates, bank_of_italy for the Bank of Italy, nbk for the National Bank of Kazakhstan, ecb for the European Central Bank or demo_fx for the demo, deployment for a rate that the deployment gives in its file of rates, extensions/model/rates.toml, which goes before the sources, or identity where the two currencies are one. The deployment sets the order of the sources (AGORANOMOS_RATES_SOURCE), and a rate that goes through the base currency of another source, or through the quote of a rate of the deployment, has the source of that second leg in cross_source. The Bank of Italy calls its rates indicative and no financial benchmark under Regulation (EU) 2016/1011; the NBK allows their use with the source named, under its data licence.
 {% enddocs %}
 
 {% docs cross_source %}
-The source of the second leg of a rate that goes through the base currency of its source, the rate of that base currency against the base currency of the first source of the rates, such as bank_of_italy for a rate of RUB of nbk through KZT into the euro; none for a rate against the base currency of the first source and for the reporting currency.
+The source of the second leg of a rate that goes through the base currency of its source, the rate of that base currency against the base currency of the first source of the rates, such as bank_of_italy for a rate of RUB of nbk through KZT into the euro, or, for a rate of the deployment in a quote that is not the reporting currency, the source of the rate of that quote; none for a rate against the base currency of the first source and for the reporting currency.
 {% enddocs %}
 
 {% docs is_carried_forward %}
@@ -398,7 +398,15 @@ The rate of quote_currency against base_currency in the convention of the source
 {% enddocs %}
 
 {% docs quote_currency %}
-The currency in which a rate of the source gives the value of one unit of the base currency, such as USD.
+The currency in which a rate gives the value of one unit of another currency, such as USD: in the rates of a source, of one unit of the base currency; in the rates of the file of the deployment, extensions/model/rates.toml, of one unit of currency.
+{% enddocs %}
+
+{% docs first_day %}
+The first day of the range of days that the row covers: of a rate of the file of the deployment, from in its entry of extensions/model/rates.toml, the first day on which the rate holds; of a comparison of the core with the totals of a platform, the first day of the totals of the account that it took.
+{% enddocs %}
+
+{% docs last_day %}
+The last day of the range of days that the row covers: of a rate of the file of the deployment, to in its entry of extensions/model/rates.toml, the last day on which the rate holds; of a comparison of the core with the totals of a platform, the last day of the totals of the account that it took.
 {% enddocs %}
 
 {% docs airflow_dag_id %}
@@ -439,6 +447,10 @@ The load that gives the day of the row, load_sk of core.loads: for an account an
 
 {% docs is_partial_day %}
 Whether the day is still in progress in its account, as a load of the kind intraday read it at the moment of its load: the impressions, clicks and spend of the campaigns so far, and no conversions (none, not zero), until a load of the kind window or history replaces the day whole (ADR-0051). Only the statistics of campaigns have a partial day: the statistics of ad groups and of ads, and the conversions by action, have no row of it.
+{% enddocs %}
+
+{% docs is_final %}
+Whether the row is final, as no daily load takes its day again: true when the day on which the load that wrote the row ended, in the time zone of the account or the property, is at least the window of restatements of its platform after the day of the row, the days of restatement_window_days in ad_platforms, as a daily load takes again only the days of that window. A recent row is not final because its platform may still change the day, often its conversions, and the next daily load takes the day again. The column follows the load and not the calendar: a day that a load took within the window before a stop of the stack longer than the window stays not final, as no load takes it again. A row that a load of the history took when its day was already older than the window is final at once, and a partial day (is_partial_day) is never final. A row whose load or platform the warehouse no longer holds is not final, rather than none.
 {% enddocs %}
 
 {% docs load_kind %}

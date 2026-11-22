@@ -316,8 +316,11 @@ where unknown_time_zone
     a gap, which the test of G3 finds after the write of the rates. lists are the staging models
     of the accounts and the properties, each with the column of its account; currencies the seed
     of ISO 4217; days the table stg_loads__newest_days; staged the staging models of the rates of
-    each source by its code, rates core.fx_rates_daily and loads core.loads (macros/rates.sql). -#}
-{% macro quarantine_rate_findings(lists, currencies, days, staged, rates, loads) -%}
+    each source by its code, rates core.fx_rates_daily and loads core.loads (macros/rates.sql);
+    given the rates of the file of the deployment, stg_settings__rates. A currency that the file
+    gives a rate of has one, when the quote of the rate is the reporting currency or a currency of
+    which the sources give a rate; the detail of a currency that the file names says so. -#}
+{% macro quarantine_rate_findings(lists, currencies, days, staged, rates, loads, given) -%}
 with listed as (
     {%- for relation, account in lists %}
     {%- if not loop.first %}
@@ -334,15 +337,25 @@ named as (
     where source in ('{{ quarantine_sources() | join("', '") }}')
 ),
 
-rated as (
+sourced as (
     select distinct currency
     from (
-        {{ rates_known(staged, rates, days, loads, 'select currency from listed') }}
+        {{ rates_known(staged, rates, days, loads, 'select currency from listed union select quote_currency from ' ~ given) }}
     ) as known
     union
     select currency::text
     from {{ rates }}
     where reporting_currency = {{ reporting_currency() }}
+),
+
+rated as (
+    select currency
+    from sourced
+    union
+    select g.currency::text
+    from {{ given }} as g
+    where g.quote_currency = {{ reporting_currency() }}
+        or g.quote_currency in (select currency from sourced)
 )
 
 select distinct
@@ -352,7 +365,12 @@ select distinct
     'missing_rate'::text as reason,
     'rates'::text as checked,
     'no rate of ' || l.currency || ' into ' || {{ reporting_currency() }}
-        || ' from ' || {{ rates_named(staged, rates) }} as detail
+        || ' from ' || {{ rates_named(staged, rates) }}
+        || case
+            when exists (select from {{ given }} as g where g.currency = l.currency)
+                then ', nor from extensions/model/rates.toml, whose quote has no rate either'
+            else ''
+        end as detail
 from listed as l
 join named as n
     on n.source = l.source and n.account_id = l.account_id
