@@ -197,6 +197,14 @@ The load of Meta signs in with the token of a system user of the business portfo
 | `META_ADS_APP_ID` | empty | The App ID of the app of the portfolio, digits, for a token that expires in 60 days; empty for a token that never expires. `preflight` stops on another value, and when it is set without `META_ADS_APP_SECRET`. |
 | `META_ADS_APP_SECRET` | empty | The App Secret of the same app, for a token that expires; empty otherwise. With it, every call carries `appsecret_proof`, and each load refreshes the token once it is 30 days old and keeps the new one in the Airflow Variable `agoranomos_meta_ads_token` ([A token that expires](../how-to/connect-meta.md#a-token-that-expires)). `preflight` stops when it is set without `META_ADS_APP_ID` or without the token. |
 
+## TikTok
+
+The load of TikTok signs in with the long-term token of the person who authorized the app of the deployment and loads the advertisers of `tiktok_ads` that `extensions/model/clients.toml` names into `raw_tiktok_ads` ([ADR-0053](../adr/0053-connect-tiktok-with-an-app-of-the-deployment.md), [Connect TikTok](../how-to/connect-tiktok.md)). Only the container that runs the tasks gets the setting: the scheduler with the LocalExecutor, the worker with the CeleryExecutor. `./agoranomos preflight` checks its form and never prints it.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `TIKTOK_ADS_ACCESS_TOKEN` | empty | The long-term token that [`./agoranomos tiktok connect`](command-line.md#tiktok) writes here, sent in the header `Access-Token` of each call. It does not expire, and it reads every advertiser that the person who authorized the app reaches, those of other clients of an agency too, until that person cancels the authorization, so keep it as you keep the other secrets of `.env`. The app ID and the secret of the app stay out of `.env`. A load without it fails with a line that says so. `preflight` stops on a value with a space, a quote, a `$`, a `#`, a backslash, a backtick, an angle bracket or a character outside ASCII. |
+
 ## GA4
 
 The load of GA4 signs in as a service account of the Google Cloud project of the deployment, which is a user of each property with the role Viewer, and loads the properties of `ga4` that `extensions/model/clients.toml` names into `raw_ga4` ([ADR-0054](../adr/0054-connect-ga4-with-a-service-account-of-the-deployment.md), [Connect GA4](../how-to/connect-ga4.md)). Only the container that runs the tasks gets this setting: the scheduler with the LocalExecutor, the worker with the CeleryExecutor. `./agoranomos` checks neither key of a service account, of Google Ads or of GA4, and never prints them; the load checks the form of each.

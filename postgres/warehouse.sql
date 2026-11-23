@@ -190,6 +190,16 @@ ALTER SCHEMA raw_meta_ads_staging OWNER TO loader;
 GRANT USAGE ON SCHEMA raw_meta_ads TO transformer;
 GRANT SELECT ON ALL TABLES IN SCHEMA raw_meta_ads TO transformer;
 ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_meta_ads GRANT SELECT ON TABLES TO transformer;
+-- The TikTok advertisers of the deployment (ADR-0053), whose reports and lists of campaigns, ad
+-- groups and ads dlt appends to raw_tiktok_ads, with raw_tiktok_ads_staging beside it, empty, as a
+-- platform has it. loader owns both; transformer may read the first, as for Meta.
+CREATE SCHEMA IF NOT EXISTS raw_tiktok_ads AUTHORIZATION loader;
+CREATE SCHEMA IF NOT EXISTS raw_tiktok_ads_staging AUTHORIZATION loader;
+ALTER SCHEMA raw_tiktok_ads OWNER TO loader;
+ALTER SCHEMA raw_tiktok_ads_staging OWNER TO loader;
+GRANT USAGE ON SCHEMA raw_tiktok_ads TO transformer;
+GRANT SELECT ON ALL TABLES IN SCHEMA raw_tiktok_ads TO transformer;
+ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_tiktok_ads GRANT SELECT ON TABLES TO transformer;
 -- The GA4 properties of the deployment (ADR-0054), whose properties and reports of sessions dlt
 -- appends to raw_ga4, with raw_ga4_staging beside it, empty, as a platform has it. loader owns
 -- both; transformer may read the first, as for Meta.

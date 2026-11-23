@@ -51,6 +51,7 @@ def test_no_dag_file_imports_another():
         "agoranomos_meta_ads_history",
         "agoranomos_nbk_daily",
         "agoranomos_selfcheck",
+        "agoranomos_tiktok_ads_daily",
     } <= stems
     for path in DAG_FILES:
         others = stems - {path.stem}
@@ -67,16 +68,15 @@ RAW_BANK_OF_ITALY = "postgres://warehouse-db:5432/warehouse/raw_bank_of_italy/ra
 RAW_NBK = "postgres://warehouse-db:5432/warehouse/raw_nbk/rates_daily"
 
 
-def test_the_transform_runs_when_the_demo_the_rates_google_ads_meta_or_ga4_have_loaded():
-    # Any of nine conditions (ADR-0039): all five assets of the demo, the asset of the rates of the
+def test_the_transform_runs_when_the_demo_the_rates_or_a_platform_have_loaded():
+    # Any of ten conditions (ADR-0039): all five assets of the demo, the asset of the rates of the
     # ECB, that of the rates of the Bank of Italy (ADR-0042), that of Google Ads (ADR-0032), that of
-    # Meta (ADR-0050), that of GA4 (ADR-0054), that of the rates of the NBK (ADR-0042), or that of
-    # the short cycle of the
-    # current day of Google Ads or of the demo (ADR-0051). The five of the demo stay one
-    # condition, so that one run of the history or of the daily load starts one run of the
-    # transform, after its last platform, and not one after its first platform and one more for
-    # the other four, the first reading tables whose days the loads still replace. One run at a
-    # time, as before.
+    # Meta (ADR-0050), that of GA4 (ADR-0054), that of the rates of the NBK (ADR-0042), that of
+    # TikTok (ADR-0053), or that of the short cycle of the current day of Google Ads or of the demo
+    # (ADR-0051). The five of the demo stay one condition, so that one run of the history or of
+    # the daily load starts one run of the transform, after its last platform, and not one after
+    # its first platform and one more for the other four, the first reading tables whose days the
+    # loads still replace. One run at a time, as before.
     text = (DAGS / "agoranomos_demo_transform.py").read_text(encoding="utf-8")
     assert "schedule=LOADED" in text
     assert "max_active_runs=1" in text
@@ -90,7 +90,7 @@ def test_the_transform_runs_when_the_demo_the_rates_google_ads_meta_or_ga4_have_
     assert f'RAW_NBK = Asset("{RAW_NBK}")' in assets
     assert (
         "LOADED = AssetAny(\n    DEMO_LOADED,\n    RAW_ECB,\n    RAW_BANK_OF_ITALY,\n"
-        "    RAW_GOOGLE_ADS,\n    RAW_META_ADS,\n    RAW_GA4,\n    RAW_NBK,\n"
+        "    RAW_GOOGLE_ADS,\n    RAW_META_ADS,\n    RAW_GA4,\n    RAW_NBK,\n    RAW_TIKTOK_ADS,\n"
         "    RAW_GOOGLE_ADS_INTRADAY,\n    RAW_DEMO_INTRADAY,\n)"
     ) in assets
     assert 'RAW_GOOGLE_ADS_INTRADAY = Asset("agoranomos_google_ads_intraday")' in assets
@@ -670,6 +670,86 @@ def test_a_run_of_the_load_of_meta_takes_a_portion_of_the_history_from_its_param
     assert any("portion=portion" in call for call in calls if call.startswith("meta_ads.load("))
 
 
+TIKTOK_ADS_DAILY = DAGS / "agoranomos_tiktok_ads_daily.py"
+
+
+def test_the_load_of_tiktok_imports_dlt_in_its_task_and_no_cosmos():
+    found = imports(TIKTOK_ADS_DAILY)
+    assert ("agoranomos_pipelines.assets", ["RAW_TIKTOK_ADS"]) in found
+    assert [module for module, _ in found if module.split(".")[0] == "cosmos"] == []
+    tree = ast.parse(TIKTOK_ADS_DAILY.read_text(encoding="utf-8"))
+    top = [
+        node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert not [m for m in top if m.split(".")[0] == "dlt" or m.endswith((".tiktok_ads", ".loads"))]
+
+
+def test_the_load_of_tiktok_starts_paused_and_masks_its_token():
+    # A deployment unpauses it once its token and advertisers are in place (ADR-0053). The load
+    # masks the token of .env with mask_secret, which the task gives it.
+    text = TIKTOK_ADS_DAILY.read_text(encoding="utf-8")
+    keywords = {
+        node.arg: ast.unparse(node.value)
+        for node in ast.walk(ast.parse(text))
+        if isinstance(node, ast.keyword)
+    }
+    assert keywords["is_paused_upon_creation"] == "True"
+    assert keywords["max_active_runs"] == "1"
+    assert keywords["catchup"] == "False"
+    assert keywords["mask"] == "mask_secret"
+    assert (
+        "airflow.sdk",
+        ["CronTriggerTimetable", "Param", "dag", "get_current_context", "task"],
+    ) in imports(TIKTOK_ADS_DAILY)
+    assert "except tiktok_ads.AdvertisersFailed as failed:" in text
+    assert "raise AirflowFailException(str(failed)) from None" in text
+
+
+def test_the_load_of_tiktok_runs_after_its_data_fix_and_keeps_its_watermarks():
+    # 12:17 UTC: after the data fix of TikTok at 12:00 UTC (ADR-0053), and after the loads of Meta
+    # and of Google Ads. The asset state store of its asset is the cache of the watermarks.
+    text = TIKTOK_ADS_DAILY.read_text(encoding="utf-8")
+    assert 'SCHEDULE = CronTriggerTimetable("17 12 * * *", timezone="UTC")' in text
+    assert 'CronTriggerTimetable("37 10 * * *"' in GOOGLE_ADS_DAILY.read_text(encoding="utf-8")
+    assert 'CronTriggerTimetable("7 10 * * *"' in META_ADS_DAILY.read_text(encoding="utf-8")
+    assert decorators(TIKTOK_ADS_DAILY)["load_tiktok_ads"] == [
+        "task(task_id='load_tiktok_ads', outlets=[RAW_TIKTOK_ADS])"
+    ]
+    assert 'cache=context["asset_state_store"][RAW_TIKTOK_ADS]' in text
+    assets = ASSETS.read_text(encoding="utf-8")
+    assert "postgres://warehouse-db:5432/warehouse/raw_tiktok_ads/report_campaign_daily" in assets
+
+
+def test_a_run_of_the_load_of_tiktok_takes_a_portion_of_the_history_from_its_parameters():
+    # As for Google Ads and Meta, so that C5c of #225 adds the planner alone. An advertiser of
+    # TikTok is digits.
+    text = TIKTOK_ADS_DAILY.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    [params] = [
+        node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign) and ast.unparse(node.targets[0]) == "PARAMS"
+    ]
+    found = {
+        ast.literal_eval(key): {k.arg: ast.literal_eval(k.value) for k in value.keywords}
+        | {"default": ast.literal_eval(value.args[0])}
+        for key, value in zip(params.keys, params.values, strict=True)
+    }
+    assert set(found) == {"accounts", "window_from", "window_to"}
+    assert found["accounts"]["default"] == []
+    assert found["accounts"]["items"] == {"type": "string", "pattern": "^[0-9]{1,20}$"}
+    for day in ("window_from", "window_to"):
+        assert found[day]["default"] is None
+        assert (found[day]["type"], found[day]["format"]) == (["null", "string"], "date")
+    calls = [ast.unparse(node) for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    assert (
+        "tiktok_ads.portion_of(params['accounts'], params['window_from'], params['window_to'])"
+    ) in calls
+    assert any("portion=portion" in call for call in calls if call.startswith("tiktok_ads.load("))
+
+
 GA4_DAILY = DAGS / "agoranomos_ga4_daily.py"
 
 
@@ -910,6 +990,13 @@ TEN_MINUTES = "timedelta(minutes=10)"
         ),
         (
             "agoranomos_meta_ads_daily.py",
+            TEN_MINUTES,
+            "timedelta(minutes=20)",
+            "timedelta(hours=2)",
+            "hours=7",
+        ),
+        (
+            "agoranomos_tiktok_ads_daily.py",
             TEN_MINUTES,
             "timedelta(minutes=20)",
             "timedelta(hours=2)",

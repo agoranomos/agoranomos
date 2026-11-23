@@ -147,4 +147,4 @@ To go further:
 - [Run agoranomos locally](../how-to/run-locally.md) covers updates, your own DAGs, memory and the separate worker of Airflow.
 - [Architecture](../explanation/architecture.md) explains how the parts fit together.
 
-The connectors to real ad platforms are those of Google Ads and of Meta ([Connect Google Ads](../how-to/connect-google-ads.md), [Connect Meta](../how-to/connect-meta.md)), and the others are planned. Until you connect an account, the demo is the data that the stack shows.
+The connectors to real ad platforms are those of Google Ads and of Meta ([Connect Google Ads](../how-to/connect-google-ads.md), [Connect Meta](../how-to/connect-meta.md)), and that of TikTok, which loads into the raw layer only ([Connect TikTok](../how-to/connect-tiktok.md)); the others are planned. Until you connect an account, the demo is the data that the stack shows.

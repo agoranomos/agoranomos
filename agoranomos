@@ -1209,6 +1209,9 @@ EOF
   elif [ -n "$meta_app_secret" ] && [ -z "$meta_token" ]; then
     problem "META_ADS_APP_ID and META_ADS_APP_SECRET in .env need META_ADS_ACCESS_TOKEN, the token that the load refreshes"
   fi
+  # TikTok (ADR-0053): the form of the token, as the load checks it, and never its value.
+  tiktok_problem=$(tiktok_token_problem "$(setting TIKTOK_ADS_ACCESS_TOKEN '')")
+  [ -z "$tiktok_problem" ] || problem "$tiktok_problem"
   # The daily scan of Metabase (ADR-0037): a whole hour, as Metabase starts a daily scan at the
   # start of an hour. metabase-init checks it too, for a start through plain docker compose.
   case "$(setting METABASE_SCAN_TIME 12:00)" in
@@ -2906,6 +2909,98 @@ cmd_mcp() {
   compose exec -T ai /opt/agoranomos/ai/mcp.sh "$1"
 }
 
+# What is wrong with the form of a token of TikTok, $1, or nothing: one word of printable ASCII
+# without a quote, a $, a #, a backslash, a backtick or an angle bracket, as the load and the
+# exchange of agoranomos_pipelines/tiktok_api.py check it (ADR-0053). The message never shows it.
+tiktok_token_problem() {
+  # shellcheck disable=SC2016 # the characters named in the message, not an expansion
+  tiktok_form='TIKTOK_ADS_ACCESS_TOKEN in .env must be the token of TikTok that ./agoranomos tiktok connect writes, one word without spaces, quotes, $, # or backslashes'
+  case "$1" in
+    '') return 0 ;;
+  esac
+  if printf '%s' "$1" | LC_ALL=C grep -q '[^!-~]'; then
+    say "$tiktok_form"
+    return 0
+  fi
+  case "$1" in
+    *[\"\'\<\>\$\#\\\`]*) say "$tiktok_form" ;;
+  esac
+}
+
+# Read one answer of the person into tiktok_answer, with the prompt $1 on the standard error and
+# without echo on a terminal, so that a secret stays off the screen and out of the scrollback; from
+# a pipe, a line without a prompt. The echo comes back when the script stops on a signal too.
+tiktok_ask() {
+  tiktok_answer=""
+  if [ -t 0 ]; then
+    printf '%s: ' "$1" >&2
+    tiktok_tty=$(stty -g)
+    trap 'stty "$tiktok_tty"; printf "\n" >&2; exit 130' INT
+    trap 'stty "$tiktok_tty"; exit 143' TERM
+    trap 'stty "$tiktok_tty"; exit 129' HUP
+    stty -echo
+    IFS= read -r tiktok_answer || tiktok_answer=""
+    stty "$tiktok_tty"
+    trap - INT TERM HUP
+    printf '\n' >&2
+  else
+    IFS= read -r tiktok_answer || tiktok_answer=""
+  fi
+}
+
+# Exchange an auth_code of TikTok for the long-term token of the deployment (ADR-0053): read the app
+# ID, the secret of the app and the code without echo, send them through the standard input of a
+# command in the container of the Airflow scheduler, which reaches TikTok, write the token alone
+# into .env, and show which advertisers of tiktok_ads in clients.toml the token reaches. The app ID
+# and the secret stay out of .env, as no load needs them, and none of the three, nor the token, is
+# ever an argument of a command, which other users of the host could read, or printed.
+tiktok_connect() {
+  [ "$#" -eq 0 ] || die "usage: ./agoranomos tiktok connect"
+  [ -f "$ENV_FILE" ] || die "there is no .env yet: run ./agoranomos init"
+  running_service airflow-scheduler ||
+    die "the Airflow scheduler is not running: start the stack with ./agoranomos up, as the exchange runs in its container, which reaches TikTok"
+  if [ -t 0 ]; then
+    say "Paste each value and press Enter; nothing shows while you paste. Run this within the hour of the auth_code, which TikTok accepts once."
+  fi
+  tiktok_ask "App ID"
+  tiktok_app_id=$tiktok_answer
+  tiktok_ask "Secret"
+  tiktok_secret=$tiktok_answer
+  tiktok_ask "auth_code"
+  tiktok_code=$tiktok_answer
+  [ -n "$tiktok_app_id" ] && [ -n "$tiktok_secret" ] && [ -n "$tiktok_code" ] ||
+    die "the exchange needs the app ID, the secret and the auth_code, each on a line of its own"
+  tiktok_output=$(printf '%s\n%s\n%s\n' "$tiktok_app_id" "$tiktok_secret" "$tiktok_code" |
+    compose exec -T --workdir /opt/agoranomos/dags airflow-scheduler \
+      python -m agoranomos_pipelines.tiktok_api connect) ||
+    die "no token was written: the line above says why"
+  tiktok_secret="" tiktok_code=""
+  tiktok_token=$(printf '%s\n' "$tiktok_output" | sed -n 1p)
+  [ -n "$tiktok_token" ] && [ -z "$(tiktok_token_problem "$tiktok_token")" ] ||
+    die "the exchange gave no token that .env can hold: see ./agoranomos logs airflow-scheduler"
+  if [ -n "$(env_get TIKTOK_ADS_ACCESS_TOKEN)" ]; then
+    tiktok_said="Replaced the token of TikTok that .env held with the new one, in TIKTOK_ADS_ACCESS_TOKEN."
+  else
+    tiktok_said="Wrote the token of TikTok into .env, in TIKTOK_ADS_ACCESS_TOKEN."
+  fi
+  env_set TIKTOK_ADS_ACCESS_TOKEN "$tiktok_token"
+  tiktok_token=""
+  say "$tiktok_said"
+  printf '%s\n' "$tiktok_output" | sed 1d
+  tiktok_output=""
+  say "./agoranomos up gives it to the container that runs the tasks."
+}
+
+cmd_tiktok() {
+  case "${1:-}" in
+    connect)
+      shift
+      tiktok_connect "$@"
+      ;;
+    *) die "usage: ./agoranomos tiktok connect" ;;
+  esac
+}
+
 cmd_help() {
   print_banner
   usage
@@ -2930,6 +3025,7 @@ Commands:
                 ai connect <client>, ai clients, ai revoke <client ID>: the OAuth clients of its MCP server)
                 and the MCP servers of the warehouse and of Airflow (ai warehouse|airflow on|off: turn one on or off)
   mcp           mcp warehouse|airflow: run the MCP server of the warehouse or of Airflow on stdio, for an AI client
+  tiktok        tiktok connect: exchange an auth_code of TikTok for the token of the deployment, and write it into .env
   help          Show this help
 
 Documentation: docs/reference/command-line.md
@@ -2953,6 +3049,7 @@ main() {
     credentials) cmd_credentials "$@" ;;
     ai) cmd_ai "$@" ;;
     mcp) cmd_mcp "$@" ;;
+    tiktok) cmd_tiktok "$@" ;;
     help | -h | --help) cmd_help ;;
     *)
       usage >&2

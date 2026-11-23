@@ -54,6 +54,11 @@ RAW_META_ADS = Asset("postgres://warehouse-db:5432/warehouse/raw_meta_ads/insigh
 # The asset of the report of GA4 (ADR-0054), in the same form, which each of its loads updates.
 RAW_GA4 = Asset("postgres://warehouse-db:5432/warehouse/raw_ga4/report_sessions_daily")
 
+# The asset of the reports of TikTok (ADR-0053), in the same form, which each of its loads updates.
+RAW_TIKTOK_ADS = Asset(
+    "postgres://warehouse-db:5432/warehouse/raw_tiktok_ads/report_campaign_daily"
+)
+
 # The asset of the official rates of the National Bank of Kazakhstan (ADR-0042), in the same form,
 # which each of its loads updates.
 RAW_NBK = Asset("postgres://warehouse-db:5432/warehouse/raw_nbk/rates_daily")
@@ -65,10 +70,11 @@ RAW_NBK = Asset("postgres://warehouse-db:5432/warehouse/raw_nbk/rates_daily")
 TRANSFORMED = Asset("agoranomos_transformed")
 
 # The condition on which the transform runs (ADR-0039): the demo has loaded, or the rates of the ECB
-# or of the Bank of Italy have, or Google Ads, Meta or GA4 has, or the rates of the NBK have, or the
-# short cycle of Google Ads or of the demo has (ADR-0051). A source that joins the model adds its
-# asset here. The transform allows one run at a time: while a run is queued or running, Airflow
-# keeps the events that come, and starts one run for all of them once it ends.
+# or of the Bank of Italy have, or Google Ads, Meta or GA4 has, or the rates of the NBK have, or
+# TikTok has, or the short cycle of Google Ads or of the demo has (ADR-0051); no run reads the
+# loads of GA4 or of TikTok until their staging (C6c of #226, C5d of #225). A source that joins the
+# model adds its asset here. The transform allows one run at a time: while a run is queued or
+# running, Airflow keeps the events that come, and starts one run for all of them once it ends.
 LOADED = AssetAny(
     DEMO_LOADED,
     RAW_ECB,
@@ -77,6 +83,7 @@ LOADED = AssetAny(
     RAW_META_ADS,
     RAW_GA4,
     RAW_NBK,
+    RAW_TIKTOK_ADS,
     RAW_GOOGLE_ADS_INTRADAY,
     RAW_DEMO_INTRADAY,
 )

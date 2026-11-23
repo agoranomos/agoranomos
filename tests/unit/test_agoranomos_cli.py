@@ -285,6 +285,7 @@ def test_help_lists_the_commands(cli):
         "metadata",
         "credentials",
         "ai",
+        "tiktok",
     )
     for command in (*commands, "help"):
         assert re.search(rf"^  {command}\s", result.stdout, flags=re.MULTILINE)
@@ -4787,6 +4788,153 @@ def test_preflight_checks_the_form_of_the_settings_of_meta_and_never_prints_them
     check_limit(result, outcome, word)
     for secret in (META_TOKEN, META_SECRET):
         assert secret not in result.stdout + result.stderr
+
+
+# A stand-in of a token of TikTok, made up here with low entropy: a real one would be a secret.
+TIKTOK_TOKEN = "stand-in-token-of-tiktok-stand-in-token"
+TIKTOK_SECRET = "stand-in-secret-of-the-app"
+TIKTOK_CODE = "stand-in-auth-code"
+TIKTOK_APP = "7000000000000000000"
+
+
+@pytest.mark.parametrize(
+    ("value", "outcome"),
+    [
+        (TIKTOK_TOKEN, "pass"),
+        ("act.stand-in!6506.va", "pass"),
+        (f"'{TIKTOK_TOKEN} with a space'", "stop"),
+        (f"<{TIKTOK_TOKEN}>", "stop"),
+        (f"'{TIKTOK_TOKEN}$x'", "stop"),
+        (f"'{TIKTOK_TOKEN}#x'", "stop"),
+        (f"{TIKTOK_TOKEN}é", "stop"),
+    ],
+)
+def test_preflight_checks_the_form_of_the_token_of_tiktok_and_never_prints_it(cli, value, outcome):
+    # ADR-0053: the script checks the form of the token, never its value, and no message shows it.
+    cli.run("init")
+    add_env(cli, TIKTOK_ADS_ACCESS_TOKEN=value)
+    result = cli.run("preflight")
+    check_limit(result, outcome, "TIKTOK_ADS_ACCESS_TOKEN")
+    assert TIKTOK_TOKEN not in result.stdout + result.stderr
+
+
+# The stand-in of docker for tiktok connect: the Airflow scheduler runs unless FAKE_STOPPED is set,
+# and the command in its container reads its standard input into the log with the suffix .stdin and
+# prints FAKE_EXCHANGE, or fails with FAKE_EXCHANGE_FAIL on its standard error, as the exchange of
+# tiktok_api.py does.
+TIKTOK_DOCKER = r"""
+printf '%s\n' "$*" >> "$FAKE_LOG"
+case " $* " in
+  *" ps "*) [ -n "${FAKE_STOPPED:-}" ] || printf 'airflow-scheduler|running|healthy|\n' ;;
+  *" exec "*)
+    cat > "$FAKE_LOG.stdin"
+    if [ -n "${FAKE_EXCHANGE_FAIL:-}" ]; then
+      printf 'tiktok connect: %s\n' "$FAKE_EXCHANGE_FAIL" >&2
+      exit 1
+    fi
+    printf '%s\n' "$FAKE_EXCHANGE"
+    ;;
+esac
+"""
+TIKTOK_REPORT = "The token reaches 2 advertisers of TikTok."
+TIKTOK_INPUT = f"{TIKTOK_APP}\n{TIKTOK_SECRET}\n{TIKTOK_CODE}\n"
+
+
+def tiktok_connect(cli, stdin=TIKTOK_INPUT, **fake):
+    cli.stub("docker", TIKTOK_DOCKER)
+    fake.setdefault("FAKE_EXCHANGE", f"{TIKTOK_TOKEN}\n{TIKTOK_REPORT}")
+    return cli.run("tiktok", "connect", stdin=stdin, **fake)
+
+
+def test_tiktok_connect_writes_the_token_alone_into_env_and_shows_no_secret(cli):
+    # ADR-0053: the app ID, the secret and the code go to the exchange on its standard input, never
+    # as arguments; the token goes into .env, and the app ID and the secret stay out of it.
+    cli.run("init")
+    result = tiktok_connect(cli)
+    assert result.returncode == 0, result.stderr
+    assert cli.read_env()["TIKTOK_ADS_ACCESS_TOKEN"] == TIKTOK_TOKEN
+    env = cli.env_path.read_text(encoding="utf-8")
+    assert TIKTOK_SECRET not in env
+    assert TIKTOK_APP not in env
+    assert TIKTOK_CODE not in env
+    assert (cli.env_path.stat().st_mode & 0o777) == 0o600
+    assert result.stdout.splitlines() == [
+        "Wrote the token of TikTok into .env, in TIKTOK_ADS_ACCESS_TOKEN.",
+        TIKTOK_REPORT,
+        "./agoranomos up gives it to the container that runs the tasks.",
+    ]
+    for secret in (TIKTOK_TOKEN, TIKTOK_SECRET, TIKTOK_CODE):
+        assert secret not in result.stderr
+        assert secret not in "\n".join(cli.docker_calls())
+    received = cli.log.with_name(f"{cli.log.name}.stdin").read_text(encoding="utf-8")
+    assert received == TIKTOK_INPUT
+    [call] = [c for c in cli.docker_calls() if " exec " in f" {c} "]
+    assert call == (
+        "compose exec -T --workdir /opt/agoranomos/dags airflow-scheduler "
+        "python -m agoranomos_pipelines.tiktok_api connect"
+    )
+
+
+def test_tiktok_connect_replaces_a_token_and_says_so(cli):
+    cli.run("init")
+    add_env(cli, TIKTOK_ADS_ACCESS_TOKEN="old-stand-in-token")
+    result = tiktok_connect(cli)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("Replaced the token of TikTok that .env held with the new one")
+    lines = cli.env_path.read_text(encoding="utf-8").splitlines()
+    assert [line for line in lines if line.startswith("TIKTOK_ADS_ACCESS_TOKEN=")] == [
+        f"TIKTOK_ADS_ACCESS_TOKEN={TIKTOK_TOKEN}"
+    ]
+    assert cli.read_env()["TIKTOK_ADS_ACCESS_TOKEN"] == TIKTOK_TOKEN
+
+
+@pytest.mark.parametrize(
+    ("fake", "stdin", "message"),
+    [
+        ({"FAKE_STOPPED": "1"}, TIKTOK_INPUT, "the Airflow scheduler is not running"),
+        ({}, f"{TIKTOK_APP}\n{TIKTOK_SECRET}\n", "needs the app ID, the secret and the auth_code"),
+        (
+            {"FAKE_EXCHANGE_FAIL": "TikTok refused the exchange"},
+            TIKTOK_INPUT,
+            "no token was written",
+        ),
+        ({"FAKE_EXCHANGE": "a token with spaces"}, TIKTOK_INPUT, "no token that .env can hold"),
+    ],
+)
+def test_tiktok_connect_writes_nothing_when_a_step_fails(cli, fake, stdin, message):
+    cli.run("init")
+    before = cli.env_path.read_text(encoding="utf-8")
+    result = tiktok_connect(cli, stdin=stdin, **fake)
+    assert result.returncode == 1
+    assert message in result.stderr
+    assert cli.env_path.read_text(encoding="utf-8") == before
+    for secret in (TIKTOK_SECRET, TIKTOK_CODE):
+        assert secret not in result.stdout + result.stderr
+
+
+def test_tiktok_connect_asks_on_a_terminal(cli):
+    cli.run("init")
+    cli.stub("docker", TIKTOK_DOCKER)
+    result = cli.run_asked(
+        f"{TIKTOK_APP}\n{TIKTOK_SECRET}\n{TIKTOK_CODE}",
+        "tiktok",
+        "connect",
+        FAKE_EXCHANGE=f"{TIKTOK_TOKEN}\n{TIKTOK_REPORT}",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "App ID: " in result.stderr
+    assert "Secret: " in result.stderr
+    assert "auth_code: " in result.stderr
+    assert "nothing shows while you paste" in result.stdout
+    assert cli.read_env()["TIKTOK_ADS_ACCESS_TOKEN"] == TIKTOK_TOKEN
+
+
+def test_tiktok_takes_connect_alone(cli):
+    cli.run("init")
+    for args in (("tiktok",), ("tiktok", "other"), ("tiktok", "connect", "now")):
+        result = cli.run(*args)
+        assert result.returncode == 1
+        assert "usage: ./agoranomos tiktok connect" in result.stderr
 
 
 # A stand-in of the key of a service account, made up here, in the form that .env takes it, as the

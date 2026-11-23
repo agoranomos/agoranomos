@@ -42,6 +42,7 @@ Checks that this machine can run the stack. Each problem is reported with what t
 | The rates, `AGORANOMOS_RATES_SOURCE` and `AGORANOMOS_REPORTING_CURRENCY` in `.env` | the source is not `auto`, `bank_of_italy`, `nbk` or `ecb`, or the reporting currency is not one that its sources give: EUR or a currency of the ECB with `ecb`, a currency of the Bank of Italy or of the National Bank of Kazakhstan otherwise | — |
 | `GOOGLE_ADS_LOGIN_CUSTOMER_ID` in `.env` | it is neither empty nor the ten digits of a manager account, without hyphens | — |
 | Meta, `META_ADS_*` in `.env` | the token or the App Secret holds a space, a quote or an angle bracket, the App ID is not digits, the App ID and the App Secret do not come together, or they come without the token | — |
+| TikTok, `TIKTOK_ADS_ACCESS_TOKEN` in `.env` | the token holds a space, a quote, a `$`, a `#`, a backslash, a backtick, an angle bracket or a character outside ASCII | — |
 | `AGORANOMOS_INTRADAY_HOURS` in `.env` | it is not 0, 1, 2, 3, 4, 6, 8, 12 or 24 | — |
 | Each `*_MEMORY` setting in `.env` | it is not empty and not a number with the unit `k`, `m` or `g`, in either case, such as `2048m` or `2g`: Compose would read a number alone as bytes; or it is smaller than 6 MiB, the smallest memory limit that Docker accepts | — |
 | A comment after an empty value in `.env` | a setting has a space or a tab and then `#` after its `=`, as in `KEY= # note`: Compose trims the blanks and reads `# note` as the value, a secret or the session key of Metabase among them; a `#` right after the `=`, as in `KEY=#abc`, is a value and no problem | — |
@@ -114,6 +115,14 @@ Each person then signs in with their own account of Metabase, which is not an ad
 `.mcp.json` in the checkout gives Claude Code both servers, as `agoranomos-warehouse` and `agoranomos-airflow`; Claude Code asks once whether to use the servers of the project. For another client, give it the path of `./agoranomos` as the command and `mcp warehouse` or `mcp airflow` as its arguments. The MCP server of Metabase is not in `.mcp.json`, since its client ID belongs to each deployment: [`ai connect claude-code`](#ai) prints the command that adds it.
 
 It refuses in server mode, while the switch of the server is off or `COMPOSE_PROFILES` does not list `ai`, and while the container `ai` does not run, and says what to do. It needs `.env`.
+
+## `tiktok`
+
+`./agoranomos tiktok connect` exchanges the `auth_code` of TikTok for the long-term token of the deployment and writes the token into `.env`, as `TIKTOK_ADS_ACCESS_TOKEN` ([ADR-0053](../adr/0053-connect-tiktok-with-an-app-of-the-deployment.md), [Connect TikTok](../how-to/connect-tiktok.md)). It asks for the app ID, the secret of the app and the `auth_code`, one after another, and on a terminal shows nothing that you paste; from a pipe it reads them as three lines. It sends them, on the standard input of a command in the container of the Airflow scheduler, which reaches the internet, to `POST /open_api/v1.3/oauth2/access_token/` once, as TikTok accepts a code once and for an hour at most. None of the three, nor the token, is ever an argument of a command, which other users of the machine could read, or printed.
+
+It then writes the token alone into `.env`, and says whether it replaced one that was there; the app ID and the secret stay out of `.env`, as no load needs them. It shows how many advertisers the token reaches, which advertisers of `tiktok_ads` in `extensions/model/clients.toml` it reaches, which of them it does not, whose loads would fail, and how many more it reaches that the file does not name, which the load leaves out. Run `./agoranomos up` after it, which gives the token to the container that runs the tasks.
+
+It needs `.env` and a running stack, and refuses a value of the wrong form before it sends anything: an app ID that is not digits, a secret with a space, or the whole address of the redirect in place of the `auth_code`. When TikTok refuses the code, it says why, with the code of TikTok, and writes nothing.
 
 ## `down`
 

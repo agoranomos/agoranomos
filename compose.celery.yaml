@@ -113,6 +113,7 @@ services:
       GOOGLE_ADS_SERVICE_ACCOUNT_KEY: ""
       META_ADS_ACCESS_TOKEN: ""
       META_ADS_APP_SECRET: ""
+      TIKTOK_ADS_ACCESS_TOKEN: ""
       GA4_SERVICE_ACCOUNT_KEY: ""
     depends_on:
       broker:
