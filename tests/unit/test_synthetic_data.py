@@ -74,10 +74,12 @@ def test_the_registry_writes_only_marked_rows(profile):
     assert "'synthetic'," in sql
     # The loads are accepted, so that no run of the transform reads them (newest_load.sql).
     assert "'loaded', now(), gen_random_uuid(), 'accepted', now()" in sql
-    # Every platform of the accounts is an ad platform of the seed of the base package.
+    # Every platform of the accounts is an ad platform of the seed of the base package, but
+    # TikTok, which loads into raw alone until its core and marts come with C5d of #225, and which
+    # joins the generator then.
     seed = (REPO_ROOT / "dbt" / "seeds" / "seed_ad_platforms.csv").read_text(encoding="utf-8")
     ads = {line.split(",")[0] for line in seed.splitlines()[1:] if line.split(",")[2] == "ads"}
-    assert set(synthetic.PLATFORMS) == ads
+    assert set(synthetic.PLATFORMS) == ads - {"tiktok_ads"}
 
 
 def test_remove_deletes_the_facts_with_a_thaw_and_drops_only_marked_partitions():

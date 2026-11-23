@@ -274,6 +274,12 @@ SCHEMA_PRIVILEGES = {
     ("transformer", "raw_nbk_staging"): (False, False),
     ("metabase_reader", "raw_nbk"): (False, False),
     ("metabase_reader", "raw_nbk_staging"): (False, False),
+    ("loader", "raw_tiktok_ads"): (True, True),
+    ("loader", "raw_tiktok_ads_staging"): (True, True),
+    ("transformer", "raw_tiktok_ads"): (True, False),
+    ("transformer", "raw_tiktok_ads_staging"): (False, False),
+    ("metabase_reader", "raw_tiktok_ads"): (False, False),
+    ("metabase_reader", "raw_tiktok_ads_staging"): (False, False),
     ("loader", "raw_settings"): (True, True),
     ("transformer", "raw_settings"): (True, False),
     ("metabase_reader", "raw_settings"): (False, False),
@@ -324,6 +330,8 @@ def test_each_schema_of_the_layers_has_its_owner(env):
         "raw_nbk:loader",
         "raw_nbk_staging:loader",
         "raw_settings:loader",
+        "raw_tiktok_ads:loader",
+        "raw_tiktok_ads_staging:loader",
         "staging:transformer",
     ]
 
@@ -368,6 +376,7 @@ def test_the_default_privileges_are_those_of_the_roles_that_create_the_tables(en
         "loader:raw_meta_ads:r:{transformer=r/loader}",
         "loader:raw_nbk:r:{transformer=r/loader}",
         "loader:raw_settings:r:{transformer=r/loader}",
+        "loader:raw_tiktok_ads:r:{transformer=r/loader}",
         "transformer:marts:r:{metabase_reader=r/transformer,ai_reader=r/transformer}",
     ]
 

@@ -190,6 +190,16 @@ ALTER SCHEMA raw_meta_ads_staging OWNER TO loader;
 GRANT USAGE ON SCHEMA raw_meta_ads TO transformer;
 GRANT SELECT ON ALL TABLES IN SCHEMA raw_meta_ads TO transformer;
 ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_meta_ads GRANT SELECT ON TABLES TO transformer;
+-- The TikTok advertisers of the deployment (ADR-0053), whose reports and lists of campaigns, ad
+-- groups and ads dlt appends to raw_tiktok_ads, with raw_tiktok_ads_staging beside it, empty, as a
+-- platform has it. loader owns both; transformer may read the first, as for Meta.
+CREATE SCHEMA IF NOT EXISTS raw_tiktok_ads AUTHORIZATION loader;
+CREATE SCHEMA IF NOT EXISTS raw_tiktok_ads_staging AUTHORIZATION loader;
+ALTER SCHEMA raw_tiktok_ads OWNER TO loader;
+ALTER SCHEMA raw_tiktok_ads_staging OWNER TO loader;
+GRANT USAGE ON SCHEMA raw_tiktok_ads TO transformer;
+GRANT SELECT ON ALL TABLES IN SCHEMA raw_tiktok_ads TO transformer;
+ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_tiktok_ads GRANT SELECT ON TABLES TO transformer;
 -- The official rates of the tenge of the National Bank of Kazakhstan (ADR-0042), which dlt appends
 -- to raw_nbk, with raw_nbk_staging beside it, as for the ECB. loader owns both; transformer may read
 -- the first.
