@@ -667,7 +667,8 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
     from agoranomos_pipelines.demo import platforms
 
     # And the real sources, which mimic nothing: the rates of the ECB, Google Ads (ADR-0032), Meta
-    # (ADR-0050), and the rates of the Bank of Italy and of the NBK (ADR-0042).
+    # (ADR-0050), the rates of the Bank of Italy and of the NBK (ADR-0042), and TikTok (ADR-0053),
+    # whose load reads its window here before its staging exists.
     assert set(rows) == {
         *platforms.PLATFORMS,
         "bank_of_italy",
@@ -675,6 +676,7 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
         "google_ads",
         "meta_ads",
         "nbk",
+        "tiktok_ads",
     }
     for code, platform in platforms.PLATFORMS.items():
         assert rows[code]["mimics"] == platform.mimics
@@ -706,6 +708,14 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
     assert rows["meta_ads"] == {
         "platform": "meta_ads",
         "platform_name": "Meta Ads",
+        "kind": "ads",
+        "mimics": "",
+        "is_demo": "false",
+        "restatement_window_days": "28",
+    }
+    assert rows["tiktok_ads"] == {
+        "platform": "tiktok_ads",
+        "platform_name": "TikTok Ads",
         "kind": "ads",
         "mimics": "",
         "is_demo": "false",

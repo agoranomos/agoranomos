@@ -16,8 +16,9 @@ REPO = Path(__file__).resolve().parents[2]
 SEED = REPO / "dbt" / "seeds" / "seed_ad_platforms.csv"
 PIPELINES = REPO / "airflow" / "dags" / "agoranomos_pipelines"
 MIGRATIONS = REPO / "postgres" / "migrations"
-# The windows of today: those of ADR-0038 ("The window") for Google Ads and Meta, the 14 days of
-# the rates of the three banks (ADR-0042), and those of the demo, which keeps its own as it mimics.
+# The windows of today: those of ADR-0038 ("The window") for Google Ads and Meta, that of ADR-0053
+# for TikTok, the 14 days of the rates of the three banks (ADR-0042), and those of the demo, which
+# keeps its own as it mimics.
 WINDOWS = {
     "bank_of_italy": 14,
     "demo_fx": 7,
@@ -29,6 +30,7 @@ WINDOWS = {
     "google_ads": 90,
     "meta_ads": 28,
     "nbk": 14,
+    "tiktok_ads": 28,
 }
 # The sources whose load reads its window, by the module of its connector.
 CONNECTORS = {
@@ -37,6 +39,7 @@ CONNECTORS = {
     "bank_of_italy": "bank_of_italy",
     "ecb": "ecb",
     "nbk": "nbk",
+    "tiktok_ads": "tiktok_ads",
 }
 
 

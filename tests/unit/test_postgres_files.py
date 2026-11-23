@@ -446,6 +446,7 @@ SOURCES = (
     "google_ads",
     "meta_ads",
     "nbk",
+    "tiktok_ads",
 )
 
 
