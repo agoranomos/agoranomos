@@ -504,13 +504,17 @@ def test_each_view_of_a_fact_ends_with_whether_its_row_is_final():
         whole = "not f.is_partial_day\n        and " if name in PARTIAL_DAY_FACTS else ""
         body = "\n".join(line for line in view.splitlines() if not line.startswith("--"))
         columns = body.split("\nfrom ", 1)[0] + "\nfrom "
-        assert columns.endswith(final.format(age=whole + age)), name
+        # The view of sessions has the four flags of GA4 after it (C8b of #228).
+        end = "    ) as is_final\nfrom "
+        after = WEB_FLAG_COLUMNS if name in FLAGGED_MARTS else end
+        assert columns.endswith(final.format(age=whole + age).replace(end, after)), name
         assert columns.count("is_final") == 1, name
         assert "platforms(ref('seed_ad_platforms'))" in view, name
         assert "left join {{ source('core', 'loads') }} as l\n    on l.load_sk = f.load_sk" in view
-        # The last column of the contract, with its doc block and its metadata.
+        # The last column of the contract but the flags, with its doc block and its metadata.
         last = blocks(described[name], 6)
-        assert list(last)[-1] == "is_final", name
+        flags = list(LOAD_FLAGS) if name in FLAGGED_MARTS else []
+        assert list(last)[len(last) - len(flags) - 1 :] == ["is_final", *flags], name
         assert last["is_final"] == (
             "      - name: is_final\n"
             "        data_type: boolean\n"
@@ -525,6 +529,83 @@ def test_each_view_of_a_fact_ends_with_whether_its_row_is_final():
     # The views of the entities have no day of a load.
     for name in set(MART_KEYS) - set(FACT_MARTS):
         assert "is_final" not in described[name], name
+
+
+# The flags of the answers of a load of web analytics (ADR-0054, C8b of #228), as FLAGS of
+# airflow/dags/agoranomos_pipelines/loads.py names them, read without importing dlt.
+LOADS_PY = DBT.parent / "airflow" / "dags" / "agoranomos_pipelines" / "loads.py"
+LOAD_FLAGS = next(
+    tuple(ast.literal_eval(node.value))
+    for node in ast.parse(LOADS_PY.read_text(encoding="utf-8")).body
+    if isinstance(node, ast.Assign) and ast.unparse(node.targets[0]) == "FLAGS"
+)
+# The views that end with the flags, after is_final, and the text of their columns.
+FLAGGED_MARTS = ("web_sessions_daily",)
+WEB_FLAG_COLUMNS = (
+    "    ) as is_final,\n" + "".join(f"    l.{flag},\n" for flag in LOAD_FLAGS)[:-2] + "\nfrom "
+)
+
+
+def test_the_flags_of_a_load_go_from_the_journal_through_the_pin_to_the_view_of_sessions():
+    # ADR-0054: the four flags under the names of the journal of GA4, in core.loads from the
+    # migration 0012, in the macro of the pin, in the view of sessions and in ops_loads, with a doc
+    # block each, as two models have them, and the metadata of a boolean of a mart.
+    assert LOAD_FLAGS == (
+        "is_subject_to_thresholding",
+        "has_data_loss_from_other_row",
+        "is_sampled",
+        "is_truncated",
+    )
+    migration = (MIGRATIONS / "0012_add_the_flags_of_a_load.sql").read_text(encoding="utf-8")
+    for flag in LOAD_FLAGS:
+        assert f"ALTER TABLE core.loads ADD COLUMN {flag} boolean;\n" in migration, flag
+    pin = PIN.read_text(encoding="utf-8")
+    assert (
+        "{{- return([\n    " + ", ".join(f"'{flag}'" for flag in LOAD_FLAGS) + ",\n]) -}}"
+    ) in pin
+    # The pin names the flags among the columns of core.loads and takes each from a journal that
+    # has it, and none from one that does not.
+    assert "    kind,\n    {{ load_flags() | join(', ') }}\n)" in pin
+    assert "{% else %}'window'{% endif %},\n    {{ journal_flags(journal, 'j.') }}\nfrom " in pin
+    assert (
+        "{%- if flag in names %}{{ prefix }}{{ flag }}{% else %}cast(null as boolean){% endif %}"
+        " as {{ flag }}"
+    ) in pin
+    assert "adapter.get_columns_in_relation(journal) | map(attribute='name')" in pin
+    ops = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
+    assert (
+        "        {{ journal_flags(\n"
+        "            load_relation(source(source_name, '_agoranomos_loads')) if execute else none\n"
+        "        ) }}\n"
+    ) in ops
+    # Of the last whole load that the journal holds of the account.
+    assert (
+        "    (array_agg({{ flag }} order by loaded_at desc)\n"
+        "        filter (where not is_intraday and loaded_at is not null))[1] as {{ flag }}\n"
+    ) in ops
+    docs = (DBT / "models" / "_docs.md").read_text(encoding="utf-8")
+    ops_yaml = blocks(
+        blocks((DBT / "models" / "ops" / "_ops__models.yml").read_text(encoding="utf-8"), 2)[
+            "ops_loads"
+        ],
+        6,
+    )
+    marts = blocks(
+        blocks((DBT / "models" / "marts" / "_marts__models.yml").read_text(encoding="utf-8"), 2)[
+            "web_sessions_daily"
+        ],
+        6,
+    )
+    for flag in LOAD_FLAGS:
+        assert f"{{% docs {flag} %}}\n" in docs, flag
+        assert f"description: '{{{{ doc(\"{flag}\") }}}}'" in ops_yaml[flag], flag
+        assert marts[flag].startswith(
+            f"      - name: {flag}\n"
+            "        data_type: boolean\n"
+            f"        description: '{{{{ doc(\"{flag}\") }}}}'\n"
+        ), flag
+        assert "semantic_type: type/Category\n" in marts[flag], flag
+        assert "has_field_values: list\n" in marts[flag], flag
 
 
 def test_a_run_keeps_a_view_of_the_marts_that_exists():
@@ -1088,7 +1169,7 @@ def test_the_pin_copies_each_whole_load_once_and_skips_a_source_without_tables()
     assert "insert into {{ loads }} (\n" in text
     assert (
         "    source, load_id, account_id, window_from, window_to, outcome, error, finished_at, "
-        "invocation_id,\n    kind\n"
+        "invocation_id,\n    kind,\n    {{ load_flags() | join(', ') }}\n"
     ) in text
     assert "    l.inserted_at, '{{ invocation_id }}'::uuid,\n" in text
     # The kind of the load, window, history (ADR-0038) or intraday (ADR-0051), from a journal that

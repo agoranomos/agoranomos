@@ -94,6 +94,7 @@ from agoranomos_pipelines.loads import (
     APPEND,
     DLT_SETTINGS,
     FAILED,
+    FLAGS,
     HISTORY,
     INTRADAY,
     LOAD_HINTS,
@@ -186,13 +187,8 @@ QUOTAS = (
 )
 # The fields of properties.get that the shape reads, and no other.
 PROPERTY_FIELDS = ("name", "displayName", "timeZone", "currencyCode")
-# The flags of the answers of a property in a load, as columns of the journal (ADR-0054).
-FLAGS = (
-    "is_subject_to_thresholding",
-    "has_data_loss_from_other_row",
-    "is_sampled",
-    "is_truncated",
-)
+# The flags of the answers of a property in a load are FLAGS of loads.py, as columns of the
+# journal (ADR-0054).
 BOOL = {"data_type": "bool"}
 
 
