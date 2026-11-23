@@ -9,10 +9,10 @@ secondary_status; and an ad that only the statistics name gets a stub in its dim
 No load reaches TikTok, and no answer comes from a real advertiser: the answers below are faked by
 hand from the reference of the API v1.3, as tests/unit/test_tiktok_ads_source.py fakes them, and
 the stand-in of the HTTP client of dlt answers each request with them in the container of the
-tasks. The test names three TikTok advertisers of its own, with IDs that no advertiser has, in
+tasks. The test names four TikTok advertisers of its own, with IDs that no advertiser has, in
 extensions/model/clients.toml, loads them as of the newest load of demo_video, so that the rates
 of the demo cover their days, and runs the transform. In its finally it deletes every row of the
-three advertisers from raw_tiktok_ads, from the core, as the superuser with the thaw of ADR-0035,
+four advertisers from raw_tiktok_ads, from the core, as the superuser with the thaw of ADR-0035,
 from the tables of staging that the run wrote, and the file, so that the demo is as before and no
 later test finds an advertiser that left the settings. If it is killed before that, run the
 cleanup of REMOVE by hand as the superuser of the warehouse, and delete
@@ -39,12 +39,15 @@ pytestmark = [
 
 TRANSFORM = "agoranomos_demo_transform"
 ASSETS = 5
-# The three advertisers of the test: one whose data is healthy, one whose totals are 10% above the
-# sum of its campaigns, which G0a holds out with a tolerance of 1% for TikTok, and one whose deleted
+# The four advertisers of the test: one whose data is healthy, one whose totals are 10% above the
+# sum of its campaigns, which G0a holds out with a tolerance of 1% for TikTok, one whose deleted
 # campaign has an ID above the largest bigint, 9223372036854775807, which G1 holds out with
-# invalid_id rather than cut it or fail the run.
+# invalid_id rather than cut it or fail the run, and a second healthy one. With it the two held out
+# are half of the pinned advertisers of TikTok, and only more than half stops the source and holds
+# the healthy ones too, with source_stopped (quarantine_stop_findings in dbt/macros/quarantine.sql).
 HEALTHY, DIFFERING, INVALID = "7900000000000000001", "7900000000000000002", "7900000000000000003"
-ADVERTISERS = (HEALTHY, DIFFERING, INVALID)
+ALSO_HEALTHY = "7900000000000000004"
+ADVERTISERS = (HEALTHY, DIFFERING, INVALID, ALSO_HEALTHY)
 OVERSIZED = {"1800000000000102": "9300000000000000102"}
 IN_ADVERTISERS = "('" + "', '".join(ADVERTISERS) + "')"
 CLIENTS = f"""\
@@ -64,6 +67,11 @@ client = "tiktok-stack-test"
 [[accounts]]
 platform = "tiktok_ads"
 account_id = "{INVALID}"
+client = "tiktok-stack-test"
+
+[[accounts]]
+platform = "tiktok_ads"
+account_id = "{ALSO_HEALTHY}"
 client = "tiktok-stack-test"
 """
 # A stand-in of the long-term token, of low entropy: no request leaves the container.
@@ -124,6 +132,7 @@ TOTALS = {
     HEALTHY: ("1500", "25", "15.55"),
     DIFFERING: ("1500", "25", "17.11"),
     INVALID: ("1500", "25", "15.55"),
+    ALSO_HEALTHY: ("1500", "25", "15.55"),
 }
 
 # A load of TikTok as of a moment, through tiktok_ads.load, with the HTTP client of dlt replaced by
@@ -310,7 +319,7 @@ def answers() -> dict:
     return found
 
 
-# The rows of the three advertisers everywhere that the load and the run wrote them, in one
+# The rows of the four advertisers everywhere that the load and the run wrote them, in one
 # transaction with the thaw of the facts (ADR-0035), as the superuser: the tables of raw by
 # advertiser, the loads of dlt that only these advertisers had, the facts and the journals of
 # restatements, the dimensions and their versions, the totals, the quarantine, the loads of the
@@ -424,12 +433,12 @@ def test_a_load_of_tiktok_reaches_the_core_and_the_marts(env, airflow_url, token
             f"FROM raw_tiktok_ads._agoranomos_loads WHERE account_id IN {IN_ADVERTISERS} "
             "ORDER BY 1",
         )
-        assert len(windows) == 3, windows
+        assert len(windows) == 4, windows
         _, first, last, status = windows[0].split("|")
         first, last = date.fromisoformat(first), date.fromisoformat(last)
         assert status == "loaded"
         assert last - first == timedelta(days=27), (first, last)
-        assert [w.split("|")[1:] for w in windows[1:]] == [[str(first), str(last), "loaded"]] * 2
+        assert [w.split("|")[1:] for w in windows[1:]] == [[str(first), str(last), "loaded"]] * 3
         days = (last - first).days + 1
         unpause(airflow_url, token, TRANSFORM)
         run = trigger(airflow_url, token, TRANSFORM)
@@ -439,7 +448,7 @@ def test_a_load_of_tiktok_reaches_the_core_and_the_marts(env, airflow_url, token
         # G0a held the advertiser whose campaigns do not add up to its totals, and G1 the one with
         # an ID that does not fit bigint, with invalid_id, and missing_key for the rows of its
         # reports that the cast left without a key: their loads stay pinned, the run succeeded,
-        # and the core accepted the healthy one.
+        # and the core accepted the two healthy ones, as no more than half of the source is held.
         quarantined = rows(
             env,
             "SELECT platform || '|' || account_id || '|' || reason FROM ops.ops_quarantine "
@@ -472,14 +481,18 @@ def test_a_load_of_tiktok_reaches_the_core_and_the_marts(env, airflow_url, token
             f"{HEALTHY}|accepted",
             f"{DIFFERING}|pinned",
             f"{INVALID}|pinned",
+            f"{ALSO_HEALTHY}|accepted",
         ], statuses
         registered = rows(
             env,
             "SELECT account_id || '|' || client_id || '|' || is_active || '|' || is_stub "  # noqa: S608 (IDs of the test)
             "|| '|' || time_zone FROM core.dim_account "
-            f"WHERE platform = 'tiktok_ads' AND account_id IN {IN_ADVERTISERS}",
+            f"WHERE platform = 'tiktok_ads' AND account_id IN {IN_ADVERTISERS} ORDER BY 1",
         )
-        assert registered == [f"{HEALTHY}|tiktok-stack-test|true|false|Etc/GMT+8"], registered
+        assert registered == [
+            f"{advertiser}|tiktok-stack-test|true|false|Etc/GMT+8"
+            for advertiser in (HEALTHY, ALSO_HEALTHY)
+        ], registered
 
         # The core holds every day of the healthy advertiser, the deleted campaign too, and so does
         # the view of the marts, with the complete payments as the primary conversions and the
@@ -502,12 +515,20 @@ def test_a_load_of_tiktok_reaches_the_core_and_the_marts(env, airflow_url, token
             clicks * days,
             spend * days,
         ], core
+        # The view shows the two healthy advertisers alone.
+        assert rows(
+            env,
+            "SELECT DISTINCT account_id FROM marts.ad_stats_campaign_daily "
+            "WHERE platform = 'tiktok_ads' ORDER BY 1",
+            "metabase_reader",
+        ) == [HEALTHY, ALSO_HEALTHY]
         shown = warehouse_output(
             env,
-            "SELECT count(DISTINCT account_id) || '|' || count(*) || '|' || sum(impressions) "
+            "SELECT count(DISTINCT account_id) || '|' || count(*) || '|' || sum(impressions) "  # noqa: S608 (IDs of the test)
             "|| '|' || sum(clicks) || '|' || sum(spend) || '|' || sum(conversions) "
             "|| '|' || sum(conversions_primary) || '|' || min(currency) "
-            "FROM marts.ad_stats_campaign_daily WHERE platform = 'tiktok_ads'",
+            "FROM marts.ad_stats_campaign_daily WHERE platform = 'tiktok_ads' "
+            f"AND account_id = '{HEALTHY}'",
             "metabase_reader",
         ).split("|")
         assert shown[:3] == ["1", str(len(DAY) * days), str(impressions * days)], shown
@@ -520,9 +541,10 @@ def test_a_load_of_tiktok_reaches_the_core_and_the_marts(env, airflow_url, token
         assert shown[7] == "USD", shown
         actions = rows(
             env,
-            "SELECT conversion_action_id || '|' || conversion_category || '|' || is_primary "
+            "SELECT conversion_action_id || '|' || conversion_category || '|' || is_primary "  # noqa: S608 (IDs of the test)
             "|| '|' || sum(conversions) || '|' || sum(conversion_value) "
             "FROM marts.ad_conversions_campaign_daily WHERE platform = 'tiktok_ads' "
+            f"AND account_id = '{HEALTHY}' "
             "GROUP BY conversion_action_id, conversion_category, is_primary ORDER BY 1",
             "metabase_reader",
         )
