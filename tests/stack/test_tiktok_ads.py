@@ -2,16 +2,17 @@
 through the real dlt source of airflow/dags/agoranomos_pipelines/tiktok_ads.py with the HTTP of the
 TikTok API for Business faked, reaches the core and marts.ad_stats_campaign_daily through the next
 run of the transform; an advertiser whose campaigns do not add up to its totals goes to quarantine
-with totals_differ (G0a of ADR-0035); a deleted campaign, ad group and ad are removed, from their
+with totals_differ (G0a of ADR-0035), and one with an ID that does not fit bigint with invalid_id,
+while the healthy one goes on; a deleted campaign, ad group and ad are removed, from their
 secondary_status; and an ad that only the statistics name gets a stub in its dimension (ADR-0036).
 
 No load reaches TikTok, and no answer comes from a real advertiser: the answers below are faked by
 hand from the reference of the API v1.3, as tests/unit/test_tiktok_ads_source.py fakes them, and
 the stand-in of the HTTP client of dlt answers each request with them in the container of the
-tasks. The test names two TikTok advertisers of its own, with IDs that no advertiser has, in
+tasks. The test names three TikTok advertisers of its own, with IDs that no advertiser has, in
 extensions/model/clients.toml, loads them as of the newest load of demo_video, so that the rates
 of the demo cover their days, and runs the transform. In its finally it deletes every row of the
-two advertisers from raw_tiktok_ads, from the core, as the superuser with the thaw of ADR-0035,
+three advertisers from raw_tiktok_ads, from the core, as the superuser with the thaw of ADR-0035,
 from the tables of staging that the run wrote, and the file, so that the demo is as before and no
 later test finds an advertiser that left the settings. If it is killed before that, run the
 cleanup of REMOVE by hand as the superuser of the warehouse, and delete
@@ -38,10 +39,13 @@ pytestmark = [
 
 TRANSFORM = "agoranomos_demo_transform"
 ASSETS = 5
-# The two advertisers of the test: one whose data is healthy, and one whose totals are 10% above
-# the sum of its campaigns, which G0a holds out with a tolerance of 1% for TikTok.
-HEALTHY, DIFFERING = "7900000000000000001", "7900000000000000002"
-ADVERTISERS = (HEALTHY, DIFFERING)
+# The three advertisers of the test: one whose data is healthy, one whose totals are 10% above the
+# sum of its campaigns, which G0a holds out with a tolerance of 1% for TikTok, and one whose deleted
+# campaign has an ID above the largest bigint, 9223372036854775807, which G1 holds out with
+# invalid_id rather than cut it or fail the run.
+HEALTHY, DIFFERING, INVALID = "7900000000000000001", "7900000000000000002", "7900000000000000003"
+ADVERTISERS = (HEALTHY, DIFFERING, INVALID)
+OVERSIZED = {"1800000000000102": "9300000000000000102"}
 IN_ADVERTISERS = "('" + "', '".join(ADVERTISERS) + "')"
 CLIENTS = f"""\
 [clients.tiktok-stack-test]
@@ -55,6 +59,11 @@ client = "tiktok-stack-test"
 [[accounts]]
 platform = "tiktok_ads"
 account_id = "{DIFFERING}"
+client = "tiktok-stack-test"
+
+[[accounts]]
+platform = "tiktok_ads"
+account_id = "{INVALID}"
 client = "tiktok-stack-test"
 """
 # A stand-in of the long-term token, of low entropy: no request leaves the container.
@@ -114,6 +123,7 @@ ADS = {
 TOTALS = {
     HEALTHY: ("1500", "25", "15.55"),
     DIFFERING: ("1500", "25", "17.11"),
+    INVALID: ("1500", "25", "15.55"),
 }
 
 # A load of TikTok as of a moment, through tiktok_ads.load, with the HTTP client of dlt replaced by
@@ -191,10 +201,17 @@ def answers() -> dict:
     lists, and the rows of the report of each level for one day."""
     found = {}
     for advertiser_id in ADVERTISERS:
+        # The IDs of the campaigns as the API writes them for the advertiser: the deleted one of
+        # INVALID does not fit bigint, in its lists and its reports.
+        ids = OVERSIZED if advertiser_id == INVALID else {}
+
+        def cid(campaign_id, ids=ids):
+            return ids.get(campaign_id, campaign_id)
+
         campaigns = [
             {
                 "advertiser_id": advertiser_id,
-                "campaign_id": campaign_id,
+                "campaign_id": cid(campaign_id),
                 "campaign_name": name,
                 "objective_type": "WEB_CONVERSIONS",
                 "operation_status": operation,
@@ -205,7 +222,7 @@ def answers() -> dict:
         ad_groups = [
             {
                 "advertiser_id": advertiser_id,
-                "campaign_id": campaign_id,
+                "campaign_id": cid(campaign_id),
                 "adgroup_id": ad_group_id,
                 "adgroup_name": name,
                 "optimization_goal": "CONVERT",
@@ -217,7 +234,7 @@ def answers() -> dict:
         ads = [
             {
                 "advertiser_id": advertiser_id,
-                "campaign_id": campaign_id,
+                "campaign_id": cid(campaign_id),
                 "adgroup_id": ad_group_id,
                 "ad_id": ad_id,
                 "ad_name": name,
@@ -259,12 +276,12 @@ def answers() -> dict:
         for campaign_id, name, *_ in CAMPAIGNS:
             report["campaign"].append(
                 {
-                    "dimensions": {"campaign_id": campaign_id},
+                    "dimensions": {"campaign_id": cid(campaign_id)},
                     "metrics": {"campaign_name": name, **metrics(*DAY[campaign_id])},
                 }
             )
         for ad_group_id, campaign_id, name, *_ in AD_GROUPS:
-            named = {"campaign_id": campaign_id, "adgroup_name": name}
+            named = {"campaign_id": cid(campaign_id), "adgroup_name": name}
             report["adgroup"].append(
                 {
                     "dimensions": {"adgroup_id": ad_group_id},
@@ -272,7 +289,7 @@ def answers() -> dict:
                 }
             )
         for ad_id, ad_group_id, campaign_id, name, *_ in (*LISTED_ADS, STUB):
-            named = {"campaign_id": campaign_id, "adgroup_id": ad_group_id, "ad_name": name}
+            named = {"campaign_id": cid(campaign_id), "adgroup_id": ad_group_id, "ad_name": name}
             report["ad"].append(
                 {"dimensions": {"ad_id": ad_id}, "metrics": named | metrics(*ADS[ad_id])}
             )
@@ -293,7 +310,7 @@ def answers() -> dict:
     return found
 
 
-# The rows of the two advertisers everywhere that the load and the run wrote them, in one
+# The rows of the three advertisers everywhere that the load and the run wrote them, in one
 # transaction with the thaw of the facts (ADR-0035), as the superuser: the tables of raw by
 # advertiser, the loads of dlt that only these advertisers had, the facts and the journals of
 # restatements, the dimensions and their versions, the totals, the quarantine, the loads of the
@@ -400,40 +417,62 @@ def test_a_load_of_tiktok_reaches_the_core_and_the_marts(env, airflow_url, token
             environment={"TIKTOK_ADS_ACCESS_TOKEN": TOKEN},
         )
         # The load took the usual window of each advertiser, the last 28 days to yesterday in its
-        # time zone, and recorded both in its journal.
+        # time zone, and recorded each in its journal.
         windows = rows(
             env,
             "SELECT account_id || '|' || window_from || '|' || window_to || '|' || status "  # noqa: S608 (IDs of the test)
             f"FROM raw_tiktok_ads._agoranomos_loads WHERE account_id IN {IN_ADVERTISERS} "
             "ORDER BY 1",
         )
-        assert len(windows) == 2, windows
+        assert len(windows) == 3, windows
         _, first, last, status = windows[0].split("|")
         first, last = date.fromisoformat(first), date.fromisoformat(last)
         assert status == "loaded"
         assert last - first == timedelta(days=27), (first, last)
-        assert [w.split("|")[1:] for w in windows[1:]] == [[str(first), str(last), "loaded"]]
+        assert [w.split("|")[1:] for w in windows[1:]] == [[str(first), str(last), "loaded"]] * 2
         days = (last - first).days + 1
         unpause(airflow_url, token, TRANSFORM)
         run = trigger(airflow_url, token, TRANSFORM)
         run = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=1800)
         assert run["state"] == "success", run["state"]
 
-        # G0a held the advertiser whose campaigns do not add up to its totals, and only it: its
-        # load stays pinned, and the core accepted the other.
+        # G0a held the advertiser whose campaigns do not add up to its totals, and G1 the one with
+        # an ID that does not fit bigint, with invalid_id, and missing_key for the rows of its
+        # reports that the cast left without a key: their loads stay pinned, the run succeeded,
+        # and the core accepted the healthy one.
         quarantined = rows(
             env,
             "SELECT platform || '|' || account_id || '|' || reason FROM ops.ops_quarantine "
             "WHERE platform = 'tiktok_ads' ORDER BY 1",
             "metabase_reader",
         )
-        assert quarantined == [f"tiktok_ads|{DIFFERING}|totals_differ"], quarantined
+        assert [q for q in quarantined if DIFFERING in q] == [
+            f"tiktok_ads|{DIFFERING}|totals_differ"
+        ], quarantined
+        held = {q.split("|")[2] for q in quarantined if INVALID in q}
+        assert "invalid_id" in held, quarantined
+        assert held <= {"invalid_id", "missing_key"}, quarantined
+        assert {q.split("|")[1] for q in quarantined} == {DIFFERING, INVALID}, quarantined
+        detail = rows(
+            env,
+            "SELECT detail FROM ops.ops_quarantine "  # noqa: S608 (IDs of the test)
+            f"WHERE platform = 'tiktok_ads' AND account_id = '{INVALID}' "
+            "AND reason = 'invalid_id'",
+            "metabase_reader",
+        )
+        assert len(detail) == 1, detail
+        assert "fits bigint" in detail[0], detail
+        assert OVERSIZED["1800000000000102"] not in detail[0], detail
         statuses = rows(
             env,
             "SELECT account_id || '|' || status FROM core.loads "  # noqa: S608 (IDs of the test)
             f"WHERE source = 'tiktok_ads' AND account_id IN {IN_ADVERTISERS} ORDER BY 1",
         )
-        assert statuses == [f"{HEALTHY}|accepted", f"{DIFFERING}|pinned"], statuses
+        assert statuses == [
+            f"{HEALTHY}|accepted",
+            f"{DIFFERING}|pinned",
+            f"{INVALID}|pinned",
+        ], statuses
         registered = rows(
             env,
             "SELECT account_id || '|' || client_id || '|' || is_active || '|' || is_stub "  # noqa: S608 (IDs of the test)

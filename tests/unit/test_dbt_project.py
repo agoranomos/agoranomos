@@ -2135,19 +2135,62 @@ def test_each_staging_model_of_tiktok_ads_is_one_call_of_the_shape_that_the_demo
     assert "_dlt_load_id as load_id" in totals
 
 
-def test_the_ids_of_tiktok_are_cast_to_bigint_and_fail_loudly():
+def test_an_id_of_tiktok_that_does_not_fit_bigint_holds_its_advertiser_in_quarantine():
     # ADR-0036 and ADR-0053: TikTok writes every ID as a string, and the core keeps the IDs of the
-    # campaigns, ad groups and ads as bigint; staging casts each through to_id, which fails on a
-    # value that does not fit rather than cut it.
+    # campaigns, ad groups and ads as bigint. As the maintainer chose on 23 November 2026, an ID
+    # that does not fit is never cut and stops neither the run nor the other advertisers: to_id
+    # gives none for it, the lists leave its row out, and G1 reads the IDs in raw as they are and
+    # holds the advertiser in quarantine with invalid_id (ADR-0035).
     numbers = (DBT / "macros" / "numbers.sql").read_text(encoding="utf-8")
-    assert (
-        "cast(cast(nullif(trim(cast({{ expression }} as text)), '') as bigint) as text)" in numbers
-    )
+    to_id = numbers[numbers.index("{% macro to_id(") : numbers.index("{% macro id_fits(")]
+    assert "case when {{ id_fits(expression) }}\n" in to_id
+    assert "then cast(cast(trim(cast({{ expression }} as text)) as bigint) as text)" in to_id
+    fits = numbers[numbers.index("{% macro id_fits(") :]
+    fits = fits[: fits.index("{%- endmacro %}")]
+    assert "~ '^[0-9]{1,19}$'" in fits
+    assert "as numeric) <= 9223372036854775807" in fits
+    assert 9223372036854775807 == 2**63 - 1
     macros = (DBT / "macros" / "shapes" / "tiktok_v1_3.sql").read_text(encoding="utf-8")
     ids = re.findall(r"^    (.*) as (campaign_id|ad_group_id|ad_id),$", macros, flags=re.M)
     assert len(ids) == 12, ids
+    cast = set()
     for expression, name in ids:
-        assert re.fullmatch(r"\{\{ to_id\('\w+'\) \}\}", expression), (expression, name)
+        found = re.fullmatch(r"\{\{ to_id\('(\w+)'\) \}\}", expression)
+        assert found, (expression, name)
+        cast.add(found.group(1))
+    # Each list leaves out a row whose ID does not fit, so that its tests hold.
+    for macro, where in (
+        ("tiktok_campaigns", "where {{ id_fits('campaign_id') }}\n"),
+        (
+            "tiktok_ad_groups",
+            "where {{ id_fits('campaign_id') }} and {{ id_fits('adgroup_id') }}\n",
+        ),
+        (
+            "tiktok_ads",
+            "where {{ id_fits('campaign_id') }} and {{ id_fits('adgroup_id') }} and "
+            "{{ id_fits('ad_id') }}\n",
+        ),
+    ):
+        body = macros[macros.index(f"{{% macro {macro}(") :]
+        assert where in body[: body.index("{% endmacro %}")], macro
+    # G1 reads every column that staging casts, in the lists and the reports of raw_tiktok_ads.
+    read = returned("quarantine_raw_ids")["raw_tiktok_ads"]
+    assert set(read) == {
+        "campaigns",
+        "adgroups",
+        "ads",
+        "report_campaign_daily",
+        "report_adgroup_daily",
+        "report_ad_daily",
+    }
+    assert {column for columns in read.values() for column in columns} == cast
+    for table in read:
+        assert table in tiktok_ads_columns(), table
+        assert set(read[table]) <= tiktok_ads_columns()[table], table
+    findings = macro_text("quarantine_raw_findings")
+    assert "{%- for table, ids in quarantine_raw_ids().get(source_name, {}).items() -%}" in findings
+    assert "~ id_fits('r.' ~ name) ~" in findings
+    assert "'invalid_id',\n            coalesce(t.bad_ids > 0, false)," in findings
 
 
 def test_the_columns_of_the_empty_tables_of_tiktok_ads_are_the_fields_of_its_requests():

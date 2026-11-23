@@ -4,7 +4,8 @@
     are metrics. The macros serve the demo platform demo_video and the connector of TikTok,
     tiktok_ads, which calls v1.3 for every request (ADR-0053). Each takes the relation of a raw
     table and the code of its platform. The IDs of the campaigns, ad groups and ads go through
-    to_id, as TikTok writes them as strings and the core keeps them as bigint (ADR-0036). -#}
+    to_id, as TikTok writes them as strings and the core keeps them as bigint (ADR-0036): one that
+    does not fit is NULL, never cut, and G1 holds its advertiser in quarantine with invalid_id. -#}
 
 {#- The campaign of a row of a report at a level, campaign, ad_group or ad, and the IDs below it,
     with the name of the level that the row carried when it was loaded. -#}
@@ -168,7 +169,10 @@ from {{ relation }}
     end
 {%- endmacro %}
 
-{#- The campaigns of the newest list of each account (newest_list), with the load of the list. -#}
+{#- The campaigns of the newest list of each account (newest_list), with the load of the list. A
+    row with an ID that does not fit bigint is left out, as the account goes to quarantine with
+    invalid_id (to_id, quarantine_raw_ids), so that the tests of the list hold; the same goes for
+    the ad groups and the ads. -#}
 {% macro tiktok_campaigns(relation, platform) %}
 select
     '{{ platform }}' as platform,
@@ -180,6 +184,7 @@ select
     objective_type as campaign_type,
     _dlt_load_id as load_id
 from {{ relation }}
+where {{ id_fits('campaign_id') }}
 {% endmacro %}
 
 {#- The ad groups of the newest list of each account (newest_list), with the load of the list.
@@ -196,6 +201,7 @@ select
     optimization_goal as ad_group_type,
     _dlt_load_id as load_id
 from {{ relation }}
+where {{ id_fits('campaign_id') }} and {{ id_fits('adgroup_id') }}
 {% endmacro %}
 
 {#- The ads of the newest list of each account (newest_list), with the load of the list. Their
@@ -213,4 +219,5 @@ select
     ad_format as ad_type,
     _dlt_load_id as load_id
 from {{ relation }}
+where {{ id_fits('campaign_id') }} and {{ id_fits('adgroup_id') }} and {{ id_fits('ad_id') }}
 {% endmacro %}

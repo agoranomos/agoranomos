@@ -17,11 +17,26 @@
 {%- endmacro %}
 
 {#- The ID of an entity that the API writes as a string of digits and the core keeps as bigint
-    (ADR-0036), such as an ID of TikTok (ADR-0053), as text in the form that the core gives it: the
-    cast to bigint fails the query loudly on a value that is not digits or does not fit, never
-    cutting it, and an empty one is NULL, which G1 reports as missing_key. -#}
+    (ADR-0036), such as an ID of TikTok (ADR-0053), as text in the form that the core gives it, or
+    NULL for an empty one and for one that is not a whole number that fits bigint (id_fits), never
+    cut. G1 reads the IDs in raw as they are and holds the account of such a value in quarantine
+    with invalid_id (quarantine_raw_ids), and a NULL in a key of a fact with missing_key, so that
+    one account with a bad ID stops neither the run nor the others (ADR-0035). -#}
 {% macro to_id(expression) -%}
-    cast(cast(nullif(trim(cast({{ expression }} as text)), '') as bigint) as text)
+    case when {{ id_fits(expression) }}
+        then cast(cast(trim(cast({{ expression }} as text)) as bigint) as text)
+    end
+{%- endmacro %}
+
+{#- Whether a value is a whole number of digits alone that fits bigint, at most
+    9223372036854775807: false for NULL, an empty value, a sign, a space inside, a decimal point,
+    or more. The CASE keeps the cast to numeric from a value that is not digits. -#}
+{% macro id_fits(expression) -%}
+    case
+        when trim(cast({{ expression }} as text)) ~ '^[0-9]{1,19}$'
+            then cast(trim(cast({{ expression }} as text)) as numeric) <= 9223372036854775807
+        else false
+    end
 {%- endmacro %}
 
 {#- The rows of a report of facts, the SQL of the call block, with any of their measures other

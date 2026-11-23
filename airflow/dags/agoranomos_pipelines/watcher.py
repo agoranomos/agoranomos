@@ -60,6 +60,7 @@ QUARANTINE_REASONS = frozenset(
         "unknown_account",
         "duplicate_key",
         "missing_key",
+        "invalid_id",
         "unknown_currency",
         "missing_rate",
         "unknown_time_zone",

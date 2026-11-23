@@ -46,6 +46,7 @@ Before it writes the core, each run of the transform checks the data of each acc
 | `unknown_account` | The loads name an account that no list of accounts or properties gives, so the core knows neither its currency nor its time zone. |
 | `duplicate_key` | Two rows of one kind of data share a key, or a list gives the account twice. |
 | `missing_key` | A row misses a part of its key, such as its campaign or its conversion action. |
+| `invalid_id` | An ID of a campaign, an ad group or an ad in raw is not a whole number that fits `bigint`, which the core keeps, as TikTok writes its IDs as text: staging leaves it out rather than cut it, and the rows of the account that it leaves without a key show as `missing_key` too. |
 | `unknown_currency` | The currency of the account is not a code of ISO 4217, such as `ZZZ`. |
 | `unknown_time_zone` | The time zone of the account is not one of the tz database of IANA. |
 | `missing_rate` | The currency of the account has no rate into the reporting currency from any source of `AGORANOMOS_RATES_SOURCE`, neither in the loads of the rates nor in the core, as with a currency that none of them publishes, and the core would hold amounts that it cannot convert. The detail names the currency and the sources of the rates, or `demo_fx` while the demo gives the rates. |

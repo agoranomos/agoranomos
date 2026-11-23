@@ -111,9 +111,10 @@ models:
       the load before, and a campaign that the newest list no longer names is not here, so that its
       dimension in the core says that the platform no longer lists it; one that only the statistics
       name is a stub there (ADR-0036). Its state reads secondary_status for a deletion and
-      operation_status otherwise (ADR-0053). platform, account_id and campaign_id are its key. Its
-      tests guard the marts: when one of them fails, dbt does not rebuild the models that read this
-      one.
+      operation_status otherwise (ADR-0053). A campaign whose ID does not fit bigint is not here,
+      and G1 holds its advertiser in quarantine with invalid_id. platform, account_id and
+      campaign_id are its key. Its tests guard the marts: when one of them fails, dbt does not
+      rebuild the models that read this one.
     data_tests:
       - unique_combination:
           arguments:
@@ -314,9 +315,10 @@ models:
       advertiser that failed in a load keeps the list of the load before, and an ad group that the
       newest list no longer names is not here, so that its dimension in the core says that the
       platform no longer lists it; one that only the statistics name is a stub there (ADR-0036). An
-      ad group of a deleted campaign is removed. platform, account_id and ad_group_id are its key.
-      Its tests guard the marts: when one of them fails, dbt does not rebuild the models that read
-      this one.
+      ad group of a deleted campaign is removed. An ad group with an ID that does not fit bigint is
+      not here, and G1 holds its advertiser in quarantine with invalid_id. platform, account_id and
+      ad_group_id are its key. Its tests guard the marts: when one of them fails, dbt does not
+      rebuild the models that read this one.
     data_tests:
       - unique_combination:
           arguments:
@@ -353,8 +355,10 @@ models:
       failed in a load keeps the list of the load before, and an ad that the newest list no longer
       names is not here, so that its dimension in the core says that the platform no longer lists
       it; one that only the statistics name is a stub there (ADR-0036). An ad of a deleted campaign
-      or ad group is removed. platform, account_id, ad_group_id and ad_id are its key. Its tests
-      guard the marts: when one of them fails, dbt does not rebuild the models that read this one.
+      or ad group is removed. An ad with an ID that does not fit bigint is not here, and G1 holds
+      its advertiser in quarantine with invalid_id. platform, account_id, ad_group_id and ad_id
+      are its key. Its tests guard the marts: when one of them fails, dbt does not rebuild the
+      models that read this one.
     data_tests:
       - unique_combination:
           arguments:
