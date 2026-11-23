@@ -50,6 +50,10 @@ FRESH_SECONDS=93600
 RETRY_SECONDS=3600
 # A backup by hand waits this long for one that runs, such as the scheduled one.
 LOCK_WAIT_SECONDS=600
+# A dump that a run of the transform breaks starts again, up to this many times in all, this far
+# apart (dump_database).
+DUMP_TRIES=5
+DUMP_PAUSE_SECONDS=30
 
 umask 077
 
@@ -127,6 +131,34 @@ step() {
   shift
   "$@"
   current_step="the work between two steps"
+}
+
+# The dump of one database, $1 on the host $2, into the partial backup: the custom format of pg_dump,
+# with zstd. Each run of the transform replaces the views of the schema staging, by a new view, a
+# rename and a drop, and pg_dump locks the tables that it dumps but no view (PostgreSQL 18): a dump
+# that reads the definition of a view that a run dropped after the dump began fails, with "could
+# not open relation with OID" or "cache lookup failed". pg_dump reads every definition before the
+# first row of data, so such a failure comes early, and the dump starts again, up to DUMP_TRIES
+# times in all, DUMP_PAUSE_SECONDS apart. Any other failure stops the backup at once. What pg_dump
+# says goes to standard error when it ends.
+dump_database() {
+  dump_try=1
+  while :; do
+    if dump_errors=$(pg_dump --host="$2" --username=backup --dbname="$1" --format=custom \
+      --compress=zstd --lock-wait-timeout=5min --file="$partial/$1.dump" 2>&1); then
+      [ -z "$dump_errors" ] || printf '%s\n' "$dump_errors" >&2
+      return 0
+    fi
+    [ -z "$dump_errors" ] || printf '%s\n' "$dump_errors" >&2
+    case $dump_errors in
+      *"could not open relation with OID"* | *"cache lookup failed"*) ;;
+      *) return 1 ;;
+    esac
+    [ "$dump_try" -lt "$DUMP_TRIES" ] || return 1
+    dump_try=$((dump_try + 1))
+    say "a run of the transform changed the catalog of $1 while it was dumped: dumping it again in $DUMP_PAUSE_SECONDS seconds ($dump_try of $DUMP_TRIES)"
+    sleep "$DUMP_PAUSE_SECONDS"
+  done
 }
 
 # When a step has failed, remove the partial backup, record the step in latest.json, and stop with
@@ -295,8 +327,7 @@ take_backup() {
   say "taking the $kind backup $name${migrations:+ before the migrations of the core $migrations}"
   for entry in $DATABASES; do
     database=${entry%%:*} host=${entry#*:}
-    step "the dump of $database" pg_dump --host="$host" --username=backup --dbname="$database" \
-      --format=custom --compress=zstd --lock-wait-timeout=5min --file="$partial/$database.dump"
+    step "the dump of $database" dump_database "$database" "$host"
   done
   step "the globals of warehouse-db" pg_dumpall --host="$WAREHOUSE_HOST" --username=backup \
     --database=warehouse --globals-only --no-role-passwords --file="$partial/globals-warehouse-db.sql"
