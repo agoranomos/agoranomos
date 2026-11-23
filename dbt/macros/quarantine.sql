@@ -86,8 +86,8 @@
     of the decimal places read as they are: each table with the column of its spend as text, and
     whether that spend is in micros, as cost_micros of Google is. A table of conversions or of
     sessions has no spend. The account and the day of a row are those of newest_load_sources. The
-    connectors of Google Ads and of Meta also load the totals of each account, which demo_search
-    and demo_social do not. -#}
+    connectors of Google Ads, of Meta and of TikTok also load the totals of each account, which
+    demo_search, demo_social and demo_video do not. -#}
 {% macro quarantine_raw_tables() -%}
 {%- set google = [
     ('campaign_stats', 'metrics__cost_micros', true),
@@ -125,6 +125,12 @@
         ('insights_ad', 'spend', false),
         ('insights_account', 'spend', false),
     ],
+    'raw_tiktok_ads': [
+        ('report_campaign_daily', 'metrics__spend', false),
+        ('report_adgroup_daily', 'metrics__spend', false),
+        ('report_ad_daily', 'metrics__spend', false),
+        ('report_advertiser_daily', 'metrics__spend', false),
+    ],
 }) -}}
 {%- endmacro %}
 
@@ -135,6 +141,7 @@
 {%- set keys = {
     'raw_google_ads': {'customer__id': 'text', 'segments__date': 'date'},
     'raw_meta_ads': {'account_id': 'text', 'date_start': 'date'},
+    'raw_tiktok_ads': {'advertiser_id': 'text', 'dimensions__stat_time_day': 'text'},
 } -%}
 {%- if source_name not in keys -%}
     {{- exceptions.raise_compiler_error('quarantine_raw_keys knows no source ' ~ source_name) -}}
@@ -531,8 +538,8 @@ where c.failed
 {%- endmacro %}
 
 {#- G0a, against the platform (ADR-0035): for each load that this run reads for an account of a
-    source whose loads bring the totals of each account by day, as the connectors of Google Ads and
-    Meta do, the impressions, the clicks and the spend of the rows of its campaigns, summed by
+    source whose loads bring the totals of each account by day, as the connectors of Google Ads,
+    Meta and TikTok do, the impressions, the clicks and the spend of the rows of its campaigns, summed by
     day, against the totals that the platform gives for the account in the same load, on each day
     of the windows that the load gives the account; a day that the load holds no row of on one
     side counts as zero there. A sum that differs from its total by more than the share of the

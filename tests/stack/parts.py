@@ -64,9 +64,12 @@ GROUPS: tuple[tuple[str, ...], ...] = (
         "test_metabase_metadata.py",
         "test_ops.py",
     ),
-    # 4: the transform, the alerts and the image.
+    # 4: the transform, TikTok, the alerts and the image.
     (
         "test_demo_transform.py",  # 39, and 39 to 41
+        # A load and a run of the transform, as test_meta_ads.py: about 8 minutes by that file,
+        # not measured yet (C5d of #225, 23 November 2026).
+        "test_tiktok_ads.py",
         "test_airflow_image.py",
         "test_alerts.py",
         "test_helpers.py",

@@ -3,6 +3,7 @@
 import ast
 import csv
 import re
+from datetime import date, timedelta
 from pathlib import Path
 
 DBT = Path(__file__).resolve().parents[2] / "dbt"
@@ -1147,6 +1148,7 @@ def test_the_pin_makes_the_partitions_of_the_facts_that_each_source_is_to_write(
         "raw_demo_video",
         "raw_google_ads",
         "raw_meta_ads",
+        "raw_tiktok_ads",
     ):
         assert sorted(facts[source]) == sorted(partitioned - {"web_sessions_daily"}), source
     rates = (MIGRATIONS / "0007_create_the_rates.sql").read_text(encoding="utf-8")
@@ -1171,6 +1173,7 @@ def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_do
         "raw_google_ads",
         "raw_meta_ads",
         "raw_nbk",
+        "raw_tiktok_ads",
     }
 
     def plain(sql):
@@ -1191,6 +1194,7 @@ def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_do
                 assert account == f"split_part({plain(fact.account_sql)}, '/', 2)", platform.code
     assert keys["raw_google_ads"] == keys["raw_demo_search"]
     assert keys["raw_meta_ads"] == keys["raw_demo_social"]
+    assert keys["raw_tiktok_ads"] == keys["raw_demo_video"]
     assert keys["raw_ecb"] == (None, "cast(r.time_period as date)")
     assert keys["raw_bank_of_italy"] == (None, "cast(r.reference_date as date)")
     # The NBK writes its day as DD.MM.YYYY, in the column date of each item (nbk.py).
@@ -1434,7 +1438,14 @@ def test_the_intermediate_models_have_their_critical_tests():
 
 
 # The ad platforms of the model, whose staging the facts of ads of the core read.
-AD_PLATFORMS = ("demo_search", "demo_social", "demo_video", "google_ads", "meta_ads")
+AD_PLATFORMS = (
+    "demo_search",
+    "demo_social",
+    "demo_video",
+    "google_ads",
+    "meta_ads",
+    "tiktok_ads",
+)
 # The tests of the sums of G2: what each compares, the fact of the core, and the staging models.
 G2_SUMS = [
     *(
@@ -2037,6 +2048,259 @@ def test_the_action_types_of_meta_ads_count_a_purchase_once():
     assert {action: meta[action] for action in demo} == demo
 
 
+TIKTOK_ADS = STAGING / "tiktok_ads"
+# The staging models of TikTok, each one call of a macro of the shape that demo_video mimics, over
+# the tables of raw_tiktok_ads, through relation_or_empty, as the DAG starts paused (ADR-0053), with
+# the level of a report where it is not that of campaigns; the totals of the advertisers, which the
+# demo does not have, the connector alone reads.
+TIKTOK_ADS_MODELS = {
+    **{
+        model: (macro, tables, *level)
+        for model, (macro, tables, *level) in SHAPED["demo_video"].items()
+    },
+    "account_totals": ("tiktok_totals", ["report_advertiser_daily"]),
+}
+
+
+def tiktok_ads_columns() -> dict[str, set[str]]:
+    """The columns that dlt makes of the fields of each table of the load of TikTok, as the hints
+    of tiktok_ads.py give them: the fields of each list, and for each report the advertiser, the ID
+    dimension of its level and the day as dimensions__, and its metrics as metrics__. dlt is not in
+    the development environment, so the fields come from the text of the source."""
+    source = ast.parse((DAGS_PIPELINES / "tiktok_ads.py").read_text(encoding="utf-8"))
+    constants = {
+        node.targets[0].id: node.value
+        for node in source.body
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+    }
+    named = {name: ast.literal_eval(constants[name]) for name in ("TOTALS", "CONVERSIONS")}
+
+    def fields(node):
+        if isinstance(node, ast.Name):
+            return list(named[node.id])
+        found = []
+        for item in node.elts:
+            if isinstance(item, ast.Starred):
+                found += named[item.value.id]
+            else:
+                found.append(ast.literal_eval(item))
+        return found
+
+    hinted = {
+        ast.literal_eval(key): set(ast.literal_eval(value))
+        for key, value in zip(constants["FIELDS"].keys, constants["FIELDS"].values, strict=True)
+    }
+    for key, value in zip(constants["LEVELS"].keys, constants["LEVELS"].values, strict=True):
+        dimension = ast.literal_eval(value.args[1])
+        metrics = fields(value.args[5])
+        hinted[ast.literal_eval(key)] = {
+            "advertiser_id",
+            f"dimensions__{dimension}",
+            "dimensions__stat_time_day",
+            *(f"metrics__{name}" for name in metrics),
+        }
+    return hinted
+
+
+def test_each_staging_model_of_tiktok_ads_is_one_call_of_the_shape_that_the_demo_shares():
+    found = {path.name for path in TIKTOK_ADS.glob("*.sql")}
+    assert found == {f"stg_tiktok_ads__{model}.sql" for model in TIKTOK_ADS_MODELS}
+    for model, (macro, tables, *level) in TIKTOK_ADS_MODELS.items():
+        text = (TIKTOK_ADS / f"stg_tiktok_ads__{model}.sql").read_text(encoding="utf-8")
+        assert text.startswith(f"-- stg_tiktok_ads__{model}.sql: "), model
+        [table] = tables
+        relation = f"relation_or_empty(source('raw_tiktok_ads', '{table}'), {{"
+        by_load = model in BY_LOAD
+        reader = "newest_load" if by_load else "newest_list"
+        assert text.count(f"{{{{ {macro}({reader}({relation}") == 1, model
+        loads = "ref('stg_loads__newest_days')" if by_load else "source('core', 'loads')"
+        assert f"}}), 'raw_tiktok_ads', {loads})" in text, model
+        assert text.count("relation_or_empty(") == 1, model
+        arguments = ", ".join(["'tiktok_ads'", *(f"'{name}'" for name in level)])
+        assert text.rstrip().endswith(f"), {arguments}) }}}}"), model
+        assert "depends_on" not in text, model
+    macros = (DBT / "macros" / "shapes" / "tiktok_v1_3.sql").read_text(encoding="utf-8")
+
+    def shape(name):
+        body = macros[macros.index(f"{{% macro {name}(") :]
+        return body[: body.index("{% endmacro %}")]
+
+    assert "{% macro tiktok_totals(relation, platform) %}" in macros
+    totals = shape("tiktok_totals")
+    # The clicks of the totals are the clicks (destination), as those of the campaigns are.
+    assert "{{ to_count('metrics__clicks') }} as total_clicks" in totals
+    assert "{{ to_count('metrics__clicks') }} as clicks" in shape("tiktok_stats")
+    assert "{{ to_number('metrics__spend') }} as total_spend" in totals
+    assert "advertiser_id as account_id" in totals
+    assert "_dlt_load_id as load_id" in totals
+
+
+def test_the_ids_of_tiktok_are_cast_to_bigint_and_fail_loudly():
+    # ADR-0036 and ADR-0053: TikTok writes every ID as a string, and the core keeps the IDs of the
+    # campaigns, ad groups and ads as bigint; staging casts each through to_id, which fails on a
+    # value that does not fit rather than cut it.
+    numbers = (DBT / "macros" / "numbers.sql").read_text(encoding="utf-8")
+    assert (
+        "cast(cast(nullif(trim(cast({{ expression }} as text)), '') as bigint) as text)" in numbers
+    )
+    macros = (DBT / "macros" / "shapes" / "tiktok_v1_3.sql").read_text(encoding="utf-8")
+    ids = re.findall(r"^    (.*) as (campaign_id|ad_group_id|ad_id),$", macros, flags=re.M)
+    assert len(ids) == 12, ids
+    for expression, name in ids:
+        assert re.fullmatch(r"\{\{ to_id\('\w+'\) \}\}", expression), (expression, name)
+
+
+def test_the_columns_of_the_empty_tables_of_tiktok_ads_are_the_fields_of_its_requests():
+    # The empty query of a table before the first load has the columns that dlt makes from the
+    # fields of its request, with the load and the ID of each row, every one text.
+    hinted = tiktok_ads_columns()
+    for model, (_, [table], *_) in TIKTOK_ADS_MODELS.items():
+        text = (TIKTOK_ADS / f"stg_tiktok_ads__{model}.sql").read_text(encoding="utf-8")
+        start = text.index(f"relation_or_empty(source('raw_tiktok_ads', '{table}'), {{")
+        body = text[start : text.index("})", start)]
+        columns = dict(re.findall(r"'(\w+)': '([\w ]+)'", body))
+        wanted = hinted[table] | {"_dlt_load_id", "_dlt_id"}
+        assert set(columns) == wanted, (model, table, sorted(set(columns) ^ wanted))
+        assert set(columns.values()) == {"text"}, (model, table)
+    # The lists of demo_video have the columns of the lists of TikTok that the macros read.
+    from agoranomos_pipelines.demo import video
+
+    day = date(2026, 11, 1)
+    for table, rows in (
+        ("campaigns", video.campaigns(day)),
+        ("adgroups", video.adgroups(day)),
+        ("ads", video.ads(day)),
+    ):
+        for row in rows:
+            assert set(row) <= hinted[table], table
+            assert "secondary_status" in row, table
+
+
+def test_the_demo_of_tiktok_sends_the_statuses_that_keep_its_states():
+    # ADR-0053: the common state reads secondary_status for a deletion and operation_status for the
+    # rest, so the campaigns, ad groups and ads of demo_video keep the states that they had: a
+    # campaign active or paused by its operation_status, and an ad group or an ad of a paused
+    # campaign active, as its own operation_status is ENABLE. None of them is deleted.
+    from agoranomos_pipelines.demo import video
+
+    macros = (DBT / "macros" / "shapes" / "tiktok_v1_3.sql").read_text(encoding="utf-8")
+    deleted = macros[macros.index("{% macro tiktok_deleted() -%}") :]
+    deleted = set(re.findall(r"'(\w+)'", deleted[: deleted.index("{%- endmacro %}")]))
+    assert deleted == {
+        "CAMPAIGN_STATUS_DELETE",
+        "ADGROUP_STATUS_DELETE",
+        "ADGROUP_STATUS_CAMPAIGN_DELETE",
+        "AD_STATUS_DELETE",
+        "AD_STATUS_CAMPAIGN_DELETE",
+        "AD_STATUS_ADGROUP_DELETE",
+    }
+    seen = set()
+    for days_back in range(0, 400, 7):
+        day = date(2026, 11, 1) - timedelta(days=days_back)
+        for row in [*video.campaigns(day), *video.adgroups(day), *video.ads(day)]:
+            assert row["secondary_status"] not in deleted, row
+            seen.add((row["operation_status"], row["secondary_status"]))
+    assert seen <= {
+        ("ENABLE", "CAMPAIGN_STATUS_ENABLE"),
+        ("DISABLE", "CAMPAIGN_STATUS_DISABLE"),
+        ("ENABLE", "ADGROUP_STATUS_DELIVERY_OK"),
+        ("ENABLE", "ADGROUP_STATUS_CAMPAIGN_DISABLE"),
+        ("ENABLE", "AD_STATUS_DELIVERY_OK"),
+        ("ENABLE", "AD_STATUS_CAMPAIGN_DISABLE"),
+    }, seen
+    assert ("ENABLE", "CAMPAIGN_STATUS_ENABLE") in seen
+    # A warehouse of an earlier release holds lists of the demo without secondary_status until the
+    # next load of the demo, and staging reads it as none there.
+    source = (DBT / "macros" / "demo_source.sql").read_text(encoding="utf-8")
+    for table in ("campaigns", "adgroups", "ads"):
+        assert f"    'raw_demo_video.{table}': ['secondary_status'],\n" in source, table
+
+
+def test_the_staging_of_tiktok_ads_has_the_tests_of_the_staging_of_demo_video():
+    # The same macros give the same columns, and the same critical tests guard both. The totals of
+    # the advertisers, which the demo does not have, come last.
+    demo = (STAGING / "demo_video" / "_demo_video__models.yml").read_text(encoding="utf-8")
+    text = (TIKTOK_ADS / "_tiktok_ads__models.yml").read_text(encoding="utf-8")
+    ads, totals = text.split("  - name: stg_tiktok_ads__account_totals\n")
+    tested = {
+        name: column_tests(column)
+        for name, column in blocks("    columns:\n" + totals.split("    columns:\n")[1], 6).items()
+    }
+    assert {name for name, tests in tested.items() if tests} == set(STATS_KEY[:3])
+
+    def tests(text):
+        return [
+            line
+            for line in text.replace("demo_video", "tiktok_ads").splitlines()
+            if "description" not in line and not line.startswith("      ")
+        ]
+
+    assert [
+        b.split("    data_tests:", 1)[1].split("  - name:", 1)[0]
+        for b in ads.split("  - name: stg_")[1:]
+        if "    data_tests:" in b
+    ] == [
+        b.split("    data_tests:", 1)[1].split("  - name:", 1)[0]
+        for b in demo.replace("demo_video", "tiktok_ads").split("  - name: stg_")[1:]
+        if "    data_tests:" in b
+    ]
+    assert tests(ads) == tests(demo)
+
+
+def test_the_sources_of_tiktok_ads_are_the_tables_that_its_load_writes():
+    # The tables of demo_video with the totals of the advertiser, the journal and the loads of dlt.
+    text = (TIKTOK_ADS / "_tiktok_ads__sources.yml").read_text(encoding="utf-8")
+    [source] = re.findall(r"^  - name: (\w+)\n    description:", text, flags=re.MULTILINE)
+    assert source == "raw_tiktok_ads"
+    assert re.search(r"^    schema: raw_tiktok_ads$", text, flags=re.MULTILINE)
+    pattern = r"^      - name: (\w+)\n        description:"
+    demo = (STAGING / "demo_video" / "_demo_video__sources.yml").read_text(encoding="utf-8")
+    assert set(re.findall(pattern, text, flags=re.MULTILINE)) == {
+        *re.findall(pattern, demo, flags=re.MULTILINE),
+        "report_advertiser_daily",
+    }
+    assert set(tiktok_ads_columns()) <= set(re.findall(pattern, text, flags=re.MULTILINE))
+
+
+def test_every_union_of_the_platforms_reads_tiktok_ads_and_the_loads_show_it():
+    unions = {
+        "int_conversion_actions__resolved": ["stg_tiktok_ads__campaign_conversions"],
+        "int_accounts__current": ["stg_tiktok_ads__accounts", "stg_tiktok_ads__campaign_stats"],
+        "int_campaigns__current": ["stg_tiktok_ads__campaigns", "stg_tiktok_ads__campaign_stats"],
+        "int_ad_groups__current": ["stg_tiktok_ads__ad_groups", "stg_tiktok_ads__ad_group_stats"],
+        "int_ads__current": ["stg_tiktok_ads__ads", "stg_tiktok_ads__ad_stats"],
+    }
+    for model, staged in unions.items():
+        text = (INTERMEDIATE / f"{model}.sql").read_text(encoding="utf-8")
+        for name in staged:
+            assert f"from {{{{ ref('{name}') }}}}" in text, (model, name)
+        if model != "int_conversion_actions__resolved" and model != "int_accounts__current":
+            assert "{{ newest_lists('raw_tiktok_ads', source('core', 'loads')) }}" in text, model
+    totals = (DBT / "models" / "core" / "platform_totals_daily.sql").read_text(encoding="utf-8")
+    assert "from {{ ref('stg_tiktok_ads__account_totals') }}" in totals
+    loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
+    assert "('raw_tiktok_ads', 'tiktok_ads')," in loads
+
+
+def test_the_conversion_actions_of_tiktok_ads_are_those_of_demo_video():
+    # ADR-0053: the complete payments are primary, and the event that a campaign optimizes for is
+    # not, as for demo_video.
+    def actions(platform):
+        return {
+            r["conversion_action_id"]: (
+                r["conversion_action_name"],
+                r["conversion_category"],
+                r["is_primary"],
+            )
+            for r in seed_rows("seed_conversion_actions")
+            if r["platform"] == platform
+        }
+
+    assert actions("tiktok_ads") == actions("demo_video")
+    assert actions("tiktok_ads")["complete_payment"][2] == "true"
+    assert actions("tiktok_ads")["conversion"][2] == "false"
+
+
 PROJECT_FILE = DBT / "dbt_project.yml"
 SNAPSHOTS = DBT / "snapshots"
 SNAPSHOTS_FILE = SNAPSHOTS / "_snapshots.yml"
@@ -2108,7 +2372,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 382, counted
+    assert counted == 425, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text
@@ -2415,7 +2679,7 @@ def test_the_views_of_the_core_take_their_accounts_from_one_place():
         assert "join {{ ref('dim_account') }} as d" in text, view
         # The accounts whose newest list this run reads, of every platform of the ads, and the
         # entities of the core that such a list no longer names (ADR-0036).
-        for source in (*(f"raw_{code}" for code in SHAPED_ADS), "raw_google_ads", "raw_meta_ads"):
+        for source in (*(f"raw_{code}" for code in SHAPED_ADS), *(f"raw_{c}" for c in REAL_ADS)):
             assert f"{{{{ newest_lists('{source}', source('core', 'loads')) }}}}" in text, view
         assert f"from {{{{ source('core', '{dimension}') }}}} as k" in text, view
         assert "when l.account_id is not null then false" in text, view
@@ -2475,11 +2739,6 @@ STATES = {
         {"ACTIVE": "active", "PAUSED": "paused", "DELETED": "removed", "ARCHIVED": "removed"},
         ("status", "status", "status"),
     ),
-    "tiktok_v1_3.sql": (
-        "tiktok_state",
-        {"ENABLE": "active", "DISABLE": "paused", "DELETE": "removed"},
-        ("operation_status", "operation_status", "operation_status"),
-    ),
 }
 
 
@@ -2503,6 +2762,23 @@ def test_each_shape_maps_the_statuses_of_its_platform_to_the_common_state():
         for level, status in zip(("campaign", "ad_group", "ad"), statuses, strict=True):
             line = f"    {{{{ {macro}('{status}') }}}} as {level}_state,\n"
             assert f"as {level}_status,\n{line}" in text, (file, level)
+    # TikTok sends no DELETE in operation_status: a deletion shows in secondary_status, which
+    # tiktok_deleted names value by value, and the rest follows operation_status (ADR-0053).
+    text = (DBT / "macros" / "shapes" / "tiktok_v1_3.sql").read_text(encoding="utf-8")
+    body = text[text.index("{% macro tiktok_state(secondary_status, operation_status) -%}") :]
+    body = body[: body.index("{%- endmacro %}")]
+    assert re.findall(r"when (.*) then '(\w+)'", body) == [
+        ("{{ secondary_status }} in {{ tiktok_deleted() }}", "removed"),
+        ("{{ operation_status }} = 'ENABLE'", "active"),
+        ("{{ operation_status }} = 'DISABLE'", "paused"),
+    ]
+    assert "        else 'other'\n" in body
+    arguments = "('secondary_status', 'operation_status')"
+    for level in ("campaign", "ad_group", "ad"):
+        assert (
+            f"    {{{{ tiktok_status{arguments} }}}} as {level}_status,\n"
+            f"    {{{{ tiktok_state{arguments} }}}} as {level}_state,\n"
+        ) in text, level
 
 
 QUARANTINE = DBT / "macros" / "quarantine.sql"
@@ -2623,7 +2899,8 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
     assert (
         "quarantine_totals_findings([(ref('stg_google_ads__campaign_stats'), "
         "ref('stg_google_ads__account_totals')), (ref('stg_meta_ads__campaign_stats'), "
-        "ref('stg_meta_ads__account_totals'))], ref('stg_loads__newest_days'))"
+        "ref('stg_meta_ads__account_totals')), (ref('stg_tiktok_ads__campaign_stats'), "
+        "ref('stg_tiktok_ads__account_totals'))], ref('stg_loads__newest_days'))"
     ) in totals
     assert "quarantine_collapse_findings([" in collapse
     assert "source('core', 'dim_account'), source('core', 'ad_stats_campaign_daily'))" in collapse
@@ -2659,7 +2936,7 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
 
 # The ad platforms of the demo, and the real ones.
 SHAPED_ADS = ["demo_search", "demo_social", "demo_video"]
-REAL_ADS = ["google_ads", "meta_ads"]
+REAL_ADS = ["google_ads", "meta_ads", "tiktok_ads"]
 
 
 def test_g1_reads_the_fact_tables_of_raw_of_each_source_that_names_an_account():
@@ -2692,6 +2969,10 @@ def test_g1_reads_the_fact_tables_of_raw_of_each_source_that_names_an_account():
         *tables["raw_demo_social"],
         ("insights_account", "spend", False),
     ]
+    assert tables["raw_tiktok_ads"] == [
+        *tables["raw_demo_video"],
+        ("report_advertiser_daily", "metrics__spend", False),
+    ]
     # The spend of each table, as the shape of its platform reads it.
     shapes = {
         "raw_demo_search": "google_ads_v25.sql",
@@ -2699,6 +2980,7 @@ def test_g1_reads_the_fact_tables_of_raw_of_each_source_that_names_an_account():
         "raw_demo_video": "tiktok_v1_3.sql",
         "raw_google_ads": "google_ads_v25.sql",
         "raw_meta_ads": "meta_v26.sql",
+        "raw_tiktok_ads": "tiktok_v1_3.sql",
     }
     for dataset, shape in shapes.items():
         text = (DBT / "macros" / "shapes" / shape).read_text(encoding="utf-8")
@@ -2716,7 +2998,10 @@ def test_g0a_checks_the_campaigns_of_an_account_against_its_totals_on_each_day()
     # zero for Google and a hundredth for Meta, whose spend is an estimate on each row (ADR-0050);
     # a load with no totals at all, as one of a connector before them, passes.
     project = PROJECT_FILE.read_text(encoding="utf-8")
-    assert "\n  platform_totals_tolerance:\n    google_ads: 0\n    meta_ads: 0.01\n" in project
+    assert (
+        "\n  platform_totals_tolerance:\n    google_ads: 0\n    meta_ads: 0.01\n"
+        "    tiktok_ads: 0.01\n"
+    ) in project
     text = macro_text("quarantine_totals_findings")
     assert "{%- set tolerances = var('platform_totals_tolerance', {}) -%}" in text
     assert "when w.source = '{{ platform }}' then {{ share | float }}" in text

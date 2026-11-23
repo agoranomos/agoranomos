@@ -4,7 +4,34 @@
     deployment may never load do. -#}
 {% macro demo_source(source_name, table_name) -%}
     {%- set columns = demo_columns()[source_name ~ '.' ~ table_name] -%}
-    {{- relation_or_empty(source(source_name, table_name), columns) -}}
+    {%- set relation = source(source_name, table_name) -%}
+    {%- set added = demo_added_columns().get(source_name ~ '.' ~ table_name, []) -%}
+    {%- set missing = [] -%}
+    {%- if execute and added and load_relation(relation) is not none -%}
+        {%- set held = adapter.get_columns_in_relation(relation) | map(attribute='name') | list -%}
+        {%- for name in added if name not in held -%}
+            {%- do missing.append(name) -%}
+        {%- endfor -%}
+    {%- endif -%}
+    {%- if missing -%}
+        (select r.*
+        {%- for name in missing %}, cast(null as {{ columns[name] }}) as {{ name }}{% endfor %}
+        from {{ relation }} as r) as {{ relation.identifier }}
+    {%- else -%}
+        {{- relation_or_empty(relation, columns) -}}
+    {%- endif -%}
+{%- endmacro %}
+
+{#- The columns that a release added to the rows of a table of the demo, which the table of a
+    warehouse of an earlier release lacks until the first load of the demo after the upgrade, as
+    dlt adds a column with the first row that has it: demo_source reads them as none until then.
+    secondary_status, of v0.7, where TikTok shows a deletion (ADR-0053). -#}
+{% macro demo_added_columns() -%}
+{{- return({
+    'raw_demo_video.campaigns': ['secondary_status'],
+    'raw_demo_video.adgroups': ['secondary_status'],
+    'raw_demo_video.ads': ['secondary_status'],
+}) -}}
 {%- endmacro %}
 
 {#- The columns of the tables of the demo that the models read, each of the type that dlt gives it
@@ -215,6 +242,7 @@
         'adgroup_id': 'character varying', '_dlt_load_id': 'character varying',
         'adgroup_name': 'character varying',
         'optimization_goal': 'character varying', 'operation_status': 'character varying',
+        'secondary_status': 'character varying',
         '_dlt_id': 'character varying',
     },
     'raw_demo_video.ads': {
@@ -222,7 +250,8 @@
         'adgroup_id': 'character varying', 'ad_id': 'character varying',
         '_dlt_load_id': 'character varying',
         'ad_name': 'character varying', 'ad_format': 'character varying',
-        'operation_status': 'character varying', '_dlt_id': 'character varying',
+        'operation_status': 'character varying',
+        'secondary_status': 'character varying', '_dlt_id': 'character varying',
     },
     'raw_demo_video.advertisers': {
         'advertiser_id': 'character varying', 'name': 'character varying',
@@ -234,7 +263,8 @@
         'advertiser_id': 'character varying', 'campaign_id': 'character varying',
         '_dlt_load_id': 'character varying',
         'campaign_name': 'character varying', 'objective_type': 'character varying',
-        'operation_status': 'character varying', '_dlt_id': 'character varying',
+        'operation_status': 'character varying',
+        'secondary_status': 'character varying', '_dlt_id': 'character varying',
     },
     'raw_demo_video.report_ad_daily': {
         'advertiser_id': 'character varying', 'dimensions__ad_id': 'character varying',

@@ -1,26 +1,29 @@
 {#- The shape of the TikTok API for Business v1.3: the integrated report of type BASIC by
     campaign_id, adgroup_id or ad_id and stat_time_day, its dimensions and metrics as nested
     objects, every metric a string, "-" for one that means nothing; the IDs of the levels above
-    are metrics. -#}
+    are metrics. The macros serve the demo platform demo_video and the connector of TikTok,
+    tiktok_ads, which calls v1.3 for every request (ADR-0053). Each takes the relation of a raw
+    table and the code of its platform. The IDs of the campaigns, ad groups and ads go through
+    to_id, as TikTok writes them as strings and the core keeps them as bigint (ADR-0036). -#}
 
 {#- The campaign of a row of a report at a level, campaign, ad_group or ad, and the IDs below it,
     with the name of the level that the row carried when it was loaded. -#}
 {% macro tiktok_level(level, names=true) %}
     {%- if level == 'campaign' %}
-    dimensions__campaign_id as campaign_id,
+    {{ to_id('dimensions__campaign_id') }} as campaign_id,
     {%- if names %}
     {{ to_name('metrics__campaign_name') }} as loaded_campaign_name,
     {%- endif %}
     {%- elif level == 'ad_group' %}
-    metrics__campaign_id as campaign_id,
-    dimensions__adgroup_id as ad_group_id,
+    {{ to_id('metrics__campaign_id') }} as campaign_id,
+    {{ to_id('dimensions__adgroup_id') }} as ad_group_id,
     {%- if names %}
     {{ to_name('metrics__adgroup_name') }} as loaded_ad_group_name,
     {%- endif %}
     {%- elif level == 'ad' %}
-    metrics__campaign_id as campaign_id,
-    metrics__adgroup_id as ad_group_id,
-    dimensions__ad_id as ad_id,
+    {{ to_id('metrics__campaign_id') }} as campaign_id,
+    {{ to_id('metrics__adgroup_id') }} as ad_group_id,
+    {{ to_id('dimensions__ad_id') }} as ad_id,
     {%- if names %}
     {{ to_name('metrics__ad_name') }} as loaded_ad_name,
     {%- endif %}
@@ -115,16 +118,53 @@ select
 from {{ relation }}
 {% endmacro %}
 
-{#- The common state of a campaign, an ad group or an ad of TikTok, from its operation_status
-    (ADR-0036): ENABLE is active, DISABLE paused and DELETE removed, the values with which the API
-    sets the status of each level (StatusOptType of the official SDK of the API for Business, as of
-    November 2026); any other value is other. -#}
-{% macro tiktok_state(status) -%}
-    case {{ status }}
-        when 'ENABLE' then 'active'
-        when 'DISABLE' then 'paused'
-        when 'DELETE' then 'removed'
+{#- The totals of an advertiser by day, from the integrated report at the level
+    AUCTION_ADVERTISER, which returns the data of all the ads of the advertiser: the platform side
+    of G0a (ADR-0035, ADR-0053), for the connector of TikTok, which reads them in a request of
+    their own; the demo has none. Clicks are the clicks (destination), as tiktok_stats takes them.
+    load_id is the load of the row, as core.platform_totals_daily keeps it. -#}
+{% macro tiktok_totals(relation, platform) %}
+select
+    cast(left(cast(dimensions__stat_time_day as text), 10) as date) as report_date,
+    '{{ platform }}' as platform,
+    advertiser_id as account_id,
+    {{ to_count('metrics__impressions') }} as total_impressions,
+    {{ to_count('metrics__clicks') }} as total_clicks,
+    {{ to_number('metrics__spend') }} as total_spend,
+    _dlt_load_id as load_id
+from {{ relation }}
+{% endmacro %}
+
+{#- The values of secondary_status with which TikTok shows a deleted campaign, ad group or ad,
+    or one of a deleted campaign or ad group, named one by one, as the values *_STATUS_NOT_DELETE
+    of the filters end in _DELETE too (ADR-0053, "The common state"; the enumerations of the
+    lists in the official SDK of the API for Business, as of November 2026). -#}
+{% macro tiktok_deleted() -%}
+    ('CAMPAIGN_STATUS_DELETE', 'ADGROUP_STATUS_DELETE', 'ADGROUP_STATUS_CAMPAIGN_DELETE',
+    'AD_STATUS_DELETE', 'AD_STATUS_CAMPAIGN_DELETE', 'AD_STATUS_ADGROUP_DELETE')
+{%- endmacro %}
+
+{#- The common state of a campaign, an ad group or an ad of TikTok (ADR-0036, ADR-0053): removed
+    when its secondary_status is a value of a deletion (tiktok_deleted), as TikTok sends no
+    DELETE in operation_status; otherwise from its operation_status, ENABLE active and DISABLE
+    paused; anything else, FROZEN among them, or none, other. An ad group or an ad of a deleted
+    campaign is removed too, and one of a paused campaign keeps its own state. -#}
+{% macro tiktok_state(secondary_status, operation_status) -%}
+    case
+        when {{ secondary_status }} in {{ tiktok_deleted() }} then 'removed'
+        when {{ operation_status }} = 'ENABLE' then 'active'
+        when {{ operation_status }} = 'DISABLE' then 'paused'
         else 'other'
+    end
+{%- endmacro %}
+
+{#- The status of a campaign, an ad group or an ad of TikTok as the core keeps it beside its state:
+    the secondary_status of a deletion, which says what was deleted, or else its operation_status,
+    ENABLE, DISABLE or FROZEN. -#}
+{% macro tiktok_status(secondary_status, operation_status) -%}
+    case
+        when {{ secondary_status }} in {{ tiktok_deleted() }} then {{ secondary_status }}
+        else {{ operation_status }}
     end
 {%- endmacro %}
 
@@ -133,10 +173,10 @@ from {{ relation }}
 select
     '{{ platform }}' as platform,
     advertiser_id as account_id,
-    campaign_id,
+    {{ to_id('campaign_id') }} as campaign_id,
     {{ to_name('campaign_name') }} as observed_name,
-    operation_status as campaign_status,
-    {{ tiktok_state('operation_status') }} as campaign_state,
+    {{ tiktok_status('secondary_status', 'operation_status') }} as campaign_status,
+    {{ tiktok_state('secondary_status', 'operation_status') }} as campaign_state,
     objective_type as campaign_type,
     _dlt_load_id as load_id
 from {{ relation }}
@@ -148,11 +188,11 @@ from {{ relation }}
 select
     '{{ platform }}' as platform,
     advertiser_id as account_id,
-    campaign_id,
-    adgroup_id as ad_group_id,
+    {{ to_id('campaign_id') }} as campaign_id,
+    {{ to_id('adgroup_id') }} as ad_group_id,
     {{ to_name('adgroup_name') }} as observed_name,
-    operation_status as ad_group_status,
-    {{ tiktok_state('operation_status') }} as ad_group_state,
+    {{ tiktok_status('secondary_status', 'operation_status') }} as ad_group_status,
+    {{ tiktok_state('secondary_status', 'operation_status') }} as ad_group_state,
     optimization_goal as ad_group_type,
     _dlt_load_id as load_id
 from {{ relation }}
@@ -164,12 +204,12 @@ from {{ relation }}
 select
     '{{ platform }}' as platform,
     advertiser_id as account_id,
-    campaign_id,
-    adgroup_id as ad_group_id,
-    ad_id,
+    {{ to_id('campaign_id') }} as campaign_id,
+    {{ to_id('adgroup_id') }} as ad_group_id,
+    {{ to_id('ad_id') }} as ad_id,
     {{ to_name('ad_name') }} as observed_name,
-    operation_status as ad_status,
-    {{ tiktok_state('operation_status') }} as ad_state,
+    {{ tiktok_status('secondary_status', 'operation_status') }} as ad_status,
+    {{ tiktok_state('secondary_status', 'operation_status') }} as ad_state,
     ad_format as ad_type,
     _dlt_load_id as load_id
 from {{ relation }}

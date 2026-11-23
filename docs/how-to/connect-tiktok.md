@@ -2,7 +2,7 @@
 
 This guide connects the TikTok advertisers of your business to agoranomos: the load reads their advertisers, campaigns, ad groups, ads and daily reports every day into the warehouse, through an app of your own developer account and the token of a person who reaches the advertisers ([ADR-0053](../adr/0053-connect-tiktok-with-an-app-of-the-deployment.md)).
 
-Each load goes into the raw layer, the schema `raw_tiktok_ads`, under the platform `tiktok_ads`. Its staging models, its rows in the core and in the marts, and so in the dashboards and the MCP servers, and the history of each advertiser by quarters are planned for v0.7: until then a load of TikTok stays in `raw_tiktok_ads`, and no run of the transform reads it.
+Each load goes into the raw layer, the schema `raw_tiktok_ads`, and the run of the transform after it takes it into the core and the marts, and so into the dashboards and the MCP servers, under the platform `tiktok_ads`. The history of each advertiser by quarters in the background is planned for v0.7.
 
 No load has reached a real TikTok advertiser yet: the connector is tested against a stand-in of the TikTok API for Business, made from its reference of v1.3 as of November 2026, so compare the first load with TikTok Ads Manager.
 
@@ -68,14 +68,27 @@ client = "acme"
 ## 4. Start the load
 
 1. Run `./agoranomos up`, which gives the token to the container that runs the tasks.
-2. In the Airflow UI, unpause the DAG `agoranomos_tiktok_ads_daily`. It starts paused, so that a deployment without TikTok asks TikTok nothing.
-3. Trigger it once, or wait for 12:17 UTC, after the data fix that TikTok runs every day at 12:00 UTC ([Data latency for reports](https://business-api.tiktok.com/portal/docs/data-latency-for-reports/v1.3), as of November 2026). The first load of each advertiser takes its usual window, the last 28 days.
+2. In the Airflow UI, unpause the DAG `agoranomos_tiktok_ads_daily`. It starts paused, so that a deployment without TikTok asks TikTok nothing. Unpause the DAGs of the rates too, `agoranomos_bank_of_italy_daily`, `agoranomos_nbk_daily` and `agoranomos_ecb_daily`, or with `AGORANOMOS_RATES_SOURCE=ecb` the last alone, whose rates convert the money of the advertisers into the reporting currency ([The rates](../reference/configuration.md#the-rates)), and `agoranomos_demo_transform` if the demo did not unpause it; if you have connected [Google Ads](connect-google-ads.md) or [Meta](connect-meta.md), they are unpaused already.
+3. Trigger `agoranomos_tiktok_ads_daily` once, or wait for 12:17 UTC, after the data fix that TikTok runs every day at 12:00 UTC ([Data latency for reports](https://business-api.tiktok.com/portal/docs/data-latency-for-reports/v1.3), as of November 2026). The first load of each advertiser takes its usual window, the last 28 days, and the transform runs after it.
 
-The journal `_agoranomos_loads` of `raw_tiktok_ads` then has a row for each advertiser, with its window or its error. The rates that are to convert the money of TikTok into the reporting currency come with its core: unpause their DAGs then, as for [Meta](connect-meta.md#3-start-the-load).
+The journal `_agoranomos_loads` of `raw_tiktok_ads` then has a row for each advertiser, with its window or its error. After the transform, the Ops collection of Metabase shows the loads of `tiktok_ads` ([Watch the pipeline](watch-the-pipeline.md)), and the marts have the rows of the platform `tiktok_ads` for the last 28 days. An advertiser whose campaigns do not add up to its totals by more than 1% waits in quarantine with the reason `totals_differ`, while the others go on ([When an account is in quarantine](watch-the-pipeline.md#when-an-account-is-in-quarantine)).
 
 Each load reads, for each advertiser, the advertiser (`advertisers`), the full lists of its campaigns, ad groups and ads with every status, deleted ones included, and the campaigns made in the TikTok app too (`campaigns`, `adgroups`, `ads`), and, by day, the totals of the advertiser and the reports of its campaigns, ad groups and ads ([The data model](../reference/data-model.md#tiktok)). Every request is of version v1.3, and every report takes one advertiser, which keeps the decimals of money. The window of an advertiser runs from the day after the last that the core accepted for it, or from 28 days back when that is earlier, to yesterday in its time zone, as TikTok dates a conversion by the day of the click and attributes clicks for up to 28 days ([ADR-0053](../adr/0053-connect-tiktok-with-an-app-of-the-deployment.md)). Until the core has accepted a load of an advertiser, the window follows the journal `_agoranomos_loads`.
 
 To load a period of an advertiser again, trigger `agoranomos_tiktok_ads_daily` with its parameters: `window_from` and `window_to`, as dates such as `2026-01-01`, and `accounts`, the IDs of the advertisers, or none for every advertiser of `clients.toml`. Such a run is a load of the kind `history`. The planner that loads the history of each advertiser a quarter at a time in the background is planned for v0.7.
+
+### The conversions
+
+TikTok reports two conversion actions in each report of the three levels ([ADR-0053](../adr/0053-connect-tiktok-with-an-app-of-the-deployment.md)): the complete payments, `complete_payment`, with their value, and the event that a campaign optimizes for, `conversion`, which has no value. The `conversions` of `ad_stats_campaign_daily`, `ad_stats_ad_group_daily` and `ad_stats_ad_daily` are that metric `conversion`, as TikTok Ads Manager shows it, and `conversions_primary` of `ad_stats_campaign_daily` is the complete payments, which the seed of the base package makes primary. TikTok dates a conversion by the day of the ad interaction, within the attribution windows of the advertiser, so the conversions of the last 28 days can still grow ([The data model](../reference/data-model.md#tiktok)). `ad_conversions_campaign_daily` has both actions of each campaign, with `is_primary` beside them. For another choice, name the actions in `extensions/model/conversion_actions.toml`:
+
+```toml
+[[actions]]
+platform = "tiktok_ads"
+conversion_action_id = "conversion"
+is_primary = true
+```
+
+A deleted campaign, ad group or ad keeps its spend in the marts, with the state `removed`: TikTok shows a deletion in `secondary_status`, and the load asks every list and report with every status ([The data model](../reference/data-model.md#tiktok)).
 
 ## The limits of TikTok
 

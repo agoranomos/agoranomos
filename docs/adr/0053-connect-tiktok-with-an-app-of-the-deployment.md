@@ -169,7 +169,7 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of November 2026:** none. The maintainer accepted the record on 22 November 2026; C5b (the load into raw and the command of the code), C5c (the history) and C5d (the core and the marts) of #225 build it. No load has reached a real TikTok advertiser.
+* **Implementation status, as of November 2026:** partly built. The maintainer accepted the record on 22 November 2026. C5b of #225 (#379) built the load into raw and the command of the code, `./agoranomos tiktok connect`, and C5d the core and the marts: the staging models of `dbt/models/staging/tiktok_ads/` over the shape macros `tiktok_v1_3`, `tiktok_state` over `secondary_status` and `operation_status`, the two conversion actions in the seed, G0a against `report_advertiser_daily` with `platform_totals_tolerance.tiktok_ads` at 0.01, and the IDs cast to `bigint`. C5c, the history by quarters, comes in a pull request of its own, #380. No load has reached a real TikTok advertiser.
 * **Not checked yet.** The stand S6 (#220) settles each of these on a live advertiser:
     * Row 19 of the register (#225), removed entities: that the lists with `primary_status` `STATUS_ALL` and the reports with the three status filters at `STATUS_ALL` return deleted entities, and that the campaigns add up to the totals of the advertiser. The pages say that `AUCTION_ADVERTISER` returns the data of all ads of the account and name the default filter of deleted entities only for the three lower levels, but do not say in so many words that its totals count deleted campaigns.
     * Row 27 of the register (#225), the tolerance of G0a, and the decimals of each currency of the agency in the reports of one advertiser.

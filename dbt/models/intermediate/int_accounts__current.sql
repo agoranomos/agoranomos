@@ -24,6 +24,9 @@ with listed as (
     select platform, account_id, account_name, currency, time_zone, manager_account_id, account_status
     from {{ ref('stg_meta_ads__accounts') }}
     union all
+    select platform, account_id, account_name, currency, time_zone, manager_account_id, account_status
+    from {{ ref('stg_tiktok_ads__accounts') }}
+    union all
     select
         platform,
         property_id,
@@ -45,6 +48,8 @@ stats as (
     select platform, account_id, report_date from {{ ref('stg_google_ads__campaign_stats') }}
     union all
     select platform, account_id, report_date from {{ ref('stg_meta_ads__campaign_stats') }}
+    union all
+    select platform, account_id, report_date from {{ ref('stg_tiktok_ads__campaign_stats') }}
 ),
 
 reported as (

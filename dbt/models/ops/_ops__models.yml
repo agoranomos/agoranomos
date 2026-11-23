@@ -7,7 +7,8 @@ models:
       beside them the last load of the kind intraday, of the current day of the account, which the
       short cycle of Google Ads takes every few hours (ADR-0051). The accounts of demo_web are its
       properties, and demo_fx, ecb and bank_of_italy have one account each, EUR, the base of
-      their rates; ecb, bank_of_italy, google_ads and meta_ads have none until their first load.
+      their rates; ecb, bank_of_italy, google_ads, meta_ads and tiktok_ads have none until their
+      first load.
       The Ops collection of Metabase shows it (ADR-0029).
     columns:
       - name: platform

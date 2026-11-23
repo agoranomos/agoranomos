@@ -16,6 +16,14 @@
     cast(cast(nullif(trim(cast({{ expression }} as text)), '') as numeric(20,0)) / 1000000 as numeric(18,6))
 {%- endmacro %}
 
+{#- The ID of an entity that the API writes as a string of digits and the core keeps as bigint
+    (ADR-0036), such as an ID of TikTok (ADR-0053), as text in the form that the core gives it: the
+    cast to bigint fails the query loudly on a value that is not digits or does not fit, never
+    cutting it, and an empty one is NULL, which G1 reports as missing_key. -#}
+{% macro to_id(expression) -%}
+    cast(cast(nullif(trim(cast({{ expression }} as text)), '') as bigint) as text)
+{%- endmacro %}
+
 {#- The rows of a report of facts, the SQL of the call block, with any of their measures other
     than zero: a row whose measures are all zero, or none, is left out of staging, whatever the API
     returned (ADR-0036), and a row with zero impressions and a conversion stays. -#}

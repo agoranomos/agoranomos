@@ -11,8 +11,8 @@ yesterday in its time zone, the last 28 days on its first load too
 (agoranomos_pipelines/tiktok_ads.py), with the totals of each advertiser by day for G0a of ADR-0035.
 It signs in with the long-term token in TIKTOK_ADS_ACCESS_TOKEN, which ./agoranomos tiktok connect
 writes. Each load updates the asset of its reports, and a scheduled one keeps the watermark of each
-advertiser in the asset state store of that asset, as a cache of the warehouse. No staging model
-reads raw_tiktok_ads yet: the core and the marts of TikTok are C5d of #225.
+advertiser in the asset state store of that asset, as a cache of the warehouse. The transform
+after a load takes it through dbt/models/staging/tiktok_ads/ into the core and the marts.
 
 A run with the parameters window_from and window_to, and accounts, loads a portion of the history
 (ADR-0038, "The first load"): the days from window_from to window_to of those advertisers, or of
