@@ -45,14 +45,18 @@ answer whose code is not 0 is an error even with HTTP 200 (Api.call).
 The days of each advertiser run from the day after the last day that the core accepted for it, or
 from W days back when that is earlier, W being the window of restatements of tiktok_ads in the seed
 of the platforms (windows.py), 28 days, as TikTok dates a conversion by the day of the click and
-allows a click window of up to 28 days (ADR-0053), to yesterday in the time zone of the
-advertiser, its field timezone; the first load takes these W days. A run with a portion, which the
-parameters of the DAG name, takes the days of the portion of its advertisers as a load of the kind
-history; the planner of the history is to come with C5c of #225. TikTok keeps report data
-"forever", so no window has an oldest day. Each load appends the lists and the facts of each
-advertiser under its own _dlt_load_id and records the window of each advertiser in
-_agoranomos_loads in the same run. The transform after it pins the loads that have ended and
-takes them through dbt/models/staging/tiktok_ads/ into the core and the marts.
+allows a click window of up to 28 days (ADR-0053), to yesterday in the time zone of the advertiser,
+its field timezone; the first load takes these W days. A run with a portion, which the parameters of
+the DAG name, takes the days of the portion of its advertisers as a load of the kind history, in
+ranges of at most RANGE_DAYS: a quarter is three or four ranges, so up to sixteen reports for each
+advertiser and their pages. The DAG agoranomos_tiktok_ads_history plans the portions after each run
+of the transform that succeeded, by quarters from the newest, back to the first day of the month 36
+months before yesterday (plan, history_limit, and agoranomos_pipelines/history.py, which the loads
+of Google Ads and of Meta share). TikTok keeps report data "forever", so no window has an oldest
+day. Each load appends the lists and the facts of each advertiser under its own _dlt_load_id and
+records the window of each advertiser in _agoranomos_loads in the same run. The transform after it
+pins the loads that have ended and takes them through dbt/models/staging/tiktok_ads/ into the core
+and the marts, and the plan of the history waits for the pin of each whole load.
 
 The last day that the core accepted for an advertiser is the end of its newest accepted load in
 core.loads, which loader may read; while the core has accepted none, it is the end of its newest
@@ -88,7 +92,7 @@ import dlt
 from dlt.destinations.exceptions import DatabaseUndefinedRelation
 from dlt.sources.helpers.requests import Client, RequestException, Timeout
 
-from agoranomos_pipelines.history import Portion, portion_from
+from agoranomos_pipelines.history import Portion, history_start, planned, portion_from
 from agoranomos_pipelines.loads import (
     APPEND,
     DLT_SETTINGS,
@@ -482,6 +486,26 @@ def portion_of(
         shape="the digits of the advertiser ID",
         error=TikTokAdsError,
     )
+
+
+def history_limit(now: datetime) -> date:
+    """The first day of the history of the advertisers at now: the first day of the month
+    HISTORY_MONTHS before yesterday in UTC (ADR-0034). TikTok keeps report data "forever", "there
+    is no query lookback range restriction" (Reporting FAQs, v1.3, as of November 2026), so no
+    oldest day of the API comes later (ADR-0053)."""
+    return history_start(now.astimezone(UTC).date() - timedelta(days=1))
+
+
+def plan(now: datetime, extensions: Path = EXTENSIONS) -> Portion | None:
+    """The next portion of the history of the advertisers of the deployment as of now, back to
+    history_limit, or none: when every advertiser holds its history, when no advertiser has had
+    its usual window yet, or while a whole load of tiktok_ads waits for the run of the transform
+    that pins it, so that each portion goes from raw to the core before the next one starts
+    (ADR-0038, agoranomos_pipelines/history.py). It reads the warehouse as loader, and needs no
+    token."""
+    wanted = checked(advertisers(extensions))
+    with open_pipeline() as pipeline:
+        return planned(pipeline, CODE, "TikTok", wanted, history_limit(now))
 
 
 class Pace:

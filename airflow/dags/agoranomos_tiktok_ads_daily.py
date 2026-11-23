@@ -17,8 +17,8 @@ after a load takes it through dbt/models/staging/tiktok_ads/ into the core and t
 A run with the parameters window_from and window_to, and accounts, loads a portion of the history
 (ADR-0038, "The first load"): the days from window_from to window_to of those advertisers, or of
 every advertiser when accounts is empty, as a load of the kind history, which leaves the watermarks
-as they were. A person may start one from the form of the run to load a period again; the planner
-that starts them a quarter at a time is C5c of #225.
+as they were. agoranomos_tiktok_ads_history starts such runs, a quarter at a time, and a person may
+start one from the form of the run to load a period again.
 
 The DAG starts paused: a deployment unpauses it once its token and its advertisers are in place
 ([Connect TikTok](docs/how-to/connect-tiktok.md)). A load without a token, or without an advertiser

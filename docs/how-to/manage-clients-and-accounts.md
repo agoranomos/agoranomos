@@ -23,7 +23,7 @@ The load of Google Ads reads only the accounts that the file names, so its next 
 
 The load of Meta reads only the accounts of `meta_ads` that the file names, each by the digits of the ad account without `act_`, such as `1234567890123456`, and its next load takes the last 28 days of a new account, which the marts show after the next run of the transform ([Connect Meta](connect-meta.md)).
 
-The load of TikTok reads only the advertisers of `tiktok_ads` that the file names, each by the digits of its advertiser ID, such as `7012345678901234567`, and its next load takes the last 28 days of a new advertiser, which the marts show after the next run of the transform ([Connect TikTok](connect-tiktok.md)).
+The load of TikTok reads only the advertisers of `tiktok_ads` that the file names, each by the digits of its advertiser ID, such as `7012345678901234567`, and its next load takes the last 28 days of a new advertiser, which the marts show after the next run of the transform ([Connect TikTok](connect-tiktok.md)), and its 36 months follow by quarters in the background ([When the history arrives](connect-tiktok.md#when-the-history-arrives)).
 
 ## Move an account to another client
 
