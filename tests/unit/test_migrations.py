@@ -60,7 +60,7 @@ CHECKSUMS = {
         "8a182bc84224fcfb292ee768d325271f92eac6695722ed016a291e9aa0ef0681"
     ),
     "0012_add_the_flags_of_a_load.sql": (
-        "c23abd8f7cbf99fb976d375b9823452e5870ebcfb144be54c396d8df062275a8"
+        "68a783bea8073602a886e11a5aa053efee042412747c01900079c03b86ea46d8"
     ),
 }
 

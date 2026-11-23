@@ -13,18 +13,18 @@
     (ADR-0038) or intraday for a load of its current day (ADR-0051), which a journal without the
     column, or a row without it or with another kind, gives as window, the four flags of the
     answers of a source of web analytics (ADR-0054), which a journal without them gives as none
-    (journal_flags), and the moment when the load ended. A source that no load has written is passed over, as a
-    deployment without the demo never loads the sources of the demo. The ID of the call of dbt
-    records which pin took a row. Then it creates, through core.ensure_partition, the partitions of
-    the facts that each source is to write, for every month of the windows that are pinned, and
-    those of the journals of restatements for the current month and the next, in UTC, into which
-    the models of the facts write with the moment of their transaction, each in a transaction of
-    its own and outside any model: a hook before_begin of a model breaks the transaction of the
-    model (#191). The rows stay pinned until the core accepts their loads.
-    The pin holds the lock of marts-init (marts_init.sql), shared, from its first statement to its
-    last, so that marts-init never reads a window that is pinned before its partitions exist; dbt
-    closes the connection when the macro fails, which lets go of the lock.
-    transformer runs it, with its rights on core.loads and on core.ensure_partition. -#}
+    (journal_flags), and the moment when the load ended. A source that no load has written is passed
+    over, as a deployment without the demo never loads the sources of the demo. The ID of the call
+    of dbt records which pin took a row. Then it creates, through core.ensure_partition, the
+    partitions of the facts that each source is to write, for every month of the windows that are
+    pinned, and those of the journals of restatements for the current month and the next, in UTC,
+    into which the models of the facts write with the moment of their transaction, each in a
+    transaction of its own and outside any model: a hook before_begin of a model breaks the
+    transaction of the model (#191). The rows stay pinned until the core accepts their loads. The
+    pin holds the lock of marts-init (marts_init.sql), shared, from its first statement to its last,
+    so that marts-init never reads a window that is pinned before its partitions exist; dbt closes
+    the connection when the macro fails, which lets go of the lock. transformer runs it, with its
+    rights on core.loads and on core.ensure_partition. -#}
 {% macro pin_loads() %}
     {%- if env_var('DBT_JOB_RUN_ID', '') == '' -%}
         {{- exceptions.raise_compiler_error(

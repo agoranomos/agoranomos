@@ -6,9 +6,9 @@
 -- the same names, from a journal that has them. They are nullable with no default: a row of a
 -- source whose answers carry no such flag, an ad platform or a source of the rates, has none, as
 -- does a failed account, which got no answer, and every row that a pin wrote before this
--- migration, as nothing recorded the flags then, so that ADD COLUMN rewrites no row. They are no
--- right: loader may read them, and transformer read and change them, as every other column of the
--- table.
+-- migration, as nothing recorded the flags then, so that ADD COLUMN rewrites no row. They need no
+-- grant of their own: loader may read them, and transformer read and change them, as every other
+-- column of the table.
 
 ALTER TABLE core.loads ADD COLUMN is_subject_to_thresholding boolean;
 ALTER TABLE core.loads ADD COLUMN has_data_loss_from_other_row boolean;
