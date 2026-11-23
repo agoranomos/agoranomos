@@ -10,14 +10,12 @@ the asset TRANSFORMED, one run at a time, and starts at most one portion of the 
 newest calendar quarter that a property lacks days of, for every property that lacks days of it,
 as a run of agoranomos_ga4_daily with the properties and the days as its parameters
 (agoranomos_pipelines/ga4.py, plan, and agoranomos_pipelines/history.py, the planner that the
-histories of Google Ads and of Meta share). That load updates the asset of GA4, and the next
-portion comes once the transform has pinned it, so that each portion goes from raw to the core
-whole before the next one, from the new quarters to the old ones. The plan starts nothing while a
-run of the load is queued or running, while a whole load waits for the run of the transform that
-pins it, or once every property that has had its usual window holds its history; it reads the
-journal of the loads and core.loads as the loader role, and asks GA4 nothing. Until the transform
-pins the loads of GA4, which its staging models bring (#226, C6c), every load waits for its pin,
-and the plan starts nothing.
+histories of Google Ads, of Meta and of TikTok share). That load updates the asset of GA4, and the
+next portion comes once the transform has pinned it, so that each portion goes from raw to the
+core whole before the next one, from the new quarters to the old ones. The plan starts nothing
+while a run of the load is queued or running, while a whole load waits for the run of the
+transform that pins it, or once every property that has had its usual window holds its history;
+it reads the journal of the loads and core.loads as the loader role, and asks GA4 nothing.
 
 The history of GA4 plans apart from those of the ad platforms, and its portion may run at the same
 time as theirs: the APIs and their quotas are apart.

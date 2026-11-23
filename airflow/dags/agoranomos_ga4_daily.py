@@ -11,8 +11,8 @@ of the property ("[GA4] Data freshness"), so at 14:07 UTC yesterday is whole for
 from UTC-2 to UTC+9, Europe and most of Asia among them; further west, yesterday may still be the
 data of the day in progress, which the next daily load takes again with its window. It signs in
 with the key of the service account in GA4_SERVICE_ACCOUNT_KEY. Each load updates the asset of its
-report, and the transform runs after it; the transform takes raw_ga4 into the core once its
-staging models exist (#226, C6c).
+report, and the transform after it takes the load through dbt/models/staging/ga4/ into
+core.web_sessions_daily and the mart web_sessions_daily.
 
 A run with the parameters window_from and window_to, and accounts, the properties, loads a portion
 of the history (ADR-0038, "The first load"): the days from window_from to window_to of those
