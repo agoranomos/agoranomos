@@ -17,6 +17,7 @@ with loads as (
         ('raw_demo_video', 'demo_video'),
         ('raw_demo_web', 'demo_web'),
         ('raw_ecb', 'ecb'),
+        ('raw_ga4', 'ga4'),
         ('raw_google_ads', 'google_ads'),
         ('raw_meta_ads', 'meta_ads'),
         ('raw_nbk', 'nbk'),

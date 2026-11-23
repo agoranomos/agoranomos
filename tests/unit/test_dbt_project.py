@@ -962,7 +962,7 @@ CHECKED = {
             "session_campaign_id",
             "sessions",
         ],
-        ["sessions", "engaged_sessions", "key_events", "total_revenue"],
+        ["sessions", "engaged_sessions", "key_events"],
     ),
     "rates_daily": (
         ["rate_date", "base_currency", "quote_currency"],
@@ -1225,7 +1225,7 @@ def test_the_pin_makes_the_partitions_of_the_facts_that_each_source_is_to_write(
     )
     assert len(partitioned) == 5, sorted(partitioned)
     assert {fact for listed in facts.values() for fact in listed} == partitioned
-    assert facts["raw_demo_web"] == ["web_sessions_daily"]
+    assert facts["raw_demo_web"] == facts["raw_ga4"] == ["web_sessions_daily"]
     assert (
         facts["raw_demo_fx"]
         == facts["raw_ecb"]
@@ -1248,8 +1248,9 @@ def test_the_pin_makes_the_partitions_of_the_facts_that_each_source_is_to_write(
 
 def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_does():
     # For the demo, as the fact tables of platforms.py hold them, through which each load records
-    # its windows; Google Ads has the shape of demo_search, Meta that of demo_social, and the rates
-    # of the ECB and of the Bank of Italy, one account.
+    # its windows; Google Ads has the shape of demo_search, Meta that of demo_social, TikTok that
+    # of demo_video, GA4 that of demo_web, and the rates of the ECB and of the Bank of Italy, one
+    # account.
     from agoranomos_pipelines.demo import platforms
 
     text = (DBT / "macros" / "newest_load.sql").read_text(encoding="utf-8")
@@ -1261,6 +1262,7 @@ def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_do
         *(platform.dataset for platform in platforms.PLATFORMS.values()),
         "raw_bank_of_italy",
         "raw_ecb",
+        "raw_ga4",
         "raw_google_ads",
         "raw_meta_ads",
         "raw_nbk",
@@ -1286,6 +1288,7 @@ def test_newest_load_names_the_account_and_the_day_of_each_source_as_its_load_do
     assert keys["raw_google_ads"] == keys["raw_demo_search"]
     assert keys["raw_meta_ads"] == keys["raw_demo_social"]
     assert keys["raw_tiktok_ads"] == keys["raw_demo_video"]
+    assert keys["raw_ga4"] == keys["raw_demo_web"]
     assert keys["raw_ecb"] == (None, "cast(r.time_period as date)")
     assert keys["raw_bank_of_italy"] == (None, "cast(r.reference_date as date)")
     # The NBK writes its day as DD.MM.YYYY, in the column date of each item (nbk.py).
@@ -1537,6 +1540,8 @@ AD_PLATFORMS = (
     "meta_ads",
     "tiktok_ads",
 )
+# The sources of web analytics of the model, whose staging the fact of sessions of the core reads.
+WEB_PLATFORMS = ("demo_web", "ga4")
 # The tests of the sums of G2: what each compares, the fact of the core, and the staging models.
 G2_SUMS = [
     *(
@@ -1547,7 +1552,7 @@ G2_SUMS = [
 ]
 G2_SUMS = [
     (what, fact, {f"stg_{code}__{kind}" for code in AD_PLATFORMS}) for what, fact, kind in G2_SUMS
-] + [("sessions", "web_sessions_daily", {"stg_demo_web__sessions_daily"})]
+] + [("sessions", "web_sessions_daily", {f"stg_{code}__sessions_daily" for code in WEB_PLATFORMS})]
 
 
 def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
@@ -2435,6 +2440,126 @@ def test_the_conversion_actions_of_tiktok_ads_are_those_of_demo_video():
     assert actions("tiktok_ads")["conversion"][2] == "false"
 
 
+GA4 = STAGING / "ga4"
+# The staging models of GA4, each one call of a macro of the shape that demo_web mimics, over the
+# tables of raw_ga4, through relation_or_empty, as the DAG starts paused (ADR-0054).
+GA4_MODELS = SHAPED["demo_web"]
+
+
+def ga4_columns() -> dict[str, set[str]]:
+    """The columns that dlt makes of the fields of each table of the load of GA4, as the hints of
+    ga4.py give them: the fields of properties.get, and the property, the dimensions and the
+    metrics of the report, each by the name that dlt gives it. dlt is not in the development
+    environment, so the fields come from the text of the source."""
+    source = ast.parse((DAGS_PIPELINES / "ga4.py").read_text(encoding="utf-8"))
+    constants = {
+        node.targets[0].id: ast.literal_eval(node.value)
+        for node in source.body
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id in ("PROPERTY_FIELDS", "DIMENSIONS", "METRICS")
+    }
+
+    def snake(name):
+        return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+    return {
+        "properties": {snake(name) for name in constants["PROPERTY_FIELDS"]},
+        "report_sessions_daily": {
+            snake(name) for name in ("property", *constants["DIMENSIONS"], *constants["METRICS"])
+        },
+    }
+
+
+def test_each_staging_model_of_ga4_is_one_call_of_the_shape_that_the_demo_shares():
+    found = {path.name for path in GA4.glob("*.sql")}
+    assert found == {f"stg_ga4__{model}.sql" for model in GA4_MODELS}
+    for model, (macro, [table]) in GA4_MODELS.items():
+        text = (GA4 / f"stg_ga4__{model}.sql").read_text(encoding="utf-8")
+        assert text.startswith(f"-- stg_ga4__{model}.sql: "), model
+        relation = f"relation_or_empty(source('raw_ga4', '{table}'), {{"
+        by_load = model in BY_LOAD
+        reader = "newest_load" if by_load else "newest_list"
+        assert text.count(f"{{{{ {macro}({reader}({relation}") == 1, model
+        if by_load:
+            assert "}), 'raw_ga4', ref('stg_loads__newest_days'))" in text, model
+        else:
+            # The name of a property holds its ID after properties/, as in demo_web.
+            account = LIST_ACCOUNTS[("demo_web", model)]
+            assert f"}}), 'raw_ga4', source('core', 'loads'), {account})" in text, model
+        assert text.count("relation_or_empty(") == 1, model
+        assert text.rstrip().endswith("), 'ga4') }}"), model
+        assert "depends_on" not in text, model
+
+
+def test_the_columns_of_the_empty_tables_of_ga4_are_the_fields_of_its_requests():
+    # The empty query of a table before the first load has the columns that dlt makes from the
+    # fields of its requests, with the load and the ID of each row, every one text; they are the
+    # columns of the same table of demo_web.
+    hinted = ga4_columns()
+    demo = (DBT / "macros" / "demo_source.sql").read_text(encoding="utf-8")
+    for model, (_, [table]) in GA4_MODELS.items():
+        text = (GA4 / f"stg_ga4__{model}.sql").read_text(encoding="utf-8")
+        start = text.index(f"relation_or_empty(source('raw_ga4', '{table}'), {{")
+        body = text[start : text.index("})", start)]
+        columns = dict(re.findall(r"'(\w+)': '([\w ]+)'", body))
+        wanted = hinted[table] | {"_dlt_load_id", "_dlt_id"}
+        assert set(columns) == wanted, (model, table, sorted(set(columns) ^ wanted))
+        assert set(columns.values()) == {"text"}, (model, table)
+        start = demo.index(f"    'raw_demo_web.{table}': {{")
+        shown = set(re.findall(r"'(\w+)': '[\w ]+'", demo[start : demo.index("},", start)]))
+        assert set(columns) == shown, (model, table, sorted(set(columns) ^ shown))
+
+
+def test_the_staging_of_ga4_has_the_tests_of_the_staging_of_demo_web():
+    # The same macros give the same columns, and the same critical tests guard both.
+    demo = (STAGING / "demo_web" / "_demo_web__models.yml").read_text(encoding="utf-8")
+    text = (GA4 / "_ga4__models.yml").read_text(encoding="utf-8")
+
+    def tests(text):
+        return [
+            line
+            for line in text.replace("demo_web", "ga4").splitlines()
+            if "description" not in line and not line.startswith("      ")
+        ]
+
+    assert tests(text) == tests(demo)
+    assert [line for line in text.splitlines() if "data_tests" in line] == [
+        line for line in demo.splitlines() if "data_tests" in line
+    ]
+
+
+def test_the_sources_of_ga4_are_the_tables_that_its_load_writes():
+    # The tables of demo_web, the journal and the loads of dlt.
+    text = (GA4 / "_ga4__sources.yml").read_text(encoding="utf-8")
+    [source] = re.findall(r"^  - name: (\w+)\n    description:", text, flags=re.MULTILINE)
+    assert source == "raw_ga4"
+    assert re.search(r"^    schema: raw_ga4$", text, flags=re.MULTILINE)
+    pattern = r"^      - name: (\w+)\n        description:"
+    demo = (STAGING / "demo_web" / "_demo_web__sources.yml").read_text(encoding="utf-8")
+    assert set(re.findall(pattern, text, flags=re.MULTILINE)) == set(
+        re.findall(pattern, demo, flags=re.MULTILINE)
+    )
+    assert set(ga4_columns()) <= set(re.findall(pattern, text, flags=re.MULTILINE))
+
+
+def test_every_union_of_the_web_platforms_reads_ga4_and_the_loads_show_it():
+    accounts = (INTERMEDIATE / "int_accounts__current.sql").read_text(encoding="utf-8")
+    for name in ("stg_ga4__properties", "stg_ga4__sessions_daily"):
+        assert f"from {{{{ ref('{name}') }}}}" in accounts, name
+    core = (CORE / "core_web_sessions_daily.sql").read_text(encoding="utf-8")
+    both = "[ref('stg_demo_web__sessions_daily'), ref('stg_ga4__sessions_daily')]"
+    assert core.count(both) == 2
+    g1 = G1.read_text(encoding="utf-8")
+    assert "(ref('stg_ga4__properties'), 'property_id')" in g1
+    assert g1.count("(ref('stg_ga4__properties'), 'property_id')") == 2
+    assert "-- depends_on: {{ ref('stg_ga4__sessions_daily') }}" in g1
+    keys = macro_text("quarantine_raw_keys")
+    assert "    'raw_ga4': {'property': 'text', 'date': 'text'},\n" in keys
+    loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
+    assert "('raw_ga4', 'ga4')," in loads
+
+
 PROJECT_FILE = DBT / "dbt_project.yml"
 SNAPSHOTS = DBT / "snapshots"
 SNAPSHOTS_FILE = SNAPSHOTS / "_snapshots.yml"
@@ -2506,7 +2631,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 425, counted
+    assert counted == 429, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text
@@ -3024,7 +3149,7 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
     for statement, kind in zip(by_kind, kinds, strict=True):
         assert statement.count("quarantine_insert(this, quarantine_attributed(") == 1, kind
         assert f"quarantine_fact_findings('{kind}', [" in statement, kind
-        codes = ["demo_web"] if kind == "sessions_daily" else [*SHAPED_ADS, *REAL_ADS]
+        codes = WEB_PLATFORMS if kind == "sessions_daily" else [*SHAPED_ADS, *REAL_ADS]
         read = re.findall(r"ref\('(stg_\w+)'\)", statement)
         assert read == [*(f"stg_{code}__{kind}" for code in codes), *["stg_loads__newest_days"] * 2]
     raw, totals, collapse, sessions, rates, stop = statements[len(kinds) : -1]
@@ -3040,7 +3165,10 @@ def test_g1_runs_each_kind_of_data_in_a_statement_of_its_own():
     assert "source('core', 'dim_account'), source('core', 'ad_stats_campaign_daily'))" in collapse
     # Web analytics has no spend: G1a finds a load of a property with no row where the core holds
     # sessions, before a window erases them.
-    assert "quarantine_collapse_findings([ref('stg_demo_web__sessions_daily')]" in sessions
+    assert (
+        "quarantine_collapse_findings([ref('stg_demo_web__sessions_daily'), "
+        "ref('stg_ga4__sessions_daily')]"
+    ) in sessions
     assert (
         "source('core', 'dim_account'), source('core', 'web_sessions_daily'), measure='sessions', "
         "checked='sessions_daily', account='property_id', fall=false)"
@@ -3123,6 +3251,8 @@ def test_g1_reads_the_fact_tables_of_raw_of_each_source_that_names_an_account():
                 cast = "micros_to_number" if micros else "to_number"
                 assert f"{{{{ {cast}('{spend}') }}}} as spend" in text, (dataset, table)
     assert all(spend is None for _, spend, _ in tables["raw_demo_web"])
+    # GA4 has the tables of demo_web, and no totals (ADR-0054).
+    assert tables["raw_ga4"] == tables["raw_demo_web"]
 
 
 def test_g0a_checks_the_campaigns_of_an_account_against_its_totals_on_each_day():

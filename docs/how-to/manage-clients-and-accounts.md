@@ -25,7 +25,7 @@ The load of Meta reads only the accounts of `meta_ads` that the file names, each
 
 The load of TikTok reads only the advertisers of `tiktok_ads` that the file names, each by the digits of its advertiser ID, such as `7012345678901234567`, and its next load takes the last 28 days of a new advertiser, which the marts show after the next run of the transform ([Connect TikTok](connect-tiktok.md)), and its 36 months follow by quarters in the background ([When the history arrives](connect-tiktok.md#when-the-history-arrives)).
 
-The load of GA4 reads only the properties of `ga4` that the file names, each by the digits of the property without `properties/`, such as `123456789`, and its next load takes the last 14 days of a new property into the raw layer, which no mart shows until the core takes GA4 ([Connect GA4](connect-ga4.md)).
+The load of GA4 reads only the properties of `ga4` that the file names, each by the digits of the property without `properties/`, such as `123456789`, and its next load takes the last 14 days of a new property, which the mart `web_sessions_daily` shows after the next run of the transform ([Connect GA4](connect-ga4.md)), and its 36 months follow by quarters in the background ([When the history arrives](connect-ga4.md#when-the-history-arrives)).
 
 ## Move an account to another client
 

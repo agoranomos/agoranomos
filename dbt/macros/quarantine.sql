@@ -46,7 +46,8 @@
     columns are NOT NULL or zero or more there, so that one account cannot fail the write of a
     fact for all: the column of the account; the columns of the key after the day, the platform
     and the account; the other IDs that a row needs; the measures that a row needs; and the
-    measures that are zero or more. -#}
+    measures that are zero or more. The revenue of the sessions is not among them: the core keeps a
+    day whose refunds exceed its revenue as negative, as GA4 gives it. -#}
 {% macro quarantine_fact_kinds() -%}
 {%- set metrics = ['impressions', 'clicks', 'spend'] -%}
 {%- set counted = [
@@ -78,7 +79,7 @@
         ['session_source', 'session_medium', 'session_campaign_name', 'session_campaign_id'],
         [],
         ['sessions', 'engaged_sessions'],
-        ['sessions', 'engaged_sessions', 'key_events', 'total_revenue'],
+        ['sessions', 'engaged_sessions', 'key_events'],
     ),
 }) -}}
 {%- endmacro %}
@@ -111,6 +112,7 @@
         ('report_ad_daily', 'metrics__spend', false),
     ],
     'raw_demo_web': [('report_sessions_daily', none, false)],
+    'raw_ga4': [('report_sessions_daily', none, false)],
     'raw_google_ads': [
         ('campaign_stats', 'metrics__cost_micros', true),
         ('campaign_conversions', none, false),
@@ -140,6 +142,7 @@
     (relation_or_empty): the columns that newest_load_sources names, and the load. -#}
 {% macro quarantine_raw_keys(source_name) -%}
 {%- set keys = {
+    'raw_ga4': {'property': 'text', 'date': 'text'},
     'raw_google_ads': {'customer__id': 'text', 'segments__date': 'date'},
     'raw_meta_ads': {'account_id': 'text', 'date_start': 'date'},
     'raw_tiktok_ads': {'advertiser_id': 'text', 'dimensions__stat_time_day': 'text'},

@@ -330,7 +330,7 @@ The name of the campaign of the sessions as their links carried it on the day, t
 {% enddocs %}
 
 {% docs session_campaign_id %}
-The ID of the campaign of the sessions as their links carried it, the utm_id: the ID of the ad campaign when its links carry it; (not set) otherwise.
+The ID of the campaign of the sessions: the ID of a campaign of Google Ads that auto-tagging gives, or the utm_id that their links carried, the ID of the ad campaign when its links carry it; (not set) otherwise.
 {% enddocs %}
 
 {% docs session_default_channel_group %}
