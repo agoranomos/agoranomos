@@ -18,9 +18,8 @@ core.loads, as transformer, the loads that the run read, but those of the accoun
 of the run held in quarantine, and then the task transformed updates the asset TRANSFORMED, after
 which the histories of Google Ads, of Meta and of TikTok take their next portions
 (agoranomos_google_ads_history, agoranomos_meta_ads_history, agoranomos_tiktok_ads_history,
-ADR-0038), while the task clean_raw
-deletes, as loader, the rows of the accepted loads from the raw layer, and those of a load that did
-not end and began more than a day ago (ADR-0035, ADR-0046,
+ADR-0038), while the task clean_raw deletes, as loader, the rows of the accepted loads from the raw
+layer, and those of a load that did not end and began more than a day ago (ADR-0035, ADR-0046,
 agoranomos_pipelines/acceptance.py). A run with a failed or a skipped task of dbt accepts nothing
 and cleans nothing, and the next run reads its loads again. The DAG runs when each of the five
 platforms of the demo has loaded since its last run, each load updating the asset of its main table,

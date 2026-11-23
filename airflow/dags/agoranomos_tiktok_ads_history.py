@@ -8,7 +8,7 @@ day of the API bounds it. It runs after each run of the transform that succeeded
 TRANSFORMED, one run at a time, and starts at most one portion of the history: the newest calendar
 quarter that an advertiser lacks days of, for every advertiser that lacks days of it, as a run of
 agoranomos_tiktok_ads_daily with the advertisers and the days as its parameters, which takes the
-reports of the portion in ranges of at most 30 days, four for each level of a quarter
+reports of the portion in ranges of at most 30 days, three or four for each level of a quarter
 (agoranomos_pipelines/tiktok_ads.py, plan, and agoranomos_pipelines/history.py, the planner that
 the histories of Google Ads and of Meta share). That load updates the asset of TikTok, the
 transform takes it, pins it into core.loads with the kind history and creates the partitions of its
