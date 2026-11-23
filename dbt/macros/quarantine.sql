@@ -8,7 +8,8 @@
 
 {#- The reasons of quarantine, as codes, in the order of the checks: the newest pinned load of the
     account failed for it; the loads name an account that no list gives; two rows share a key, or
-    a list gives the account twice; a row misses a part of its key; the currency of the account is
+    a list gives the account twice; a row misses a part of its key; an ID of a campaign, an ad
+    group or an ad in raw is not a whole number that fits bigint; the currency of the account is
     not one of ISO 4217; its time zone is not one of IANA; no source of the rates has a rate of
     its currency into the reporting currency (ADR-0042); a spend has more than six decimal places;
     a measure is missing or below zero; a load holds rows outside its window; the rows of the
@@ -19,10 +20,10 @@
     stops. -#}
 {% macro quarantine_reasons() -%}
 {{- return([
-    'load_failed', 'unknown_account', 'duplicate_key', 'missing_key', 'unknown_currency',
-    'unknown_time_zone', 'missing_rate', 'too_many_decimals', 'missing_measure',
-    'negative_measure', 'date_outside_window', 'totals_differ', 'empty_window', 'spend_fall',
-    'source_stopped',
+    'load_failed', 'unknown_account', 'duplicate_key', 'missing_key', 'invalid_id',
+    'unknown_currency', 'unknown_time_zone', 'missing_rate', 'too_many_decimals',
+    'missing_measure', 'negative_measure', 'date_outside_window', 'totals_differ', 'empty_window',
+    'spend_fall', 'source_stopped',
 ]) -}}
 {%- endmacro %}
 
@@ -86,8 +87,8 @@
     of the decimal places read as they are: each table with the column of its spend as text, and
     whether that spend is in micros, as cost_micros of Google is. A table of conversions or of
     sessions has no spend. The account and the day of a row are those of newest_load_sources. The
-    connectors of Google Ads and of Meta also load the totals of each account, which demo_search
-    and demo_social do not. -#}
+    connectors of Google Ads, of Meta and of TikTok also load the totals of each account, which
+    demo_search, demo_social and demo_video do not. -#}
 {% macro quarantine_raw_tables() -%}
 {%- set google = [
     ('campaign_stats', 'metrics__cost_micros', true),
@@ -125,6 +126,12 @@
         ('insights_ad', 'spend', false),
         ('insights_account', 'spend', false),
     ],
+    'raw_tiktok_ads': [
+        ('report_campaign_daily', 'metrics__spend', false),
+        ('report_adgroup_daily', 'metrics__spend', false),
+        ('report_ad_daily', 'metrics__spend', false),
+        ('report_advertiser_daily', 'metrics__spend', false),
+    ],
 }) -}}
 {%- endmacro %}
 
@@ -135,6 +142,7 @@
 {%- set keys = {
     'raw_google_ads': {'customer__id': 'text', 'segments__date': 'date'},
     'raw_meta_ads': {'account_id': 'text', 'date_start': 'date'},
+    'raw_tiktok_ads': {'advertiser_id': 'text', 'dimensions__stat_time_day': 'text'},
 } -%}
 {%- if source_name not in keys -%}
     {{- exceptions.raise_compiler_error('quarantine_raw_keys knows no source ' ~ source_name) -}}
@@ -143,6 +151,25 @@
 {%- do found.update(keys[source_name]) -%}
 {%- do found.update({'_dlt_load_id': 'text'}) -%}
 {{- return(found) -}}
+{%- endmacro %}
+
+{#- The columns of the IDs of the campaigns, ad groups and ads in the raw tables of a source whose
+    staging casts them to bigint through to_id (ADR-0036, ADR-0053), by table, the lists and the
+    reports: G1 reads each as it is, and a value that is not empty and not a whole number that fits
+    bigint (id_fits) holds the account in quarantine with invalid_id, as staging leaves it out
+    rather than cut it. tests/unit/test_dbt_project.py checks that these are the columns that the
+    shape macros cast. -#}
+{% macro quarantine_raw_ids() -%}
+{{- return({
+    'raw_tiktok_ads': {
+        'campaigns': ['campaign_id'],
+        'adgroups': ['campaign_id', 'adgroup_id'],
+        'ads': ['campaign_id', 'adgroup_id', 'ad_id'],
+        'report_campaign_daily': ['dimensions__campaign_id'],
+        'report_adgroup_daily': ['metrics__campaign_id', 'dimensions__adgroup_id'],
+        'report_ad_daily': ['metrics__campaign_id', 'metrics__adgroup_id', 'dimensions__ad_id'],
+    },
+}) -}}
 {%- endmacro %}
 
 {#- The columns of the table of the failures, in their order, as each statement inserts them. -#}
@@ -462,8 +489,10 @@ group by f.source, f.account_id, d.load_id, c.reason
 {#- The checks of the fact tables of one source in raw as they are, of the loads that this run reads
     for each account: rows dated outside the window that the journal of the load gives the
     account, which staging never reads, and a spend with more than six decimal places, which a
-    cast to numeric(18,6) in staging would round silently (ADR-0036). One small aggregate for each
-    table, by load and account. A table that no load has written yet is left out. -#}
+    cast to numeric(18,6) in staging would round silently (ADR-0036); and, for a source of
+    quarantine_raw_ids, an ID in its lists or its reports that is not a whole number that fits
+    bigint, which staging leaves out rather than cut. One small aggregate for each table, by load
+    and account. A table that no load has written yet is left out. -#}
 {% macro quarantine_raw_findings(source_name, days, loads) -%}
 {%- set code = source_name[4:] -%}
 {%- set account, day = newest_load_keys(source_name) -%}
@@ -487,8 +516,26 @@ group by f.source, f.account_id, d.load_id, c.reason
     {%- do parts.append(
         "select '" ~ table ~ "' as checked, r._dlt_load_id as load_id, " ~ account
         ~ " as account_id, min(" ~ day ~ ") as first_day, max(" ~ day ~ ") as last_day, "
-        ~ places ~ " as places\n    from (select * from " ~ relation ~ ") as r\n    group by "
-        ~ "r._dlt_load_id, " ~ account
+        ~ places ~ " as places, null::bigint as bad_ids\n    from (select * from " ~ relation
+        ~ ") as r\n    group by r._dlt_load_id, " ~ account
+    ) -%}
+{%- endfor %}
+{%- for table, ids in quarantine_raw_ids().get(source_name, {}).items() -%}
+    {%- set columns = {account[2:]: 'text', '_dlt_load_id': 'text'} -%}
+    {%- set bad = [] -%}
+    {%- for name in ids -%}
+        {%- do columns.update({name: 'text'}) -%}
+        {%- do bad.append(
+            "(nullif(trim(cast(r." ~ name ~ " as text)), '') is not null and not "
+            ~ id_fits('r.' ~ name) ~ ")"
+        ) -%}
+    {%- endfor -%}
+    {%- set relation = relation_or_empty(source(source_name, table), columns) -%}
+    {%- do parts.append(
+        "select '" ~ table ~ "' as checked, r._dlt_load_id as load_id, " ~ account
+        ~ " as account_id, null::date as first_day, null::date as last_day, null::integer as"
+        ~ " places, count(*) filter (where " ~ bad | join(' or ') ~ ") as bad_ids\n    from"
+        ~ " (select * from " ~ relation ~ ") as r\n    group by r._dlt_load_id, " ~ account
     ) -%}
 {%- endfor %}
 with tables as (
@@ -525,14 +572,19 @@ cross join lateral (
             'too_many_decimals',
             coalesce(t.places > 6, false),
             'a spend with ' || t.places || ' decimal places'
+        ),
+        (
+            'invalid_id',
+            coalesce(t.bad_ids > 0, false),
+            t.bad_ids || ' rows with an ID that is not a whole number that fits bigint'
         )
 ) as c (reason, failed, detail)
 where c.failed
 {%- endmacro %}
 
 {#- G0a, against the platform (ADR-0035): for each load that this run reads for an account of a
-    source whose loads bring the totals of each account by day, as the connectors of Google Ads and
-    Meta do, the impressions, the clicks and the spend of the rows of its campaigns, summed by
+    source whose loads bring the totals of each account by day, as the connectors of Google Ads,
+    Meta and TikTok do, the impressions, the clicks and the spend of the rows of its campaigns, summed by
     day, against the totals that the platform gives for the account in the same load, on each day
     of the windows that the load gives the account; a day that the load holds no row of on one
     side counts as zero there. A sum that differs from its total by more than the share of the

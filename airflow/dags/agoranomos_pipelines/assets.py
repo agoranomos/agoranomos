@@ -71,10 +71,10 @@ TRANSFORMED = Asset("agoranomos_transformed")
 
 # The condition on which the transform runs (ADR-0039): the demo has loaded, or the rates of the ECB
 # or of the Bank of Italy have, or Google Ads, Meta or GA4 has, or the rates of the NBK have, or
-# TikTok has, or the short cycle of Google Ads or of the demo has (ADR-0051); no run reads the
-# loads of GA4 or of TikTok until their staging (C6c of #226, C5d of #225). A source that joins the
-# model adds its asset here. The transform allows one run at a time: while a run is queued or
-# running, Airflow keeps the events that come, and starts one run for all of them once it ends.
+# TikTok has, or the short cycle of Google Ads or of the demo has (ADR-0051); no run reads the loads
+# of GA4 until its staging (C6c of #226). A source that joins the model adds its asset here. The
+# transform allows one run at a time: while a run is queued or running, Airflow keeps the events
+# that come, and starts one run for all of them once it ends.
 LOADED = AssetAny(
     DEMO_LOADED,
     RAW_ECB,

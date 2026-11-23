@@ -37,7 +37,7 @@ GOLDEN = {
     "demo_fx": "8937659b7b74917f0b76b70a53b8fd33ce414297073a4c1022066542cf82d22d",
     "demo_search": "08748d3f1515f5aeb44489c96d277382b6e2973c5fefd789b530c69ff9ee34cc",
     "demo_social": "8e69473975db3205d4ae87493fa65da6eff3c3abd87bb983ebc544e59ea3b5e8",
-    "demo_video": "81ee94ee5b8ac0f78abdfe555b52e6f53b4bd68f69d81ce78a09efd70d974b6d",
+    "demo_video": "aaaec2744765f634e555cd667d54ac684efb4808f06ba8f25455fb11eb3a744a",
     "demo_web": "335d391844f7585e98d451db4c2b997fe878fe05a6d416e10fc9079879102eb4",
 }
 

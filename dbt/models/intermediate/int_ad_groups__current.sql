@@ -36,6 +36,11 @@ with listed as (
         platform, account_id, campaign_id, ad_group_id, observed_name, ad_group_status,
         ad_group_state, ad_group_type
     from {{ ref('stg_meta_ads__ad_groups') }}
+    union all
+    select
+        platform, account_id, campaign_id, ad_group_id, observed_name, ad_group_status,
+        ad_group_state, ad_group_type
+    from {{ ref('stg_tiktok_ads__ad_groups') }}
 ),
 
 stats as (
@@ -53,6 +58,9 @@ stats as (
     union all
     select platform, account_id, campaign_id, ad_group_id, report_date, loaded_ad_group_name
     from {{ ref('stg_meta_ads__ad_group_stats') }}
+    union all
+    select platform, account_id, campaign_id, ad_group_id, report_date, loaded_ad_group_name
+    from {{ ref('stg_tiktok_ads__ad_group_stats') }}
 ),
 
 reported as (
@@ -81,6 +89,8 @@ lists as (
     {{ newest_lists('raw_google_ads', source('core', 'loads')) }}
     union all
     {{ newest_lists('raw_meta_ads', source('core', 'loads')) }}
+    union all
+    {{ newest_lists('raw_tiktok_ads', source('core', 'loads')) }}
 ),
 
 accounts as (

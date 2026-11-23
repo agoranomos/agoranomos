@@ -185,6 +185,7 @@ SHAPES: dict[tuple[str, str], dict[str, Any]] = {
         "campaign_name": STR,
         "objective_type": STR,
         "operation_status": STR,
+        "secondary_status": STR,
     },
     ("demo_video", "report_campaign_daily"): {
         "advertiser_id": STR,
@@ -200,6 +201,7 @@ SHAPES: dict[tuple[str, str], dict[str, Any]] = {
         "adgroup_name": STR,
         "optimization_goal": STR,
         "operation_status": STR,
+        "secondary_status": STR,
     },
     ("demo_video", "report_adgroup_daily"): {
         "advertiser_id": STR,
@@ -217,6 +219,7 @@ SHAPES: dict[tuple[str, str], dict[str, Any]] = {
         "ad_name": STR,
         "ad_format": STR,
         "operation_status": STR,
+        "secondary_status": STR,
     },
     ("demo_video", "report_ad_daily"): {
         "advertiser_id": STR,

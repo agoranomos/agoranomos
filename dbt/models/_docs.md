@@ -102,7 +102,7 @@ How many times the ads of the account were shown on the day, as the ad platform 
 {% enddocs %}
 
 {% docs total_clicks %}
-How many times the ads of the account were clicked on the day with a click that leads to the site, as the ad platform totals them for the account over all its campaigns: the clicks of Google and the link clicks of Meta, as in clicks. Each run compares them with the sum of the campaigns of the account (G0a).
+How many times the ads of the account were clicked on the day with a click that leads to the site, as the ad platform totals them for the account over all its campaigns: the clicks of Google, the clicks (destination) of TikTok and the link clicks of Meta, as in clicks. Each run compares them with the sum of the campaigns of the account (G0a).
 {% enddocs %}
 
 {% docs total_spend %}
@@ -214,7 +214,7 @@ The status of the ad account at the last load, as the ad platform writes it, suc
 {% enddocs %}
 
 {% docs campaign_status %}
-The status of the campaign at the last load, or in a version of the campaign its status in that version, as the ad platform writes it, such as ENABLED, PAUSED or REMOVED for Google, ACTIVE or DELETED for Meta, or ENABLE for TikTok.
+The status of the campaign at the last load, or in a version of the campaign its status in that version, as the ad platform writes it, such as ENABLED, PAUSED or REMOVED for Google, ACTIVE or DELETED for Meta, or ENABLE, DISABLE or, for a deleted one, CAMPAIGN_STATUS_DELETE for TikTok.
 {% enddocs %}
 
 {% docs campaign_state %}
@@ -238,7 +238,7 @@ The name of the ad group that the row carried when it was loaded. A platform giv
 {% enddocs %}
 
 {% docs ad_group_status %}
-The status of the ad group at the last load, or in a version of the ad group its status in that version, as the ad platform writes it, such as ENABLED or REMOVED for Google, ACTIVE or DELETED for Meta, or ENABLE for TikTok. It is the status of the ad group itself: an ad group of a paused campaign can still be enabled.
+The status of the ad group at the last load, or in a version of the ad group its status in that version, as the ad platform writes it, such as ENABLED or REMOVED for Google, ACTIVE or DELETED for Meta, or ENABLE, DISABLE or, for a deleted one, a secondary status of TikTok such as ADGROUP_STATUS_CAMPAIGN_DELETE. It is the status of the ad group itself: an ad group of a paused campaign can still be enabled.
 {% enddocs %}
 
 {% docs ad_group_state %}
@@ -262,7 +262,7 @@ The name of the ad that the row carried when it was loaded, none for a type of a
 {% enddocs %}
 
 {% docs ad_status %}
-The status of the ad at the last load, or in a version of the ad its status in that version, as the ad platform writes it, such as ENABLED or REMOVED for an ad in its ad group of Google, ACTIVE or DELETED for Meta, or ENABLE for TikTok.
+The status of the ad at the last load, or in a version of the ad its status in that version, as the ad platform writes it, such as ENABLED or REMOVED for an ad in its ad group of Google, ACTIVE or DELETED for Meta, or ENABLE, DISABLE or, for a deleted one, a secondary status of TikTok such as AD_STATUS_DELETE.
 {% enddocs %}
 
 {% docs ad_state %}
@@ -462,7 +462,7 @@ The source, the account and the day of the row in one text, as source|account_id
 {% enddocs %}
 
 {% docs reason %}
-The check of G0a, G1 or G1a (ADR-0035) that kept the account out of the core, as a code: load_failed, unknown_account, duplicate_key, missing_key, unknown_currency, unknown_time_zone, missing_rate, too_many_decimals, missing_measure, negative_measure, date_outside_window, totals_differ, empty_window, spend_fall, or source_stopped for an account whose source has more than half of its pinned accounts in quarantine.
+The check of G0a, G1 or G1a (ADR-0035) that kept the account out of the core, as a code: load_failed, unknown_account, duplicate_key, missing_key, invalid_id, unknown_currency, unknown_time_zone, missing_rate, too_many_decimals, missing_measure, negative_measure, date_outside_window, totals_differ, empty_window, spend_fall, or source_stopped for an account whose source has more than half of its pinned accounts in quarantine.
 {% enddocs %}
 
 {% docs checked %}

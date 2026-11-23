@@ -153,5 +153,6 @@ select pg_advisory_unlock_shared({{ marts_init_lock() }})
     'raw_google_ads': ads,
     'raw_meta_ads': ads,
     'raw_nbk': [],
+    'raw_tiktok_ads': ads,
 }) -}}
 {%- endmacro %}

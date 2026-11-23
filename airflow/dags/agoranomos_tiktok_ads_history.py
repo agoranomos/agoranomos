@@ -17,8 +17,7 @@ from raw to the core whole before the next one, from the new quarters to the old
 starts nothing while a run of the load is queued or running, while a whole load waits for the run
 of the transform that pins it, or once every advertiser that has had its usual window holds its
 history; it reads the journal of the loads and core.loads as the loader role, and asks TikTok
-nothing. No staging model reads raw_tiktok_ads yet, so no run of the transform pins a load of
-TikTok, and the plan waits after the first load until the core takes TikTok (C5d of #225).
+nothing.
 
 The history of TikTok and those of Google Ads and of Meta plan apart, and may each have a portion
 running at the same time: their APIs and their quotas are apart, a load writes what it reads to disk
