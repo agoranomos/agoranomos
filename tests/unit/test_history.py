@@ -1,10 +1,11 @@
-"""Tests of the planner of the history that Google Ads and Meta share
+"""Tests of the planner of the history that Google Ads, Meta and TikTok share
 (airflow/dags/agoranomos_pipelines/history.py; ADR-0038, "The first load").
 
 dlt is in the Airflow image and not in the development environment, so the module is imported with
 a stand-in of dlt that loads nothing, and a stand-in pipeline that answers the queries of the plan
 from what a test says the dataset holds. The plan of each source, with its accounts and its first
-day, is tested with its own load, in test_google_ads_source.py and test_meta_ads_source.py."""
+day, is tested with its own load, in test_google_ads_source.py, test_meta_ads_source.py and
+test_tiktok_ads_source.py."""
 
 import importlib
 import logging
@@ -16,7 +17,9 @@ import pytest
 
 GOOGLE = ("google_ads", "raw_google_ads", ["1111111111", "2222222222"])
 META = ("meta_ads", "raw_meta_ads", ["1111111111111111", "2222222222222222"])
-SOURCES = [GOOGLE, META]
+# The advertiser IDs of TikTok, of 19 digits, as its guide shows one.
+TIKTOK = ("tiktok_ads", "raw_tiktok_ads", ["7000000000000000001", "7000000000000000002"])
+SOURCES = [GOOGLE, META, TIKTOK]
 LIMIT = date(2023, 10, 1)
 
 
@@ -391,6 +394,36 @@ def test_the_plan_starts_nothing_before_a_first_load_or_once_the_history_is_whol
         assert history.planned(whole, source, "Meta", [one, two], LIMIT) is None
     said = "Every account of Meta that has had its usual window holds its days back to 2023-10-01"
     assert said in caplog.text
+
+
+def test_the_history_of_tiktok_goes_by_quarters_from_its_28_days_back_to_the_limit(history):
+    # ADR-0053: the usual window of an advertiser is 28 days in its time zone, and the history goes
+    # back to the first day of the month 36 months before yesterday, with no oldest day of TikTok,
+    # a quarter a portion for every advertiser that lacks it. An advertiser named in clients.toml
+    # that no load has taken yet waits for its usual window.
+    source, dataset, (one, two) = TIKTOK
+    three = "7000000000000000003"
+    pipeline = StandInPipeline(
+        dataset,
+        windows=[
+            (one, date(2026, 9, 30), date(2026, 10, 27)),
+            (two, date(2026, 10, 1), date(2026, 10, 28)),
+        ],
+    )
+    portions = []
+    while portion := history.planned(pipeline, source, "TikTok", [one, two, three], LIMIT):
+        portions.append(portion)
+        for account_id in portion.accounts:
+            pipeline.state["windows"].append((account_id, portion.first, portion.last))
+        assert len(portions) < 20, "the history never ends"
+    # The third quarter of 2026 back to the fourth of 2023.
+    assert len(portions) == 12
+    assert portions[0] == history.Portion((one, two), date(2026, 7, 1), date(2026, 9, 30))
+    assert all(portion.accounts == (one, two) for portion in portions)
+    assert (portions[-1].first, portions[-1].last) == (LIMIT, date(2023, 12, 31))
+    for portion in portions:
+        assert history.quarter(portion.first) == history.quarter(portion.last)
+        assert portion.conf()["accounts"] == [one, two]
 
 
 def test_the_code_and_the_accounts_of_a_query_are_checked(history):

@@ -1,17 +1,17 @@
 """The history of the loads (ADR-0038, "The first load"): the kind of each load in core.loads, which
 the pin copies from the journal of the load, the view of the progress in the schema ops, the asset
-that the last task of a run of the transform that succeeded updates, and the histories of Google Ads
-and of Meta, which run on that asset, with the planner that they share, in a running stack.
+that the last task of a run of the transform that succeeded updates, and the histories of Google
+Ads, of Meta and of TikTok, which run on that asset, with the planner that they share, in a running
+stack.
 
-No load reaches Google or Meta here: their DAGs stay paused but for one run of each history, whose
-plan reads the warehouse and asks the API nothing. That test names an account of its platform of
-its own in extensions/model/clients.toml, with an ID of the placeholder of the guides, which no
-load ever took, so the plan finds no usual window and starts nothing; it takes the file out again
-and pauses the DAG in its finally. If it is killed before that, delete
-extensions/model/clients.toml and pause agoranomos_google_ads_history and
-agoranomos_meta_ads_history by hand. The demo takes its
-history in one load of each platform, of the kind history, and a daily load of the demo its usual
-window.
+No load reaches Google, Meta or TikTok here: their DAGs stay paused but for one run of each
+history, whose plan reads the warehouse and asks the API nothing. That test names an account of its
+platform of its own in extensions/model/clients.toml, with an ID of the placeholder of the guides,
+which no load ever took, so the plan finds no usual window and starts nothing; it takes the file
+out again and pauses the DAG in its finally. If it is killed before that, delete
+extensions/model/clients.toml and pause agoranomos_google_ads_history,
+agoranomos_meta_ads_history and agoranomos_tiktok_ads_history by hand. The demo takes its history
+in one load of each platform, of the kind history, and a daily load of the demo its usual window.
 
 The assertions print IDs, days, counts, kinds and states, never a secret.
 """
@@ -49,6 +49,11 @@ JOURNAL = (
 PLATFORMS = {
     "google_ads": ("agoranomos_google_ads_daily", "agoranomos_google_ads_history", "1234567890"),
     "meta_ads": ("agoranomos_meta_ads_daily", "agoranomos_meta_ads_history", "1234567890123456"),
+    "tiktok_ads": (
+        "agoranomos_tiktok_ads_daily",
+        "agoranomos_tiktok_ads_history",
+        "7012345678901234567",
+    ),
 }
 CLIENTS = """\
 [clients.history-test]
