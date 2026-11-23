@@ -88,6 +88,7 @@ LAG_DAYS = {
     "demo_video": 1,
     "demo_web": 1,
     "ecb": 1,
+    "ga4": 1,
     "google_ads": 1,
     "meta_ads": 1,
     "nbk": 1,

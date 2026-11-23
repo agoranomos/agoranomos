@@ -205,6 +205,14 @@ The load of TikTok signs in with the long-term token of the person who authorize
 |---|---|---|
 | `TIKTOK_ADS_ACCESS_TOKEN` | empty | The long-term token that [`./agoranomos tiktok connect`](command-line.md#tiktok) writes here, sent in the header `Access-Token` of each call. It does not expire, and it reads every advertiser that the person who authorized the app reaches, those of other clients of an agency too, until that person cancels the authorization, so keep it as you keep the other secrets of `.env`. The app ID and the secret of the app stay out of `.env`. A load without it fails with a line that says so. `preflight` stops on a value with a space, a quote, a `$`, a `#`, a backslash, a backtick, an angle bracket or a character outside ASCII. |
 
+## GA4
+
+The load of GA4 signs in as a service account of the Google Cloud project of the deployment, which is a user of each property with the role Viewer, and loads the properties of `ga4` that `extensions/model/clients.toml` names into `raw_ga4` ([ADR-0054](../adr/0054-connect-ga4-with-a-service-account-of-the-deployment.md), [Connect GA4](../how-to/connect-ga4.md)). Only the container that runs the tasks gets this setting: the scheduler with the LocalExecutor, the worker with the CeleryExecutor. `./agoranomos` checks neither key of a service account, of Google Ads or of GA4, and never prints them; the load checks the form of each.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `GA4_SERVICE_ACCOUNT_KEY` | empty | The key of the service account, in the forms of `GOOGLE_ADS_SERVICE_ACCOUNT_KEY`: the JSON file that Google Cloud makes, as base64 on one line, or as the JSON on one line in single quotes. It may be the same key as that of Google Ads, or that of a service account of its own, so that a leak of one key reads one source. It reads every property that the service account is a user of, so keep it as you keep the other secrets of `.env`. A load without it fails with a line that says so. |
+
 ## The rates
 
 The exchange rates into the reporting currency come from the sources that `AGORANOMOS_RATES_SOURCE` names, in their order, each a source with a DAG of its own that starts paused ([ADR-0042](../adr/0042-take-the-rates-from-the-bank-of-italy-and-the-national-bank-of-kazakhstan.md)):

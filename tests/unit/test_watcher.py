@@ -129,6 +129,8 @@ def test_the_late_check_counts_the_whole_loads_and_not_those_of_the_current_day(
 def test_every_source_of_the_base_package_has_a_lag():
     sources = {path.stem for path in (ROOT / "dbt" / "models" / "staging").iterdir()}
     assert sources - {"loads", "settings"} <= set(watcher.LAG_DAYS)
+    # GA4 (ADR-0054), whose staging comes with C6c of #226, loads once a day as the others.
+    assert watcher.LAG_DAYS["ga4"] == 1
 
 
 def status(**fields):
