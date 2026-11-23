@@ -52,6 +52,7 @@ def test_no_dag_file_imports_another():
         "agoranomos_nbk_daily",
         "agoranomos_selfcheck",
         "agoranomos_tiktok_ads_daily",
+        "agoranomos_tiktok_ads_history",
     } <= stems
     for path in DAG_FILES:
         others = stems - {path.stem}
@@ -858,6 +859,68 @@ def test_the_two_histories_have_the_same_shape():
         }
 
     assert settings(GOOGLE_ADS_HISTORY) == settings(META_ADS_HISTORY)
+
+
+TIKTOK_ADS_HISTORY = DAGS / "agoranomos_tiktok_ads_history.py"
+
+
+def test_the_history_of_tiktok_plans_a_portion_after_each_transform_that_succeeded():
+    # As the histories of Google Ads and of Meta, with the planner that they share (history.py):
+    # a portion is a run of the load of TikTok with its parameters, which starts nothing while a
+    # run of that load is queued or running. The DAG starts paused and imports dlt in its task
+    # only.
+    text = TIKTOK_ADS_HISTORY.read_text(encoding="utf-8")
+    found = imports(TIKTOK_ADS_HISTORY)
+    assert ("agoranomos_pipelines.assets", ["TRANSFORMED"]) in found
+    assert (
+        "airflow.providers.standard.operators.trigger_dagrun",
+        ["TriggerDagRunOperator"],
+    ) in found
+    assert [module for module, _ in found if module.split(".")[0] == "cosmos"] == []
+    tree = ast.parse(text)
+    top = [
+        node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert not [
+        m
+        for m in top
+        if m.split(".")[0] == "dlt" or m.endswith((".tiktok_ads", ".loads", ".history"))
+    ]
+    keywords = {
+        node.arg: ast.unparse(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.keyword)
+    }
+    assert 'dag_id="agoranomos_tiktok_ads_history",' in text
+    assert keywords["schedule"] == "TRANSFORMED"
+    assert keywords["trigger_dag_id"] == "LOAD"
+    assert 'LOAD = "agoranomos_tiktok_ads_daily"' in text
+    assert keywords["conf"] == "plan()"
+    assert keywords["tags"] == "['agoranomos', 'tiktok_ads']"
+    assert decorators(TIKTOK_ADS_HISTORY)["plan"] == ["task.short_circuit(task_id='plan')"]
+    assert 'context["ti"].get_dr_count(dag_id=LOAD, states=["queued", "running"])' in text
+    assert 'tiktok_ads.plan(context["dag_run"].run_after)' in text
+    assert "return None if portion is None else portion.conf()" in text
+    # The plan reads the warehouse as loader, and no secret of TikTok.
+    assert 'mask_secret(loads.credentials()["password"])' in text
+    assert "TOKEN" not in text
+
+
+def test_the_history_of_tiktok_has_the_shape_of_the_other_two():
+    # One planner, three DAGs that differ only in their platform: their schedule, their runs, their
+    # pause at creation and their timeouts are the same.
+    def settings(path):
+        return {
+            node.arg: ast.unparse(node.value)
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+            if isinstance(node, ast.keyword)
+            and node.arg not in ("dag_id", "tags", "trigger_dag_id")
+        }
+
+    assert settings(TIKTOK_ADS_HISTORY) == settings(META_ADS_HISTORY)
+    assert settings(TIKTOK_ADS_HISTORY)["is_paused_upon_creation"] == "True"
 
 
 TEN_MINUTES = "timedelta(minutes=10)"
