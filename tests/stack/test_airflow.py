@@ -40,6 +40,10 @@ NBK_DAILY = "agoranomos_nbk_daily"
 # The load of TikTok, which starts paused too (ADR-0053).
 TIKTOK_ADS_DAILY = "agoranomos_tiktok_ads_daily"
 TIKTOK_ADS_HISTORY = "agoranomos_tiktok_ads_history"
+
+# The load of GA4 and its history, which start paused too (ADR-0054).
+GA4_DAILY = "agoranomos_ga4_daily"
+GA4_HISTORY = "agoranomos_ga4_history"
 EXTENSION_CHECK = "ci_extension_check"
 FIXTURE = REPO_ROOT / "tests" / "stack" / "fixtures" / f"{EXTENSION_CHECK}.py"
 EXECUTORS = {"local": "LocalExecutor", "celery": "CeleryExecutor"}
@@ -396,6 +400,8 @@ def test_the_dag_processor_reports_no_import_error(airflow_url, token):
         NBK_DAILY,
         TIKTOK_ADS_DAILY,
         TIKTOK_ADS_HISTORY,
+        GA4_DAILY,
+        GA4_HISTORY,
     ):
         wait_for_dag(airflow_url, token, dag_id)
     status, body = api(airflow_url, token, "GET", "/api/v2/importErrors?bundle_name=agoranomos")
@@ -416,13 +422,15 @@ def test_the_dag_processor_reports_no_import_error(airflow_url, token):
         NBK_DAILY,
         TIKTOK_ADS_DAILY,
         TIKTOK_ADS_HISTORY,
+        GA4_DAILY,
+        GA4_HISTORY,
     ],
 )
 def test_the_loads_of_the_real_sources_stay_paused(airflow_url, token, dag_id):
     # The demo keeps its own rates and asks Google, Meta, TikTok, the ECB, the Bank of Italy and
-    # the NBK nothing (ADR-0032, ADR-0042, ADR-0050, ADR-0053): no job of the stack unpauses these
-    # DAGs, and the stack tests run without the network. The histories of Google Ads, of Meta and
-    # of TikTok, which test_history.py runs once each, are paused again after it.
+    # the NBK nothing (ADR-0032, ADR-0042, ADR-0050, ADR-0053, ADR-0054): no job of the stack
+    # unpauses these DAGs, and the stack tests run without the network. The histories of Google
+    # Ads, of Meta and of TikTok, which test_history.py runs once each, are paused again after it.
     wait_for_dag(airflow_url, token, dag_id)
     status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}")
     assert status == 200, body

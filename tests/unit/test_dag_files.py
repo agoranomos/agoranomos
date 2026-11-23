@@ -70,14 +70,14 @@ RAW_NBK = "postgres://warehouse-db:5432/warehouse/raw_nbk/rates_daily"
 
 
 def test_the_transform_runs_when_the_demo_the_rates_or_a_platform_have_loaded():
-    # Any of nine conditions (ADR-0039): all five assets of the demo, the asset of the rates of the
+    # Any of ten conditions (ADR-0039): all five assets of the demo, the asset of the rates of the
     # ECB, that of the rates of the Bank of Italy (ADR-0042), that of Google Ads (ADR-0032), that of
-    # Meta (ADR-0050), that of the rates of the NBK (ADR-0042), that of TikTok (ADR-0053), or that
-    # of the short cycle of the current day of Google Ads or of the demo (ADR-0051). The five of
-    # the demo stay one condition, so that one run of the history or of the daily load starts one
-    # run of the transform, after its last platform, and not one after its first platform and one
-    # more for the other four, the first reading tables whose days the loads still replace. One
-    # run at a time, as before.
+    # Meta (ADR-0050), that of GA4 (ADR-0054), that of the rates of the NBK (ADR-0042), that of
+    # TikTok (ADR-0053), or that of the short cycle of the current day of Google Ads or of the demo
+    # (ADR-0051). The five of the demo stay one condition, so that one run of the history or of
+    # the daily load starts one run of the transform, after its last platform, and not one after
+    # its first platform and one more for the other four, the first reading tables whose days the
+    # loads still replace. One run at a time, as before.
     text = (DAGS / "agoranomos_demo_transform.py").read_text(encoding="utf-8")
     assert "schedule=LOADED" in text
     assert "max_active_runs=1" in text
@@ -91,7 +91,7 @@ def test_the_transform_runs_when_the_demo_the_rates_or_a_platform_have_loaded():
     assert f'RAW_NBK = Asset("{RAW_NBK}")' in assets
     assert (
         "LOADED = AssetAny(\n    DEMO_LOADED,\n    RAW_ECB,\n    RAW_BANK_OF_ITALY,\n"
-        "    RAW_GOOGLE_ADS,\n    RAW_META_ADS,\n    RAW_NBK,\n    RAW_TIKTOK_ADS,\n"
+        "    RAW_GOOGLE_ADS,\n    RAW_META_ADS,\n    RAW_GA4,\n    RAW_NBK,\n    RAW_TIKTOK_ADS,\n"
         "    RAW_GOOGLE_ADS_INTRADAY,\n    RAW_DEMO_INTRADAY,\n)"
     ) in assets
     assert 'RAW_GOOGLE_ADS_INTRADAY = Asset("agoranomos_google_ads_intraday")' in assets
@@ -751,6 +751,75 @@ def test_a_run_of_the_load_of_tiktok_takes_a_portion_of_the_history_from_its_par
     assert any("portion=portion" in call for call in calls if call.startswith("tiktok_ads.load("))
 
 
+GA4_DAILY = DAGS / "agoranomos_ga4_daily.py"
+
+
+def test_the_load_of_ga4_imports_dlt_in_its_task_starts_paused_and_masks_the_key():
+    # ADR-0054: a deployment unpauses it once its key and its properties are in place. The task
+    # masks the password of the loader and the private key of the service account.
+    found = imports(GA4_DAILY)
+    assert ("agoranomos_pipelines.assets", ["RAW_GA4"]) in found
+    assert [module for module, _ in found if module.split(".")[0] == "cosmos"] == []
+    text = GA4_DAILY.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    top = [
+        node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert not [m for m in top if m.split(".")[0] == "dlt" or m.endswith((".ga4", ".loads"))]
+    keywords = {
+        node.arg: ast.unparse(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.keyword)
+    }
+    assert 'dag_id="agoranomos_ga4_daily",' in text
+    assert keywords["is_paused_upon_creation"] == "True"
+    assert keywords["max_active_runs"] == "1"
+    assert keywords["catchup"] == "False"
+    assert keywords["tags"] == "['agoranomos', 'ga4']"
+    assert 'mask_secret(loads.credentials()["password"])' in text
+    assert 'mask_secret(ga4.key_info()["private_key"])' in text
+    assert decorators(GA4_DAILY)["load_ga4"] == ["task(task_id='load_ga4', outlets=[RAW_GA4])"]
+    assets = ASSETS.read_text(encoding="utf-8")
+    assert (
+        'RAW_GA4 = Asset("postgres://warehouse-db:5432/warehouse/raw_ga4/report_sessions_daily")'
+    ) in assets
+
+
+def test_the_load_of_ga4_runs_once_the_daily_data_of_europe_and_asia_is_ready():
+    # GA4 gives the daily data of a standard property about 12 hours after its day ends ("[GA4]
+    # Data freshness"): at 14:07 UTC, from UTC-2 to UTC+9, after the loads of the ad platforms.
+    text = GA4_DAILY.read_text(encoding="utf-8")
+    assert 'SCHEDULE = CronTriggerTimetable("7 14 * * *", timezone="UTC")' in text
+    for offset in range(-2, 10):
+        assert (14 + offset) % 24 >= 12, offset
+
+
+def test_a_run_of_the_load_of_ga4_takes_a_portion_of_the_history_from_its_parameters():
+    # As for Google Ads and Meta, whose planner names the properties accounts. A property is digits.
+    tree = ast.parse(GA4_DAILY.read_text(encoding="utf-8"))
+    [params] = [
+        node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign) and ast.unparse(node.targets[0]) == "PARAMS"
+    ]
+    found = {
+        ast.literal_eval(key): {k.arg: ast.literal_eval(k.value) for k in value.keywords}
+        | {"default": ast.literal_eval(value.args[0])}
+        for key, value in zip(params.keys, params.values, strict=True)
+    }
+    assert set(found) == {"accounts", "window_from", "window_to"}
+    assert found["accounts"]["default"] == []
+    assert found["accounts"]["items"] == {"type": "string", "pattern": "^[0-9]{1,20}$"}
+    for day in ("window_from", "window_to"):
+        assert found[day]["default"] is None
+        assert (found[day]["type"], found[day]["format"]) == (["null", "string"], "date")
+    calls = [ast.unparse(node) for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    assert "ga4.portion_of(params['accounts'], params['window_from'], params['window_to'])" in calls
+    assert "ga4.load(context['dag_run'].run_after, portion=portion)" in calls
+
+
 GOOGLE_ADS_HISTORY = DAGS / "agoranomos_google_ads_history.py"
 
 
@@ -923,6 +992,42 @@ def test_the_history_of_tiktok_has_the_shape_of_the_other_two():
     assert settings(TIKTOK_ADS_HISTORY)["is_paused_upon_creation"] == "True"
 
 
+GA4_HISTORY = DAGS / "agoranomos_ga4_history.py"
+
+
+def test_the_history_of_ga4_plans_as_those_of_the_ad_platforms():
+    # The same planner (history.py), with the load of GA4: the same schedule, runs and timeouts as
+    # the history of Meta, and no secret of GA4 in the plan.
+    text = GA4_HISTORY.read_text(encoding="utf-8")
+    found = imports(GA4_HISTORY)
+    assert ("agoranomos_pipelines.assets", ["TRANSFORMED"]) in found
+    tree = ast.parse(text)
+    top = [
+        node.module if isinstance(node, ast.ImportFrom) else node.names[0].name
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert not [
+        m for m in top if m.split(".")[0] == "dlt" or m.endswith((".ga4", ".loads", ".history"))
+    ]
+    assert 'dag_id="agoranomos_ga4_history",' in text
+    assert 'LOAD = "agoranomos_ga4_daily"' in text
+    assert 'ga4.plan(context["dag_run"].run_after)' in text
+    assert "key_info" not in text
+    assert decorators(GA4_HISTORY)["plan"] == ["task.short_circuit(task_id='plan')"]
+
+    def settings(path):
+        return {
+            node.arg: ast.unparse(node.value)
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+            if isinstance(node, ast.keyword)
+            and node.arg not in ("dag_id", "tags", "trigger_dag_id")
+        }
+
+    assert settings(GA4_HISTORY) == settings(META_ADS_HISTORY)
+    assert 'tags=["agoranomos", "ga4"]' in text
+
+
 TEN_MINUTES = "timedelta(minutes=10)"
 
 
@@ -955,6 +1060,13 @@ TEN_MINUTES = "timedelta(minutes=10)"
         ),
         (
             "agoranomos_tiktok_ads_daily.py",
+            TEN_MINUTES,
+            "timedelta(minutes=20)",
+            "timedelta(hours=2)",
+            "hours=7",
+        ),
+        (
+            "agoranomos_ga4_daily.py",
             TEN_MINUTES,
             "timedelta(minutes=20)",
             "timedelta(hours=2)",

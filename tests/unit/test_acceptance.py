@@ -59,14 +59,17 @@ def test_the_cleanup_names_the_account_of_each_raw_table_as_staging_reads_it():
         if schema not in acceptance.NOT_STAGED_YET
     }
     assert found == staged
-    # The raw schemas that staging does not read yet: TikTok, whose staging is C5d of #225. Its
-    # tables are those of demo_video, with the totals of each advertiser beside them, and name the
-    # advertiser as demo_video does, so that its staging can call the same macros.
-    assert frozenset({"raw_tiktok_ads"}) == acceptance.NOT_STAGED_YET
+    # The raw schemas that staging does not read yet: TikTok, whose staging is C5d of #225, and
+    # GA4, whose staging is C6c of #226. The tables of TikTok are those of demo_video, with the
+    # totals of each advertiser beside them, and name the advertiser as demo_video does; those
+    # of GA4 are those of demo_web, and name the property as demo_web does, so that the staging
+    # of each can call the same macros.
+    assert frozenset({"raw_ga4", "raw_tiktok_ads"}) == acceptance.NOT_STAGED_YET
     assert not set(found) & acceptance.NOT_STAGED_YET
     tiktok = acceptance.ACCOUNTS["raw_tiktok_ads"]
     video = acceptance.ACCOUNTS["raw_demo_video"]
     assert tiktok == {**video, "report_advertiser_daily": "r.advertiser_id"}
+    assert acceptance.ACCOUNTS["raw_ga4"] == acceptance.ACCOUNTS["raw_demo_web"]
     # The tables of Meta are those of demo_social, with the totals of the account beside them,
     # and name the account as demo_social does, so that its staging calls the same macros.
     meta = acceptance.ACCOUNTS["raw_meta_ads"]
@@ -105,6 +108,7 @@ def test_a_load_that_did_not_end_waits_longer_than_any_run_of_a_dag_lives():
         "agoranomos_google_ads_daily",
         "agoranomos_google_ads_intraday",
         "agoranomos_meta_ads_daily",
+        "agoranomos_ga4_daily",
         "agoranomos_nbk_daily",
         "agoranomos_tiktok_ads_daily",
     ):

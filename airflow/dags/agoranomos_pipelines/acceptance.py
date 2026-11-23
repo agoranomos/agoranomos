@@ -144,6 +144,11 @@ ACCOUNTS: dict[str, dict[str, str | None]] = {
         "insights_adset": SOCIAL,
         "insights_ad": SOCIAL,
     },
+    # GA4 (ADR-0054), in the shape of demo_web.
+    "raw_ga4": {
+        "properties": "split_part(r.name, '/', 2)",
+        "report_sessions_daily": "split_part(r.property, '/', 2)",
+    },
     "raw_nbk": {"rates_daily": None},
     # TikTok (ADR-0053), in the shape of demo_video, with the totals of each advertiser beside it,
     # whose staging models C5d of #225 is to add: until then no pin takes its loads, so the cleanup
@@ -160,8 +165,10 @@ ACCOUNTS: dict[str, dict[str, str | None]] = {
     },
 }
 # The raw schemas that the cleanup names before staging reads them, which
-# tests/unit/test_acceptance.py leaves out of its comparison with the staging models.
-NOT_STAGED_YET = frozenset({"raw_tiktok_ads"})
+# tests/unit/test_acceptance.py leaves out of its comparison with the staging models: TikTok
+# and GA4, until their staging models come (C5d of #225, C6c of #226). Until then the pin
+# takes no load of them, so the cleanup removes only the rows of their loads that did not end.
+NOT_STAGED_YET: frozenset[str] = frozenset({"raw_ga4", "raw_tiktok_ads"})
 
 # The acceptance (ADR-0046). The bound is the newest pin that this run read: the latest pinned_at
 # of the loads of the days of the run. Pins go one after another, so every row pinned at or before
