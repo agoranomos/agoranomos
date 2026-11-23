@@ -881,7 +881,7 @@ CHECKED = {
             "session_campaign_id",
             "sessions",
         ],
-        ["sessions", "engaged_sessions", "key_events", "total_revenue"],
+        ["sessions", "engaged_sessions", "key_events"],
     ),
     "rates_daily": (
         ["rate_date", "base_currency", "quote_currency"],

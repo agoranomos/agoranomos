@@ -46,7 +46,8 @@
     columns are NOT NULL or zero or more there, so that one account cannot fail the write of a
     fact for all: the column of the account; the columns of the key after the day, the platform
     and the account; the other IDs that a row needs; the measures that a row needs; and the
-    measures that are zero or more. -#}
+    measures that are zero or more. The revenue of the sessions is not among them: the core keeps a
+    day whose refunds exceed its revenue as negative, as GA4 gives it. -#}
 {% macro quarantine_fact_kinds() -%}
 {%- set metrics = ['impressions', 'clicks', 'spend'] -%}
 {%- set counted = [
@@ -78,7 +79,7 @@
         ['session_source', 'session_medium', 'session_campaign_name', 'session_campaign_id'],
         [],
         ['sessions', 'engaged_sessions'],
-        ['sessions', 'engaged_sessions', 'key_events', 'total_revenue'],
+        ['sessions', 'engaged_sessions', 'key_events'],
     ),
 }) -}}
 {%- endmacro %}
