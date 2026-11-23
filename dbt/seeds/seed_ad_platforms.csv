@@ -6,6 +6,7 @@ demo_social,Demo Social,ads,Meta Marketing API v26.0,true,28
 demo_video,Demo Video,ads,TikTok API for Business v1.3,true,28
 demo_web,Demo Web Analytics,web_analytics,GA4 Data API v1beta,true,14
 ecb,European Central Bank,exchange_rates,,false,14
+ga4,Google Analytics 4,web_analytics,,false,14
 google_ads,Google Ads,ads,,false,90
 meta_ads,Meta Ads,ads,,false,28
 nbk,National Bank of Kazakhstan,exchange_rates,,false,14

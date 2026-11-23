@@ -197,6 +197,14 @@ The load of Meta signs in with the token of a system user of the business portfo
 | `META_ADS_APP_ID` | empty | The App ID of the app of the portfolio, digits, for a token that expires in 60 days; empty for a token that never expires. `preflight` stops on another value, and when it is set without `META_ADS_APP_SECRET`. |
 | `META_ADS_APP_SECRET` | empty | The App Secret of the same app, for a token that expires; empty otherwise. With it, every call carries `appsecret_proof`, and each load refreshes the token once it is 30 days old and keeps the new one in the Airflow Variable `agoranomos_meta_ads_token` ([A token that expires](../how-to/connect-meta.md#a-token-that-expires)). `preflight` stops when it is set without `META_ADS_APP_ID` or without the token. |
 
+## GA4
+
+The load of GA4 signs in as a service account of the Google Cloud project of the deployment, which is a user of each property with the role Viewer, and loads the properties of `ga4` that `extensions/model/clients.toml` names into `raw_ga4` ([ADR-0054](../adr/0054-connect-ga4-with-a-service-account-of-the-deployment.md), [Connect GA4](../how-to/connect-ga4.md)). Only the container that runs the tasks gets this setting: the scheduler with the LocalExecutor, the worker with the CeleryExecutor. `./agoranomos` checks neither key of a service account, of Google Ads or of GA4, and never prints them; the load checks the form of each.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `GA4_SERVICE_ACCOUNT_KEY` | empty | The key of the service account, in the forms of `GOOGLE_ADS_SERVICE_ACCOUNT_KEY`: the JSON file that Google Cloud makes, as base64 on one line, or as the JSON on one line in single quotes. It may be the same key as that of Google Ads, or that of a service account of its own, so that a leak of one key reads one source. It reads every property that the service account is a user of, so keep it as you keep the other secrets of `.env`. A load without it fails with a line that says so. |
+
 ## The rates
 
 The exchange rates into the reporting currency come from the sources that `AGORANOMOS_RATES_SOURCE` names, in their order, each a source with a DAG of its own that starts paused ([ADR-0042](../adr/0042-take-the-rates-from-the-bank-of-italy-and-the-national-bank-of-kazakhstan.md)):

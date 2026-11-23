@@ -144,11 +144,18 @@ ACCOUNTS: dict[str, dict[str, str | None]] = {
         "insights_adset": SOCIAL,
         "insights_ad": SOCIAL,
     },
+    # GA4 (ADR-0054), in the shape of demo_web.
+    "raw_ga4": {
+        "properties": "split_part(r.name, '/', 2)",
+        "report_sessions_daily": "split_part(r.property, '/', 2)",
+    },
     "raw_nbk": {"rates_daily": None},
 }
 # The raw schemas that the cleanup names before staging reads them, which
-# tests/unit/test_acceptance.py leaves out of its comparison with the staging models: none today.
-NOT_STAGED_YET: frozenset[str] = frozenset()
+# tests/unit/test_acceptance.py leaves out of its comparison with the staging models: GA4, until
+# its staging models come (#226, C6c). Until then the pin takes no load of it, so the cleanup
+# removes only the rows of its loads that did not end.
+NOT_STAGED_YET: frozenset[str] = frozenset({"raw_ga4"})
 
 # The acceptance (ADR-0046). The bound is the newest pin that this run read: the latest pinned_at
 # of the loads of the days of the run. Pins go one after another, so every row pinned at or before

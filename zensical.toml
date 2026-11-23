@@ -28,6 +28,7 @@ nav = [
     { "See the demo" = "how-to/see-the-demo.md" },
     { "Connect Google Ads" = "how-to/connect-google-ads.md" },
     { "Connect Meta" = "how-to/connect-meta.md" },
+    { "Connect GA4" = "how-to/connect-ga4.md" },
     { "Manage clients and accounts" = "how-to/manage-clients-and-accounts.md" },
     { "Read the advertising dashboard" = "how-to/read-the-advertising-dashboard.md" },
     { "Talk to your data" = "how-to/talk-to-your-data.md" },

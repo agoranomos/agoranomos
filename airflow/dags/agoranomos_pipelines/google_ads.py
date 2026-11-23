@@ -386,20 +386,28 @@ def login_customer_id() -> str | None:
 def key_info() -> dict:
     """The key of the service account, from GOOGLE_ADS_SERVICE_ACCOUNT_KEY: the JSON file that
     Google Cloud makes, as it is or as base64. A message never shows the key."""
-    value = os.environ.get(KEY, "").strip()
+    return service_account_info(KEY, GoogleAdsError)
+
+
+def service_account_info(name: str, error: type[Exception]) -> dict:
+    """The key of a service account from the variable name of .env, which the load of Google Ads
+    and that of GA4 read: the JSON file that Google Cloud makes, as it is or as base64. A key that
+    is missing or not in that form raises error, with a message that names the variable and never
+    shows the key."""
+    value = os.environ.get(name, "").strip()
     if not value:
-        raise GoogleAdsError(f"{KEY} in .env is empty: put the key of the service account there")
+        raise error(f"{name} in .env is empty: put the key of the service account there")
     if not value.startswith("{"):
         try:
             value = base64.b64decode(value, validate=True).decode("utf-8")
         except (binascii.Error, UnicodeDecodeError):
-            raise GoogleAdsError(f"{KEY} in .env is neither JSON nor base64 of JSON") from None
+            raise error(f"{name} in .env is neither JSON nor base64 of JSON") from None
     try:
         info = json.loads(value)
     except json.JSONDecodeError:
-        raise GoogleAdsError(f"{KEY} in .env is not the JSON of a key") from None
+        raise error(f"{name} in .env is not the JSON of a key") from None
     if not isinstance(info, dict) or info.get("type") != "service_account":
-        raise GoogleAdsError(f"{KEY} in .env is not the key of a service account")
+        raise error(f"{name} in .env is not the key of a service account")
     return info
 
 

@@ -434,7 +434,8 @@ def test_the_cleanup_of_the_results_of_celery_deletes_the_old_ones_and_does_noth
 
 
 # The sources that dlt loads: the platforms of the demo, the rates of the ECB, Google Ads
-# (ADR-0032), Meta (ADR-0050) and the rates of the Bank of Italy and of the NBK (ADR-0042).
+# (ADR-0032), Meta (ADR-0050), GA4 (ADR-0054) and the rates of the Bank of Italy and of the NBK
+# (ADR-0042).
 SOURCES = (
     "demo_search",
     "demo_social",
@@ -445,6 +446,7 @@ SOURCES = (
     "bank_of_italy",
     "google_ads",
     "meta_ads",
+    "ga4",
     "nbk",
 )
 

@@ -667,11 +667,12 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
     from agoranomos_pipelines.demo import platforms
 
     # And the real sources, which mimic nothing: the rates of the ECB, Google Ads (ADR-0032), Meta
-    # (ADR-0050), and the rates of the Bank of Italy and of the NBK (ADR-0042).
+    # (ADR-0050), GA4 (ADR-0054), and the rates of the Bank of Italy and of the NBK (ADR-0042).
     assert set(rows) == {
         *platforms.PLATFORMS,
         "bank_of_italy",
         "ecb",
+        "ga4",
         "google_ads",
         "meta_ads",
         "nbk",
@@ -691,6 +692,14 @@ def test_the_seed_of_platforms_names_every_demo_platform_and_what_it_mimics():
         "platform": "ecb",
         "platform_name": "European Central Bank",
         "kind": "exchange_rates",
+        "mimics": "",
+        "is_demo": "false",
+        "restatement_window_days": "14",
+    }
+    assert rows["ga4"] == {
+        "platform": "ga4",
+        "platform_name": "Google Analytics 4",
+        "kind": "web_analytics",
         "mimics": "",
         "is_demo": "false",
         "restatement_window_days": "14",

@@ -190,6 +190,16 @@ ALTER SCHEMA raw_meta_ads_staging OWNER TO loader;
 GRANT USAGE ON SCHEMA raw_meta_ads TO transformer;
 GRANT SELECT ON ALL TABLES IN SCHEMA raw_meta_ads TO transformer;
 ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_meta_ads GRANT SELECT ON TABLES TO transformer;
+-- The GA4 properties of the deployment (ADR-0054), whose properties and reports of sessions dlt
+-- appends to raw_ga4, with raw_ga4_staging beside it, empty, as a platform has it. loader owns
+-- both; transformer may read the first, as for Meta.
+CREATE SCHEMA IF NOT EXISTS raw_ga4 AUTHORIZATION loader;
+CREATE SCHEMA IF NOT EXISTS raw_ga4_staging AUTHORIZATION loader;
+ALTER SCHEMA raw_ga4 OWNER TO loader;
+ALTER SCHEMA raw_ga4_staging OWNER TO loader;
+GRANT USAGE ON SCHEMA raw_ga4 TO transformer;
+GRANT SELECT ON ALL TABLES IN SCHEMA raw_ga4 TO transformer;
+ALTER DEFAULT PRIVILEGES FOR ROLE loader IN SCHEMA raw_ga4 GRANT SELECT ON TABLES TO transformer;
 -- The official rates of the tenge of the National Bank of Kazakhstan (ADR-0042), which dlt appends
 -- to raw_nbk, with raw_nbk_staging beside it, as for the ECB. loader owns both; transformer may read
 -- the first.

@@ -1,5 +1,5 @@
-"""history: the planner of the history of the ad platforms, which the loads of Google Ads and of
-Meta share (ADR-0038, "The first load").
+"""history: the planner of the history of the ad platforms, which the loads of Google Ads, of Meta
+and of GA4 share (ADR-0038, "The first load").
 
 The first load of an account takes the usual window of its platform, so that a dashboard fills in
 minutes, and its history comes after it, in the background, in portions: the DAG of the history of

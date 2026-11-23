@@ -509,6 +509,9 @@ services:
       META_ADS_ACCESS_TOKEN: ${META_ADS_ACCESS_TOKEN:-}
       META_ADS_APP_ID: ${META_ADS_APP_ID:-}
       META_ADS_APP_SECRET: ${META_ADS_APP_SECRET:-}
+      # The key of the service account of GA4, for the load of ga4 (ADR-0054): empty until a
+      # deployment connects it.
+      GA4_SERVICE_ACCOUNT_KEY: ${GA4_SERVICE_ACCOUNT_KEY:-}
       # The addresses of Apprise for the alerts (ADR-0045): the listener of the plugin
       # agoranomos_alerts runs in the scheduler in both variants, and the task of the watcher where
       # the tasks run; the worker of the CeleryExecutor gets them from here too. Empty, nothing is
