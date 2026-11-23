@@ -15,6 +15,7 @@ entropy, as the secret scan of CI reads every branch."""
 
 import importlib
 import io
+import itertools
 import json
 import logging
 import sys
@@ -81,6 +82,17 @@ class StandInClient:
 
     def execute_sql(self, sql):
         self.pipeline.queries.append(sql)
+        # The queries of the plan of the history: the windows of core.loads and of the journal,
+        # the newest loads of each kind and outcome in core.loads, and the whole loads that no pin
+        # took yet.
+        if sql.startswith("SELECT account_id, window_from, window_to FROM core.loads "):
+            return self.pipeline.state["core_windows"]
+        if sql.startswith("SELECT account_id, kind, outcome, max(finished_at) FROM core.loads "):
+            return self.pipeline.state["attempts"]
+        if sql.startswith("SELECT count(DISTINCT j._dlt_load_id) "):
+            return [(self.pipeline.state["waiting"],)]
+        if sql.startswith("SELECT j.account_id, j.window_from, j.window_to "):
+            return self.pipeline.state["windows"]
         if " FROM core.loads " in sql:
             return self.pipeline.state["accepted"]
         if self.pipeline.state["loads"] is None:
@@ -302,9 +314,19 @@ def tiktok(monkeypatch, tmp_path):
     """The module with stand-ins, and what it made and was asked: state["loads"] is how many
     complete loads the dataset holds (None: none yet), state["reloads"] what the journal of its
     whole loads gives, state["accepted"] what core.loads gives as the last accepted day of each
-    advertiser. made["waits"] holds each wait, of the pace and of the retries, and the clock moves
-    by a second at each look, so that the pace waits only where a test stops it."""
-    state = {"loads": None, "reloads": [], "accepted": []}
+    advertiser, and state["windows"], state["core_windows"], state["attempts"] and
+    state["waiting"] what the plan of the history reads. made["waits"] holds each wait, of the pace
+    and of the retries, and the clock moves by a second at each look, so that the pace waits only
+    where a test stops it."""
+    state = {
+        "loads": None,
+        "reloads": [],
+        "accepted": [],
+        "windows": [],
+        "core_windows": [],
+        "attempts": [],
+        "waiting": 0,
+    }
     api = TikTok()
     clock = {"now": 1000.0, "step": 1.0}
     made = {"pipelines": [], "clients": [], "waits": [], "api": api, "clock": clock}
@@ -474,6 +496,97 @@ def test_the_parameters_of_a_run_name_a_portion_or_none(tiktok):
     ):
         with pytest.raises(module.TikTokAdsError, match=message):
             module.portion_of(*args)
+
+
+def test_the_history_goes_back_36_months_with_no_oldest_day_of_tiktok(tiktok):
+    # ADR-0034 and ADR-0053: the first day of the month 36 months before yesterday in UTC, as
+    # TikTok keeps report data "forever" and gives no oldest day.
+    module, _, _, _ = tiktok
+    assert module.history_limit(NOW) == date(2023, 10, 1)
+    # Yesterday in UTC: the limit moves on with the second day of a month.
+    assert module.history_limit(datetime(2026, 11, 1, 0, 30, tzinfo=UTC)) == date(2023, 10, 1)
+    assert module.history_limit(datetime(2026, 11, 2, 0, 30, tzinfo=UTC)) == date(2023, 11, 1)
+
+
+def test_the_plan_of_the_history_reads_the_loads_of_tiktok_and_asks_tiktok_nothing(
+    tiktok, monkeypatch
+):
+    # The planner that Google Ads and Meta share (agoranomos_pipelines/history.py), over
+    # raw_tiktok_ads and the rows of tiktok_ads in core.loads; it needs no token.
+    module, state, made, extensions = tiktok
+    monkeypatch.delenv("TIKTOK_ADS_ACCESS_TOKEN")
+    state.update(
+        loads=2,
+        windows=[
+            (ONE, date(2026, 9, 30), date(2026, 10, 27)),
+            (TWO, date(2026, 10, 1), date(2026, 10, 28)),
+        ],
+    )
+    assert module.plan(NOW, extensions) == module.Portion(
+        (ONE, TWO), date(2026, 7, 1), date(2026, 9, 30)
+    )
+    queries = made["pipelines"][0].queries
+    assert (
+        "SELECT account_id, window_from, window_to FROM core.loads "
+        "WHERE source = 'tiktok_ads' AND outcome = 'loaded' AND kind <> 'intraday' "
+        "AND account_id IN ('7000000000000000001', '7000000000000000002')"
+    ) in queries
+    assert any('FROM "raw_tiktok_ads"."_agoranomos_loads" AS j' in query for query in queries)
+    # A whole load that no run of the transform has pinned yet, as every load of TikTok until its
+    # staging: nothing.
+    state.update(waiting=1)
+    assert module.plan(NOW, extensions) is None
+    # Every advertiser back to the limit: nothing.
+    state.update(
+        waiting=0,
+        windows=[
+            (ONE, date(2023, 10, 1), date(2026, 10, 27)),
+            (TWO, date(2023, 10, 1), date(2026, 10, 28)),
+        ],
+    )
+    assert module.plan(NOW, extensions) is None
+    assert made["api"].requests == []
+    # Without an advertiser of tiktok_ads in clients.toml, the plan fails with the line of the
+    # load.
+    (extensions / "clients.toml").write_text('[clients.acme]\nname = "Acme"\n', encoding="utf-8")
+    with pytest.raises(module.TikTokAdsError, match="names no account of the platform tiktok_ads"):
+        module.plan(NOW, extensions)
+
+
+@pytest.mark.parametrize(
+    ("first", "last", "ranges"),
+    [
+        # A quarter of 92 days: four ranges, the last of two days.
+        ("2026-07-01", "2026-09-30", 4),
+        # The first quarter of a year that is not a leap year, 90 days: three.
+        ("2026-01-01", "2026-03-31", 3),
+    ],
+)
+def test_a_portion_of_a_quarter_asks_each_level_in_ranges_of_at_most_30_days(
+    tiktok, first, last, ranges
+):
+    # The cost of a quarter (ADR-0053, "The quota"): for each advertiser, its details, its three
+    # lists and, for the totals and each level, a report for each range of at most 30 days.
+    module, _, made, extensions = tiktok
+    module.load(NOW, extensions, portion=module.portion_of([ONE], first, last))
+    api = made["api"]
+    for level in ("AUCTION_ADVERTISER", "AUCTION_CAMPAIGN", "AUCTION_ADGROUP", "AUCTION_AD"):
+        found = [
+            (date.fromisoformat(params["start_date"]), date.fromisoformat(params["end_date"]))
+            for params in reports(api, level)
+        ]
+        assert len(found) == ranges, level
+        assert found[0][0] == date.fromisoformat(first)
+        assert found[-1][1] == date.fromisoformat(last)
+        assert all((end - start).days < 30 for start, end in found)
+        assert all(b[0] == a[1] + timedelta(days=1) for a, b in itertools.pairwise(found))
+    assert len(api.requests) == 1 + 3 + 4 * ranges
+    [row] = last_run(made)[0]["_agoranomos_loads"]
+    assert (row["kind"], row["window_from"], row["window_to"]) == (
+        "history",
+        date.fromisoformat(first),
+        date.fromisoformat(last),
+    )
 
 
 def test_a_load_asks_v1_3_for_each_advertiser_in_the_order_of_adr_0053(tiktok):

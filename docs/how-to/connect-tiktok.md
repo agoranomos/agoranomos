@@ -2,7 +2,7 @@
 
 This guide connects the TikTok advertisers of your business to agoranomos: the load reads their advertisers, campaigns, ad groups, ads and daily reports every day into the warehouse, through an app of your own developer account and the token of a person who reaches the advertisers ([ADR-0053](../adr/0053-connect-tiktok-with-an-app-of-the-deployment.md)).
 
-Each load goes into the raw layer, the schema `raw_tiktok_ads`, under the platform `tiktok_ads`. Its staging models, its rows in the core and in the marts, and so in the dashboards and the MCP servers, and the history of each advertiser by quarters are planned for v0.7: until then a load of TikTok stays in `raw_tiktok_ads`, and no run of the transform reads it.
+Each load goes into the raw layer, the schema `raw_tiktok_ads`, under the platform `tiktok_ads`. Its staging models, its rows in the core and in the marts, and so in the dashboards and the MCP servers, are planned for v0.7: until then a load of TikTok stays in `raw_tiktok_ads`, no run of the transform reads it, and the history of each advertiser, which comes by quarters after its first load, waits for them ([When the history arrives](#when-the-history-arrives)).
 
 No load has reached a real TikTok advertiser yet: the connector is tested against a stand-in of the TikTok API for Business, made from its reference of v1.3 as of November 2026, so compare the first load with TikTok Ads Manager.
 
@@ -68,14 +68,25 @@ client = "acme"
 ## 4. Start the load
 
 1. Run `./agoranomos up`, which gives the token to the container that runs the tasks.
-2. In the Airflow UI, unpause the DAG `agoranomos_tiktok_ads_daily`. It starts paused, so that a deployment without TikTok asks TikTok nothing.
-3. Trigger it once, or wait for 12:17 UTC, after the data fix that TikTok runs every day at 12:00 UTC ([Data latency for reports](https://business-api.tiktok.com/portal/docs/data-latency-for-reports/v1.3), as of November 2026). The first load of each advertiser takes its usual window, the last 28 days.
+2. In the Airflow UI, unpause the DAGs `agoranomos_tiktok_ads_daily` and `agoranomos_tiktok_ads_history`. Each starts paused, so that a deployment without TikTok asks TikTok nothing.
+3. Trigger `agoranomos_tiktok_ads_daily` once, or wait for 12:17 UTC, after the data fix that TikTok runs every day at 12:00 UTC ([Data latency for reports](https://business-api.tiktok.com/portal/docs/data-latency-for-reports/v1.3), as of November 2026). The first load of each advertiser takes its usual window, the last 28 days.
 
 The journal `_agoranomos_loads` of `raw_tiktok_ads` then has a row for each advertiser, with its window or its error. The rates that are to convert the money of TikTok into the reporting currency come with its core: unpause their DAGs then, as for [Meta](connect-meta.md#3-start-the-load).
 
 Each load reads, for each advertiser, the advertiser (`advertisers`), the full lists of its campaigns, ad groups and ads with every status, deleted ones included, and the campaigns made in the TikTok app too (`campaigns`, `adgroups`, `ads`), and, by day, the totals of the advertiser and the reports of its campaigns, ad groups and ads ([The data model](../reference/data-model.md#tiktok)). Every request is of version v1.3, and every report takes one advertiser, which keeps the decimals of money. The window of an advertiser runs from the day after the last that the core accepted for it, or from 28 days back when that is earlier, to yesterday in its time zone, as TikTok dates a conversion by the day of the click and attributes clicks for up to 28 days ([ADR-0053](../adr/0053-connect-tiktok-with-an-app-of-the-deployment.md)). Until the core has accepted a load of an advertiser, the window follows the journal `_agoranomos_loads`.
 
-To load a period of an advertiser again, trigger `agoranomos_tiktok_ads_daily` with its parameters: `window_from` and `window_to`, as dates such as `2026-01-01`, and `accounts`, the IDs of the advertisers, or none for every advertiser of `clients.toml`. Such a run is a load of the kind `history`. The planner that loads the history of each advertiser a quarter at a time in the background is planned for v0.7.
+### When the history arrives
+
+The history of each advertiser comes after its first load, in the background ([ADR-0038](../adr/0038-load-by-copy-and-write-the-core-by-whole-days.md), [ADR-0053](../adr/0053-connect-tiktok-with-an-app-of-the-deployment.md)): back to the first day of the month 36 months before yesterday ([ADR-0034](../adr/0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md)). TikTok bounds it no further, as its report data "is retained forever, and there is no query lookback range restriction" ([Reporting FAQs](https://business-api.tiktok.com/portal/docs/reporting-faqs/v1.3), as of November 2026). It goes as the history of Google Ads does, with the same planner ([When the history arrives](connect-google-ads.md#when-the-history-arrives)): after each run of the transform that succeeds, `agoranomos_tiktok_ads_history` starts one portion, a run of `agoranomos_tiktok_ads_daily` that takes the newest calendar quarter that some advertiser lacks, for every advertiser that lacks days of it, so the quarters come one at a time, from the newest to the oldest, twelve or thirteen of them, each a load and a run of the transform.
+
+Until the staging models of TikTok come, no run of the transform pins a load of TikTok, so the plan finds the first load still waiting for its pin and starts nothing: the log of the task `plan` says so. The history then begins with the first run of the transform that takes TikTok into the core.
+
+- **The cost.** A report by day takes at most 30 days, so a portion asks each level of a quarter in three or four ranges: for each advertiser, its details, its three lists and up to sixteen reports, four for each level, with one more call for each further page of 1,000 rows. A whole history of 36 months is fewer than 200 reports for each advertiser, far below the 864,000 calls a day of an endpoint, and the pace, the waits and the splits of the daily load hold for a portion too ([The limits of TikTok](#the-limits-of-tiktok)). A portion asks up to four times the reports of a daily load.
+- **With Google Ads and Meta.** Their histories plan apart, and a portion of each may run at the same time: their APIs and their quotas are apart, and the one transform takes the loads that have ended one run at a time.
+
+A portion waits while a run of `agoranomos_tiktok_ads_daily` is queued or running, the daily one too, and the daily load waits for a running portion. A failed portion waits for the next run of the transform that succeeds. An advertiser that a portion failed for, as one that the token no longer reaches, holds up no other advertiser, as in Google Ads: the portions go on without it, and its quarter comes again, in a portion of the advertisers that failed alone, once the other advertisers hold their history and a daily load has loaded it since. The card **History of each account** of the Ops collection shows the progress ([Watch the pipeline](watch-the-pipeline.md)), once the transform takes TikTok.
+
+To load a period of an advertiser again, trigger `agoranomos_tiktok_ads_daily` with its parameters: `window_from` and `window_to`, as dates such as `2026-01-01`, and `accounts`, the IDs of the advertisers, or none for every advertiser of `clients.toml`. Such a run is a load of the kind `history`, as the portions are.
 
 ## The limits of TikTok
 

@@ -1,5 +1,5 @@
-"""history: the planner of the history of the ad platforms, which the loads of Google Ads, of Meta
-and of GA4 share (ADR-0038, "The first load").
+"""history: the planner of the history of the ad platforms, which the loads of Google Ads, of Meta,
+of TikTok and of GA4 share (ADR-0038, "The first load").
 
 The first load of an account takes the usual window of its platform, so that a dashboard fills in
 minutes, and its history comes after it, in the background, in portions: the DAG of the history of
@@ -10,7 +10,8 @@ account of the source lacks days of, for every account of the source that lacks 
 (next_portion), so that each portion goes from raw to the core whole before the next one starts,
 from the new quarters to the old ones, back to a first day that the source gives: the first day of
 the month 36 months before yesterday (ADR-0034), and for Meta never before the 37 months past which
-the API refuses a start date (meta_ads.oldest).
+the API refuses a start date (meta_ads.oldest); TikTok keeps its reports with no such limit
+(tiktok_ads.history_limit).
 
 The plan of a source reads, as the role loader, the windows of the whole loads of each account in
 the journal _agoranomos_loads of its raw dataset and in core.loads, of the kinds window and
@@ -55,7 +56,7 @@ log = logging.getLogger(__name__)
 # The history of a real source takes the last 36 months (ADR-0034).
 HISTORY_MONTHS = 36
 # The code of a source goes into SQL as it is, as do the IDs of its accounts, which are digits on
-# every platform that plans a history: ten on Google Ads, more on Meta.
+# every platform that plans a history: ten on Google Ads, more on Meta and on TikTok.
 SOURCE = re.compile(r"[a-z][a-z0-9_]*")
 ACCOUNT_ID = re.compile(r"[0-9]{1,20}")
 
