@@ -22,9 +22,9 @@ anyio==4.15.1 \
     #   sse-starlette
     #   starlette
     #   watchfiles
-astro-airflow-mcp==0.9.1 \
-    --hash=sha256:3b6a3825e7826e9925ac7ac71726f0c5aa2c1d3a059d66d256fd8068c6ff9ad2 \
-    --hash=sha256:49f723d600dd06ef227798acee91d010aec267d51df57e73b60e729bf65f760f
+astro-airflow-mcp==0.9.2 \
+    --hash=sha256:24b82a5c4a186cd6d5a0d8a2e9ba2b0075947f88e08a1ab55a82bf5ee7b50566 \
+    --hash=sha256:56476c1d6d5e577fac865224728722f40bc012a4cd2d313bcaf0faa5643bb597
     # via -r requirements.in
 attrs==26.1.0 \
     --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309 \
