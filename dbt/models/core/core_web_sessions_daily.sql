@@ -9,7 +9,7 @@
     incremental_predicates=['DBT_INTERNAL_DEST.report_date >= ' ~ window_start()],
     pre_hook=[
         "{{ fact_thaw(ref('int_window_days')) }}",
-        "{{ fact_empty_days(fact_sessions_rows([ref('stg_demo_web__sessions_daily')], ref('int_window_days')), ref('int_window_days')) }}",
+        "{{ fact_empty_days(fact_sessions_rows([ref('stg_demo_web__sessions_daily'), ref('stg_ga4__sessions_daily')], ref('int_window_days')), ref('int_window_days')) }}",
     ],
 ) }}
-{{ fact_sessions_rows([ref('stg_demo_web__sessions_daily')], ref('int_window_days')) }}
+{{ fact_sessions_rows([ref('stg_demo_web__sessions_daily'), ref('stg_ga4__sessions_daily')], ref('int_window_days')) }}

@@ -18,6 +18,9 @@ with found as (
     union all
     select platform, conversion_action_id, conversion_action_name, platform_category
     from {{ ref('stg_meta_ads__campaign_conversions') }}
+    union all
+    select platform, conversion_action_id, conversion_action_name, platform_category
+    from {{ ref('stg_tiktok_ads__campaign_conversions') }}
 ),
 
 observed as (

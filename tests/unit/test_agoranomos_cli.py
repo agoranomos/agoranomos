@@ -4937,6 +4937,23 @@ def test_tiktok_takes_connect_alone(cli):
         assert "usage: ./agoranomos tiktok connect" in result.stderr
 
 
+# A stand-in of the key of a service account, made up here, in the form that .env takes it, as the
+# JSON in single quotes: a real one would be a secret.
+GA4_KEY = '{"type": "service_account", "private_key": "stand-in key of ga4"}'
+
+
+def test_preflight_takes_the_key_of_ga4_and_never_prints_it(cli):
+    # ADR-0054: the script checks neither key of a service account, of Google Ads or of GA4; the
+    # load checks the form of each. The template keeps it commented out, so a person adds it, and
+    # no output of the script shows it.
+    cli.run("init")
+    assert "# GA4_SERVICE_ACCOUNT_KEY=\n" in cli.env_path.read_text(encoding="utf-8")
+    add_env(cli, GA4_SERVICE_ACCOUNT_KEY=f"'{GA4_KEY}'")
+    result = cli.run("preflight")
+    assert result.returncode == 0, result.stderr
+    assert "stand-in key of ga4" not in result.stdout + result.stderr
+
+
 def test_preflight_stops_on_keep_daily_of_zeros(cli):
     ops_env(cli, BACKUP_KEEP_DAILY="00")
     result = cli.run("preflight")

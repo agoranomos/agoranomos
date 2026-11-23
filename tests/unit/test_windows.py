@@ -17,8 +17,8 @@ SEED = REPO / "dbt" / "seeds" / "seed_ad_platforms.csv"
 PIPELINES = REPO / "airflow" / "dags" / "agoranomos_pipelines"
 MIGRATIONS = REPO / "postgres" / "migrations"
 # The windows of today: those of ADR-0038 ("The window") for Google Ads and Meta, that of ADR-0053
-# for TikTok, the 14 days of the rates of the three banks (ADR-0042), and those of the demo, which
-# keeps its own as it mimics.
+# for TikTok, the 14 days of the rates of the three banks (ADR-0042), the 14 days of GA4
+# (ADR-0054), and those of the demo, which keeps its own as it mimics.
 WINDOWS = {
     "bank_of_italy": 14,
     "demo_fx": 7,
@@ -27,6 +27,7 @@ WINDOWS = {
     "demo_video": 28,
     "demo_web": 14,
     "ecb": 14,
+    "ga4": 14,
     "google_ads": 90,
     "meta_ads": 28,
     "nbk": 14,
@@ -36,6 +37,7 @@ WINDOWS = {
 CONNECTORS = {
     "google_ads": "google_ads",
     "meta_ads": "meta_ads",
+    "ga4": "ga4",
     "bank_of_italy": "bank_of_italy",
     "ecb": "ecb",
     "nbk": "nbk",

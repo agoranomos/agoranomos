@@ -1,0 +1,88 @@
+sources:
+  - name: raw_tiktok_ads
+    description: >-
+      The TikTok advertisers of the deployment that extensions/model/clients.toml names, which the
+      DAG agoranomos_tiktok_ads_daily loads with dlt from the TikTok API for Business v1.3
+      (ADR-0053), each answer as the API gives it, in the shape of demo_video: nested objects joined
+      by __, and every field as text, as the API writes IDs, numbers and money as strings. The DAG
+      starts paused, so a deployment without TikTok has no table here, and the models that read
+      these tables then read none.
+    schema: raw_tiktok_ads
+    # No freshness check of dbt: the Ops collection shows the last load of each account, from
+    # _agoranomos_loads (models/ops/ops_loads.sql).
+    config:
+      freshness: null
+    tables:
+      - name: _agoranomos_loads
+        description: >-
+          The journal of the loads of TikTok: one row for each advertiser in each load, written in
+          the same run as the rows of the load, so under its _dlt_load_id. An advertiser that the
+          load took has the status loaded, the day of the load in the time zone of the advertiser
+          (as_of), the first and last day of the window that the load took (window_from,
+          window_to), the moment of the load (loaded_at) and the kind of the load, window or
+          history. An advertiser whose requests to the API failed has the status failed, the text
+          of the error, the moment of the attempt (now), and no day and no loaded_at, as nothing
+          was loaded. The staging models read, for each advertiser and day, the rows of the newest
+          pinned load whose window covers the day.
+      - name: _dlt_loads
+        description: >-
+          The loads of dlt into raw_tiktok_ads, one row each: a load is whole once it has its row
+          here, with status 0, which dlt writes after the last table of the load. The pin of each
+          run of the transform takes whole loads only.
+      - name: advertisers
+        description: >-
+          Each advertiser, the ad account of TikTok, as /advertiser/info/ gives it: its ID, name,
+          currency, time zone (timezone, and the region display_timezone) and status. Each load
+          appends the row of each advertiser that it read under its own _dlt_load_id, and staging
+          reads the row of the newest pinned load of each advertiser, so an advertiser whose load
+          failed keeps the row of the load before.
+      - name: campaigns
+        description: >-
+          The campaigns of each advertiser, with operation_status and secondary_status, from
+          /campaign/get/ filtered on the primary_status STATUS_ALL and on both origins of a
+          campaign, so that the deleted ones and those made in the TikTok app come too. Each load
+          appends the full list of each advertiser under its own _dlt_load_id, and staging reads
+          the list of the newest pinned load of each advertiser.
+      - name: adgroups
+        description: >-
+          The ad groups of each advertiser, with operation_status, secondary_status and
+          optimization goal, from /adgroup/get/ filtered on the primary_status STATUS_ALL. Each
+          load appends the full list of each advertiser under its own _dlt_load_id, and staging
+          reads the list of the newest pinned load of each advertiser.
+      - name: ads
+        description: >-
+          The ads of each advertiser, with operation_status, secondary_status and format, from
+          /ad/get/ filtered on the primary_status STATUS_ALL. Each load appends the full list of
+          each advertiser under its own _dlt_load_id, and staging reads the list of the newest
+          pinned load of each advertiser.
+      - name: report_advertiser_daily
+        description: >-
+          The totals of each advertiser by day, from the integrated report BASIC at the level
+          AUCTION_ADVERTISER, which returns the data of all the ads of the advertiser: currency,
+          spend, impressions and clicks (destination), as strings. The transform checks the
+          statistics of the campaigns against them (G0a). Each load appends its rows under its own
+          _dlt_load_id, and staging reads, for each advertiser and day, those of the newest pinned
+          load whose window covers the day.
+      - name: report_campaign_daily
+        description: >-
+          The integrated report BASIC of each advertiser at the level AUCTION_CAMPAIGN, one row for
+          each campaign and day with any metric, in the currency and the time zone of the
+          advertiser, filtered on the campaign_status STATUS_ALL, - for a metric that means nothing
+          on the day. Each load appends its rows under its own _dlt_load_id, and staging reads, for
+          each advertiser and day, those of the newest pinned load whose window covers the day.
+      - name: report_adgroup_daily
+        description: >-
+          The integrated report BASIC of each advertiser at the level AUCTION_ADGROUP, one row for
+          each ad group and day with any metric, with the campaign of the ad group among its
+          metrics, in the currency and the time zone of the advertiser, filtered on the
+          adgroup_status STATUS_ALL, - for a metric that means nothing on the day. Each load
+          appends its rows under its own _dlt_load_id, and staging reads, for each advertiser and
+          day, those of the newest pinned load whose window covers the day.
+      - name: report_ad_daily
+        description: >-
+          The integrated report BASIC of each advertiser at the level AUCTION_AD, one row for each
+          ad and day with any metric, with the campaign and the ad group of the ad among its
+          metrics, in the currency and the time zone of the advertiser, filtered on the ad_status
+          STATUS_ALL, - for a metric that means nothing on the day. Each load appends its rows under
+          its own _dlt_load_id, and staging reads, for each advertiser and day, those of the newest
+          pinned load whose window covers the day.

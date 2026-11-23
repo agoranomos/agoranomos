@@ -40,9 +40,12 @@ GROUPS: tuple[tuple[str, ...], ...] = (
         "test_ai_servers.py",
         "test_backup_before_a_migration.py",
     ),
-    # 2: the partial day, the retention and the backups.
+    # 2: the partial day, GA4, the retention and the backups.
     (
         "test_partial_day.py",  # 39, and 29 to 37
+        # Two loads and two runs of the transform, as test_demo_intraday.py: about 14 minutes by
+        # that file, not measured yet (C6c of #226, 23 November 2026).
+        "test_ga4.py",
         "test_backup.py",
         "test_backup_roundtrip.py",
         "test_celery.py",
@@ -64,9 +67,12 @@ GROUPS: tuple[tuple[str, ...], ...] = (
         "test_metabase_metadata.py",
         "test_ops.py",
     ),
-    # 4: the transform, the alerts and the image.
+    # 4: the transform, TikTok, the alerts and the image.
     (
         "test_demo_transform.py",  # 39, and 39 to 41
+        # A load and a run of the transform, as test_meta_ads.py: about 8 minutes by that file,
+        # not measured yet (C5d of #225, 23 November 2026).
+        "test_tiktok_ads.py",
         "test_airflow_image.py",
         "test_alerts.py",
         "test_helpers.py",

@@ -5,9 +5,10 @@ models:
       writes (_agoranomos_loads): the last day that a whole load, of the kind window or history,
       took, when it was loaded, and how many hours ago, as of the moment that the view is read, and
       beside them the last load of the kind intraday, of the current day of the account, which the
-      short cycle of Google Ads takes every few hours (ADR-0051). The accounts of demo_web are its
-      properties, and demo_fx, ecb and bank_of_italy have one account each, EUR, the base of
-      their rates; ecb, bank_of_italy, google_ads and meta_ads have none until their first load.
+      short cycle of Google Ads takes every few hours (ADR-0051). The accounts of demo_web and ga4
+      are their properties, and demo_fx, ecb and bank_of_italy have one account each, EUR, the base
+      of their rates; ecb, bank_of_italy, google_ads, meta_ads, tiktok_ads and ga4 have none until
+      their first load.
       The Ops collection of Metabase shows it (ADR-0029).
     columns:
       - name: platform

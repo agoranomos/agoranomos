@@ -24,6 +24,9 @@ with listed as (
     select platform, account_id, account_name, currency, time_zone, manager_account_id, account_status
     from {{ ref('stg_meta_ads__accounts') }}
     union all
+    select platform, account_id, account_name, currency, time_zone, manager_account_id, account_status
+    from {{ ref('stg_tiktok_ads__accounts') }}
+    union all
     select
         platform,
         property_id,
@@ -33,6 +36,16 @@ with listed as (
         cast(null as text),
         cast(null as text)
     from {{ ref('stg_demo_web__properties') }}
+    union all
+    select
+        platform,
+        property_id,
+        property_name,
+        currency,
+        time_zone,
+        cast(null as text),
+        cast(null as text)
+    from {{ ref('stg_ga4__properties') }}
 ),
 
 stats as (
@@ -45,6 +58,8 @@ stats as (
     select platform, account_id, report_date from {{ ref('stg_google_ads__campaign_stats') }}
     union all
     select platform, account_id, report_date from {{ ref('stg_meta_ads__campaign_stats') }}
+    union all
+    select platform, account_id, report_date from {{ ref('stg_tiktok_ads__campaign_stats') }}
 ),
 
 reported as (
@@ -63,6 +78,8 @@ named as (
     select platform, account_id from reported
     union
     select distinct platform, property_id from {{ ref('stg_demo_web__sessions_daily') }}
+    union
+    select distinct platform, property_id from {{ ref('stg_ga4__sessions_daily') }}
 )
 
 select

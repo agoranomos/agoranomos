@@ -150,8 +150,10 @@ select pg_advisory_unlock_shared({{ marts_init_lock() }})
     'raw_demo_video': ads,
     'raw_demo_web': ['web_sessions_daily'],
     'raw_ecb': [],
+    'raw_ga4': ['web_sessions_daily'],
     'raw_google_ads': ads,
     'raw_meta_ads': ads,
     'raw_nbk': [],
+    'raw_tiktok_ads': ads,
 }) -}}
 {%- endmacro %}

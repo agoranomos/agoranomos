@@ -1,11 +1,11 @@
-"""Tests of the planner of the history that Google Ads, Meta and TikTok share
+"""Tests of the planner of the history that Google Ads, Meta, TikTok and GA4 share
 (airflow/dags/agoranomos_pipelines/history.py; ADR-0038, "The first load").
 
 dlt is in the Airflow image and not in the development environment, so the module is imported with
 a stand-in of dlt that loads nothing, and a stand-in pipeline that answers the queries of the plan
 from what a test says the dataset holds. The plan of each source, with its accounts and its first
-day, is tested with its own load, in test_google_ads_source.py, test_meta_ads_source.py and
-test_tiktok_ads_source.py."""
+day, is tested with its own load, in test_google_ads_source.py, test_meta_ads_source.py,
+test_tiktok_ads_source.py and test_ga4_source.py."""
 
 import importlib
 import logging
@@ -19,7 +19,9 @@ GOOGLE = ("google_ads", "raw_google_ads", ["1111111111", "2222222222"])
 META = ("meta_ads", "raw_meta_ads", ["1111111111111111", "2222222222222222"])
 # The advertiser IDs of TikTok, of 19 digits, as its guide shows one.
 TIKTOK = ("tiktok_ads", "raw_tiktok_ads", ["7000000000000000001", "7000000000000000002"])
-SOURCES = [GOOGLE, META, TIKTOK]
+# GA4 (ADR-0054), whose accounts are the digits of its properties.
+GA4 = ("ga4", "raw_ga4", ["123456789", "987654321"])
+SOURCES = [GOOGLE, META, TIKTOK, GA4]
 LIMIT = date(2023, 10, 1)
 
 
@@ -117,10 +119,12 @@ def test_a_quarter_runs_from_its_first_to_its_last_day(history):
 @pytest.mark.parametrize(
     ("usual", "count"),
     [
-        # The usual window of Google Ads, 90 days, and of Meta, 28 days, both ending on 28 October
-        # 2026 in one account and on the 27th in the other, in another time zone.
+        # The usual window of Google Ads, 90 days, of Meta, 28 days, and of GA4, 14 days, ending on
+        # 28 October 2026 in one account and on the 27th in the other, in another time zone: GA4
+        # lacks the first days of October too.
         (90, 12),
         (28, 12),
+        (14, 13),
     ],
 )
 def test_the_history_goes_by_quarters_from_the_newest_back_to_the_limit(history, usual, count):

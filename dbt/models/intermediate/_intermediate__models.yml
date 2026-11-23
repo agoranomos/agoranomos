@@ -306,7 +306,7 @@ models:
               config: {tags: [critical]}
           - accepted_values:
               arguments:
-                values: ["load_failed", "unknown_account", "duplicate_key", "missing_key", "unknown_currency", "unknown_time_zone", "missing_rate", "too_many_decimals", "missing_measure", "negative_measure", "date_outside_window", "totals_differ", "empty_window", "spend_fall", "source_stopped"]
+                values: ["load_failed", "unknown_account", "duplicate_key", "missing_key", "invalid_id", "unknown_currency", "unknown_time_zone", "missing_rate", "too_many_decimals", "missing_measure", "negative_measure", "date_outside_window", "totals_differ", "empty_window", "spend_fall", "source_stopped"]
               config: {tags: [critical]}
       - name: checked
         description: '{{ doc("checked") }}'

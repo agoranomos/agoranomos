@@ -22,7 +22,7 @@ lists of its campaigns, ad groups and ads (campaigns, adgroups, ads, from /campa
 "All statuses (including "Deleted")", and on both campaign_system_origins, so that the campaigns
 made in the TikTok app come too, with operation_status and secondary_status; then the synchronous
 report BASIC by stat_time_day (/report/integrated/get/) at the level AUCTION_ADVERTISER, the
-totals of the advertiser by day, against which the transform is to check the sum of its campaigns
+totals of the advertiser by day, against which the transform checks the sum of its campaigns
 (G0a of ADR-0035), right before the levels AUCTION_CAMPAIGN, AUCTION_ADGROUP and AUCTION_AD
 (report_advertiser_daily, report_campaign_daily, report_adgroup_daily, report_ad_daily), each level
 below the advertiser filtered on the status of its level at STATUS_ALL, as each defaults to
@@ -54,10 +54,9 @@ of the transform that succeeded, by quarters from the newest, back to the first 
 months before yesterday (plan, history_limit, and agoranomos_pipelines/history.py, which the loads
 of Google Ads and of Meta share). TikTok keeps report data "forever", so no window has an oldest
 day. Each load appends the lists and the facts of each advertiser under its own _dlt_load_id and
-records the window of each advertiser in _agoranomos_loads in the same run. No staging model reads
-raw_tiktok_ads yet, so no run of the transform pins its loads, the cleanup removes only those that
-did not end (acceptance.py), and the plan of the history, which waits for the pin of each whole
-load, starts no portion after the first load.
+records the window of each advertiser in _agoranomos_loads in the same run. The transform after it
+pins the loads that have ended and takes them through dbt/models/staging/tiktok_ads/ into the core
+and the marts, and the plan of the history waits for the pin of each whole load.
 
 The last day that the core accepted for an advertiser is the end of its newest accepted load in
 core.loads, which loader may read; while the core has accepted none, it is the end of its newest
@@ -256,7 +255,7 @@ LEVELS = {
     ),
 }
 # The lists and the facts of each advertiser, in the order of their requests: the totals of the
-# advertiser right before the report of its campaigns, which G0a is to check against them.
+# advertiser right before the report of its campaigns, which G0a checks against them.
 ENTITIES = tuple(EDGES)
 FACTS = tuple(LEVELS)
 
@@ -803,7 +802,7 @@ def read_advertiser(
     """Read an advertiser whole: the advertiser, whose time zone gives its window, then its lists
     and the reports of its window, each table into a file in the folder of the advertiser under
     staging. With days, a portion of the history, the window is those days, up to yesterday of the
-    advertiser; the lists come too, as staging is to read the lists of the newest load of an
+    advertiser; the lists come too, as staging reads the lists of the newest load of an
     advertiser. An error raises TikTokAdsError and leaves nothing of the advertiser: a window
     replaces whole days, and a part of one would lose the rest (ADR-0035)."""
     subject = f"TikTok advertiser {advertiser_id}"

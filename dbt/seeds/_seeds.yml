@@ -43,6 +43,9 @@ seeds:
       read on 15 November 2026: the purchases and the leads of the pixel are primary, and the
       types that the reference lists as grouped, such as omni_purchase and lead ("All offsite
       leads plus all On-Facebook leads"), are not, as they count the actions of the pixel again.
+      The actions of TikTok are its two metrics that the report of each level gives, as for
+      demo_video (ADR-0053): the complete payments, complete_payment, primary, and the event that
+      a campaign optimizes for, conversion, not primary.
     config:
       # Text, as the IDs of some platforms are numbers and those of others are not.
       column_types: {conversion_action_id: text, is_primary: boolean}

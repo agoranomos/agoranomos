@@ -1,0 +1,58 @@
+models:
+  - name: stg_ga4__properties
+    description: >-
+      The GA4 properties of the deployment, one row each, from the newest load of the property that
+      a run pinned, with the time zone of their days and the currency of their revenue, as
+      properties.get of the Admin API gives them. It is empty until the first load. platform and
+      property_id are its key. int_g1_failures checks each account for its key, its currency and
+      its time zone, and holds one that fails out of the core and the marts (ADR-0035). Its tests
+      guard the marts: when one of them fails, dbt does not rebuild the models that read this one.
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: property_id
+        description: '{{ doc("property_id") }}'
+        data_tests: [not_null]
+      - name: property_name
+        description: '{{ doc("property_name") }}'
+      - name: time_zone
+        description: '{{ doc("time_zone") }}'
+      - name: currency
+        description: '{{ doc("currency") }}'
+  - name: stg_ga4__sessions_daily
+    description: >-
+      The sessions of the GA4 properties, one row for each property, day in the time zone of the
+      property, source, medium and campaign of the sessions, with the default channel group that
+      GA4 gives them, from the runReport of the Data API v1beta (ADR-0054). It is empty until the
+      first load. report_date, property_id, session_source, session_medium, session_campaign_name
+      and session_campaign_id are its key. int_g1_failures checks its rows for each account, and
+      holds an account whose rows fail out of the core and the marts (ADR-0035). Its tests guard
+      the marts: when one of them fails, dbt does not rebuild the models that read this one.
+    columns:
+      - name: report_date
+        description: '{{ doc("report_date") }}'
+        data_tests: [not_null]
+      - name: platform
+        description: '{{ doc("platform") }}'
+      - name: property_id
+        description: '{{ doc("property_id") }}'
+        data_tests: [not_null]
+      - name: session_source
+        description: '{{ doc("session_source") }}'
+      - name: session_medium
+        description: '{{ doc("session_medium") }}'
+      - name: session_campaign_name
+        description: '{{ doc("session_campaign_name") }}'
+      - name: session_campaign_id
+        description: '{{ doc("session_campaign_id") }}'
+      - name: session_default_channel_group
+        description: '{{ doc("session_default_channel_group") }}'
+      - name: sessions
+        description: '{{ doc("sessions") }}'
+      - name: engaged_sessions
+        description: '{{ doc("engaged_sessions") }}'
+      - name: key_events
+        description: '{{ doc("key_events") }}'
+      - name: total_revenue
+        description: '{{ doc("total_revenue") }}'

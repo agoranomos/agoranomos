@@ -5,7 +5,9 @@ on a day without one. A removed campaign is left out of the list of campaigns an
 as the default filter STATUS_NOT_DELETE does (ADR-0025). The reports at the levels AUCTION_ADGROUP
 and AUCTION_AD, by adgroup_id or ad_id and stat_time_day, have the same metrics, with the IDs of
 the levels above as metrics, and the ad groups and the ads are listed like the campaigns
-(ADR-0034)."""
+(ADR-0034). Each list gives the operation_status and the secondary_status of each entity, as the
+lists of TikTok do: an ad group or an ad keeps the operation_status ENABLE under a paused campaign,
+and its secondary_status says that its campaign is disabled (ADR-0053)."""
 
 from __future__ import annotations
 
@@ -49,6 +51,9 @@ def campaigns(day: date) -> Iterator[dict[str, object]]:
             "campaign_name": campaign.name_at(day),
             "objective_type": campaign.kind,
             "operation_status": "ENABLE" if campaign.active(day) else "DISABLE",
+            "secondary_status": (
+                "CAMPAIGN_STATUS_ENABLE" if campaign.active(day) else "CAMPAIGN_STATUS_DISABLE"
+            ),
         }
 
 
@@ -61,6 +66,11 @@ def adgroups(day: date) -> Iterator[dict[str, object]]:
             "adgroup_name": group.name,
             "optimization_goal": group.kind,
             "operation_status": "ENABLE",
+            "secondary_status": (
+                "ADGROUP_STATUS_DELIVERY_OK"
+                if campaign.active(day)
+                else "ADGROUP_STATUS_CAMPAIGN_DISABLE"
+            ),
         }
 
 
@@ -75,6 +85,11 @@ def ads(day: date) -> Iterator[dict[str, object]]:
                 "ad_name": ad.name,
                 "ad_format": ad.kind,
                 "operation_status": "ENABLE",
+                "secondary_status": (
+                    "AD_STATUS_DELIVERY_OK"
+                    if campaign.active(day)
+                    else "AD_STATUS_CAMPAIGN_DISABLE"
+                ),
             }
 
 

@@ -1,0 +1,421 @@
+models:
+  - name: stg_tiktok_ads__campaign_stats
+    description: >-
+      The statistics of the campaigns of TikTok, the deleted ones too, one row for each campaign and
+      day, from its integrated report at the level AUCTION_CAMPAIGN, with the column names of the
+      model; clicks are its clicks (destination). It is empty until the first load. report_date,
+      platform, account_id and campaign_id are its key. int_g1_failures checks its rows for each
+      advertiser, and holds an advertiser whose rows fail out of the core and the marts (ADR-0035).
+      Its tests guard the marts: when one of them fails, dbt does not rebuild the models that read
+      this one.
+    columns:
+      - name: report_date
+        description: '{{ doc("report_date") }}'
+        data_tests: [not_null]
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+      - name: loaded_campaign_name
+        description: '{{ doc("loaded_campaign_name") }}'
+      - name: impressions
+        description: '{{ doc("impressions") }}'
+      - name: clicks
+        description: '{{ doc("clicks") }}'
+      - name: spend
+        description: '{{ doc("spend") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
+  - name: stg_tiktok_ads__campaign_conversions
+    description: >-
+      The conversions of the campaigns of TikTok by action, one row for each campaign, day and
+      action with a count or a value, from its integrated report at the level AUCTION_CAMPAIGN:
+      complete_payment, the complete payments with the value of the purchases, and conversion, the
+      event that the campaign optimizes for, which has no value. report_date, platform, account_id,
+      campaign_id and conversion_action_id are its key. int_g1_failures checks its rows for each
+      advertiser, and holds an advertiser whose rows fail out of the core and the marts (ADR-0035).
+      Its tests guard the marts: when one of them fails, dbt does not rebuild the models that read
+      this one.
+    columns:
+      - name: report_date
+        description: '{{ doc("report_date") }}'
+        data_tests: [not_null]
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+      - name: conversion_action_id
+        description: '{{ doc("conversion_action_id") }}'
+      - name: conversion_action_name
+        description: '{{ doc("conversion_action_name") }}'
+      - name: platform_category
+        description: '{{ doc("platform_category") }}'
+      - name: attribution_setting
+        description: '{{ doc("attribution_setting") }}'
+      - name: conversions
+        description: '{{ doc("conversions") }}'
+      - name: conversion_value
+        description: '{{ doc("conversion_value") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
+  - name: stg_tiktok_ads__accounts
+    description: >-
+      The TikTok advertisers that extensions/model/clients.toml names, its ad accounts, one row
+      each, from the newest load of the advertiser that a run pinned. It is empty until the first
+      load. platform and account_id are its key. int_g1_failures checks each advertiser for its key,
+      its currency and its time zone, and holds one that fails out of the core and the marts
+      (ADR-0035). Its tests guard the marts: when one of them fails, dbt does not rebuild the models
+      that read this one.
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: account_name
+        description: '{{ doc("account_name") }}'
+      - name: currency
+        description: '{{ doc("currency") }}'
+      - name: time_zone
+        description: '{{ doc("time_zone") }}'
+      - name: manager_account_id
+        description: '{{ doc("manager_account_id") }}'
+      - name: account_status
+        description: '{{ doc("account_status") }}'
+  - name: stg_tiktok_ads__campaigns
+    description: >-
+      The campaigns of TikTok, the deleted ones too as far as the API returns them, one row for each
+      campaign that the newest list of its advertiser names, from the newest load of the advertiser
+      that a run pinned, whose ID is load_id: an advertiser that failed in a load keeps the list of
+      the load before, and a campaign that the newest list no longer names is not here, so that its
+      dimension in the core says that the platform no longer lists it; one that only the statistics
+      name is a stub there (ADR-0036). Its state reads secondary_status for a deletion and
+      operation_status otherwise (ADR-0053). A campaign whose ID does not fit bigint is not here,
+      and G1 holds its advertiser in quarantine with invalid_id. platform, account_id and
+      campaign_id are its key. Its tests guard the marts: when one of them fails, dbt does not
+      rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id, campaign_id]
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+        data_tests: [not_null]
+      - name: observed_name
+        description: '{{ doc("observed_name") }}'
+        data_tests: [not_null]
+      - name: campaign_status
+        description: '{{ doc("campaign_status") }}'
+      - name: campaign_state
+        description: '{{ doc("campaign_state") }}'
+      - name: campaign_type
+        description: '{{ doc("campaign_type") }}'
+      - name: load_id
+        description: '{{ doc("load_id") }}'
+        data_tests: [not_null]
+  - name: stg_tiktok_ads__ad_group_stats
+    description: >-
+      The statistics of the ad groups of TikTok, one row for each ad group and day, from its
+      integrated report at the level AUCTION_ADGROUP, with the column names of the model; clicks are
+      its clicks (destination). report_date, platform, account_id and ad_group_id are its key.
+      int_g1_failures checks its rows for each advertiser, and holds an advertiser whose rows fail
+      out of the core and the marts (ADR-0035). Its tests guard the marts: when one of them fails,
+      dbt does not rebuild the models that read this one.
+    columns:
+      - name: report_date
+        description: '{{ doc("report_date") }}'
+        data_tests: [not_null]
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+      - name: ad_group_id
+        description: '{{ doc("ad_group_id") }}'
+      - name: loaded_ad_group_name
+        description: '{{ doc("loaded_ad_group_name") }}'
+      - name: impressions
+        description: '{{ doc("impressions") }}'
+      - name: clicks
+        description: '{{ doc("clicks") }}'
+      - name: spend
+        description: '{{ doc("spend") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
+  - name: stg_tiktok_ads__ad_group_conversions
+    description: >-
+      The conversions of the ad groups of TikTok by conversion action, one row for each ad group,
+      day and action with any conversion, from its integrated report at the level AUCTION_ADGROUP:
+      complete_payment, the complete payments with the value of the purchases, and conversion, the
+      event that the ad group optimizes for, which has no value. report_date, platform, account_id,
+      ad_group_id and conversion_action_id are its key. int_g1_failures checks its rows for each
+      advertiser, and holds an advertiser whose rows fail out of the core and the marts (ADR-0035).
+      Its tests guard the marts: when one of them fails, dbt does not rebuild the models that read
+      this one.
+    columns:
+      - name: report_date
+        description: '{{ doc("report_date") }}'
+        data_tests: [not_null]
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+      - name: ad_group_id
+        description: '{{ doc("ad_group_id") }}'
+      - name: conversion_action_id
+        description: '{{ doc("conversion_action_id") }}'
+      - name: conversion_action_name
+        description: '{{ doc("conversion_action_name") }}'
+      - name: platform_category
+        description: '{{ doc("platform_category") }}'
+      - name: attribution_setting
+        description: '{{ doc("attribution_setting") }}'
+      - name: conversions
+        description: '{{ doc("conversions") }}'
+      - name: conversion_value
+        description: '{{ doc("conversion_value") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
+  - name: stg_tiktok_ads__ad_stats
+    description: >-
+      The statistics of the ads of TikTok, one row for each ad and day, from its integrated report
+      at the level AUCTION_AD, with the column names of the model; clicks are its clicks
+      (destination). report_date, platform, account_id, ad_group_id and ad_id are its key.
+      int_g1_failures checks its rows for each advertiser, and holds an advertiser whose rows fail
+      out of the core and the marts (ADR-0035). Its tests guard the marts: when one of them fails,
+      dbt does not rebuild the models that read this one.
+    columns:
+      - name: report_date
+        description: '{{ doc("report_date") }}'
+        data_tests: [not_null]
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+      - name: ad_group_id
+        description: '{{ doc("ad_group_id") }}'
+      - name: ad_id
+        description: '{{ doc("ad_id") }}'
+      - name: loaded_ad_name
+        description: '{{ doc("loaded_ad_name") }}'
+      - name: impressions
+        description: '{{ doc("impressions") }}'
+      - name: clicks
+        description: '{{ doc("clicks") }}'
+      - name: spend
+        description: '{{ doc("spend") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
+  - name: stg_tiktok_ads__ad_conversions
+    description: >-
+      The conversions of the ads of TikTok by conversion action, one row for each ad, day and action
+      with any conversion, from its integrated report at the level AUCTION_AD: complete_payment, the
+      complete payments with the value of the purchases, and conversion, the event that the ad group
+      optimizes for, which has no value. report_date, platform, account_id, ad_group_id, ad_id and
+      conversion_action_id are its key. int_g1_failures checks its rows for each advertiser, and
+      holds an advertiser whose rows fail out of the core and the marts (ADR-0035). Its tests guard
+      the marts: when one of them fails, dbt does not rebuild the models that read this one.
+    columns:
+      - name: report_date
+        description: '{{ doc("report_date") }}'
+        data_tests: [not_null]
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+      - name: ad_group_id
+        description: '{{ doc("ad_group_id") }}'
+      - name: ad_id
+        description: '{{ doc("ad_id") }}'
+      - name: conversion_action_id
+        description: '{{ doc("conversion_action_id") }}'
+      - name: conversion_action_name
+        description: '{{ doc("conversion_action_name") }}'
+      - name: platform_category
+        description: '{{ doc("platform_category") }}'
+      - name: attribution_setting
+        description: '{{ doc("attribution_setting") }}'
+      - name: conversions
+        description: '{{ doc("conversions") }}'
+      - name: conversion_value
+        description: '{{ doc("conversion_value") }}'
+      - name: platform_conversions
+        description: '{{ doc("platform_conversions") }}'
+      - name: platform_conversion_value
+        description: '{{ doc("platform_conversion_value") }}'
+      - name: all_conversions
+        description: '{{ doc("all_conversions") }}'
+      - name: all_conversion_value
+        description: '{{ doc("all_conversion_value") }}'
+  - name: stg_tiktok_ads__ad_groups
+    description: >-
+      The ad groups of TikTok, one row for each ad group that the newest list of its advertiser
+      names, from the newest load of the advertiser that a run pinned, whose ID is load_id: an
+      advertiser that failed in a load keeps the list of the load before, and an ad group that the
+      newest list no longer names is not here, so that its dimension in the core says that the
+      platform no longer lists it; one that only the statistics name is a stub there (ADR-0036). An
+      ad group of a deleted campaign is removed. An ad group with an ID that does not fit bigint is
+      not here, and G1 holds its advertiser in quarantine with invalid_id. platform, account_id and
+      ad_group_id are its key. Its tests guard the marts: when one of them fails, dbt does not
+      rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id, ad_group_id]
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+        data_tests: [not_null]
+      - name: ad_group_id
+        description: '{{ doc("ad_group_id") }}'
+        data_tests: [not_null]
+      - name: observed_name
+        description: '{{ doc("observed_name") }}'
+        data_tests: [not_null]
+      - name: ad_group_status
+        description: '{{ doc("ad_group_status") }}'
+      - name: ad_group_state
+        description: '{{ doc("ad_group_state") }}'
+      - name: ad_group_type
+        description: '{{ doc("ad_group_type") }}'
+      - name: load_id
+        description: '{{ doc("load_id") }}'
+        data_tests: [not_null]
+  - name: stg_tiktok_ads__ads
+    description: >-
+      The ads of TikTok, one row for each ad that the newest list of its advertiser names, from the
+      newest load of the advertiser that a run pinned, whose ID is load_id: an advertiser that
+      failed in a load keeps the list of the load before, and an ad that the newest list no longer
+      names is not here, so that its dimension in the core says that the platform no longer lists
+      it; one that only the statistics name is a stub there (ADR-0036). An ad of a deleted campaign
+      or ad group is removed. An ad with an ID that does not fit bigint is not here, and G1 holds
+      its advertiser in quarantine with invalid_id. platform, account_id, ad_group_id and ad_id
+      are its key. Its tests guard the marts: when one of them fails, dbt does not rebuild the
+      models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [platform, account_id, ad_group_id, ad_id]
+    columns:
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: campaign_id
+        description: '{{ doc("campaign_id") }}'
+        data_tests: [not_null]
+      - name: ad_group_id
+        description: '{{ doc("ad_group_id") }}'
+        data_tests: [not_null]
+      - name: ad_id
+        description: '{{ doc("ad_id") }}'
+        data_tests: [not_null]
+      - name: observed_name
+        description: '{{ doc("observed_name") }}'
+      - name: ad_status
+        description: '{{ doc("ad_status") }}'
+      - name: ad_state
+        description: '{{ doc("ad_state") }}'
+      - name: ad_type
+        description: '{{ doc("ad_type") }}'
+      - name: load_id
+        description: '{{ doc("load_id") }}'
+        data_tests: [not_null]
+  - name: stg_tiktok_ads__account_totals
+    description: >-
+      The totals of the TikTok advertisers of the deployment by day, one row for each advertiser and
+      day with a metric, from the integrated report at the level AUCTION_ADVERTISER, which returns
+      the data of all the ads of the advertiser: the side of the platform of G0a (ADR-0035,
+      ADR-0053), with the load of each row; clicks are the clicks (destination). It is empty until
+      the first load. report_date, platform and account_id are its key. int_g1_failures compares the
+      statistics of the campaigns of each advertiser and day with them, and holds an advertiser
+      whose campaigns do not add up to them, within the share of platform_totals_tolerance, out of
+      the core and the marts, and core.platform_totals_daily keeps them. Its tests guard the marts:
+      when one of them fails, dbt does not rebuild the models that read this one.
+    columns:
+      - name: report_date
+        description: '{{ doc("report_date") }}'
+        data_tests: [not_null]
+      - name: platform
+        description: '{{ doc("platform") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: total_impressions
+        description: '{{ doc("total_impressions") }}'
+      - name: total_clicks
+        description: '{{ doc("total_clicks") }}'
+      - name: total_spend
+        description: '{{ doc("total_spend") }}'
+      - name: load_id
+        description: '{{ doc("load_id") }}'

@@ -26,3 +26,5 @@ meta_ads,offsite_conversion.fb_pixel_complete_registration,Registrations (pixel)
 meta_ads,omni_complete_registration,Registrations (all surfaces),sign_up,false
 meta_ads,mobile_app_install,Mobile app installs,app_install,false
 meta_ads,omni_app_install,App installs (all surfaces),app_install,false
+tiktok_ads,complete_payment,Complete payments,purchase,true
+tiktok_ads,conversion,Conversions (the optimization event),other,false

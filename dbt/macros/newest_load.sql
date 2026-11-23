@@ -140,7 +140,7 @@ where d.status = 'pinned'
 
 {#- The journal of a source, or, while no load has written it, an empty query with its columns
     (relation_or_empty): a deployment without the demo never loads the sources of the demo, and a
-    deployment may never load the rates of the ECB, Google Ads or Meta. -#}
+    deployment may never load the rates of the ECB, Google Ads, Meta, TikTok or GA4. -#}
 {% macro newest_load_table(source_name, table_name) -%}
     {{- relation_or_empty(source(source_name, table_name), newest_load_columns()[table_name]) -}}
 {%- endmacro %}
@@ -166,8 +166,9 @@ where d.status = 'pinned'
     rates, and their rows none (none): the day alone finds the load. The demo platforms take these
     from airflow/dags/agoranomos_pipelines/demo/platforms.py, and tests/unit/test_dbt_project.py
     checks that the two agree; Google Ads has the shape of demo_search, and Meta that of
-    demo_social, whose date_start the load of Meta also writes as a date. The rates of the NBK
-    have their day as its feed writes it, DD.MM.YYYY. -#}
+    demo_social, whose date_start the load of Meta also writes as a date, TikTok that of
+    demo_video, and GA4 that of demo_web. The rates of the NBK have their day as its feed writes
+    it, DD.MM.YYYY. -#}
 {% macro newest_load_sources() -%}
 {{- return({
     'raw_bank_of_italy': (none, 'cast(r.reference_date as date)'),
@@ -177,9 +178,11 @@ where d.status = 'pinned'
     'raw_demo_video': ('r.advertiser_id', 'left(r.dimensions__stat_time_day::text, 10)::date'),
     'raw_demo_web': ("split_part(r.property, '/', 2)", "to_date(r.date, 'YYYYMMDD')"),
     'raw_ecb': (none, 'cast(r.time_period as date)'),
+    'raw_ga4': ("split_part(r.property, '/', 2)", "to_date(r.date, 'YYYYMMDD')"),
     'raw_google_ads': ('r.customer__id', 'r.segments__date::date'),
     'raw_meta_ads': ('r.account_id', 'r.date_start'),
     'raw_nbk': (none, "to_date(r.date, 'DD.MM.YYYY')"),
+    'raw_tiktok_ads': ('r.advertiser_id', 'left(r.dimensions__stat_time_day::text, 10)::date'),
 }) -}}
 {%- endmacro %}
 
