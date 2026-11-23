@@ -32,6 +32,7 @@ nav = [
     { "Connect GA4" = "how-to/connect-ga4.md" },
     { "Manage clients and accounts" = "how-to/manage-clients-and-accounts.md" },
     { "Read the advertising dashboard" = "how-to/read-the-advertising-dashboard.md" },
+    { "Read the web analytics dashboard" = "how-to/read-the-web-analytics-dashboard.md" },
     { "Talk to your data" = "how-to/talk-to-your-data.md" },
     { "Watch the pipeline" = "how-to/watch-the-pipeline.md" },
     { "Rename a field or add your own definitions" = "how-to/rename-a-field.md" },

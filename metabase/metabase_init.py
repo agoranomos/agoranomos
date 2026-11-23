@@ -10,18 +10,19 @@ variables in compose.yaml instead. On a new Metabase it also turns the public li
 it applies the metadata of the marts (metadata.py): the names, descriptions and types that dbt and
 the overrides of the deployment give the tables and fields of the marts, with one line for each
 change, and keeps the KPIs that the marts declare as metrics in the collection agoranomos / Metrics
-and as terms of the glossary (metrics.py, ADR-0034). While Metabase starts its weeks on its default,
-Sunday, the job starts them on Monday, as ISO 8601 does. It keeps the daily scan of the values of
-the filters at METABASE_SCAN_TIME, after the nightly load, the sync hourly, and the policy of the
-cache of the whole instance Adaptive, with one line for each change (ADR-0037). It keeps the
-dashboard Advertising, with its tabs, in the collection agoranomos / Advertising (advertising.py,
-ADR-0034), once Metabase shows the marts. Last, it keeps the Ops collection, a dashboard about the
-pipeline itself, in the collection agoranomos as the code says (ops.py, ADR-0029), and gives every
-group but Administrators at most View on the collections of the content of the package that the
-registry of the content records, the collection agoranomos and its packages such as Demo,
-Advertising and Ops (content.py, ADR-0018), on every start, with one line for each change. Run with
-the argument diff, as ./agoranomos metadata diff does, it prints the plan of the metadata and
-applies nothing.
+and as terms of the glossary (metrics.py, ADR-0034). While Metabase starts its weeks on its
+default, Sunday, the job starts them on Monday, as ISO 8601 does. It keeps the daily scan of the
+values of the filters at METABASE_SCAN_TIME, after the nightly load, the sync hourly, and the
+policy of the cache of the whole instance Adaptive, with one line for each change (ADR-0037). It
+keeps the dashboard Advertising, with its tabs, in the collection agoranomos / Advertising
+(advertising.py, ADR-0034), and the dashboard Web analytics in the collection agoranomos / Web
+analytics (web_analytics.py, ADR-0054), once Metabase shows the marts. Last, it keeps the Ops
+collection, a dashboard about the pipeline itself, in the collection agoranomos as the code says
+(ops.py, ADR-0029), and gives every group but Administrators at most View on the collections of the
+content of the package that the registry of the content records, the collection agoranomos and its
+packages such as Demo, Advertising, Web analytics and Ops (content.py, ADR-0018), on every start,
+with one line for each change. Run with the argument diff, as ./agoranomos metadata diff does, it
+prints the plan of the metadata and applies nothing.
 
 Every secret comes from the environment and goes only into the body of a request. The messages of
 this script name a step and an HTTP status, or the class of an error (and, for an answer of an
@@ -51,6 +52,7 @@ import content
 import metadata
 import metrics
 import ops
+import web_analytics
 
 WAREHOUSE_NAME = "agoranomos warehouse"
 # How long the job waits for a sync that adds a table of the marts to Metabase, in seconds.
@@ -718,6 +720,9 @@ def main(env: Mapping[str, str] | None = None, argv: Collection[str] = ()) -> in
         metrics.ensure(metabase, registry, config.metadata_export, database_id, log)
         # The dashboard Advertising, with or without the demo, once Metabase shows the marts.
         advertising.ensure(metabase, registry, marts, config.metadata_export, database_id, log)
+        # The dashboard Web analytics, in every deployment, once Metabase shows the marts: empty
+        # until a source of web analytics loads (ADR-0054).
+        web_analytics.ensure(metabase, registry, marts, database_id, log)
         # The Ops collection, with or without the demo; it ends with the lock-down of every
         # collection of the content of the package.
         content.ensure_package(metabase, registry, ops.ops_package(), database_id, log)

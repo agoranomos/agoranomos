@@ -287,8 +287,8 @@ jobs:
           df -h /var/lib/docker
       - name: Pull the images
         run: docker compose pull --quiet --ignore-buildable
-      # metabase-init passes without the marts: the metrics and the dashboard Advertising wait for
-      # a start after the first run of the transform.
+      # metabase-init passes without the marts: the metrics and the dashboards Advertising and Web
+      # analytics wait for a start after the first run of the transform.
       - name: Start the stack
         run: ./agoranomos up
       # Without the demo no job of the stack runs the transform: the tests of the transform of
@@ -298,9 +298,9 @@ jobs:
       - name: Build the empty model
         run: uv run pytest tests/stack/test_dbt_metadata.py -v -m transform
       # The start after the first run of the transform, which a deployment has too: metabase-init
-      # shows the marts in Metabase and makes the metrics and the dashboard Advertising, and reports
-      # them as changes. The stack tests then meet a stack whose start reported every change, and a
-      # test that runs metabase-init again finds nothing to change.
+      # shows the marts in Metabase and makes the metrics and the dashboards Advertising and Web
+      # analytics, and reports them as changes. The stack tests then meet a stack whose start
+      # reported every change, and a test that runs metabase-init again finds nothing to change.
       - name: Start again (the marts are new)
         run: ./agoranomos up
       - name: Stack tests

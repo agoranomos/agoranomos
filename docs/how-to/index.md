@@ -14,6 +14,7 @@ How-to guides are short recipes for people who want to get a specific job done w
 - [Connect GA4](connect-ga4.md): load the sessions of the GA4 properties of your business every day into the warehouse and the marts, with their history, as a service account of your own Google Cloud project. No load has reached a real property yet.
 - [Manage clients and accounts](manage-clients-and-accounts.md): add a client or an account, move an account to another client, and take one out, whose data stays.
 - [Read the advertising dashboard](read-the-advertising-dashboard.md): what the tabs and the filters of the dashboard Advertising show, and how its numbers are computed.
+- [Read the web analytics dashboard](read-the-web-analytics-dashboard.md): what the cards and the filters of the dashboard Web analytics show, and how its numbers are computed.
 - [Talk to your data](talk-to-your-data.md): connect Claude Code, the Claude apps or another AI client to your data through MCP, choose what it may do, and turn it off.
 - [Watch the pipeline](watch-the-pipeline.md): what the dashboard of the Ops collection shows about the loads, the runs of the transform and the warehouse, where its data comes from, and how to get alerts through Apprise.
 - [Rename a field or add your own definitions](rename-a-field.md): give the tables and fields of the marts names, descriptions and notes of your deployment's own.
