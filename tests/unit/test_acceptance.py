@@ -51,19 +51,19 @@ def test_the_cleanup_names_the_account_of_each_raw_table_as_staging_reads_it():
     # A row goes by load and account, so the account of each table must be the one through which
     # staging finds its load: a wrong column would keep rows, or take those of another account.
     found = read_by_staging()
-    assert len(found) == 11
-    assert sum(len(tables) for tables in found.values()) == 58
+    assert len(found) == 12
+    assert sum(len(tables) for tables in found.values()) == 60
     staged = {
         schema: tables
         for schema, tables in acceptance.ACCOUNTS.items()
         if schema not in acceptance.NOT_STAGED_YET
     }
     assert found == staged
-    # The raw schemas that staging does not read yet: GA4, whose staging is C6c of #226. The
-    # tables of TikTok are those of demo_video, with the totals of each advertiser beside them,
-    # and name the advertiser as demo_video does, so that its staging calls the same macros;
-    # those of GA4 are those of demo_web, and name the property as demo_web does.
-    assert frozenset({"raw_ga4"}) == acceptance.NOT_STAGED_YET
+    # Staging reads every raw schema that the cleanup names. The tables of TikTok are those of
+    # demo_video, with the totals of each advertiser beside them, and name the advertiser as
+    # demo_video does, so that its staging calls the same macros; those of GA4 are those of
+    # demo_web, and name the property as demo_web does.
+    assert frozenset() == acceptance.NOT_STAGED_YET
     assert not set(found) & acceptance.NOT_STAGED_YET
     tiktok = acceptance.ACCOUNTS["raw_tiktok_ads"]
     video = acceptance.ACCOUNTS["raw_demo_video"]

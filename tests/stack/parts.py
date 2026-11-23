@@ -40,9 +40,12 @@ GROUPS: tuple[tuple[str, ...], ...] = (
         "test_ai_servers.py",
         "test_backup_before_a_migration.py",
     ),
-    # 2: the partial day, the retention and the backups.
+    # 2: the partial day, GA4, the retention and the backups.
     (
         "test_partial_day.py",  # 39, and 29 to 37
+        # Two loads and two runs of the transform, as test_demo_intraday.py: about 14 minutes by
+        # that file, not measured yet (C6c of #226, 23 November 2026).
+        "test_ga4.py",
         "test_backup.py",
         "test_backup_roundtrip.py",
         "test_celery.py",

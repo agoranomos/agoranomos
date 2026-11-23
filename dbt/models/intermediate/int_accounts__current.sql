@@ -36,6 +36,16 @@ with listed as (
         cast(null as text),
         cast(null as text)
     from {{ ref('stg_demo_web__properties') }}
+    union all
+    select
+        platform,
+        property_id,
+        property_name,
+        currency,
+        time_zone,
+        cast(null as text),
+        cast(null as text)
+    from {{ ref('stg_ga4__properties') }}
 ),
 
 stats as (
@@ -68,6 +78,8 @@ named as (
     select platform, account_id from reported
     union
     select distinct platform, property_id from {{ ref('stg_demo_web__sessions_daily') }}
+    union
+    select distinct platform, property_id from {{ ref('stg_ga4__sessions_daily') }}
 )
 
 select

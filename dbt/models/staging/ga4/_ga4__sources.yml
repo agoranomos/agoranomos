@@ -1,0 +1,47 @@
+sources:
+  - name: raw_ga4
+    description: >-
+      The GA4 properties of the deployment that extensions/model/clients.toml names, which the DAG
+      agoranomos_ga4_daily loads with dlt from the Google Analytics Admin API and Data API v1beta
+      (ADR-0054), in the shape of demo_web: the fields of each answer as dlt names them, every value
+      as text, as the API writes a metric as a string. The DAG starts paused, so a deployment
+      without GA4 has no table here, and the models that read these tables then read none.
+    schema: raw_ga4
+    # No freshness check of dbt: the Ops collection shows the last load of each account, from
+    # _agoranomos_loads (models/ops/ops_loads.sql).
+    config:
+      freshness: null
+    tables:
+      - name: _agoranomos_loads
+        description: >-
+          The journal of the loads of GA4: one row for each property in each load, written in the
+          same run as the rows of the load, so under its _dlt_load_id. A property that the load took
+          has the status loaded, the day of the load in the time zone of the property (as_of), the
+          first and last day of the window that the load took (window_from, window_to), the moment
+          of the load (loaded_at), the kind of the load, window or history, and four flags, each
+          true when any answer of the property in the load said that its numbers may not be whole:
+          is_subject_to_thresholding, has_data_loss_from_other_row, is_sampled and is_truncated. A
+          property whose requests to the API failed has the status failed, the text of the error,
+          the moment of the attempt (now), and no day, no loaded_at and no flag, as nothing was
+          loaded. The staging models read, for each property and day, the rows of the newest pinned
+          load whose window covers the day.
+      - name: _dlt_loads
+        description: >-
+          The loads of dlt into raw_ga4, one row each: a load is whole once it has its row here,
+          with status 0, which dlt writes after the last table of the load. The pin of each run of
+          the transform takes whole loads only.
+      - name: properties
+        description: >-
+          Each property as properties.get of the Admin API gives it: its name, properties/ and its
+          ID, its display name, the time zone of its days and the currency of its revenue. Each load
+          appends the row of each property that it read under its own _dlt_load_id, and staging
+          reads the row of the newest pinned load of each property, so a property whose load failed
+          keeps the row of the load before.
+      - name: report_sessions_daily
+        description: >-
+          The runReport of each property over the window of the load, one row for each day, source,
+          medium, campaign name, campaign ID and default channel group with any session, key event
+          or revenue, the day as YYYYMMDD in the time zone of the property, with the property added
+          as properties/ and its ID. Each load appends its rows under its own _dlt_load_id, and
+          staging reads, for each property and day, those of the newest pinned load whose window
+          covers the day.

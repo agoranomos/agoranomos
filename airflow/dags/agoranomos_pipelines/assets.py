@@ -64,17 +64,16 @@ RAW_TIKTOK_ADS = Asset(
 RAW_NBK = Asset("postgres://warehouse-db:5432/warehouse/raw_nbk/rates_daily")
 
 # The asset of a run of the transform in which every task succeeded, which the last task of the
-# transform updates: the histories of Google Ads, of Meta and of TikTok plan their next portions
-# after it, so that each portion goes from raw to the core before the next one starts (ADR-0038,
-# "The first load"). It is no table, so it has a name and no address of PostgreSQL.
+# transform updates: the histories of Google Ads, of Meta, of TikTok and of GA4 plan their next
+# portions after it, so that each portion goes from raw to the core before the next one starts
+# (ADR-0038, "The first load"). It is no table, so it has a name and no address of PostgreSQL.
 TRANSFORMED = Asset("agoranomos_transformed")
 
 # The condition on which the transform runs (ADR-0039): the demo has loaded, or the rates of the ECB
 # or of the Bank of Italy have, or Google Ads, Meta or GA4 has, or the rates of the NBK have, or
-# TikTok has, or the short cycle of Google Ads or of the demo has (ADR-0051); no run reads the loads
-# of GA4 until its staging (C6c of #226). A source that joins the model adds its asset here. The
-# transform allows one run at a time: while a run is queued or running, Airflow keeps the events
-# that come, and starts one run for all of them once it ends.
+# TikTok has, or the short cycle of Google Ads or of the demo has (ADR-0051). A source that joins
+# the model adds its asset here. The transform allows one run at a time: while a run is queued or
+# running, Airflow keeps the events that come, and starts one run for all of them once it ends.
 LOADED = AssetAny(
     DEMO_LOADED,
     RAW_ECB,
