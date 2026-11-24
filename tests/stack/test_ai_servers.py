@@ -223,7 +223,7 @@ def test_the_airflow_server_reads_the_dags(airflow_server):
     ],
 )
 def test_the_airflow_server_refuses_every_tool_that_writes(airflow_server, tool, arguments):
-    # astro-airflow-mcp 0.9.1 answers a refused call with an error object as its result, and not
+    # astro-airflow-mcp 0.9.2 answers a refused call with an error object as its result, and not
     # with an error of MCP: the call never reaches Airflow, whose role Viewer would refuse it too.
     failed, text = airflow_server.call(tool, arguments)
     answer = json.loads(text)

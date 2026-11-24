@@ -42,8 +42,8 @@ def test_every_locked_package_has_a_hash_and_the_server_is_pinned():
         for line in (AI / "requirements.in").read_text(encoding="utf-8").splitlines()
         if line and not line.startswith("#")
     ]
-    assert wanted == ["astro-airflow-mcp==0.9.1"]
-    assert any(lines[i].startswith("astro-airflow-mcp==0.9.1 ") for i in packages)
+    assert wanted == ["astro-airflow-mcp==0.9.2"]
+    assert any(lines[i].startswith("astro-airflow-mcp==0.9.2 ") for i in packages)
 
 
 def test_the_build_gets_only_the_lock_file():
