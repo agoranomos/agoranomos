@@ -89,12 +89,14 @@ It takes about half an hour, most of it the first start.
     - `load_settings` loaded the settings of the model, such as which client each account belongs to;
     - `pin` pinned the loads that had ended, the five of the history, which the tasks after it read, so that a load that ends during a run waits for the next one;
     - `elementary` built the tables in which each task of dbt records how it went, which the Ops collection shows;
-    - each task after them built one model or seed of dbt and ran its tests: from a view of the data of each platform, through the steps that the platforms share and the tables of the core, to the marts, views over the core, such as `ad_stats_campaign_daily`, which the advertising dashboard reads.
+    - each task of the task group `dbt` built one model or seed of dbt and ran its tests: from a view of the data of each platform, through the steps that the platforms share and the tables of the core, to the marts, views over the core, such as `ad_stats_campaign_daily`, which the advertising dashboard reads;
+    - once every task of dbt had succeeded, `accept` marked the loads that the run read as accepted, `transformed` then updated the asset after which the histories of Google Ads, Meta, TikTok and GA4 take their next portions, and `clean_raw` deleted the rows of the accepted loads from the raw layer, as the core now holds them.
 4. Look at the DAG `agoranomos_demo_daily`. It brings each new day of the demo every day at 09:17 UTC, and the transform runs again after it. Its first run came right after the history and usually found every account loaded already, so it skipped its loads.
+5. Look at the DAG `agoranomos_demo_intraday`. Every 3 hours, as `AGORANOMOS_INTRADAY_HOURS` in `.env` sets by default, it loads the current day of each account of Demo Search as far as it has gone, and the transform runs again after it. Its first run came right after the history. The dashboard **Advertising**, in the collection **agoranomos / Advertising**, shows these rows in its card **Today, as of the load**, with the moment of the load, and its other cards count whole days only. The next morning `agoranomos_demo_daily` takes the day whole and replaces them.
 
 <figure class="ag-shot" markdown="span">
-    ![The graph of the DAG agoranomos_demo_transform in Airflow: the tasks load_settings, pin and elementary, then the task group dbt, and beside it the duration of the last run](../assets/screenshots/airflow-transform-light.webp#only-light){ width="1440" height="900" loading="lazy" }
-    ![The graph of the DAG agoranomos_demo_transform in Airflow: the tasks load_settings, pin and elementary, then the task group dbt, and beside it the duration of the last run, in the dark theme](../assets/screenshots/airflow-transform-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
+    ![The graph of the DAG agoranomos_demo_transform in Airflow: the tasks load_settings, pin and elementary, then the task group dbt, then accept, followed by transformed and clean_raw, and beside it the duration of the last runs](../assets/screenshots/airflow-transform-light.webp#only-light){ width="1440" height="900" loading="lazy" }
+    ![The graph of the DAG agoranomos_demo_transform in Airflow: the tasks load_settings, pin and elementary, then the task group dbt, then accept, followed by transformed and clean_raw, and beside it the duration of the last runs, in the dark theme](../assets/screenshots/airflow-transform-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
     <figcaption>Airflow · the graph of agoranomos_demo_transform · demo data</figcaption>
 </figure>
 
@@ -104,7 +106,7 @@ It takes about half an hour, most of it the first start.
 2. Read its first row:
     - **Late accounts** shows 0: every account was loaded in the last 36 hours.
     - **Failed models** shows 0: every model and seed of the last run of the transform was built.
-    - **Failed or warned tests** shows 1. The demo leaves one day of one account out on purpose, and the test `assert_every_day_of_an_account_has_statistics` warns about it on every run. **Tests that warned or failed, last 30 days**, further down, names it.
+    - **Failed or warned tests** counts the tests of the last run of the transform only. The demo leaves one day of one account of Demo Social out on purpose, about 120 days ago, and the test `assert_every_day_of_an_account_has_statistics` looks for such a day from the first day of the loads that a run reads. After the first run, which read the 18 months of the history, the card shows 1, that warning. A later run reads the loads of `agoranomos_demo_intraday` or `agoranomos_demo_daily`, which start well after that day, so the test passes and the card shows 0. **Tests that warned or failed, last 30 days**, further down, still names the warning.
 3. Look at **Last load of each account**: one row for each account of each platform, with the last day that a load took and how many hours ago it ran.
 
 <figure class="ag-shot" markdown="span">
