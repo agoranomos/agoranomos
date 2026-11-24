@@ -37,7 +37,7 @@ from datetime import UTC, date, datetime, timedelta
 import dlt
 
 from agoranomos_pipelines import rates
-from agoranomos_pipelines.demo import fx, search
+from agoranomos_pipelines.demo import fx, search, web
 from agoranomos_pipelines.demo.common import local_today
 from agoranomos_pipelines.demo.platforms import LOAD_ORDER, PLATFORMS, gap
 from agoranomos_pipelines.demo.world import Account
@@ -45,6 +45,7 @@ from agoranomos_pipelines.loads import (
     APPEND,
     DATE,
     DLT_SETTINGS,
+    FLAGS,
     HISTORY,
     INTRADAY,
     LOAD_HINTS,
@@ -71,6 +72,13 @@ RATES = fx.PLATFORM
 # The platform of the demo that has a short cycle of the current day, in the shape of Google Ads,
 # whose short cycle is the one that the base package builds (ADR-0051).
 INTRADAY_PLATFORM = search.PLATFORM
+# The platform of the demo of web analytics, in the shape of GA4, whose journal holds the four flags
+# of the answers of each property (ADR-0054), as boolean columns, like that of GA4.
+WEB = web.PLATFORM
+WEB_LOAD_HINTS = {
+    **LOAD_HINTS,
+    "columns": {**LOAD_HINTS["columns"], **{flag: {"data_type": "bool"} for flag in FLAGS}},
+}
 # The IDs of the tables of the ad groups and of the ads of demo_search.
 SEARCH_AD_GROUP = {"customer__id": TEXT, "campaign__id": TEXT, "ad_group__id": TEXT}
 SEARCH_AD = {**SEARCH_AD_GROUP, "ad_group_ad__ad__id": TEXT, "ad_group_ad__ad__name": TEXT}
@@ -255,7 +263,8 @@ def journal_rows(
     code: str, now: datetime, windows: dict[str, tuple[date, date]], kinds: dict[str, str]
 ) -> list[dict[str, object]]:
     """The rows of _agoranomos_loads of a load of a platform at now: for each account, its window,
-    the day of now in its time zone, and the kind of its load."""
+    the day of now in its time zone, and the kind of its load; for each property of demo_web, the
+    four flags of its answers too, of which the property and the day of web.flagged have one."""
     zones = {account.account_id: account.time_zone for account in PLATFORMS[code].module.accounts()}
     loaded_at = datetime.now(UTC)
     return [
@@ -268,6 +277,14 @@ def journal_rows(
             "loaded_at": loaded_at,
             "status": LOADED,
             "kind": kinds[account_id],
+            **(
+                {
+                    flag: flag == web.FLAGGED and web.flagged(now, account_id, (start, end))
+                    for flag in FLAGS
+                }
+                if code == WEB
+                else {}
+            ),
         }
         for account_id, (start, end) in sorted(windows.items())
     ]
@@ -424,7 +441,11 @@ def load(
         # In the same run as the facts and the lists, so under the same _dlt_load_id: a load that
         # does not end whole has no row in _dlt_loads, and its window is read by nobody.
         resources.append(
-            dlt.resource(journal(code, now, first, history), name=LOADS, **own(LOAD_HINTS))
+            dlt.resource(
+                journal(code, now, first, history),
+                name=LOADS,
+                **own(WEB_LOAD_HINTS if code == WEB else LOAD_HINTS),
+            )
         )
         run(pipeline, resources)
         counts = row_counts(pipeline)

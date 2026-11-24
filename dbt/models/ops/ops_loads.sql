@@ -5,7 +5,9 @@
 -- of the demo in a deployment without it, is empty. The last day loaded, the last load and the count are of
 -- the whole loads, of the kinds window and history, and a row without a kind is of the kind window;
 -- the last load of the kind intraday, of the current day of the account, comes beside them, as it
--- takes days still in progress and would hide a daily load that stopped (ADR-0051).
+-- takes days still in progress and would hide a daily load that stopped (ADR-0051). The four flags
+-- of the answers of a source of web analytics (ADR-0054) are those of the last whole load that took
+-- the account, and none for a journal without them, as those of the ad platforms and of the rates.
 with loads as (
     {%- for source_name, platform in [
         ('raw_bank_of_italy', 'bank_of_italy'),
@@ -29,7 +31,10 @@ with loads as (
         account_id,
         window_to,
         loaded_at,
-        kind is not distinct from 'intraday' as is_intraday
+        kind is not distinct from 'intraday' as is_intraday,
+        {{ journal_flags(
+            load_relation(source(source_name, '_agoranomos_loads')) if execute else none
+        ) }}
     from {{ newest_load_table(source_name, '_agoranomos_loads') }}
     {%- endfor %}
 )
@@ -49,5 +54,9 @@ select
     round(
         (extract(epoch from now() - max(loaded_at) filter (where is_intraday)) / 3600)::numeric, 1
     ) as hours_since_intraday
+    {%- for flag in load_flags() %},
+    (array_agg({{ flag }} order by loaded_at desc)
+        filter (where not is_intraday and loaded_at is not null))[1] as {{ flag }}
+    {%- endfor %}
 from loads
 group by platform, account_id

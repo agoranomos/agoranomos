@@ -27,8 +27,9 @@ Four fields of the metadata of each answer say that its numbers may not be the w
 subjectToThresholding, dataLossFromOtherRow, samplingMetadatas and dataTruncationReasons. The load
 writes them for each property and load into four boolean columns of the journal
 _agoranomos_loads, is_subject_to_thresholding, has_data_loss_from_other_row, is_sampled and
-is_truncated, each true when any page of the property in the load had it; C8b carries them into
-core.loads (#228). A flag says "may": a report subject to thresholding may have lost nothing.
+is_truncated, each true when any page of the property in the load had it; the pin copies them
+into core.loads (loads.FLAGS). A flag says "may": a report subject to thresholding may have lost
+nothing.
 
 The window of a daily load of a property is [min(yesterday + 1 - W, last accepted day + 1),
 yesterday] in the time zone of the property, from properties.get, where W is the window of
@@ -94,6 +95,7 @@ from agoranomos_pipelines.loads import (
     APPEND,
     DLT_SETTINGS,
     FAILED,
+    FLAGS,
     HISTORY,
     INTRADAY,
     LOAD_HINTS,
@@ -186,13 +188,8 @@ QUOTAS = (
 )
 # The fields of properties.get that the shape reads, and no other.
 PROPERTY_FIELDS = ("name", "displayName", "timeZone", "currencyCode")
-# The flags of the answers of a property in a load, as columns of the journal (ADR-0054).
-FLAGS = (
-    "is_subject_to_thresholding",
-    "has_data_loss_from_other_row",
-    "is_sampled",
-    "is_truncated",
-)
+# The flags of the answers of a property in a load are FLAGS of loads.py, as columns of the
+# journal (ADR-0054).
 BOOL = {"data_type": "bool"}
 
 

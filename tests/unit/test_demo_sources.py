@@ -470,6 +470,53 @@ def test_every_load_records_the_window_and_the_day_of_each_account(sources):
     assert module.LOADS not in counts
 
 
+def test_the_journal_of_demo_web_flags_one_property_on_the_loads_that_hold_one_day(sources):
+    # ADR-0054 (C8b of #228): demo_web writes the four flags of GA4 into its journal, as boolean
+    # columns, and one of them is true on each load of one property whose window holds the day
+    # 30 days before its yesterday, the history in a stack that loads every day; every other flag
+    # of every load is false. The other platforms write no flag.
+    module, pipelines, _ = sources
+    from agoranomos_pipelines.demo import common, web
+
+    flags = (
+        "is_subject_to_thresholding",
+        "has_data_loss_from_other_row",
+        "is_sampled",
+        "is_truncated",
+    )
+    assert flags == module.FLAGS
+    assert web.FLAGGED in flags
+    assert web.FLAGGED_PROPERTY in {a.account_id for a in web.accounts()}
+
+    def journal(**options):
+        module.load("demo_web", NOW, **options)
+        rows, hints = pipelines[-1].runs[-1]
+        columns = hints[module.LOADS]["columns"]
+        assert {flag: columns[flag]["data_type"] for flag in flags} == dict.fromkeys(flags, "bool")
+        return {r["account_id"]: tuple(r[flag] for flag in flags) for r in rows[module.LOADS]}
+
+    flagged = tuple(flag == web.FLAGGED for flag in flags)
+    clear = (False,) * 4
+    # The history holds the day.
+    assert journal() == {"390000001": clear, web.FLAGGED_PROPERTY: flagged}
+
+    # A daily window of 14 days does not, and one that starts on the day does.
+    def days_back(back):
+        return lambda account: common.last_final_day(NOW, account.time_zone) - timedelta(days=back)
+
+    assert journal(first=days_back(13)) == {"390000001": clear, web.FLAGGED_PROPERTY: clear}
+    assert journal(first=days_back(web.FLAGGED_DAYS_AGO)) == {
+        "390000001": clear,
+        web.FLAGGED_PROPERTY: flagged,
+    }
+    assert journal(first=days_back(web.FLAGGED_DAYS_AGO - 1))[web.FLAGGED_PROPERTY] == clear
+    # A platform of ads has no flag in its journal.
+    module.load("demo_search", NOW)
+    rows, hints = pipelines[-1].runs[-1]
+    assert not set(flags) & set(hints[module.LOADS]["columns"])
+    assert all(not set(flags) & set(row) for row in rows[module.LOADS])
+
+
 def test_a_pipeline_opens_as_loader_into_the_dataset_of_its_platform(sources):
     # A caller can read through it what earlier loads left in the dataset before it loads. dlt
     # makes no index on _dlt_id of a new table (ADR-0035).

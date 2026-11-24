@@ -11,19 +11,20 @@
     0, that core.loads does not hold yet: the window or the error of each account of the load, its
     kind, window for the usual window of the account, history for a load of the days before it
     (ADR-0038) or intraday for a load of its current day (ADR-0051), which a journal without the
-    column, or a row without it or with another kind, gives as window, and the moment when the
-    load ended. A source that no load has written is passed over, as a
-    deployment without the demo never loads the sources of the demo. The ID of the call of dbt
-    records which pin took a row. Then it creates, through core.ensure_partition, the partitions of
-    the facts that each source is to write, for every month of the windows that are pinned, and
-    those of the journals of restatements for the current month and the next, in UTC, into which
-    the models of the facts write with the moment of their transaction, each in a transaction of
-    its own and outside any model: a hook before_begin of a model breaks the transaction of the
-    model (#191). The rows stay pinned until the core accepts their loads.
-    The pin holds the lock of marts-init (marts_init.sql), shared, from its first statement to its
-    last, so that marts-init never reads a window that is pinned before its partitions exist; dbt
-    closes the connection when the macro fails, which lets go of the lock.
-    transformer runs it, with its rights on core.loads and on core.ensure_partition. -#}
+    column, or a row without it or with another kind, gives as window, the four flags of the
+    answers of a source of web analytics (ADR-0054), which a journal without them gives as none
+    (journal_flags), and the moment when the load ended. A source that no load has written is passed
+    over, as a deployment without the demo never loads the sources of the demo. The ID of the call
+    of dbt records which pin took a row. Then it creates, through core.ensure_partition, the
+    partitions of the facts that each source is to write, for every month of the windows that are
+    pinned, and those of the journals of restatements for the current month and the next, in UTC,
+    into which the models of the facts write with the moment of their transaction, each in a
+    transaction of its own and outside any model: a hook before_begin of a model breaks the
+    transaction of the model (#191). The rows stay pinned until the core accepts their loads. The
+    pin holds the lock of marts-init (marts_init.sql), shared, from its first statement to its last,
+    so that marts-init never reads a window that is pinned before its partitions exist; dbt closes
+    the connection when the macro fails, which lets go of the lock. transformer runs it, with its
+    rights on core.loads and on core.ensure_partition. -#}
 {% macro pin_loads() %}
     {%- if env_var('DBT_JOB_RUN_ID', '') == '' -%}
         {{- exceptions.raise_compiler_error(
@@ -54,12 +55,14 @@ set lock_timeout to default
             {%- call statement('pin', fetch_result=false) -%}
 insert into {{ loads }} (
     source, load_id, account_id, window_from, window_to, outcome, error, finished_at, invocation_id,
-    kind
+    kind,
+    {{ load_flags() | join(', ') }}
 )
 select
     '{{ source }}', j._dlt_load_id, j.account_id, j.window_from, j.window_to, j.status, j.error,
     l.inserted_at, '{{ invocation_id }}'::uuid,
-    {% if kinds %}case when j.kind in ('history', 'intraday') then j.kind else 'window' end{% else %}'window'{% endif %}
+    {% if kinds %}case when j.kind in ('history', 'intraday') then j.kind else 'window' end{% else %}'window'{% endif %},
+    {{ journal_flags(journal, 'j.') }}
 from {{ journal }} as j
 join {{ finished }} as l
     on l.load_id = j._dlt_load_id and l.status = 0
@@ -131,6 +134,29 @@ select pg_advisory_unlock_shared({{ marts_init_lock() }})
         info=True
     ) -}}
 {% endmacro %}
+
+{#- The flags of the answers of a load (ADR-0054), columns of core.loads (the migration 0012) and of
+    the journal of a source of web analytics, GA4 and demo_web, under the same names, as FLAGS of
+    airflow/dags/agoranomos_pipelines/loads.py, which tests/unit/test_dbt_project.py compares with
+    them. -#}
+{% macro load_flags() -%}
+{{- return([
+    'is_subject_to_thresholding', 'has_data_loss_from_other_row', 'is_sampled', 'is_truncated',
+]) -}}
+{%- endmacro %}
+
+{#- The flags of a journal of the loads, as SQL for a list of columns: each flag that the journal
+    has, after the prefix of its alias, and none, as a boolean, for one that it lacks, or for every
+    flag when the journal does not exist (none). A journal gets the flags with the first load that
+    writes them, and the journals of the ad platforms and of the rates never do. -#}
+{% macro journal_flags(journal, prefix='') -%}
+    {%- set names = (adapter.get_columns_in_relation(journal) | map(attribute='name') | list)
+        if journal is not none else [] -%}
+    {%- for flag in load_flags() -%}
+        {%- if flag in names %}{{ prefix }}{{ flag }}{% else %}cast(null as boolean){% endif %} as {{ flag }}
+        {%- if not loop.last %}, {% endif -%}
+    {%- endfor -%}
+{%- endmacro %}
 
 {#- The partitioned facts of the core that each source is to write (ADR-0036), whose partitions
     the pin creates for the months of its windows: the four facts of the ad platforms, and that of

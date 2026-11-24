@@ -95,6 +95,18 @@ LOAD_HINTS = {
         "kind": TEXT,
     },
 }
+# The flags of the answers of an account in a load, which a source of web analytics writes into its
+# journal beside the columns of LOAD_HINTS, as boolean columns (ADR-0054): GA4 from the fields
+# subjectToThresholding, dataLossFromOtherRow, samplingMetadatas and dataTruncationReasons of the
+# answers of each property (ga4.py), and the demo of web analytics on one property and day
+# (demo/web.py). The pin copies them into core.loads under the same names, and a journal without
+# them gives none (C8b of #228).
+FLAGS = (
+    "is_subject_to_thresholding",
+    "has_data_loss_from_other_row",
+    "is_sampled",
+    "is_truncated",
+)
 LOADED, FAILED = "loaded", "failed"
 WINDOW, HISTORY, INTRADAY = "window", "history", "intraday"
 

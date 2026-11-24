@@ -86,7 +86,16 @@ Each answer of the Data API says whether its numbers may not be the whole truth,
 | `is_sampled` | is sampled |
 | `is_truncated` | says that its data is truncated, as for days before the retention of the property |
 
-The quotes are from the reference of `ResponseMetaData` (as of November 2026). The core and the view of loads are to carry the flags too ([#228](https://github.com/agoranomos/agoranomos/issues/228), C8b).
+The quotes are from the reference of `ResponseMetaData` (as of November 2026). The pin of each run of the transform copies the four flags of a journal into `core.loads` under the same names, and the view `marts.web_sessions_daily` ends with them, after `is_final`: each row carries the flags of the load that wrote it, so a filter on a flag finds the days whose numbers may not match the interface of GA4. `ops.ops_loads` shows the flags of the last whole load of each property. A flag is none on the rows of an ad platform or of the rates, on a failed property, which got no answer, and on a load that the warehouse took before it kept the flags. The demo of web analytics, `demo_web`, flags one property, `390000002` (brindlemoor.example), on each of its loads whose window holds the day 30 days before its yesterday, the history in a stack that loads every day, with `has_data_loss_from_other_row`, so that the columns are filled without GA4. The flags have not been seen on a real property yet: no load of this connector has reached one.
+
+What to do about a flag:
+
+- **`has_data_loss_from_other_row`.** The sessions of the day still count in its total, but some of them are in the row `(other)` and not under their own source, medium or campaign. GA4 makes that row "when the number of rows in a table exceeds the table's row limit" ([The (other) row](https://support.google.com/analytics/answer/13208658), as of November 2026): compare such a day with the interface of GA4 on its total sessions, not by campaign.
+- **`is_subject_to_thresholding`.** GA4 withholds data in "an API call that includes demographic data" ([Data thresholds](https://support.google.com/analytics/answer/9383630), as of November 2026), and the shape of this connector requests none, so a day with the flag may still be whole: compare it with the interface of GA4 before you rely on a small number.
+- **`is_sampled`.** The numbers of the day are estimates from a sample of the events. A sample comes from a quota of events for each query ([Data sampling](https://support.google.com/analytics/answer/13331292), as of November 2026), so loading the period again in shorter windows, with the parameters of a run ([When the history arrives](#when-the-history-arrives)), reads fewer events at a time and may avoid it.
+- **`is_truncated`.** GA4 cut the data of the report, as for days before the retention of the property. Check the days of the window against the life of the property, and load the period again if the flag stays.
+
+No card of the Ops collection shows the flags today.
 
 ### The quota
 
