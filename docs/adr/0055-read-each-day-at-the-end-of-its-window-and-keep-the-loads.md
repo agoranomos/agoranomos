@@ -1,0 +1,107 @@
+---
+status: proposed
+date: 2026-11-24
+decision-makers: Andrei Gromov
+---
+
+# Read each day at the end of its window, and keep the daily loads for good
+
+Supersedes in part [ADR-0038](0038-load-by-copy-and-write-the-core-by-whole-days.md): the window of a daily load in "The window", whose second term `last accepted day + 1` becomes `last accepted day + 2 − W`. Supersedes in part [ADR-0036](0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md), [ADR-0044](0044-keep-the-core-for-good-and-change-it-by-migrations.md) and [ADR-0046](0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md): the 13 months of `core.loads`, as its accepted loads of the kinds `window` and `history` stay for good. The rest of those records stays accepted.
+
+## Context and Problem Statement
+
+The audit of 24 November 2026 found two faults in the way the core keeps its loads, findings A3 and A4, checked on `main` at `a2403a2`. This record read the code again at `f7976c5` on the same day.
+
+**A3, a day that one load missed is never final.** [ADR-0038](0038-load-by-copy-and-write-the-core-by-whole-days.md) ("The window") gives a daily load of an account the days `[min(yesterday + 1 − W, last accepted day + 1), yesterday]`, in the time zone of the account, where `W` is the window of restatements of its platform, from the seed of the platforms (`dbt/seeds/seed_ad_platforms.csv`, read by `airflow/dags/agoranomos_pipelines/windows.py`). The code has this formula in the function `window` of `google_ads.py`, `meta_ads.py`, `tiktok_ads.py` and `ga4.py`, in `load_daily` of `demo/sources.py`, and in a similar form in `window` of `ecb.py`, `bank_of_italy.py` and `nbk.py`, all in `airflow/dags/agoranomos_pipelines/`. The views of the facts mark a row `is_final` when the day on which its load ended, in the time zone of the account, is at least `W` days after the day of the row ([ADR-0037](0037-serve-the-marts-as-views-over-the-core.md), `dbt/models/marts/ad_stats_campaign_daily.sql`, the doc block `is_final` of `dbt/models/_docs.md`).
+
+Only one load makes a day final: the one in which the day is the oldest of its window. When that load does not run or is not accepted, because the stack is off, or the account fails or is in quarantine, the next window starts a day later. The day was read last at the age `W − 1`, no daily load reads it again, and the history planner takes only the days that no window holds (`missing` of `history.py`), so the day stays not final for good. With `W` = 90, 1 September becomes final through the load of 30 November, whose window is 1 September to 29 November. If that load is missed, the load of 1 December starts at 2 September, and 1 September keeps the load of 29 November, which ended 89 days after it. A run of `N` daily loads missed in a row loses `min(N, W − 1)` days of each account. The documentation names only a stop longer than the window ([The data model](../reference/data-model.md), "The final days in the views").
+
+**A4, the retention of the loads takes the load of every row of a fact in turn.** The DAG of maintenance deletes the accepted rows of the kind `window` of `core.loads` that ended more than 13 months ago (`core_loads_delete` of `maintenance.py`), as the row `core.loads` of the table of [ADR-0036](0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md) and "Retention" of [ADR-0044](0044-keep-the-core-for-good-and-change-it-by-migrations.md) say, as [ADR-0046](0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md) superseded it in part. It keeps the newest accepted load of the kind `window` of each account, those newer than the oldest pinned load of the account, and those whose row `_dlt_loads` still holds, but asks nothing of the facts. The deletion of the kind `intraday` keeps a load that a fact still names (`core_intraday_loads_delete`, [ADR-0051](0051-take-the-current-day-as-a-load-of-the-kind-intraday.md)); that of the kind `window` has no such condition.
+
+Each daily load stays the newest load of the oldest day of its window, as the next window starts a day later, so the facts of that day keep its `load_sk`. From 13 months after the first daily load of an account, each day loses its load in turn, one a day:
+
+* the views of the facts join `core.loads` on `load_sk`, so they show the day with `loaded_at` none and `is_final` false;
+* the history planner reads the windows of the kinds `window` and `history` in `core.loads` and in the journal of the source, joined to `_dlt_loads`, whose rows mostly go after 90 days (`known_windows` and `missing` of `history.py`), so it sees the day as never loaded and plans a load of the history for it: a day more each day, each one a load, a run of the transform and a write in a frozen month (audit finding C1).
+
+`core.loads` exists since v0.5.0, released on 15 November 2026, so the first accepted rows of the kind `window` of a deployment reach 13 months in December 2027 at the earliest, and no deployment has lost one yet.
+
+How does a daily window read again a day that a missed load left, and how long does `core.loads` keep a load that the facts name?
+
+## Decision Drivers
+
+* `is_final` means what ADR-0037 makes it mean: the warehouse read the row at the full age of the window of its platform, so no later load changes it.
+* A stop of any length closes by itself, and no day of it is read too young or left out (ADR-0038).
+* Each row of a fact keeps the load that wrote it, which the views and the history planner read.
+* One rule of the window for every source that takes a window of restatements, in one place.
+* A longer window costs only what a stop left to read again.
+* The core is the archive ([ADR-0044](0044-keep-the-core-for-good-and-change-it-by-migrations.md)), and its journals stay small beside its facts.
+
+## Considered Options
+
+For the window of a daily load (A3):
+
+* `[min(yesterday + 1 − W, last accepted day + 2 − W), yesterday]`, for every load that takes a window of restatements, through one function of `windows.py`
+* `is_final` by the calendar age of the day, with the window as it is
+* The code as it is, with the loss documented
+
+For the retention of `core.loads` (A4):
+
+* The accepted loads of the kind `window` stay for good, as those of the kind `history` do
+* Keep only the accepted loads that a fact still names
+* A history planner that reads the days of the facts instead of the windows of the loads
+
+## Decision Outcome
+
+The maintainer chose on 24 November 2026: "`[min(yesterday + 1 − W, last accepted day + 2 − W), yesterday]`" and "The accepted loads of the kind `window` stay for good". The first makes every day that a stop leaves read again at the full age of its window, so `is_final` holds for every day that the warehouse read at that age. The second keeps the load of every row of a fact, at the cost of a journal that grows by about one row a day for each account.
+
+In practice this means:
+
+* **The window.** A daily load of an account takes `[min(yesterday + 1 − W, last accepted day + 2 − W), yesterday]` in its time zone. On a day after an accepted load, the last accepted day is the day before yesterday, both terms are `yesterday + 1 − W`, and the window is the usual `W` days. After `N` days without an accepted load the window is `W + N` days, against `max(W, N + 1)` today, and each day of the stop is read at an age of at least `W`: in the example above, the load of 1 December takes 1 September to 30 November, 91 days, and reads 1 September at the age of 91. With no last accepted day, as for the first load of an account, the window stays the last `W` days.
+* **Every source.** The rule holds for every load that takes a window of restatements: Google Ads, Meta, TikTok, GA4, the five platforms of the demo and the three sources of rates, the ECB, the Bank of Italy and the NBK. One function of `airflow/dags/agoranomos_pipelines/windows.py` gives the window from the last day of the load, the last day that the watermark of the source gives and `W`, and each source calls it instead of a formula of its own. Each source keeps its watermark: the last accepted day of a whole load in `core.loads` for Google Ads, Meta, TikTok and GA4, and the last day of a whole load in the journal of the source (`loads.recorded`) for the demo and the rates. The sources of rates keep their own first load and their history (`rates.history_from`).
+* **`is_final` and its caveat.** The definition of `is_final` stays. Its documentation loses the caveat of a stop longer than the window, as a stop of any length now ends with each of its days read at that age.
+* **The loads stay.** The accepted loads of the kind `window` stay in `core.loads` for good, as those of the kind `history` already do. The DAG of maintenance keeps deleting the accepted loads of the kind `intraday` older than 14 days that no fact names (ADR-0051), and deletes nothing else of `core.loads`. Nothing else of the retention changes: the journals of restatements keep their 13 months by month, `_dlt_loads` its 90 days, and the rest of the table of ADR-0044.
+
+The other options were not chosen for these reasons:
+
+* **`is_final` by the calendar age of the day** would mark final a day that the warehouse read last at a lower age, whose numbers the platform may have changed after that read. The column would then say what the warehouse cannot know.
+* **The code as it is, with the loss documented**, keeps a day not final for each missed load, for good, which a person can repair only by a load of the history by hand. A stack that a laptop runs misses loads often.
+* **Keeping only the loads that a fact still names** keeps almost the same rows, as each daily load is the newest load of the oldest day of its window, and adds a check over every fact to each run of the maintenance, as `core_intraday_loads_delete` does over the fact of campaigns.
+* **A planner that reads the facts** would settle C1, but not the views, which would still show the days without their load, with `loaded_at` none and `is_final` false.
+
+### Consequences
+
+* Good, because `is_final` holds for every day that the warehouse read at the age of its window, whatever the length of a stop, and the documentation needs no caveat for a stop.
+* Good, because the window has one rule in one function, where the code has eight copies of it today.
+* Good, because each row of a fact keeps its load, so the views keep `loaded_at` and `is_final`, and the history planner never plans a day again that a window holds.
+* Bad, because the first load after a stop is longer, for as many days as the stop lasted.
+    * The transform: the write of a window grows with its days, 4 to 12 minutes for 90 days at the density of the limit, during which the readers lost 30 to 70% of their transactions a second ([#224](https://github.com/agoranomos/agoranomos/issues/224), [#199](https://github.com/agoranomos/agoranomos/issues/199)). One missed load makes the next window of Google Ads 91 days instead of 90; a stop of 30 days, 120 days instead of 90; a stop of 120 days, 210 days instead of 121. Each is once, in the first accepted load after the stop.
+    * Google Ads: a request costs one operation whatever its days ([#224](https://github.com/agoranomos/agoranomos/issues/224), [ADR-0032](0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md)), so a longer window costs no operation more than the twelve of an account.
+    * Meta: a request costs one call, whatever its days, and one more for each further page ([ADR-0050](0050-connect-meta-with-an-app-and-a-system-user-of-the-deployment.md)), so a longer window costs the pages of its rows; a synchronous request that fails with too much data goes again as a report run.
+    * TikTok: a report by day takes at most 30 days, so a window takes ranges of at most 30 days at each level ([ADR-0053](0053-connect-tiktok-with-an-app-of-the-deployment.md)). A window of `28 + N` days takes two ranges from `N` = 3, four more reports for each advertiser, where today a stop needs 30 days for that.
+    * GA4: a window is one report with one date range, whose core tokens grow with the length of the range ([ADR-0054](0054-connect-ga4-with-a-service-account-of-the-deployment.md)), far below the 200,000 of a property a day.
+    * The rates: the ECB answers the days of a load in one request; the Bank of Italy takes one request for each weekday, at most one a second, and the NBK one for each calendar day, at least a second apart ([ADR-0042](0042-take-the-rates-from-the-bank-of-italy-and-the-national-bank-of-kazakhstan.md)), so their load after a stop of `N` days asks up to `N` more times.
+    * An account in quarantine keeps the rows of its pinned loads in the raw layer until a run accepts them (ADR-0046), and under this rule each of its daily loads is a day longer than the one before, from the first day of the quarantine.
+* Bad, because a daily window can now replace days that the core holds in a frozen month. The freeze refuses the change of a row of a month that ended more than 92 days before the current date (`postgres/migrations/0005_create_the_facts.sql`, `frozen_before` of `dbt/macros/facts.sql`, `FROZEN_DAYS` of `maintenance.py`), two days past the longest window of 90 days. Today a window after a stop starts at the day after the last accepted day, which the core does not hold yet. Under this rule a window of Google Ads starts before the frozen bound after about 3 to 33 days without an accepted load, by the day of the month, and its write replaces rows of a frozen month as a load of the history does: the pre-hook `fact_thaw` lifts the freeze for the transaction of the write when it replaces rows that the fact holds in a frozen month, whatever the kind of the load, and the maintenance freezes the month again. A later change that narrows the lifting of the freeze to the loads of the kind `history` (audit finding C3) must keep this case, a load of the kind `window` that starts before the frozen bound.
+* Neutral, because `core.loads` grows: one row for each account and load, so about 365 rows a year for each account from its daily loads, 73,000 a year for 200 accounts, beside the portions of the history, about 13 for each account, and the rows of the kind `intraday` of the last 14 days. The agency profile writes about 25,000 rows of facts a day, 15,000 of them of ads ([System requirements](../reference/system-requirements.md#the-agency-on-synthetic-data)), about 9 million a year, so `core.loads` stays under 1% of the rows of the facts.
+* Bad, because the days that a deployment lost to A3 before this record stay not final until a load of the history takes them again. A person finds them in the views as rows with `is_final` false and `is_partial_day` false whose day is older than `restatement_window_days` of `ad_platforms` before today, and loads their period again by triggering the daily DAG of the source with its parameters, `window_from`, `window_to` and `accounts`, as the guides of the connectors say ([Connect Google Ads](../how-to/connect-google-ads.md#when-the-history-arrives), [Connect Meta](../how-to/connect-meta.md#when-the-history-arrives), [Connect TikTok](../how-to/connect-tiktok.md#when-the-history-arrives), [Connect GA4](../how-to/connect-ga4.md#when-the-history-arrives)). Such a run is a load of the kind `history`, which ends more than `W` days after those days, so its rows are final at once. No deployment has lost a load to A4 yet, as its first rows reach 13 months in December 2027 at the earliest.
+* Neutral, because the short cycle and the filter `kind <> 'intraday'` of every reader of a watermark do not change (ADR-0051): a load of the kind `intraday` neither moves the last accepted day nor counts in a window. The readers of the last accepted day in `meta_ads.py` and `tiktok_ads.py` lack that filter today (audit finding B7); no load of Meta or TikTok has the kind `intraday`, as neither has a short cycle, and the change that implements this record adds the filter to both.
+
+### Confirmation
+
+Unit tests of the function of `windows.py` check the usual window, a first load with no last accepted day, one missed load, a stop of 30 days and one of 120 days, each with the age at which every day of the stop is read, and that each of the eight places that compute a window today calls the function. Unit tests of the maintenance check that its SQL deletes no accepted row of the kinds `window` and `history`, whatever its age, and still deletes the old rows of the kind `intraday` that no fact names. A stack test makes the core forget a daily load of the demo, runs the next daily load and the transform, and checks that the day that the missed load would have made final is final, with its load in `core.loads`. The code review checks that no window of a source is computed outside `windows.py`.
+
+## More Information
+
+* **Implementation status, as of November 2026:** not built yet. A pull request of its own implements it, and changes:
+    * `airflow/dags/agoranomos_pipelines/windows.py`, with the function of the window;
+    * `google_ads.py`, `meta_ads.py`, `tiktok_ads.py` and `ga4.py`, whose `window` calls it, with the filter of the kind `intraday` in `accepted` of `meta_ads.py` and `tiktok_ads.py`; `demo/sources.py`, whose `load_daily` calls it; `ecb.py`, `bank_of_italy.py` and `nbk.py`, whose `window` calls it, all in `airflow/dags/agoranomos_pipelines/`;
+    * `maintenance.py`, whose `core_loads_delete` goes, with `LOADS_MONTHS`, and whose `clean_core_loads` keeps only the deletion of the kind `intraday`;
+    * the tests `tests/unit/test_windows.py`, `test_google_ads_source.py`, `test_meta_ads_source.py`, `test_tiktok_ads_source.py`, `test_ga4_source.py`, `test_demo_sources.py`, `test_ecb_source.py`, `test_bank_of_italy_source.py`, `test_nbk_source.py`, `test_maintenance.py` and `test_retention.py` of `tests/unit/`, and `tests/stack/test_retention.py` and `tests/stack/test_demo_load.py`;
+    * the doc block `is_final` of `dbt/models/_docs.md`, the comment on `is_final` of `dbt/models/marts/ad_stats_campaign_daily.sql`, the comment of `pinned_loads` in `dbt/macros/newest_load.sql`, which counts the accepted loads of 13 months, and the docstrings of the sources that state the formula;
+    * the documentation: "The final days in the views" of `docs/reference/data-model.md`, the retention of `docs/reference/configuration.md`, the task `clean_core_loads` of `docs/how-to/watch-the-pipeline.md`, and the line of the DAG of maintenance in `AGENTS.md`.
+* The facts behind this record, read in the code of `main` at `f7976c5` on 24 November 2026: `window` of `google_ads.py`, `meta_ads.py`, `tiktok_ads.py`, `ga4.py`, `ecb.py`, `bank_of_italy.py` and `nbk.py`, and `load_daily` of `demo/sources.py`, each with the last day that its watermark gives plus one day; `accepted` of `google_ads.py` and `ga4.py` with `kind <> 'intraday'`, and of `meta_ads.py` and `tiktok_ads.py` without it; `recorded` of `loads.py`, which leaves the kind `intraday` out; `missing` and `known_windows` of `history.py`; `core_loads_delete`, `core_intraday_loads_delete`, `clean_core_loads`, `FROZEN_DAYS`, `LOADS_MONTHS` and `INTRADAY_DAYS` of `maintenance.py`; `is_final` and the join on `load_sk` in the views of the facts (`dbt/models/marts/`); `fact_thaw`, `frozen_before` and `window_start` of `dbt/macros/facts.sql`; `pinned_loads` of `dbt/macros/newest_load.sql`; the trigger `freeze_the_months_before_the_window` of `0005_create_the_facts.sql`; the table `core.loads` and its index `loads_last_accepted` (`0006_create_the_journals.sql`); `ranges` of `tiktok_ads.py`, of at most 30 days; and the windows of the seed of the platforms: 90 days for `google_ads` and `demo_search`, 28 for `meta_ads`, `tiktok_ads`, `demo_social` and `demo_video`, 14 for `ga4`, `demo_web`, `ecb`, `bank_of_italy` and `nbk`, and 7 for `demo_fx`.
+* Not checked yet, and to be checked with the code:
+    * The plans of the readers of `core.loads` over the rows of several years, at 200 accounts: `pinned_loads`, whose third part joins the accepted whole loads of an account with its pinned loads of the kind `intraday`, `known_windows`, which reads every window of an account, `accepted`, and the views of Ops over the table.
+    * The time of the transform for a window of Google Ads of 120 days at the density of the agency, beside one of 90.
+* Related decisions: at acceptance this record replaces, in ADR-0038, `last accepted day + 1` in the formula of "The window", with its sentence "The second term widens the window after a stop to the last accepted day"; in ADR-0036, "13 months" of the row `core.loads` of "The facts"; in ADR-0044, the 13 months of `core.loads` in "Retention", as ADR-0046 left it; and in ADR-0046, "the DAG of maintenance deletes the rows past 13 months" of "`core.loads`". [ADR-0050](0050-connect-meta-with-an-app-and-a-system-user-of-the-deployment.md), [ADR-0053](0053-connect-tiktok-with-an-app-of-the-deployment.md) and [ADR-0054](0054-connect-ga4-with-a-service-account-of-the-deployment.md) repeat the formula of ADR-0038 for their sources, and the new one holds for them too. The rest of those records stands. [ADR-0051](0051-take-the-current-day-as-a-load-of-the-kind-intraday.md) keeps its decision, with the retention of the loads of the kind `intraday`.
+* Revisit this record if a platform needs a window longer than the freeze allows, or if the measurements above show that a window after a long stop has to be split.

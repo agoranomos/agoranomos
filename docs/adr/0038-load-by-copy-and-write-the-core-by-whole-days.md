@@ -12,6 +12,8 @@ Superseded in part by [ADR-0051](0051-take-the-current-day-as-a-load-of-the-kind
 
 Superseded in part by [ADR-0053](0053-connect-tiktok-with-an-app-of-the-deployment.md): the window of restatements of TikTok in "The window", 7 days, which becomes 28. The rest of this record stays accepted.
 
+Superseded in part by [ADR-0055](0055-read-each-day-at-the-end-of-its-window-and-keep-the-loads.md): `last accepted day + 1` in the window of a daily load of "The window", which becomes `last accepted day + 2 − W`, so that each day that a stop leaves is read again at the full age of its window. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 [ADR-0004](0004-ingest-with-dlt.md) merges rows on natural keys into raw tables that stay for good, and calls data final up to yesterday. In the code, the keys are not set, so a delete of a window walks a table by a chain of `OR`; the load goes by `INSERT ... VALUES`, whose backends the kernel killed 29 times in one morning of October 2026 on a test stack, under the limit of 384 MiB of `warehouse-db`, until files of 5,000 rows and two workers stopped it; and nothing connects a load to the run of dbt that reads it.
