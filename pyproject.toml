@@ -14,13 +14,14 @@ dev = [
     "pytest==9.2.0",
     "pytest-xdist==3.8.0",
     "ruff==0.17.6",
-    "zensical==0.1.2",
+    "zensical==0.1.3",
 ]
 
 [tool.uv]
 # The root is a workspace for tooling and future packages; it is never built or installed itself.
 package = false
-# The minimum uv version: an older uv stops with an error. CI uses the exact version pinned in ci.yml and stack.yml.
+# The minimum uv version: an older uv stops with an error. CI uses the exact version pinned in the workflows
+# that install it: ci.yml, stack.yml, docs.yml, profile.yml and upgrade.yml.
 required-version = ">=0.12.22"
 
 [tool.ruff]

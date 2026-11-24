@@ -13,13 +13,15 @@
 -- carries no filter of a period across a join (B16). The primary actions are an array that the
 -- query reads once, so that the lookup is a condition of the index. The columns of v0.4 come
 -- first, in their order, and the later ones after them. A row of a day still in progress in its
--- account, which only a load of the kind intraday took, carries is_partial_day (ADR-0051). A row
--- is final, is_final, when the day on which its load ended, in the time zone of the account, is
--- at least the window of restatements of its platform after the day of the row, and the day is
--- whole: a daily load takes again only the days of the window, so no later load changes the row
--- (ADR-0037, ADR-0038). It follows the load and not the calendar: after a missed daily load, or a
--- stop of any length, the next window starts a day earlier for each missed load, so each day is
--- read once at the age of the window or more and becomes final then (windows.daily_window of
+-- account, which only a load of the kind intraday took, carries is_partial_day (ADR-0051); it has
+-- no conversions, so conversions_primary is none on it, as the other conversions of the row are,
+-- and 0 only on a whole day of a campaign without a primary conversion. A row is final, is_final,
+-- when the day on which its load ended, in the time zone of the account, is at least the window of
+-- restatements of its platform after the day of the row, and the day is whole: a daily load takes
+-- again only the days of the window, so no later load changes the row (ADR-0037, ADR-0038). It
+-- follows the load and not the calendar: after a missed daily load, or a stop of any length, the
+-- next window starts a day earlier for each missed load, so each day is read once at the age of the
+-- window or more and becomes final then (windows.daily_window of
 -- airflow/dags/agoranomos_pipelines/windows.py). A row whose load or platform the view does not
 -- find is not final, rather than none.
 -- Metabase reads the marts layer only.
@@ -51,7 +53,10 @@ select
     m.campaign_type,
     m.is_listed,
     f.all_conversions,
-    cast(coalesce(q.conversions_primary, 0) as numeric(18,6)) as conversions_primary,
+    cast(
+        case when not f.is_partial_day then coalesce(q.conversions_primary, 0) end
+        as numeric(18,6)
+    ) as conversions_primary,
     r.rate_into_reporting_currency as fx_rate_into_reporting_currency,
     r.published_on as fx_rate_date,
     r.is_carried_forward as is_fx_rate_carried_forward,

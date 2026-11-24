@@ -27,7 +27,7 @@ The cards of web analytics take the period, the time grouping and the client onl
 
 - **Overview.**
     - The KPIs: spend, conversions and cost per conversion of the primary conversion actions, ROAS, clicks, CTR and CPC, and the key events of web analytics beside them. Each shows its last period of the time grouping, compared with the one before.
-    - **Today, as of the load**: the spend, the clicks and the impressions of each account on its partial days, the current day in its time zone and the day before until the daily load takes it, with the day and the moment when the load of the current day ended. It takes every filter but the period and the time grouping. It is empty while no load of the current day has come.
+    - **Today, as of the load**: the spend, the clicks and the impressions of each account on its partial days, the current day in its time zone and the day before until the daily load takes it, with the day and the moment when the load of the current day ended. Only Google Ads and, with the demo, `demo_search` load the current day ([When today arrives](connect-google-ads.md#when-today-arrives)), so the card shows no account of another platform. It takes every filter but the period and the time grouping. It is empty while no load of the current day has come.
     - The spend and the conversions over time, a text about how to read the numbers, the results of each platform, the spend of each client, the top ten campaigns by spend, and the last load of each account.
 - **Platforms.** Every statistic and KPI of each platform, with the conversions of the primary conversion actions and those of the own metric of the platform side by side, and its spend and conversions over time.
 - **Campaigns.** Every campaign with its state, its statistics and KPIs, by platform and account.
@@ -37,8 +37,8 @@ The cards of web analytics take the period, the time grouping and the client onl
 A click on a campaign, in the table of the campaigns or of the top campaigns, opens the tab **Ad groups and ads** with the filter **Campaign** set to it.
 
 <figure class="ag-shot" markdown="span">
-    ![The tab Campaigns of the dashboard Advertising in Metabase: every campaign with its platform, account, statistics and KPIs](../assets/screenshots/advertising-campaigns-light.webp#only-light){ width="1440" height="900" loading="lazy" }
-    ![The tab Campaigns of the dashboard Advertising in Metabase: every campaign with its platform, account, statistics and KPIs, in the dark theme](../assets/screenshots/advertising-campaigns-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
+    ![The tab Campaigns of the dashboard Advertising in Metabase: its filters, among them Campaign state, and every campaign with its platform, account, state, statistics and KPIs](../assets/screenshots/advertising-campaigns-light.webp#only-light){ width="1440" height="900" loading="lazy" }
+    ![The tab Campaigns of the dashboard Advertising in Metabase: its filters, among them Campaign state, and every campaign with its platform, account, state, statistics and KPIs, in the dark theme](../assets/screenshots/advertising-campaigns-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
     <figcaption>Metabase · agoranomos / Advertising · the tab Campaigns · demo data</figcaption>
 </figure>
 

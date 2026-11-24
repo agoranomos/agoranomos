@@ -9,7 +9,7 @@ A source goes through every layer of the model ([ADR-0025](../../../docs/adr/002
 
 ## Decide first
 
-- **The shape.** Each API shape has one macro in `dbt/macros/shapes/`, which the demo and the connector of that platform share: `google_ads_v25`, `meta_v26`, `tiktok_v1_3`, `ga4_v1beta` and `euro_rates`. A source of a shape that exists calls its macros. A new shape gets a new macro file, which follows the rules of ADR-0025:
+- **The shape.** Each API shape has one macro in `dbt/macros/shapes/`, which the demo and the connector of that platform share: `google_ads_v25`, `meta_v26`, `tiktok_v1_3` and `ga4_v1beta`, and for the rates `euro_rates` of the demo, which `ecb_exr`, `bank_of_italy_rates` and `nbk_rates` follow for the ECB, the Bank of Italy and the NBK. A source of a shape that exists calls its macros. A new shape gets a new macro file, which follows the rules of ADR-0025:
     - money as `numeric(18,6)`, in the currency of the account, through the macros of `dbt/macros/numbers.sql`;
     - a name of a platform through `to_name` of `dbt/macros/names.sql`, as an empty one is none;
     - `report_date` in the time zone of the account;
@@ -17,7 +17,7 @@ A source goes through every layer of the model ([ADR-0025](../../../docs/adr/002
     - conversions as the platform counts them;
     - the common state of a campaign, an ad group or an ad, `active`, `paused`, `removed` or `other`, beside its status, through one macro of the shape that maps the statuses of the platform, such as `google_ads_state` ([ADR-0036](../../../docs/adr/0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md)).
 - **The code of the platform.** A real platform keeps its own code, such as `google_ads`. A demo platform gets a code that starts with `demo_`.
-- **The reload window.** How many recent days each daily load takes again, as the platform still changes them.
+- **The reload window.** How many recent days each daily load takes again, as the platform still changes them: the window of restatements, at most 90 days, whose one place is the seed of the platforms (step 6).
 - **A decision record.** A significant choice gets an ADR in `docs/adr/` before the code: how a connector gets its credentials, or a new grain or mart, for example. It starts as `proposed`.
 
 ## The places to change
@@ -25,8 +25,9 @@ A source goes through every layer of the model ([ADR-0025](../../../docs/adr/002
 1. **The warehouse.** In `postgres/warehouse.sql`, add the schemas `raw_<platform>` and `raw_<platform>_staging`, which dlt asks for after each load, to empty it, and which stays empty, as every table of a load appends. Both are owned by `loader`, and `transformer` gets usage and select on the first. Copy the block of the example; `tests/unit/test_postgres_files.py` reads its form.
 2. **The load.** A dlt source loads, as `loader`, into `raw_<platform>` ([ADR-0004](../../../docs/adr/0004-ingest-with-dlt.md)). The demo's loads are in `airflow/dags/agoranomos_pipelines/demo/`:
     - `sources.py` holds the table hints;
-    - `platforms.py` holds the fact tables, with the columns of their account and day, and the reload window;
-    - `assets.py` holds the asset of the main table, and `LOADED` there, the condition that starts the transform, takes the asset of a new source ([ADR-0039](../../../docs/adr/0039-run-one-dbt-build-in-the-watcher-mode.md)).
+    - `platforms.py` holds the fact tables, with the columns of their account and day; the reload window is not there, as each load reads it from the seed of the platforms when it runs, through `restatement_window_days` of `airflow/dags/agoranomos_pipelines/windows.py`.
+
+    `airflow/dags/agoranomos_pipelines/assets.py` holds the asset of the main table of each source, and `LOADED` there, the condition that starts the transform, takes the asset of a new source ([ADR-0039](../../../docs/adr/0039-run-one-dbt-build-in-the-watcher-mode.md)).
 
     Every table appends the rows of each load under its own `_dlt_load_id` (`APPEND` of `loads.py`), with no keys and no scope: a fact table the rows of its windows, and a table of the entities, the accounts, campaigns, ad groups and ads, the full list of each account that the load took, with no versions of dlt; and every load also records the window of each account that it took in the journal `_agoranomos_loads`, with `LOAD_HINTS` of `loads.py`, in the same run, so under the same id ([The raw layer](../../../docs/reference/data-model.md#the-raw-layer)). Give every table and column hint the reason that the code around it gives.
 
@@ -46,7 +47,7 @@ A source goes through every layer of the model ([ADR-0025](../../../docs/adr/002
 
     The marts are views over the core, and need no change for a new platform ([The marts](../../../docs/reference/data-model.md#the-marts)).
 5. **Ops.** Add the platform's schema and code to the list of `dbt/models/ops/ops_loads.sql`, which reads its `_agoranomos_loads`.
-6. **Seeds.** Add a row to `dbt/seeds/seed_ad_platforms.csv`. Add the conversion actions of the platform, with their categories and which are primary, to `seed_conversion_actions.csv`.
+6. **Seeds.** Add a row to `dbt/seeds/seed_ad_platforms.csv`, with the window of restatements in `restatement_window_days`, its one place, which `marts.ad_platforms` shows too: a load of a platform that has no row there, or no window, stops with a line that names the seed, and `tests/unit/test_windows.py` checks that no window is longer than 90 days, the freeze of the facts of the core. Add the conversion actions of the platform, with their categories and which are primary, to `seed_conversion_actions.csv`.
 7. **Metadata.** Every mart, column and display name stays described as [Describe the marts](../../../docs/reference/describe-the-marts.md) says. A new column that more than one model has takes a doc block in `dbt/models/_docs.md`.
 8. **Tests.**
     - The unit tests: `tests/unit/test_dbt_project.py` maps each platform to its shape macros and raw tables.
