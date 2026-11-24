@@ -50,8 +50,8 @@ FRESH_SECONDS=93600
 RETRY_SECONDS=3600
 # A backup by hand waits this long for one that runs, such as the scheduled one.
 LOCK_WAIT_SECONDS=600
-# A dump that a run of the transform breaks starts again, up to this many times in all, this far
-# apart (dump_database).
+# A dump that a dropped relation breaks starts again, up to this many times in all, this far apart
+# (dump_database).
 DUMP_TRIES=5
 DUMP_PAUSE_SECONDS=30
 
@@ -134,13 +134,15 @@ step() {
 }
 
 # The dump of one database, $1 on the host $2, into the partial backup: the custom format of pg_dump,
-# with zstd. Each run of the transform replaces the views of the schema staging, by a new view, a
-# rename and a drop, and pg_dump locks the tables that it dumps but no view (PostgreSQL 18): a dump
-# that reads the definition of a view that a run dropped after the dump began fails, with "could
-# not open relation with OID" or "cache lookup failed". pg_dump reads every definition before the
-# first row of data, so such a failure comes early, and the dump starts again, up to DUMP_TRIES
-# times in all, DUMP_PAUSE_SECONDS apart. Any other failure stops the backup at once. What pg_dump
-# says goes to standard error when it ends.
+# with zstd. A relation that another process drops while the dump begins fails it. Each run of the
+# transform replaces the views of the schema staging, by a new view, a rename and a drop, and
+# Metabase replaces the tables of its search index in its own database. pg_dump lists the relations
+# of the catalog, then locks the tables that it dumps but no view (PostgreSQL 18): a table dropped
+# between the list and the lock fails with "relation ... does not exist", and a view whose
+# definition it reads after the drop with "could not open relation with OID" or "cache lookup
+# failed". pg_dump locks and reads every definition before the first row of data, so such a failure
+# comes early, and the dump starts again, up to DUMP_TRIES times in all, DUMP_PAUSE_SECONDS apart.
+# Any other failure stops the backup at once. What pg_dump says goes to standard error when it ends.
 dump_database() {
   dump_try=1
   while :; do
@@ -152,11 +154,12 @@ dump_database() {
     [ -z "$dump_errors" ] || printf '%s\n' "$dump_errors" >&2
     case $dump_errors in
       *"could not open relation with OID"* | *"cache lookup failed"*) ;;
+      *'ERROR:  relation "'*'" does not exist'*) ;;
       *) return 1 ;;
     esac
     [ "$dump_try" -lt "$DUMP_TRIES" ] || return 1
     dump_try=$((dump_try + 1))
-    say "a run of the transform changed the catalog of $1 while it was dumped: dumping it again in $DUMP_PAUSE_SECONDS seconds ($dump_try of $DUMP_TRIES)"
+    say "a relation of $1 was dropped while it was dumped, as a run of the transform or Metabase replaces one: dumping it again in $DUMP_PAUSE_SECONDS seconds ($dump_try of $DUMP_TRIES)"
     sleep "$DUMP_PAUSE_SECONDS"
   done
 }

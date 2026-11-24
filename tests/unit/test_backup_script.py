@@ -92,14 +92,21 @@ if [ -n "${{FAKE_FAIL_UNTIL:-}}" ]; then
 fi
 case " ${{FAKE_FAIL:-}} " in *" {name}:$target "*) exit 1 ;; esac
 # FAKE_DDL: the first FAKE_DDL_TIMES runs on this target, 1 by default, fail as a dump fails whose
-# catalog a run of the transform changed meanwhile. The runs are counted in a file.
+# catalog changed meanwhile: a view that a run of the transform dropped, or with FAKE_DDL_KIND=table
+# a table that Metabase dropped between the list and the lock. The runs are counted in a file.
 case " ${{FAKE_DDL:-}} " in *" {name}:$target "*)
   runs=$(cat "$FAKE_LOG.ddl" 2> /dev/null || echo 0)
   runs=$((runs + 1))
   echo "$runs" > "$FAKE_LOG.ddl"
   if [ "$runs" -le "${{FAKE_DDL_TIMES:-1}}" ]; then
-    echo "pg_dump: error: query failed: ERROR:  could not open relation with OID 31993" >&2
-    echo "pg_dump: detail: Query was: SELECT pg_catalog.pg_get_viewdef('31993'::pg_catalog.oid)" >&2
+    if [ "${{FAKE_DDL_KIND:-view}}" = table ]; then
+      echo 'pg_dump: error: query failed: ERROR:  relation "public.search_index__x" does not' \
+        'exist' >&2
+      echo "pg_dump: detail: Query was: LOCK TABLE public.search_index__x" >&2
+    else
+      echo "pg_dump: error: query failed: ERROR:  could not open relation with OID 31993" >&2
+      echo "pg_dump: detail: Query was: SELECT pg_catalog.pg_get_viewdef('31993'::oid)" >&2
+    fi
     exit 1
   fi ;;
 esac
@@ -485,8 +492,22 @@ def warehouse_dumps(backups: Path) -> list[str]:
 
 
 @pytest.mark.parametrize("shell", SHELLS)
-def test_a_dump_that_a_run_of_the_transform_breaks_starts_again(shell, backups):
-    result = run(shell, backups, "now", FAKE_DDL="pg_dump:warehouse", FAKE_DDL_TIMES="2")
+@pytest.mark.parametrize(
+    ("kind", "said"),
+    [
+        ("view", "could not open relation with OID 31993"),
+        ("table", 'relation "public.search_index__x" does not exist'),
+    ],
+)
+def test_a_dump_that_a_dropped_relation_breaks_starts_again(shell, backups, kind, said):
+    result = run(
+        shell,
+        backups,
+        "now",
+        FAKE_DDL="pg_dump:warehouse",
+        FAKE_DDL_TIMES="2",
+        FAKE_DDL_KIND=kind,
+    )
     assert result.returncode == 0, result.stderr
     assert sorted(path.name for path in (backups / NAME).iterdir()) == sorted(
         [*FILES, "SHA256SUMS", "manifest.json"]
@@ -494,11 +515,12 @@ def test_a_dump_that_a_run_of_the_transform_breaks_starts_again(shell, backups):
     assert len(warehouse_dumps(backups)) == 3
     for attempt in (2, 3):
         assert (
-            "backup: a run of the transform changed the catalog of warehouse while it was dumped: "
+            "backup: a relation of warehouse was dropped while it was dumped, as a run of the "
+            "transform or Metabase replaces one: "
             f"dumping it again in 30 seconds ({attempt} of 5)"
         ) in result.stdout.splitlines()
     # What pg_dump said of each failed try stays in the output.
-    assert result.stderr.count("could not open relation with OID 31993") == 2
+    assert result.stderr.count(said) == 2
     assert latest(backups)["result"] == "ok"
 
 
