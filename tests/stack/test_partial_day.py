@@ -21,12 +21,14 @@ reads, accepts and cleans the loads of the step, so that the next step starts fr
 then holds:
 
 1. an intraday load alone: today partial, nothing in the other facts or in a journal, and the lists
-   and the dimensions as they were; the card Today, as of the load, of the dashboard Advertising
-   answers the partial rows, and its KPI Spend and the metrics leave them out;
+   and the dimensions as they were; the partial rows of the mart have no conversions, the primary
+   ones none and not 0; the card Today, as of the load, of the dashboard Advertising answers the
+   partial rows, and its KPI Spend and the metrics leave them out;
 2. an intraday load lower than the partial day that the core holds: no quarantine;
 3. a whole load of today, lower still, and an intraday load with a larger load ID, together: the
    day whole from the whole load, no row of the journal, and no quarantine; the card of today
-   answers no row, and the KPI Spend counts today;
+   answers no row, the KPI Spend counts today, and no whole row of the mart has its primary
+   conversions none;
 4. an intraday load after the whole load was accepted: the day stays whole.
 
 The finally deletes the loads of the tests from raw, _dlt_loads, the journal and core.loads, and
@@ -138,6 +140,17 @@ WHOLE_SPEND = (
     "SELECT report_date, sum(spend_reporting) FROM marts.ad_stats_campaign_daily "
     "WHERE NOT is_partial_day AND report_date BETWEEN DATE '{start}' AND DATE '{end}' "
     "GROUP BY 1 ORDER BY 1"
+)
+# The conversions of the mart of the campaigns: the partial rows, those of them with a conversion
+# that is not none, and the whole rows whose primary conversions are none, which the view gives as
+# 0 on a whole day of a campaign without a primary conversion (C3a of #223).
+CONVERSIONS = (
+    "SELECT count(*) FILTER (WHERE is_partial_day), "
+    "count(*) FILTER (WHERE is_partial_day AND (conversions_primary IS NOT NULL "
+    "OR conversions IS NOT NULL OR conversion_value IS NOT NULL "
+    "OR all_conversions IS NOT NULL)), "
+    "count(*) FILTER (WHERE NOT is_partial_day AND conversions_primary IS NULL) "
+    "FROM marts.ad_stats_campaign_daily"
 )
 # The CTR of the whole days of the mart, as the metric CTR (Campaigns) computes it.
 WHOLE_CTR = (
@@ -300,6 +313,15 @@ def quarantine(env):
     return rows(env, "SELECT reason FROM ops.ops_quarantine", "metabase_reader")
 
 
+def partial_rows_of_the_mart(env) -> int:
+    """The number of partial rows of the mart of the campaigns, after a check that none of them
+    has a conversion and that every whole row has its primary conversions, 0 if it has none."""
+    [(partial, converted, unknown)] = rows(env, CONVERSIONS, "metabase_reader")
+    assert converted == "0", f"{converted} partial rows of the mart have conversions"
+    assert unknown == "0", f"{unknown} whole rows of the mart have no conversions_primary"
+    return int(partial)
+
+
 def shown(data):
     """The rows of an answer of Metabase: the first column, the day, as a date, the numbers as
     decimals, and the rest as they come."""
@@ -449,6 +471,8 @@ def test_a_partial_day_stays_below_the_whole_day_that_replaces_it(
         assert rows(env, kind) == [("intraday", "accepted")]
         # The lists and the dimensions as they were: the run read no list of the account.
         assert dimensions(env, sk) == before
+        # The partial rows of the mart have no conversions, the primary ones none and not 0.
+        assert partial_rows_of_the_mart(env) == len(whole)
         # The card of today answers the partial rows of today, of this account alone, and the KPI
         # Spend and the metrics leave them out.
         assert spend(whole) > 0, "the partial day has no spend"
@@ -488,6 +512,8 @@ def test_a_partial_day_stays_below_the_whole_day_that_replaces_it(
         assert journaled == "0"
         # The card of today answers no row, and the KPI Spend counts the whole day.
         assert check_the_dashboard(env, metabase_url, session, last, today) == []
+        # Today whole in the mart, with its primary conversions, 0 as the load had none.
+        assert partial_rows_of_the_mart(env) == 0
 
         # 4. An intraday load after the whole load was accepted: the day stays whole.
         accepted = (

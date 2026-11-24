@@ -453,10 +453,15 @@ def test_the_primary_conversions_of_a_campaign_are_a_lateral_join_of_one_row():
     # B16: the conversions of the primary actions are looked up once for each row of a question
     # by the key of the fact of the conversions by action, and the join is left out of a question
     # that does not read them, as an aggregate with no GROUP BY returns one row. The primary
-    # actions are an array that the query reads once, a condition of the index of that key.
+    # actions are an array that the query reads once, a condition of the index of that key. A
+    # partial day has no conversions, so the column is none on it, and 0 on a whole day of a
+    # campaign without a primary conversion (ADR-0051, C3a of #223).
     text = (DBT / "models" / "marts" / "ad_stats_campaign_daily.sql").read_text(encoding="utf-8")
     column = (
-        "    cast(coalesce(q.conversions_primary, 0) as numeric(18,6)) as conversions_primary,\n"
+        "    cast(\n"
+        "        case when not f.is_partial_day then coalesce(q.conversions_primary, 0) end\n"
+        "        as numeric(18,6)\n"
+        "    ) as conversions_primary,\n"
     )
     assert column in text
     # Only the column reads the join, so that the planner can leave it out.

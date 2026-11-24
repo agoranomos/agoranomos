@@ -142,7 +142,7 @@ The value of the conversions of all_conversions, as the ad platform reports it, 
 {% enddocs %}
 
 {% docs conversions_primary %}
-The conversions of the primary conversion actions of the deployment (is_primary) of the campaign on the day, added up from ad_conversions_campaign_daily, with all_conversions where the platform has it, so that an action that the own metric of the platform leaves out counts too; 0 for a campaign without any. It is the choice of the deployment in extensions/model/conversion_actions.toml, which can differ from conversions, the metric that the account shows. None in a table by ad group or ad, as the conversions by action of those levels are a module of the extended set that is not built yet.
+The conversions of the primary conversion actions of the deployment (is_primary) of the campaign on the day, added up from ad_conversions_campaign_daily, with all_conversions where the platform has it, so that an action that the own metric of the platform leaves out counts too; 0 for a campaign without any on a whole day, and none on a partial day (is_partial_day), which has no conversions, as conversions, conversion_value and all_conversions are none there. It is the choice of the deployment in extensions/model/conversion_actions.toml, which can differ from conversions, the metric that the account shows. None in a table by ad group or ad, as the conversions by action of those levels are a module of the extended set that is not built yet.
 {% enddocs %}
 
 {% docs fx_rate_into_reporting_currency %}
