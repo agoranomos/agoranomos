@@ -16,9 +16,10 @@ in the container of the tasks beside the run of the transform of the short cycle
 as raw_loads.py does, takes yesterday back whole; it ends during that run, so it waits for the next
 one, which the test runs by hand. The finally deletes the loads of the short cycle of the test from
 raw_demo_search, _dlt_loads, the journal and core.loads, and today from the fact of campaigns,
-gives the dimensions back the last day of statistics that they held, and the whole loads their
-windows; if the daily load did not replace yesterday, it loads and transforms once more, so that
-the demo is as before. If the test is killed before that, run agoranomos_demo_daily and the
+gives the dimensions back the last day of statistics that they held, or the last whole day of the
+core when its daily load took a later one, as across a midnight of an account, and the whole loads
+their windows; if the daily load did not replace yesterday, it loads and transforms once more, so
+that the demo is as before. If the test is killed before that, run agoranomos_demo_daily and the
 transform by hand, and delete what the finally deletes: the rows of the kind intraday of
 raw_demo_search._agoranomos_loads, of _dlt_loads and of campaign_stats whose load ID is newer than
 the start of the test, those loads in core.loads, and the rows of today of the two accounts in
@@ -555,17 +556,25 @@ def test_the_short_cycle_writes_partial_days_that_the_daily_load_replaces(
                 f"SET window_to = DATE '{day}' WHERE account_id = '{account_id}' "
                 f"AND _dlt_load_id = '{load_id}'",
             )
+        # The last day of statistics that each dimension held, or the last whole day that the core
+        # holds now when that is later: across a midnight of the account between the start of the
+        # stack and this test, the daily load of the test takes a day whole that the core did not
+        # hold, and a dimension that went back to the day before would take it again in the next
+        # run of the transform, as a change of its row.
         for key, _, day in reported["dim_account"]:
             warehouse_output(
                 env,
-                "UPDATE core.dim_account SET last_report_date = "  # noqa: S608 (values of the core)
-                f"{date_or_null(day)} WHERE account_sk = {key}",
+                "UPDATE core.dim_account SET last_report_date = greatest("  # noqa: S608 (values of the core)
+                f"{date_or_null(day)}, (SELECT max(report_date) FROM core.ad_stats_campaign_daily "
+                f"WHERE account_sk = {key} AND NOT is_partial_day)) WHERE account_sk = {key}",
             )
         for key, campaign, day in reported["dim_campaign"]:
             warehouse_output(
                 env,
-                "UPDATE core.dim_campaign SET last_report_date = "  # noqa: S608 (values of the core)
-                f"{date_or_null(day)} WHERE account_sk = {key} AND campaign_id = {campaign}",
+                "UPDATE core.dim_campaign SET last_report_date = greatest("  # noqa: S608 (values of the core)
+                f"{date_or_null(day)}, (SELECT max(report_date) FROM core.ad_stats_campaign_daily "
+                f"WHERE account_sk = {key} AND campaign_id = {campaign} AND NOT is_partial_day)) "
+                f"WHERE account_sk = {key} AND campaign_id = {campaign}",
             )
     for account_id, day in last.items():
         restored = warehouse_output(
