@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Connect GA4 with a service account of the deployment
 
+Superseded in part by [ADR-0055](0055-read-each-day-at-the-end-of-its-window-and-keep-the-loads.md): `last accepted day + 1` in the window of a daily load of "The window and the history", which becomes `last accepted day + 2 − 14`, so that each day that a stop leaves is read again at the full age of its window. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 [ADR-0032](0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md) put GA4 after Google Ads, because it brings sessions and no spend, and noted that it has "the easiest sign-in of all, a service account with the Viewer role on a property". It left each later source to a record of its own. Later records already decided the parts of GA4 that the model needs: [ADR-0034](0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md) shows the key events of GA4 beside the conversions of the platforms, where the deployment has GA4; [ADR-0036](0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md) gives the facts of GA4 a table of their own on the text keys of the source; [ADR-0038](0038-load-by-copy-and-write-the-core-by-whole-days.md) sets the window of restatements of GA4 to 14 days and the history to portions by quarters; [ADR-0051](0051-take-the-current-day-as-a-load-of-the-kind-intraday.md) takes the current day of the ad platforms.
