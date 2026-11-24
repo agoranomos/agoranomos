@@ -16,6 +16,7 @@ longer one needs a new migration that moves the triggers of the freeze first."""
 from __future__ import annotations
 
 import csv
+from datetime import date, timedelta
 from pathlib import Path
 
 # The dbt project in the services of Airflow (compose.yaml), and that of the checkout of this file,
@@ -52,3 +53,20 @@ def restatement_window_days(platform: str) -> int:
     if platform not in found:
         raise LookupError(f"{seed()} has no row for the platform {platform}")
     return found[platform]
+
+
+def daily_window(last: date, last_end: date | None, width: int) -> tuple[date, date]:
+    """The days of a daily load whose last day is last, for a window of restatements of width
+    days: [min(last + 1 - width, last_end + 2 - width), last], with last_end the last day of the
+    newest whole load before it, or the usual last width days when there is none.
+
+    A day is final once a load has read it at the age of width days or more (the column is_final
+    of the marts). The load whose last day was last_end read the day last_end + 1 - width at that
+    age, so the days from last_end + 2 - width on still wait for theirs. Without a missed load,
+    last is last_end + 1 and the window is the usual one; after k missed loads it starts k days
+    earlier, so that each day that a missed load would have read at that age is read at that age
+    or more, no day is left out, and a stop of any length closes by itself."""
+    usual = last - timedelta(days=width - 1)
+    if last_end is None:
+        return usual, last
+    return min(usual, last_end - timedelta(days=width - 2)), last
