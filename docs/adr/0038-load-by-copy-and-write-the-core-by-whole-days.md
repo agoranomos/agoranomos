@@ -150,7 +150,7 @@ The other options were not chosen for these reasons:
 * Not checked yet, and to be checked before or with the code:
     * Pinning in the watcher mode through Airflow: the check above ran dbt by hand. One `dbt build` is one invocation, so the result should carry over.
     * The initial windows, which come from documentation: `ops.restatements` tells within a month.
-    * A real account of Google Ads: no load has reached one yet.
+    * A real account of Google Ads: the long-running stand of the project loads real accounts since 24 November 2026, and their loads are not compared with this record yet.
     * The quotas of Meta and TikTok for a short cycle, which depend on the level of access, and those of Microsoft, LinkedIn, Yandex and VK.
     * Freshness of today on Yandex and VK.
 * Open at review: SQL migrations are a recommendation of the research, confirmed by a run, with a custom materialization as the fallback.

@@ -73,11 +73,17 @@ The [architecture overview](docs/explanation/architecture.md) describes every pa
 
 You need Docker with at least 6 GB of memory (8 GB recommended), git, and free ports 8080 and 3000 on `127.0.0.1`.
 
+<!-- x-release-please-start-version -->
+
 ```bash
-git clone https://github.com/agoranomos/agoranomos.git
+git clone --branch v0.6.0 https://github.com/agoranomos/agoranomos.git
 cd agoranomos
 ./agoranomos up
 ```
+
+<!-- x-release-please-end -->
+
+`--branch` takes the tag of the latest release, so git says that the checkout is in a detached `HEAD`: that is expected. To work on agoranomos itself, clone without `--branch`, which gives the `main` branch.
 
 `up` creates `.env` with new secrets, checks the machine, builds the Airflow image, starts the stack and waits until every service is healthy and the demo is ready. The first start takes a few minutes, and up to half an hour on a slow machine, where the first transform of the demo takes most of it. Then:
 

@@ -73,11 +73,17 @@ agoranomos создается, чтобы закрыть эти пробелы: 
 
 Понадобятся Docker, которому доступно не меньше 6 ГБ памяти (рекомендуется 8 ГБ), git и свободные порты 8080 и 3000 на `127.0.0.1`.
 
+<!-- x-release-please-start-version -->
+
 ```bash
-git clone https://github.com/agoranomos/agoranomos.git
+git clone --branch v0.6.0 https://github.com/agoranomos/agoranomos.git
 cd agoranomos
 ./agoranomos up
 ```
+
+<!-- x-release-please-end -->
+
+`--branch` берет тег последнего релиза, поэтому git сообщит, что рабочая копия в состоянии detached `HEAD`: так и должно быть. Чтобы работать над самим agoranomos, клонируйте без `--branch`, и вы получите ветку `main`.
 
 `up` создает `.env` с новыми секретами, проверяет машину, собирает образ Airflow, запускает стек и ждет, пока все сервисы станут healthy, а демо будет готово. Первый запуск занимает несколько минут, а на медленной машине до получаса: большую часть времени идет первая сборка демо в dbt. Затем:
 
