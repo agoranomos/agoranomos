@@ -61,7 +61,7 @@ The documentation follows [Diátaxis](https://diataxis.fr/): content is split by
 
     **[How-to guides](how-to/index.md)**
 
-    Recipes for specific tasks, such as adding a data source. Published together with the features they describe: the first guides, [Run agoranomos locally](how-to/run-locally.md), [Deploy on a server](how-to/deploy-on-a-server.md), [Back up and restore](how-to/back-up-and-restore.md), [See the demo](how-to/see-the-demo.md) and [Watch the pipeline](how-to/watch-the-pipeline.md), start the stack in local mode and in server mode, back it up and restore it, cover the demo, from the demo data through the model to a dashboard, and show the health of the pipeline.
+    Recipes for specific tasks, such as [connecting Google Ads](how-to/connect-google-ads.md). Published together with the features they describe, they start the stack in local mode and in server mode, back it up and restore it, cover the demo, connect Google Ads, Meta, TikTok and GA4, manage the clients and their accounts, read the dashboards, connect an AI client through MCP, watch the pipeline and rename the fields of the marts.
 
 -   <span class="ag-n">facts to look up</span>
 
