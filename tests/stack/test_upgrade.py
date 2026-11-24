@@ -3,23 +3,23 @@ demo, then the current code in the same checkout, on the same volumes, and ./ago
 
 The workflow Upgrade runs it in two steps. AGORANOMOS_UPGRADE=before runs on the stack of the
 previous release, once the checkout holds the current code and before ./agoranomos up: it records
-the relations of the warehouse with their oids, the migrations of the core that it has applied,
-the backups, the rows of the marts, the dashboards of the package and the tables and fields of the
-marts as Metabase knows them, and the rates of the core. AGORANOMOS_UPGRADE=after, once
-./agoranomos up has upgraded the stack, checks what the upgrade must do: db-init applied and
-recorded every migration that waited, the rates that the core held keep their rows and their
-source, with no load of their history again (ADR-0042),
-up took a backup before them whose manifest names them, marts-init built the views of the marts
-from the seeds of the current code and dropped the relations of the release that no model builds or
-reads, every card of the dashboards of the package answers, on the same tables and fields of
-Metabase, the metadata of the marts is applied, the raw tables of the demo are in the shape of the
-current code, no relation of the release stays that the current code neither builds nor reads, and
-the demo goes on, with a daily load and a run of the transform. AGORANOMOS_UPGRADE_FILE names the
-file in which the first step leaves what it found for the second. With AGORANOMOS_UPGRADE_SUMMARY,
-the second step appends to that file, such as the summary of a job of CI, the rows of the marts
-before and after, and the relations of the previous release that the upgrade left as they were.
-Without these variables the tests skip: they need a stack of the previous release, which no other
-run of the stack tests has.
+the relations of the warehouse with their oids, the migrations of the core that it has applied, the
+backups, the rows of the marts, the dashboards of the package and the tables and fields of the marts
+as Metabase knows them, the rates of the core and the newest row of core.loads.
+AGORANOMOS_UPGRADE=after, once ./agoranomos up has upgraded the stack, checks what the upgrade must
+do: db-init applied and recorded every migration that waited, the rates that the core held keep
+their rows and their source, with no load of their history again (ADR-0042), the rows of core.loads
+keep none of the four flags of the answers of a load (ADR-0054), up took a backup before them whose
+manifest names them, marts-init built the views of the marts from the seeds of the current code and
+dropped the relations of the release that no model builds or reads, every card of the dashboards of
+the package answers, on the same tables and fields of Metabase, the metadata of the marts is
+applied, the raw tables of the demo are in the shape of the current code, no relation of the release
+stays that the current code neither builds nor reads, and the demo goes on, with a daily load and a
+run of the transform. AGORANOMOS_UPGRADE_FILE names the file in which the first step leaves what it
+found for the second. With AGORANOMOS_UPGRADE_SUMMARY, the second step appends to that file, such as
+the summary of a job of CI, the rows of the marts before and after, and the relations of the
+previous release that the upgrade left as they were. Without these variables the tests skip: they
+need a stack of the previous release, which no other run of the stack tests has.
 
 The assertions print names, numbers, states and kinds of relations, never a secret.
 """
@@ -323,6 +323,16 @@ RATE_HISTORIES = (
 )
 
 
+# The newest row of core.loads, 0 without one, and the rows up to it that have a flag of the
+# answers of a load, which the migration 0012 adds with no default (ADR-0054, C8b of #228).
+LAST_LOAD = "SELECT coalesce(max(load_sk), 0) FROM core.loads"
+FLAGGED_LOADS = (
+    "SELECT count(*) FROM core.loads WHERE load_sk <= {last} AND (is_subject_to_thresholding "
+    "IS NOT NULL OR has_data_loss_from_other_row IS NOT NULL OR is_sampled IS NOT NULL "
+    "OR is_truncated IS NOT NULL)"
+)
+
+
 def core_rates(env) -> dict[str, Any]:
     """The rates of the core as RATES_UP_TO gives them up to their last day, and the loads of the
     history of the rates."""
@@ -373,6 +383,7 @@ def test_before_the_upgrade_record_the_stack_of_the_previous_release(env, metaba
                 ],
                 "marts": metabase_marts(metabase_url, session),
                 "rates": core_rates(env),
+                "last_load": int(warehouse_output(env, LAST_LOAD)),
             },
             indent=2,
             sort_keys=True,
@@ -431,6 +442,17 @@ def test_the_rates_that_the_core_held_keep_their_rows_and_their_source(env):
         assert gaps == "0", gaps
     rows, last = saved["rows"], saved["last"]
     summarize([f"Rates of the core before the update: {rows} rows up to {last}, unchanged"])
+
+
+@after_only
+def test_the_loads_that_the_core_held_keep_no_flag(env):
+    # ADR-0054 (C8b of #228): the migration 0012 adds the four flags of the answers of a load to
+    # core.loads, nullable and with no default, so every row of a pin of the previous release has
+    # none, as nothing recorded the flags then; a pin of this release writes them for the loads
+    # that come after.
+    last = recorded()["last_load"]
+    assert last > 0, "the previous release held no row in core.loads"
+    assert warehouse_output(env, FLAGGED_LOADS.format(last=last)) == "0"
 
 
 @after_only

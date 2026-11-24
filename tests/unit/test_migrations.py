@@ -59,6 +59,9 @@ CHECKSUMS = {
     "0011_describe_the_rates_of_the_deployment.sql": (
         "8a182bc84224fcfb292ee768d325271f92eac6695722ed016a291e9aa0ef0681"
     ),
+    "0012_add_the_flags_of_a_load.sql": (
+        "68a783bea8073602a886e11a5aa053efee042412747c01900079c03b86ea46d8"
+    ),
 }
 
 
@@ -373,6 +376,29 @@ def test_the_rates_of_the_deployment_change_only_the_comments_of_the_rates():
     assert starts
     assert all(s.startswith("COMMENT ON ") and " core.fx_rates_daily" in s for s in starts)
     assert "deployment for a rate that the deployment gives in extensions/model/rates.toml" in text
+
+
+def test_the_flags_of_a_load_are_four_nullable_booleans_named_after_the_data_api():
+    # ADR-0054 (C8b of #228): the four flags of the answers of GA4, under the names of the journal
+    # raw_ga4._agoranomos_loads, nullable and with no default, so that a row of a source without
+    # them, or of a pin before the migration, keeps none and no row is rewritten; each comment
+    # names the field of ResponseMetaData that the flag comes from. The grants of 0006 cover them.
+    path = MIGRATIONS / "0012_add_the_flags_of_a_load.sql"
+    text = code(path, keep_strings=True)
+    fields = {
+        "is_subject_to_thresholding": "subjectToThresholding",
+        "has_data_loss_from_other_row": "dataLossFromOtherRow",
+        "is_sampled": "samplingMetadatas",
+        "is_truncated": "dataTruncationReasons",
+    }
+    assert statement_starts(path)[:4] == [
+        f"ALTER TABLE core.loads ADD COLUMN {flag} boolean" for flag in fields
+    ]
+    for flag, field in fields.items():
+        comment = re.search(rf"COMMENT ON COLUMN core\.loads\.{flag} IS '((?:[^']|'')*)'", text)
+        assert comment, flag
+        assert f"{field} of its ResponseMetaData" in comment.group(1), flag
+    assert not re.search(r"\b(GRANT|REVOKE|UPDATE|INSERT|DELETE|DEFAULT|NOT NULL)\b", code(path))
 
 
 def test_each_fact_has_the_trigger_of_the_freeze_and_each_journal_has_none():

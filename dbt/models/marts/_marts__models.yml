@@ -823,8 +823,10 @@ models:
       of the row; add up revenue across properties with total_revenue_reporting. Its platforms are
       those of ad_platforms with the kind web_analytics. A row is final, is_final, when the load
       that wrote it ended at least the window of restatements of its platform after its day, so that
-      no later load changes it. Its tests read the days of the windows that the run of the transform
-      pinned.
+      no later load changes it. The four flags after it are those of the answers of GA4 to the load
+      that wrote the row (ADR-0054): a row whose load GA4 thresholded, rolled into "(other)",
+      sampled or truncated may not match the interface of GA4. Its tests read the days of the
+      windows that the run of the transform pinned.
     config:
       contract:
         enforced: true
@@ -1109,6 +1111,42 @@ models:
           meta:
             metabase:
               display_name: Is Final
+              semantic_type: type/Category
+              has_field_values: list
+      - name: is_subject_to_thresholding
+        data_type: boolean
+        description: '{{ doc("is_subject_to_thresholding") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Is Subject to Thresholding
+              semantic_type: type/Category
+              has_field_values: list
+      - name: has_data_loss_from_other_row
+        data_type: boolean
+        description: '{{ doc("has_data_loss_from_other_row") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Has Data Loss From Other Row
+              semantic_type: type/Category
+              has_field_values: list
+      - name: is_sampled
+        data_type: boolean
+        description: '{{ doc("is_sampled") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Is Sampled
+              semantic_type: type/Category
+              has_field_values: list
+      - name: is_truncated
+        data_type: boolean
+        description: '{{ doc("is_truncated") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Is Truncated
               semantic_type: type/Category
               has_field_values: list
   - name: ad_platforms

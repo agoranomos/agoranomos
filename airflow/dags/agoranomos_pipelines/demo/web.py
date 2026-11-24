@@ -3,12 +3,14 @@ sessions of each property by day, source, medium, campaign and default channel g
 value as a string, the day as YYYYMMDD in the time zone of the property, and no row without
 sessions. The links of the ads of the demo carry the ID of their campaign in utm_id, so the
 sessions that an ad brings name its campaign; the name is the one of the day of the session, as
-GA4 keeps it (ADR-0025)."""
+GA4 keeps it (ADR-0025). The journal of each load carries the four flags of the answers of GA4
+(ADR-0054): one of them on the loads of one property whose window holds one day (flagged), none on
+the others."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from agoranomos_pipelines.demo import world
 from agoranomos_pipelines.demo.common import (
@@ -44,6 +46,15 @@ OTHER_TRAFFIC = (
     ("blog.example", "referral", "(referral)", "Referral", 60),
     ("(not set)", "(not set)", "(not set)", "Unassigned", 20),
 )
+# The property and the day of the flag of the demo: each load of the property whose window holds the
+# day that is 30 days before its yesterday has an answer with rows rolled into "(other)", which GA4
+# says in dataLossFromOtherRow when one of its tables has more rows than its limit (ADR-0054), and
+# every other load has no flag. In a stack that loads every day only the history takes that day,
+# so the rows that the history wrote of the property carry the flag and those of the daily loads do
+# not. The name is that of the column of the journal (FLAGS of agoranomos_pipelines/loads.py).
+FLAGGED_PROPERTY = "390000002"
+FLAGGED_DAYS_AGO = 30
+FLAGGED = "has_data_loss_from_other_row"
 MONTHS = (
     "January",
     "February",
@@ -172,6 +183,16 @@ def records(now, first=None, skip=frozenset()) -> dict[str, Iterator[dict[str, o
         "properties": properties(now),
         "report_sessions_daily": report_sessions_daily(now, first, skip),
     }
+
+
+def flagged(now: datetime, account_id: str, window: tuple[date, date]) -> bool:
+    """Whether a load at now of the window of a property has the flag FLAGGED: the property is
+    FLAGGED_PROPERTY and the window holds the day FLAGGED_DAYS_AGO before its yesterday."""
+    if account_id != FLAGGED_PROPERTY:
+        return False
+    prop = next(a for a in accounts() if a.account_id == account_id)
+    day = last_final_day(now, prop.time_zone) - timedelta(days=FLAGGED_DAYS_AGO)
+    return window[0] <= day <= window[1]
 
 
 def windows(now: datetime, first=None) -> dict[str, tuple[date, date]]:

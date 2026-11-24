@@ -8,7 +8,8 @@ models:
       short cycle of Google Ads takes every few hours (ADR-0051). The accounts of demo_web and ga4
       are their properties, and demo_fx, ecb and bank_of_italy have one account each, EUR, the base
       of their rates; ecb, bank_of_italy, google_ads, meta_ads, tiktok_ads and ga4 have none until
-      their first load.
+      their first load. The four flags of the answers of web analytics (ADR-0054) are those of the
+      last whole load of a property, and none on the other platforms.
       The Ops collection of Metabase shows it (ADR-0029).
     columns:
       - name: platform
@@ -41,6 +42,14 @@ models:
         description: >-
           The hours from the last load of the kind intraday of the account to the moment that the
           view is read, to one decimal place; none without such a load.
+      - name: is_subject_to_thresholding
+        description: '{{ doc("is_subject_to_thresholding") }}'
+      - name: has_data_loss_from_other_row
+        description: '{{ doc("has_data_loss_from_other_row") }}'
+      - name: is_sampled
+        description: '{{ doc("is_sampled") }}'
+      - name: is_truncated
+        description: '{{ doc("is_truncated") }}'
   - name: ops_rates
     description: >-
       The rates of the core into the reporting currency, one row for each source of the rates

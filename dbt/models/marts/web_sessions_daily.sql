@@ -2,7 +2,8 @@
 -- (ADR-0037): one row of core.web_sessions_daily, with the property and its client, the ad
 -- campaign whose ID the links carried in utm_id when exactly one campaign of the core has it,
 -- revenue in the currency of the property and in the reporting currency at the rate of its day,
--- when its load ended and whether the row is final, as ad_stats_campaign_daily has it. The
+-- when its load ended and whether the row is final, as ad_stats_campaign_daily has it, and the
+-- four flags of the answers of the load that wrote the row (ADR-0054), from core.loads. The
 -- campaigns come down to one row for each ID before the join, which the planner leaves out for a
 -- question that does not read them.
 select
@@ -38,7 +39,11 @@ select
         (l.finished_at at time zone a.time_zone)::date - f.report_date
             >= p.restatement_window_days,
         false
-    ) as is_final
+    ) as is_final,
+    l.is_subject_to_thresholding,
+    l.has_data_loss_from_other_row,
+    l.is_sampled,
+    l.is_truncated
 from {{ ref('core_web_sessions_daily') }} as f
 left join {{ ref('dim_account') }} as a
     on a.account_sk = f.account_sk

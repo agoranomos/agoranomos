@@ -453,6 +453,22 @@ Whether the day is still in progress in its account, as a load of the kind intra
 Whether the row is final, as no daily load takes its day again: true when the day on which the load that wrote the row ended, in the time zone of the account or the property, is at least the window of restatements of its platform after the day of the row, the days of restatement_window_days in ad_platforms, as a daily load takes again only the days of that window. A recent row is not final because its platform may still change the day, often its conversions, and the next daily load takes the day again. The column follows the load and not the calendar: a day that a load took within the window before a stop of the stack longer than the window stays not final, as no load takes it again. A row that a load of the history took when its day was already older than the window is final at once, and a partial day (is_partial_day) is never final. A row whose load or platform the warehouse no longer holds is not final, rather than none.
 {% enddocs %}
 
+{% docs is_subject_to_thresholding %}
+Whether an answer of GA4 to the load of the property was subject to thresholding, subjectToThresholding of the metadata of an answer of the Data API: GA4 returned only the data that meets its minimum aggregation thresholds, which may withhold rows of small counts and does not mean that it withheld any. A flag is of a load and a property, true when any answer of the property in the load had it: in web_sessions_daily that of the load that wrote the row, in ops_loads that of the last whole load of the account. None for a source whose answers carry no such flag, as an ad platform, and for a load that the warehouse took before it kept the flags.
+{% enddocs %}
+
+{% docs has_data_loss_from_other_row %}
+Whether an answer of GA4 to the load of the property rolled some combinations of its dimensions into one row "(other)", dataLossFromOtherRow of the metadata of an answer of the Data API, as GA4 does when one of its tables has more rows than its limit: the sessions still count, but some of them are not under their own source, medium or campaign. A flag is of a load and a property, true when any answer of the property in the load had it: in web_sessions_daily that of the load that wrote the row, in ops_loads that of the last whole load of the account. None for a source whose answers carry no such flag, as an ad platform, and for a load that the warehouse took before it kept the flags.
+{% enddocs %}
+
+{% docs is_sampled %}
+Whether an answer of GA4 to the load of the property was sampled, samplingMetadatas of the metadata of an answer of the Data API set: its numbers are estimated from a sample of the events. A flag is of a load and a property, true when any answer of the property in the load had it: in web_sessions_daily that of the load that wrote the row, in ops_loads that of the last whole load of the account. None for a source whose answers carry no such flag, as an ad platform, and for a load that the warehouse took before it kept the flags.
+{% enddocs %}
+
+{% docs is_truncated %}
+Whether an answer of GA4 to the load of the property had its data truncated, dataTruncationReasons of the metadata of an answer of the Data API set. A flag is of a load and a property, true when any answer of the property in the load had it: in web_sessions_daily that of the load that wrote the row, in ops_loads that of the last whole load of the account. None for a source whose answers carry no such flag, as an ad platform, and for a load that the warehouse took before it kept the flags.
+{% enddocs %}
+
 {% docs load_kind %}
 The kind of a load, as core.loads holds it: window for the usual window of an account, which a daily load takes, history for a load of the days before it, intraday for a load of its current day, whose day is partial (ADR-0051).
 {% enddocs %}

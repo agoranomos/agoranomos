@@ -446,6 +446,12 @@ LOAD_COLUMNS = {
     "error": "character varying",
     "kind": "character varying",
 }
+# The journal of demo_web, in the shape of GA4, has the four flags of the answers of each property
+# too, as booleans (ADR-0054, FLAGS of agoranomos_pipelines/loads.py).
+WEB_FLAG_COLUMNS = dict.fromkeys(
+    ("is_subject_to_thresholding", "has_data_loss_from_other_row", "is_sampled", "is_truncated"),
+    "boolean",
+)
 
 
 def test_each_load_of_the_history_records_the_window_of_each_account(env, history_run):
@@ -490,7 +496,8 @@ def test_each_load_of_the_history_records_the_window_of_each_account(env, histor
         )
         # Without the columns of dlt, _dlt_load_id and _dlt_id.
         found = dict(line.split(":") for line in kinds.splitlines())
-        assert found == LOAD_COLUMNS, code
+        wanted_columns = LOAD_COLUMNS | (WEB_FLAG_COLUMNS if code == "demo_web" else {})
+        assert found == wanted_columns, code
 
 
 def test_each_load_of_the_history_updates_its_asset_and_logs_no_secret(
