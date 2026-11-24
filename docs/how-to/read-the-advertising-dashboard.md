@@ -37,8 +37,8 @@ The cards of web analytics take the period, the time grouping and the client onl
 A click on a campaign, in the table of the campaigns or of the top campaigns, opens the tab **Ad groups and ads** with the filter **Campaign** set to it.
 
 <figure class="ag-shot" markdown="span">
-    ![The tab Campaigns of the dashboard Advertising in Metabase: every campaign with its platform, account, statistics and KPIs](../assets/screenshots/advertising-campaigns-light.webp#only-light){ width="1440" height="900" loading="lazy" }
-    ![The tab Campaigns of the dashboard Advertising in Metabase: every campaign with its platform, account, statistics and KPIs, in the dark theme](../assets/screenshots/advertising-campaigns-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
+    ![The tab Campaigns of the dashboard Advertising in Metabase: its filters, among them Campaign state, and every campaign with its platform, account, state, statistics and KPIs](../assets/screenshots/advertising-campaigns-light.webp#only-light){ width="1440" height="900" loading="lazy" }
+    ![The tab Campaigns of the dashboard Advertising in Metabase: its filters, among them Campaign state, and every campaign with its platform, account, state, statistics and KPIs, in the dark theme](../assets/screenshots/advertising-campaigns-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
     <figcaption>Metabase · agoranomos / Advertising · the tab Campaigns · demo data</figcaption>
 </figure>
 
