@@ -33,7 +33,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/demo-dashboard-dark.png">
-    <img alt="The dashboard Advertising in Metabase on the demo data: its tabs and filters, the spend, the conversions and the other KPIs of the last 12 weeks, and the spend and the conversions over time" src="docs/assets/readme/demo-dashboard.png" width="100%">
+    <img alt="The dashboard Advertising in Metabase on the demo data: its tabs and filters, the spend, the conversions and the other KPIs of the last 12 weeks, and the spend, the clicks and the impressions of the current day as of its load" src="docs/assets/readme/demo-dashboard.png" width="100%">
   </picture>
 </p>
 <p align="center"><sub>The dashboard Advertising on the demo data, which the first start builds from a demo source through dlt, dbt and Metabase. No accounts or keys needed.</sub></p>

@@ -2,6 +2,12 @@
 
 The collection **agoranomos / Web analytics** in Metabase holds the dashboard **Web analytics**: the sessions, engaged sessions, key events and revenue of the properties of web analytics of the deployment, by source, medium, default channel group and campaign, for the period, the client and the property of its filters ([ADR-0054](../adr/0054-connect-ga4-with-a-service-account-of-the-deployment.md)). Every deployment has it, so it is empty until a source of web analytics loads: GA4 ([Connect GA4](connect-ga4.md)), or the fictional platform `demo_web` of the demo ([See the demo](see-the-demo.md)). No load has reached a real GA4 property yet, so today it shows the demo or nothing.
 
+<figure class="ag-shot" markdown="span">
+    ![The dashboard Web analytics in Metabase on the demo data: the filters Period, Time grouping, Client and Property, the sessions, the engaged sessions, the key events and the revenue of the last week compared with the week before, the sessions and key events over time, the top of the text about these numbers, and the sessions of each channel group over time](../assets/screenshots/web-analytics-light.webp#only-light){ width="1440" height="900" loading="lazy" }
+    ![The dashboard Web analytics in Metabase on the demo data: the filters Period, Time grouping, Client and Property, the sessions, the engaged sessions, the key events and the revenue of the last week compared with the week before, the sessions and key events over time, the top of the text about these numbers, and the sessions of each channel group over time, in the dark theme](../assets/screenshots/web-analytics-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
+    <figcaption>Metabase · agoranomos / Web analytics · Web analytics · demo data</figcaption>
+</figure>
+
 ## Open it
 
 Sign in to Metabase as [Run agoranomos locally](run-locally.md#sign-in) says and open the collection **agoranomos / Web analytics**. `metabase-init` makes the dashboard once Metabase shows the marts, after the first run of the transform, with or without the demo, and keeps it as the code says on every start, view-only for every group but Administrators ([ADR-0018](../adr/0018-keep-the-content-of-the-package-in-metabase-as-code.md)). With the demo, `demo-init` makes it at the first start, right after the transform. Until then, the log of the start says that the dashboard waits for the marts.
