@@ -100,11 +100,12 @@ case " ${{FAKE_DDL:-}} " in *" {name}:$target "*)
   echo "$runs" > "$FAKE_LOG.ddl"
   if [ "$runs" -le "${{FAKE_DDL_TIMES:-1}}" ]; then
     if [ "${{FAKE_DDL_KIND:-view}}" = table ]; then
-      echo 'pg_dump: error: query failed: ERROR:  relation "public.search_index__x" does not exist' >&2
-      echo "pg_dump: detail: Query was: LOCK TABLE public.search_index__x IN ACCESS SHARE MODE" >&2
+      echo 'pg_dump: error: query failed: ERROR:  relation "public.search_index__x" does not' \
+        'exist' >&2
+      echo "pg_dump: detail: Query was: LOCK TABLE public.search_index__x" >&2
     else
       echo "pg_dump: error: query failed: ERROR:  could not open relation with OID 31993" >&2
-      echo "pg_dump: detail: Query was: SELECT pg_catalog.pg_get_viewdef('31993'::pg_catalog.oid)" >&2
+      echo "pg_dump: detail: Query was: SELECT pg_catalog.pg_get_viewdef('31993'::oid)" >&2
     fi
     exit 1
   fi ;;
