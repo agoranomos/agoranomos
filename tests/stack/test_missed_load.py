@@ -58,30 +58,29 @@ sources.load_daily(sys.argv[2], datetime.fromisoformat(sys.argv[1]))
 """
 # The last day of the whole loads of each account in the journal, as loads.recorded() reads it.
 LAST_DAYS = (
-    "SELECT j.account_id, max(j.window_to) FROM {dataset}._agoranomos_loads AS j "  # noqa: S608 (constants of this file)
+    "SELECT j.account_id, max(j.window_to) FROM {dataset}._agoranomos_loads AS j "
     "JOIN {dataset}._dlt_loads AS l ON l.load_id = j._dlt_load_id AND l.status = 0 "
     "WHERE j.status = 'loaded' AND j.kind IS DISTINCT FROM 'intraday' "
     "GROUP BY 1 ORDER BY 1"
 )
 # The loads of the journal, which the test moves back and then forward again.
 JOURNAL_LOADS = (
-    "SELECT string_agg(DISTINCT quote_literal(_dlt_load_id), ',') "  # noqa: S608 (constants of this file)
-    "FROM {dataset}._agoranomos_loads"
+    "SELECT string_agg(DISTINCT quote_literal(_dlt_load_id), ',') FROM {dataset}._agoranomos_loads"
 )
 MOVE = (
-    "UPDATE {dataset}._agoranomos_loads SET window_to = window_to {sign} {days} "  # noqa: S608 (constants of this file)
+    "UPDATE {dataset}._agoranomos_loads SET window_to = window_to {sign} {days} "
     "WHERE _dlt_load_id IN ({loads})"
 )
 # The window of each account in the journal of a load.
 WINDOW = (
-    "SELECT account_id, window_from, window_to FROM {dataset}._agoranomos_loads "  # noqa: S608 (constants of this file)
+    "SELECT account_id, window_from, window_to FROM {dataset}._agoranomos_loads "
     "WHERE _dlt_load_id = '{load}' AND status = 'loaded' ORDER BY account_id"
 )
 # The rows of the view of the campaigns of an account on a day: how many, how many final, and how
 # many from the load, which ended at least the window after the day, by the time zone of the
 # account.
 DAY = (
-    "SELECT count(*), count(*) FILTER (WHERE v.is_final), "  # noqa: S608 (constants of this file)
+    "SELECT count(*), count(*) FILTER (WHERE v.is_final), "
     "count(*) FILTER (WHERE v.loaded_at = l.finished_at "
     "AND (l.finished_at AT TIME ZONE v.time_zone)::date - v.report_date >= {window}) "
     "FROM marts.ad_stats_campaign_daily AS v "
