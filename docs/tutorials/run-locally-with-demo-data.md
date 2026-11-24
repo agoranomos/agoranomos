@@ -73,17 +73,13 @@ It takes about half an hour, most of it the first start.
 
 ## Look at the web analytics
 
-1. Go back to the collection **Demo**, which the path at the top of the page links to, and open **Web analytics (demo)**.
+1. In the sidebar, open **agoranomos**, then **Web analytics**, and the dashboard **Web analytics**, which every deployment has and the demo fills.
 
-    It shows the **Sessions**, **Engagement rate**, **Key events** and **Revenue** of the sites of both clients, the sessions of each day in each channel group, the results of each channel group and the sources and mediums with the most sessions. Its filters are **Period** and **Client**.
+    The first row shows the **Sessions**, **Engaged sessions**, **Key events** and **Revenue** of the sites of both clients, each for the last whole week compared with the week before. Below them are the sessions and key events over time, the sessions of each channel group over time, the results of each channel group, the sources and mediums with the most sessions, and the campaigns. Its filters are **Period**, **Time grouping**, **Client** and **Property**.
 
-2. Scroll to **Sessions of ad campaigns**. Its rows are the sessions that came from the campaigns of the three ad platforms: the same campaigns as on the advertising dashboard, seen from the sites.
+2. Scroll to **Campaigns**. Besides the campaigns of the three ad platforms, the same campaigns as on the advertising dashboard, seen from the sites, it lists the newsletters and the names that web analytics gives the sessions without a campaign, such as `(organic)` and `(direct)`.
 
-<figure class="ag-shot" markdown="span">
-    ![The dashboard Web analytics (demo) in Metabase: the sessions, the engagement rate, the key events and the revenue of the sites of both clients, and the sessions of each day in each channel group](../assets/screenshots/demo-web-analytics-light.webp#only-light){ width="1440" height="900" loading="lazy" }
-    ![The dashboard Web analytics (demo) in Metabase: the sessions, the engagement rate, the key events and the revenue of the sites of both clients, and the sessions of each day in each channel group, in the dark theme](../assets/screenshots/demo-web-analytics-dark.webp#only-dark){ width="1440" height="900" loading="lazy" }
-    <figcaption>Metabase · agoranomos / Demo · Web analytics (demo) · demo data</figcaption>
-</figure>
+[Read the web analytics dashboard](../how-to/read-the-web-analytics-dashboard.md) says how its numbers are computed.
 
 ## See where the numbers come from
 

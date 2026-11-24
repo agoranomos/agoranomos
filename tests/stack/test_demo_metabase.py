@@ -1,6 +1,6 @@
 """The demo in Metabase, made by demo-init: the collection agoranomos / Demo, its questions and its
-two dashboards, found through the registry of the content, each once, with the numbers of the marts
-for the filters of the dashboards, view-only for every group but Administrators (ADR-0018);
+dashboard, found through the registry of the content, each once, with the numbers of the marts for
+the filters of the dashboard, view-only for every group but Administrators (ADR-0018);
 demo-init runs again without a change, puts an edit back, never takes a collection of the same name
 for the package, and moves the demo collection of v0.1.
 
@@ -39,8 +39,10 @@ pytestmark = [
     pytest.mark.usefixtures("daily_load_paused"),
 ]
 
-# The dashboards of the demo and its questions, by their keys in the package, with their names.
-DASHBOARDS = {"advertising": "Advertising overview (demo)", "web-analytics": "Web analytics (demo)"}
+# The dashboard of the demo and its questions, by their keys in the package, with their names. The
+# sessions of the demo are on the dashboard Web analytics of every deployment
+# (tests/stack/test_web_analytics.py).
+DASHBOARDS = {"advertising": "Advertising overview (demo)"}
 QUESTIONS = {question["key"]: question["name"] for question in demo_init.QUESTIONS}
 # The dashboard of each question, by its key.
 BOARD_OF = {question["key"]: question["dashboard"] for question in demo_init.QUESTIONS}
@@ -64,10 +66,6 @@ CLIENT = "SELECT min(client_name) FROM marts.ad_stats_campaign_daily"
 SPEND = (
     "SELECT sum(spend_reporting) FROM marts.ad_stats_campaign_daily WHERE NOT is_partial_day "
     "AND report_date BETWEEN '{start}' AND '{end}' AND client_name = '{client}'"
-)
-SESSIONS = (
-    "SELECT sum(sessions) FROM marts.web_sessions_daily "
-    "WHERE report_date BETWEEN '{start}' AND '{end}' AND client_name = '{client}'"
 )
 # The keys of the content of the demo in the registry.
 KEYS = (
@@ -181,10 +179,7 @@ def run_card(metabase_url, session, entries, board_key, card_key, values):
     return result["data"]["rows"]
 
 
-@pytest.mark.parametrize(
-    ("board", "card", "query"),
-    [("advertising", "spend", SPEND), ("web-analytics", "sessions", SESSIONS)],
-)
+@pytest.mark.parametrize(("board", "card", "query"), [("advertising", "spend", SPEND)])
 def test_a_number_of_a_dashboard_is_that_of_the_mart_for_its_filters(
     env, metabase_url, session, board, card, query
 ):
@@ -260,7 +255,7 @@ def test_an_edit_of_the_content_is_reverted_by_the_next_start_and_logged(
 ):
     entries = registry()
     question = item(metabase_url, session, "demo/spend-by-day", entries)
-    board = item(metabase_url, session, "demo/web-analytics", entries)
+    board = item(metabase_url, session, "demo/advertising", entries)
     demo_id = str(item(metabase_url, session, "demo", entries)["id"])
     put(metabase_url, session, f"/api/card/{question['id']}", {"name": "Edited by a test"})
     put(metabase_url, session, f"/api/dashboard/{board['id']}", {"archived": True})
@@ -275,15 +270,15 @@ def test_an_edit_of_the_content_is_reverted_by_the_next_start_and_logged(
         item(metabase_url, session, "demo/spend-by-day", entries)["name"]
         == QUESTIONS["spend-by-day"]
     )
-    board = item(metabase_url, session, "demo/web-analytics", entries)
+    board = item(metabase_url, session, "demo/advertising", entries)
     assert (board["archived"], board["collection_id"]) == (False, int(demo_id))
-    assert len(board["dashcards"]) == list(BOARD_OF.values()).count("web-analytics")
+    assert len(board["dashcards"]) == list(BOARD_OF.values()).count("advertising")
     graph = get(metabase_url, session, "/api/collection/graph")
     assert graph["groups"][all_users][demo_id] == "read"
     assert changes == [
         'demo-init: revert of an edit: question demo/spend-by-day name: "Edited by a test" -> '
         f'"{QUESTIONS["spend-by-day"]}"',
-        "demo-init: restored from the trash: dashboard demo/web-analytics",
+        "demo-init: restored from the trash: dashboard demo/advertising",
         'demo-init: lowered: group "All Users" on collection "Demo": curate -> view',
     ], changes
 

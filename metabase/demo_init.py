@@ -6,18 +6,20 @@ platforms of the demo generator into raw_demo_<platform>, and then agoranomos_de
 the five assets of the history start. Then it unpauses agoranomos_demo_daily, which brings the new
 days every day, and agoranomos_demo_intraday, which brings the current day every few hours
 (ADR-0051), each if that DAG has never run, the second unless AGORANOMOS_INTRADAY_HOURS is 0, which
-leaves it without a schedule. Then it makes the demo visible in Metabase: it syncs the
-schema of the warehouse, applies the metadata of the marts (metadata.py), as metabase-init does,
-and puts the demo, its questions and its two dashboards, Advertising overview and Web analytics,
-in the collection agoranomos / Demo as the code says (content.py, ADR-0018): an edit is reverted
-and logged, an item in the trash comes back, and every group but Administrators gets at most View
-on them. The questions get the titles of their columns and axes from the display names of the
-metadata, money in the reporting currency of the metadata, and the color of the charts; each
-has the filters of its dashboard, the period, the client and, for the advertising, the platform,
-which the filters of the dashboard set. The demo collection of v0.1, the one whose dashboard the
-account of demo-init made, moves into agoranomos as Demo once, after every item in it that the
-demo does not ship has gone to the root, and its dashboard and questions become those of the
-advertising.
+leaves it without a schedule. Then it makes the demo visible in Metabase: it syncs the schema of
+the warehouse, applies the metadata of the marts (metadata.py), as metabase-init does, and puts the
+demo, its questions and its dashboard Advertising overview (demo) in the collection agoranomos /
+Demo as the code says (content.py, ADR-0018): an edit is reverted and logged, an item in the trash
+comes back, and every group but Administrators gets at most View on them. The questions get the
+titles of their columns and axes from the display names of the metadata, money in the reporting
+currency of the metadata, and the color of the charts; each has the filters of its dashboard, the
+period, the client and the platform, which the filters of the dashboard set. Then it keeps the
+metrics and the dashboards Advertising and Web analytics of every deployment, which metabase-init
+could not make before the first run of the transform: the second, with the sessions of the demo,
+takes the place of the dashboard Web analytics (demo) of earlier releases, which goes to the trash
+(ADR-0054). The demo collection of v0.1, the one whose dashboard the account of demo-init made,
+moves into agoranomos as Demo once, after every item in it that the demo does not ship has gone to
+the root, and its dashboard and questions become those of the advertising.
 
 Each step looks at the current state first. A start that finds a successful run of the history and
 a successful run of the transform after it does not run the pipeline again and leaves the pause
@@ -53,6 +55,7 @@ import advertising
 import content
 import metadata
 import metrics
+import web_analytics
 from metabase_init import (
     SHAPE_ERRORS,
     ApiClient,
@@ -88,18 +91,16 @@ DEMO_NAME = "Demo"
 DEMO_DESCRIPTION = (
     "The demo of agoranomos: a fictional business, as the demo data of this release shows it."
 )
-# The two dashboards of the demo, by their keys in the package: their names and descriptions.
+# The dashboard of the demo, by its key in the package: its name and description. The dashboard
+# Web analytics (demo) of earlier releases, with its questions, goes to the trash on the first start
+# of this one, as the code no longer ships it (content.retire_missing): the dashboard Web analytics
+# of every deployment shows the sessions of the demo (web_analytics.py, ADR-0054).
 ADVERTISING = "advertising"
-WEB = "web-analytics"
 DASHBOARDS = {
     ADVERTISING: (
         "Advertising overview (demo)",
         "The advertising statistics of the demo, in the reporting currency, from "
         "marts.ad_stats_campaign_daily and marts.ad_conversions_campaign_daily.",
-    ),
-    WEB: (
-        "Web analytics (demo)",
-        "The sessions of web analytics of the demo, from marts.web_sessions_daily.",
     ),
 }
 # The names of the demo of v0.1, which the jobs look for once, to move it into agoranomos: its
@@ -116,7 +117,6 @@ V01_KEYS = {
 MART_SCHEMA = "marts"
 AD_STATS = "ad_stats_campaign_daily"
 CONVERSIONS = "ad_conversions_campaign_daily"
-SESSIONS = "web_sessions_daily"
 # The one deadline of the job, in seconds from its start, shared by the waits for the DAGs, the
 # history, the transform and the sync. The first transform of the demo is the long part: on 3
 # November 2026 it took 10.4 to 11.3 minutes after a history of 68 seconds on a laptop with an Intel
@@ -171,7 +171,6 @@ DASHBOARD_FILTERS = {
     "platform": content.DashboardFilter("platform", "Platform", "string/=", "string"),
 }
 AD_FILTERS = ("period", "client", "platform")
-WEB_FILTERS = ("period", "client")
 
 # The types that Metabase 0.64.1 gives the columns of the answers of the questions, read on the
 # stand in October 2026: the contracts of the marts fix the types of the columns that the questions
@@ -188,31 +187,23 @@ COLUMN_TYPES = {
             "campaign_name",
             "conversion_action_name",
             "conversion_category",
-            "session_default_channel_group",
-            "session_source",
-            "session_medium",
-            "session_campaign_name",
         ),
         TEXT,
     ),
 }
 # The semantic types that Metabase 0.64.1 gives the columns of the answers by their names, each
 # time that it computes their metadata (src/metabase/analyze/classifiers/name.clj at the tag
-# v0.64.1; seen on the stand in October 2026): a decimal whose name ends in rate is a share, one
-# whose name has cost is a cost, and a name with source or channel is a source.
+# v0.64.1; seen on the stand in October 2026): a decimal whose name ends in rate is a share, and
+# one whose name has cost is a cost.
 SEMANTIC_TYPES = {
     "click_through_rate": "type/Share",
-    "engagement_rate": "type/Share",
     "cost_per_conversion": "type/Cost",
-    "session_source": "type/Source",
-    "session_default_channel_group": "type/Source",
 }
 # The columns of the answers that are no column of a mart, with their titles: the ratios.
 RATIO_TITLES = {
     "click_through_rate": "CTR",
     "cost_per_conversion": "Cost per Conversion",
     "roas": "ROAS",
-    "engagement_rate": "Engagement Rate",
 }
 # How the numbers of a column are shown: money in the reporting currency, a share as a percentage,
 # and a ratio or a count with this many decimals.
@@ -220,17 +211,15 @@ MONEY = frozenset(
     {
         "spend_reporting",
         "conversion_value_reporting",
-        "total_revenue_reporting",
         "cost_per_conversion",
     }
 )
-PERCENT = frozenset({"click_through_rate", "engagement_rate"})
+PERCENT = frozenset({"click_through_rate"})
 DECIMALS = {
     "roas": 2,
     "conversions": 0,
     "conversions_primary": 0,
     "all_conversions": 0,
-    "key_events": 0,
 }
 
 
@@ -240,7 +229,6 @@ def where(*filters: str) -> str:
 
 
 AD_WHERE = where(*AD_FILTERS)
-WEB_WHERE = where(*WEB_FILTERS)
 # The statistics of the campaigns on whole days only: a day still in progress in its account, which
 # only a load of the kind intraday took, has is_partial_day, and the questions leave it out, as the
 # dashboard Advertising does but its card of today (advertising.py, ADR-0051).
@@ -255,7 +243,6 @@ ROAS = "sum(conversion_value_reporting) / nullif(sum(spend_reporting), 0) AS roa
 # Every conversion of an action: all_conversions where the platform has the metric, else
 # conversions, as conversions_primary adds them up for the primary actions.
 ALL_CONVERSIONS = "sum(coalesce(all_conversions, conversions)) AS all_conversions"
-ENGAGEMENT = "sum(engaged_sessions)::numeric / nullif(sum(sessions), 0) AS engagement_rate"
 
 
 def sql(*lines: str) -> str:
@@ -470,171 +457,9 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         ),
         "layout": {"row": 22, "col": 0, "size_x": 24, "size_y": 7},
     },
-    {
-        "dashboard": WEB,
-        "key": "sessions",
-        "name": "Sessions",
-        "description": "The sessions of the properties of web analytics.",
-        "display": "scalar",
-        "mart": SESSIONS,
-        "columns": ("sessions",),
-        "query": sql(
-            "SELECT sum(sessions) AS sessions", f"FROM {MART_SCHEMA}.{SESSIONS}", WEB_WHERE
-        ),
-        "layout": {"row": 0, "col": 0, "size_x": 6, "size_y": 3},
-    },
-    {
-        "dashboard": WEB,
-        "key": "engagement-rate",
-        "name": "Engagement rate",
-        "description": "The engaged sessions divided by the sessions.",
-        "display": "scalar",
-        "mart": SESSIONS,
-        "columns": ("engagement_rate",),
-        "query": sql(f"SELECT {ENGAGEMENT}", f"FROM {MART_SCHEMA}.{SESSIONS}", WEB_WHERE),
-        "layout": {"row": 0, "col": 6, "size_x": 6, "size_y": 3},
-    },
-    {
-        "dashboard": WEB,
-        "key": "key-events",
-        "name": "Key events",
-        "description": "The key events of the sessions.",
-        "display": "scalar",
-        "mart": SESSIONS,
-        "columns": ("key_events",),
-        "query": sql(
-            "SELECT sum(key_events) AS key_events", f"FROM {MART_SCHEMA}.{SESSIONS}", WEB_WHERE
-        ),
-        "layout": {"row": 0, "col": 12, "size_x": 6, "size_y": 3},
-    },
-    {
-        "dashboard": WEB,
-        "key": "revenue",
-        "name": "Revenue",
-        "description": "The revenue of the sessions, in the reporting currency.",
-        "display": "scalar",
-        "mart": SESSIONS,
-        "columns": ("total_revenue_reporting",),
-        "query": sql(
-            "SELECT sum(total_revenue_reporting) AS total_revenue_reporting",
-            f"FROM {MART_SCHEMA}.{SESSIONS}",
-            WEB_WHERE,
-        ),
-        "layout": {"row": 0, "col": 18, "size_x": 6, "size_y": 3},
-    },
-    {
-        "dashboard": WEB,
-        "key": "sessions-by-day",
-        "name": "Sessions by day and channel group",
-        "description": "The sessions of each day in each default channel group of web analytics.",
-        "display": "area",
-        "mart": SESSIONS,
-        "columns": ("report_date", "session_default_channel_group", "sessions"),
-        "visualization_settings": {
-            "graph.dimensions": ["report_date", "session_default_channel_group"],
-            "graph.metrics": ["sessions"],
-            "stackable.stack_type": "stacked",
-        },
-        "query": sql(
-            "SELECT report_date, session_default_channel_group, sum(sessions) AS sessions",
-            f"FROM {MART_SCHEMA}.{SESSIONS}",
-            WEB_WHERE,
-            "GROUP BY report_date, session_default_channel_group",
-            "ORDER BY report_date, session_default_channel_group",
-        ),
-        "layout": {"row": 3, "col": 0, "size_x": 24, "size_y": 6},
-    },
-    {
-        "dashboard": WEB,
-        "key": "by-channel-group",
-        "name": "Results by channel group",
-        "description": (
-            "The sessions, engaged sessions, key events and revenue of each default channel "
-            "group, with the engagement rate; revenue in the reporting currency."
-        ),
-        "display": "table",
-        "mart": SESSIONS,
-        "columns": (
-            "session_default_channel_group",
-            "sessions",
-            "engaged_sessions",
-            "engagement_rate",
-            "key_events",
-            "total_revenue_reporting",
-        ),
-        "query": sql(
-            "SELECT session_default_channel_group, sum(sessions) AS sessions,",
-            f"  sum(engaged_sessions) AS engaged_sessions, {ENGAGEMENT},",
-            "  sum(key_events) AS key_events,",
-            "  sum(total_revenue_reporting) AS total_revenue_reporting",
-            f"FROM {MART_SCHEMA}.{SESSIONS}",
-            WEB_WHERE,
-            "GROUP BY session_default_channel_group",
-            "ORDER BY sessions DESC",
-        ),
-        "layout": {"row": 9, "col": 0, "size_x": 24, "size_y": 7},
-    },
-    {
-        "dashboard": WEB,
-        "key": "by-source",
-        "name": "Top sources and mediums",
-        "description": (
-            "The 20 pairs of a source and a medium with the most sessions, with their key events "
-            "and revenue, in the reporting currency."
-        ),
-        "display": "table",
-        "mart": SESSIONS,
-        "columns": (
-            "session_source",
-            "session_medium",
-            "sessions",
-            "key_events",
-            "total_revenue_reporting",
-        ),
-        "query": sql(
-            "SELECT session_source, session_medium, sum(sessions) AS sessions,",
-            "  sum(key_events) AS key_events,",
-            "  sum(total_revenue_reporting) AS total_revenue_reporting",
-            f"FROM {MART_SCHEMA}.{SESSIONS}",
-            WEB_WHERE,
-            "GROUP BY session_source, session_medium",
-            "ORDER BY sessions DESC",
-            "LIMIT 20",
-        ),
-        "layout": {"row": 16, "col": 0, "size_x": 24, "size_y": 7},
-    },
-    {
-        "dashboard": WEB,
-        "key": "ad-campaigns",
-        "name": "Sessions of ad campaigns",
-        "description": (
-            "The sessions, key events and revenue of each campaign that web analytics names, of "
-            "the sessions that it gives an ad platform, with revenue in the reporting currency."
-        ),
-        "display": "table",
-        "mart": SESSIONS,
-        "columns": (
-            "session_campaign_name",
-            "session_source",
-            "session_medium",
-            "sessions",
-            "key_events",
-            "total_revenue_reporting",
-        ),
-        "query": sql(
-            "SELECT session_campaign_name, session_source, session_medium,",
-            "  sum(sessions) AS sessions, sum(key_events) AS key_events,",
-            "  sum(total_revenue_reporting) AS total_revenue_reporting",
-            f"FROM {MART_SCHEMA}.{SESSIONS}",
-            f"{WEB_WHERE} AND ad_platform IS NOT NULL",
-            "GROUP BY session_campaign_id, session_campaign_name, session_source, session_medium",
-            "ORDER BY sessions DESC",
-        ),
-        "layout": {"row": 23, "col": 0, "size_x": 24, "size_y": 7},
-    },
 )
 # The filters of the questions of each dashboard.
-QUESTION_FILTERS = {ADVERTISING: AD_FILTERS, WEB: WEB_FILTERS}
+QUESTION_FILTERS = {ADVERTISING: AD_FILTERS}
 
 ENV_NAMES = {
     "airflow_url": "AIRFLOW_URL",
@@ -987,10 +812,11 @@ def ensure_synced(
 
 
 def demo_marts(marts: metadata.Metadata) -> tuple[metadata.Table, ...]:
-    """The tables of the marts that the questions of the demo read, in the effective metadata: the
-    dbt project declares them."""
+    """The tables of the marts that the questions of the demo read, and the mart of the sessions,
+    which the dashboard Web analytics reads, in the effective metadata: the dbt project declares
+    them."""
     tables = []
-    for name in dict.fromkeys(q["mart"] for q in QUESTIONS):
+    for name in dict.fromkeys([*(q["mart"] for q in QUESTIONS), web_analytics.WEB_SESSIONS]):
         table = marts.effective.get((MART_SCHEMA, name))
         if table is None:
             raise SetupError(
@@ -1101,7 +927,7 @@ def question_filters(question: Mapping[str, Any], fields: Fields) -> tuple[conte
 
 def demo_package(marts: metadata.Metadata, fields: Fields) -> content.Package:
     """The demo as a package of the content: its questions, with the titles and the formats of
-    their columns, the colors of their series and their filters, and its two dashboards with their
+    their columns, the colors of their series and their filters, and its dashboard with its
     filters."""
     currency = reporting_currency(marts)
     return content.Package(
@@ -1377,20 +1203,21 @@ def main(env: Mapping[str, str] | None = None) -> int:
         adopt_earlier_demo(metabase, registry, log)
         package = demo_package(marts, fields_of(metabase, database["id"]))
         ids = content.ensure_package(metabase, registry, package, database["id"], log)
-        # The metrics and the dashboard Advertising of the marts that the first run of the
-        # transform has just built, which metabase-init could not create before them.
+        # The metrics and the dashboards Advertising and Web analytics of the marts that the first
+        # run of the transform has just built, which metabase-init could not create before them.
         metrics.ensure(metabase, registry, config.metadata_export, database["id"], log)
         advertising.ensure(metabase, registry, marts, config.metadata_export, database["id"], log)
+        web_analytics.ensure(metabase, registry, marts, database["id"], log)
     except (SetupError, metadata.MetadataError, content.ContentError) as error:
         print(f"demo-init: {error}", file=sys.stderr)
         return 1
     except SHAPE_ERRORS as error:
         print(f"demo-init: {unexpected_shape(server, error, hint)}", file=sys.stderr)
         return 1
-    boards = " and ".join(f"{name!r} ({ids[key]})" for key, (name, _) in DASHBOARDS.items())
+    name = DASHBOARDS[ADVERTISING][0]
     print(
-        f"demo-init: the demo pipeline {when(ran)}, and the dashboards {boards} are in the "
-        f"collection {content.ROOT_NAME} / {DEMO_NAME}"
+        f"demo-init: the demo pipeline {when(ran)}, and the dashboard {name!r} "
+        f"({ids[ADVERTISING]}) is in the collection {content.ROOT_NAME} / {DEMO_NAME}"
     )
     return 0
 

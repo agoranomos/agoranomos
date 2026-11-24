@@ -821,9 +821,9 @@ def top_imports(path: Path) -> set[str]:
 
 def test_the_module_imports_only_the_standard_library_and_its_own_modules():
     # metabase-init runs in a plain python image: it has the standard library, and advertising.py,
-    # ai_access.py, metadata.py, content.py, metrics.py and ops.py from the same folder, which
-    # import nothing of this module.
-    own = {"advertising", "ai_access", "content", "metadata", "metrics", "ops"}
+    # ai_access.py, metadata.py, content.py, metrics.py, ops.py and web_analytics.py from the same
+    # folder, which import nothing of this module.
+    own = {"advertising", "ai_access", "content", "metadata", "metrics", "ops", "web_analytics"}
     imported = top_imports(Path(mi.__file__))
     allowed = set(sys.stdlib_module_names) | own
     assert own <= imported
@@ -836,6 +836,9 @@ def test_the_module_imports_only_the_standard_library_and_its_own_modules():
     ads_imports = top_imports(Path(mi.__file__).with_name("advertising.py"))
     allowed_ads = set(sys.stdlib_module_names) | {"content", "metadata", "metrics", "ops"}
     assert ads_imports <= allowed_ads, sorted(ads_imports - allowed_ads)
+    web_imports = top_imports(Path(mi.__file__).with_name("web_analytics.py"))
+    allowed_web = set(sys.stdlib_module_names) | {"content", "metadata", "metrics"}
+    assert web_imports <= allowed_web, sorted(web_imports - allowed_web)
     ai_imports = top_imports(Path(mi.__file__).with_name("ai_access.py"))
     allowed_ai = set(sys.stdlib_module_names) | {"content", "metadata"}
     assert ai_imports <= allowed_ai, sorted(ai_imports - allowed_ai)

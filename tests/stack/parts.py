@@ -89,7 +89,7 @@ GROUPS: tuple[tuple[str, ...], ...] = (
         "test_server.py",
     ),
     # 6: the quarantine, Meta, the restatements, the final days, the flags of the loads, the short
-    # cycle of the demo and Airflow.
+    # cycle of the demo, Airflow and the dashboard Web analytics.
     (
         "test_quarantine.py",  # 14, and 14 to 15
         "test_meta_ads.py",  # 8, and 6 to 9
@@ -104,6 +104,8 @@ GROUPS: tuple[tuple[str, ...], ...] = (
         "test_demo_intraday.py",
         "test_airflow.py",
         "test_metrics.py",
+        # No run of the transform: a few seconds, not measured yet (24 November 2026).
+        "test_web_analytics.py",
     ),
 )
 
