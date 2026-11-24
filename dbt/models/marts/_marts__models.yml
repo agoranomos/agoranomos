@@ -1128,7 +1128,7 @@ models:
         config:
           meta:
             metabase:
-              display_name: Has Data Loss from Other Row
+              display_name: Has Data Loss From Other Row
               semantic_type: type/Category
               has_field_values: list
       - name: is_sampled
