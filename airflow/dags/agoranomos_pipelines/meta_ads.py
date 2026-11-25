@@ -223,9 +223,9 @@ RETRY_LATER = frozenset({(-2, 2490547), (2, 1504043)})
 # try again. If the issue persists, contact Meta Support." On 25 November 2026 the stand S6 (#220)
 # saw 2 with 1504044, HTTP 400, after about 30 seconds, like a timeout, on the synchronous
 # insights of four accounts, again on each of the five calls of three of them; on one of these,
-# by hand, the level adset failed so again while a report run of the same request completed in 7
-# seconds. Elsewhere code 2 stays a temporary error, and 100 with 1504018 fails the account, as
-# any other error does.
+# by hand, the level adset failed the same way again, while a report run of the same request
+# completed in 7 seconds. Elsewhere code 2 stays a temporary error, and 100 with 1504018 fails the
+# account, as any other error does.
 SYNC_TIMEOUTS = frozenset({(100, 1504018), (2, 1504038), (2, 1504044)})
 # The time of a portion of the history, which one task of agoranomos_meta_ads_daily takes, within
 # its execution_timeout of two hours: a portion starts no account PORTION_STARTS seconds after the
