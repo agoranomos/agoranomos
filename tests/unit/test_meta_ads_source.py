@@ -1072,6 +1072,22 @@ def test_the_unknown_error_on_the_account_or_a_list_still_waits_and_asks_again(m
     assert not graph.runs
 
 
+@pytest.mark.parametrize(
+    ("subcode", "name"), [(1504041, "Invalid Breakdowns"), (1504042, "Invalid Custom Metrics")]
+)
+def test_a_mistake_of_the_request_fails_the_account_at_once_with_no_wait(meta, subcode, name):
+    module, _, made, extensions = meta
+    graph = made["graph"]
+    graph.before = lambda method, path, params: (
+        error(2, subcode, name) if path == f"act_{ONE}/adsets" else None
+    )
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load(NOW, extensions)
+    assert f"{name} (code 2, subcode {subcode})" in str(raised.value)
+    assert paths(graph).count(("GET", f"act_{ONE}/adsets")) == 1
+    assert made["waits"] == []
+
+
 def test_the_unknown_error_on_the_results_of_a_report_run_waits_and_asks_again(meta):
     module, _, made, extensions = meta
     graph = made["graph"]

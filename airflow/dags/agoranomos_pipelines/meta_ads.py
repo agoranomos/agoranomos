@@ -182,9 +182,15 @@ CLIENT = {
 # documentation/ads-commerce/marketing-api/overview/rate-limiting, and of the Graph API,
 # https://developers.facebook.com/docs/graph-api/overview/rate-limiting/); and 1 and 2, for which
 # the Graph API says to wait and retry (https://developers.facebook.com/docs/graph-api/guides/
-# error-handling/), all read on 15 November 2026.
+# error-handling/), all read on 15 November 2026. Code 2 with the subcodes of INVALID_REQUEST is the
+# exception: a mistake of the request, which no retry helps.
 THROTTLED = frozenset({4, 17, 613, 80000, 80003, 80004, 80014})
 TEMPORARY = frozenset({1, 2})
+# The errors that fail the account at once, with no retry: code 2 with subcode 1504041, "Invalid
+# Breakdowns", and with 1504042, "Invalid Custom Metrics", mistakes of the request, on a synchronous
+# or an asynchronous request (Ads Insights Error Codes, https://developers.facebook.com/
+# documentation/ads-commerce/marketing-api/insights/error-codes, read on 26 November 2026 UTC).
+INVALID_REQUEST = frozenset({(2, 1504041), (2, 1504042)})
 THROTTLE_ATTEMPTS = 5
 # Too much data per call: code 100 with subcode 1487534, on a synchronous or an asynchronous
 # request (Limits and best practices of the Insights API, https://developers.facebook.com/
@@ -818,7 +824,8 @@ class Api:
         a temporary one, waits and asks again, up to THROTTLE_ATTEMPTS calls; too much data per
         call raises TooMuchData, a timeout or an error of the server after the retries of dlt
         raises Slow, and so does an error whose code and subcode are in slow, at once, which only
-        the synchronous request of insights passes, with SYNC_TIMEOUTS; any other error raises
+        the synchronous request of insights passes, with SYNC_TIMEOUTS; an error in INVALID_REQUEST
+        raises MetaAdsError at once, with no retry; any other error raises
         MetaAdsError, with the error of the API and no secret.
         Each call counts in the score of the account."""
         for attempt in range(1, THROTTLE_ATTEMPTS + 1):
@@ -852,6 +859,8 @@ class Api:
                 raise self.fail(subject, said, Slow)
             if (code, subcode) in slow:
                 raise self.fail(subject, said, Slow)
+            if (code, subcode) in INVALID_REQUEST:
+                raise self.fail(subject, said)
             if code in THROTTLED | TEMPORARY and attempt < THROTTLE_ATTEMPTS:
                 wait = found.reset or THROTTLE_WAIT * 2 ** (attempt - 1)
                 log.warning(
