@@ -1008,6 +1008,111 @@ def test_a_synchronous_request_that_is_too_large_goes_again_as_a_report_run(meta
     assert len([row for row in rows["insights_ad"] if row["account_id"] == ONE]) == 28
 
 
+# The synchronous timeouts of the Ads Insights Error Codes, and the unknown error that the stand S6
+# (#220) saw on the insights of the level adset on 25 November 2026, with the messages of the page.
+SYNC_TIMEOUTS = [
+    (100, 1504018, "Request Timed Out"),
+    (2, 1504038, "Request Timed Out"),
+    (2, 1504044, "Service temporarily unavailable"),
+]
+
+
+def synchronous(graph, account_id, level):
+    return [
+        params
+        for method, url, params in graph.requests
+        if method == "GET"
+        and url == f"{BASE}/act_{account_id}/insights"
+        and params.get("level") == level
+    ]
+
+
+@pytest.mark.parametrize(("code", "subcode", "message"), SYNC_TIMEOUTS)
+def test_a_synchronous_timeout_of_insights_goes_to_a_report_run_with_no_retry(
+    meta, code, subcode, message
+):
+    module, _, made, extensions = meta
+    graph = made["graph"]
+
+    def before(method, path, params):
+        if method == "GET" and path == f"act_{ONE}/insights" and params.get("level") == "adset":
+            return error(code, subcode, message)
+        return None
+
+    graph.before = before
+    module.load(NOW, extensions)
+    # One synchronous request, no wait of throttling, and a report run of the same request.
+    assert len(synchronous(graph, ONE, "adset")) == 1
+    [run] = graph.runs
+    assert run["level"] == "adset"
+    assert json.loads(run["filtering"])[0]["field"] == "adset.effective_status"
+    assert made["waits"] == [5, 10]
+    [(rows, _)] = made["pipelines"][0].runs
+    assert len([row for row in rows["insights_adset"] if row["account_id"] == ONE]) == 28
+    journal = {row["account_id"]: row for row in rows["_agoranomos_loads"]}
+    assert journal[ONE]["status"] == "loaded"
+
+
+@pytest.mark.parametrize("path", [f"act_{ONE}", f"act_{ONE}/adsets"])
+def test_the_unknown_error_on_the_account_or_a_list_still_waits_and_asks_again(meta, path):
+    module, _, made, extensions = meta
+    graph = made["graph"]
+    refused = {"count": 0}
+
+    def before(method, asked, params):
+        if asked == path and refused["count"] < 2:
+            refused["count"] += 1
+            return error(2, 1504044, "Service temporarily unavailable")
+        return None
+
+    graph.before = before
+    module.load(NOW, extensions)
+    assert made["waits"] == [60, 120]
+    assert paths(graph).count(("GET", path)) == 3
+    assert not graph.runs
+
+
+def test_the_unknown_error_on_the_results_of_a_report_run_waits_and_asks_again(meta):
+    module, _, made, extensions = meta
+    graph = made["graph"]
+    refused = {"count": 0}
+
+    def before(method, path, params):
+        if path == f"{RUN_ID}/insights" and refused["count"] < 2:
+            refused["count"] += 1
+            return error(2, 1504044, "Service temporarily unavailable")
+        return None
+
+    graph.before = before
+    portion = module.Portion((ONE,), date(2026, 1, 1), date(2026, 3, 31))
+    module.load(NOW, extensions, portion=portion)
+    assert [run["level"] for run in graph.runs] == ["account", "campaign", "adset", "ad"]
+    assert paths(graph).count(("GET", f"{RUN_ID}/insights")) == 6
+    assert made["waits"][2:4] == [60, 120]
+
+
+def test_a_synchronous_timeout_of_code_100_on_a_list_fails_the_account_at_once(meta):
+    module, _, made, extensions = meta
+    graph = made["graph"]
+    graph.before = lambda method, path, params: (
+        error(100, 1504018, "Request Timed Out") if path == f"act_{ONE}/adsets" else None
+    )
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load(NOW, extensions)
+    # Outside the synchronous insights, code 100 is no temporary error: no retry, no report run.
+    assert f"Meta ad account {ONE}: 400 Request Timed Out (code 100, subcode 1504018)" in str(
+        raised.value
+    )
+    assert paths(graph).count(("GET", f"act_{ONE}/adsets")) == 1
+    assert made["waits"] == []
+    assert not graph.runs
+
+
+def test_the_timeouts_of_the_tests_are_those_of_the_source(meta):
+    module, *_ = meta
+    assert {(code, subcode) for code, subcode, _ in SYNC_TIMEOUTS} == module.SYNC_TIMEOUTS
+
+
 def test_a_portion_takes_its_days_through_report_runs_as_a_load_of_history(meta):
     module, _, made, extensions = meta
     graph = made["graph"]
