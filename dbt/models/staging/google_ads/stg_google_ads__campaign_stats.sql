@@ -6,4 +6,4 @@
     'metrics__conversions_value': 'text', 'metrics__all_conversions': 'double precision',
     'metrics__all_conversions_value': 'text', 'segments__date': 'date',
     '_dlt_load_id': 'text',
-}), 'raw_google_ads', ref('stg_loads__newest_days')), 'google_ads', all_conversions=true) }}
+}), 'raw_google_ads', ref('stg_loads__newest_days')), 'google_ads', all_conversions=true, conversions=ref('stg_google_ads__campaign_conversions')) }}

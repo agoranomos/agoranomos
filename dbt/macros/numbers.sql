@@ -41,10 +41,30 @@
 
 {#- The rows of a report of facts, the SQL of the call block, with any of their measures other
     than zero: a row whose measures are all zero, or none, is left out of staging, whatever the API
-    returned (ADR-0036), and a row with zero impressions and a conversion stays. -#}
-{% macro nonzero(measures) -%}
-select * from (
+    returned (ADR-0036), and a row with zero impressions and a conversion stays. The statistics of
+    campaigns also pass conversions, the staging model of the conversions of the campaigns of the
+    same platform, whose rows have a conversion or a value other than zero: a row of statistics
+    whose measures are all zero then stays when its campaign has a conversion on its day. The
+    measures of a row alone would lose such a day, and conversions_primary of the view of campaigns
+    with it: Meta counts its actions in a child table and none in the statistics, the conversions
+    of TikTok and of demo_search need not be in the own metric of the platform, and Google Ads
+    gives its conversions by action in a report of their own. The join is to the distinct campaign
+    days of the conversions, not a subquery for each row. The levels of ad groups and ads keep a
+    row by its measures alone, as the core holds the conversions by action of campaigns only. -#}
+{% macro nonzero(measures, conversions=none) -%}
+select reported.* from (
 {{ caller() }}
 ) as reported
-where {% for measure in measures %}{{ measure }} <> 0{% if not loop.last %} or {% endif %}{% endfor %}
+{%- if conversions is not none %}
+left join (
+    select distinct platform, account_id, campaign_id, report_date
+    from {{ conversions }}
+) as converted
+    on converted.platform = reported.platform
+    and converted.account_id = reported.account_id
+    and converted.campaign_id = reported.campaign_id
+    and converted.report_date = reported.report_date
+{%- endif %}
+where {% for measure in measures %}reported.{{ measure }} <> 0{% if not loop.last %} or {% endif %}{% endfor %}
+{%- if conversions is not none %} or converted.report_date is not null{% endif %}
 {%- endmacro %}
