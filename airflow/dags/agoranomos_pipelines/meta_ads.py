@@ -794,15 +794,20 @@ class Api:
         log.info("%s: %s", subject, found.text)
         if wait is None and (found.percent is None or found.percent <= PAUSE_AT):
             return
-        if wait is None:
-            wait = found.reset or THROTTLE_WAIT
-        wait = min(wait, MAX_WAIT)
-        log.warning(
-            "%s: the use of the account is at %s%%; waiting %d s",
-            subject,
-            "?" if found.percent is None else f"{found.percent:g}",
-            wait,
-        )
+        error = wait is not None
+        wait = min(wait if error else found.reset or THROTTLE_WAIT, MAX_WAIT)
+        percent = "?" if found.percent is None else f"{found.percent:g}"
+        if error:
+            log.warning(
+                "%s: waiting %d s because of the error, not the use of the account (at %s%%)",
+                subject,
+                wait,
+                percent,
+            )
+        else:
+            log.warning(
+                "%s: the use of the account is at %s%%; waiting %d s", subject, percent, wait
+            )
         sleep(wait)
 
     def call(
