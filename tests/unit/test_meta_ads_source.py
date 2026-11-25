@@ -236,6 +236,13 @@ class Graph:
                 },
             )
         if path.startswith("act_") and "/" not in path:
+            # The field business needs the permission business_management, which a token of
+            # ads_read lacks: Meta refuses the whole request, as the stand S6 saw in November 2026.
+            if "business" in params.get("fields", "").split(","):
+                return error(
+                    100,
+                    message="(#100) Requires business_management permission to access the field.",
+                )
             account_id = path.removeprefix("act_")
             return StandInResponse(
                 200,
@@ -246,7 +253,6 @@ class Graph:
                     "currency": "USD",
                     "timezone_name": ZONES[account_id],
                     "account_status": 1,
-                    "business": {"id": "555", "name": "Acme Holding"},
                 },
                 self.headers,
             )
@@ -589,7 +595,7 @@ def test_the_lists_take_every_effective_status_and_the_fields_of_the_shape(meta)
         assert params["fields"] == fields
         assert params["limit"] == "500"
     assert asked[f"act_{ONE}"]["fields"] == (
-        "id,account_id,name,currency,timezone_name,account_status,business"
+        "id,account_id,name,currency,timezone_name,account_status"
     )
 
 
@@ -675,7 +681,7 @@ def test_a_load_keeps_the_rows_as_the_api_gives_them_in_the_tables_of_demo_socia
         "_agoranomos_loads",
     ]
     assert [row["account_id"] for row in rows["ad_accounts"]] == [ONE, TWO]
-    assert rows["ad_accounts"][0]["business"] == {"id": "555", "name": "Acme Holding"}
+    assert "business" not in rows["ad_accounts"][0]
     assert rows["campaigns"][0]["effective_status"] == "ACTIVE"
     assert rows["adsets"][0]["status"] == "ARCHIVED"
     assert rows["ads"][0]["status"] == "DELETED"
@@ -697,7 +703,7 @@ def test_a_load_keeps_the_rows_as_the_api_gives_them_in_the_tables_of_demo_socia
     assert columns["spend"]["data_type"] == "text"
     assert columns["impressions"]["data_type"] == "text"
     assert "actions" not in columns
-    assert hints["ad_accounts"]["columns"]["business__id"]["data_type"] == "text"
+    assert not any(name.startswith("business") for name in hints["ad_accounts"]["columns"])
     assert hints["ad_accounts"]["columns"]["account_status"]["data_type"] == "text"
 
 

@@ -258,7 +258,6 @@ def answers() -> dict:
                 "currency": "USD",
                 "timezone_name": "America/New_York",
                 "account_status": 1,
-                "business": {"id": "900000000000000", "name": "Business of the stack test"},
             },
             "campaigns": campaigns,
             "adsets": ad_sets,
