@@ -189,7 +189,7 @@ TEMPORARY = frozenset({1, 2})
 # The errors that fail the account at once, with no retry: code 2 with subcode 1504041, "Invalid
 # Breakdowns", and with 1504042, "Invalid Custom Metrics", mistakes of the request, on a synchronous
 # or an asynchronous request (Ads Insights Error Codes, https://developers.facebook.com/
-# documentation/ads-commerce/marketing-api/insights/error-codes, read on 26 November 2026 UTC).
+# documentation/ads-commerce/marketing-api/insights/error-codes, read on 25 November 2026).
 INVALID_REQUEST = frozenset({(2, 1504041), (2, 1504042)})
 THROTTLE_ATTEMPTS = 5
 # Too much data per call: code 100 with subcode 1487534, on a synchronous or an asynchronous
@@ -825,8 +825,8 @@ class Api:
         call raises TooMuchData, a timeout or an error of the server after the retries of dlt
         raises Slow, and so does an error whose code and subcode are in slow, at once, which only
         the synchronous request of insights passes, with SYNC_TIMEOUTS; an error in INVALID_REQUEST
-        raises MetaAdsError at once, with no retry; any other error raises
-        MetaAdsError, with the error of the API and no secret.
+        raises MetaAdsError at once, with no retry; any other error raises MetaAdsError, with the
+        error of the API and no secret.
         Each call counts in the score of the account."""
         for attempt in range(1, THROTTLE_ATTEMPTS + 1):
             sent = {**params, **(self.auth if sign else {})}
