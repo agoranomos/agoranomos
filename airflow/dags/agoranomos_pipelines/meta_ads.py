@@ -23,8 +23,8 @@ with the windows of attribution as the columns _1d_click, _7d_click and _1d_view
 demo_social mimics, which the macros of dbt/macros/shapes/meta_v26.sql read (no field that they
 read changed in v27.0). For each account, in this order, every page of each answer through
 paging.next: the account (ad_accounts), the full lists of its campaigns, ad sets and ads
-(campaigns, adsets, ads), filtered on every value of effective_status, so that archived and
-deleted objects come too, as far as the API returns them; then, by day, the totals of the account
+(campaigns, adsets, ads), filtered on every value of effective_status but DELETED, which the
+lists refuse, so that archived objects come too; then, by day, the totals of the account
 from the insights at the level account (insights_account), against which the transform is to check
 the sum of its campaigns (G0a of ADR-0035), right before the insights of the campaigns, and the
 insights of the levels campaign, adset and ad (insights_campaign, insights_adset, insights_ad),
@@ -223,10 +223,15 @@ RETRY_LATER = frozenset({(-2, 2490547), (2, 1504043)})
 # load has no such time: its 28 days go synchronously.
 PORTION_STARTS = 60 * 60
 PORTION_ENDS = 90 * 60
-# The values of effective_status that each list and each level of insights filters on, every value
-# that the references of the edges and the objects list as of November 2026: the edges campaigns
-# and adsets of an ad account, and the field effective_status of an ad, list twelve; the field of a
-# campaign six, and that of an ad set seven, which the filter of each level of insights takes.
+# The values of effective_status, every value that the references of the edges and the objects
+# list as of November 2026: the edges campaigns and adsets of an ad account, and the field
+# effective_status of an ad, list twelve; the field of a campaign six, and that of an ad set seven,
+# which the filter of each level of insights takes. The lists take the twelve but DELETED: the
+# stand S6 showed in November 2026 that the edges campaigns, adsets and ads of an account refuse an
+# effective_status that holds DELETED, alone or with others (code 100, subcode 1815001, "Cannot
+# request deleted objects"), while the other eleven pass and archived objects come. The insights
+# take DELETED, so the statistics of a deleted object still come, and a deleted object reaches the
+# core only through them, as a stub of ADR-0036 named from its statistics.
 EVERY_STATUS = (
     "ACTIVE",
     "PAUSED",
@@ -241,6 +246,7 @@ EVERY_STATUS = (
     "IN_PROCESS",
     "WITH_ISSUES",
 )
+LIST_STATUSES = tuple(status for status in EVERY_STATUS if status != "DELETED")
 LEVEL_STATUSES = {
     "campaign": ("ACTIVE", "PAUSED", "DELETED", "ARCHIVED", "IN_PROCESS", "WITH_ISSUES"),
     "adset": (
@@ -1116,7 +1122,7 @@ def read_account(
             path = folder / f"{table}.jsonl"
             params = {
                 "fields": ",".join(FIELDS[table]),
-                "effective_status": json.dumps(list(EVERY_STATUS)),
+                "effective_status": json.dumps(list(LIST_STATUSES)),
                 "limit": str(LIMIT),
             }
             with path.open("w", encoding="utf-8") as file:

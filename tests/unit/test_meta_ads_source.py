@@ -156,11 +156,14 @@ class StandInResponse:
         return self.body if isinstance(self.body, str) else json.dumps(self.body)
 
 
-def error(code, subcode=None, message="An error", status=400):
-    """An error of the Graph API, as its guide of errors writes one."""
+def error(code, subcode=None, message="An error", status=400, title=None, text=None):
+    """An error of the Graph API, as its guide of errors writes one, with error_user_title and
+    error_user_msg when title and text are given."""
     body = {"message": message, "type": "OAuthException", "code": code, "fbtrace_id": "AbC1"}
     if subcode is not None:
         body["error_subcode"] = subcode
+    if title is not None:
+        body |= {"error_user_title": title, "error_user_msg": text}
     return StandInResponse(status, {"error": body})
 
 
@@ -282,6 +285,16 @@ class Graph:
         if edge == "insights":
             rows = [insight(account_id, params["level"], day) for day in days_of(params)]
             return StandInResponse(200, {"data": rows, "paging": {}}, self.headers)
+        # The lists refuse DELETED in effective_status, alone or with other values, as the stand
+        # S6 saw in November 2026, and return no deleted object.
+        if "DELETED" in json.loads(params.get("effective_status", "[]")):
+            return error(
+                100,
+                1815001,
+                "Invalid parameter",
+                title="Cannot request deleted objects",
+                text="Requests for deleted objects are not supported at this endpoint",
+            )
         rows = {
             "campaigns": [
                 {
@@ -313,9 +326,9 @@ class Graph:
                     "campaign_id": "120200000001",
                     "adset_id": "120200000002",
                     "name": "Boots, red",
-                    "status": "DELETED",
-                    "configured_status": "DELETED",
-                    "effective_status": "DELETED",
+                    "status": "ARCHIVED",
+                    "configured_status": "ARCHIVED",
+                    "effective_status": "ARCHIVED",
                 }
             ],
         }[edge]
@@ -560,14 +573,14 @@ def test_a_load_asks_v27_for_each_account_in_the_order_of_adr_0050(meta):
     }
 
 
-def test_the_lists_take_every_effective_status_and_the_fields_of_the_shape(meta):
+def test_the_lists_take_every_effective_status_but_deleted_and_the_fields_of_the_shape(meta):
+    # The edges of the lists refuse DELETED (code 100, subcode 1815001), as the stand S6 saw.
     module, _, made, extensions = meta
     module.load(NOW, extensions)
     asked = {url.removeprefix(BASE + "/"): params for _, url, params in made["graph"].requests}
     statuses = [
         "ACTIVE",
         "PAUSED",
-        "DELETED",
         "PENDING_REVIEW",
         "DISAPPROVED",
         "PREAPPROVED",
@@ -659,6 +672,42 @@ def test_the_insights_go_by_day_at_four_levels_filtered_on_the_status_of_each(me
     ]
 
 
+def test_a_list_with_deleted_fails_its_account_as_meta_refuses_it(meta, monkeypatch):
+    # The stand-in refuses DELETED in the lists as Meta does, so a load that asked for it again
+    # would fail every account at its first list.
+    module, _, made, extensions = meta
+    monkeypatch.setattr(module, "LIST_STATUSES", module.EVERY_STATUS)
+    with pytest.raises(module.MetaAdsError, match="2 of 2 Meta ad accounts failed") as raised:
+        module.load(NOW, extensions)
+    assert "400 Invalid parameter (code 100, subcode 1815001)" in str(raised.value)
+    assert paths(made["graph"])[:2] == [("GET", f"act_{ONE}"), ("GET", f"act_{ONE}/campaigns")]
+
+
+def test_the_statistics_of_a_deleted_ad_that_no_list_returns_reach_raw(meta):
+    # The ad lists return no deleted ad, while the insights of ads, filtered with DELETED, still
+    # name it, so staging makes it a stub of ADR-0036 from the statistics.
+    module, _, made, extensions = meta
+    graph = made["graph"]
+
+    def before(method, path, params):
+        if path.endswith("/ads"):
+            return StandInResponse(200, {"data": [], "paging": {}})
+        return None
+
+    graph.before = before
+    module.load(NOW, extensions)
+    [(rows, _)] = made["pipelines"][0].runs
+    assert rows["ads"] == []
+    assert {row["ad_id"] for row in rows["insights_ad"]} == {"120200000003"}
+    assert len(rows["insights_ad"]) == 56
+    [filtered] = [
+        json.loads(params["filtering"])
+        for _, url, params in graph.requests
+        if url == f"{BASE}/act_{ONE}/insights" and params["level"] == "ad"
+    ]
+    assert "DELETED" in filtered[0]["value"]
+
+
 def test_a_load_keeps_the_rows_as_the_api_gives_them_in_the_tables_of_demo_social(meta):
     # The tables and fields that dbt/macros/shapes/meta_v26.sql reads for demo_social, with the
     # totals of the account beside them; actions and action_values stay lists, which dlt makes the
@@ -684,7 +733,7 @@ def test_a_load_keeps_the_rows_as_the_api_gives_them_in_the_tables_of_demo_socia
     assert "business" not in rows["ad_accounts"][0]
     assert rows["campaigns"][0]["effective_status"] == "ACTIVE"
     assert rows["adsets"][0]["status"] == "ARCHIVED"
-    assert rows["ads"][0]["status"] == "DELETED"
+    assert rows["ads"][0]["status"] == "ARCHIVED"
     # 28 days of ONE and 28 of TWO.
     assert counts["insights_campaign"] == 56
     row = rows["insights_ad"][0]
