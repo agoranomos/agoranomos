@@ -750,21 +750,20 @@ class Api:
             self.sign_in(token, secret)
 
     def sign_in(self, token: str, secret: str | None) -> None:
-        """The sign-in that each signed call carries: the token in the header Authorization, and
-        the parameter appsecret_proof, its proof, whenever the App Secret is set. The reference of
-        the Marketing API shows the token as the parameter access_token, which a URL would carry;
-        the WhatsApp Cloud API on the same graph.facebook.com says "include your token in an
+        """The sign-in that each signed call carries: the token in the header Authorization, and the
+        parameter appsecret_proof, its proof, whenever the App Secret is set. The reference of the
+        Marketing API shows the token as the parameter access_token, which a URL would carry; the
+        WhatsApp Cloud API on the same graph.facebook.com says "include your token in an
         authorization request header, preceded by Bearer" (Access tokens,
         https://developers.facebook.com/documentation/business-messaging/whatsapp/access-tokens/,
         read on 25 November 2026), and the Graph API v27.0 took the header for the ad accounts, the
         lists and the insights of each level, their pages included, on the stand S6 (#220) on 25
-        November 2026, which tried no report run. The refresh of current_token is the one
-        call that is not signed: it carries its secrets in its query, as Meta documents it. Of the
-        versions of the image as of November 2026, dlt 1.32.0
-        passes the headers of a call to requests and logs none, urllib3 2.7.0 logs the URL of a
-        request and never its headers, and requests 2.34.2 writes the value of a header into an
-        error only when it is malformed, which SECRET_FORM rules out; Secrets.scrub masks the
-        header in any text all the same."""
+        November 2026, which tried no report run. The refresh of current_token is the one call that
+        is not signed: it carries its secrets in its query, as Meta documents it. Of the versions of
+        the image as of November 2026, dlt 1.32.0 passes the headers of a call to requests and logs
+        none, urllib3 2.7.0 logs the URL of a request and never its headers, and requests 2.34.2
+        writes the value of a header into an error only when it is malformed, which SECRET_FORM
+        rules out; Secrets.scrub masks the header in any text all the same."""
         self.headers = {"Authorization": f"Bearer {token}"}
         self.auth = {}
         self.secrets.add(token)
