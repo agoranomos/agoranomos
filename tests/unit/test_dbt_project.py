@@ -1975,9 +1975,8 @@ META_ADS_MODELS = {
 
 def meta_ads_columns() -> dict[str, set[str]]:
     """The columns that dlt makes of the fields of each table of the load of Meta, as
-    meta_ads.columns hints them: the business of an account as its ID and name, and no column for
-    the lists of actions, which become child tables. dlt is not in the development environment, so
-    the fields come from the text of the source."""
+    meta_ads.columns hints them: no column for the lists of actions, which become child tables.
+    dlt is not in the development environment, so the fields come from the text of the source."""
     source = ast.parse((DAGS_PIPELINES / "meta_ads.py").read_text(encoding="utf-8"))
     constants = {
         node.targets[0].id: node.value
@@ -1999,15 +1998,10 @@ def meta_ads_columns() -> dict[str, set[str]]:
         ast.literal_eval(key): fields(value)
         for key, value in zip(constants["FIELDS"].keys, constants["FIELDS"].values, strict=True)
     }
-    hinted = {}
-    for table, names in tables.items():
-        columns = set()
-        for name in names:
-            if name in ("actions", "action_values"):
-                continue
-            columns |= {"business__id", "business__name"} if name == "business" else {name}
-        hinted[table] = columns
-    return hinted
+    return {
+        table: {name for name in names if name not in ("actions", "action_values")}
+        for table, names in tables.items()
+    }
 
 
 def test_each_staging_model_of_meta_ads_is_one_call_of_the_shape_that_the_demo_shares():

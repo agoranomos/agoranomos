@@ -60,8 +60,9 @@ client = "meta-stack-test"
 TOKEN = "stand-in-token-of-the-meta-stack-test"
 
 # Each day of each account, faked by hand: two campaigns, an active one and an archived one, an ad
-# set in each, and three ads, of which the lists give two: the third, a deleted ad that the lists
-# no longer return, only the insights of ads name.
+# set in each, and three ads, of which the lists give two: the third, a deleted ad, only the
+# insights of ads name, as the lists of Meta refuse DELETED in effective_status and return no
+# deleted object (the stand S6, November 2026).
 CAMPAIGNS = (("120200000000101", "Boots", "ACTIVE"), ("120200000000102", "Socks", "ARCHIVED"))
 AD_SETS = (("120200000000201", "120200000000101", "Boots, men"),)
 AD_SETS += (("120200000000202", "120200000000102", "Socks, all"),)
@@ -127,8 +128,8 @@ faked = json.loads(sys.argv[2])
 
 
 class Answer:
-    def __init__(self, body):
-        self.status_code, self.body, self.headers = 200, body, {}
+    def __init__(self, body, status_code=200):
+        self.status_code, self.body, self.headers = status_code, body, {}
 
     def json(self):
         return json.loads(json.dumps(self.body))
@@ -157,6 +158,19 @@ class Graph:
             return Answer(account["account"])
         edge = path.split("/")[1]
         if edge != "insights":
+            # The lists refuse DELETED in effective_status, as Meta does.
+            if "DELETED" in json.loads(params.get("effective_status", "[]")):
+                refused = {
+                    "message": "Invalid parameter",
+                    "type": "OAuthException",
+                    "code": 100,
+                    "error_subcode": 1815001,
+                    "error_user_title": "Cannot request deleted objects",
+                    "error_user_msg": (
+                        "Requests for deleted objects are not supported at this endpoint"
+                    ),
+                }
+                return Answer({"error": refused}, 400)
             return Answer({"data": account[edge], "paging": {}})
         rows = []
         for day in days(params):
@@ -258,7 +272,6 @@ def answers() -> dict:
                 "currency": "USD",
                 "timezone_name": "America/New_York",
                 "account_status": 1,
-                "business": {"id": "900000000000000", "name": "Business of the stack test"},
             },
             "campaigns": campaigns,
             "adsets": ad_sets,
