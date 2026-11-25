@@ -1,7 +1,8 @@
 -- Every day, between the first and the last day of each account in the windows of the run, on
 -- which the account has no row of the statistics of its campaigns: a day that a load missed. A
 -- warning, as a day on which every campaign of an account paused has no row either, and a row
--- whose measures are all zero is not kept (ADR-0036).
+-- whose measures are all zero is kept only when its campaign has a conversion on its day
+-- (ADR-0036).
 {{ config(severity='warn') }}
 with rows as (
     select platform, account_id, report_date
