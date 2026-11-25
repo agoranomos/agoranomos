@@ -122,10 +122,12 @@ TOTALS = {
 
 # A load of Meta as of a moment, through meta_ads.load, with the HTTP client of dlt replaced by a
 # stand-in that answers each request of the Graph API with the answers above, given as JSON, for
-# every day of the time_range that the request asks for. dlt reads the password of loader from the
-# environment of the container, and the script prints the rows of each table.
+# every day of the time_range that the request asks for, and fails a request whose token is not in
+# the header Authorization or is in its URL. dlt reads the password of loader from the environment
+# of the container, and the script prints the rows of each table.
 LOAD = """
 import json
+import os
 import sys
 from datetime import date, datetime, timedelta
 from urllib.parse import urlsplit
@@ -158,9 +160,14 @@ class Graph:
     def __init__(self, **settings):
         pass
 
-    def get(self, url, params):
-        path = urlsplit(url).path.removeprefix(f"/{meta_ads.API_VERSION}/")
-        assert params.get("access_token"), "a request without the token"
+    def get(self, url, params, headers):
+        parts = urlsplit(url)
+        path = parts.path.removeprefix(f"/{meta_ads.API_VERSION}/")
+        # The token goes in the header Authorization of each call, and never in a URL.
+        assert "access_token" not in params, "the token in a URL"
+        assert "access_token" not in parts.query, "the token in a URL"
+        token = os.environ["META_ADS_ACCESS_TOKEN"]
+        assert headers == {"Authorization": "Bearer " + token}, "a request without the token"
         account_id = path.split("/")[0].removeprefix("act_")
         account = faked[account_id]
         if "/" not in path:
@@ -187,7 +194,7 @@ class Graph:
                 rows.append({**row, "date_start": day, "date_stop": day})
         return Answer({"data": rows, "paging": {}})
 
-    def post(self, url, data):
+    def post(self, url, data, headers):
         raise AssertionError("a daily load asks no report run")
 
 

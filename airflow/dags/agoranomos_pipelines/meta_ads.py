@@ -5,16 +5,16 @@ The source loads the accounts of the platform meta_ads that extensions/model/cli
 and no other, so that the accounts that other businesses share with the business portfolio of the
 deployment bring in nothing that the file does not name (ADR-0024). An account is its numeric ID,
 without the prefix act_ that the paths of the API add. It signs in with the token of a system user
-of the portfolio, META_ADS_ACCESS_TOKEN, sent as the parameter access_token of each call, as the
-reference of the Marketing API shows it. A token that never expires is all that .env holds. A
-token that expires in 60 days comes with META_ADS_APP_ID and META_ADS_APP_SECRET: the load then
-refreshes it through GET oauth/access_token with fb_exchange_token before it is 30 days old, and
-keeps the newest token in the Airflow Variable VARIABLE, with a hash of the token of .env that it
-came from, so that a new token in .env replaces it; a refresh that fails fails the load
-(current_token). Whenever the secret is set, every call carries appsecret_proof, the HMAC-SHA256 of
-the token keyed with the secret. No token, secret or proof reaches a log or an error: each text
-that the source writes from an error goes through Secrets.scrub, and the task masks the values
-too.
+of the portfolio, META_ADS_ACCESS_TOKEN, sent in the header Authorization: Bearer of each call,
+never in a URL or a body, but for the refresh below (Api.sign_in). A token that never expires is
+all that .env holds. A token that expires in 60 days comes with META_ADS_APP_ID and
+META_ADS_APP_SECRET: the load then refreshes it through GET oauth/access_token with
+fb_exchange_token before it is 30 days old, and keeps the newest token in the Airflow Variable
+VARIABLE, with a hash of the token of .env that it came from, so that a new token in .env replaces
+it; a refresh that fails fails the load (current_token). Whenever the secret is set, every other
+call carries the parameter appsecret_proof, the HMAC-SHA256 of the token keyed with the secret. No
+token, secret or proof reaches a log or an error: each text that the source writes from an error
+goes through Secrets.scrub, and the task masks the values too.
 
 The source calls the Graph API version API_VERSION through the HTTP client of dlt, and keeps each
 row as the API gives it, which dlt writes in snake_case with nested objects joined by __ and the
@@ -31,14 +31,14 @@ insights of the levels campaign, adset and ad (insights_campaign, insights_adset
 each filtered on the effective_status of its level over every value (ADR-0036), with actions,
 action_values and attribution_setting, and the windows 1d_click, 7d_click and 1d_view. A daily
 load asks the insights synchronously; a request that fails with too much data (code 100, subcode
-1487534), a timeout or an error of the server goes again as a report run (report_run), as each
-portion of the history does: POST act_<id>/insights, polled until it completes, and then
-<report_run_id>/insights page by page; a report run that has too much data, refused at its POST or
-failed with Report Too Large, goes by calendar months, and one that Meta skips or that fails with
-an error to retry later is asked again. After each call, the load reads the headers of
-throttling, X-Ad-Account-Usage, X-FB-Ads-Insights-Throttle and X-Business-Use-Case-Usage, logs
-them, and waits when a use passes PAUSE_AT percent, and an error of throttling waits and asks again
-(Api.call).
+1487534), a timeout, an error of the server, or one of the errors of SYNC_TIMEOUTS, with no
+synchronous retry, goes again as a report run (report_run), as each portion of the history does:
+POST act_<id>/insights, polled until it completes, and then <report_run_id>/insights page by
+page; a report run that has too much data, refused at its POST or failed with Report Too Large,
+goes by calendar months, and one that Meta skips or that fails with an error to retry later is
+asked again. After each call, the load reads the headers of throttling, X-Ad-Account-Usage,
+X-FB-Ads-Insights-Throttle and X-Business-Use-Case-Usage, logs them, and waits when a use passes
+PAUSE_AT percent, and an error of throttling waits and asks again (Api.call).
 
 The days of each account run from the day after the last day that the core accepted for it, or
 from 28 days back when that is earlier, as insights "do not change after 28 days of being
@@ -215,6 +215,18 @@ COMPLETED, FAILED_JOB, SKIPPED = "Job Completed", "Job Failed", "Job Skipped"
 # other failure fails the account.
 TOO_LARGE = frozenset({TOO_MUCH_DATA, (-3, 1504045)})
 RETRY_LATER = frozenset({(-2, 2490547), (2, 1504043)})
+# The errors of a synchronous request of insights that go again as a report run at once, with no
+# synchronous retry (written_insights). The Ads Insights Error Codes, read on 25 November 2026,
+# give two synchronous timeouts, 100 with 1504018 and 2 with 1504038, "Request Timed Out", for
+# which they say "Try a smaller date range, fetch less data, or use async jobs."; and 2 with
+# 1504044, a synchronous "Unknown Error Occurred", for which they say "Please refresh the page or
+# try again. If the issue persists, contact Meta Support." On 25 November 2026 the stand S6 (#220)
+# saw 2 with 1504044, HTTP 400, after about 30 seconds, like a timeout, on the synchronous
+# insights of four accounts, again on each of the five calls of three of them; on one of these,
+# by hand, the level adset failed the same way again, while a report run of the same request
+# completed in 7 seconds. Elsewhere code 2 stays a temporary error, and 100 with 1504018 fails the
+# account, as any other error does.
+SYNC_TIMEOUTS = frozenset({(100, 1504018), (2, 1504038), (2, 1504044)})
 # The time of a portion of the history, which one task of agoranomos_meta_ads_daily takes, within
 # its execution_timeout of two hours: a portion starts no account PORTION_STARTS seconds after the
 # load began, and leaves the accounts that it has not reached to the next portion, which the plan
@@ -364,7 +376,8 @@ class MetaAdsError(RuntimeError):
 
 
 class Slow(MetaAdsError):
-    """A request that timed out, or that the server failed, after the retries of dlt: a
+    """A request that timed out, or that the server failed, after the retries of dlt, or a
+    synchronous request of insights that Meta answered with an error of SYNC_TIMEOUTS: a
     synchronous request of insights goes again as a report run."""
 
 
@@ -389,15 +402,19 @@ class Secrets:
     PARAMETER = re.compile(
         r"(access_token|appsecret_proof|client_secret|fb_exchange_token)=[^&\s]*"
     )
+    # The credentials of a header Authorization, whatever the token.
+    BEARER = re.compile(r"(Bearer )[^\s'\",}]+")
 
     def add(self, value: str | None) -> None:
         if value:
             self.values.add(value)
 
     def scrub(self, text: str) -> str:
-        """The text with each parameter of a URL that carries a secret, and then each secret, as
-        ***: the parameters first, so that a secret inside the name of one cannot hide it."""
+        """The text with each parameter of a URL that carries a secret, the credentials of each
+        header Authorization, and then each secret, as ***: the parameters and the header first, so
+        that a secret inside the name of one cannot hide it."""
         text = self.PARAMETER.sub(r"\1=***", text)
+        text = self.BEARER.sub(r"\1***", text)
         for value in sorted(self.values, key=len, reverse=True):
             text = text.replace(value, "***")
         return text
@@ -740,14 +757,28 @@ class Api:
         self.requests = 0
         # The moment, by monotonic(), by which a report run of a portion completes, or None.
         self.deadline: float | None = None
+        self.headers: dict[str, str] = {}
         self.auth: dict[str, str] = {}
         if token is not None:
             self.sign_in(token, secret)
 
     def sign_in(self, token: str, secret: str | None) -> None:
-        """The parameters of the sign-in that each call carries: the token, and its proof whenever
-        the App Secret is set."""
-        self.auth = {"access_token": token}
+        """The sign-in that each signed call carries: the token in the header Authorization, and the
+        parameter appsecret_proof, its proof, whenever the App Secret is set. The reference of the
+        Marketing API shows the token as the parameter access_token, which a URL would carry; the
+        WhatsApp Cloud API on the same graph.facebook.com says "include your token in an
+        authorization request header, preceded by Bearer" (Access tokens,
+        https://developers.facebook.com/documentation/business-messaging/whatsapp/access-tokens/,
+        read on 25 November 2026), and the Graph API v27.0 took the header for the ad accounts, the
+        lists and the insights of each level, their pages included, on the stand S6 (#220) on 25
+        November 2026, which tried no report run. The refresh of current_token is the one call that
+        is not signed: it carries its secrets in its query, as Meta documents it. Of the versions of
+        the image as of November 2026, dlt 1.32.0 passes the headers of a call to requests and logs
+        none, urllib3 2.7.0 logs the URL of a request and never its headers, and requests 2.34.2
+        writes the value of a header into an error only when it is malformed, which SECRET_FORM
+        rules out; Secrets.scrub masks the header in any text all the same."""
+        self.headers = {"Authorization": f"Bearer {token}"}
+        self.auth = {}
         self.secrets.add(token)
         if secret is not None:
             self.auth["appsecret_proof"] = proof(token, secret)
@@ -775,21 +806,30 @@ class Api:
         sleep(wait)
 
     def call(
-        self, subject: str, method: str, url: str, params: dict[str, str], sign: bool = True
+        self,
+        subject: str,
+        method: str,
+        url: str,
+        params: dict[str, str],
+        sign: bool = True,
+        slow: frozenset[tuple[int, int]] = frozenset(),
     ) -> dict:
         """The answer of a call as JSON, after the waits of throttling. An error of throttling, or
         a temporary one, waits and asks again, up to THROTTLE_ATTEMPTS calls; too much data per
         call raises TooMuchData, a timeout or an error of the server after the retries of dlt
-        raises Slow, and any other error MetaAdsError, with the error of the API and no secret.
+        raises Slow, and so does an error whose code and subcode are in slow, at once, which only
+        the synchronous request of insights passes, with SYNC_TIMEOUTS; any other error raises
+        MetaAdsError, with the error of the API and no secret.
         Each call counts in the score of the account."""
         for attempt in range(1, THROTTLE_ATTEMPTS + 1):
             sent = {**params, **(self.auth if sign else {})}
+            headers = self.headers if sign else {}
             self.requests += 1
             try:
                 if method == "POST":
-                    response = self.client.post(url, data=sent)
+                    response = self.client.post(url, data=sent, headers=headers)
                 else:
-                    response = self.client.get(url, params=sent)
+                    response = self.client.get(url, params=sent, headers=headers)
             except Timeout as error:
                 raise self.fail(subject, f"the request timed out: {error}", Slow) from None
             except RequestException as error:
@@ -810,6 +850,8 @@ class Api:
                 raise self.fail(subject, said, TooMuchData)
             if response.status_code >= 500:
                 raise self.fail(subject, said, Slow)
+            if (code, subcode) in slow:
+                raise self.fail(subject, said, Slow)
             if code in THROTTLED | TEMPORARY and attempt < THROTTLE_ATTEMPTS:
                 wait = found.reset or THROTTLE_WAIT * 2 ** (attempt - 1)
                 log.warning(
@@ -823,14 +865,20 @@ class Api:
             raise self.fail(subject, said)
         raise AssertionError("unreachable")  # pragma: no cover
 
-    def pages(self, subject: str, path: str, params: dict[str, str]) -> Iterator[dict]:
+    def pages(
+        self,
+        subject: str,
+        path: str,
+        params: dict[str, str],
+        slow: frozenset[tuple[int, int]] = frozenset(),
+    ) -> Iterator[dict]:
         """The rows of every page of an answer, data, through paging.next until a page has none
         (Paginated results of the Graph API, read on 15 November 2026). A next page goes to the
-        Graph API alone, with the parameters of the sign-in of this load, never those that the
-        link carries."""
+        Graph API alone, with the sign-in of this load, never a token or a proof that the link
+        carries."""
         url, query = f"{BASE}/{path}", params
         while True:
-            body = self.call(subject, "GET", url, query)
+            body = self.call(subject, "GET", url, query, slow=slow)
             rows = body.get("data")
             if not isinstance(rows, list):
                 raise self.fail(subject, "an answer without a list of data")
@@ -1022,16 +1070,19 @@ def written_insights(
     api: Api, account_id: str, level: str, days: tuple[date, date], file: TextIO, by_report: bool
 ) -> None:
     """Write the insights of a level of an account over days to file: synchronously, and as a
-    report run when the synchronous request is too large, times out or fails on the server, after
-    the file is cut back to where its rows began; or as a report run at once, by_report. A report
-    run with too much data, refused at its POST or failed with an error of TOO_LARGE, goes by
-    calendar months (ADR-0050), and a month with too much data fails the account."""
+    report run when the synchronous request is too large, times out, fails on the server or is
+    answered with an error of SYNC_TIMEOUTS on any of its pages, with no synchronous retry of
+    these, after the file is cut back to where its rows began; or as a report run at once,
+    by_report. A report run with too much data, refused at its POST or failed with an error of
+    TOO_LARGE, goes by calendar months (ADR-0050), and a month with too much data fails the
+    account."""
     subject = f"Meta ad account {account_id}"
     params = insights_params(level, days)
     if not by_report:
         start = file.tell()
         try:
-            write_rows(api.pages(subject, f"act_{account_id}/insights", params), file)
+            found = api.pages(subject, f"act_{account_id}/insights", params, slow=SYNC_TIMEOUTS)
+            write_rows(found, file)
             return
         except Slow as error:
             log.warning("%s; asking again as a report run", error)
