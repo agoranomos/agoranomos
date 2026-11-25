@@ -266,8 +266,10 @@ LEVEL_STATUSES = {
 WINDOWS = ("1d_click", "7d_click", "1d_view")
 
 # The fields of each table: those of the shape of demo_social, so that the same macros read both,
-# with the statuses of ADR-0036 on the lists and the business of the account. A level of insights
-# is that of its table.
+# with the statuses of ADR-0036 on the lists. A level of insights is that of its table. The
+# account has no business: that field needs the permission business_management, which a token of
+# ads_read lacks, and Meta refuses the whole request with error 100, as the stand S6 showed in
+# November 2026.
 STATS = ("date_start", "date_stop", "impressions", "clicks", "inline_link_clicks", "spend")
 ACTIONS = ("attribution_setting", "actions", "action_values")
 ACCOUNT = ("account_id", "account_name", "account_currency")
@@ -279,7 +281,6 @@ FIELDS = {
         "currency",
         "timezone_name",
         "account_status",
-        "business",
     ),
     "campaigns": (
         "id",
@@ -337,17 +338,13 @@ FACTS = tuple(LEVELS)
 
 
 def columns(table: str) -> dict[str, dict]:
-    """The columns of the fields of a table, as dlt names them: text, the dates as dates, the
-    business of the account as its ID and name, and none for the lists of actions, which become
-    child tables of text."""
+    """The columns of the fields of a table, as dlt names them: text, the dates as dates, and none
+    for the lists of actions, which become child tables of text."""
     found: dict[str, dict] = {}
     for name in FIELDS[table]:
         if name in ("actions", "action_values"):
             continue
-        if name == "business":
-            found |= {"business__id": TEXT, "business__name": TEXT}
-        else:
-            found[name] = DATE if name in ("date_start", "date_stop") else TEXT
+        found[name] = DATE if name in ("date_start", "date_stop") else TEXT
     return found
 
 
