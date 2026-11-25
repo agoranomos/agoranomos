@@ -24,8 +24,11 @@
     {%- endif %}
 {%- endmacro %}
 
-{% macro meta_stats(relation, platform, level='campaign') %}
-{%- call nonzero(['impressions', 'clicks', 'spend', 'platform_conversions', 'platform_conversion_value']) %}
+{#- The statistics of a level by day. Meta counts no conversion in them, so the campaigns pass
+    conversions, the staging model of their conversions, and a campaign day whose impressions,
+    clicks and spend are zero stays when one of its actions has a count or a value (nonzero). -#}
+{% macro meta_stats(relation, platform, level='campaign', conversions=none) %}
+{%- call nonzero(['impressions', 'clicks', 'spend', 'platform_conversions', 'platform_conversion_value'], conversions) %}
 select
     cast(date_start as date) as report_date,
     '{{ platform }}' as platform,

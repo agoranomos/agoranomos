@@ -11,8 +11,9 @@ models:
       metric of conversions of the platform, as its account shows it, and none on Meta, which has no
       such metric; conversions_primary is the sum of the conversions of the primary conversion
       actions of the deployment, which ad_conversions_campaign_daily has by action. A row whose
-      measures are all zero is not kept. Its platforms are those of ad_platforms with the kind ads.
-      A row of a day still in progress in its account, which only a load of the kind intraday took,
+      measures are all zero is kept only when ad_conversions_campaign_daily has a conversion of its
+      campaign on its day, which conversions_primary then counts. Its platforms are those of
+      ad_platforms with the kind ads. A row of a day still in progress in its account, which only a load of the kind intraday took,
       has is_partial_day, with impressions, clicks and spend so far and no conversions, until a
       whole load replaces the day; the metrics of Metabase and every card of the dashboard
       Advertising but Today, as of the load, leave those rows out, so they count whole days only. A

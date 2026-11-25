@@ -1057,6 +1057,14 @@ LIST_ACCOUNTS = {
 }
 
 
+def converted(code: str, model: str) -> list[str]:
+    """The argument that passes the conversions of the campaigns to the statistics of the
+    campaigns of a platform, so that a campaign day with a conversion keeps its row (nonzero)."""
+    if model != "campaign_stats":
+        return []
+    return [f"conversions=ref('stg_{code}__campaign_conversions')"]
+
+
 def test_each_staging_model_of_a_platform_is_one_call_of_the_shape_of_its_api():
     # With the code of the platform of its folder and the raw tables of its own dataset: a model
     # that passed the code of another platform would still pass its key tests. A model of a fact
@@ -1086,7 +1094,9 @@ def test_each_staging_model_of_a_platform_is_one_call_of_the_shape_of_its_api():
                 loads = "source('core', 'loads')" + (f", {account}" if account else "")
                 relations[0] = f"newest_list({relations[0]}, '{dataset}', {loads})"
             relations = ", ".join(relations)
-            arguments = ", ".join([relations, f"'{code}'", *(f"'{name}'" for name in level)])
+            arguments = ", ".join(
+                [relations, f"'{code}'", *(f"'{name}'" for name in level), *converted(code, model)]
+            )
             assert comment.startswith(f"-- {path.name}: "), path.name
             assert body == [f"{{{{ {macro}({arguments}) }}}}"], path.name
 
@@ -1563,8 +1573,8 @@ G2_SUMS = [
 def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
     # Clicks above impressions, an account of no client, a missing day and lower levels above their
     # parents can be right, so they warn; so can primary actions that do not add up to
-    # conversions_primary, as a day with nothing but a primary action that the metric of the
-    # platform leaves out has no row of statistics (ADR-0036). They read the views of the marts.
+    # conversions_primary, as a campaign day that only the report of conversions of Google Ads
+    # holds has no row of statistics (ADR-0036). They read the views of the marts.
     wanted = {
         "assert_clicks_within_impressions": ({"ad_stats_campaign_daily"}, True),
         "assert_every_account_has_a_client": ({"ad_accounts"}, True),
@@ -1836,7 +1846,14 @@ def test_each_staging_model_of_google_ads_is_one_call_of_the_shape_that_the_demo
         # The statistics of the connector carry all the conversions of Google, which those of
         # demo_search do not.
         everything = ["all_conversions=true"] if model.endswith("_stats") else []
-        arguments = ", ".join(["'google_ads'", *(f"'{name}'" for name in level), *everything])
+        arguments = ", ".join(
+            [
+                "'google_ads'",
+                *(f"'{name}'" for name in level),
+                *everything,
+                *converted("google_ads", model),
+            ]
+        )
         loads = "ref('stg_loads__newest_days')" if by_load else "source('core', 'loads')"
         end = f"}}), 'raw_google_ads', {loads}), {arguments}) }}}}"
         assert text.rstrip().endswith(end), model
@@ -1847,7 +1864,8 @@ def test_each_staging_model_of_google_ads_is_one_call_of_the_shape_that_the_demo
     assert "{% macro google_ads_conversion_actions(relation, platform) %}" in macros
     assert "{% macro google_ads_totals(relation, platform) %}" in macros
     assert (
-        "{% macro google_ads_stats(relation, platform, level='campaign', all_conversions=false) %}"
+        "{% macro google_ads_stats(relation, platform, level='campaign', all_conversions=false,"
+        " conversions=none) %}"
     ) in macros
 
 
@@ -2021,7 +2039,9 @@ def test_each_staging_model_of_meta_ads_is_one_call_of_the_shape_that_the_demo_s
             text.index(relation) for relation in relations
         ), model
         assert text.count("relation_or_empty(") == len(tables), model
-        arguments = ", ".join(["'meta_ads'", *(f"'{name}'" for name in level)])
+        arguments = ", ".join(
+            ["'meta_ads'", *(f"'{name}'" for name in level), *converted("meta_ads", model)]
+        )
         assert text.rstrip().endswith(f"), {arguments}) }}}}"), model
         assert "depends_on" not in text, model
     macros = (DBT / "macros" / "shapes" / "meta_v26.sql").read_text(encoding="utf-8")
@@ -2211,7 +2231,9 @@ def test_each_staging_model_of_tiktok_ads_is_one_call_of_the_shape_that_the_demo
         loads = "ref('stg_loads__newest_days')" if by_load else "source('core', 'loads')"
         assert f"}}), 'raw_tiktok_ads', {loads})" in text, model
         assert text.count("relation_or_empty(") == 1, model
-        arguments = ", ".join(["'tiktok_ads'", *(f"'{name}'" for name in level)])
+        arguments = ", ".join(
+            ["'tiktok_ads'", *(f"'{name}'" for name in level), *converted("tiktok_ads", model)]
+        )
         assert text.rstrip().endswith(f"), {arguments}) }}}}"), model
         assert "depends_on" not in text, model
     macros = (DBT / "macros" / "shapes" / "tiktok_v1_3.sql").read_text(encoding="utf-8")
@@ -3304,7 +3326,7 @@ def test_the_facts_of_statistics_take_all_the_conversions_of_the_platform():
     google = (DBT / "macros" / "shapes" / "google_ads_v25.sql").read_text(encoding="utf-8")
     stats = google[google.index("{% macro google_ads_stats(") :]
     stats = stats[: stats.index("{% endmacro %}")]
-    assert "'platform_conversion_value', 'all_conversions', 'all_conversion_value']) %}" in stats
+    assert "'all_conversions', 'all_conversion_value'], conversions) %}" in stats
     for what in ("statistics_of_campaigns", "statistics_of_ad_groups", "statistics_of_ads"):
         test = (DBT / "tests" / f"assert_the_core_holds_the_{what}_of_staging.sql").read_text(
             encoding="utf-8"
@@ -3315,6 +3337,39 @@ def test_the_facts_of_statistics_take_all_the_conversions_of_the_platform():
     for shape in ("meta_v26.sql", "tiktok_v1_3.sql"):
         text = (DBT / "macros" / "shapes" / shape).read_text(encoding="utf-8")
         assert "cast(null as numeric(18,6)) as all_conversions,\n" in text, shape
+
+
+def test_a_campaign_day_with_a_conversion_keeps_its_row_of_statistics():
+    # ADR-0036: a row whose measures are all zero is left out of staging, and a row with zero
+    # impressions and a conversion stays. Meta counts its actions in a child table and none in the
+    # statistics, so the stand S6 (#220) lost conversions_primary of two campaign days with a
+    # purchase and no impressions, clicks or spend. The statistics of the campaigns of every
+    # platform keep such a row through the distinct campaign days of their conversions; the ad
+    # groups and the ads, whose conversions by action the core does not hold, by their measures.
+    text = (DBT / "macros" / "numbers.sql").read_text(encoding="utf-8")
+    macro = text[text.index("{% macro nonzero(") :]
+    macro = macro[: macro.index("{%- endmacro %}")]
+    assert macro.startswith("{% macro nonzero(measures, conversions=none) -%}\nselect reported.*")
+    assert "select distinct platform, account_id, campaign_id, report_date\n" in macro
+    for key in ("platform", "account_id", "campaign_id", "report_date"):
+        assert f"converted.{key} = reported.{key}" in macro, key
+    assert "or converted.report_date is not null" in macro
+    for shape, macro in (
+        ("google_ads_v25.sql", "google_ads_stats"),
+        ("meta_v26.sql", "meta_stats"),
+        ("tiktok_v1_3.sql", "tiktok_stats"),
+    ):
+        text = (DBT / "macros" / "shapes" / shape).read_text(encoding="utf-8")
+        body = text[text.index(f"{{% macro {macro}(") :]
+        body = body[: body.index("{% endmacro %}")]
+        assert "conversions=none) %}" in body.splitlines()[0], shape
+        assert "], conversions) %}" in body, shape
+    for code in (*SHAPED_ADS, "google_ads", "meta_ads", "tiktok_ads"):
+        for level in ("campaign", "ad_group", "ad"):
+            text = (STAGING / code / f"stg_{code}__{level}_stats.sql").read_text(encoding="utf-8")
+            wanted = f"conversions=ref('stg_{code}__campaign_conversions')"
+            assert (wanted in text) is (level == "campaign"), (code, level)
+            assert text.count("conversions=ref(") == int(level == "campaign"), (code, level)
 
 
 def test_the_reasons_of_quarantine_are_one_list():
