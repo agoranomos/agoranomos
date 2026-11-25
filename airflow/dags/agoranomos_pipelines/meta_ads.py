@@ -5,16 +5,16 @@ The source loads the accounts of the platform meta_ads that extensions/model/cli
 and no other, so that the accounts that other businesses share with the business portfolio of the
 deployment bring in nothing that the file does not name (ADR-0024). An account is its numeric ID,
 without the prefix act_ that the paths of the API add. It signs in with the token of a system user
-of the portfolio, META_ADS_ACCESS_TOKEN, sent as the parameter access_token of each call, as the
-reference of the Marketing API shows it. A token that never expires is all that .env holds. A
-token that expires in 60 days comes with META_ADS_APP_ID and META_ADS_APP_SECRET: the load then
-refreshes it through GET oauth/access_token with fb_exchange_token before it is 30 days old, and
-keeps the newest token in the Airflow Variable VARIABLE, with a hash of the token of .env that it
-came from, so that a new token in .env replaces it; a refresh that fails fails the load
-(current_token). Whenever the secret is set, every call carries appsecret_proof, the HMAC-SHA256 of
-the token keyed with the secret. No token, secret or proof reaches a log or an error: each text
-that the source writes from an error goes through Secrets.scrub, and the task masks the values
-too.
+of the portfolio, META_ADS_ACCESS_TOKEN, sent in the header Authorization: Bearer of each call,
+never in a URL or a body, but for the refresh below (Api.sign_in). A token that never expires is
+all that .env holds. A token that expires in 60 days comes with META_ADS_APP_ID and
+META_ADS_APP_SECRET: the load then refreshes it through GET oauth/access_token with
+fb_exchange_token before it is 30 days old, and keeps the newest token in the Airflow Variable
+VARIABLE, with a hash of the token of .env that it came from, so that a new token in .env replaces
+it; a refresh that fails fails the load (current_token). Whenever the secret is set, every other
+call carries the parameter appsecret_proof, the HMAC-SHA256 of the token keyed with the secret. No
+token, secret or proof reaches a log or an error: each text that the source writes from an error
+goes through Secrets.scrub, and the task masks the values too.
 
 The source calls the Graph API version API_VERSION through the HTTP client of dlt, and keeps each
 row as the API gives it, which dlt writes in snake_case with nested objects joined by __ and the
@@ -402,15 +402,19 @@ class Secrets:
     PARAMETER = re.compile(
         r"(access_token|appsecret_proof|client_secret|fb_exchange_token)=[^&\s]*"
     )
+    # The credentials of a header Authorization, whatever the token.
+    BEARER = re.compile(r"(Bearer )[^\s'\",}]+")
 
     def add(self, value: str | None) -> None:
         if value:
             self.values.add(value)
 
     def scrub(self, text: str) -> str:
-        """The text with each parameter of a URL that carries a secret, and then each secret, as
-        ***: the parameters first, so that a secret inside the name of one cannot hide it."""
+        """The text with each parameter of a URL that carries a secret, the credentials of each
+        header Authorization, and then each secret, as ***: the parameters and the header first, so
+        that a secret inside the name of one cannot hide it."""
         text = self.PARAMETER.sub(r"\1=***", text)
+        text = self.BEARER.sub(r"\1***", text)
         for value in sorted(self.values, key=len, reverse=True):
             text = text.replace(value, "***")
         return text
@@ -753,14 +757,28 @@ class Api:
         self.requests = 0
         # The moment, by monotonic(), by which a report run of a portion completes, or None.
         self.deadline: float | None = None
+        self.headers: dict[str, str] = {}
         self.auth: dict[str, str] = {}
         if token is not None:
             self.sign_in(token, secret)
 
     def sign_in(self, token: str, secret: str | None) -> None:
-        """The parameters of the sign-in that each call carries: the token, and its proof whenever
-        the App Secret is set."""
-        self.auth = {"access_token": token}
+        """The sign-in that each signed call carries: the token in the header Authorization, and the
+        parameter appsecret_proof, its proof, whenever the App Secret is set. The reference of the
+        Marketing API shows the token as the parameter access_token, which a URL would carry; the
+        WhatsApp Cloud API on the same graph.facebook.com says "include your token in an
+        authorization request header, preceded by Bearer" (Access tokens,
+        https://developers.facebook.com/documentation/business-messaging/whatsapp/access-tokens/,
+        read on 25 November 2026), and the Graph API v27.0 took the header for the ad accounts, the
+        lists and the insights of each level, their pages included, on the stand S6 (#220) on 25
+        November 2026, which tried no report run. The refresh of current_token is the one call that
+        is not signed: it carries its secrets in its query, as Meta documents it. Of the versions of
+        the image as of November 2026, dlt 1.32.0 passes the headers of a call to requests and logs
+        none, urllib3 2.7.0 logs the URL of a request and never its headers, and requests 2.34.2
+        writes the value of a header into an error only when it is malformed, which SECRET_FORM
+        rules out; Secrets.scrub masks the header in any text all the same."""
+        self.headers = {"Authorization": f"Bearer {token}"}
+        self.auth = {}
         self.secrets.add(token)
         if secret is not None:
             self.auth["appsecret_proof"] = proof(token, secret)
@@ -805,12 +823,13 @@ class Api:
         Each call counts in the score of the account."""
         for attempt in range(1, THROTTLE_ATTEMPTS + 1):
             sent = {**params, **(self.auth if sign else {})}
+            headers = self.headers if sign else {}
             self.requests += 1
             try:
                 if method == "POST":
-                    response = self.client.post(url, data=sent)
+                    response = self.client.post(url, data=sent, headers=headers)
                 else:
-                    response = self.client.get(url, params=sent)
+                    response = self.client.get(url, params=sent, headers=headers)
             except Timeout as error:
                 raise self.fail(subject, f"the request timed out: {error}", Slow) from None
             except RequestException as error:
@@ -855,8 +874,8 @@ class Api:
     ) -> Iterator[dict]:
         """The rows of every page of an answer, data, through paging.next until a page has none
         (Paginated results of the Graph API, read on 15 November 2026). A next page goes to the
-        Graph API alone, with the parameters of the sign-in of this load, never those that the
-        link carries."""
+        Graph API alone, with the sign-in of this load, never a token or a proof that the link
+        carries."""
         url, query = f"{BASE}/{path}", params
         while True:
             body = self.call(subject, "GET", url, query, slow=slow)

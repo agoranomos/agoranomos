@@ -44,7 +44,7 @@ printf 'META_ADS_APP_ID=%s\n' '<the App ID>' >> .env
 read -rs secret && printf 'META_ADS_APP_SECRET=%s\n' "$secret" >> .env && unset secret
 ```
 
-The token reads every ad account that is assigned to the system user, so keep `.env` as you keep its other secrets. `./agoranomos preflight`, which `./agoranomos up` runs, checks only the form of the token and of the App Secret, one word without spaces or quotes, and never prints them ([Configuration](../reference/configuration.md#meta)).
+The token reads every ad account that is assigned to the system user, so keep `.env` as you keep its other secrets. The load sends it in the header `Authorization` of each call to the API, never in its address; only the refresh of a token that expires carries it in its address, as Meta documents it ([below](#a-token-that-expires)), and the task masks it in the logs. `./agoranomos preflight`, which `./agoranomos up` runs, checks only the form of the token and of the App Secret, one word without spaces or quotes, and never prints them ([Configuration](../reference/configuration.md#meta)).
 
 Then name each account to load in `extensions/model/clients.toml`, with its client ([The settings of the model](../reference/configuration.md#the-settings-of-the-model)). The load reads only the accounts that the file names, so the accounts that other businesses share with your portfolio bring in nothing that the file does not name ([ADR-0024](../adr/0024-one-deployment-is-one-business.md)). An account ID is the digits of the ad account, without the `act_` that Ads Manager and the paths of the API put before them:
 
