@@ -711,11 +711,27 @@ def usage(headers) -> Usage:
     )
 
 
+def for_a_person(error: dict) -> str:
+    """What Meta writes about an error for a person, error_user_title and error_user_msg, each cut
+    to 500 characters, as "; <title>: <message>", or "" when it writes neither: "The title of the
+    dialog, if shown" and "The message to display to the user", in the language of "the locale of
+    the API request" (Handling errors, read on 25 November 2026), which is that of the token. They
+    are data to show, and nothing acts on them; the caller scrubs them with the rest of the text."""
+    said = [
+        str(error[key])[:500]
+        for key in ("error_user_title", "error_user_msg")
+        if error.get(key) not in (None, "")
+    ]
+    return "; " + ": ".join(said) if said else ""
+
+
 def graph_error(response) -> tuple[int | None, int | None, str]:
-    """The code, the subcode and the message of an error of the Graph API, which it writes as
-    {"error": {"message": ..., "type": ..., "code": ..., "error_subcode": ..., "fbtrace_id": ...}}
-    (Handling errors, https://developers.facebook.com/docs/graph-api/guides/error-handling/, read on
-    15 November 2026), or the start of a body that is not one."""
+    """The code, the subcode and the message of an error of the Graph API, with what for_a_person
+    gives, which it writes as {"error": {"message": ..., "type": ..., "code": ..., "error_subcode":
+    ..., "error_user_title": ..., "error_user_msg": ..., "fbtrace_id": ...}} (Handling errors,
+    https://developers.facebook.com/docs/graph-api/guides/error-handling/, read on 15 November 2026,
+    and for error_user_title and error_user_msg on 25 November 2026), or the start of a body that
+    is not one."""
     try:
         body = response.json()
     except ValueError:
@@ -727,7 +743,7 @@ def graph_error(response) -> tuple[int | None, int | None, str]:
     return (
         code if isinstance(code, int) else None,
         subcode if isinstance(subcode, int) else None,
-        str(error.get("message", ""))[:500],
+        str(error.get("message", ""))[:500] + for_a_person(error),
     )
 
 
@@ -972,8 +988,8 @@ def report_run(api: Api, subject: str, account_id: str, params: dict[str, str], 
         if status != FAILED_JOB:
             found = None
         elif found[0] is not None:
-            message = ended.get("error_message") or "no message"
-            said += f": {message} (code {found[0]}, subcode {found[1]})"
+            message = str(ended.get("error_message") or "no message")[:500]
+            said += f": {message}{for_a_person(ended)} (code {found[0]}, subcode {found[1]})"
         if found in TOO_LARGE:
             raise api.fail(subject, said, TooMuchData)
         if (status == SKIPPED or found in RETRY_LATER) and attempt < REPORT_ATTEMPTS:
