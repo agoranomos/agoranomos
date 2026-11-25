@@ -708,11 +708,28 @@ def test_an_error_gives_what_meta_writes_for_a_person_cut_and_scrubbed(meta):
     text = str(raised.value)
     assert f"Meta ad account {ONE}: 400 Permissions error; Нет доступа: Токен *** не видит " in text
     assert TOKEN not in text
-    # The message of a person, cut before the scrub, ends 500 characters after its start.
-    told = f"Токен {TOKEN} не видит аккаунт {long}"[:500]
-    assert f"{told[: told.index(TOKEN)]}***{told[told.index(TOKEN) + len(TOKEN) :]}" in text
+    # The message of a person is scrubbed, then cut to 500 characters.
+    told = f"Токен *** не видит аккаунт {long}"[:500]
+    assert f"; Нет доступа: {told} (code 200" in text
     assert "x" * 500 not in text
     assert text.endswith(" (code 200, subcode None)")
+
+
+@pytest.mark.parametrize("field", ["message", "text"])
+def test_a_token_across_the_cut_of_500_characters_leaves_none_of_it(meta, field):
+    # The token starts 10 characters before the cut of its text: a cut before the scrub would
+    # leave those 10, which no scrub can find.
+    module, _, made, extensions = meta
+    across = "y" * 490 + TOKEN + "z" * 20
+    texts = {"message": across, "title": "A title", "text": "A text"} | {field: across}
+    made["graph"].before = lambda method, path, params: (
+        error(200, None, **texts) if path == f"act_{ONE}" else None
+    )
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load(NOW, extensions)
+    text = str(raised.value)
+    assert "y" * 490 + "***" + "z" * 7 in text
+    assert TOKEN[:4] not in text
 
 
 def test_an_error_without_a_text_for_a_person_reads_as_before(meta):
@@ -729,9 +746,12 @@ def test_an_error_without_a_text_for_a_person_reads_as_before(meta):
 
 def test_a_title_or_a_text_for_a_person_alone_is_shown_alone(meta):
     module, _, _, _ = meta
-    assert module.for_a_person({"error_user_title": "A title"}) == "; A title"
-    assert module.for_a_person({"error_user_msg": "A text", "error_user_title": ""}) == "; A text"
-    assert module.for_a_person({"message": "An error"}) == ""
+    scrub = module.Secrets({"secret"}).scrub
+    assert module.for_a_person({"error_user_title": "A title"}, scrub) == "; A title"
+    assert module.for_a_person({"error_user_msg": "A secret", "error_user_title": ""}, scrub) == (
+        "; A ***"
+    )
+    assert module.for_a_person({"message": "An error"}, scrub) == ""
 
 
 def test_the_statistics_of_a_deleted_ad_that_no_list_returns_reach_raw(meta):
