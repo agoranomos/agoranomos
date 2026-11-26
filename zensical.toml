@@ -101,6 +101,7 @@ nav = [
     { "ADR-0052: Run each stack test once on a pull request, and every one in every combination on main" = "adr/0052-run-each-stack-test-once-on-a-pull-request.md" },
     { "ADR-0053: Connect TikTok with an app of the deployment" = "adr/0053-connect-tiktok-with-an-app-of-the-deployment.md" },
     { "ADR-0054: Connect GA4 with a service account of the deployment" = "adr/0054-connect-ga4-with-a-service-account-of-the-deployment.md" },
+    { "ADR-0056: Count ROAS by the value of the primary conversion actions" = "adr/0056-count-roas-by-the-value-of-the-primary-actions.md" },
   ] },
 ]
 
