@@ -303,7 +303,7 @@ def warehouse_of(metabase_url: str, session: dict[str, str]) -> dict[str, Any]:
 
 def scan_of(env: dict[str, str]) -> str:
     """The schedule of the scan that the setting gives, as Metabase writes it."""
-    return f"0 0 {int((env.get('METABASE_SCAN_TIME') or '12:00')[:2])} * * ? *"
+    return f"0 0 {int((env.get('METABASE_SCAN_TIME') or '16:00')[:2])} * * ? *"
 
 
 def cache_policy(metabase_url: str, session: dict[str, str]) -> list[dict[str, Any]]:
