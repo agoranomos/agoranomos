@@ -30,6 +30,16 @@
 (select min(window_from) from core.loads where status = 'pinned' and outcome = 'loaded')
 {%- endmacro %}
 
+{#- The last day that the pinned windows reach, as SQL: the upper bound of the tests of the facts,
+    which read the days between the two bounds, and the YAML of the facts and of their views
+    writes the same text. With the lower bound alone, a run whose windows all lie in the past, as
+    one that reads a load of history, read every day from its windows to the current day: with a
+    whole load whose window of one day was before the 400 days of an agency, the tests of the views
+    of the ads took 2.8 to 17 seconds each, against 0.1 with no load (#444). -#}
+{% macro window_end() -%}
+(select max(window_to) from core.loads where status = 'pinned' and outcome = 'loaded')
+{%- endmacro %}
+
 {#- The first day of a month that is not frozen, as the trigger freeze_the_months_before_the_window
     of each fact computes it (0005_create_the_facts.sql), in the time zone of the session. -#}
 {% macro frozen_before() -%}

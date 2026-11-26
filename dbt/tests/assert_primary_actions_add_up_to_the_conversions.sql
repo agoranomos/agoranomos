@@ -16,14 +16,14 @@ with by_action as (
         campaign_id,
         sum(coalesce(all_conversions, conversions)) as conversions
     from {{ ref('ad_conversions_campaign_daily') }}
-    where is_primary and report_date >= {{ window_start() }}
+    where is_primary and report_date between {{ window_start() }} and {{ window_end() }}
     group by report_date, platform, account_id, campaign_id
 ),
 
 by_campaign as (
     select report_date, platform, account_id, campaign_id, conversions_primary
     from {{ ref('ad_stats_campaign_daily') }}
-    where report_date >= {{ window_start() }}
+    where report_date between {{ window_start() }} and {{ window_end() }}
 )
 
 select

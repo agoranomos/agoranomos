@@ -4,4 +4,4 @@
 {{ config(severity='warn') }}
 select report_date, platform, account_id, campaign_id
 from {{ ref('ad_stats_campaign_daily') }}
-where clicks > impressions and report_date >= {{ window_start() }}
+where clicks > impressions and report_date between {{ window_start() }} and {{ window_end() }}
