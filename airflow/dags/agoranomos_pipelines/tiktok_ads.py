@@ -68,8 +68,10 @@ A load reads each advertiser whole before dlt sees any of it, into a file for ea
 page at a time. An error of the API on one advertiser is caught at the advertiser, which leaves
 nothing in the load; the load takes the other advertisers, records the failed one in
 _agoranomos_loads with the status failed and the text of the error, and fails at the end with one
-line that lists the advertisers and their errors (ADR-0004, ADR-0035). What the API returns is
-data: a campaign name can carry any text, and nothing here acts on it."""
+line that lists the advertisers and their errors (ADR-0004, ADR-0035); the task of the load
+succeeds when it took another advertiser, so that the transform takes it, and the run fails after
+it (outcome.py). What the API returns is data: a campaign name can carry any text, and nothing
+here acts on it."""
 
 from __future__ import annotations
 
@@ -296,10 +298,16 @@ class Slow(TikTokAdsError):
 
 
 class AdvertisersFailed(TikTokAdsError):
-    """The load took the other advertisers, and these failed: one line that counts them and lists
-    each advertiser with the error of the API (ADR-0004). A retry of the task would repeat the
-    whole load and gain nothing: the next load takes the days that the failed advertisers
-    missed."""
+    """The load took the other advertisers, if any, and these failed: one line that counts them and
+    lists each advertiser with the error of the API (ADR-0004), and loaded, how many advertisers
+    the load took. The task of the load succeeds when it took one, so that the transform takes
+    them, and the last task of the DAG fails the run with the line; with none, the task fails
+    (outcome.py). A retry would repeat the whole load and gain nothing: the next load takes the
+    days that the failed advertisers missed."""
+
+    def __init__(self, line: str, loaded: int) -> None:
+        super().__init__(line)
+        self.loaded = loaded
 
 
 @dataclass
@@ -996,5 +1004,5 @@ def load(
         log.info("Loaded %d rows into %s.%s, as of %s", rows, DATASET, table, now.isoformat())
     log.info("%d calls to the TikTok API for %d advertisers", api.requests, len(wanted))
     if failed:
-        raise AdvertisersFailed(failure_line(failed, len(read)))
+        raise AdvertisersFailed(failure_line(failed, len(read)), len(read))
     return counts

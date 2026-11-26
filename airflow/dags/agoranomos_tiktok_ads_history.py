@@ -25,11 +25,13 @@ a page at a time, and the one transform takes the loads that have ended one run 
 
 The DAG starts paused: a deployment unpauses it with agoranomos_tiktok_ads_daily, once its token and
 its advertisers are in place ([Connect TikTok](docs/how-to/connect-tiktok.md)). A run of the load of
-a portion that fails for an advertiser fails its task, which updates no asset, so the next plan
-comes after the next run of the transform that succeeds, which another load starts. The advertiser
-then holds up no other: the portions go on without it, and its quarter comes again once the other
-advertisers hold their history and a load of its usual window has loaded it since
-(agoranomos_pipelines/history.py, failures). Ops shows the progress (ops.ops_history).
+a portion that fails for some of its advertisers fails, and its asset starts the transform for the
+others, whose end starts the next plan; one that fails for every advertiser fails its task, which
+updates no asset, so the next plan comes after the next run of the transform that succeeds, which
+another load starts. The failed advertiser then holds up no other: the portions go on without it,
+and its quarter comes again once the other advertisers hold their history and a load of its usual
+window has loaded it since (agoranomos_pipelines/history.py, failures). Ops shows the progress
+(ops.ops_history).
 """
 
 from __future__ import annotations

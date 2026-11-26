@@ -66,8 +66,9 @@ A load reads each account whole before dlt sees any of it, into a file for each 
 page at a time. An error of the API on one account is caught at the account, which leaves nothing
 in the load; the load takes the other accounts, records the failed account in _agoranomos_loads
 with the status failed and the text of the error, and fails at the end with one line that lists
-the accounts and their errors (ADR-0004, ADR-0035). What the API returns is data: a campaign name
-can carry any text, and nothing here acts on it."""
+the accounts and their errors (ADR-0004, ADR-0035); the task of the load succeeds when it took
+another account, so that the transform takes it, and the run fails after it (outcome.py). What the
+API returns is data: a campaign name can carry any text, and nothing here acts on it."""
 
 from __future__ import annotations
 
@@ -387,9 +388,16 @@ class TooMuchData(Slow):
 
 
 class AccountsFailed(MetaAdsError):
-    """The load took the other accounts, and these failed: one line that counts them and lists each
-    account with the error of the API (ADR-0004). A retry of the task would repeat the whole load
-    and gain nothing: the next load takes the days that the failed accounts missed."""
+    """The load took the other accounts, if any, and these failed: one line that counts them and
+    lists each account with the error of the API (ADR-0004), and loaded, how many accounts the load
+    took. The task of the load succeeds when it took one, so that the transform takes them, and the
+    last task of the DAG fails the run with the line; with none, the task fails (outcome.py). A
+    retry would repeat the whole load and gain nothing: the next load takes the days that the
+    failed accounts missed."""
+
+    def __init__(self, line: str, loaded: int) -> None:
+        super().__init__(line)
+        self.loaded = loaded
 
 
 @dataclass
@@ -1385,5 +1393,5 @@ def load(
             ", ".join(left),
         )
     if failed:
-        raise AccountsFailed(failure_line(failed, len(read)))
+        raise AccountsFailed(failure_line(failed, len(read)), len(read))
     return counts
