@@ -830,7 +830,7 @@ services:
       METABASE_ADMIN_EMAIL: ${AGORANOMOS_ADMIN_EMAIL:-admin@example.com}
       METABASE_ADMIN_PASSWORD: ${METABASE_ADMIN_PASSWORD:?run ./agoranomos init}
       # The hour of the daily scan of the values of the filters (ADR-0037).
-      METABASE_SCAN_TIME: ${METABASE_SCAN_TIME:-12:00}
+      METABASE_SCAN_TIME: ${METABASE_SCAN_TIME:-16:00}
       WAREHOUSE_HOST: warehouse-db
       WAREHOUSE_PORT: "5432"
       WAREHOUSE_DB: warehouse

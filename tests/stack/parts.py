@@ -32,14 +32,14 @@ and then of the other five.
 # a group on a pull request took 30 to 57 minutes on 18 November 2026 (44356389537), and that of a
 # part, two groups, 53 to 87 in each combination (44356412101).
 GROUPS: tuple[tuple[str, ...], ...] = (
-    # 1: the rates, the dimensions of the core and the short cycles of Meta and of TikTok.
+    # 1: the rates, the rates of the file and the dimensions of the core.
     (
         "test_rates.py",  # 24 minutes, and 20 to 27
         "test_core_dimensions.py",  # 16, and 12 to 18
         "test_transform_schedule.py",  # 7, and 7 to 8
-        # Four loads and one run of the transform, as test_meta_ads.py before its second run: about
-        # 8 minutes by that file, not measured yet (#412, 26 November 2026).
-        "test_short_cycle.py",
+        # Two loads of demo_social and three runs of the transform: about 20 minutes by
+        # test_quarantine.py, not measured yet (26 November 2026).
+        "test_rates_of_the_file.py",
         "test_ai_servers.py",
         "test_backup_before_a_migration.py",
     ),
@@ -73,9 +73,12 @@ GROUPS: tuple[tuple[str, ...], ...] = (
         "test_missed_load.py",
         "test_ops.py",
     ),
-    # 4: the transform, TikTok, the alerts and the image.
+    # 4: the transform, TikTok, the short cycles of Meta and of TikTok, the alerts and the image.
     (
         "test_demo_transform.py",  # 39, and 39 to 41
+        # Four loads and one run of the transform, as test_meta_ads.py before its second run: about
+        # 8 minutes by that file, not measured yet (#412, 26 November 2026).
+        "test_short_cycle.py",
         # A load and a run of the transform, as test_meta_ads.py: about 8 minutes by that file,
         # not measured yet (C5d of #225, 23 November 2026).
         "test_tiktok_ads.py",

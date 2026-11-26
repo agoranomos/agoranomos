@@ -1240,3 +1240,98 @@ def test_the_rates_held_from_the_ecb_keep_their_source_under_a_history_of_the_ba
     assert kept is None or kept["rate_source"] == "ecb", kept
     assert rows[("ARS", "2026-11-06")]["rate_source"] == "bank_of_italy"
     assert Decimal(rows[("ARS", "2026-11-06")]["base_rate"]) == euros(parsed, "ARS", "2026-11-06")
+
+
+# The check of the rates of a run (macros/quarantine.sql) as int_g1_failures runs it before the
+# core, over the recorded answers of the chain, for an account of demo_social in each currency of
+# the check, from a stand-in of the lists of accounts, with the days of the answers in
+# stg_loads__newest_days.
+RATE_FINDINGS = (
+    "{{ quarantine_rate_findings([('stack_test_accounts', 'account_id')], "
+    "ref('seed_iso_4217_currencies'), ref('stg_loads__newest_days'), "
+    "{'bank_of_italy': ref('stg_bank_of_italy__rates_daily'), 'nbk': ref('stg_nbk__rates_daily'), "
+    "'ecb': ref('stg_ecb__rates_daily'), 'demo_fx': ref('stg_demo_fx__rates_daily')}, "
+    "source('core', 'fx_rates_daily'), source('core', 'loads'), ref('stg_settings__rates')) }}"
+)
+CHECKED_LOAD = "9000000005.1"
+
+
+def compiled_inline(name, sql, currency):
+    """SQL with the macros of the dbt project, as dbt compiles it in the container of the tasks in
+    a reporting currency, with the order of the sources of auto."""
+    work = f"{WORK}-{name}"
+    command = ["exec", "-T", "-e", f"AGORANOMOS_REPORTING_CURRENCY={currency}"]
+    command += ["-e", "AGORANOMOS_RATES_SOURCE=auto", task_service(), DBT, "--quiet"]
+    command += ["--no-use-colors", "compile", "--inline", sql]
+    command += ["--project-dir", PROJECT, "--profiles-dir", PROJECT]
+    command += ["--target-path", f"{work}/target", "--log-path", f"{work}/logs"]
+    return compose(*command).stdout
+
+
+def rate_findings(env, chain, currency, *entries):
+    """The findings of the check of the rates over the recorded answers in a reporting currency,
+    with entries of the file of the deployment in raw_settings.rates, as file_entries takes them:
+    each the account, the reason and the detail."""
+    _, statements = chain
+    sql = compiled_inline(f"chain-findings-{currency}", RATE_FINDINGS, currency)
+    accounts = [
+        "CREATE TEMP TABLE stack_test_accounts AS SELECT 'demo_social'::text AS platform, "  # noqa: S608 (constants of this file)
+        "'stack-test-' || currency AS account_id, currency "
+        f"FROM unnest(ARRAY{list(CHAIN_CURRENCIES)!r}) AS currency",
+        "INSERT INTO staging.stg_loads__newest_days (source, account_id, day, load_id, load_key) "  # noqa: S608 (constants of this file)
+        f"SELECT 'demo_social', a.account_id, d::date, '{CHECKED_LOAD}', "
+        f"'demo_social|{CHECKED_LOAD}|' || a.account_id || '|' || d::date "
+        "FROM stack_test_accounts AS a CROSS JOIN generate_series(date '2026-11-06', "
+        "date '2026-11-12', interval '1 day') AS d",
+    ]
+    if entries:
+        accounts.append(file_entries(*entries).rstrip(";"))
+    output = warehouse_output(
+        env,
+        "; ".join(
+            [
+                *statements,
+                *accounts,
+                f"SELECT 'found|' || f.account_id || '|' || f.reason || '|' || f.detail "  # noqa: S608 (the SQL of dbt)
+                f"FROM ({sql}) AS f ORDER BY 1",
+                "ROLLBACK",
+            ]
+        ),
+    )
+    return [line.split("|")[1:] for line in output.splitlines() if line.startswith("found|")]
+
+
+def test_a_currency_that_no_source_has_puts_its_account_in_quarantine(env, chain):
+    # ADR-0042 (C2c of #222): over the order of the sources, the one currency that none of them
+    # has, KPW, holds its account out of the core with missing_rate, and no other, RUB of the NBK
+    # alone and ARS of the Bank of Italy alone among them, in euros and in tenge, each with the
+    # sources in the order of auto for the currency.
+    for currency, order in (("EUR", "bank_of_italy, nbk, ecb"), ("KZT", "nbk, bank_of_italy, ecb")):
+        assert rate_findings(env, chain, currency) == [
+            [
+                "stack-test-KPW",
+                "missing_rate",
+                f"no rate of KPW into {currency} from the sources of the rates, {order}",
+            ]
+        ], currency
+
+
+def test_a_rate_of_the_file_covers_a_currency_that_no_source_has_on_the_days_of_its_entries(
+    env, chain, file_sql
+):
+    # ADR-0042 (C7 of #227): the file gives KPW a rate only on the days of its
+    # entries, as the model writes it (core_fx_rates_daily), so the account goes to quarantine for
+    # the days that they leave out, and not for a day of an entry in a quote that a source gives,
+    # such as ARS, which the Bank of Italy alone has.
+    named = "the sources of the rates, bank_of_italy, nbk, ecb"
+    short = ("KPW", "EUR", "0.0011", date(2026, 11, 6), date(2026, 11, 9))
+    assert rate_findings(env, chain, "EUR", short) == [
+        [
+            "stack-test-KPW",
+            "missing_rate",
+            f"no rate of KPW into EUR from {named}, nor from extensions/model/rates.toml "
+            "on 3 days from 2026-11-10 to 2026-11-12",
+        ]
+    ]
+    whole = ("KPW", "ARS", "1.2", date(2026, 11, 6), date(2026, 11, 12))
+    assert rate_findings(env, chain, "EUR", whole) == []
