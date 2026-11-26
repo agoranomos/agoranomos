@@ -8,9 +8,10 @@ and answers from what the test says the dataset holds."""
 import importlib
 import sys
 import types
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
+from test_windows import MISSED, assert_each_day_becomes_final
 
 # A Thursday, at 03:00 in Frankfurt (CET).
 NOW = datetime(2026, 10, 29, 2, 0, tzinfo=UTC)
@@ -172,9 +173,15 @@ def test_the_first_load_takes_37_months_one_before_the_history_of_google_ads(ecb
 
 def test_a_later_load_takes_the_new_days_and_at_least_the_last_fourteen(ecb):
     module, _, _ = ecb
-    # The day after the last loaded, when that is earlier than the last fourteen days.
+    # A day earlier for each missed load, from the day after the oldest that the load of the
+    # last day loaded read at the age of fourteen days.
+    assert module.window(NOW, date(2026, 10, 26)) == (
+        date(2026, 10, 14),
+        date(2026, 10, 28),
+        "window",
+    )
     assert module.window(NOW, date(2026, 10, 10)) == (
-        date(2026, 10, 11),
+        date(2026, 9, 28),
         date(2026, 10, 28),
         "window",
     )
@@ -198,6 +205,22 @@ def test_a_load_takes_the_history_again_from_the_day_that_the_core_needs(ecb):
     # The first load starts at the earlier of the two.
     assert module.window(NOW, None, date(2022, 1, 1)) == (date(2022, 1, 1), last, "history")
     assert module.window(NOW, None, date(2024, 1, 1)) == (date(2023, 9, 1), last, "history")
+
+
+@pytest.mark.parametrize("missed", MISSED.values(), ids=MISSED.keys())
+def test_each_day_of_the_rates_is_read_once_at_the_age_of_its_window(missed, ecb):
+    # windows.daily_window: after 0, 1, 2 or N missed daily loads, or a stop longer than the
+    # window, each day is read at the age of 14 days or more, and no day is left out; the first
+    # load takes the history, and every later one is of the kind window.
+    module = ecb[0]
+
+    def window(last, last_end):
+        now = datetime.combine(last + timedelta(days=1), time(12), UTC)
+        first, end, kind = module.window(now, last_end)
+        assert kind == ("history" if last_end is None else "window")
+        return first, end
+
+    assert_each_day_becomes_final(window, 14, missed)
 
 
 def test_a_load_asks_the_ecb_for_the_data_of_its_window_with_explicit_retries(ecb):

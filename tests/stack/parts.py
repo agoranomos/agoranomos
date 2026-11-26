@@ -56,7 +56,7 @@ GROUPS: tuple[tuple[str, ...], ...] = (
         "test_metabase.py",
         "test_retention.py",
     ),
-    # 3: the facts of the core, the loads of the demo and the metadata.
+    # 3: the facts of the core, the loads of the demo, a missed load and the metadata.
     (
         "test_core_facts.py",  # 24, and 19 to 27
         "test_demo_load.py",  # 13, and 8 to 9
@@ -65,6 +65,9 @@ GROUPS: tuple[tuple[str, ...], ...] = (
         "test_ai_access.py",
         "test_marts_init.py",
         "test_metabase_metadata.py",
+        # A load and a run of the transform, as test_restatements.py: about 8 minutes by that
+        # file, not measured yet (24 November 2026).
+        "test_missed_load.py",
         "test_ops.py",
     ),
     # 4: the transform, TikTok, the alerts and the image.

@@ -66,7 +66,10 @@ def test_the_journals_keep_13_months_as_their_comments_say():
     for journal in maintenance.JOURNALS:
         comment = re.search(rf"COMMENT ON TABLE core\.{journal} IS\n'([^']*)'", text)[1]
         assert comment.endswith(f"kept {maintenance.JOURNAL_MONTHS} months."), journal
-    assert maintenance.LOADS_MONTHS == 13
+    # The accepted rows of the kinds window and history of core.loads stay for good: the fact of
+    # the oldest day of each daily window names its load alone.
+    assert not hasattr(maintenance, "LOADS_MONTHS")
+    assert not hasattr(maintenance, "core_loads_delete")
     assert maintenance.DLT_LOADS_DAYS == 90
     # The rows of the loads of the kind intraday: the proposal of ADR-0051.
     assert maintenance.INTRADAY_DAYS == 14
@@ -202,33 +205,6 @@ def test_the_cleanup_of_dlt_loads_takes_only_the_names_of_raw_schemas(schema):
         maintenance.dlt_loads_delete(schema, has_state=True, has_journal=True)
 
 
-def test_the_cleanup_of_core_loads_takes_old_accepted_rows_that_nothing_reads():
-    query = " ".join(maintenance.core_loads_delete('"raw_demo_search"._dlt_loads').split())
-    assert query.startswith("DELETE FROM core.loads AS l WHERE l.source = %(source)s")
-    # Never a pinned row: no run has accepted it, and staging reads it.
-    assert "AND l.status = 'accepted'" in query
-    # Never a load of the history, from whose windows the next portion is planned (ADR-0038).
-    assert "AND l.kind = 'window'" in query
-    assert "l.finished_at < now() - make_interval(months => %(months)s)" in query
-    # Not the newest accepted load of the kind window of its account.
-    assert (
-        "AND EXISTS (SELECT FROM core.loads AS n WHERE n.source = l.source AND n.account_id ="
-        " l.account_id AND n.status = 'accepted' AND n.outcome = 'loaded' AND n.kind = 'window'"
-        " AND n.load_id::numeric > l.load_id::numeric)" in query
-    )
-    # Not one newer than the oldest pinned load of its account, which staging still reads.
-    assert (
-        "AND NOT EXISTS (SELECT FROM core.loads AS p WHERE p.source = l.source AND p.account_id ="
-        " l.account_id AND p.status = 'pinned' AND p.outcome = 'loaded'"
-        " AND p.load_id::numeric < l.load_id::numeric)" in query
-    )
-    # Not one whose row of _dlt_loads raw still holds, which the next pin would take again.
-    assert query.endswith(
-        'AND NOT EXISTS (SELECT FROM "raw_demo_search"._dlt_loads AS d WHERE d.load_id = l.load_id)'
-    )
-    assert "_dlt_loads" not in maintenance.core_loads_delete(None)
-
-
 def test_the_cleanup_of_core_loads_takes_old_accepted_intraday_rows_that_no_fact_reads():
     # ADR-0051: no watermark reads a row of the kind intraday, so it goes once it is 14 days old,
     # but while a partial day of the fact of campaigns still holds its rows.
@@ -254,8 +230,9 @@ def test_the_cleanup_of_core_loads_takes_old_accepted_intraday_rows_that_no_fact
     assert "_dlt_loads" not in maintenance.core_intraday_loads_delete(None)
     # The newest of an account goes too: no window starts from it.
     assert "n.kind" not in query
-    # The rows of the kind window keep their 13 months, and those of the kind history stay.
-    assert "'intraday'" not in maintenance.core_loads_delete(None)
+    # The rows of the kinds window and history stay: the delete takes the kind intraday alone.
+    assert "'window'" not in query
+    assert "'history'" not in query
 
 
 def stats(**changed):

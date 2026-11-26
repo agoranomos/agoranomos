@@ -559,7 +559,8 @@ def recorded_windows(module, pipelines):
 
 def test_a_daily_load_takes_the_days_after_the_last_load(sources):
     # demo_web was last loaded 40 days ago, longer than its window of 14 days: the load takes every
-    # day after the last that it has, so no day is missing in between.
+    # day from the day after the oldest that the last load read at the age of 14 days, so no day is
+    # missing in between, and each is read at that age once.
     module, pipelines, loads = sources
     from agoranomos_pipelines.demo import common, web
 
@@ -568,10 +569,10 @@ def test_a_daily_load_takes_the_days_after_the_last_load(sources):
     windows = recorded_windows(module, pipelines)
     for account in web.accounts():
         yesterday = common.last_final_day(NOW, account.time_zone)
-        assert windows[account.account_id] == (yesterday - timedelta(days=39), yesterday)
+        assert windows[account.account_id] == (yesterday - timedelta(days=52), yesterday)
     rows = pipelines[-1].runs[-1][0]["report_sessions_daily"]
     days = {r["date"] for r in rows if r["property"] == "properties/390000001"}
-    first = (common.last_final_day(NOW, "America/New_York") - timedelta(days=39)).strftime("%Y%m%d")
+    first = (common.last_final_day(NOW, "America/New_York") - timedelta(days=52)).strftime("%Y%m%d")
     assert min(days) == first
     # One run, with the lists, the facts and the journal.
     assert len(pipelines[-1].runs) == 1
@@ -596,6 +597,26 @@ def test_a_daily_load_takes_at_least_the_reload_window_of_the_platform(sources, 
     # The window ends on the same day as that of a history: yesterday of each account.
     ends = {a: end for a, (_, end) in platform.module.windows(NOW).items()}
     assert {a: end for a, (_, end) in recorded_windows(module, pipelines).items()} == ends
+
+
+@pytest.mark.parametrize(
+    "code", ["demo_fx", "demo_search", "demo_social", "demo_video", "demo_web"]
+)
+@pytest.mark.parametrize("missed", [0, 1, 2, 13, 120])
+def test_a_daily_load_starts_a_day_earlier_for_each_missed_load(sources, code, missed):
+    # windows.daily_window: after missed daily loads, the window starts a day earlier for each, so
+    # that the days that the missed loads would have read at the age of the window are read at
+    # that age or more, whether the stop is shorter or longer than the window.
+    module, pipelines, loads = sources
+    from agoranomos_pipelines.demo import platforms
+
+    platform = platforms.PLATFORMS[code]
+    loaded(loads, code, missed + 1)
+    module.load_daily(code, NOW)
+    windows = recorded_windows(module, pipelines)
+    assert windows.keys() == {account.account_id for account in platform.module.accounts()}
+    for start, end in windows.values():
+        assert (end - start).days + 1 == platform.window_days + missed
 
 
 def test_a_second_daily_load_on_the_same_day_takes_the_same_window(sources):

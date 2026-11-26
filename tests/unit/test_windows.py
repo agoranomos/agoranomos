@@ -6,6 +6,7 @@ of the demo, which read the seed when a task runs."""
 import ast
 import csv
 import re
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -119,8 +120,123 @@ def test_each_connector_reads_its_window_when_a_task_runs(code):
     path = PIPELINES / f"{CONNECTORS[code]}.py"
     text = path.read_text(encoding="utf-8")
     assert f'\nCODE = "{code}"\n' in text
-    assert "\nfrom agoranomos_pipelines.windows import restatement_window_days\n" in text
+    assert (
+        "\nfrom agoranomos_pipelines.windows import daily_window, restatement_window_days\n" in text
+    )
     assert calls(path) == (["CODE"], 0)
+
+
+def daily_calls(path: Path) -> list[str]:
+    """The arguments of the calls of daily_window in a module."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return [
+        ", ".join(ast.unparse(argument) for argument in node.args)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "daily_window"
+    ]
+
+
+def test_every_daily_load_takes_its_window_from_one_function():
+    # The connectors and the sources of the rates count their days with daily_window alone, with
+    # the window of their own code; the demo with that of its platform.
+    found = {path.name: daily_calls(path) for path in sorted(PIPELINES.rglob("*.py"))}
+    found = {name: arguments for name, arguments in found.items() if arguments}
+    assert found == {
+        "bank_of_italy.py": ["end, last_end, restatement_window_days(CODE)"],
+        "ecb.py": ["end, last_end, restatement_window_days(CODE)"],
+        "ga4.py": ["last, last_end, restatement_window_days(CODE)"],
+        "google_ads.py": ["last, last_end, restatement_window_days(CODE)"],
+        "meta_ads.py": ["last, last_end, restatement_window_days(CODE)"],
+        "nbk.py": ["end, last_end, restatement_window_days(CODE)"],
+        "sources.py": ["end, last[account_id][1], width"],
+        "tiktok_ads.py": ["last, last_end, restatement_window_days(CODE)"],
+    }
+
+
+def schedule(window, width: int, missed=frozenset(), days: int = 400, start=date(2026, 1, 1)):
+    """Run a daily load on each of days days from start but those whose number is in missed, each
+    with the days window(last, last_end) gives, last the day before the load and last_end the last
+    day of the load before it, or None before the first, and check that each window ends on its
+    last day. Return the oldest age, in days, at which a load read each day that a load read, and
+    the day of the last load."""
+    oldest: dict[date, int] = {}
+    last_end, today = None, None
+    for number in range(days):
+        if number in missed:
+            continue
+        today = start + timedelta(days=number)
+        last = today - timedelta(days=1)
+        first, end = window(last, last_end)
+        assert end == last
+        day = first
+        while day <= last:
+            oldest[day] = max(oldest.get(day, 0), (today - day).days)
+            day += timedelta(days=1)
+        last_end = last
+    return oldest, today
+
+
+def assert_each_day_becomes_final(window, width: int, missed=frozenset(), days: int = 400):
+    """No day between the first and the last that the loads read is left out, and each day that
+    the last load read at the age of width days or more was read so: it is final."""
+    oldest, today = schedule(window, width, missed, days)
+    read = sorted(oldest)
+    assert (read[-1] - read[0]).days + 1 == len(read), "a day was left out"
+    late = [day for day in read if (today - day).days >= width and oldest[day] < width]
+    assert not late, f"never read at the age of {width} days: {late[0]} and {len(late) - 1} more"
+
+
+# The missed loads of a schedule: none, one, two days apart and two in a row, a run of N, and a
+# stop longer than any window, with the loads before and after it.
+MISSED = {
+    "none": frozenset(),
+    "one": frozenset({200}),
+    "two apart": frozenset({200, 230}),
+    "two in a row": frozenset({200, 201}),
+    "N": frozenset(range(200, 213)),
+    "a stop longer than the window": frozenset(range(200, 320)),
+}
+
+
+@pytest.mark.parametrize("width", [1, 7, 14, 28, 90])
+def test_the_window_of_a_daily_load_starts_a_day_earlier_for_each_missed_load(width):
+    last = date(2026, 10, 28)
+    usual = last - timedelta(days=width - 1)
+    # No accepted load: the usual window, the last width days.
+    assert windows.daily_window(last, None, width) == (usual, last)
+    # The load of the day before: the usual window.
+    assert windows.daily_window(last, last - timedelta(days=1), width) == (usual, last)
+    # The same day again, as a second load of a day: the usual window too.
+    assert windows.daily_window(last, last, width) == (usual, last)
+    # After k missed loads, k days more, back to the day after the oldest that the load before
+    # read at the age of width days, last_end + 1 - width.
+    for missed in (1, 2, 13, 120, 400):
+        last_end = last - timedelta(days=missed + 1)
+        first = usual - timedelta(days=missed)
+        assert first == last_end + timedelta(days=2 - width)
+        assert windows.daily_window(last, last_end, width) == (first, last)
+
+
+@pytest.mark.parametrize("width", [1, 7, 14, 28, 90])
+@pytest.mark.parametrize("missed", MISSED.values(), ids=MISSED.keys())
+def test_each_day_is_read_once_at_the_age_of_the_window_whatever_the_loads_missed(width, missed):
+    def window(last, last_end):
+        return windows.daily_window(last, last_end, width)
+
+    assert_each_day_becomes_final(window, width, missed)
+
+
+def test_the_window_of_adr_0038_left_a_day_not_final_after_one_missed_load():
+    # The form before, [min(last + 1 - W, last_end + 1), last], made a day final only in the load
+    # in which it was the oldest of its window: one missed load left that day not final for good.
+    def before(last, last_end):
+        usual = last - timedelta(days=27)
+        return (usual if last_end is None else min(last_end + timedelta(days=1), usual)), last
+
+    with pytest.raises(AssertionError, match="never read at the age of 28 days"):
+        assert_each_day_becomes_final(before, 28, MISSED["one"])
 
 
 def test_no_module_reads_the_seed_when_a_dag_is_parsed():
