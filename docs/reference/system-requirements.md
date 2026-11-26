@@ -173,7 +173,7 @@ The limits are set from measurements made on 8 and 10 October 2026, that of `war
 - A service that runs all the time gets 1.25 times its highest peak, rounded up to a multiple of 128 MiB, and at least 256 MiB.
 - A one-shot setup job gets 1.5 times its highest peak, rounded up to a multiple of 128 MiB, and at least 128 MiB: it runs for seconds, and a sample can miss the moment of its peak.
 - The peaks are the highest of every measurement, with the limits or without them: a peak under a limit is never higher than without it, so this can only raise a limit. They come from measurements on a Mac (arm64) at the first start, during the stack tests and idle, and in CI on amd64 and arm64 during the stack tests, each in both variants. The one-shot jobs are measured at the first start, and in CI at the starts of the restores of the backups. `db-init` mostly ends before a sample catches it, and gets the minimum.
-- Metabase gives half of its limit to the heap of Java (`-XX:MaxRAMPercentage=50`). The other half holds what Java needs besides the heap, about 0.5 GiB for Metabase 0.64.1. Its limit is at least 2,048 MiB.
+- Metabase gives half of its limit to the heap of Java (`-XX:MaxRAMPercentage=50`). The other half holds what Java needs besides the heap, about 0.5 GiB for Metabase 0.64.1; Metabase 0.64.9.1, with a newer Clojure, is not measured yet. Its limit is at least 2,048 MiB.
 
 | Service | Highest peak | Where | Limit |
 |---|---:|---|---:|
