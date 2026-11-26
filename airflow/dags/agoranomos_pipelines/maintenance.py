@@ -4,7 +4,9 @@ safe to repeat, so that a step that fails leaves its work to the next run:
 - the retention of ADR-0044: the logs of Airflow older than 30 days, the rows of the runs of dbt in
   the schema ops older than 90 days, the rows of _dlt_loads older than 90 days that no load, no
   state of dlt and no pin needs any more, and those of the loads of the kind intraday older than 14
-  days, the accepted rows of the kind intraday of core.loads older than 14 days that no fact
+  days, with the rows of the journals of the loads, _agoranomos_loads, whose load _dlt_loads no
+  longer holds, and those of a load that did not end after a day, the accepted rows of the kind
+  intraday of core.loads older than 14 days that no fact
   reads (ADR-0051), the months of the journals of restatements older than 13 months, and the
   Variables that the watcher mode of Cosmos leaves behind for a run older than 90 days; the rows
   of the kinds window and history of core.loads stay, as the facts of the days of their windows
@@ -19,10 +21,11 @@ safe to repeat, so that a step that fails leaves its work to the next run:
 Each step on the core connects as transformer, which owns no table of the core: the partitions
 come and go through core.ensure_partition and core.drop_partition, SECURITY DEFINER functions of
 migrator, and VACUUM and ANALYZE take the right MAINTAIN that the migrations give transformer.
-The rows of _dlt_loads belong to loader, which owns the raw schemas, and the cleanup of _dlt_loads
-connects as loader. The steps write what they did into tables of ops, which dbt creates empty and
-never fills (dbt/models/ops/ops_maintenance_steps.sql, ops_disk.sql, ops_core_totals.sql): a step
-that runs before the first run of the transform has made them does its work and records nothing.
+The rows of _dlt_loads and of the journals of the loads belong to loader, which owns the raw
+schemas, and their cleanup connects as loader. The steps write what they did into tables of ops,
+which dbt creates empty and never fills (dbt/models/ops/ops_maintenance_steps.sql, ops_disk.sql,
+ops_core_totals.sql): a step that runs before the first run of the transform has made them does
+its work and records nothing.
 
 The rest of the retention runs elsewhere. A task has no access to the database of Airflow, so the
 one-shot airflow-init cleans it with airflow db clean on each start, and Metabase cleans the log of
@@ -681,15 +684,56 @@ def dlt_loads_delete(schema: str, has_state: bool, has_journal: bool, has_kind: 
     )
 
 
+def journal_delete(schema: str) -> str:
+    """The DELETE of the rows of the journal of the loads, <schema>._agoranomos_loads, whose load
+    _dlt_loads of the schema no longer holds and whose _dlt_load_id, the moment when dlt began to
+    extract the load, is older than %(unfinished)s, an interval:
+
+    - a whole load whose row the cleanup of _dlt_loads deleted (dlt_loads_delete). Every reader of
+      the journal but the view ops.ops_loads reads it through the rows of _dlt_loads: the pin, the
+      plan of the history and the waits of the rates the whole loads (pin_loads.sql, history.py,
+      rates.py), loads.recorded() the loads that hold the newest day and the last day loaded of
+      each account, whose rows that cleanup keeps, and that cleanup the loads whose rows it keeps.
+      Before it deleted the row, core.loads held each row of the journal of the load, and it keeps
+      them for the kinds window and history, and 14 days for the kind intraday (ADR-0051);
+    - a load that did not end, which never has a row in _dlt_loads, once it is older than a run of
+      any DAG of the loads lives, as the cleanup of raw deletes its other rows (acceptance.py).
+
+    So the journal goes with _dlt_loads: 90 days for a whole load, 14 days for one of the kind
+    intraday, and a day for a load that did not end, but the rows that a load still reads. A load
+    id that is no number, as a row that a person wrote can have, stays. The schema and its tables
+    are names of the catalog, quoted."""
+    if not re.fullmatch(r"raw_[a-z0-9_]+", schema):
+        raise ValueError(f"{schema} is not the name of a raw schema of dlt")
+    quoted = f'"{schema}"'
+    # The names are those of the schema, checked above, and of the tables of dlt and of the
+    # journal: no value from outside, and no quote to escape.
+    return (
+        f"DELETE FROM {quoted}._agoranomos_loads AS j\n"  # noqa: S608
+        f"WHERE NOT EXISTS (SELECT FROM {quoted}._dlt_loads AS d"
+        " WHERE d.load_id = j._dlt_load_id)\n"
+        r"    AND CASE WHEN j._dlt_load_id ~ '^[0-9]+(\.[0-9]+)?$'"
+        " THEN to_timestamp(j._dlt_load_id::double precision) END\n"
+        "        < now() - %(unfinished)s::interval"
+    )
+
+
 def clean_dlt_loads(
     run_id: str, days: int = DLT_LOADS_DAYS, intraday_days: int = INTRADAY_DAYS
 ) -> dict[str, int]:
     """Delete the rows of _dlt_loads older than days in each raw schema of loader, and those of
     the loads of the kind intraday older than intraday_days, but those that dlt_loads_delete keeps,
-    as loader, each schema in a transaction of its own, and return how many rows each lost. A
-    delete takes ROW EXCLUSIVE, which the insert of a load does not wait for. The journal keeps its
-    rows, and the other tables of raw keep theirs until the run of the transform that accepts their
-    load deletes them (acceptance.py, ADR-0046)."""
+    then the rows of the journal of the loads whose load _dlt_loads no longer holds
+    (journal_delete), as loader, each schema in a transaction of its own, and return how many rows
+    each table lost. A delete takes ROW EXCLUSIVE, which the insert of a load does not wait for. A
+    schema without the journal, as that of the settings of the model, loses rows of _dlt_loads
+    only. The other tables of raw keep their rows until the run of the transform that accepts
+    their load deletes them (acceptance.py, ADR-0046)."""
+    # Imported here and not at the top: acceptance imports this module. A load that did not end
+    # loses the rows of its journal as it loses its other rows of raw.
+    from agoranomos_pipelines.acceptance import UNFINISHED_AFTER
+
+    unfinished = f"{UNFINISHED_AFTER.total_seconds()} seconds"
     deleted: dict[str, int] = {}
     steps: list[Step] = []
     with connected(loader_credentials()) as connection:
@@ -705,32 +749,48 @@ def clean_dlt_loads(
                 log.warning("%s is not a name of a dataset of dlt: passed over", schema)
                 continue
             started = time.monotonic()
+            loads, journal = f"{schema}._dlt_loads", f"{schema}._agoranomos_loads"
+            # The journal goes after _dlt_loads, in the same transaction, so that a row of the
+            # journal goes only with or after the row of its load.
             with connection, connection.cursor() as cursor:
                 has_state = table_exists(cursor, f"{schema}._dlt_pipeline_state")
-                has_journal = table_exists(cursor, f"{schema}._agoranomos_loads")
-                has_kind = has_journal and column_exists(
-                    cursor, f"{schema}._agoranomos_loads", "kind"
-                )
+                has_journal = table_exists(cursor, journal)
+                has_kind = has_journal and column_exists(cursor, journal, "kind")
                 cursor.execute(
                     dlt_loads_delete(schema, has_state, has_journal, has_kind),
                     {"days": days, "intraday_days": intraday_days},
                 )
-                deleted[schema] = cursor.rowcount
-            steps.append(
-                Step(
-                    datetime.now(UTC),
-                    "clean_dlt_loads",
-                    f"{schema}._dlt_loads",
-                    seconds_since(started),
-                    deleted[schema],
+                deleted[loads] = cursor.rowcount
+                steps.append(
+                    Step(
+                        datetime.now(UTC),
+                        "clean_dlt_loads",
+                        loads,
+                        seconds_since(started),
+                        deleted[loads],
+                    )
                 )
-            )
-            log.info(
-                "Deleted %d rows older than %d days from %s._dlt_loads",
-                deleted[schema],
-                days,
-                schema,
-            )
+                if has_journal:
+                    started = time.monotonic()
+                    cursor.execute(journal_delete(schema), {"unfinished": unfinished})
+                    deleted[journal] = cursor.rowcount
+                    steps.append(
+                        Step(
+                            datetime.now(UTC),
+                            "clean_dlt_loads",
+                            journal,
+                            seconds_since(started),
+                            deleted[journal],
+                        )
+                    )
+            log.info("Deleted %d rows older than %d days from %s", deleted[loads], days, loads)
+            if has_journal:
+                log.info(
+                    "Deleted %d rows from %s, of the loads that %s no longer holds",
+                    deleted[journal],
+                    journal,
+                    loads,
+                )
     with connected(transformer_credentials()) as connection:
         record_steps(connection, run_id, steps)
     return deleted

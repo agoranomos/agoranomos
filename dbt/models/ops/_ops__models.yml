@@ -31,13 +31,15 @@ models:
           one decimal place.
       - name: loads
         description: >-
-          How many whole loads of the account the journal holds, the first load among them, and no
-          load of the kind intraday.
+          How many whole loads of the account the journal holds, and no load of the kind intraday:
+          those of the last 90 days, and the older ones that a load or the next pin still reads,
+          such as the load of the last day loaded.
       - name: last_intraday_at
         description: >-
           The moment of the last load of the kind intraday of the account, which took its current
           day, and the day before while no whole load covered it, with its time zone; none for an
-          account that the short cycle has not taken, as on every platform but Google Ads.
+          account that the short cycle has not taken in the last 14 days, as on every platform but
+          Google Ads.
       - name: hours_since_intraday
         description: >-
           The hours from the last load of the kind intraday of the account to the moment that the

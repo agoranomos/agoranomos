@@ -1,8 +1,8 @@
 """The upkeep of the core in the DAG of maintenance (ADR-0039, ADR-0044), without Docker: its
 constants against the migrations of the core and the models of ops that it writes into, the SQL of
-its cleanups of _dlt_loads and core.loads, which rows of which tables they keep, its choice of the
-months to freeze, and its cleanup of the Variables of Cosmos, against names that Cosmos 1.16.0
-makes. tests/stack/test_maintenance.py runs the DAG on a stack."""
+its cleanups of _dlt_loads, of the journals of the loads and of core.loads, which rows of which
+tables they keep, its choice of the months to freeze, and its cleanup of the Variables of Cosmos,
+against names that Cosmos 1.16.0 makes. tests/stack/test_maintenance.py runs the DAG on a stack."""
 
 import ast
 import re
@@ -203,6 +203,53 @@ def test_the_cleanup_of_dlt_loads_of_a_schema_without_a_journal_keeps_the_newest
 def test_the_cleanup_of_dlt_loads_takes_only_the_names_of_raw_schemas(schema):
     with pytest.raises(ValueError, match="is not the name of a raw schema"):
         maintenance.dlt_loads_delete(schema, has_state=True, has_journal=True)
+
+
+def test_the_cleanup_of_the_journal_takes_the_loads_that_dlt_loads_no_longer_holds():
+    # The journal goes with _dlt_loads (C4 of the audit): a row whose load has a row there stays,
+    # whatever its age, as the readers of the journal read it through that row.
+    flat = " ".join(maintenance.journal_delete("raw_demo_search").split())
+    assert flat == (
+        'DELETE FROM "raw_demo_search"._agoranomos_loads AS j WHERE NOT EXISTS (SELECT FROM'
+        ' "raw_demo_search"._dlt_loads AS d WHERE d.load_id = j._dlt_load_id)'
+        r" AND CASE WHEN j._dlt_load_id ~ '^[0-9]+(\.[0-9]+)?$'"
+        " THEN to_timestamp(j._dlt_load_id::double precision) END"
+        " < now() - %(unfinished)s::interval"
+    )
+    # No age of its own, and no kind: the cleanup of _dlt_loads decides both.
+    assert "inserted_at" not in flat
+    assert "kind" not in flat
+
+
+def test_a_load_that_did_not_end_loses_its_journal_as_it_loses_its_rows_of_raw():
+    # The age of a load that did not end is that of the cleanup of raw, which deletes its other
+    # rows (acceptance.py), and the journal goes after _dlt_loads in the same transaction.
+    source = (REPO_ROOT / "airflow" / "dags" / "agoranomos_pipelines" / "maintenance.py").read_text(
+        encoding="utf-8"
+    )
+    [function] = [
+        node
+        for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef) and node.name == "clean_dlt_loads"
+    ]
+    text = ast.unparse(function)
+    assert "from agoranomos_pipelines.acceptance import UNFINISHED_AFTER" in text
+    assert "UNFINISHED_AFTER.total_seconds()" in text
+    # The innermost block that runs the delete of the journal: one transaction of the schema.
+    [block] = [
+        ast.unparse(node)
+        for node in ast.walk(function)
+        if isinstance(node, ast.With)
+        and ast.unparse(node).startswith("with connection, connection.cursor() as cursor:")
+        and "journal_delete(" in ast.unparse(node)
+    ]
+    assert block.index("dlt_loads_delete(") < block.index("journal_delete(")
+
+
+@pytest.mark.parametrize("schema", ["raw_x'; drop table y; --", "public", 'raw_"x"', "raw_X"])
+def test_the_cleanup_of_the_journal_takes_only_the_names_of_raw_schemas(schema):
+    with pytest.raises(ValueError, match="is not the name of a raw schema"):
+        maintenance.journal_delete(schema)
 
 
 def test_the_cleanup_of_core_loads_takes_old_accepted_intraday_rows_that_no_fact_reads():
