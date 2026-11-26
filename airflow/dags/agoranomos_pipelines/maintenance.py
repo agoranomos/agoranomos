@@ -5,7 +5,7 @@ safe to repeat, so that a step that fails leaves its work to the next run:
   the schema ops older than 90 days, the rows of _dlt_loads older than 90 days that no load, no
   state of dlt and no pin needs any more, and those of the loads of the kind intraday older than 14
   days, the accepted rows of the kind intraday of core.loads older than 14 days that no fact
-  reads (ADR-0051), the months of the journals of restatements older than 13 months; the rows
+  reads (ADR-0051), and the months of the journals of restatements older than 13 months; the rows
   of the kinds window and history of core.loads stay, as the facts of the days of their windows
   may still read them;
 - the upkeep of the partitions of the core (ADR-0036, ADR-0039): the partitions of the current
