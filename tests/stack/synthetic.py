@@ -34,6 +34,13 @@ replaces their days: a run reads the pinned loads only (dbt/macros/newest_load.s
 transform still gives every account the client that the settings of the model name, which none of
 these accounts has, so restore_accounts() puts their clients back after one.
 
+For the models that read the lists of the entities, history_sql() gives the journal of the loads
+the accepted loads that the maintenance keeps, and whole_load_sql() writes a whole load of every
+platform in raw, as a connector or the demo writes it: the lists of the accounts, campaigns, ad
+groups and ads of the synthetic accounts, with a window of a day on which the core holds no
+statistics, which the next run of the transform pins and reads. remove() deletes their rows too,
+and leaves the tables of raw that it made, empty.
+
 As a command, in the root of the checkout, with the stack up:
 
     uv run python tests/stack/synthetic.py generate agency [--days 400]
@@ -327,6 +334,405 @@ COMMIT;
 """  # noqa: S608 (numbers, dates and constants of this file)
 
 
+# A load of the history of the journal of loads (history_sql) and a whole load with the lists of
+# the entities (whole_load_sql), for the measurement of the lists at the density of a profile
+# (test_profile.py). The rows that they write in raw carry this name of the schema of dlt in
+# _dlt_loads, by which remove() finds them, and a table of raw that whole_load_sql creates carries
+# RAW_MARK.
+SCHEMA_NAME = "synthetic"
+RAW_MARK = "agoranomos synthetic data: a table of raw made by tests/stack/synthetic.py"
+# The accepted loads of the kind window that the maintenance keeps (ADR-0046), and those of the
+# kind intraday, with the hours between two of them (ADR-0051): the short cycle of Google Ads and
+# that of the demo, every AGORANOMOS_INTRADAY_HOURS hours, 3 by default.
+HISTORY_MONTHS = 13
+INTRADAY_DAYS = 14
+INTRADAY_HOURS = 3
+INTRADAY_PLATFORMS = ("google_ads", "demo_search")
+VARCHAR = "character varying"
+# The journal of the loads of a source as dlt writes it (newest_load_columns of
+# dbt/macros/newest_load.sql), and _dlt_loads, where dlt writes the end of a load.
+JOURNAL = {
+    "account_id": VARCHAR,
+    "as_of": "date",
+    "window_from": "date",
+    "window_to": "date",
+    "now": "timestamp with time zone",
+    "loaded_at": "timestamp with time zone",
+    "status": VARCHAR,
+    "error": VARCHAR,
+    "kind": VARCHAR,
+}
+DLT_LOADS = (
+    "load_id character varying NOT NULL, schema_name character varying, "
+    "status bigint NOT NULL, inserted_at timestamp with time zone NOT NULL, "
+    "schema_version_hash character varying"
+)
+# The rows that each kind of list reads: a the account, c the campaign, g the ad group and e the
+# ad, of the synthetic accounts of one platform. Every account of the registry is listed, and the
+# entities of the accounts with statistics.
+LIST_FROM = {
+    "accounts": "core.dim_account AS a",
+    "campaigns": "core.dim_campaign AS c JOIN core.dim_account AS a ON a.account_sk = c.account_sk",
+    "ad_groups": "core.dim_ad_group AS g JOIN core.dim_account AS a ON a.account_sk = g.account_sk",
+    "ads": "core.dim_ad AS e JOIN core.dim_account AS a ON a.account_sk = e.account_sk",
+}
+
+
+# The lists of one platform: for each kind, its table and its columns, each with its type and its
+# SQL.
+Lists = dict[str, tuple[str, dict[str, tuple[str, str]]]]
+
+
+def google_lists(accounts: str) -> Lists:
+    """The lists of the shape of Google Ads (dbt/macros/shapes/google_ads_v25.sql): the table of
+    each kind, and its columns with their type and their SQL. The status comes from the common
+    state of the core, so that a second load gives what the first one left."""
+
+    def status(state: str) -> str:
+        return (
+            f"CASE {state} WHEN 'paused' THEN 'PAUSED' WHEN 'removed' THEN 'REMOVED' "
+            "ELSE 'ENABLED' END"
+        )
+
+    campaign = "'customers/' || a.account_id || '/campaigns/' || {}"
+    group = "'customers/' || a.account_id || '/adGroups/' || {}"
+    if accounts == "customers":
+        account_columns = {
+            "customer__resource_name": (VARCHAR, "'customers/' || a.account_id"),
+            "customer__id": (VARCHAR, "a.account_id"),
+            "customer__descriptive_name": (VARCHAR, "a.account_name"),
+            "customer__currency_code": (VARCHAR, "a.currency"),
+            "customer__time_zone": (VARCHAR, "a.time_zone"),
+            "customer__manager": ("boolean", "false"),
+            "customer__status": (VARCHAR, "'ENABLED'"),
+        }
+    else:
+        account_columns = {
+            "customer_client__id": (VARCHAR, "a.account_id"),
+            "customer_client__resource_name": (
+                VARCHAR,
+                "'customers/0/customerClients/' || a.account_id",
+            ),
+            "customer_client__descriptive_name": (VARCHAR, "a.account_name"),
+            "customer_client__currency_code": (VARCHAR, "a.currency"),
+            "customer_client__time_zone": (VARCHAR, "a.time_zone"),
+            "customer_client__manager": ("boolean", "false"),
+            "customer_client__status": (VARCHAR, "'ENABLED'"),
+        }
+    return {
+        "accounts": (accounts, account_columns),
+        "campaigns": (
+            "campaigns",
+            {
+                "customer__id": (VARCHAR, "a.account_id"),
+                "campaign__resource_name": (VARCHAR, campaign.format("c.campaign_id_text")),
+                "campaign__id": (VARCHAR, "c.campaign_id_text"),
+                "campaign__name": (VARCHAR, "c.campaign_name"),
+                "campaign__status": (VARCHAR, status("c.campaign_state")),
+                "campaign__advertising_channel_type": (VARCHAR, "c.campaign_type"),
+            },
+        ),
+        "ad_groups": (
+            "ad_groups",
+            {
+                "customer__id": (VARCHAR, "a.account_id"),
+                "campaign__resource_name": (VARCHAR, campaign.format("g.campaign_id::text")),
+                "campaign__id": (VARCHAR, "g.campaign_id::text"),
+                "ad_group__resource_name": (VARCHAR, group.format("g.ad_group_id_text")),
+                "ad_group__id": (VARCHAR, "g.ad_group_id_text"),
+                "ad_group__name": (VARCHAR, "g.ad_group_name"),
+                "ad_group__status": (VARCHAR, status("g.ad_group_state")),
+                "ad_group__type": (VARCHAR, "g.ad_group_type"),
+            },
+        ),
+        "ads": (
+            "ads",
+            {
+                "customer__id": (VARCHAR, "a.account_id"),
+                "campaign__resource_name": (VARCHAR, campaign.format("e.campaign_id::text")),
+                "campaign__id": (VARCHAR, "e.campaign_id::text"),
+                "ad_group__resource_name": (VARCHAR, group.format("e.ad_group_id::text")),
+                "ad_group__id": (VARCHAR, "e.ad_group_id::text"),
+                "ad_group_ad__resource_name": (
+                    VARCHAR,
+                    "'customers/' || a.account_id || '/adGroupAds/' || e.ad_group_id || '~' "
+                    "|| e.ad_id_text",
+                ),
+                "ad_group_ad__status": (VARCHAR, status("e.ad_state")),
+                "ad_group_ad__ad__resource_name": (
+                    VARCHAR,
+                    "'customers/' || a.account_id || '/ads/' || e.ad_id_text",
+                ),
+                "ad_group_ad__ad__id": (VARCHAR, "e.ad_id_text"),
+                "ad_group_ad__ad__name": (VARCHAR, "e.ad_name"),
+                "ad_group_ad__ad__type": (VARCHAR, "e.ad_type"),
+            },
+        ),
+    }
+
+
+def meta_lists(demo: bool) -> Lists:
+    """The lists of the shape of Meta (dbt/macros/shapes/meta_v26.sql), with the columns of the
+    connector of Meta or, for demo_social, those of the demo (dbt/macros/demo_source.sql)."""
+
+    def status(state: str) -> dict[str, tuple[str, str]]:
+        value = (
+            f"CASE {state} WHEN 'paused' THEN 'PAUSED' WHEN 'removed' THEN 'DELETED' "
+            "ELSE 'ACTIVE' END"
+        )
+        found = {"status": (VARCHAR, value)}
+        if not demo:
+            found |= {"configured_status": (VARCHAR, value), "effective_status": (VARCHAR, value)}
+        return found
+
+    return {
+        "accounts": (
+            "ad_accounts",
+            {
+                "id": (VARCHAR, "'act_' || a.account_id"),
+                "account_id": (VARCHAR, "a.account_id"),
+                "name": (VARCHAR, "a.account_name"),
+                "currency": (VARCHAR, "a.currency"),
+                "timezone_name": (VARCHAR, "a.time_zone"),
+                "account_status": ("bigint", "1") if demo else (VARCHAR, "'1'"),
+            },
+        ),
+        "campaigns": (
+            "campaigns",
+            {
+                "id": (VARCHAR, "c.campaign_id_text"),
+                "account_id": (VARCHAR, "a.account_id"),
+                "name": (VARCHAR, "c.campaign_name"),
+                **status("c.campaign_state"),
+                "objective": (VARCHAR, "c.campaign_type"),
+            },
+        ),
+        "ad_groups": (
+            "adsets",
+            {
+                "id": (VARCHAR, "g.ad_group_id_text"),
+                "account_id": (VARCHAR, "a.account_id"),
+                "campaign_id": (VARCHAR, "g.campaign_id::text"),
+                "name": (VARCHAR, "g.ad_group_name"),
+                **status("g.ad_group_state"),
+                "optimization_goal": (VARCHAR, "g.ad_group_type"),
+            },
+        ),
+        "ads": (
+            "ads",
+            {
+                "id": (VARCHAR, "e.ad_id_text"),
+                "account_id": (VARCHAR, "a.account_id"),
+                "campaign_id": (VARCHAR, "e.campaign_id::text"),
+                "adset_id": (VARCHAR, "e.ad_group_id::text"),
+                "name": (VARCHAR, "e.ad_name"),
+                **status("e.ad_state"),
+            },
+        ),
+    }
+
+
+def tiktok_lists(demo: bool) -> Lists:
+    """The lists of the shape of TikTok (dbt/macros/shapes/tiktok_v1_3.sql), with the columns of
+    the connector of TikTok or, for demo_video, those of the demo."""
+
+    def status(state: str, deleted: str) -> dict[str, tuple[str, str]]:
+        return {
+            "operation_status": (
+                VARCHAR,
+                f"CASE {state} WHEN 'paused' THEN 'DISABLE' ELSE 'ENABLE' END",
+            ),
+            "secondary_status": (VARCHAR, f"CASE {state} WHEN 'removed' THEN '{deleted}' END"),
+        }
+
+    advertiser = {
+        "advertiser_id": (VARCHAR, "a.account_id"),
+        "name": (VARCHAR, "a.account_name"),
+        "currency": (VARCHAR, "a.currency"),
+        "timezone": (VARCHAR, "a.time_zone"),
+        "status": (VARCHAR, "'STATUS_ENABLE'"),
+    }
+    if not demo:
+        advertiser["display_timezone"] = (VARCHAR, "a.time_zone")
+    return {
+        "accounts": ("advertisers", advertiser),
+        "campaigns": (
+            "campaigns",
+            {
+                "advertiser_id": (VARCHAR, "a.account_id"),
+                "campaign_id": (VARCHAR, "c.campaign_id_text"),
+                "campaign_name": (VARCHAR, "c.campaign_name"),
+                "objective_type": (VARCHAR, "c.campaign_type"),
+                **status("c.campaign_state", "CAMPAIGN_STATUS_DELETE"),
+            },
+        ),
+        "ad_groups": (
+            "adgroups",
+            {
+                "advertiser_id": (VARCHAR, "a.account_id"),
+                "campaign_id": (VARCHAR, "g.campaign_id::text"),
+                "adgroup_id": (VARCHAR, "g.ad_group_id_text"),
+                "adgroup_name": (VARCHAR, "g.ad_group_name"),
+                "optimization_goal": (VARCHAR, "g.ad_group_type"),
+                **status("g.ad_group_state", "ADGROUP_STATUS_DELETE"),
+            },
+        ),
+        "ads": (
+            "ads",
+            {
+                "advertiser_id": (VARCHAR, "a.account_id"),
+                "campaign_id": (VARCHAR, "e.campaign_id::text"),
+                "adgroup_id": (VARCHAR, "e.ad_group_id::text"),
+                "ad_id": (VARCHAR, "e.ad_id_text"),
+                "ad_name": (VARCHAR, "e.ad_name"),
+                "ad_format": (VARCHAR, "e.ad_type"),
+                **status("e.ad_state", "AD_STATUS_DELETE"),
+            },
+        ),
+    }
+
+
+# The lists of each platform of PLATFORMS in its schema of raw, as its connector or the demo
+# writes them: the tables of its staging models of the accounts, campaigns, ad groups and ads.
+LISTS = {
+    "google_ads": google_lists("customers"),
+    "meta_ads": meta_lists(demo=False),
+    "tiktok_ads": tiktok_lists(demo=False),
+    "demo_search": google_lists("customer_clients"),
+    "demo_social": meta_lists(demo=True),
+    "demo_video": tiktok_lists(demo=True),
+}
+
+
+def history_sql(first: date, last: date) -> str:
+    """The journal of the loads that the accounts of the registry would hold after the days of the
+    period, as the maintenance keeps it (ADR-0046, ADR-0051): an accepted load of the kind window of
+    each account on each day of the period, back at most HISTORY_MONTHS months, at five in the
+    morning of the next day in UTC, and an accepted load of the kind intraday of each account of
+    INTRADAY_PLATFORMS every INTRADAY_HOURS hours over the last INTRADAY_DAYS days. No fact reads
+    them, and no run reads an accepted load older than a pinned one (macros/newest_load.sql)."""
+    platforms = ", ".join(f"'{p}'" for p in INTRADAY_PLATFORMS)
+    return f"""
+BEGIN;
+INSERT INTO core.loads (source, load_id, account_id, window_from, window_to, outcome, finished_at,
+    invocation_id, status, accepted_at, kind)
+SELECT a.platform,
+    to_char(extract(epoch FROM t.at), 'FM9999999999') || '.' || substr(a.account_id, 11),
+    a.account_id, d::date, d::date, 'loaded', t.at, gen_random_uuid(), 'accepted', t.at, 'window'
+FROM core.dim_account AS a
+CROSS JOIN generate_series(date '{first}', date '{last}', interval '1 day') AS d
+CROSS JOIN LATERAL (SELECT (d::date + 1 + time '05:00') AT TIME ZONE 'UTC' AS at) AS t
+WHERE {ACCOUNTS} AND d::date >= (now() - interval '{HISTORY_MONTHS} months')::date
+    AND t.at < now() - interval '1 hour'
+ON CONFLICT DO NOTHING;
+INSERT INTO core.loads (source, load_id, account_id, window_from, window_to, outcome, finished_at,
+    invocation_id, status, accepted_at, kind)
+SELECT a.platform,
+    to_char(extract(epoch FROM t), 'FM9999999999') || '.5' || substr(a.account_id, 11),
+    a.account_id, (t AT TIME ZONE 'UTC')::date, (t AT TIME ZONE 'UTC')::date, 'loaded', t,
+    gen_random_uuid(), 'accepted', t, 'intraday'
+FROM core.dim_account AS a
+CROSS JOIN generate_series(date_trunc('hour', now()) - interval '{INTRADAY_DAYS} days',
+    now() - interval '1 hour', interval '{INTRADAY_HOURS} hours') AS t
+WHERE {ACCOUNTS} AND a.platform IN ({platforms})
+ON CONFLICT DO NOTHING;
+COMMIT;
+ANALYZE core.loads;
+"""  # noqa: S608 (numbers, dates and constants of this file)
+
+
+def whole_load_sql(load_id: str, day: date, pin: bool = False) -> str:
+    """A whole load of every platform of PLATFORMS, with the load id given, as its connector or the
+    demo writes it in raw: the lists of the accounts, campaigns, ad groups and ads of LISTS, of
+    every synthetic account of the platform, its row in the journal with the window of one day,
+    and its end in _dlt_loads, in one transaction. A table that raw lacks is created, with
+    RAW_MARK, and a column that a table lacks is added, as loader, which owns the raw schemas and
+    whose tables transformer may read (postgres/warehouse.sql). The day is one on which the core
+    holds no statistics of the accounts, the day before the period: so the run that reads the load
+    writes no fact and takes nothing out of the core, as the load brings no statistics, and G1a
+    finds no spend that fell. With pin, the rows of the load also go into core.loads as the pin of
+    a run writes them (dbt/macros/pin_loads.sql), so that the views of staging read them before
+    the run; its pin then passes them over."""
+    ddl = []
+    rows = []
+    for platform, lists in LISTS.items():
+        schema = f"raw_{platform}"
+        listed = f"{ACCOUNTS} AND a.platform = '{platform}'"
+        tables = [("_agoranomos_loads", JOURNAL)]
+        tables += [
+            (table, {n: t for n, (t, _) in columns.items()}) for table, columns in lists.values()
+        ]
+        for table, columns in tables:
+            name = f"{schema}.{table}"
+            declared = ", ".join(f"{column} {kind}" for column, kind in columns.items())
+            ddl.append(
+                f"DO $$ BEGIN IF to_regclass('{name}') IS NULL THEN "
+                f"CREATE TABLE {name} ({declared}, _dlt_load_id character varying NOT NULL, "
+                f"_dlt_id character varying NOT NULL UNIQUE); "
+                f"COMMENT ON TABLE {name} IS '{RAW_MARK}'; END IF; END $$;"
+            )
+            added = ", ".join(f"ADD COLUMN IF NOT EXISTS {c} {k}" for c, k in columns.items())
+            ddl.append(f"ALTER TABLE {name} {added};")
+        ddl.append(
+            f"DO $$ BEGIN IF to_regclass('{schema}._dlt_loads') IS NULL THEN "
+            f"CREATE TABLE {schema}._dlt_loads ({DLT_LOADS}); "
+            f"COMMENT ON TABLE {schema}._dlt_loads IS '{RAW_MARK}'; END IF; END $$;"
+        )
+        for kind, (table, columns) in lists.items():
+            names = ", ".join(columns)
+            values = ", ".join(sql for _, sql in columns.values())
+            rows.append(
+                f"INSERT INTO {schema}.{table} ({names}, _dlt_load_id, _dlt_id) "  # noqa: S608 (constants of this file)
+                f"SELECT {values}, '{load_id}', md5(random()::text) "
+                f"FROM {LIST_FROM[kind]} WHERE {listed};"
+            )
+        rows.append(
+            f"INSERT INTO {schema}._agoranomos_loads (account_id, as_of, window_from, window_to, "  # noqa: S608 (constants of this file)
+            "now, loaded_at, status, kind, _dlt_load_id, _dlt_id) "
+            f"SELECT a.account_id, date '{day}', date '{day}', date '{day}', now(), now(), "
+            f"'loaded', 'window', '{load_id}', md5(random()::text) "
+            f"FROM core.dim_account AS a WHERE {listed};"
+        )
+        rows.append(
+            f"INSERT INTO {schema}._dlt_loads (load_id, schema_name, status, inserted_at) "  # noqa: S608 (constants of this file)
+            f"VALUES ('{load_id}', '{SCHEMA_NAME}', 0, now());"
+        )
+        if pin:
+            rows.append(
+                "INSERT INTO core.loads (source, load_id, account_id, window_from, window_to, "  # noqa: S608 (constants of this file)
+                "outcome, finished_at, invocation_id, kind) "
+                f"SELECT '{platform}', '{load_id}', a.account_id, date '{day}', date '{day}', "
+                "'loaded', now(), gen_random_uuid(), 'window' "
+                f"FROM core.dim_account AS a WHERE {listed} ON CONFLICT DO NOTHING;"
+            )
+    analyze = ", ".join(
+        f"raw_{platform}.{table}"
+        for platform, lists in LISTS.items()
+        for table, _ in lists.values()
+    )
+    return "\n".join(
+        [
+            "BEGIN;",
+            "SET LOCAL ROLE loader;",
+            *ddl,
+            "RESET ROLE;",
+            *rows,
+            "COMMIT;",
+            f"ANALYZE core.loads, {analyze};",
+        ]
+    )
+
+
+def list_rows(env: dict[str, str]) -> dict[str, int]:
+    """The rows of each kind of list that a whole load writes, of all the platforms."""
+    counts = {}
+    for kind, source in LIST_FROM.items():
+        counts[kind] = int(
+            warehouse_output(env, f"SELECT count(*) FROM {source} WHERE {ACCOUNTS}")  # noqa: S608 (constants of this file)
+        )
+    return counts
+
+
 ANALYZE_SQL = (
     "ANALYZE core.dim_client, core.dim_account, core.loads, core.dim_conversion_action, "
     "core.dim_campaign, core.dim_ad_group, core.dim_ad, core.fx_rates_daily, "
@@ -438,7 +844,24 @@ def remove_sql() -> list[str]:
         "IF empty THEN EXECUTE format('DROP TABLE %s', p); END IF; "
         "END LOOP; END $$;"
     )
-    return [*facts, registry, partitions]
+    schemas = ", ".join(f"'raw_{platform}'" for platform in LISTS)
+    # The rows of the whole loads in raw, which a run that accepts them deletes, and their ends in
+    # _dlt_loads; a table that whole_load_sql made stays, empty, as dlt adds what it lacks to a
+    # table that exists, and a view of staging may read it.
+    raw = (
+        "DO $$ DECLARE s text; t text; BEGIN "  # noqa: S608 (constants of this file)
+        f"FOREACH s IN ARRAY ARRAY[{schemas}] LOOP "
+        "IF to_regclass(s || '._dlt_loads') IS NOT NULL THEN "
+        "FOR t IN SELECT table_name FROM information_schema.columns "
+        "WHERE table_schema = s AND column_name = '_dlt_load_id' LOOP "
+        "EXECUTE format('DELETE FROM %I.%I WHERE _dlt_load_id IN "
+        "(SELECT load_id FROM %I._dlt_loads WHERE schema_name = %L)', "
+        f"s, t, s, '{SCHEMA_NAME}'); "
+        "END LOOP; "
+        f"EXECUTE format('DELETE FROM %I._dlt_loads WHERE schema_name = %L', s, '{SCHEMA_NAME}'); "
+        "END IF; END LOOP; END $$;"
+    )
+    return [*facts, raw, registry, partitions]
 
 
 def remove(env: dict[str, str], log: Callable[[str], None] = print) -> None:

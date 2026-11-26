@@ -190,7 +190,7 @@ Each test of a view of a fact reads the days of the windows that the run of the 
 
 `+persist_docs` in `dbt/dbt_project.yml` makes dbt write the descriptions into the comments of the tables, views and columns that it builds, so SQL clients see them too, and so do AI clients through the tools `list_tables` and `describe_table` of the MCP server of the warehouse (`ai/tools.yaml`). dbt does not comment the tables of the sources.
 
-Metabase copies the comment of a table or column into its description when it syncs, but only while that description is empty, as of Metabase 0.63.19 and 0.64.1: a changed description does not reach Metabase this way. In 0.64.1, a sync no longer fills the description of a column that someone cleared in Metabase either. The jobs that apply the metadata on every start bring it there instead.
+Metabase copies the comment of a table or column into its description when it syncs, but only while that description is empty, as of Metabase 0.63.19 and 0.64.1: a changed description does not reach Metabase this way. In 0.64.1, a sync no longer fills the description of a column that someone cleared in Metabase either. The jobs that apply the metadata on every start bring it there instead. Metabase 0.64.6 moved the values that someone set on tables and fields back into its tables of them, `metabase_table` and `metabase_field`, so that a sync leaves them alone ([metabase/metabase#86150](https://github.com/metabase/metabase/pull/86150)); this paragraph and the display name of `null` above are not checked yet on 0.64.9.1, which the stack pins.
 
 ## A deployment's own words
 

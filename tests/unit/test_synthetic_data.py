@@ -88,3 +88,60 @@ def test_remove_deletes_the_facts_with_a_thaw_and_drops_only_marked_partitions()
         assert f"DELETE FROM core.{fact} WHERE account_sk IN" in statement  # noqa: S608 (a fact of the generator)
     assert "DROP TABLE" in statements[-1]
     assert synthetic.MARK in statements[-1]
+
+
+def staged_columns(platform: str, kind: str) -> tuple[str, dict[str, str]]:
+    """The table of raw that the staging model of a list reads, and the columns that it gives the
+    table when the table does not exist: the dict of relation_or_empty in the model, or for a
+    platform of the demo, the entry of demo_columns (dbt/macros/demo_source.sql)."""
+    model = (
+        REPO_ROOT / "dbt" / "models" / "staging" / platform / f"stg_{platform}__{kind}.sql"
+    ).read_text(encoding="utf-8")
+    [table] = re.findall(rf"source\('raw_{platform}', '(\w+)'\)", model)
+    if platform.startswith("demo_"):
+        macros = (REPO_ROOT / "dbt" / "macros" / "demo_source.sql").read_text(encoding="utf-8")
+        [block] = re.findall(rf"'raw_{platform}\.{table}': \{{(.*?)\}}", macros, re.DOTALL)
+    else:
+        [block] = re.findall(r"\{(.*?)\}", model, re.DOTALL)
+    columns = dict(re.findall(r"'(\w+)': '([^']+)'", block))
+    return table, {name: kind for name, kind in columns.items() if not name.startswith("_dlt_")}
+
+
+@pytest.mark.parametrize("platform", sorted(synthetic.LISTS))
+def test_each_list_has_the_columns_that_its_staging_model_reads(platform):
+    # A whole load writes each list as its connector or the demo does, in the table that the
+    # staging model of the list reads, with every column that the model reads, and for the demo
+    # of the type that dlt gives it.
+    assert set(synthetic.LISTS) == set(synthetic.PLATFORMS)
+    for kind, (table, columns) in synthetic.LISTS[platform].items():
+        staged_table, staged = staged_columns(platform, kind)
+        assert table == staged_table, (platform, kind)
+        assert set(columns) == set(staged), (platform, kind)
+        if platform.startswith("demo_"):
+            assert {name: t for name, (t, _) in columns.items()} == staged, (platform, kind)
+
+
+def test_the_history_of_the_loads_is_accepted_and_marked():
+    sql = synthetic.history_sql(date(2025, 10, 1), date(2026, 11, 24))
+    assert sql.count("INSERT INTO core.loads") == 2
+    assert sql.count("'accepted'") == 2
+    assert "'window'" in sql
+    assert "'intraday'" in sql
+    assert sql.count(synthetic.ACCOUNTS) == 2
+
+
+def test_a_whole_load_ends_in_dlt_loads_after_its_lists_and_is_found_by_remove():
+    sql = synthetic.whole_load_sql("1764000000.000001", date(2025, 9, 30))
+    assert sql.startswith("BEGIN;\nSET LOCAL ROLE loader;")
+    assert "INSERT INTO core.loads" not in sql
+    pinned = synthetic.whole_load_sql("1764000000.000001", date(2025, 9, 30), pin=True)
+    assert pinned.count("INSERT INTO core.loads") == len(synthetic.LISTS)
+    for platform, lists in synthetic.LISTS.items():
+        end = sql.index(f"INSERT INTO raw_{platform}._dlt_loads")
+        for table, _ in lists.values():
+            assert sql.index(f"INSERT INTO raw_{platform}.{table} (") < end, (platform, table)
+        assert sql.index(f"INSERT INTO raw_{platform}._agoranomos_loads (") < end, platform
+    assert f"'{synthetic.SCHEMA_NAME}', 0, now()" in sql
+    [raw] = [s for s in synthetic.remove_sql() if "_dlt_loads" in s]
+    assert f"'{synthetic.SCHEMA_NAME}'" in raw
+    assert "DROP" not in raw

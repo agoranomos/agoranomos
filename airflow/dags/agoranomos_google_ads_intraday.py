@@ -1,19 +1,20 @@
 """The current day of the Google Ads accounts of the deployment, every few hours (ADR-0051).
 
 agoranomos_google_ads_intraday runs every AGORANOMOS_INTRADAY_HOURS hours of .env, 3 by default, at
-27 minutes past the hour in UTC, from midnight, and loads with dlt, as the loader role, into
-raw_google_ads, for each account of google_ads that extensions/model/clients.toml names and that a
-whole load has taken, its current day in its time zone, and the day before while no whole load
-covers it: the impressions, clicks and cost of its campaigns, without conversions, as a load of the
-kind intraday (agoranomos_pipelines/google_ads.py, load_intraday). That is two requests to the
-Google Ads API for each account, its customer and the statistics of its campaigns, against twelve
-for a daily load. The load updates an asset of its own, and the transform takes it like any load:
-the rows of a day that only such a load took are partial in the core (is_partial_day), until a
-load of agoranomos_google_ads_daily takes the day and replaces them whole. An account that no whole
-load has taken yet waits for its first daily load, and a run with no such account loads nothing.
-With 0, the DAG has no schedule; a value that is neither 0 nor a divisor of 24 stops the parse of
-this file with a line that says so (agoranomos_pipelines/intraday.py), as ./agoranomos stops
-before up.
+27 minutes past the hour in UTC, at hours that keep at least an hour from the start of the daily
+backup, BACKUP_TIME in BACKUP_TZ (ADR-0020), from 01:27 with the defaults, and loads with dlt, as
+the loader role, into raw_google_ads, for each account of google_ads that
+extensions/model/clients.toml names and that a whole load has taken, its current day in its time
+zone, and the day before while no whole load covers it: the impressions, clicks and cost of its
+campaigns, without conversions, as a load of the kind intraday (agoranomos_pipelines/google_ads.py,
+load_intraday). That is two requests to the Google Ads API for each account, its customer and the
+statistics of its campaigns, against twelve for a daily load. The load updates an asset of its own,
+and the transform takes it like any load: the rows of a day that only such a load took are partial
+in the core (is_partial_day), until a load of agoranomos_google_ads_daily takes the day and replaces
+them whole. An account that no whole load has taken yet waits for its first daily load, and a run
+with no such account loads nothing. With 0, the DAG has no schedule; a value that is neither 0 nor a
+divisor of 24 stops the parse of this file with a line that says so
+(agoranomos_pipelines/intraday.py), as ./agoranomos stops before up.
 
 The loads of Google Ads run one at a time in the pool google_ads_load, which airflow-init sets with
 one slot on every start: the daily load, its runs of the history and this one. The first task,
@@ -44,8 +45,8 @@ log = logging.getLogger(__name__)
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
 # The hours between two loads, from AGORANOMOS_INTRADAY_HOURS, which compose.yaml gives the DAG
-# processor and the tasks: a value that is not allowed stops the parse of this file. 0 gives no
-# schedule.
+# processor and the tasks, with BACKUP_TIME and BACKUP_TZ, which the hours of the runs keep away
+# from: a value that is not allowed stops the parse of this file. 0 gives no schedule.
 HOURS = intraday.period()
 CRON = intraday.cron(HOURS)
 SCHEDULE = None if CRON is None else CronTriggerTimetable(CRON, timezone="UTC")
