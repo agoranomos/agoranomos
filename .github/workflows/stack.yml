@@ -487,24 +487,58 @@ jobs:
           done
       # A release takes main as it is, and a release pull request changes no file of the stack, so
       # the check of this pull request says nothing of the code that it would release. The newest
-      # run on a push to main does, and a push that changes the stack starts one.
+      # run on a push to main does, and a push that changes the stack starts one: the commit of that
+      # push holds the stack of the head of main, which no later push changed. A newer push stops
+      # the run of an older one (concurrency above), so the step looks at the runs of the commit of
+      # the newest push, of any event on main, and waits for the newest that was not cancelled: it
+      # passes when that run passed, and fails when it failed or when every run of the commit was
+      # cancelled, which a re-run by hand ends. Until 26 November 2026 it took the newest run of a
+      # push alone, and failed when that run had been cancelled.
       - name: A release waits for the stack of main
         if: ${{ startsWith(github.head_ref, 'release-please--') }}
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         run: |
+          # One line: the state, the ID of the run, the commit, the status or conclusion of the run.
+          # The $ names are variables of jq, which the shell is not to expand.
+          # shellcheck disable=SC2016
+          pick='[.[] | select(.event == "push" or .event == "schedule" or .event == "workflow_dispatch")]
+            | ([.[] | select(.event == "push")][0].headSha) as $head
+            | if $head == null then "none" else
+                [.[] | select(.headSha == $head)] as $runs
+                | ([$runs[] | select(.conclusion != "cancelled")][0]) as $run
+                | if $run == null then "cancelled \($runs[0].databaseId) \($head)"
+                  elif $run.status != "completed" then "running \($run.databaseId) \($head) \($run.status)"
+                  elif $run.conclusion == "success" then "success \($run.databaseId) \($head)"
+                  else "failed \($run.databaseId) \($head) \($run.conclusion)" end
+              end'
           while :; do
-            newest=$(gh run list --repo "$REPOSITORY" --workflow stack.yml --branch main \
-              --event push --limit 1 --json status,conclusion \
-              --jq '.[0] | "\(.status) \(.conclusion)"')
-            case "$newest" in
-              "completed success") exit 0 ;;
-              completed*)
-                echo "::error::the newest run of the stack on main ended as: $newest"
+            # In two steps, so that a failed request stops the job and does not read as no run.
+            runs=$(gh run list --repo "$REPOSITORY" --workflow stack.yml --branch main \
+              --limit 100 --json databaseId,event,headSha,status,conclusion)
+            verdict=$(printf '%s' "$runs" | jq -r "$pick")
+            read -r state run commit result <<< "$verdict"
+            case "$state" in
+              success)
+                echo "run $run of the stack on main passed for $commit"
+                exit 0
+                ;;
+              running)
+                echo "run $run of the stack on main for $commit: $result"
+                ;;
+              failed)
+                echo "::error::run $run of the stack on main for $commit ended as $result"
+                exit 1
+                ;;
+              cancelled)
+                echo "::error::every run of the stack on main for $commit was cancelled; re-run run $run by hand (gh run rerun $run, or Re-run all jobs on its page), then re-run this check"
+                exit 1
+                ;;
+              *)
+                echo "::error::no run of a push in the newest 100 runs of the stack on main"
                 exit 1
                 ;;
             esac
-            echo "the newest run of the stack on main: $newest"
             sleep 60
           done
