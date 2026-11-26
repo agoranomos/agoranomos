@@ -181,7 +181,9 @@ def test_tasks_run_where_the_executor_puts_them(airflow_url, token, selfcheck_ru
     # The LocalExecutor runs a task as a process of the scheduler, and the CeleryExecutor on a
     # worker: the task instance records the host that ran it, and a container's host name is its ID.
     service = "airflow-worker" if active_variant() == "celery" else "airflow-scheduler"
-    host = compose("exec", "-T", service, "hostname").stdout.strip()
+    # The image of Airflow 3.4.0, on the Docker Hardened Images, has no hostname command.
+    hostname = "import socket; print(socket.gethostname())"
+    host = compose("exec", "-T", service, "python", "-c", hostname).stdout.strip()
     assert [i["hostname"] for i in task_instances(airflow_url, token, selfcheck_run)] == [host]
 
 
