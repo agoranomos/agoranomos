@@ -92,7 +92,9 @@ GROUPS: tuple[tuple[str, ...], ...] = (
     # cycle of the demo, Airflow and the dashboard Web analytics.
     (
         "test_quarantine.py",  # 14, and 14 to 15
-        "test_meta_ads.py",  # 8, and 6 to 9
+        # 8, and 6 to 9, before its second run of the transform of 26 November 2026, which adds a
+        # few minutes, not measured yet.
+        "test_meta_ads.py",
         "test_restatements.py",  # 8, and 6 to 7
         # No run of the transform: a few seconds (C8a of #228, 20 November 2026, on a Mac).
         "test_final_days.py",

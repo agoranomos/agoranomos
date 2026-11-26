@@ -478,7 +478,7 @@ The source, the account and the day of the row in one text, as source|account_id
 {% enddocs %}
 
 {% docs reason %}
-The check of G0a, G1 or G1a (ADR-0035) that kept the account out of the core, as a code: load_failed, unknown_account, duplicate_key, missing_key, invalid_id, unknown_currency, unknown_time_zone, missing_rate, too_many_decimals, missing_measure, negative_measure, date_outside_window, totals_differ, empty_window, spend_fall, or source_stopped for an account whose source has more than half of its pinned accounts in quarantine.
+The check of G0a, G1 or G1a (ADR-0035) that kept the account out of the core, as a code: load_failed, unknown_account, duplicate_key, missing_key, invalid_id, unknown_currency, unknown_time_zone, missing_rate, too_many_decimals, missing_measure, negative_measure, date_outside_window, totals_differ, empty_window, spend_fall, or source_stopped for a pinned account whose source has more than half of its accounts in quarantine, of those that the settings of the model name and those of its pinned loads.
 {% enddocs %}
 
 {% docs checked %}

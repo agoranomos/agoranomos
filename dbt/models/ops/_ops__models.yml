@@ -316,9 +316,10 @@ models:
     description: >-
       The accounts that the last run of the transform kept out of the core, in quarantine, one row
       for each account and reason (ADR-0035): an account whose data failed a check of G1 or G1a, and
-      each pinned account of a source with more than half of its pinned accounts in quarantine. The
-      core keeps the data of such an account as it was, the raw layer keeps the rows of its loads,
-      and the marts, which staging still builds, leave it out for the run. An account leaves the
+      each pinned account of a source with more than half of its accounts in quarantine, of those
+      that the settings of the model name and those of its pinned loads. The core keeps the data
+      of such an account as it was, the raw layer keeps the rows of its loads, and the marts, which
+      staging still builds, leave it out for the run. An account leaves the
       view when the next run finds its data whole, as a healthy load brings it; the journal
       core.account_quarantine keeps every load, account and reason that a run kept out. The Ops
       collection of Metabase shows it.
