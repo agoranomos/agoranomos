@@ -2,7 +2,7 @@
 -- before it writes the core: one row for each load, account, reason and kind of data that failed.
 -- An account with a row here is in quarantine for this run: int_accounts__current, and so every
 -- dimension of the core, and the marts of the old path leave it out, core.account_quarantine
--- records it, and a source with more than half of its pinned accounts here stops whole
+-- records it, and a source with more than half of its accounts here stops whole
 -- (macros/quarantine.sql). A table that each run fills anew, one statement for each kind of data:
 -- as one statement, the checks of three levels held a dozen aggregates at once, and were the
 -- largest process of the database (#191), and every dimension, and the facts of #199, read the
@@ -27,7 +27,7 @@
         "{{ quarantine_insert(this, quarantine_attributed(quarantine_collapse_findings([ref('stg_demo_search__campaign_stats'), ref('stg_demo_social__campaign_stats'), ref('stg_demo_video__campaign_stats'), ref('stg_google_ads__campaign_stats'), ref('stg_meta_ads__campaign_stats'), ref('stg_tiktok_ads__campaign_stats')], ref('stg_loads__newest_days'), source('core', 'dim_account'), source('core', 'ad_stats_campaign_daily')), ref('stg_loads__newest_days'), source('core', 'loads'))) }}",
         "{{ quarantine_insert(this, quarantine_attributed(quarantine_collapse_findings([ref('stg_demo_web__sessions_daily'), ref('stg_ga4__sessions_daily')], ref('stg_loads__newest_days'), source('core', 'dim_account'), source('core', 'web_sessions_daily'), measure='sessions', checked='sessions_daily', account='property_id', fall=false), ref('stg_loads__newest_days'), source('core', 'loads'))) }}",
         "{{ quarantine_insert(this, quarantine_attributed(quarantine_rate_findings([(ref('stg_demo_search__accounts'), 'account_id'), (ref('stg_demo_social__accounts'), 'account_id'), (ref('stg_demo_video__accounts'), 'account_id'), (ref('stg_google_ads__accounts'), 'account_id'), (ref('stg_meta_ads__accounts'), 'account_id'), (ref('stg_tiktok_ads__accounts'), 'account_id'), (ref('stg_demo_web__properties'), 'property_id'), (ref('stg_ga4__properties'), 'property_id')], ref('seed_iso_4217_currencies'), ref('stg_loads__newest_days'), {'bank_of_italy': ref('stg_bank_of_italy__rates_daily'), 'nbk': ref('stg_nbk__rates_daily'), 'ecb': ref('stg_ecb__rates_daily'), 'demo_fx': ref('stg_demo_fx__rates_daily')}, source('core', 'fx_rates_daily'), source('core', 'loads'), ref('stg_settings__rates')), ref('stg_loads__newest_days'), source('core', 'loads'))) }}",
-        "{{ quarantine_insert(this, quarantine_attributed(quarantine_stop_findings(this, source('core', 'loads')), ref('stg_loads__newest_days'), source('core', 'loads'))) }}",
+        "{{ quarantine_insert(this, quarantine_attributed(quarantine_stop_findings(this, source('core', 'loads'), ref('stg_settings__account_clients')), ref('stg_loads__newest_days'), source('core', 'loads'))) }}",
         "analyze {{ this }}",
     ],
 ) }}
@@ -82,6 +82,7 @@
 -- depends_on: {{ ref('stg_demo_fx__rates_daily') }}
 -- depends_on: {{ source('core', 'fx_rates_daily') }}
 -- depends_on: {{ ref('stg_settings__rates') }}
+-- depends_on: {{ ref('stg_settings__account_clients') }}
 {{ quarantine_attributed(
     quarantine_account_findings(
         [

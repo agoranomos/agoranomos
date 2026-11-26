@@ -41,8 +41,8 @@ pytestmark = [
 TRANSFORM = "agoranomos_demo_transform"
 ASSETS = 5
 # The three properties of the test: two whose loads are healthy, and one whose second load brings
-# no row, which G1a holds out with empty_window. It is one of the three pinned properties of GA4 in
-# the run, and only more than half stops the source and holds the healthy ones too, with
+# no row, which G1a holds out with empty_window. It is one of the three properties of GA4 of the
+# settings, and only more than half stops the source and holds the healthy ones too, with
 # source_stopped (quarantine_stop_findings in dbt/macros/quarantine.sql).
 HEALTHY, EMPTIED, ALSO_HEALTHY = "990000001", "990000002", "990000003"
 PROPERTIES = (HEALTHY, EMPTIED, ALSO_HEALTHY)
