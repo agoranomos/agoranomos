@@ -4,9 +4,10 @@
 -- into the reporting currency in core.fx_rates_daily, so that a view converts each row of a fact
 -- with one join. A row for each currency that lacks a rate on some of those days: an error, as an
 -- amount of such a day would have no amount in the reporting currency, which leaves the run red.
--- A currency that the source of the rates lacks keeps its accounts out of the core before the
--- write (macros/quarantine.sql), so a row here is a day before the first rate that the source
--- published of the currency, or a fault of the model.
+-- A currency that the sources of the rates lack keeps its accounts out of the core before the
+-- write (macros/quarantine.sql), and so does one that only the file of the deployment gives, on
+-- a day that no entry of the file covers, so a row here is a day before the first rate that a
+-- source published of the currency, or a fault of the model.
 select
     w.currency,
     count(distinct w.report_date) as days,
