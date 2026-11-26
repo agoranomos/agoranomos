@@ -3,27 +3,24 @@ running stack, on a history that the tests accrue: the partitions of the months 
 they drop first, empty; old months of a journal of restatements; a raw schema of their own, as dlt
 and the journal of the loads leave one after a stop of more than 90 days, with rows of core.loads
 for its source, pinned and accepted, some older than 13 months, and rows of the journal of loads
-that did not end, old and young; Variables of the backup of Cosmos, old and young; and totals of a
-platform for their source. The demo adds its history of 18 months, whose frozen months the
-maintenance freezes, and its raw schema raw_demo_search, whose rows of _dlt_loads the tests age by
-100 days, as a stop of the stack does.
+that did not end, old and young; and totals of a platform for their source. The demo adds its
+history of 18 months, whose frozen months the maintenance freezes, and its raw schema
+raw_demo_search, whose rows of _dlt_loads the tests age by 100 days, as a stop of the stack does.
 
 The tests put back what they changed: they drop their schema, delete their rows of core.loads, of
-core.platform_totals_daily and of ops, their Variables and the months of the journal that they
-made, make the partitions that they dropped again, and give raw_demo_search its rows of _dlt_loads
-and of its journal back as they were. No migration and no grant changes. The assertions print
-names, counts and dates, never a secret.
+core.platform_totals_daily and of ops, and the months of the journal that they made, make the
+partitions that they dropped again, and give raw_demo_search its rows of _dlt_loads and of its
+journal back as they were. No migration and no grant changes. The assertions print names, counts
+and dates, never a secret.
 """
 
-import re
 import secrets
-from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 from agoranomos_pipelines import maintenance
 from agoranomos_pipelines.demo import platforms
-from airflow_api import api, is_busy, run_dag, task_instances, variable_names, wait_for_dag
+from airflow_api import is_busy, run_dag, task_instances, wait_for_dag
 from services import DEMO
 from stack_helpers import wait_for, warehouse_output
 
@@ -243,14 +240,6 @@ def partitions_of(env, table):
     ).split(",")
 
 
-def variable_key(tag, days):
-    """The name that Cosmos 1.16.0 gives the Variable of the backup of the producer of a task group
-    dbt of a DAG named tag, for a run that an asset started days ago: each character of the ID of
-    the run that is not a letter, a digit, - or _ becomes _ (cosmos/operators/_watcher/xcom.py)."""
-    run_id = f"asset_triggered__{(datetime.now(UTC) - timedelta(days=days)).isoformat()}"
-    return f"{maintenance.VARIABLE_PREFIX}{tag}__dbt__{re.sub(r'[^A-Za-z0-9_-]', '_', run_id)}"
-
-
 @pytest.fixture(scope="module")
 def run(env, airflow_url, token):
     """A run of the DAG of maintenance on the history of the tests, and what the tests check of
@@ -266,7 +255,6 @@ def run(env, airflow_url, token):
         interval=10,
         message=f"the runs of {TRANSFORM} did not end",
     )
-    old_variable, young_variable = variable_key(tag, 91), variable_key(tag, 89)
     made_months = []
     demo = DEMO and sql(env, "SELECT to_regclass('raw_demo_search._dlt_loads') IS NOT NULL") == "t"
     ops_tables = sql(env, f"SELECT to_regclass('{maintenance.DISK}') IS NOT NULL") == "t"
@@ -302,11 +290,6 @@ def run(env, airflow_url, token):
                 f" DELETE FROM {maintenance.TOTALS} WHERE checked_at >= {UTC_MONTH}"
                 " AT TIME ZONE 'UTC'",
             )
-        for key in (old_variable, young_variable):
-            status, _ = api(
-                airflow_url, token, "POST", "/api/v2/variables", {"key": key, "value": "{}"}
-            )
-            assert status in (200, 201), status
         before = {}
         if demo:
             # A stop of 100 days, as the next start sees it: every row of _dlt_loads is old.
@@ -367,8 +350,6 @@ def run(env, airflow_url, token):
                 "SELECT string_agg(CASE WHEN account_id = 'a5' THEN 'young' ELSE _dlt_load_id END,"  # noqa: S608 (names, dates and a tag of the test)
                 f" ',' ORDER BY _dlt_load_id::numeric) FROM {schema}._agoranomos_loads",
             ).split(","),
-            old_variable=old_variable,
-            young_variable=young_variable,
             tasks=task_instances(airflow_url, token, finished),
         )
     finally:
@@ -392,8 +373,6 @@ def run(env, airflow_url, token):
                 f"DELETE FROM {maintenance.TOTALS} WHERE platform = '{tag}';"  # noqa: S608 (names, dates and a tag of the test)
                 f" INSERT INTO {maintenance.TOTALS} SELECT * FROM {saved}.totals",
             )
-        for key in (old_variable, young_variable):
-            api(airflow_url, token, "DELETE", f"/api/v2/variables/{key}")
         for months in made_months:
             sql(
                 env,
@@ -419,7 +398,6 @@ def test_the_maintenance_succeeds_with_every_task(run):
         "clean_dlt_loads",
         "clean_core_loads",
         "drop_old_journal_months",
-        "clean_cosmos_variables",
         "make_partitions",
         "analyze_the_facts",
         "freeze_old_months",
@@ -555,11 +533,6 @@ def test_a_stop_of_100_days_keeps_what_the_demo_reads(run):
     before, after = map(int, run.demo_journal.split("|"))
     assert 0 < after <= before
     assert run.demo_orphans == "0"
-
-
-def test_the_variables_of_cosmos_of_old_runs_go(airflow_url, token, run):
-    left = variable_names(airflow_url, token, f"{maintenance.VARIABLE_PREFIX}{run.tag}")
-    assert left == [run.young_variable]
 
 
 def test_ops_records_the_disk_and_metabase_reads_it(env, run):

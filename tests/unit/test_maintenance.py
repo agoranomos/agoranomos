@@ -1,12 +1,12 @@
 """The upkeep of the core in the DAG of maintenance (ADR-0039, ADR-0044), without Docker: its
 constants against the migrations of the core and the models of ops that it writes into, the SQL of
 its cleanups of _dlt_loads, of the journals of the loads and of core.loads, which rows of which
-tables they keep, its choice of the months to freeze, and its cleanup of the Variables of Cosmos,
-against names that Cosmos 1.16.0 makes. tests/stack/test_maintenance.py runs the DAG on a stack."""
+tables they keep, and its choice of the months to freeze. tests/stack/test_maintenance.py runs the
+DAG on a stack."""
 
 import ast
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -116,7 +116,6 @@ def test_the_dag_runs_every_step_as_a_task_of_its_own():
         "clean_dlt_loads",
         "clean_core_loads",
         "drop_old_journal_months",
-        "clean_cosmos_variables",
         "make_partitions",
         "analyze_the_facts",
         "freeze_old_months",
@@ -306,53 +305,6 @@ def stats(**changed):
 )
 def test_a_frozen_month_is_frozen_again_only_after_a_change(found, expected):
     assert maintenance.needs_freeze(found) is expected
-
-
-def cosmos_key(dag_id: str, task_group_id: str | None, run_id: str) -> str:
-    """The name of the Variable of the backup of a producer, as Cosmos 1.16.0 makes it
-    (cosmos/operators/_watcher/xcom.py, _xcom_backup_variable_key)."""
-
-    def clean(value: str) -> str:
-        return re.sub(r"[^A-Za-z0-9_-]", "_", value)
-
-    parts = ["cosmos_xcom_backup", clean(dag_id.replace(".", "___"))]
-    if task_group_id:
-        parts.append(clean(task_group_id.replace(".", "__")))
-    parts.append(clean(run_id.replace(".", "_")))
-    return "__".join(parts)
-
-
-@pytest.mark.parametrize(
-    ("run_id", "moment"),
-    [
-        ("scheduled__2026-05-04T10:15:00+00:00", datetime(2026, 5, 4, 10, 15, tzinfo=UTC)),
-        (
-            "asset_triggered__2026-11-10T06:47:12.345678+00:00",
-            datetime(2026, 11, 10, 6, 47, 12, tzinfo=UTC),
-        ),
-        ("manual__2026-01-02T03:04:05.6+00:00_aBcD1234", datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)),
-        ("my own run", None),
-    ],
-)
-def test_the_moment_of_a_variable_of_cosmos_is_that_of_its_run(run_id, moment):
-    # The ID of the run comes last, so its moment wins over one in the ID of the DAG.
-    key = cosmos_key("dag_of_2025-01-01T00:00:00", "dbt", run_id)
-    assert key.startswith(maintenance.VARIABLE_PREFIX)
-    assert maintenance.variable_moment(key) == moment
-
-
-def test_the_variables_of_cosmos_of_runs_older_than_90_days_go():
-    now = datetime(2026, 11, 10, 4, 23, tzinfo=UTC)
-    old = cosmos_key("a_dag", "dbt", f"asset_triggered__{(now - timedelta(days=91)).isoformat()}")
-    young = cosmos_key("a_dag", None, f"manual__{(now - timedelta(days=89)).isoformat()}")
-    undated = cosmos_key("a_dag", None, "a run of my own")
-    other = "cosmos_seed_checksum__a_dag"
-    deleted = []
-    gone, kept = maintenance.clean_cosmos_variables(
-        [old, young, undated, other], deleted.append, now
-    )
-    assert gone == deleted == [old]
-    assert kept == [undated]
 
 
 def test_the_steps_on_the_core_connect_as_transformer_and_the_cleanup_of_raw_as_loader():

@@ -9,7 +9,8 @@ models:
       are their properties, and demo_fx, ecb and bank_of_italy have one account each, EUR, the base
       of their rates; ecb, bank_of_italy, google_ads, meta_ads, tiktok_ads and ga4 have none until
       their first load. The four flags of the answers of web analytics (ADR-0054) are those of the
-      last whole load of a property, and none on the other platforms.
+      last whole load of a property, and none on the other platforms. An account that the settings
+      of the model no longer name keeps its row, with is_in_settings false.
       The Ops collection of Metabase shows it (ADR-0029).
     columns:
       - name: platform
@@ -52,6 +53,14 @@ models:
         description: '{{ doc("is_sampled") }}'
       - name: is_truncated
         description: '{{ doc("is_truncated") }}'
+      - name: is_in_settings
+        description: >-
+          Whether the settings of the model name the account, as core.dim_account records it in
+          each run of the transform: false for an account of an ad platform or a property of web
+          analytics that they do not name, as one taken out of extensions/model/clients.toml,
+          which the card Late accounts of the Ops collection and the alert of late accounts leave
+          out, and none for a source of the rates and for an account that the registry does not
+          hold yet, which they count.
   - name: ops_rates
     description: >-
       The rates of the core into the reporting currency, one row for each source of the rates
