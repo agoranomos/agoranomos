@@ -1,7 +1,9 @@
-{#- The shape of the Google Ads API v25, as dlt loads its responses (nested objects joined by
+{#- The shape of the Google Ads API v26, as dlt loads its responses (nested objects joined by
     __, names in snake_case): the macros that turn its raw tables into the columns of staging,
-    for the demo platform demo_search and the connector of Google Ads (ADR-0025, ADR-0032).
-    Each takes the relation of a raw table and the code of its platform. -#}
+    for the connector of Google Ads, which calls v26, and for the demo platform demo_search, which
+    mimics v25 (ADR-0025, ADR-0032). The fields that the macros read are the same in v25 and v26,
+    checked against the field reference of v26 on 26 November 2026. Each takes the relation of a
+    raw table and the code of its platform. -#}
 
 {#- The IDs of a row of a report at a level, campaign, ad_group or ad, after those of the account
     and the campaign, with the name of the level that the row carried when it was loaded. -#}
