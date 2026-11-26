@@ -1,9 +1,12 @@
 -- The conversions of the primary actions of a campaign on a day, conversions_primary of the view of
 -- campaigns, are the sum of its primary actions in the view of the conversions by action: a
--- difference means that a join doubled or lost rows. A warning, as one can be right: a day on
--- which a campaign has nothing but the conversions of a primary action that the own metric of
--- the platform leaves out, which Google can report, has no row of statistics (ADR-0036), so the
--- view of campaigns does not show them. It reads the days of the windows of the run.
+-- difference means that a join doubled or lost rows. Staging keeps a row of statistics whose
+-- measures are all zero when its campaign has a conversion on its day (ADR-0036, nonzero), so a
+-- day with nothing but the conversions of a primary action has its row. A warning, as one can
+-- still be right: Google Ads gives its statistics and its conversions by action in two reports,
+-- and staging keeps only the rows that the report of statistics holds, so a campaign day that is
+-- only in the report of conversions has no row of statistics. It reads the days of the windows
+-- of the run.
 {{ config(severity='warn') }}
 with by_action as (
     select
