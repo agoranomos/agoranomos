@@ -62,6 +62,9 @@ CHECKSUMS = {
     "0012_add_the_flags_of_a_load.sql": (
         "68a783bea8073602a886e11a5aa053efee042412747c01900079c03b86ea46d8"
     ),
+    "0013_add_the_channel_group_to_the_key_of_the_sessions.sql": (
+        "8558a957a5ecdc587665b135583981039b2f1efe12c3aaed8133d140049be78c"
+    ),
 }
 
 
@@ -399,6 +402,33 @@ def test_the_flags_of_a_load_are_four_nullable_booleans_named_after_the_data_api
         assert comment, flag
         assert f"{field} of its ResponseMetaData" in comment.group(1), flag
     assert not re.search(r"\b(GRANT|REVOKE|UPDATE|INSERT|DELETE|DEFAULT|NOT NULL)\b", code(path))
+
+
+def test_the_channel_group_joins_the_key_of_the_sessions_with_a_value_for_none():
+    # ADR-0057: GA4 splits the sessions of one campaign of a day between two default channel
+    # groups, so the group joins the primary key of the sessions, before the day, as NOT NULL; a
+    # row of an earlier release without a group takes (not set), as staging writes, in the frozen
+    # months too, under a thaw of the transaction of the migration alone. The partitions take the
+    # new comment of the column, and no right changes.
+    path = MIGRATIONS / "0013_add_the_channel_group_to_the_key_of_the_sessions.sql"
+    text = code(path, keep_strings=True)
+    assert statement_starts(path)[:5] == [
+        "SELECT set_config('', pg_current_xact_id()::text, true) <> '' AS thawed",
+        "UPDATE core.web_sessions_daily SET session_default_channel_group = '' "
+        "WHERE session_default_channel_group IS NULL",
+        "ALTER TABLE core.web_sessions_daily ALTER COLUMN session_default_channel_group "
+        "SET NOT NULL",
+        "ALTER TABLE core.web_sessions_daily DROP CONSTRAINT web_sessions_daily_pkey",
+        "ALTER TABLE core.web_sessions_daily ADD CONSTRAINT web_sessions_daily_pkey PRIMARY KEY "
+        "( account_sk, session_source, session_medium, session_campaign_name, "
+        "session_campaign_id, session_default_channel_group, report_date )",
+    ]
+    assert "set_config('agoranomos.thaw', pg_current_xact_id()::text, true)" in text
+    assert "SET session_default_channel_group = '(not set)'" in text
+    assert "COMMENT ON TABLE core.web_sessions_daily IS" in text
+    assert "COMMENT ON COLUMN core.web_sessions_daily.session_default_channel_group IS" in text
+    assert "COMMENT ON COLUMN %I.%I.session_default_channel_group IS %L" in text
+    assert not re.search(r"\b(GRANT|REVOKE|DELETE|INSERT)\b", code(path))
 
 
 def test_each_fact_has_the_trigger_of_the_freeze_and_each_journal_has_none():

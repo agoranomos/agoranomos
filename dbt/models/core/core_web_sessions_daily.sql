@@ -1,7 +1,8 @@
--- core.web_sessions_daily, the sessions of web analytics by day, property, source, medium and
--- campaign (ADR-0036, ADR-0038): each run replaces the days of the windows that it pinned whole,
--- by property and day, with the rows of the newest load of each day, in one transaction
--- (macros/facts.sql). It has no journal of restatements.
+-- core.web_sessions_daily, the sessions of web analytics by day, property, source, medium,
+-- campaign and default channel group (ADR-0036, ADR-0038, ADR-0057): each run replaces the days of
+-- the windows that it pinned whole, by property and day, with the rows of the newest load of each
+-- day, in one transaction (macros/facts.sql), so the key of delete+insert is the property and the
+-- day, and the primary key of the table holds the rest. It has no journal of restatements.
 {{ config(
     alias='web_sessions_daily',
     incremental_strategy='delete+insert',

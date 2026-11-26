@@ -101,3 +101,4 @@ agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0052](0052-run-each-stack-test-once-on-a-pull-request.md) | Run each stack test once on a pull request, and every one in every combination on main | accepted | 2026-11-18 |
 | [0053](0053-connect-tiktok-with-an-app-of-the-deployment.md) | Connect TikTok with an app of the deployment | accepted | 2026-11-20 |
 | [0054](0054-connect-ga4-with-a-service-account-of-the-deployment.md) | Connect GA4 with a service account of the deployment | accepted | 2026-11-20 |
+| [0057](0057-keep-the-default-channel-group-in-the-key-of-the-sessions.md) | Keep the default channel group in the key of the sessions of web analytics | proposed | 2026-11-26 |

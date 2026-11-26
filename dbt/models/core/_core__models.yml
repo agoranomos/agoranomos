@@ -834,11 +834,12 @@ models:
           The load that wrote the row, load_sk of core.loads.
   - name: core_web_sessions_daily
     description: >-
-      Sessions of web analytics by day, property, source, medium and campaign: one row for the
-      sessions of a property on a day, in the time zone of the property, with one source, medium and
-      campaign, and the revenue in the currency of the property. account_sk, session_source,
-      session_medium, session_campaign_name, session_campaign_id and report_date are its key,
-      compared byte by byte. Partitioned by month of report_date; a month that ended before the
+      Sessions of web analytics by day, property, source, medium, campaign and default channel
+      group: one row for the sessions of a property on a day, in the time zone of the property, with
+      one source, medium, campaign and default channel group, and the revenue in the currency of
+      the property. account_sk, session_source, session_medium, session_campaign_name,
+      session_campaign_id, session_default_channel_group and report_date are its key, compared
+      byte by byte. Partitioned by month of report_date; a month that ended before the
       window of restatements is frozen (the trigger freeze_the_months_before_the_window).
     columns:
       - name: account_sk
@@ -870,7 +871,10 @@ models:
       - name: session_default_channel_group
         description: >-
           The channel of the sessions, by the rules of web analytics, such as Paid Search, Paid
-          Social, Organic Search or Direct.
+          Social, Organic Search, Direct, or Unassigned for sessions that no rule matches; (not set)
+          when web analytics gave no group. Part of the key: web analytics can split the sessions of
+          one source, medium and campaign of a day between two groups, such as Cross-network and
+          Display.
       - name: sessions
         description: >-
           How many sessions web analytics counted on the day for the row: visits, not people, and

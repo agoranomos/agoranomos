@@ -570,6 +570,49 @@ def test_a_view_of_a_fact_holds_its_rows_and_a_sum_by_days_is_the_total(env, tra
     assert missing == "0", view
 
 
+# The campaigns of demo_web whose sessions of a day the core holds in two default channel groups,
+# as GA4 splits a campaign that runs across networks (ADR-0057): their keys and their groups, in
+# the core and in the mart, and whether a property of them is in quarantine.
+SPLIT = (
+    "SELECT count(*) || '|' || coalesce(min(groups), '') FROM (SELECT string_agg("
+    "session_default_channel_group, ',' ORDER BY session_default_channel_group) AS groups "
+    "FROM {relation} {where} GROUP BY {key}, report_date, session_source, session_medium, "
+    "session_campaign_name, session_campaign_id HAVING count(*) > 1) AS s"
+)
+
+
+def test_the_sessions_of_a_campaign_split_between_two_channel_groups_reach_the_mart(
+    env, transform_run
+):
+    core = warehouse_output(
+        env,
+        SPLIT.format(
+            relation="core.web_sessions_daily AS f JOIN core.dim_account AS a USING (account_sk)",
+            where="WHERE a.platform = 'demo_web'",
+            key="f.account_sk",
+        ),
+    )
+    shown = warehouse_output(
+        env,
+        SPLIT.format(
+            relation="marts.web_sessions_daily",
+            where="WHERE platform = 'demo_web'",
+            key="property_id",
+        ),
+        "metabase_reader",
+    )
+    count, groups = core.split("|")
+    assert int(count) > 0, "the core holds no campaign of demo_web split between two groups"
+    assert groups == "Cross-network,Display", core
+    assert shown == core
+    held = warehouse_output(
+        env,
+        "SELECT count(*) FROM core.account_quarantine WHERE source = 'demo_web' "
+        "AND reason = 'duplicate_key'",
+    )
+    assert held == "0"
+
+
 def test_the_rates_of_the_mart_are_those_of_the_generator(env, transform_run):
     reporting = env.get("AGORANOMOS_REPORTING_CURRENCY") or "USD"
     rows = rows_of(

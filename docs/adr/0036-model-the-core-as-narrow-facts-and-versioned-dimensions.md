@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Model the core as narrow facts by grain, with dimensions that keep their versions
 
+Superseded in part by [ADR-0057](0057-keep-the-default-channel-group-in-the-key-of-the-sessions.md): the grain of `core.web_sessions_daily` in "The facts" is property, source, medium, campaign, default channel group and day, and the default channel group is part of its key, which migration `0005` had left out. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 [ADR-0025](0025-model-advertising-statistics-once.md) models statistics as wide tables: each fact in `marts` carries its names and both currencies, and dbt rebuilds all of it on every run. [ADR-0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) moves the permanent data into a schema `core`, which needs a model of its own.

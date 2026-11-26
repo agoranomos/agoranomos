@@ -75,7 +75,10 @@
     ),
     'sessions_daily': (
         'property_id',
-        ['session_source', 'session_medium', 'session_campaign_name', 'session_campaign_id'],
+        [
+            'session_source', 'session_medium', 'session_campaign_name', 'session_campaign_id',
+            'session_default_channel_group',
+        ],
         [],
         ['sessions', 'engaged_sessions'],
         ['sessions', 'engaged_sessions', 'key_events'],

@@ -71,11 +71,14 @@ client = "ga4-stack-test"
 TOKEN = "stand-in-token-of-the-ga4-stack-test"
 # The rows of each day of each property, faked by hand: the source, the medium, the campaign name,
 # the campaign ID and the default channel group, then the sessions, the engaged sessions, the key
-# events and the revenue, as GA4 writes them, strings. The campaign ID of the first is filled in by
-# the test with the ID of a campaign of the demo, as its links would carry it in utm_id.
+# events and the revenue, as GA4 writes them, strings. The campaign ID of the first two is filled
+# in by the test with the ID of a campaign of the demo, as its links would carry it in utm_id; GA4
+# splits the sessions of that campaign between two default channel groups, which the key of the
+# sessions keeps apart (ADR-0057).
 CAMPAIGN = "{campaign}"
 ROWS = (
     ("facebook", "paid_social", "Socks", CAMPAIGN, "Paid Social", "40", "25", "3", "120.5"),
+    ("facebook", "paid_social", "Socks", CAMPAIGN, "Display", "7", "2", "0", "0"),
     ("(direct)", "(none)", "(direct)", "(not set)", "Direct", "60", "30", "1", "0"),
 )
 
@@ -396,7 +399,11 @@ def test_a_load_of_ga4_reaches_the_core_and_the_marts(env, airflow_url, token):
             "metabase_reader",
         )
         assert campaigns == sorted(
-            [f"{campaign_id}|demo_social|{ad_account_id}|Paid Social", "(not set)|||Direct"]
+            [
+                f"{campaign_id}|demo_social|{ad_account_id}|Display",
+                f"{campaign_id}|demo_social|{ad_account_id}|Paid Social",
+                "(not set)|||Direct",
+            ]
         ), campaigns
 
         # A second load in which one property brings no row: G1a holds it out with empty_window,

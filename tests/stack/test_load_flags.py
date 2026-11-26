@@ -67,6 +67,7 @@ VIEW = (
     "AND f.report_date = v.report_date AND f.session_source = v.session_source "
     "AND f.session_medium = v.session_medium AND f.session_campaign_name = v.session_campaign_name "
     "AND f.session_campaign_id = v.session_campaign_id "
+    "AND f.session_default_channel_group = v.session_default_channel_group "
     "JOIN core.loads AS l ON l.load_sk = f.load_sk "
     "WHERE v.platform = 'demo_web'"
 )

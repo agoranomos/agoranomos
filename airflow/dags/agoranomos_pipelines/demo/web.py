@@ -3,9 +3,12 @@ sessions of each property by day, source, medium, campaign and default channel g
 value as a string, the day as YYYYMMDD in the time zone of the property, and no row without
 sessions. The links of the ads of the demo carry the ID of their campaign in utm_id, so the
 sessions that an ad brings name its campaign; the name is the one of the day of the session, as
-GA4 keeps it (ADR-0025). The journal of each load carries the four flags of the answers of GA4
-(ADR-0054): one of them on the loads of one property whose window holds one day (flagged), none on
-the others."""
+GA4 keeps it (ADR-0025). The sessions of a campaign of Performance Max of demo_search take the
+channel group Cross-network, and on about half the days GA4 splits them between Cross-network and
+Display, as it does for such a campaign of Google Ads, so that one source, medium and campaign of a
+day has two rows that differ only in the group (ADR-0057). The journal of each load carries the
+four flags of the answers of GA4 (ADR-0054): one of them on the loads of one property whose window
+holds one day (flagged), none on the others."""
 
 from __future__ import annotations
 
@@ -36,6 +39,12 @@ AD_TRAFFIC = {
     "demo_social": ("demo-social", "paid", "Paid Social"),
     "demo_video": ("demo-video", "paid", "Paid Video"),
 }
+# The channel groups of the sessions of a campaign of Google whose channel type runs across the
+# networks, and the share in percent that GA4 gives the second group on a day that it splits them,
+# with the share of the days that it splits.
+CROSS_NETWORK = {"PERFORMANCE_MAX": ("Cross-network", "Display")}
+SPLIT_SHARE = (20, 40)
+SPLIT_DAYS_PCT = 50
 # The sessions that come without ads, on an average day of a property: source, medium, campaign,
 # default channel group, sessions.
 OTHER_TRAFFIC = (
@@ -134,14 +143,7 @@ def report_sessions_daily(now, first=None, skip=frozenset()) -> Iterator[dict[st
                     )
                     if sessions == 0:
                         continue
-                    yield row(
-                        prop,
-                        day,
-                        source,
-                        medium,
-                        campaign.name_at(day),
-                        campaign.campaign_id,
-                        channel,
+                    measures = (
                         sessions,
                         sessions * pct(60, 70, *key, "e") // 100,
                         matured(
@@ -153,6 +155,17 @@ def report_sessions_daily(now, first=None, skip=frozenset()) -> Iterator[dict[st
                             stats.value_minor * pct(90, 100, *key, "r") // 100, days_old, KEY_EVENTS
                         ),
                     )
+                    for group, values in channel_groups(campaign.kind, channel, key, measures):
+                        yield row(
+                            prop,
+                            day,
+                            source,
+                            medium,
+                            campaign.name_at(day),
+                            campaign.campaign_id,
+                            group,
+                            *values,
+                        )
             for source, medium, name, channel, base in OTHER_TRAFFIC:
                 key = (PLATFORM, prop.account_id, source, medium, day.isoformat())
                 sessions = matured(
@@ -176,6 +189,25 @@ def report_sessions_daily(now, first=None, skip=frozenset()) -> Iterator[dict[st
                     key_events,
                     key_events * 6_000,
                 )
+
+
+def channel_groups(kind, channel, key, measures):
+    """The default channel groups of the sessions of a campaign on a day, each with its sessions,
+    engaged sessions, key events and revenue: the channel of its platform, or, for a kind of
+    CROSS_NETWORK, its first group, and on a day that GA4 splits, a share of each measure in its
+    second group, which adds up to the same measures. The share and the days depend on the key
+    alone, so a day changes only as its measures mature."""
+    if kind not in CROSS_NETWORK:
+        return [(channel, measures)]
+    first, second = CROSS_NETWORK[kind]
+    if pct(0, 99, *key, "split") >= SPLIT_DAYS_PCT:
+        return [(first, measures)]
+    share = pct(*SPLIT_SHARE, *key, "share")
+    split = tuple(value * share // 100 for value in measures)
+    if split[0] == 0:
+        return [(first, measures)]
+    kept = tuple(value - part for value, part in zip(measures, split, strict=True))
+    return [(first, kept), (second, split)]
 
 
 def records(now, first=None, skip=frozenset()) -> dict[str, Iterator[dict[str, object]]]:

@@ -334,7 +334,7 @@ The ID of the campaign of the sessions: the ID of a campaign of Google Ads that 
 {% enddocs %}
 
 {% docs session_default_channel_group %}
-The channel of the sessions, by the rules of web analytics, such as Paid Search, Paid Social, Organic Search or Direct.
+The channel of the sessions, by the rules of web analytics, such as Paid Search, Paid Social, Organic Search, Direct, or Unassigned for sessions that no rule matches; (not set) when web analytics gave no group. Web analytics can split the sessions of one source, medium and campaign of a day between two groups, such as Cross-network and Display, so the group is part of the key of a row.
 {% enddocs %}
 
 {% docs ad_platform %}

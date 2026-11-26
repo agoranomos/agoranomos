@@ -23,10 +23,12 @@ models:
   - name: stg_ga4__sessions_daily
     description: >-
       The sessions of the GA4 properties, one row for each property, day in the time zone of the
-      property, source, medium and campaign of the sessions, with the default channel group that
-      GA4 gives them, from the runReport of the Data API v1beta (ADR-0054). It is empty until the
-      first load. report_date, property_id, session_source, session_medium, session_campaign_name
-      and session_campaign_id are its key. int_g1_failures checks its rows for each account, and
+      property, source, medium, campaign and default channel group of the sessions, from the
+      runReport of the Data API v1beta (ADR-0054); GA4 can split the sessions of one campaign of a
+      day between two groups, such as Cross-network and Display. It is empty until the first load.
+      report_date, property_id, session_source, session_medium, session_campaign_name,
+      session_campaign_id and session_default_channel_group are its key (ADR-0057), and a row
+      without a group takes (not set). int_g1_failures checks its rows for each account, and
       holds an account whose rows fail out of the core and the marts (ADR-0035). Its tests guard
       the marts: when one of them fails, dbt does not rebuild the models that read this one.
     columns:

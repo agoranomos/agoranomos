@@ -38,7 +38,7 @@ GOLDEN = {
     "demo_search": "08748d3f1515f5aeb44489c96d277382b6e2973c5fefd789b530c69ff9ee34cc",
     "demo_social": "8e69473975db3205d4ae87493fa65da6eff3c3abd87bb983ebc544e59ea3b5e8",
     "demo_video": "aaaec2744765f634e555cd667d54ac684efb4808f06ba8f25455fb11eb3a744a",
-    "demo_web": "335d391844f7585e98d451db4c2b997fe878fe05a6d416e10fc9079879102eb4",
+    "demo_web": "44d5b4575edba772e2074d197e2c9508db6aaefe8ed88bdd24ea30ccccb57eaa",
 }
 
 
@@ -156,6 +156,7 @@ WINDOW_KEYS = {
         r["sessionMedium"],
         r["sessionCampaignId"],
         r["sessionCampaignName"],
+        r["sessionDefaultChannelGroup"],
     ),
     "demo_fx": lambda r: (r["rate_date"], r["quote"]),
 }
@@ -315,6 +316,50 @@ def test_web_analytics_links_the_sessions_of_ads_to_their_campaigns():
     assert {r["sessionCampaignId"] for r in ads} <= ids
     assert {r["sessionCampaignId"] for r in rows if r not in ads} == {"(not set)"}
     assert all(len(r["date"]) == 8 and r["date"].isdigit() for r in rows)
+
+
+def test_web_analytics_splits_a_campaign_across_networks_between_two_channel_groups():
+    # ADR-0057: GA4 splits the sessions of one campaign of Google Ads that runs across networks
+    # between Cross-network and Display, so one source, medium and campaign of a day has two rows
+    # that differ only in the group; the demo does so for its campaigns of Performance Max on
+    # about half the days, and never for another campaign.
+    rows = list(web.records(NOW, last_month)["report_sessions_daily"])
+    groups = {}
+    for r in rows:
+        key = (r["date"], r["property"], r["sessionSource"], r["sessionMedium"])
+        key += (r["sessionCampaignName"], r["sessionCampaignId"])
+        groups.setdefault(key, []).append(r["sessionDefaultChannelGroup"])
+    split = {key for key, found in groups.items() if len(found) > 1}
+    cross = {c.campaign_id for c in world.CAMPAIGNS if c.kind in web.CROSS_NETWORK}
+    assert cross
+    assert split
+    assert {key[-1] for key in split} == cross
+    assert all(sorted(groups[key]) == ["Cross-network", "Display"] for key in split)
+    days = {key for key in groups if key[-1] in cross}
+    assert len(split) < len(days)
+    assert all(len(found) == len(set(found)) for found in groups.values())
+
+
+def test_a_split_of_the_sessions_adds_up_to_the_measures_of_the_campaign():
+    measures = (1000, 640, 37, 123_456)
+    key = ("demo_web", "390000001", "21000000103", "2026-10-01")
+    assert web.channel_groups("SEARCH", "Paid Search", key, measures) == [("Paid Search", measures)]
+    found = [
+        web.channel_groups(
+            "PERFORMANCE_MAX", "Paid Search", (*key[:3], f"2026-10-{d:02d}"), measures
+        )
+        for d in range(1, 31)
+    ]
+    assert {len(groups) for groups in found} == {1, 2}
+    for groups in found:
+        assert groups[0][0] == "Cross-network"
+        if len(groups) == 2:
+            assert groups[1][0] == "Display"
+            assert all(
+                0 < part < whole for part, whole in zip(groups[1][1][:2], measures[:2], strict=True)
+            )
+        totals = tuple(sum(values[i] for _, values in groups) for i in range(4))
+        assert totals == measures
 
 
 def test_the_rates_come_on_weekdays_but_holidays_and_start_before_any_history():

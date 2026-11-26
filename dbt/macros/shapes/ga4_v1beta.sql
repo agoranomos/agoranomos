@@ -1,5 +1,8 @@
 {#- The shape of the GA4 Data API v1beta, a row of runReport as a dictionary of its dimensions and
-    metrics, which the connector adds the property to, and the properties of the GA4 Admin API. -#}
+    metrics, which the connector adds the property to, and the properties of the GA4 Admin API.
+    The default channel group is part of the key of the sessions (ADR-0057), so a row without one
+    takes (not set), the value that GA4 gives a dimension that it has no value of; GA4 itself
+    writes Unassigned for sessions that no rule of its channels matches. -#}
 
 {% macro ga4_properties(relation, platform) %}
 select
@@ -21,7 +24,8 @@ select
     {{ to_name('session_medium') }} as session_medium,
     {{ to_name('session_campaign_name') }} as session_campaign_name,
     {{ to_name('session_campaign_id') }} as session_campaign_id,
-    {{ to_name('session_default_channel_group') }} as session_default_channel_group,
+    coalesce({{ to_name('session_default_channel_group') }}, '(not set)')
+        as session_default_channel_group,
     {{ to_count('sessions') }} as sessions,
     {{ to_count('engaged_sessions') }} as engaged_sessions,
     {{ to_number('key_events') }} as key_events,
