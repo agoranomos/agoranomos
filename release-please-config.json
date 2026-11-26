@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/v17.11.2/schemas/config.json",
-  "pull-request-footer": "Before you merge:\n\n- [ ] The documentation is checked against this release.\n- [ ] The workflow Upgrade passed on the head of `main`.\n- [ ] The section Upgrading of the release notes is ready.\n- [ ] The new sources and the changes of the loads and the transform ran on the long-running stand on real data.\n\nThe steps are in [CONTRIBUTING.md](https://github.com/agoranomos/agoranomos/blob/main/CONTRIBUTING.md#releases).",
+  "pull-request-footer": "Before you merge:\n\n- [ ] The documentation is checked against this release.\n- [ ] The workflow Upgrade passed on the head of `main`.\n- [ ] The section Upgrading of the release notes is ready.\n- [ ] The new sources and the changes of the loads and the transform ran on the long-running stand on real data.\n- [ ] Each AI client that ADR-0033 supports was checked against this release.\n\nThe steps are in [CONTRIBUTING.md](https://github.com/agoranomos/agoranomos/blob/main/CONTRIBUTING.md#releases).",
   "signoff": "agoranomos-release[bot] <340885739+agoranomos-release[bot]@users.noreply.github.com>",
   "packages": {
     ".": {

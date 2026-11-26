@@ -4,7 +4,7 @@ This guide connects the Meta ad accounts of your business to agoranomos: the loa
 
 Each load goes into the raw layer, the schema `raw_meta_ads`, and the run of the transform after it takes it into the core and the marts, and so into the dashboards and the MCP servers, under the platform `meta_ads`. The history of each account follows its first load, a quarter at a time in the background ([When the history arrives](#when-the-history-arrives)).
 
-No load has reached a real Meta account yet: the connector is tested against a stand-in of the Graph API, made from the reference of the Marketing API v27.0 as of November 2026, so compare the first load with Ads Manager.
+The long-running test stand of the project loads real Meta accounts with it since 25 November 2026, and the tests of the connector use a stand-in of the Graph API, made from the reference of the Marketing API v27.0 as of November 2026, so compare the first load with Ads Manager.
 
 ## What you need
 

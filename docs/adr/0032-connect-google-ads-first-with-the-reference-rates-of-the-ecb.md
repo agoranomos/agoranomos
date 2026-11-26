@@ -6,7 +6,7 @@ decision-makers: Andrei Gromov
 
 # Connect Google Ads first, with the reference rates of the European Central Bank
 
-Superseded in part by [ADR-0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md): an account whose load fails goes to quarantine, and the run goes on; by [ADR-0036](0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md): the conversions by action below the campaign leave the basic set; and by [ADR-0038](0038-load-by-copy-and-write-the-core-by-whole-days.md): the schema `raw_google_ads_staging` goes with `append`. And by [ADR-0042](0042-take-the-rates-from-the-bank-of-italy-and-the-national-bank-of-kazakhstan.md): the rates come from the Bank of Italy and the National Bank of Kazakhstan in place of the ECB. The rest of this record stays accepted.
+Superseded in part by [ADR-0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md): an account whose load fails goes to quarantine, and the run goes on; and by [ADR-0036](0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md): the conversions by action below the campaign leave the basic set. And by [ADR-0042](0042-take-the-rates-from-the-bank-of-italy-and-the-national-bank-of-kazakhstan.md): the rates come from the Bank of Italy and the National Bank of Kazakhstan in place of the ECB. The rest of this record stays accepted. The schema `raw_google_ads_staging` of "The first source" stays too: the maintainer kept the staging schemas of dlt on 12 November 2026, and [ADR-0038](0038-load-by-copy-and-write-the-core-by-whole-days.md) no longer replaces it (a factual correction of 26 November 2026).
 
 ## Context and Problem Statement
 
