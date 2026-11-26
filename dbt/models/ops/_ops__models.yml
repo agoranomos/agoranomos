@@ -365,7 +365,7 @@ models:
       collection of Metabase shows it.
     columns:
       - name: finished_at
-        description: When the step ended, with its time zone.
+        description: '{{ doc("finished_at") }}'
       - name: maintenance_run_id
         description: '{{ doc("maintenance_run_id") }}'
       - name: task

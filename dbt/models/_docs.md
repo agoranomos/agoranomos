@@ -161,6 +161,10 @@ Whether the rate of the row is the last published one before its day, on a day w
 When the load of the ad platform or the web analytics that wrote the row into the core ended, from core.loads, which keeps each load that a row of the core names.
 {% enddocs %}
 
+{% docs finished_at %}
+When the load or the step of the row ended, with its time zone: in stg_loads__newest_lists the newest load of the account whose lists the run reads, as core.loads holds it, which the current campaigns, ad groups and ads take as the moment when a list last named an entity; in ops_maintenance_steps a step of the maintenance.
+{% enddocs %}
+
 {% docs is_account_active %}
 Whether the settings of the model still name the account or the property of the row: one that leaves extensions/model/clients.toml keeps its data and belongs to the client Unassigned, and is no longer active.
 {% enddocs %}

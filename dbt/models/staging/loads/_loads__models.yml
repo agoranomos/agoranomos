@@ -68,9 +68,7 @@ models:
         description: '{{ doc("load_id") }}'
         data_tests: [not_null]
       - name: finished_at
-        description: >-
-          When the load of the list ended, as core.loads holds it: the current entities take it as
-          the moment when a list last named an entity.
+        description: '{{ doc("finished_at") }}'
         data_tests: [not_null]
       - name: list_key
         description: >-
