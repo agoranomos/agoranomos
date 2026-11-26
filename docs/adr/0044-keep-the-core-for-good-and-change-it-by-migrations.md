@@ -120,6 +120,6 @@ The other options were not chosen for these reasons:
     * Both cleanups on the CeleryExecutor.
     * The upgrade from the previous release with the CeleryExecutor and in server mode, where the backup service takes the backup before the migrations: the test of 11 November 2026 ran in local mode with the LocalExecutor.
     * Growth, vacuum and the compression of a dump on real data, as all the measurements use random numbers.
-* Open at review: `is_account_active` with the data kept, and `data forget` on an explicit command, are a recommendation of the research; the alternative, deleting an account with its entry, is dangerous.
+* Accepted by the maintainer on 26 November 2026, as the research recommends and as built: `is_account_active` with the data kept, and `data forget` on an explicit command, which is planned for v0.9; the alternative, deleting an account with its entry, is dangerous.
 * Related decisions: at acceptance this record replaces the 3 monthly copies of "How long" of [ADR-0020](0020-back-up-the-databases-every-day.md) and the manual backup before an upgrade. [ADR-0029](0029-record-the-runs-of-dbt-with-elementary-and-show-them-in-ops.md) does not change, and the retention of `ops` stands beside it. The core is protected by [ADR-0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md).
 * Revisit this record when a real deployment shows how the data grows, or at v1.0, which promises an upgrade with no reload of history.
