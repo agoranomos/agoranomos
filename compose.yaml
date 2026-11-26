@@ -49,6 +49,11 @@ x-airflow: &airflow
     # it parses the DAG of the short cycle, and its tasks when they run: a divisor of 24, or 0 for
     # none (agoranomos_pipelines/intraday.py).
     AGORANOMOS_INTRADAY_HOURS: ${AGORANOMOS_INTRADAY_HOURS:-3}
+    # The time of the daily backup and its time zone (ADR-0020), as the backup service gets them,
+    # from which the DAG processor keeps the runs of the short cycle at least an hour away
+    # (agoranomos_pipelines/intraday.py). Airflow itself keeps UTC: these name no zone of its own.
+    BACKUP_TIME: ${BACKUP_TIME:-03:00}
+    BACKUP_TZ: ${BACKUP_TZ:-UTC}
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?run ./agoranomos init}
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
