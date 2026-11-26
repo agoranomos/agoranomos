@@ -18,14 +18,17 @@ import io
 import itertools
 import json
 import logging
+import sqlite3
 import sys
 import types
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 
 import pytest
+from test_windows import MISSED, assert_each_day_becomes_final
 
 # 02:00 UTC on Thursday 29 October 2026: still the 28th at UTC-8, the 29th in Berlin.
 NOW = datetime(2026, 10, 29, 2, 0, tzinfo=UTC)
@@ -462,15 +465,76 @@ def test_the_token_is_one_word_and_no_message_shows_it(tiktok, monkeypatch, valu
 
 
 def test_the_window_takes_28_days_or_more_from_the_last_accepted_day(tiktok):
-    # ADR-0038 with the 28 days of ADR-0053: [min(yesterday + 1 - 28, last accepted day + 1),
-    # yesterday], in the time zone of the advertiser.
+    # The 28 days of ADR-0053 in windows.daily_window: [min(yesterday + 1 - 28, last accepted
+    # day + 2 - 28), yesterday], in the time zone of the advertiser.
     module, _, _, _ = tiktok
     last = date(2026, 10, 28)
     assert module.window(last, None) == (date(2026, 10, 1), last)
-    assert module.window(last, date(2026, 10, 20)) == (date(2026, 10, 1), last)
-    assert module.window(last, date(2026, 9, 1)) == (date(2026, 9, 2), last)
+    assert module.window(last, date(2026, 10, 27)) == (date(2026, 10, 1), last)
+    assert module.window(last, date(2026, 10, 26)) == (date(2026, 9, 30), last)
+    assert module.window(last, date(2026, 10, 20)) == (date(2026, 9, 24), last)
+    assert module.window(last, date(2026, 9, 1)) == (date(2026, 8, 6), last)
     assert module.yesterday(NOW, ZONES[ONE][0]) == date(2026, 10, 27)
     assert module.yesterday(NOW, ZONES[TWO][0]) == date(2026, 10, 28)
+
+
+@pytest.mark.parametrize("missed", MISSED.values(), ids=MISSED.keys())
+def test_each_day_of_an_advertiser_is_read_once_at_the_age_of_its_window(missed, tiktok):
+    # windows.daily_window: after 0, 1, 2 or N missed daily loads, or a stop longer than the
+    # window, each day is read at the age of 28 days or more, and no day is left out.
+    module = tiktok[0]
+    assert_each_day_becomes_final(module.window, 28, missed)
+
+
+class Core:
+    """core.loads in SQLite, which runs the query of accepted() as it is."""
+
+    def __init__(self, rows):
+        self.db = sqlite3.connect(":memory:")
+        self.db.execute(
+            "CREATE TABLE loads (source, load_id, account_id, window_from, window_to, outcome, "
+            "status, kind)"
+        )
+        insert = "INSERT INTO loads VALUES (?, ?, ?, ?, ?, 'loaded', 'accepted', ?)"
+        self.db.executemany(insert, rows)
+        self.queries = []
+
+    @contextmanager
+    def sql_client(self):
+        yield self
+
+    def execute_sql(self, sql):
+        self.queries.append(sql)
+        found = self.db.execute(sql.replace("core.loads", "loads")).fetchall()
+        return [(account_id, date.fromisoformat(end)) for account_id, end in found]
+
+
+def test_a_stop_of_120_days_still_closes_by_itself_after_an_intraday_load(tiktok):
+    # ADR-0051, which every reader of window_to of core.loads follows: the core accepted the
+    # whole days of the advertiser up to 30 June, then the loads stopped for 120 days, and on the
+    # first day back a load of the kind intraday of 28 October came first, which the core
+    # accepted. The last accepted day stays 30 June, so the daily window starts on 4 June, the
+    # day after the oldest that the load of 30 June read at the age of 28 days, and not 28 days
+    # back, which would lose four months.
+    module = tiktok[0]
+    core = Core(
+        [
+            (module.CODE, "1751328000.1", ONE, "2026-06-03", "2026-06-30", "window"),
+            (module.CODE, "1761696000.2", ONE, "2026-10-28", "2026-10-28", "intraday"),
+        ]
+    )
+    last_end = module.accepted(core, [ONE])
+    assert last_end == {ONE: date(2026, 6, 30)}
+    assert module.window(date(2026, 10, 27), last_end[ONE]) == (
+        date(2026, 6, 4),
+        date(2026, 10, 27),
+    )
+    # Without the kind, the intraday load would set the last day to 28 October.
+    [query] = core.queries
+    assert "AND kind <> 'intraday' AND" in query
+    assert core.execute_sql(query.replace(" AND kind <> 'intraday'", "")) == [
+        (ONE, date(2026, 10, 28))
+    ]
 
 
 def test_a_range_of_a_report_has_at_most_30_days(tiktok):
@@ -705,7 +769,11 @@ def test_a_window_longer_than_30_days_goes_in_ranges(tiktok):
         for params in reports(made["api"], "AUCTION_CAMPAIGN")
         if params["advertiser_id"] == ONE
     ]
-    assert found == [("2026-09-02", "2026-10-01"), ("2026-10-02", "2026-10-27")]
+    assert found == [
+        ("2026-08-06", "2026-09-04"),
+        ("2026-09-05", "2026-10-04"),
+        ("2026-10-05", "2026-10-27"),
+    ]
 
 
 def test_a_load_keeps_the_rows_as_the_api_gives_them_in_the_tables_of_demo_video(tiktok):
@@ -789,8 +857,8 @@ def test_the_window_starts_after_the_last_day_that_the_core_accepted(tiktok):
     journal = last_run(made)[0]["_agoranomos_loads"]
     windows = {row["account_id"]: (row["window_from"], row["window_to"]) for row in journal}
     assert windows == {
-        ONE: (date(2026, 9, 2), date(2026, 10, 27)),
-        TWO: (date(2026, 10, 1), date(2026, 10, 28)),
+        ONE: (date(2026, 8, 6), date(2026, 10, 27)),
+        TWO: (date(2026, 9, 29), date(2026, 10, 28)),
     }
     [query] = [q for q in made["pipelines"][0].queries if "core.loads" in q]
     assert "source = 'tiktok_ads'" in query
