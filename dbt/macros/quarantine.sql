@@ -11,7 +11,8 @@
     a list gives the account twice; a row misses a part of its key; an ID of a campaign, an ad
     group or an ad in raw is not a whole number that fits bigint; the currency of the account is
     not one of ISO 4217; its time zone is not one of IANA; no source of the rates has a rate of
-    its currency into the reporting currency (ADR-0042); a spend has more than six decimal places;
+    its currency into the reporting currency, nor the file of the deployment on a day of the run
+    (ADR-0042); a spend has more than six decimal places;
     a measure is missing or below zero; a load holds rows outside its window; the rows of the
     campaigns of a load do not add up to the totals of the account that the platform gives in the
     same load (G0a); a load has no row on the days of its window while the core holds spend on
@@ -336,19 +337,24 @@ where unknown_time_zone
 {%- endmacro %}
 
 {#- The check of the rates (ADR-0042): an account whose currency has no rate into the reporting
-    currency from any source of the order of AGORANOMOS_RATES_SOURCE (rates_chain), neither among
-    the rates of the loads that this run reads nor in core.fx_rates_daily as the runs before this
-    one left it, so that the core takes no fact that a view could not convert, and no rate of 1 or
-    0 stands for a missing one. Only the accounts that the pinned loads of this run name, as only
-    they write the core; a currency outside ISO 4217 has a reason of its own, and the reporting
-    currency needs no rate. A day of a currency that has a rate but none on or before that day is
-    a gap, which the test of G3 finds after the write of the rates. lists are the staging models
-    of the accounts and the properties, each with the column of its account; currencies the seed
-    of ISO 4217; days the table stg_loads__newest_days; staged the staging models of the rates of
-    each source by its code, rates core.fx_rates_daily and loads core.loads (macros/rates.sql);
-    given the rates of the file of the deployment, stg_settings__rates. A currency that the file
-    gives a rate of has one, when the quote of the rate is the reporting currency or a currency of
-    which the sources give a rate; the detail of a currency that the file names says so. -#}
+    currency on a day that this run reads of it, so that the core takes no fact that a view could
+    not convert, and no rate of 1 or 0 stands for a missing one. A currency has a rate on every day
+    when a source of the order of AGORANOMOS_RATES_SOURCE (rates_chain) has one, among the rates of
+    the loads that this run reads or in core.fx_rates_daily as the runs before this one left it
+    from a source; a day of such a currency before its first rate is a gap, which the test of G3
+    finds after the write of the rates. A currency that no source has has a rate only on the days
+    of the entries of the file of the deployment whose quote is the reporting currency or a
+    currency of which the sources give a rate, as the model writes the rows of an entry inside its
+    range alone and never carries them over (core_fx_rates_daily), and on the days on which
+    core.fx_rates_daily holds a rate of it, as from an entry that the file no longer has. Only the
+    accounts that the pinned loads of this run name, on their days, as only they write the core; a
+    currency outside ISO 4217 has a reason of its own, and the reporting currency needs no rate.
+    lists are the staging models of the accounts and the properties, each with the column of its
+    account; currencies the seed of ISO 4217; days the table stg_loads__newest_days; staged the
+    staging models of the rates of each source by its code, rates core.fx_rates_daily and loads
+    core.loads (macros/rates.sql); given the rates of the file of the deployment,
+    stg_settings__rates. The detail of a currency that the file names says so, with the days that
+    its entries leave out. -#}
 {% macro quarantine_rate_findings(lists, currencies, days, staged, rates, loads, given) -%}
 with listed as (
     {%- for relation, account in lists %}
@@ -360,12 +366,8 @@ with listed as (
     {%- endfor %}
 ),
 
-named as (
-    select distinct source, account_id
-    from {{ days }}
-    where source in ('{{ quarantine_sources() | join("', '") }}')
-),
-
+-- The currencies that a source of the order has: the rows of the file of the deployment in the
+-- table count only on their days, below.
 sourced as (
     select distinct currency
     from (
@@ -375,38 +377,60 @@ sourced as (
     select currency::text
     from {{ rates }}
     where reporting_currency = {{ reporting_currency() }}
+        and rate_source <> 'deployment'
 ),
 
-rated as (
-    select currency
-    from sourced
-    union
-    select g.currency::text
+-- The entries of the file whose quote has a rate into the reporting currency.
+quoted as (
+    select g.currency::text as currency, g.first_day, g.last_day
     from {{ given }} as g
     where g.quote_currency = {{ reporting_currency() }}
         or g.quote_currency in (select currency from sourced)
+),
+
+-- The days that this run reads of each account whose currency no source has, on which neither
+-- an entry of the file nor core.fx_rates_daily gives it a rate.
+uncovered as (
+    select distinct l.source, l.account_id, l.currency, d.day
+    from listed as l
+    join {{ days }} as d
+        on d.source = l.source and d.account_id = l.account_id
+    join {{ currencies }} as c
+        on c.currency_code = l.currency
+    where d.source in ('{{ quarantine_sources() | join("', '") }}')
+        and l.currency <> {{ reporting_currency() }}
+        and not exists (select from sourced as s where s.currency = l.currency)
+        and not exists (
+            select
+            from quoted as q
+            where q.currency = l.currency and d.day between q.first_day and q.last_day
+        )
+        and not exists (
+            select
+            from {{ rates }} as r
+            where r.rate_date = d.day
+                and r.currency = cast(l.currency as char(3))
+                and r.reporting_currency = {{ reporting_currency() }}
+        )
 )
 
-select distinct
-    l.source,
-    l.account_id,
+select
+    u.source,
+    u.account_id,
     cast(null as text) as load_id,
     'missing_rate'::text as reason,
     'rates'::text as checked,
-    'no rate of ' || l.currency || ' into ' || {{ reporting_currency() }}
+    'no rate of ' || u.currency || ' into ' || {{ reporting_currency() }}
         || ' from ' || {{ rates_named(staged, rates) }}
         || case
-            when exists (select from {{ given }} as g where g.currency = l.currency)
+            when not exists (select from {{ given }} as g where g.currency = u.currency)
+                then ''
+            when not exists (select from quoted as q where q.currency = u.currency)
                 then ', nor from extensions/model/rates.toml, whose quote has no rate either'
-            else ''
+            else ', nor from extensions/model/rates.toml ' || {{ quarantine_days('u.day') }}
         end as detail
-from listed as l
-join named as n
-    on n.source = l.source and n.account_id = l.account_id
-join {{ currencies }} as c
-    on c.currency_code = l.currency
-where l.currency <> {{ reporting_currency() }}
-    and not exists (select from rated as r where r.currency = l.currency)
+from uncovered as u
+group by u.source, u.account_id, u.currency
 {%- endmacro %}
 
 {#- The days of an account on which a check failed, as the detail of its failure. -#}
