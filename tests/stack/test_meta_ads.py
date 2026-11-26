@@ -4,8 +4,11 @@ Graph API faked, reaches the core and marts.ad_stats_campaign_daily through the 
 transform; an account whose campaigns do not add up to its totals goes to quarantine with
 totals_differ (G0a of ADR-0035), and a run after it that reads no new load of Meta does not stop
 the source for the one account that it still holds; an ad that only the statistics name gets a
-stub in its dimension (ADR-0036); and a campaign day with no impressions, link clicks or spend and
-a purchase keeps its row of statistics, whose conversions_primary counts the purchase (ADR-0036).
+stub in its dimension (ADR-0036); a campaign day with no impressions, link clicks or spend and
+a purchase keeps its row of statistics, whose conversions_primary counts the purchase (ADR-0036);
+and a campaign day whose row lacks impressions and clicks, with spend and link clicks of zero and
+a purchase, as the stand saw in October 2026, reaches the core with 0 impressions and its purchase,
+and keeps its account out of quarantine.
 
 No load reaches Meta, and no answer comes from a real account: the answers below are faked by hand
 from the reference of the Marketing API v27.0, as tests/unit/test_meta_ads_source.py fakes them,
@@ -77,6 +80,11 @@ STUB = ("120200000000303", "120200000000201", "120200000000101", "Boots, blue")
 # impressions, link clicks or spend, as the stand S6 (#220) saw on two campaign days, and no ad set
 # in the insights: its row of statistics stays, with zeros, for its conversion (ADR-0036).
 CONVERTED = ("120200000000103", "Gloves")
+# A second deleted campaign with the same purchase, whose rows lack impressions and clicks, with
+# spend "0" and inline_link_clicks "0", as the stand saw in the campaigns of one account on each
+# day of 1 to 27 October 2026: the shape reads them as 0 impressions (meta_impressions in
+# dbt/macros/shapes/meta_v26.sql), so G1 finds no missing measure.
+ABSENT = ("120200000000104", "Scarves")
 CONVERTED_ACTIONS = (
     [{"action_type": "offsite_conversion.fb_pixel_purchase", "value": "1", "7d_click": "1"}],
     [{"action_type": "offsite_conversion.fb_pixel_purchase", "value": "49.90"}],
@@ -283,6 +291,9 @@ def answers() -> dict:
         insights["campaign"].append(
             row | measures("0", "0", "0") | converted | {"action_values": valued}
         )
+        row = named | {"campaign_id": ABSENT[0], "campaign_name": ABSENT[1]}
+        row |= {"inline_link_clicks": "0", "spend": "0"}
+        insights["campaign"].append(row | converted | {"action_values": valued})
         for ad_id, ad_set_id, campaign_id, name, *_ in (*LISTED_ADS, STUB):
             row = named | {"campaign_id": campaign_id, "adset_id": ad_set_id, "ad_id": ad_id}
             row["ad_name"] = name
@@ -463,7 +474,7 @@ def test_a_load_of_meta_reaches_the_core_and_the_marts(env, airflow_url, token):
         # The core holds every day of the healthy account, and so does the view of the marts,
         # with the primary actions of the seed, the purchases and the leads of the pixel, and no
         # metric of conversions of the platform, which Meta does not have. Each day has a row of
-        # the deleted campaign too, with zeros, for its purchase.
+        # each deleted campaign too, with zeros, for its purchase.
         spend = sum(Decimal(s) for _, _, s in DAY.values())
         impressions = sum(int(i) for i, _, _ in DAY.values())
         clicks = sum(int(c) for _, c, _ in DAY.values())
@@ -475,7 +486,7 @@ def test_a_load_of_meta_reaches_the_core_and_the_marts(env, airflow_url, token):
             f"WHERE a.platform = 'meta_ads' AND a.account_id = '{HEALTHY}'",
         ).split("|")
         assert [int(core[0]), int(core[1]), int(core[2]), Decimal(core[3])] == [
-            (len(DAY) + 1) * days,
+            (len(DAY) + 2) * days,
             impressions * days,
             clicks * days,
             spend * days,
@@ -493,11 +504,11 @@ def test_a_load_of_meta_reaches_the_core_and_the_marts(env, airflow_url, token):
             "FROM marts.ad_stats_campaign_daily WHERE platform = 'meta_ads'",
             "metabase_reader",
         ).split("|")
-        assert shown[:3] == ["1", str((len(DAY) + 1) * days), str(impressions * days)], shown
+        assert shown[:3] == ["1", str((len(DAY) + 2) * days), str(impressions * days)], shown
         assert [int(shown[3]), Decimal(shown[4]), Decimal(shown[5])] == [
             clicks * days,
             spend * days,
-            Decimal(4 * days),
+            Decimal(5 * days),
         ], shown
         assert shown[6:8] == ["0", "USD"], shown
         # The value of the primary actions, the purchases of the pixel of the two campaigns that
@@ -519,6 +530,43 @@ def test_a_load_of_meta_reaches_the_core_and_the_marts(env, airflow_url, token):
             "metabase_reader",
         )
         assert zeros == [f"{CONVERTED[1]}|0|0|0.000000|none|1.000000|false"] * days, zeros
+        # The rows without impressions and clicks: 0 impressions in the core, its purchase in the
+        # conversions of the core, and the same row in the view of the marts.
+        absent = warehouse_output(
+            env,
+            "SELECT count(*) || '|' || sum(f.impressions) || '|' || sum(f.clicks) || '|' "  # noqa: S608 (IDs of the test)
+            "|| sum(f.spend) FROM core.ad_stats_campaign_daily AS f "
+            "JOIN core.dim_account AS a ON a.account_sk = f.account_sk "
+            f"WHERE a.platform = 'meta_ads' AND a.account_id = '{HEALTHY}' "
+            f"AND f.campaign_id = {ABSENT[0]}",
+        ).split("|")
+        assert [int(absent[0]), int(absent[1]), int(absent[2]), Decimal(absent[3])] == [
+            days,
+            0,
+            0,
+            Decimal(0),
+        ], absent
+        purchases = warehouse_output(
+            env,
+            "SELECT count(*) || '|' || sum(f.conversions) || '|' || sum(f.conversion_value) "  # noqa: S608 (IDs of the test)
+            "FROM core.ad_conversions_campaign_daily AS f "
+            "JOIN core.dim_account AS a ON a.account_sk = f.account_sk "
+            f"WHERE a.platform = 'meta_ads' AND a.account_id = '{HEALTHY}' "
+            f"AND f.campaign_id = {ABSENT[0]}",
+        ).split("|")
+        assert [int(purchases[0]), Decimal(purchases[1]), Decimal(purchases[2])] == [
+            days,
+            Decimal(days),
+            Decimal("49.90") * days,
+        ], purchases
+        shown_absent = rows(
+            env,
+            "SELECT campaign_name || '|' || impressions || '|' || clicks || '|' || spend || '|' "  # noqa: S608 (IDs of the test)
+            "|| conversions_primary FROM marts.ad_stats_campaign_daily "
+            f"WHERE platform = 'meta_ads' AND campaign_id = '{ABSENT[0]}' ORDER BY report_date",
+            "metabase_reader",
+        )
+        assert shown_absent == [f"{ABSENT[1]}|0|0|0.000000|1.000000"] * days, shown_absent
         actions = rows(
             env,
             "SELECT conversion_action_id || '|' || conversion_category || '|' || is_primary "
@@ -560,6 +608,7 @@ def test_a_load_of_meta_reaches_the_core_and_the_marts(env, airflow_url, token):
             "120200000000101|ACTIVE|active",
             "120200000000102|ARCHIVED|removed",
             f"{CONVERTED[0]}||other",
+            f"{ABSENT[0]}||other",
         ], states
         ads = rows(
             env,
