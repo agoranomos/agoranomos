@@ -2,9 +2,10 @@
 through the real dlt source of airflow/dags/agoranomos_pipelines/meta_ads.py with the HTTP of the
 Graph API faked, reaches the core and marts.ad_stats_campaign_daily through the next run of the
 transform; an account whose campaigns do not add up to its totals goes to quarantine with
-totals_differ (G0a of ADR-0035); an ad that only the statistics name gets a stub in its
-dimension (ADR-0036); and a campaign day with no impressions, link clicks or spend and a purchase
-keeps its row of statistics, whose conversions_primary counts the purchase (ADR-0036).
+totals_differ (G0a of ADR-0035), and a run after it that reads no new load of Meta does not stop
+the source for the one account that it still holds; an ad that only the statistics name gets a
+stub in its dimension (ADR-0036); and a campaign day with no impressions, link clicks or spend and
+a purchase keeps its row of statistics, whose conversions_primary counts the purchase (ADR-0036).
 
 No load reaches Meta, and no answer comes from a real account: the answers below are faked by hand
 from the reference of the Marketing API v27.0, as tests/unit/test_meta_ads_source.py fakes them,
@@ -567,6 +568,21 @@ def test_a_load_of_meta_reaches_the_core_and_the_marts(env, airflow_url, token):
             f"AND f.ad_id = {STUB[0]}",
         ).split("|")
         assert [int(stats[0]), Decimal(stats[1])] == [days, Decimal(ADS[STUB[0]][2]) * days]
+
+        # A run that reads no new load of Meta, as one after the short cycle of Google Ads: the
+        # one pinned account of Meta is the one that the run before held, and it is one of the two
+        # accounts that the settings name, so the source goes on, with no source_stopped
+        # (quarantine_stop_findings in dbt/macros/quarantine.sql, ADR-0035).
+        run = trigger(airflow_url, token, TRANSFORM)
+        run = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=1800)
+        assert run["state"] == "success", run["state"]
+        quarantined = rows(
+            env,
+            "SELECT platform || '|' || account_id || '|' || reason FROM ops.ops_quarantine "
+            "WHERE platform = 'meta_ads' ORDER BY 1",
+            "metabase_reader",
+        )
+        assert quarantined == [f"meta_ads|{DIFFERING}|totals_differ"], quarantined
     finally:
         idle(airflow_url, token)
         warehouse_output(env, REMOVE)

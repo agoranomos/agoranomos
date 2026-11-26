@@ -1,6 +1,6 @@
 """The quarantine of an account (ADR-0035): the checks of G1 and G1a hold an account whose data
 fails them out of the core for a run of the transform, the views of the marts go on showing what
-the core held, the other accounts go on, a source with more than half of its pinned accounts in
+the core held, the other accounts go on, a source with more than half of its accounts in
 quarantine stops, the run stays green, and Ops says why. The checks write core.account_quarantine,
 and int_accounts__current and int_window_days leave the accounts of int_g1_failures out
 (dbt/macros/quarantine.sql).
@@ -173,7 +173,7 @@ def test_an_account_that_fails_its_checks_stays_out_and_the_others_go_on(
             f"demo_social|{UNRATED.account_id}|missing_rate|rates: no rate of "
             f"{UNRATED_CURRENCY} into {reporting} from the source of the rates, demo_fx",
             f"demo_video|{VIDEO.account_id}|negative_measure|campaign_stats: on {first}",
-            f"demo_video|{VIDEO.account_id}|source_stopped|source: in quarantine: 1 of the pinned "
+            f"demo_video|{VIDEO.account_id}|source_stopped|source: in quarantine: 1 of the "
             "accounts of the source, 1",
         ]
         # The journal holds the load and the reason, and the window that the core did not take.
