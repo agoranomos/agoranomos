@@ -108,9 +108,8 @@ def load_ga4() -> None:
     default_args={
         # Retries are explicit (ADR-0004): those of a request, of a server error and of the quota
         # are in agoranomos_pipelines/ga4.py, and these retry the task, as after a lock timeout of
-        # the loader role (ADR-0046). The wait doubles with each retry, from 10 to 20 minutes,
-        # which max_retry_delay keeps: Airflow 3.3.2 takes a multiplier here, and True would be 1,
-        # no backoff.
+        # the loader role (ADR-0046). The wait doubles with each retry, from 10 to 20 minutes, which
+        # max_retry_delay keeps: Airflow 3.4.0 takes a multiplier here, and reads True as 2.0.
         "retries": 2,
         "retry_delay": timedelta(minutes=10),
         "retry_exponential_backoff": 2.0,

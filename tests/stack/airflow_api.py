@@ -10,7 +10,7 @@ from stack_helpers import LogEntries, Secret, SecretHeaders, http_json, wait_for
 
 FINISHED = ("success", "failed")
 # The most items that the API of Airflow gives on one page ([api] maximum_page_limit, 100 by
-# default in Airflow 3.3.2).
+# default in Airflow 3.4.0).
 PER_PAGE = 100
 
 
@@ -74,7 +74,7 @@ def run_dag(airflow_url, token, dag_id, timeout=300):
 def clear(airflow_url, token, run, task_ids, include_downstream=False):
     """Clear tasks of a finished run, and those after them with include_downstream, so that
     Airflow runs them again in the same run, which goes back to queued; the other tasks of the run
-    keep their state. Returns the ids of the tasks that it cleared. Airflow 3.3.2 clears only the
+    keep their state. Returns the ids of the tasks that it cleared. Airflow 3.4.0 clears only the
     failed tasks unless it is told otherwise (only_failed), and with dry_run it changes nothing."""
     body = {
         "dry_run": False,

@@ -35,8 +35,6 @@ LOGS = maintenance.LOGS
 AGED = "100 days"
 # What airflow-init prints for a call of db clean that failed, before the tables of the call.
 FAILED = "airflow-init: the database of Airflow keeps its old rows of "
-# The tables of the second call of db clean in airflow-init, which has no filter by DAG.
-UNFILTERED = "asset_event,deadline,job,log,task_reschedule"
 # The column of each table of elementary in ops that names a row, for the rows of the tests.
 OPS_KEYS = {
     "dbt_invocations": "invocation_id",
@@ -69,7 +67,9 @@ def shift(dag_id, run_id, interval):
         f"UPDATE task_instance SET start_date = start_date {interval}, "
         f"end_date = end_date {interval}, queued_dttm = queued_dttm {interval}, "
         f"scheduled_dttm = scheduled_dttm {interval} {where}; "
-        f'UPDATE xcom SET "timestamp" = "timestamp" {interval} {where};'
+        # Airflow 3.4.0 keeps an XCom in xcom_v2 by the ID of its task instance.
+        f'UPDATE xcom_v2 SET "timestamp" = "timestamp" {interval} '
+        f"WHERE task_instance_id IN (SELECT id FROM task_instance {where});"
     )
 
 
@@ -171,14 +171,14 @@ def cleanups(env, airflow_url, token):
 
 
 def test_a_failed_cleanup_says_so_in_one_line_and_the_start_goes_on(cleanups):
-    # The trigger fails the call of the tables without a filter by DAG, which takes log, with an
-    # error of integrity, which db clean does not swallow: the job still exits 0, so ./agoranomos
-    # up goes on, and the refused row waits for the next start.
+    # The trigger fails the call, which takes log, with an error of integrity, which db clean does
+    # not swallow: the job still exits 0, so ./agoranomos up goes on, and the refused row waits for
+    # the next start.
     assert cleanups.failed.code == 0
     [line] = cleanups.failed.failed
-    assert line.startswith(
-        f"{FAILED}{UNFILTERED} until the next start: the cleanup failed with IntegrityError: "
-    ), line
+    assert line.startswith(FAILED), line
+    assert ",log," in line, line
+    assert " until the next start: the cleanup failed with IntegrityError: " in line, line
     assert "a stack test refuses the delete" in line, line
     assert cleanups.refused_after_failed == 1
 
@@ -189,21 +189,25 @@ def test_the_next_start_cleans_what_a_failed_one_left(env, cleanups):
     assert count(env, f"log WHERE event = '{cleanups.tag}_refused'") == 0
 
 
-def test_db_clean_misses_no_table_but_deadline_in_its_first_call(cleanups):
-    # Airflow 3.3.2 filters deadline by a column dag_id that it lacks, and dag_run brings it into
-    # the call that keeps the rows of the demo history: that call warns, and the next cleans it.
-    # A release of Airflow that fixes this fails the test, and the comment of compose.yaml goes.
-    [line] = cleanups.cleaned.not_cleaned
-    assert "['deadline']" in line, line
+def test_db_clean_misses_no_table(cleanups):
+    # Airflow 3.4.0 filters deadline and task_reschedule by DAG through the tables that they
+    # reach their DAG by, also when dag_run brings deadline into the call (apache/airflow#73173):
+    # the one call that keeps the rows of the demo history cleans every table.
+    assert cleanups.cleaned.not_cleaned == []
 
 
 def test_the_rows_older_than_90_days_go_and_the_younger_stay(env, cleanups):
     tag = cleanups.tag
-    for table in ("dag_run", "task_instance", "xcom"):
-        where = f"WHERE dag_id = '{SELFCHECK}' AND run_id = {quoted(cleanups.old_run)}"
-        assert count(env, f"{table} {where}") == 0, table
-        where = f"WHERE dag_id = '{SELFCHECK}' AND run_id = {quoted(cleanups.new_run)}"
-        assert count(env, f"{table} {where}") >= 1, table
+    for run, cleaned in ((cleanups.old_run, True), (cleanups.new_run, False)):
+        where = f"WHERE dag_id = '{SELFCHECK}' AND run_id = {quoted(run)}"
+        xcom = f"xcom_v2 WHERE task_instance_id IN (SELECT id FROM task_instance {where})"  # noqa: S608 (constants and IDs of Airflow, quoted)
+        for table, rows in (
+            ("dag_run", f"dag_run {where}"),
+            ("task_instance", f"task_instance {where}"),
+            ("xcom_v2", xcom),
+        ):
+            found = count(env, rows)
+            assert (found == 0) if cleaned else (found >= 1), (table, run, found)
     assert count(env, f"log WHERE event = '{tag}_old'") == 0
     assert count(env, f"log WHERE event = '{tag}_kept'") == 1
     assert count(env, f"asset_event WHERE extra->>'probe' = '{tag}_old'") == 0

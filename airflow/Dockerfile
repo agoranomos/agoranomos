@@ -1,7 +1,7 @@
 # The Airflow image of agoranomos: the official image, with dlt and Cosmos in Airflow's own environment,
 # dbt in a virtual environment of its own (ADR-0002, ADR-0005), and the plugins of airflow/plugins.
 # ./agoranomos up builds it from this folder, and it is never pushed to a registry.
-FROM apache/airflow:3.3.2-python3.13@sha256:e9982ad3f49a60418622e1baf80c34b0daf3fa5091a336cb5ee61f0cdd189371
+FROM apache/airflow:3.4.0-python3.13@sha256:a8d9d19c563c768b2bc605ef26440f28a9164ea886064e99c599b057432ff572
 
 # No usage telemetry from the tools that this image adds; compose.yaml sets the same variables.
 ENV RUNTIME__DLTHUB_TELEMETRY=false \
@@ -27,10 +27,11 @@ ENV AIRFLOW__COSMOS__ENABLE_CACHE_DBT_LS=False \
 # dlt, Cosmos and Apprise go into Airflow's environment, under the constraints that the base image
 # was built with, and with apache-airflow in the same command, so that pip fails instead of moving
 # Airflow.
-# requirements.txt also pins the dependencies of dlt that the constraints leave open, and certifi
-# above the version of the constraints, for a security fix: its line is taken out of them.
+# requirements.txt also pins the dependencies of dlt that the constraints leave open. A package
+# pinned above the version of the constraints, for a security fix, has its line taken out of them
+# here with grep -v '^<name>==' before the copy goes to pip; none is, as of Airflow 3.4.0.
 COPY requirements.txt /tmp/agoranomos/requirements.txt
-RUN grep -v '^certifi==' "${HOME}/constraints.txt" > /tmp/constraints.txt \
+RUN cp "${HOME}/constraints.txt" /tmp/constraints.txt \
     && pip install --no-cache-dir "apache-airflow==${AIRFLOW_VERSION}" \
         -r /tmp/agoranomos/requirements.txt --constraint /tmp/constraints.txt \
     && pip check

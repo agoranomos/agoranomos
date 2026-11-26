@@ -1090,8 +1090,8 @@ def test_the_loads_retry_with_a_growing_wait_and_end_within_their_timeout(
     # after a long stop, takes long, its three tries of two hours and the waits between them, and
     # for the Bank of Italy, whose history is about 800 requests at one a second, its three tries
     # of half an hour and their waits within two hours, so that a load never lives longer: the
-    # cleanup of the rows of a load that did not end is to wait at least that long. Airflow 3.3.2
-    # takes a multiplier for the backoff, so True would be 1, a constant wait.
+    # cleanup of the rows of a load that did not end is to wait at least that long. Airflow 3.4.0
+    # takes a multiplier for the backoff, and the DAGs give it as a number.
     keywords = {
         node.arg: node.value
         for node in ast.walk(ast.parse((DAGS / name).read_text(encoding="utf-8")))

@@ -76,7 +76,7 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of November 2026:** built for v0.5: the plugin `airflow/plugins/agoranomos_alerts.py` with the listener `on_dag_run_failed` and Apprise 1.13.1, the DAG `agoranomos_watcher` every 15 minutes with its state in `ops.alert_state`, the status of the backups in the volume `backup-status`, and `AGORANOMOS_ALERT_URLS` in `.env`, with the stack tests of both variants ([Get alerts](../how-to/watch-the-pipeline.md#get-alerts)). The cleanup of the logs of Airflow came before, in the DAG `agoranomos_maintenance`.
+* **Implementation status, as of November 2026:** built for v0.5: the plugin `airflow/plugins/agoranomos_alerts.py` with the listener `on_dag_run_failed` and Apprise 1.13.1, and Apprise 2.1.0 since the update to Airflow 3.4.0, whose constraints hold it, the DAG `agoranomos_watcher` every 15 minutes with its state in `ops.alert_state`, the status of the backups in the volume `backup-status`, and `AGORANOMOS_ALERT_URLS` in `.env`, with the stack tests of both variants ([Get alerts](../how-to/watch-the-pipeline.md#get-alerts)). The cleanup of the logs of Airflow came before, in the DAG `agoranomos_maintenance`.
 * The facts behind this record, run on 31 October 2026 on the image of the stack, Airflow 3.3.2, with one task that raises an exception, one killed by signal 9 and one that succeeds:
 
     | Mechanism | Exception in a task | Process of a task killed | Runs in |

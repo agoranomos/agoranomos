@@ -126,12 +126,13 @@ def test_the_image_starts_from_the_pinned_official_image():
     assert re.fullmatch(BASE_IMAGE, images[0]), images[0]
 
 
-# The dependencies of dlt 1.30.0 that the constraints of Airflow 3.3.2 leave open:
+# The dependencies of dlt 1.32.0 that the constraints of Airflow 3.4.0 leave open:
 # airflow/requirements.txt pins them, so that every machine builds the same image.
 DLT_DEPENDENCIES = {"giturlparse", "pathvalidate", "requirements-parser", "semver", "simplejson"}
-# The packages pinned above the constraints of Airflow 3.3.2 for a security fix, with the first
-# version that has it: certifi, for GHSA-6q48-6c7w-9gw2.
-OVERRIDES = {"certifi": (2026, 10, 18)}
+# The packages pinned above the constraints of Airflow for a security fix, with the first version
+# that has it, such as "certifi": (2026, 10, 18) for GHSA-6q48-6c7w-9gw2, which the constraints
+# of Airflow 3.3.2 lacked. The constraints of Airflow 3.4.0 need none.
+OVERRIDES: dict[str, tuple[int, ...]] = {}
 
 
 def test_airflow_gets_dlt_cosmos_and_apprise_under_its_constraints():

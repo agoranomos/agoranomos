@@ -47,7 +47,7 @@ log = logging.getLogger(__name__)
 # Where compose.yaml mounts the volume of the logs of Airflow, airflow-logs, in every Airflow
 # container: the logs of the tasks, dag_id=<dag>/run_id=<run>/task_id=<task>/attempt=<n>.log, and
 # those of the DAG processor, dag_processor/<day>/<bundle>/<file>.log, with the link
-# dag_processor/latest to the folder of the day (Airflow 3.3.2).
+# dag_processor/latest to the folder of the day (Airflow 3.4.0).
 LOGS = "/opt/airflow/logs"
 LOG_RETENTION_DAYS = 30
 # The folders that the deletion of their files leaves empty go once they have been empty for a day,
@@ -115,7 +115,7 @@ DLT_LOADS_DAYS = 90
 # [<task group>__]<run>, with every character of the ID of the run that is not a letter, a digit, a
 # hyphen or an underscore as _ (cosmos/operators/_watcher/xcom.py). A failed run leaves its
 # Variable behind (astronomer/astronomer-cosmos#2823), and a Variable has no time of its own, so
-# its age is that of the moment in the ID of its run, as Airflow 3.3.2 makes the IDs of the runs:
+# its age is that of the moment in the ID of its run, as Airflow 3.4.0 makes the IDs of the runs:
 # <type>__<ISO moment>, with a random suffix when the run has no logical date (DagRun.
 # generate_run_id, and the types of DagRunType). A Variable of a run older than VARIABLE_DAYS, the
 # time that the database of Airflow keeps a run, goes; one whose name holds no such ID of a run, as

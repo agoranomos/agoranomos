@@ -80,8 +80,8 @@ def load_task(code: str):
         # Retries are explicit, as the contract of the sources asks (ADR-0004), also after a new
         # column of the API waited past the lock timeout of the loader role for a run of the
         # transform that reads the table (ADR-0046). The wait doubles with each retry, from 1 to 2
-        # minutes and then from 2 to 4: Airflow 3.3.2 takes a multiplier here, and True would be
-        # 1, no backoff.
+        # minutes and then from 2 to 4: Airflow 3.4.0 takes a multiplier here, and reads True as
+        # 2.0.
         "retries": 2,
         "retry_delay": timedelta(minutes=1),
         "retry_exponential_backoff": 2.0,

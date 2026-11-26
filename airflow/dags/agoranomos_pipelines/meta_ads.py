@@ -146,7 +146,7 @@ APP_ID = "META_ADS_APP_ID"
 APP_SECRET = "META_ADS_APP_SECRET"  # noqa: S105 (the name of a variable)
 # The Airflow Variable of the newest token that a refresh gave. Airflow encrypts a Variable with
 # the Fernet key of the deployment, and hides the value of one whose key names a token in its UI
-# and logs (the sensitive names of Airflow 3.3.2).
+# and logs (the sensitive names of Airflow 3.4.0).
 VARIABLE = "agoranomos_meta_ads_token"
 # A token that expires is valid for 60 days from the day it was made or refreshed (System users,
 # https://developers.facebook.com/docs/business-management-apis/system-users/
