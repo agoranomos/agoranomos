@@ -2,6 +2,7 @@
 dashboard. metabase-init keeps it in Metabase; tests/unit/test_metabase_init.py checks that."""
 
 import re
+import sqlite3
 from pathlib import Path
 
 import content
@@ -152,3 +153,62 @@ def test_the_view_of_the_loads_counts_the_whole_loads_with_the_last_intraday_loa
     # The columns that the questions of Ops read keep their names.
     read = {name for question in ops.QUESTIONS for name in question["columns"]}
     assert {"last_day_loaded", "last_loaded_at", "hours_since_load", "loads"} <= read
+
+
+def ops_loads_stand_in() -> sqlite3.Connection:
+    """ops.ops_loads in SQLite, with the columns that the questions read, and an account of the
+    settings, one taken out of them and a source of the rates, each late, and a fresh account."""
+    db = sqlite3.connect(":memory:")
+    db.execute("ATTACH DATABASE ':memory:' AS ops")
+    db.execute(
+        "CREATE TABLE ops.ops_loads (platform, account_id, last_day_loaded, last_loaded_at,"
+        " hours_since_load, loads, is_in_settings)"
+    )
+    db.executemany(
+        "INSERT INTO ops.ops_loads VALUES (?, ?, '2026-11-01', '2026-11-02 05:00', ?, 3, ?)",
+        [
+            ("google_ads", "1234567890", 100.0, True),
+            ("google_ads", "1234567891", 900.0, False),
+            ("ecb", "EUR", 50.0, None),
+            ("meta_ads", "1234567892", 2.5, True),
+        ],
+    )
+    return db
+
+
+def test_late_accounts_counts_the_accounts_of_the_settings_and_the_rates():
+    # The maintainer's decision of 26 November 2026: an account that the settings no longer name,
+    # whose last load ops.ops_loads keeps for good, is never late. The watcher leaves out the same
+    # accounts (tests/unit/test_watcher.py).
+    [question] = [q for q in ops.QUESTIONS if q["key"] == "late-accounts"]
+    assert f"    AND {ops.IN_SETTINGS}" in question["query"]
+    assert ops_loads_stand_in().execute(question["query"]).fetchall() == [(2,)]
+
+
+def test_the_last_loads_show_whether_the_settings_name_each_account_and_list_those_last():
+    [question] = [q for q in ops.QUESTIONS if q["key"] == "loads"]
+    assert question["columns"][-1] == "is_in_settings"
+    rows = ops_loads_stand_in().execute(question["query"]).fetchall()
+    assert [(row[0], row[1], row[-1]) for row in rows] == [
+        ("google_ads", "1234567890", 1),
+        ("ecb", "EUR", None),
+        ("meta_ads", "1234567892", 1),
+        ("google_ads", "1234567891", 0),
+    ]
+
+
+def test_the_view_of_the_loads_says_whether_the_settings_name_the_account():
+    # As core.dim_account records it in each run of the transform, from
+    # stg_settings__account_clients, which the stop of a source counts too; none where the
+    # registry has no row, as for a source of the rates.
+    text = (OPS_MODELS / "ops_loads.sql").read_text(encoding="utf-8")
+    for line in (
+        "    a.is_active as is_in_settings\n",
+        "from loads as l\n",
+        "left join {{ ref('dim_account') }} as a\n",
+        "    on a.platform = l.platform and a.account_id = l.account_id\n",
+        "group by l.platform, l.account_id, a.is_active\n",
+    ):
+        assert line in text, line
+    models = (OPS_MODELS / "_ops__models.yml").read_text(encoding="utf-8")
+    assert "      - name: is_in_settings\n" in models

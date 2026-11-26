@@ -12,7 +12,7 @@ the overrides of the deployment give the tables and fields of the marts, with on
 change, and keeps the KPIs that the marts declare as metrics in the collection agoranomos / Metrics
 and as terms of the glossary (metrics.py, ADR-0034). While Metabase starts its weeks on its
 default, Sunday, the job starts them on Monday, as ISO 8601 does. It keeps the daily scan of the
-values of the filters at METABASE_SCAN_TIME, after the nightly load, the sync hourly, and the
+values of the filters at METABASE_SCAN_TIME, after the daily loads, the sync hourly, and the
 policy of the cache of the whole instance Adaptive, with one line for each change (ADR-0037). It
 keeps the dashboard Advertising, with its tabs, in the collection agoranomos / Advertising
 (advertising.py, ADR-0034), and the dashboard Web analytics in the collection agoranomos / Web

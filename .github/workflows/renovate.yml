@@ -5,8 +5,11 @@ name: Renovate
 # RENOVATE_APP_CLIENT_ID, and its private key is the repository secret RENOVATE_APP_PRIVATE_KEY.
 on:
   schedule:
-    # Daily at 02:17 UTC. Keep it before 04:00 UTC: the weekly work in renovate.json (the uv.lock
-    # refresh and Renovate's own version) runs only in the window "* 0-3 * * 1" (Monday, UTC).
+    # Daily at 02:17 UTC, but GitHub delays a scheduled run under load: the 52 scheduled runs from
+    # 5 October to 25 November 2026 started between 06:57 and 12:29 UTC. So the weekly work in
+    # renovate.json (Renovate's own version, the Docker image digests and the refresh of the lock
+    # files) takes the whole of Monday, "* * * * 1" in UTC, which a late run still meets, and
+    # prHourlyLimit is 0, so that the one run of a day opens every pull request that is due.
     - cron: "17 2 * * *"
   workflow_dispatch:
 

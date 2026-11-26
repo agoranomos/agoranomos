@@ -9,7 +9,7 @@ account in GOOGLE_ADS_LOGIN_CUSTOMER_ID when the service account reaches the acc
 It asks googleAds:searchStream of the REST interface of the Google Ads API, version API_VERSION, for
 each account, and keeps each result as the API gives it, which dlt writes in snake_case with nested
 objects joined by __: the shape that demo_search mimics, which the macros of
-dbt/macros/shapes/google_ads_v25.sql read (none of their fields changed in v26).
+dbt/macros/shapes/google_ads_v26.sql read (none of their fields changed in v26).
 
 A load first reads each account (customer), then its campaigns, its ad groups, its ads and its
 conversion actions, the full lists of the account, and then, by day, the totals of the account
@@ -140,7 +140,7 @@ from agoranomos_pipelines.loads import (
     run,
 )
 from agoranomos_pipelines.settings.files import load_settings
-from agoranomos_pipelines.windows import restatement_window_days
+from agoranomos_pipelines.windows import daily_window, restatement_window_days
 
 log = logging.getLogger(__name__)
 
@@ -430,16 +430,14 @@ def today(now: datetime, time_zone: str) -> date:
 
 
 def window(last: date, last_end: date | None) -> tuple[date, date]:
-    """The days of a load of an account whose last day is last, as ADR-0038 gives them,
-    [min(last + 1 - W, last_end + 1), last], where W is the window of restatements of Google Ads in
-    the seed of the platforms (windows.py), read now, and last_end the last day that the core
-    accepted for the account (last_day): the last W days when none is known yet, as the history
-    comes after them in portions, else the days from the day after it, or from the first of the
-    last W days when that is earlier, so that a stop of any length closes by itself."""
-    usual = last - timedelta(days=restatement_window_days(CODE) - 1)
-    if last_end is None:
-        return usual, last
-    return min(last_end + timedelta(days=1), usual), last
+    """The days of a load of an account whose last day is last, [min(last + 1 - W,
+    last_end + 2 - W), last] (windows.daily_window), where W is the window of restatements of
+    Google Ads in the seed of the platforms (windows.py), read now, and last_end the last day that
+    the core accepted for the account (last_day): the last W days when none is known yet, as the
+    history comes after them in portions, else a window that starts a day earlier for each missed
+    load, so that each day is read at the age of W days or more and a stop of any length closes
+    by itself."""
+    return daily_window(last, last_end, restatement_window_days(CODE))
 
 
 def accepted(pipeline, account_ids: Iterable[str]) -> dict[str, date]:

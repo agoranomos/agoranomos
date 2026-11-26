@@ -126,6 +126,45 @@ def test_the_late_check_counts_the_whole_loads_and_not_those_of_the_current_day(
     assert "l.kind <> 'intraday'" in watcher.LATE_SQL
 
 
+def test_the_late_check_leaves_out_an_account_that_the_settings_do_not_name():
+    # The maintainer's decision of 26 November 2026: an account taken out of the settings, which
+    # its platform no longer loads, is not late; an account of the settings and a source of the
+    # rates, which the registry of accounts does not hold, are. The card Late accounts counts the
+    # same accounts (tests/unit/test_ops.py).
+    db = sqlite3.connect(":memory:")
+    db.execute("ATTACH DATABASE ':memory:' AS core")
+    db.execute(
+        "CREATE TABLE core.loads (source, account_id, window_from, window_to, outcome, kind)"
+    )
+    db.execute("CREATE TABLE core.dim_account (platform, account_id, time_zone, is_active)")
+    db.executemany(
+        "INSERT INTO core.loads VALUES (?, ?, '2026-06-01', '2026-06-30', 'loaded', 'window')",
+        [("google_ads", "1234567890"), ("google_ads", "1234567891"), ("ecb", "EUR")],
+    )
+    db.executemany(
+        "INSERT INTO core.dim_account VALUES ('google_ads', ?, 'Europe/Berlin', ?)",
+        [("1234567890", 1), ("1234567891", 0)],
+    )
+    rows = [
+        (source, account_id, date.fromisoformat(last), zone)
+        for source, account_id, last, zone in db.execute(watcher.LATE_SQL).fetchall()
+    ]
+    found = {problem.subject for problem in watcher.late_problems(rows, NOW)}
+    assert found == {"google_ads 1234567890", "ecb EUR"}
+
+
+def test_an_alert_of_an_account_that_leaves_the_settings_goes_away():
+    # The account was late and its alert went out. Once a run of the transform marks it as no
+    # longer active, the late check no longer finds it: the next message names it as gone, which
+    # deletes its row once it has gone out, and a recovery that could not go out in a day is
+    # dropped.
+    held = watcher.Row("late", "google_ads 1234567891", "late", NOW - 3 * DAY, NOW - DAY, None)
+    result = watcher.plan([], [held], {"late"}, NOW)
+    assert (result.recover, result.recovered, result.forget) == ([held], [held], [])
+    gone = watcher.Row(held.kind, held.subject, held.reason, held.since, NOW, NOW - DAY)
+    assert watcher.plan([], [gone], {"late"}, NOW).forget == [gone]
+
+
 def test_every_source_of_the_base_package_has_a_lag():
     sources = {path.stem for path in (ROOT / "dbt" / "models" / "staging").iterdir()}
     assert sources - {"loads", "settings"} <= set(watcher.LAG_DAYS)

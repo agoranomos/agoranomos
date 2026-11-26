@@ -56,7 +56,7 @@ from agoranomos_pipelines.loads import (
     row_counts,
     run,
 )
-from agoranomos_pipelines.windows import restatement_window_days
+from agoranomos_pipelines.windows import daily_window, restatement_window_days
 
 log = logging.getLogger(__name__)
 
@@ -111,16 +111,15 @@ def window(
     now: datetime, last_end: date | None, history: date | None = None
 ) -> tuple[date, date, str]:
     """The days of a load at now and its kind: the history when no load has taken a day yet, from
-    history when the core needs it earlier (rates.history_from), else the days from the day after
-    the last loaded, or from the first of the last days of its window of restatements (windows.py)
-    when that is earlier, to yesterday, and those from history, as a load of the history, when it
-    is earlier still."""
+    history when the core needs it earlier (rates.history_from), else the last days of its window
+    of restatements (windows.py) to yesterday, starting a day earlier for each missed load
+    (windows.daily_window), and those from history, as a load of the history, when it is earlier
+    still."""
     end = yesterday(now)
     if last_end is None:
         first = history_start(now)
         return (first if history is None else min(first, history)), end, HISTORY
-    width = restatement_window_days(CODE)
-    usual = min(last_end + timedelta(days=1), end - timedelta(days=width - 1))
+    usual, _ = daily_window(end, last_end, restatement_window_days(CODE))
     if history is not None and history < usual:
         return history, end, HISTORY
     return usual, end, WINDOW
