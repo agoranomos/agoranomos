@@ -43,7 +43,7 @@ ASSETS = 5
 # sum of its campaigns, which G0a holds out with a tolerance of 1% for TikTok, one whose deleted
 # campaign has an ID above the largest bigint, 9223372036854775807, which G1 holds out with
 # invalid_id rather than cut it or fail the run, and a second healthy one. With it the two held out
-# are half of the pinned advertisers of TikTok, and only more than half stops the source and holds
+# are half of the advertisers of TikTok, and only more than half stops the source and holds
 # the healthy ones too, with source_stopped (quarantine_stop_findings in dbt/macros/quarantine.sql).
 HEALTHY, DIFFERING, INVALID = "7900000000000000001", "7900000000000000002", "7900000000000000003"
 ALSO_HEALTHY = "7900000000000000004"

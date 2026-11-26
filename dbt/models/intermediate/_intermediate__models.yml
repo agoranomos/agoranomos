@@ -276,9 +276,10 @@ models:
       gives for the account in the same load, where its loads bring them, as those of Google Ads
       do, within the share of var('platform_totals_tolerance'). G1a compares
       the spend of the campaigns of each load, and the sessions of each load of web analytics, with
-      what the core holds on the same days. A source with more than half of its pinned accounts
-      here stops, and its other pinned accounts get the reason source_stopped. A table that each
-      run fills anew, one statement for each kind of data.
+      what the core holds on the same days. A source with more than half of its accounts here, of
+      those that the settings of the model name and those of its pinned loads, stops, and its
+      other pinned accounts get the reason source_stopped. A table that each run fills anew, one
+      statement for each kind of data.
       source, load_id, account_id, reason and checked are its key. Its tests guard the core and the
       marts: when one of them fails, dbt does not build the models that read this one.
     data_tests:

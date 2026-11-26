@@ -32,11 +32,14 @@ and then of the other five.
 # a group on a pull request took 30 to 57 minutes on 18 November 2026 (44356389537), and that of a
 # part, two groups, 53 to 87 in each combination (44356412101).
 GROUPS: tuple[tuple[str, ...], ...] = (
-    # 1: the rates and the dimensions of the core.
+    # 1: the rates, the rates of the file and the dimensions of the core.
     (
         "test_rates.py",  # 24 minutes, and 20 to 27
         "test_core_dimensions.py",  # 16, and 12 to 18
         "test_transform_schedule.py",  # 7, and 7 to 8
+        # Two loads of demo_social and three runs of the transform: about 20 minutes by
+        # test_quarantine.py, not measured yet (26 November 2026).
+        "test_rates_of_the_file.py",
         "test_ai_servers.py",
         "test_backup_before_a_migration.py",
     ),
@@ -88,14 +91,13 @@ GROUPS: tuple[tuple[str, ...], ...] = (
         "test_profile.py",
         "test_server.py",
     ),
-    # 6: the quarantine, the rates of the file, Meta, the restatements, the final days, the flags
-    # of the loads, the short cycle of the demo, Airflow and the dashboard Web analytics.
+    # 6: the quarantine, Meta, the restatements, the final days, the flags of the loads, the short
+    # cycle of the demo, Airflow and the dashboard Web analytics.
     (
         "test_quarantine.py",  # 14, and 14 to 15
-        # Two loads of demo_social and three runs of the transform: about 20 minutes by
-        # test_quarantine.py, not measured yet (26 November 2026).
-        "test_rates_of_the_file.py",
-        "test_meta_ads.py",  # 8, and 6 to 9
+        # 8, and 6 to 9, before its second run of the transform of 26 November 2026, which adds a
+        # few minutes, not measured yet.
+        "test_meta_ads.py",
         "test_restatements.py",  # 8, and 6 to 7
         # No run of the transform: a few seconds (C8a of #228, 20 November 2026, on a Mac).
         "test_final_days.py",

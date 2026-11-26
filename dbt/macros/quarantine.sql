@@ -17,8 +17,7 @@
     campaigns of a load do not add up to the totals of the account that the platform gives in the
     same load (G0a); a load has no row on the days of its window while the core holds spend on
     them (G1a); the spend of a load fell by more than var('quarantine_spend_fall') against the core
-    (G1a); more than half of the pinned accounts of the source are in quarantine, so the source
-    stops. -#}
+    (G1a); more than half of the accounts of the source are in quarantine, so the source stops. -#}
 {% macro quarantine_reasons() -%}
 {{- return([
     'load_failed', 'unknown_account', 'duplicate_key', 'missing_key', 'invalid_id',
@@ -828,11 +827,17 @@ where held > 0
 {%- endmacro %}
 
 {#- The stop of a source (ADR-0035, ADR-0046): a source with more than half of its accounts in
-    quarantine, of the accounts that core.loads holds pinned for it, stops, and each of its pinned
-    accounts gets the reason source_stopped, so that the healthy ones stay out of the core too;
-    exactly half stops nothing. A filter in SQL, not a test at error, which would stop the healthy
-    sources too (#188). It reads the failures that the statements before it wrote. -#}
-{% macro quarantine_stop_findings(failures, loads) -%}
+    quarantine stops, and each of its pinned accounts gets the reason source_stopped, so that the
+    healthy ones stay out of the core too; exactly half stops nothing. The accounts of a source are
+    those that the settings of the model name for it, settings, the staging model of clients.toml of
+    the deployment and of the demo, from which each connector takes the accounts that it loads, and
+    those of its loads that core.loads holds pinned, as of an account that left the settings with a
+    load that the core did not accept, or of a source that no setting names. So a run that reads no
+    new load of a source, whose pinned accounts are only those that earlier runs held, counts them
+    against every account of the source, and a portion of the history of a few accounts against
+    them all too. A filter in SQL, not a test at error, which would stop the healthy sources too
+    (#188). It reads the failures that the statements before it wrote. -#}
+{% macro quarantine_stop_findings(failures, loads, settings) -%}
 with pinned as (
     select distinct source, account_id
     from {{ loads }}
@@ -840,23 +845,32 @@ with pinned as (
         and source in ('{{ quarantine_sources() | join("', '") }}')
 ),
 
+accounts as (
+    select platform as source, account_id
+    from {{ settings }}
+    where platform in ('{{ quarantine_sources() | join("', '") }}')
+    union
+    select source, account_id
+    from pinned
+),
+
 held as (
-    select p.source, count(distinct p.account_id) as accounts
-    from pinned as p
-    where exists (
-        select from {{ failures }} as f
-        where f.source = p.source and f.account_id = p.account_id
-    )
-    group by p.source
+    select distinct source, account_id
+    from {{ failures }}
+),
+
+counted as (
+    select a.source, count(h.account_id) as held, count(*) as accounts
+    from accounts as a
+    left join held as h
+        on h.source = a.source and h.account_id = a.account_id
+    group by a.source
 ),
 
 stopped as (
-    select h.source, h.accounts as held, count(*) as accounts
-    from held as h
-    join pinned as p
-        on p.source = h.source
-    group by h.source, h.accounts
-    having h.accounts * 2 > count(*)
+    select source, held, accounts
+    from counted
+    where held * 2 > accounts
 )
 
 select
@@ -865,8 +879,7 @@ select
     null as load_id,
     'source_stopped' as reason,
     'source' as checked,
-    'in quarantine: ' || s.held || ' of the pinned accounts of the source, ' || s.accounts
-        as detail
+    'in quarantine: ' || s.held || ' of the accounts of the source, ' || s.accounts as detail
 from stopped as s
 join pinned as p
     on p.source = s.source
