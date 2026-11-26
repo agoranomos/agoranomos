@@ -89,7 +89,7 @@ CI runs the static checks, the full-history secret scan, the strict documentatio
 
 ## Do not
 
-- Do not bypass the hooks: no `git commit --no-verify`, and no skipping or disabling a hook or a CI check to get a change through. Fix the cause instead.
+- Do not bypass the hooks: no `git commit --no-verify`, and no skipping or disabling a hook or a CI check to get a change through. Fix the cause instead. The same holds for the push protection of GitHub's secret scanning, which blocks a push that holds a secret of a kind that GitHub knows: take the secret out of the commits, and never bypass the block. Leave the dismissal of an alert of code scanning or secret scanning to the maintainer.
 - Do not weaken CI. Workflows start with `permissions: {}`, each job asks for only what it needs, every action is pinned by its full commit SHA with the version in a comment, and every job has a timeout. Do not widen permissions, unpin an action or remove a timeout.
 - Do not make the documentation site call another host. A reader's browser asks only the site itself, so fonts, scripts, style sheets and images are files in `docs/`, never loaded from a CDN. The one exception is the header, which asks api.github.com for the stars, forks and latest release of the repository: as of Zensical 0.1.3 (November 2026) it has no setting to turn that off. The `check-docs-site` hook fails on any other.
 - Do not describe unbuilt features as existing, and do not invent versions, flags or APIs.
