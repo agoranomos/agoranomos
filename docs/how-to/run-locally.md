@@ -81,6 +81,8 @@ To delete the stack together with its data, run `docker compose down --volumes` 
 
 ## Update to a new release
 
+A release upgrades from the newest release of the previous minor version, the second number of the version, and from an earlier release of its own minor version: v0.7.0 upgrades from v0.6.0, and from no release before it ([ADR-0059](../adr/0059-upgrade-from-the-previous-minor-release-only.md)). The test of the upgrade runs that path only. From an older release, such as v0.5.0 or v0.4.5, update one minor version at a time, as [Update from an older release](#update-from-an-older-release) says.
+
 First, in the root of the checkout, get the tags of the new releases, and see whether the release that you update to changes the version of Metabase. In the commands of this section, put the tag of that release in place of `<tag>`, such as `v0.6.0`; `git tag --sort=-v:refname | head -n 1` names the newest. A checkout of the `main` branch uses `origin/main` in place of `<tag>`, and `git pull` in place of `git checkout <tag>`. <!-- x-release-please-version -->
 
 ```bash
@@ -117,6 +119,18 @@ docker volume rm <the name that the first command printed>
 ```
 
 When the first command prints nothing, `db-init` has no volume, and there is nothing to remove; when there is no container of `db-init` at all, it prints an error instead. The volumes that each `down` and `up` of those earlier versions left behind carry no name or label of the project, so they cannot be told apart from the unused volumes of other projects: leave them. For the same reason, do not use `docker volume prune`: it also removes the unused volumes of the other projects on this machine.
+
+### Update from an older release
+
+A stack of a release older than the previous minor one goes to the newest release of each minor version in turn, starting with its own when it does not run that one yet: from v0.5.0 to v0.6.0 and then to v0.7.0, from v0.4.2 to v0.4.5, v0.5.0, v0.6.0 and then v0.7.0. Each release does its part of the upgrade on the warehouse, which the next one relies on. v0.7.0 still holds the code of the upgrade from v0.4, untested, and v0.8.0 removes it.
+
+1. List the releases, and note the newest of your minor version and of each one after it. `git tag --list 'v*' --sort=v:refname` lists them from the oldest to the newest.
+1. Before each step, take a backup and note the commit that you run, as [Take a backup now](back-up-and-restore.md#take-a-backup-now) says. Before the step to v0.5.0, follow [Before the update to v0.5](back-up-and-restore.md#before-the-update-to-v05) instead, which takes them too.
+1. Update to the next release of your list as the beginning of this section says, from `git diff HEAD <tag>` to `./agoranomos up`, with its tag in place of `<tag>`. The guides of that release, in `docs/` of the checkout, say what its update changes, under the sections "Upgrading from" of `docs/reference/data-model.md`.
+1. Wait until the release has done its part. `./agoranomos status` says `none waiting` on its line `Migrations of the core:`. In Airflow, every DAG of a load that you have unpaused has run once after the update, and a run of `agoranomos_demo_transform` after them has succeeded; with the demo, `demo-init` runs the demo through in that `up` already. Trigger by hand a load that would wait for its schedule, as the step to v0.5.0 asks for `agoranomos_ecb_daily` and `agoranomos_google_ads_daily` ([Upgrading from v0.4](../reference/data-model.md#upgrading-from-v04)).
+1. Take the next release of your list in the same way, from step 2, until the stack runs the newest one.
+
+The backup of each step leads back to the release before that step, with the checkout at the commit that you noted ([Go back from an upgrade](back-up-and-restore.md#go-back-from-an-upgrade)). Keep the backup of the first step for as long as you may want to go back to the release that you came from.
 
 ## Run the tasks on a separate worker
 
