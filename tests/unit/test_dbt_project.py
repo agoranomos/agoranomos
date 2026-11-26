@@ -2082,7 +2082,7 @@ def test_a_row_of_meta_without_impressions_and_with_nothing_delivered_reads_zero
     # The totals of the account, the platform side of G0a, read the impressions as Meta sends
     # them; G0a counts a missing sum as zero on either side.
     assert "{{ to_count('impressions') }} as total_impressions" in shape("meta_totals")
-    for other in ("google_ads_v25.sql", "tiktok_v1_3.sql"):
+    for other in ("google_ads_v26.sql", "tiktok_v1_3.sql"):
         text = (DBT / "macros" / "shapes" / other).read_text(encoding="utf-8")
         assert "{{ to_count('metrics__impressions') }} as impressions," in text, other
     # Every table of the insights that meta_stats reads has the columns of the rule, the fields
