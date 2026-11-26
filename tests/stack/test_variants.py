@@ -867,6 +867,8 @@ def test_metabase_takes_its_address_from_the_setting_of_the_site(variant):
 def test_metabase_keeps_its_connections_off_loopback_and_does_not_redirect_itself(variant):
     environment = rendered(variant)["metabase"]["environment"]
     assert environment["MB_WAREHOUSE_ALLOWED_NETWORKS"] == "allow-private"
+    # Custom maps fetch their GeoJSON from public addresses only, as Metabase 0.64.1 did.
+    assert environment["MB_GEOJSON_ALLOWED_NETWORKS"] == "external-only"
     assert "MB_REDIRECT_ALL_REQUESTS_TO_HTTPS" not in environment
 
 
