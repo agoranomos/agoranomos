@@ -2058,6 +2058,54 @@ def test_each_staging_model_of_meta_ads_is_one_call_of_the_shape_that_the_demo_s
     assert "_dlt_load_id as load_id" in totals
 
 
+def test_a_row_of_meta_without_impressions_and_with_nothing_delivered_reads_zero():
+    # The stand saw rows of the insights of the campaigns of Meta without impressions and clicks,
+    # with spend "0", inline_link_clicks "0" and, on one day, a conversion, which kept the
+    # account in quarantine with missing_measure once nonzero kept the row (#408). The shape reads
+    # such a row as 0 impressions, and only such a row: one that lacks its impressions and has a
+    # spend, a link click or a click keeps NULL for G1, which stays the same for every source.
+    macros = (DBT / "macros" / "shapes" / "meta_v26.sql").read_text(encoding="utf-8")
+
+    def shape(name):
+        body = macros[macros.index(f"{{% macro {name}(") :]
+        end = "{%- endmacro %}" if name == "meta_impressions" else "{% endmacro %}"
+        return body[: body.index(end)]
+
+    impressions = shape("meta_impressions")
+    assert impressions.startswith("{% macro meta_impressions() -%}\n    case\n")
+    assert (
+        "        when {{ to_count('impressions') }} is null\n"
+        "            and {{ to_number('spend') }} = 0\n"
+        "            and {{ to_count('inline_link_clicks') }} = 0\n"
+        "            and coalesce({{ to_count('clicks') }}, 0) = 0\n"
+        "            then 0\n"
+        "        else {{ to_count('impressions') }}\n"
+        "    end\n"
+    ) in impressions
+    stats = shape("meta_stats")
+    assert "    {{ meta_impressions() }} as impressions,\n" in stats
+    assert "to_count('impressions')" not in stats
+    # The totals of the account, the platform side of G0a, read the impressions as Meta sends
+    # them; G0a counts a missing sum as zero on either side.
+    assert "{{ to_count('impressions') }} as total_impressions" in shape("meta_totals")
+    for other in ("google_ads_v25.sql", "tiktok_v1_3.sql"):
+        text = (DBT / "macros" / "shapes" / other).read_text(encoding="utf-8")
+        assert "{{ to_count('metrics__impressions') }} as impressions," in text, other
+    # Every table of the insights that meta_stats reads has the columns of the rule, the fields
+    # that the connector hints and the demo writes, so that a table whose loads had no row with
+    # impressions still has the column.
+    hinted = meta_ads_columns()
+    demo = (DBT / "macros" / "demo_source.sql").read_text(encoding="utf-8")
+    for table in ("insights_campaign", "insights_adset", "insights_ad"):
+        assert {"impressions", "clicks", "inline_link_clicks", "spend"} <= hinted[table], table
+        start = demo.index(f"'raw_demo_social.{table}': {{")
+        columns = set(re.findall(r"'(\w+)': '[\w ]+'", demo[start : demo.index("},", start)]))
+        assert {"impressions", "clicks", "inline_link_clicks", "spend"} <= columns, table
+    # G1 still holds a missing impression of every source.
+    metrics = macro_text("quarantine_fact_kinds")
+    assert "{%- set metrics = ['impressions', 'clicks', 'spend'] -%}" in metrics
+
+
 def test_the_columns_of_the_empty_tables_of_meta_ads_are_the_fields_of_its_requests():
     # The empty query of a table before the first load has the columns that dlt makes from the
     # fields of its request, with the load and the ID of each row, which the actions join; a child
