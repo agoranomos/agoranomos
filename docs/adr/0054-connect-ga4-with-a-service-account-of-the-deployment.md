@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Connect GA4 with a service account of the deployment
 
+Superseded in part by [ADR-0055](0055-read-each-day-at-the-end-of-its-window-and-keep-the-loads.md): `last accepted day + 1` in the window of a daily load of "The window and the history", which becomes `last accepted day + 2 − 14`, so that each day that a stop leaves is read again at the full age of its window. The rest of this record stays accepted.
+
 Superseded in part by [ADR-0057](0057-keep-the-default-channel-group-in-the-key-of-the-sessions.md): the key of `core.web_sessions_daily` that "Context and Problem Statement" gives, without `session_default_channel_group`, which the request of "The requests" asks for as `sessionDefaultChannelGroup`, and "no migration is needed" in "Consequences", as GA4 splits the sessions of one campaign of a day between two default channel groups and migration `0013` puts the group into the key. The rest of this record stays accepted.
 
 ## Context and Problem Statement

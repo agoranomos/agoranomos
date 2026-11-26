@@ -101,6 +101,7 @@ nav = [
     { "ADR-0052: Run each stack test once on a pull request, and every one in every combination on main" = "adr/0052-run-each-stack-test-once-on-a-pull-request.md" },
     { "ADR-0053: Connect TikTok with an app of the deployment" = "adr/0053-connect-tiktok-with-an-app-of-the-deployment.md" },
     { "ADR-0054: Connect GA4 with a service account of the deployment" = "adr/0054-connect-ga4-with-a-service-account-of-the-deployment.md" },
+    { "ADR-0055: Read each day at the end of its window, and keep the daily loads for good" = "adr/0055-read-each-day-at-the-end-of-its-window-and-keep-the-loads.md" },
     { "ADR-0057: Keep the default channel group in the key of the sessions of web analytics" = "adr/0057-keep-the-default-channel-group-in-the-key-of-the-sessions.md" },
   ] },
 ]

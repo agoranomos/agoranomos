@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Model the core as narrow facts by grain, with dimensions that keep their versions
 
+Superseded in part by [ADR-0055](0055-read-each-day-at-the-end-of-its-window-and-keep-the-loads.md): "13 months" of the row `core.loads` of "The facts", as the accepted loads of the kinds `window` and `history` stay for good. The rest of this record stays accepted.
+
 Superseded in part by [ADR-0057](0057-keep-the-default-channel-group-in-the-key-of-the-sessions.md): the grain of `core.web_sessions_daily` in "The facts" is property, source, medium, campaign, default channel group and day, and the default channel group is part of its key, which migration `0005` had left out. The rest of this record stays accepted.
 
 ## Context and Problem Statement
