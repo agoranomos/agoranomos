@@ -49,6 +49,9 @@ pytestmark = pytest.mark.skipif(
 THRESHOLD_SECONDS = 2.0
 # How often each card runs after its first run, with the cache of Metabase off.
 REPEATS = 3
+# How often each card runs for the judgment against the threshold: the median of these timings
+# decides, as one timing depends on the runner (audit finding D2, 26 November 2026).
+TIMINGS = 3
 # The clients at once of the profile of an agency (ADR-0040), and how often each opens the overview.
 CLIENTS = 20
 OPENS = 3
@@ -279,23 +282,23 @@ def test_each_card_of_the_dashboard_answers_within_the_threshold(
     metabase_url, session, board, profile
 ):
     # Row 10 of the register: every card with the default filters of the dashboard, the 12 weeks
-    # before this one by week, once and then REPEATS times, each a query of the warehouse.
+    # before this one by week, TIMINGS times, each a query of the warehouse, judged by their median.
     chosen, found = profile
     lines = [
-        "| Tab | Card | First | Then | Median of all | Over 2 s |",
-        "|---|---|---:|---|---:|---|",
+        "| Tab | Card | Timings | Median | Over 2 s |",
+        "|---|---|---|---:|---|",
     ]
     before = load()
     slow = []
     for dashcard in cards(board):
-        times = [run_card(metabase_url, session, board, dashcard) for _ in range(1 + REPEATS)]
+        times = [run_card(metabase_url, session, board, dashcard) for _ in range(TIMINGS)]
         median = statistics.median(times)
         name = dashcard["card"]["name"]
+        timings = ", ".join(f"{t:.2f}" for t in times)
         if median > THRESHOLD_SECONDS:
-            slow.append(f"{name} ({median:.2f} s)")
-        then = ", ".join(f"{t:.2f}" for t in times[1:])
+            slow.append(f"{name} (median {median:.2f} s of {timings} s)")
         lines.append(
-            f"| {tab_name(board, dashcard)} | {name} | {times[0]:.2f} s | {then} s | "
+            f"| {tab_name(board, dashcard)} | {name} | {timings} s | "
             f"{median:.2f} s | {'yes' if median > THRESHOLD_SECONDS else 'no'} |"
         )
     lines += ["", f"Load of the host before → after: {before} → {load()}."]

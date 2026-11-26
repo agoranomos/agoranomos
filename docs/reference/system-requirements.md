@@ -412,6 +412,8 @@ CI does the same in every run of the stack tests, and adds the table to the summ
 
 In the table, `n/a` means that there is nothing to read: a one-shot job that has exited, or a machine without cgroup v2. `unread` means that `docker inspect` or `docker exec` failed for that container, for example because it stopped while the table was made, as a container that the kernel stopped at its limit can: the rest of the table still comes out, and when the limit of a running service is `unread`, so is the total of the limits. A line of `docker stats` that cannot be read is left out, and a note under the table says how many were, such as `1 line of docker stats could not be read and was left out.` The peaks then come from fewer samples, so they can be a little lower than the real ones.
 
+The stack test of the cards times each card three times with the cache of Metabase off and judges it by the median of the three against the 2 seconds of [ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md), as one timing depends on the runner: the same card took 2.66 seconds in one run on 18 November 2026 and 1.45 seconds in another the next day. The report prints the three timings and the median of each card. A card moves to an aggregate only when its median stays over 2 seconds (as of 26 November 2026).
+
 To measure a profile, start a stack without the demo, `COMPOSE_PROFILES=core` in `.env`, with the limits of the profile, and build the model and start it again as the job without the demo of the workflow Stack does, so that Metabase shows the marts and the dashboard Advertising. Then write the synthetic data and measure, in the root of the checkout:
 
 ```bash
