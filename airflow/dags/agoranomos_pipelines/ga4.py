@@ -55,9 +55,9 @@ connection before an answer starts is asked again by dlt; one in the middle of a
 again here, after the file is cut back to where the page began, up to ATTEMPTS times. A property
 that fails leaves nothing in the load, is recorded in the journal as failed with the error, the
 others load, and the load fails at the end with one line that lists the properties and their
-errors (ADR-0035), which Airflow retries; on the last try, the task of the load succeeds when it
-took another property, so that the transform takes it, and the run fails after it (outcome.py).
-What the API returns is data: a campaign name can carry any text, and nothing here acts on it."""
+errors (ADR-0035); the task of the load succeeds when it took another property, so that the
+transform takes it, and the run fails after it (outcome.py). What the API returns is data: a
+campaign name can carry any text, and nothing here acts on it."""
 
 from __future__ import annotations
 
@@ -233,10 +233,10 @@ class AnswerBrokeOff(Ga4Error):
 class PropertiesFailed(Ga4Error):
     """The load took the other properties, if any, and these failed: one line that counts them and
     lists each property with the error of the API (ADR-0004), and loaded, how many properties the
-    load took. Airflow retries the task, as after any other error, and the retry loads every
-    property again; on the last try, the task of the load succeeds when it took one, so that the
-    transform takes them, and the last task of the DAG fails the run with the line, and with none
-    the task fails (outcome.py). The next load takes the days that the failed properties missed."""
+    load took. The task of the load succeeds when it took one, so that the transform takes them,
+    and the last task of the DAG fails the run with the line; with none, the task fails
+    (outcome.py). A retry would repeat the whole load and gain nothing: the next load takes the
+    days that the failed properties missed."""
 
     def __init__(self, line: str, loaded: int) -> None:
         super().__init__(line)

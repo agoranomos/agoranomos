@@ -24,13 +24,11 @@ load never lives longer than the cleanup of the rows of a load that did not end 
 
 The DAG starts paused: a deployment unpauses it with agoranomos_google_ads_daily, once its key and
 its accounts are in place ([Connect Google Ads](docs/how-to/connect-google-ads.md)). An error of
-the API on one account does not stop the others: the load takes them, and its task fails with one
-line that lists the accounts and their errors, which Airflow retries once, five minutes later, as
-after any other error. On the last try, the task succeeds instead when it took an account, so
-that its asset starts the transform for the accounts that it took, while the last task,
-check_accounts, fails the run with the line (outcome.py of the package); when no account loaded,
-the task of the load fails with that line. The failed account leaves no row in the journal, and
-the next cycle takes it again.
+the API on one account does not stop the others: the load takes them, and its task succeeds, so
+that its asset starts the transform for them, while the last task, check_accounts, fails the run,
+without a retry, with one line that lists the accounts and their errors (outcome.py of the
+package); when no account loaded, the task of the load fails with that line. The failed account
+leaves no row in the journal, and the next cycle takes it again.
 """
 
 from __future__ import annotations
@@ -103,12 +101,10 @@ def load_google_ads_intraday() -> str | None:
         # The moment of the read, which gives the current day of each account.
         counts = google_ads.load_intraday(datetime.now(UTC))
     except google_ads.AccountsFailed as failed:
-        # A try that Airflow will retry, five minutes later, raises the failure again, and the
-        # retry reads the current day of every account again. The last try returns the line,
-        # which lists the failed accounts (ADR-0004), when the load took others: check_accounts
-        # fails the run with it, after the transform has started for them. The next cycle takes
-        # the failed accounts again.
-        return outcome.line_of(failed, get_current_context()["ti"])
+        # A retry would repeat the load for nothing, and the next cycle takes the failed accounts
+        # again. The line lists them (ADR-0004): check_accounts fails the run with it, after the
+        # transform has started for the other accounts, if any.
+        return outcome.line_of(failed)
     if counts is None:
         raise AirflowSkipException("no account of google_ads has had a whole load yet")
     return None

@@ -110,10 +110,7 @@ def dag_file(monkeypatch):
             "ti": types.SimpleNamespace(
                 get_dr_count=lambda dag_id, states: (
                     made["asked"].append((dag_id, tuple(states))) or made["active"]
-                ),
-                # The second and last try of a task with retries=1, as the load of the cycle.
-                try_number=2,
-                max_tries=1,
+                )
             ),
         }
         made["active"], made["context"], made["asked"] = 0, context, []
@@ -245,17 +242,8 @@ def test_the_load_skips_without_an_account_to_load_or_after_a_long_wait(dag_file
 
         return load_intraday
 
-    # On the first try, which Airflow retries five minutes later, the failure is raised for the
-    # retry, partial or whole.
-    ti = made["context"]["ti"]
-    ti.try_number = 1
-    for loaded in (1, 0):
-        google_ads.load_intraday = failing(loaded)
-        with pytest.raises(AccountsFailed):
-            load()
-    # On the last try, with one account loaded, the task succeeds, so that its asset starts the
-    # transform, and the last task fails the run with the line.
-    ti.try_number = 2
+    # One account loaded: the task succeeds, so that its asset starts the transform, and the last
+    # task fails the run with the line.
     google_ads.load_intraday = failing(1)
     line = load()
     assert line == "1 of 2 Google Ads accounts failed"

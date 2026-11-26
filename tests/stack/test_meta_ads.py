@@ -6,10 +6,9 @@ totals_differ (G0a of ADR-0035), and a run after it that reads no new load of Me
 the source for the one account that it still holds; an ad that only the statistics name gets a
 stub in its dimension (ADR-0036); and a campaign day with no impressions, link clicks or spend and
 a purchase keeps its row of statistics, whose conversions_primary counts the purchase (ADR-0036).
-A load that the Graph API refuses for one of its two accounts ends as the last try of its task
-does, with the line of the refused account, and the next run of the transform takes the other into
-the core, while the refused one goes to quarantine with load_failed (agoranomos_pipelines/
-outcome.py, ADR-0035).
+A load that the Graph API refuses for one of its two accounts ends as its task does, with the line
+of the refused account, and the next run of the transform takes the other into the core, while
+the refused one goes to quarantine with load_failed (agoranomos_pipelines/outcome.py, ADR-0035).
 
 No load reaches Meta, and no answer comes from a real account: the answers below are faked by hand
 from the reference of the Marketing API v27.0, as tests/unit/test_meta_ads_source.py fakes them,
@@ -143,7 +142,7 @@ TOTALS = {
 # whose answers are a refusal, and fails a request whose token is not in the header Authorization
 # or is in its URL. dlt reads the password of loader from the environment of the container, and
 # the script prints the rows of each table, or, after a load that failed for some accounts, what
-# the last try of the task of the DAG returns then (agoranomos_pipelines/outcome.py).
+# the task of the DAG returns then (agoranomos_pipelines/outcome.py).
 LOAD = """
 import json
 import os
@@ -223,14 +222,10 @@ meta_ads.Client = Graph
 try:
     counts = meta_ads.load(now)
 except meta_ads.AccountsFailed as failed:
-    # As the last try of the task of the DAG ends: with the line, when the load took another
-    # account. A try with no retry left, as the first of a task with retries=0.
-    from types import SimpleNamespace
-
+    # As the task of the DAG ends: with the line, when the load took another account.
     from agoranomos_pipelines import outcome
 
-    last = SimpleNamespace(try_number=1, max_tries=0)
-    print(json.dumps({"line": outcome.line_of(failed, last)}))
+    print(json.dumps({"line": outcome.line_of(failed)}))
 else:
     print(json.dumps(counts, sort_keys=True))
 """
@@ -647,9 +642,9 @@ def test_a_load_that_fails_for_one_account_brings_the_other_into_the_core(env, a
             json.dumps(answers()),
             environment={"META_ADS_ACCESS_TOKEN": TOKEN},
         )
-        # The load took the healthy account and ended as the last try of its task does: with the
-        # line of the refused one, which check_accounts fails the run with, and no exception, so
-        # that the asset of the task starts the transform.
+        # The load took the healthy account and ended as its task does: with the line of the
+        # refused one, which check_accounts fails the run with, and no exception, so that the asset
+        # of the task starts the transform.
         [line] = json.loads(result.stdout.strip().splitlines()[-1]).values()
         assert line.startswith(
             f"1 of 2 Meta ad accounts failed, the other 1 is loaded: Meta ad account {REFUSED}: "

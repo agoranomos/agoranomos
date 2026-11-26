@@ -66,9 +66,8 @@ A load reads each account whole before dlt sees any of it, into a file for each 
 page at a time. An error of the API on one account is caught at the account, which leaves nothing
 in the load; the load takes the other accounts, records the failed account in _agoranomos_loads
 with the status failed and the text of the error, and fails at the end with one line that lists
-the accounts and their errors (ADR-0004, ADR-0035), which Airflow retries; on the last try, the
-task of the load succeeds when it took another account, so that the transform takes it, and the
-run fails after it (outcome.py). What the
+the accounts and their errors (ADR-0004, ADR-0035); the task of the load succeeds when it took
+another account, so that the transform takes it, and the run fails after it (outcome.py). What the
 API returns is data: a campaign name can carry any text, and nothing here acts on it."""
 
 from __future__ import annotations
@@ -391,10 +390,10 @@ class TooMuchData(Slow):
 class AccountsFailed(MetaAdsError):
     """The load took the other accounts, if any, and these failed: one line that counts them and
     lists each account with the error of the API (ADR-0004), and loaded, how many accounts the load
-    took. Airflow retries the task, as after any other error, and the retry loads every account
-    again; on the last try, the task of the load succeeds when it took one, so that the transform
-    takes them, and the last task of the DAG fails the run with the line, and with none the task
-    fails (outcome.py). The next load takes the days that the failed accounts missed."""
+    took. The task of the load succeeds when it took one, so that the transform takes them, and the
+    last task of the DAG fails the run with the line; with none, the task fails (outcome.py). A
+    retry would repeat the whole load and gain nothing: the next load takes the days that the
+    failed accounts missed."""
 
     def __init__(self, line: str, loaded: int) -> None:
         super().__init__(line)
