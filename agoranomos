@@ -1214,7 +1214,7 @@ EOF
   [ -z "$tiktok_problem" ] || problem "$tiktok_problem"
   # The daily scan of Metabase (ADR-0037): a whole hour, as Metabase starts a daily scan at the
   # start of an hour. metabase-init checks it too, for a start through plain docker compose.
-  case "$(setting METABASE_SCAN_TIME 12:00)" in
+  case "$(setting METABASE_SCAN_TIME 16:00)" in
     [01][0-9]:00 | 2[0-3]:00) ;;
     *) problem "METABASE_SCAN_TIME in .env must be a whole hour as HH:00, such as 12:00: Metabase starts a daily scan at the start of an hour" ;;
   esac
