@@ -114,7 +114,6 @@ The DAG `agoranomos_maintenance` keeps the warehouse and the service data in sha
 | `drop_old_journal_months` | Drops the months of the journals of restatements older than 13 months, through `core.drop_partition` | `transformer` |
 | `clean_dlt_loads` | Deletes the rows of `_dlt_loads` of each raw schema older than 90 days, and those of the loads of the kind `intraday` older than 14 days, but those that a load, dlt or the next pin still reads | `loader` |
 | `clean_core_loads` | Deletes the accepted rows of the kind `intraday` of `core.loads` older than 14 days that no fact reads, but those that a run or a load still reads; the rows of the kinds `window` and `history` stay, as the facts of the days of their windows name them | `transformer` |
-| `clean_cosmos_variables` | Deletes the Airflow Variables `cosmos_xcom_backup__…` of the runs older than 90 days, which the watcher mode of Cosmos leaves after a failed run when its task store failed too | the task, through the Task SDK |
 | `clean_ops` | Deletes the results of the runs of dbt older than 90 days from the tables of elementary in `ops`; the dashboard reads the last 30 days | `transformer` |
 | `clean_airflow_logs` | Deletes the logs of Airflow older than 30 days | the user of the tasks |
 | `record_the_disk` | Records the room on the disk, the size of the warehouse and of its core, and the partitions of the window of restatements with the room inside them, in `ops.ops_disk` | `transformer` |

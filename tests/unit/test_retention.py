@@ -279,7 +279,6 @@ def test_the_tasks_of_the_maintenance_do_not_wait_for_each_other():
         "clean_dlt_loads()",
         "clean_core_loads()",
         "drop_old_journal_months()",
-        "clean_cosmos_variables()",
         "make_partitions()",
         "analyze_the_facts()",
         "freeze_old_months()",

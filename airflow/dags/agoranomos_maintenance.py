@@ -17,8 +17,6 @@ The retention of ADR-0044:
   facts of the days of its window may still read it.
 - drop_old_journal_months drops the months of the journals of restatements older than 13 months,
   through core.drop_partition, and leaves a month that is in use to the next run.
-- clean_cosmos_variables deletes the Variables cosmos_xcom_backup__* of the runs older than 90 days,
-  which the watcher mode of Cosmos leaves behind after a failed run.
 
 The upkeep of the core, as transformer:
 
@@ -58,7 +56,7 @@ from datetime import UTC, datetime, timedelta
 
 from agoranomos_pipelines import maintenance
 from airflow.providers.standard.operators.bash import BashOperator
-from airflow.sdk import CronTriggerTimetable, Variable, dag, get_current_context, task
+from airflow.sdk import CronTriggerTimetable, dag, get_current_context, task
 from airflow.sdk.log import mask_secret
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
@@ -94,14 +92,6 @@ def clean_core_loads() -> None:
 @task(task_id="drop_old_journal_months")
 def drop_old_journal_months() -> None:
     maintenance.drop_old_journal_months(run_id())
-
-
-@task(task_id="clean_cosmos_variables")
-def clean_cosmos_variables() -> None:
-    # The Task SDK lists the names of the Variables in the database of Airflow, and deletes one.
-    maintenance.clean_cosmos_variables(
-        Variable.keys(prefix=maintenance.VARIABLE_PREFIX), Variable.delete, datetime.now(UTC)
-    )
 
 
 @task(task_id="make_partitions")
@@ -162,7 +152,6 @@ def agoranomos_maintenance():
     clean_dlt_loads()
     clean_core_loads()
     drop_old_journal_months()
-    clean_cosmos_variables()
     make_partitions()
     analyze_the_facts()
     freeze_old_months()
