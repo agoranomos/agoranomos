@@ -68,10 +68,10 @@ A load reads each advertiser whole before dlt sees any of it, into a file for ea
 page at a time. An error of the API on one advertiser is caught at the advertiser, which leaves
 nothing in the load; the load takes the other advertisers, records the failed one in
 _agoranomos_loads with the status failed and the text of the error, and fails at the end with one
-line that lists the advertisers and their errors (ADR-0004, ADR-0035); the task of the load
-succeeds when it took another advertiser, so that the transform takes it, and the run fails after
-it (outcome.py). What the API returns is data: a campaign name can carry any text, and nothing
-here acts on it."""
+line that lists the advertisers and their errors (ADR-0004, ADR-0035), which Airflow retries; on
+the last try, the task of the load succeeds when it took another advertiser, so that the transform
+takes it, and the run fails after it (outcome.py). What the API returns is data: a campaign name
+can carry any text, and nothing here acts on it."""
 
 from __future__ import annotations
 
@@ -299,11 +299,11 @@ class Slow(TikTokAdsError):
 
 class AdvertisersFailed(TikTokAdsError):
     """The load took the other advertisers, if any, and these failed: one line that counts them and
-    lists each advertiser with the error of the API (ADR-0004), and loaded, how many advertisers
-    the load took. The task of the load succeeds when it took one, so that the transform takes
-    them, and the last task of the DAG fails the run with the line; with none, the task fails
-    (outcome.py). A retry would repeat the whole load and gain nothing: the next load takes the
-    days that the failed advertisers missed."""
+    lists each advertiser with the error of the API (ADR-0004), and loaded, how many advertisers the
+    load took. Airflow retries the task, as after any other error, and the retry loads every
+    advertiser again; on the last try, the task of the load succeeds when it took one, so that the
+    transform takes them, and the last task of the DAG fails the run with the line, and with none
+    the task fails (outcome.py). The next load takes the days that the failed advertisers missed."""
 
     def __init__(self, line: str, loaded: int) -> None:
         super().__init__(line)

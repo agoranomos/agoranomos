@@ -79,8 +79,9 @@ part of one would lose the rest; an answer whose connection breaks after it has 
 again first, up to three times in all. The load takes the other accounts, records the failed
 account in _agoranomos_loads with the status failed and the text of the error, keeps its row of
 customers as the last load saw it, and fails at the end with one line that lists the accounts and
-their errors (ADR-0004, ADR-0035); the task of the load succeeds when it took another account, so
-that the transform takes it, and the run fails after it (outcome.py). What the API returns is
+their errors (ADR-0004, ADR-0035), which Airflow retries; on the last try, the task of the load
+succeeds when it took another account, so that the transform takes it, and the run fails after it
+(outcome.py). What the API returns is
 data: a campaign name can carry any text, and nothing here acts on it."""
 
 from __future__ import annotations
@@ -352,10 +353,10 @@ class AnswerBrokeOff(GoogleAdsError):
 class AccountsFailed(GoogleAdsError):
     """The load took the other accounts, if any, and these failed: one line that counts them and
     lists each account with the error of the API (ADR-0004), and loaded, how many accounts the load
-    took. The task of the load succeeds when it took one, so that the transform takes them, and the
-    last task of the DAG fails the run with the line; with none, the task fails (outcome.py). A
-    retry would repeat the whole load and gain nothing: the next load takes the days that the
-    failed accounts missed."""
+    took. Airflow retries the task, as after any other error, and the retry loads every account
+    again; on the last try, the task of the load succeeds when it took one, so that the transform
+    takes them, and the last task of the DAG fails the run with the line, and with none the task
+    fails (outcome.py). The next load takes the days that the failed accounts missed."""
 
     def __init__(self, line: str, loaded: int) -> None:
         super().__init__(line)

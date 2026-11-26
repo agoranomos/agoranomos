@@ -25,12 +25,13 @@ The DAG starts paused: a deployment unpauses it once its token and its accounts 
 ([Connect Meta](docs/how-to/connect-meta.md)). A load without a token, or without an account of
 meta_ads in clients.toml, fails with a line that says so. An error of the API on one account does
 not stop the others: the load takes them and records the failed account in its journal
-(ADR-0035). The task of the load then succeeds, so that its asset starts the transform for the
-accounts that it took, and the last task, check_accounts, fails the run, without a retry, with one
-line that lists the accounts and their errors, so that the alert of a failed run goes (outcome.py
-of the package); when no account loaded, the task of the load fails with that line and starts
-nothing. A retry of the task, after any other error, loads every account again. A repeat is safe:
-each load replaces the days that it covers.
+(ADR-0035). The task then fails with one line that lists the accounts and their errors, and
+Airflow retries the whole load, as after any other error, so that an outage that clears within the
+retries leaves no account behind. On the last try, the task of the load succeeds instead when it
+took an account, so that its asset starts the transform for the accounts that it took, and the
+last task, check_accounts, fails the run with the line, so that the alert of a failed run goes
+(outcome.py of the package); when no account loaded, the task of the load fails with that line and
+starts nothing. A repeat is safe: each load replaces the days that it covers.
 """
 
 from __future__ import annotations
@@ -100,10 +101,12 @@ def load_meta_ads() -> str | None:
             mask=mask_secret,
         )
     except meta_ads.AccountsFailed as failed:
-        # A retry would repeat the load for nothing, and the next load takes the days that the
-        # failed accounts missed. The line lists them (ADR-0004): check_accounts fails the run
-        # with it, after the transform has started for the other accounts, if any.
-        return outcome.line_of(failed)
+        # A try that Airflow will retry raises the failure again, and the retry loads every
+        # one of the accounts again. The last try returns the line, which lists the failed
+        # accounts (ADR-0004), when the load took others: check_accounts fails the run with
+        # it, after the transform has started for them. The next load takes the days that the
+        # failed accounts missed.
+        return outcome.line_of(failed, context["ti"])
     return None
 
 

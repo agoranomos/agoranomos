@@ -24,12 +24,13 @@ The DAG starts paused: a deployment unpauses it once its key and its properties 
 ([Connect GA4](docs/how-to/connect-ga4.md)). A load without a key, or without a property of ga4 in
 clients.toml, fails with a line that says so. An error of the API on one property does not stop
 the others: the load takes them and records the failed property in its journal (ADR-0035). The
-task of the load then succeeds, so that its asset starts the transform for the properties that it
-took, and the last task, check_accounts, fails the run, without a retry, with one line that lists
-the properties and their errors, so that the alert of a failed run goes (outcome.py of the
-package); when no property loaded, the task of the load fails with that line and starts nothing. A
-retry of the task, after any other error, loads every property again. A repeat is safe: each load
-replaces the days that it covers.
+task then fails with one line that lists the properties and their errors, and Airflow retries the
+whole load, as after any other error, so that an outage that clears within the retries leaves no
+property behind. On the last try, the task of the load succeeds instead when it took a property,
+so that its asset starts the transform for the properties that it took, and the last task,
+check_accounts, fails the run with the line, so that the alert of a failed run goes (outcome.py of
+the package); when no property loaded, the task of the load fails with that line and starts
+nothing. A repeat is safe: each load replaces the days that it covers.
 """
 
 from __future__ import annotations
@@ -91,10 +92,12 @@ def load_ga4() -> str | None:
     try:
         ga4.load(context["dag_run"].run_after, portion=portion)
     except ga4.PropertiesFailed as failed:
-        # A retry would repeat the load for nothing, and the next load takes the days that the
-        # failed properties missed. The line lists them (ADR-0004): check_accounts fails the run
-        # with it, after the transform has started for the other properties, if any.
-        return outcome.line_of(failed)
+        # A try that Airflow will retry raises the failure again, and the retry loads every
+        # one of the properties again. The last try returns the line, which lists the failed
+        # properties (ADR-0004), when the load took others: check_accounts fails the run with
+        # it, after the transform has started for them. The next load takes the days that the
+        # failed properties missed.
+        return outcome.line_of(failed, context["ti"])
     return None
 
 

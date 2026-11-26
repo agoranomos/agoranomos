@@ -27,11 +27,11 @@ time, and the one transform takes the loads that have ended one run at a time.
 The DAG starts paused: a deployment unpauses it with agoranomos_meta_ads_daily, once its token and
 its accounts are in place ([Connect Meta](docs/how-to/connect-meta.md)). A run of the load of a
 portion that fails for some of its accounts, also for one whose report run ran out of the time of
-the portion, fails, and its asset starts the transform for the others, whose end starts the next
-plan; one that fails for every account fails its task, which updates no asset, so the next plan
-comes after the next run of the transform that succeeds, which another load starts. The failed
-account then holds up no other: the portions go on without it, and its quarter comes again once
-the other accounts hold their history and a load of its usual window has loaded it since
+the portion, fails after its retries, and its asset starts the transform for the others, whose end
+starts the next plan; one that fails for every account fails its task, which updates no asset, so
+the next plan comes after the next run of the transform that succeeds, which another load starts.
+The failed account then holds up no other: the portions go on without it, and its quarter comes
+again once the other accounts hold their history and a load of its usual window has loaded it since
 (agoranomos_pipelines/history.py, failures). Ops shows the progress (ops.ops_history).
 """
 
