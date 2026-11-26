@@ -1023,6 +1023,25 @@ def test_an_error_of_throttling_waits_and_asks_again(meta):
     assert paths(graph).count(("GET", f"act_{ONE}/adsets")) == 3
 
 
+def test_the_wait_after_an_error_says_that_the_error_causes_it(meta, caplog):
+    module, _, made, extensions = meta
+    caplog.set_level(logging.INFO, logger="agoranomos_pipelines.meta_ads")
+    refused = {"count": 0}
+
+    def before(method, path, params):
+        if path == f"act_{ONE}/adsets" and refused["count"] < 1:
+            refused["count"] += 1
+            return error(2, 1504044, "Service temporarily unavailable")
+        return None
+
+    made["graph"].before = before
+    module.load(NOW, extensions)
+    assert made["waits"] == [60]
+    assert "waiting 60 s because of the error, not the use of the account (at " in caplog.text
+    assert "asking again, attempt 2 of 5" in caplog.text
+    assert "the use of the account is at" not in caplog.text
+
+
 @pytest.mark.parametrize(("code", "subcode"), [(613, 1487742), (4, 1504022), (80000, 2446079)])
 def test_throttling_that_does_not_end_fails_the_account_after_five_calls(meta, code, subcode):
     module, _, made, extensions = meta
