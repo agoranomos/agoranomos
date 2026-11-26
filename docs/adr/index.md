@@ -103,4 +103,4 @@ agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0054](0054-connect-ga4-with-a-service-account-of-the-deployment.md) | Connect GA4 with a service account of the deployment | accepted | 2026-11-20 |
 | [0055](0055-read-each-day-at-the-end-of-its-window-and-keep-the-loads.md) | Read each day at the end of its window, and keep the daily loads for good | accepted | 2026-11-24 |
 | [0056](0056-count-roas-by-the-value-of-the-primary-actions.md) | Count ROAS by the value of the primary conversion actions | accepted | 2026-11-26 |
-| [0059](0059-upgrade-from-the-previous-minor-release-only.md) | Upgrade from the previous minor release only | proposed | 2026-11-26 |
+| [0059](0059-upgrade-from-the-previous-minor-release-only.md) | Upgrade from the previous minor release only | accepted | 2026-11-26 |
