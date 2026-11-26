@@ -20,7 +20,7 @@ period of 1 or 2 hours, the move that keeps the most runs is taken and the runs 
 closer are left out (run_hours). The hours stay the same every day, also when the zone of the
 backup changes to summer time. An empty BACKUP_TIME or BACKUP_TZ takes 03:00 or UTC, as compose.yaml
 does, and a value that is not a time of day or a time zone stops the parse of the DAG, as
-./agoranomos stops before up with the ops profile.
+./agoranomos stops before up in every mode, with or without the ops profile.
 """
 
 from __future__ import annotations
