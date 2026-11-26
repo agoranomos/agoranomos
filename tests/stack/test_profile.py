@@ -551,6 +551,13 @@ def test_the_lists_of_a_whole_load_beside_the_core_of_the_profile(env, airflow_u
     for view in views:
         if LIST_READERS.match(view.split(".")[1]):
             read[view.split(".")[1]] = explain_view(env, view)
+    # The plan of the slowest of them, for the report.
+    slowest_view = max(read, key=lambda view: read[view][1])
+    plan = warehouse_output(
+        env,
+        f"EXPLAIN (ANALYZE) SELECT * FROM staging.{slowest_view}",  # noqa: S608 (a name of the catalog)
+        "transformer",
+    )
     runs["Second whole load"] = transform(env, airflow_url, token)
     after = load()
     quarantined = warehouse_output(
@@ -616,6 +623,16 @@ def test_the_lists_of_a_whole_load_beside_the_core_of_the_profile(env, airflow_u
         + " | ".join(f"{times[n].get(node, ('', 0.0))[1]:.2f} s" for n in names)
         + " |"
         for node, _ in slowest
+    ]
+    lines += [
+        "",
+        f"<details><summary>The plan of {slowest_view}</summary>",
+        "",
+        "```",
+        *plan.splitlines(),
+        "```",
+        "",
+        "</details>",
     ]
     report(f"The lists of a whole load, {shape(chosen, found)}", lines)
     listed = {kind: 0 for kind in rows}
