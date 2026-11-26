@@ -115,7 +115,7 @@ dbt Core with dbt-postgres does the transformations, with tests from the first d
 * Non-additive metrics, such as reach and frequency, are to be separate period facts with calendar keys.
 * Money is kept in the currency of the ad account, and a view of the marts converts it into one reporting currency at the rate of the day of its row, and each day is the day of the time zone of the ad account.
 * The facts carry the current names of campaigns, and a view keeps the names that each campaign had, from the versions that the core keeps.
-* One deployment holds the data of one business, and clients group its ad accounts ([ADR-0024](../adr/0024-one-deployment-is-one-business.md)).
+* One deployment holds the data of one business, and clients group its ad accounts ([ADR-0024](../adr/0024-one-deployment-is-one-business.md)). An agency runs one deployment for all its clients, which only its staff read, as no client gets a login ([ADR-0041](../adr/0041-run-an-agency-as-one-deployment.md)).
 
 Decision records: [ADR-0003: Run two PostgreSQL instances](../adr/0003-two-postgres-instances.md) and [ADR-0005: Transform data with dbt Core](../adr/0005-transform-with-dbt-core.md).
 

@@ -40,7 +40,7 @@ In server mode, only the server of Metabase runs, over HTTPS. The server of dbt 
     Run the `claude mcp add` command that it prints, which names the server `agoranomos-metabase`.
 
 3. Sign out of Metabase in your browser, or keep a private window ready: the consent page signs the client in with the session that the browser has, and does not say which account that is.
-4. In Claude Code, run `/mcp`, choose `agoranomos-metabase`, and sign in with your account that is not an admin. On the consent page, check that the client is the one that you registered and that it returns to `localhost`, and tick the scopes of your level ([Which scopes to tick](#which-scopes-to-tick)).
+4. In Claude Code, run `/mcp`, choose `agoranomos-metabase`, and sign in with your account that is not an admin. On the consent page, check that the client is the one that you registered and that it returns to `localhost`, and untick the scopes that your level does not need ([Which scopes to tick](#which-scopes-to-tick)).
 
 Claude Code also gets the skills of the project in `.claude/skills/`, which it uses when a request fits, or when you type the name after `/`:
 
@@ -60,9 +60,9 @@ Claude Code also gets the skills of the project in `.claude/skills/`, which it u
     It prints the client ID and the address of the server: the site followed by `/api/mcp`. One client serves everyone who connects through it.
 
 2. In Claude, open Customize > Connectors and add a custom connector with that address. Under its advanced settings, choose your own OAuth client, and enter the client ID with no secret. On a Team or Enterprise plan, an Owner adds it in Organization settings > Connectors.
-3. Each person connects it and signs in with their own account that is not an admin, in a private window or after signing out of Metabase. On the consent page, check the name of the client and that it returns to `claude.ai`, and allow it.
+3. Each person connects it and signs in with their own account that is not an admin, in a private window or after signing out of Metabase. On the consent page, check the name of the client and that it returns to `claude.ai`, untick the scopes that their level does not need, and allow it.
 
-The Claude apps answer questions and build queries, but they cannot save questions or dashboards, whatever the level ([Which scopes to tick](#which-scopes-to-tick)).
+The Claude apps answer questions and build queries. Whether they save questions and dashboards, where the level allows it, depends on the scopes that the person leaves ticked ([Which scopes to tick](#which-scopes-to-tick)).
 
 ## Connect another client
 
@@ -76,20 +76,20 @@ Then add the server to the client with the address that the command prints, and 
 
 ## Which scopes to tick
 
-The consent page of Metabase always grants `agent:resource:read`, `agent:content:read` and `agent:query:run`. Tick others only as your level needs:
+The consent page of Metabase lists the scopes that the client asks for, each of them ticked. It always grants `agent:content:read` and `agent:query:run`, which cannot be unticked. Before you allow the client, untick the others that your level does not need:
 
-| Level of your account | Also tick |
+| Level of your account | Leave ticked as well |
 |---|---|
 | `answers` | Nothing |
 | `explore` | `agent:content:write`, only if the client is to save questions in your own collection |
 | `build` | `agent:content:write` |
 
-Never tick `agent:sql:run`, which this release does not use, nor `agent:delivery:write` or `mb:full`, the whole REST API of Metabase.
+Always untick `agent:sql:run`, which this release does not use, and `agent:delivery:write`. `mb:full`, the whole REST API of Metabase, is not offered to a client that `./agoranomos ai connect` registered; never allow a client that asks for it.
 
-The first consent page shows only the three scopes that are always granted: a client asks first for those that the MCP server of Metabase lists for itself. When Metabase then refuses a call that writes, as of October 2026 ([ADR-0031](../adr/0031-register-and-revoke-the-oauth-clients-of-metabase-with-the-script.md)):
+A client asks first for the scopes that the MCP server of Metabase lists for itself, which are all five as of Metabase 0.64.9.1 (November 2026; from 0.64.3, [metabase/metabase#84066](https://github.com/metabase/metabase/pull/84066)). So clicking Allow without unticking grants all five, up to the permissions of your account. A client that you authorized under Metabase 0.64.1 keeps the scopes that it got then, which were only those that are always granted unless you ticked more. When Metabase refuses a call that writes, as of October 2026 ([ADR-0031](../adr/0031-register-and-revoke-the-oauth-clients-of-metabase-with-the-script.md)):
 
 - **Claude Code** may say that its token has expired. Run `/mcp`, choose `agoranomos-metabase` and Re-authenticate: the consent page then also offers `agent:content:write`.
-- **The Claude apps** say to reconnect the connector, but reconnecting asks for the same three scopes, so they cannot save questions or dashboards. They answer questions and build queries at every level; to save, use Claude Code or Metabase itself.
+- **The Claude apps** say to reconnect the connector. Under Metabase 0.64.1 reconnecting asked for the same scopes again; with 0.64.9.1 it asks for all five, which agoranomos has not checked with the apps yet.
 
 The permissions of your account are the limit, whatever you tick: a scope is a hint, and Metabase refuses a call beyond your permissions however the client asks. That is why an admin does not connect a client: an admin account has every permission.
 
