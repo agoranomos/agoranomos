@@ -88,10 +88,13 @@ GROUPS: tuple[tuple[str, ...], ...] = (
         "test_profile.py",
         "test_server.py",
     ),
-    # 6: the quarantine, Meta, the restatements, the final days, the flags of the loads, the short
-    # cycle of the demo, Airflow and the dashboard Web analytics.
+    # 6: the quarantine, the rates of the file, Meta, the restatements, the final days, the flags
+    # of the loads, the short cycle of the demo, Airflow and the dashboard Web analytics.
     (
         "test_quarantine.py",  # 14, and 14 to 15
+        # Two loads of demo_social and three runs of the transform: about 20 minutes by
+        # test_quarantine.py, not measured yet (26 November 2026).
+        "test_rates_of_the_file.py",
         "test_meta_ads.py",  # 8, and 6 to 9
         "test_restatements.py",  # 8, and 6 to 7
         # No run of the transform: a few seconds (C8a of #228, 20 November 2026, on a Mac).
