@@ -138,6 +138,8 @@ A backup on the same server is lost with the server: copy the backups to another
 
 ## Update
 
+A release upgrades from the newest release of the previous minor version, such as v0.7.0 from v0.6.0 ([ADR-0059](../adr/0059-upgrade-from-the-previous-minor-release-only.md)). A server that runs an older release takes the newest release of each minor version in turn, each with the commands below and its own backup, as [Update from an older release](run-locally.md#update-from-an-older-release) says, and copies the backups to another machine after each step.
+
 Note the commit that you run now, and take a backup, before you update the checkout: the backup records the images of the checkout as they are when it runs, and a restore needs the checkout at the commit that took it. Put the tag of the release that you update to in place of `<tag>`, such as `v0.6.0`; after `git fetch --tags`, `git tag --sort=-v:refname | head -n 1` names the newest: <!-- x-release-please-version -->
 
 ```bash
