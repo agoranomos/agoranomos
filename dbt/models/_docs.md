@@ -166,7 +166,7 @@ Whether the rate of the row is the last published one before its day, on a day w
 {% enddocs %}
 
 {% docs loaded_at %}
-When the load of the ad platform or the web analytics that wrote the row into the core ended, from core.loads; none once the journal of the loads no longer keeps that load.
+When the load of the ad platform or the web analytics that wrote the row into the core ended, from core.loads, which keeps each load that a row of the core names.
 {% enddocs %}
 
 {% docs is_account_active %}
@@ -458,7 +458,7 @@ Whether the day is still in progress in its account, as a load of the kind intra
 {% enddocs %}
 
 {% docs is_final %}
-Whether the row is final, as no daily load takes its day again: true when the day on which the load that wrote the row ended, in the time zone of the account or the property, is at least the window of restatements of its platform after the day of the row, the days of restatement_window_days in ad_platforms, as a daily load takes again only the days of that window. A recent row is not final because its platform may still change the day, often its conversions, and the next daily load takes the day again. The column follows the load and not the calendar: a day that a load took within the window before a stop of the stack longer than the window stays not final, as no load takes it again. A row that a load of the history took when its day was already older than the window is final at once, and a partial day (is_partial_day) is never final. A row whose load or platform the warehouse no longer holds is not final, rather than none.
+Whether the row is final, as no daily load takes its day again: true when the day on which the load that wrote the row ended, in the time zone of the account or the property, is at least the window of restatements of its platform after the day of the row, the days of restatement_window_days in ad_platforms, as a daily load takes again only the days of that window. A recent row is not final because its platform may still change the day, often its conversions, and the next daily load takes the day again. The column follows the load and not the calendar: a daily load takes the day again until one reads it at the age of the window or more, which makes it final, as the window of a daily load starts a day earlier for each daily load that was missed before it, so a missed load or a stop of the stack of any length leaves no day not final for good. A row that a load of the history took when its day was already older than the window is final at once, and a partial day (is_partial_day) is never final. A row whose load or platform the warehouse no longer holds is not final, rather than none.
 {% enddocs %}
 
 {% docs is_subject_to_thresholding %}

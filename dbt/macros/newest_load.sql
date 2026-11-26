@@ -68,8 +68,8 @@ join (
       and would otherwise replace a whole day with a partial one.
     * Of the accepted loads, only those newer than the oldest pinned load of the account of their
       rank count, as only such a load can win a day of a pinned one of that rank: the accepted
-      loads of 13 months would otherwise unroll about 180 windows of 90 days for each account
-      (#191). An accepted whole load wins a day of a pinned intraday load whatever their load ids,
+      loads, which core.loads keeps for good (ADR-0055), would otherwise unroll a window of up
+      to 90 days for each daily load of the account since its first (#191). An accepted whole load wins a day of a pinned intraday load whatever their load ids,
       so it counts too where its window meets that of a pinned intraday load of the account, for
       those days only, and the day is then not read.
     * A failed account has no window, and its row is passed over.
