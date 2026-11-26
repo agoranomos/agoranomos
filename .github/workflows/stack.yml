@@ -501,6 +501,8 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           # One line: the state, the ID of the run, the commit, the status or conclusion of the run.
+          # The $ names are variables of jq, which the shell is not to expand.
+          # shellcheck disable=SC2016
           pick='[.[] | select(.event == "push" or .event == "schedule" or .event == "workflow_dispatch")]
             | ([.[] | select(.event == "push")][0].headSha) as $head
             | if $head == null then "none" else
