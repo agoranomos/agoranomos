@@ -6,7 +6,9 @@
 -- an account that the settings name again is active again, and ./agoranomos data forget, planned
 -- for v0.9, is to delete its data. It runs with dim_account, which sets the activity of each
 -- account from the settings on every run, and reads the facts as the runs before left them, as
--- the checks of G1a do.
+-- the checks of G1a do. It is the one warning about an account that the settings do not name,
+-- which belongs to the client unassigned (ADR-0024): the connectors load only the accounts that
+-- the settings name, so such an account holds data only from before it left them.
 {{ config(severity='warn') }}
 select a.platform, a.account_id
 from {{ ref('dim_account') }} as a
