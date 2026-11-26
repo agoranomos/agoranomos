@@ -21,7 +21,7 @@ The CeleryExecutor variant needs more: its broker and its worker come on top of 
 
 ## Profiles
 
-The resources above and the defaults of `.env.example` are those of one business. [ADR-0040](../adr/0040-size-the-stack-by-profiles-and-derive-the-settings-of-postgresql.md) names two larger scales, an agency and the limit of one server, each with its server and its limit of `warehouse-db`, from which `./agoranomos` derives the settings of PostgreSQL ([Configuration](configuration.md#the-settings-of-postgresql-of-the-warehouse)). The block "Agency profile" of `.env.example` holds the limits of an agency, commented out: set each of its lines in `.env` in place of the same setting, and run `./agoranomos up`.
+The resources above and the defaults of `.env.example` are those of one business. [ADR-0040](../adr/0040-size-the-stack-by-profiles-and-derive-the-settings-of-postgresql.md) names two larger scales, an agency, which runs one deployment for all its clients and which only its staff read ([ADR-0041](../adr/0041-run-an-agency-as-one-deployment.md)), and the limit of one server, each with its server and its limit of `warehouse-db`, from which `./agoranomos` derives the settings of PostgreSQL ([Configuration](configuration.md#the-settings-of-postgresql-of-the-warehouse)). The block "Agency profile" of `.env.example` holds the limits of an agency, commented out: set each of its lines in `.env` in place of the same setting, and run `./agoranomos up`.
 
 | Profile | Accounts | Rows of ads a day | Data over 36 months | Active queries | Server | `WAREHOUSE_DB_MEMORY` | Limits in server mode | How it is known |
 |---|---|---:|---:|---:|---|---:|---:|---|
