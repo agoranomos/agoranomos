@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-26
 decision-makers: Andrei Gromov
 ---
@@ -52,7 +52,7 @@ For the names in Metabase, with the value of the primary actions:
 
 ## Decision Outcome
 
-Recommended, for the maintainer to accept or change: "The value of the primary actions" and "`Primary ROAS` for the primary actions beside `ROAS` for the own metric". The first gives every platform a ROAS from what it reports by action, over the same actions as the conversions of the dashboard. The second follows the pair of conversions that the marts already have, so no metric of today changes its meaning, and the dashboard shows the new one wherever it shows the conversions of the primary actions.
+The maintainer chose on 26 November 2026: "The value of the primary actions" and "`Primary ROAS` for the primary actions beside `ROAS` for the own metric". The first gives every platform a ROAS from what it reports by action, over the same actions as the conversions of the dashboard. The second follows the pair of conversions that the marts already have, so no metric of today changes its meaning, and the dashboard shows the new one wherever it shows the conversions of the primary actions.
 
 In practice this means:
 
