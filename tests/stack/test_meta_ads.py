@@ -485,6 +485,11 @@ def test_a_load_of_meta_reaches_the_core_and_the_marts(env, airflow_url, token):
             "SELECT count(DISTINCT account_id) || '|' || count(*) || '|' || sum(impressions) "
             "|| '|' || sum(clicks) || '|' || sum(spend) || '|' || sum(conversions_primary) "
             "|| '|' || count(conversions) || '|' || min(currency) "
+            "|| '|' || sum(conversion_value_primary) || '|' || count(conversion_value) "
+            "|| '|' || round(sum(conversion_value_primary_reporting) "
+            "/ nullif(sum(spend_reporting), 0), 6) "
+            "|| '|' || coalesce((sum(conversion_value_reporting) "
+            "/ nullif(sum(spend_reporting), 0))::text, 'none') "
             "FROM marts.ad_stats_campaign_daily WHERE platform = 'meta_ads'",
             "metabase_reader",
         ).split("|")
@@ -494,7 +499,15 @@ def test_a_load_of_meta_reaches_the_core_and_the_marts(env, airflow_url, token):
             spend * days,
             Decimal(4 * days),
         ], shown
-        assert shown[6:] == ["0", "USD"], shown
+        assert shown[6:8] == ["0", "USD"], shown
+        # The value of the primary actions, the purchases of the pixel of the two campaigns that
+        # have one: Primary ROAS has a value on Meta, and ROAS, of the own metric, none
+        # (ADR-0056). The account is in USD, the reporting currency of the stack.
+        purchases = (ACTIONS[CAMPAIGNS[0][0]][1][0], CONVERTED_ACTIONS[1][0])
+        value = sum(Decimal(v["value"]) for v in purchases)
+        assert [Decimal(shown[8]), shown[9]] == [value * days, "0"], shown
+        assert abs(Decimal(shown[10]) - value / spend) <= Decimal("0.000001"), shown
+        assert shown[11] == "none", shown
         # The row of the deleted campaign on each day: its zeros, as Meta gave them, its name from
         # its statistics, and the purchase of the pixel in conversions_primary.
         zeros = rows(

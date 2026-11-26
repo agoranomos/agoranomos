@@ -455,7 +455,9 @@ def test_the_primary_conversions_of_a_campaign_are_a_lateral_join_of_one_row():
     # that does not read them, as an aggregate with no GROUP BY returns one row. The primary
     # actions are an array that the query reads once, a condition of the index of that key. A
     # partial day has no conversions, so the column is none on it, and 0 on a whole day of a
-    # campaign without a primary conversion (ADR-0051, C3a of #223).
+    # campaign without a primary conversion (ADR-0051, C3a of #223). The same lookup sums the value
+    # of those actions, so that a question that reads both columns of the primary actions still
+    # makes one lookup for each row (ADR-0056).
     text = (DBT / "models" / "marts" / "ad_stats_campaign_daily.sql").read_text(encoding="utf-8")
     column = (
         "    cast(\n"
@@ -464,11 +466,19 @@ def test_the_primary_conversions_of_a_campaign_are_a_lateral_join_of_one_row():
         "    ) as conversions_primary,\n"
     )
     assert column in text
-    # Only the column reads the join, so that the planner can leave it out.
-    assert re.findall(r"\bq\.\w+", text) == ["q.conversions_primary"]
+    assert PRIMARY_VALUE_COLUMNS in text
+    # Only the columns of the primary actions read the join, so that the planner can leave it out.
+    assert re.findall(r"\bq\.\w+", text) == [
+        "q.conversions_primary",
+        "q.conversion_value_primary",
+        "q.conversion_value_primary",
+    ]
     assert text.endswith(
         "left join lateral (\n"
-        "    select sum(coalesce(x.all_conversions, x.conversions)) as conversions_primary\n"
+        "    select\n"
+        "        sum(coalesce(x.all_conversions, x.conversions)) as conversions_primary,\n"
+        "        sum(coalesce(x.all_conversion_value, x.conversion_value))\n"
+        "            as conversion_value_primary\n"
         "    from {{ ref('core_ad_conversions_campaign_daily') }} as x\n"
         "    where x.account_sk = f.account_sk\n"
         "        and x.campaign_id = f.campaign_id\n"
@@ -509,16 +519,19 @@ def test_each_view_of_a_fact_ends_with_whether_its_row_is_final():
         whole = "not f.is_partial_day\n        and " if name in PARTIAL_DAY_FACTS else ""
         body = "\n".join(line for line in view.splitlines() if not line.startswith("--"))
         columns = body.split("\nfrom ", 1)[0] + "\nfrom "
-        # The view of sessions has the four flags of GA4 after it (C8b of #228).
+        # The view of sessions has the four flags of GA4 after it (C8b of #228), and the views of
+        # statistics the value of the primary actions (ADR-0056).
         end = "    ) as is_final\nfrom "
-        after = WEB_FLAG_COLUMNS if name in FLAGGED_MARTS else end
+        after = AFTER_IS_FINAL.get(name, end)
         assert columns.endswith(final.format(age=whole + age).replace(end, after)), name
         assert columns.count("is_final") == 1, name
         assert "platforms(ref('seed_ad_platforms'))" in view, name
         assert "left join {{ source('core', 'loads') }} as l\n    on l.load_sk = f.load_sk" in view
-        # The last column of the contract but the flags, with its doc block and its metadata.
+        # The last column of the contract but the flags and the value of the primary actions, with
+        # its doc block and its metadata.
         last = blocks(described[name], 6)
         flags = list(LOAD_FLAGS) if name in FLAGGED_MARTS else []
+        flags = list(PRIMARY_VALUES) if name in STATS_MARTS else flags
         assert list(last)[len(last) - len(flags) - 1 :] == ["is_final", *flags], name
         assert last["is_final"] == (
             "      - name: is_final\n"
@@ -549,6 +562,39 @@ FLAGGED_MARTS = ("web_sessions_daily",)
 WEB_FLAG_COLUMNS = (
     "    ) as is_final,\n" + "".join(f"    l.{flag},\n" for flag in LOAD_FLAGS)[:-2] + "\nfrom "
 )
+# The views of statistics end with the value of the primary conversion actions, after is_final
+# (ADR-0056): that of the campaigns from the lateral join of conversions_primary, 0 on a whole day
+# without a primary conversion and none on a partial day, in the currency of the account and at
+# the rate of its day, as conversion_value_reporting is computed, and none at the lower levels,
+# whose conversions by action are a module (ADR-0036).
+STATS_MARTS = ("ad_stats_campaign_daily", "ad_stats_ad_group_daily", "ad_stats_ad_daily")
+PRIMARY_VALUES = ("conversion_value_primary", "conversion_value_primary_reporting")
+PRIMARY_VALUE_COLUMNS = (
+    "    ) as is_final,\n"
+    "    cast(\n"
+    "        case when not f.is_partial_day then coalesce(q.conversion_value_primary, 0) end\n"
+    "        as numeric(18,6)\n"
+    "    ) as conversion_value_primary,\n"
+    "    cast(\n"
+    "        case when not f.is_partial_day\n"
+    "            then coalesce(q.conversion_value_primary, 0) * r.rate_into_reporting_currency\n"
+    "        end\n"
+    "        as numeric(18,6)\n"
+    "    ) as conversion_value_primary_reporting\n"
+    "from "
+)
+NULL_VALUE_COLUMNS = (
+    "    ) as is_final,\n"
+    "    cast(null as numeric(18,6)) as conversion_value_primary,\n"
+    "    cast(null as numeric(18,6)) as conversion_value_primary_reporting\n"
+    "from "
+)
+AFTER_IS_FINAL = {
+    "web_sessions_daily": WEB_FLAG_COLUMNS,
+    "ad_stats_campaign_daily": PRIMARY_VALUE_COLUMNS,
+    "ad_stats_ad_group_daily": NULL_VALUE_COLUMNS,
+    "ad_stats_ad_daily": NULL_VALUE_COLUMNS,
+}
 
 
 def test_the_flags_of_a_load_go_from_the_journal_through_the_pin_to_the_view_of_sessions():

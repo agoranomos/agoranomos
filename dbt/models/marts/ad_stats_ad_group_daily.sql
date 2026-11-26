@@ -2,8 +2,8 @@
 -- one row of core.ad_stats_ad_group_daily, with the names and states of its dimensions, money in
 -- the currency of the account and in the reporting currency at the rate of its day, when its load
 -- ended and whether the row is final, as ad_stats_campaign_daily has them. The conversions of the
--- primary actions are none at this level: the conversions by action of ad groups are a module
--- (ADR-0036).
+-- primary actions and their value are none at this level: the conversions by action of ad groups
+-- are a module (ADR-0036).
 -- The test of the ad groups against their campaigns reads the view of campaigns, which dbt orders
 -- before it: depends_on: {{ ref('ad_stats_campaign_daily') }}
 select
@@ -44,7 +44,9 @@ select
         (l.finished_at at time zone a.time_zone)::date - f.report_date
             >= p.restatement_window_days,
         false
-    ) as is_final
+    ) as is_final,
+    cast(null as numeric(18,6)) as conversion_value_primary,
+    cast(null as numeric(18,6)) as conversion_value_primary_reporting
 from {{ ref('core_ad_stats_ad_group_daily') }} as f
 left join {{ ref('dim_account') }} as a
     on a.account_sk = f.account_sk
