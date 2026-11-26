@@ -1,8 +1,8 @@
-"""Tests of how a run of the daily load of Google Ads, of Meta, of TikTok or of GA4 ends when some of
-its accounts failed (airflow/dags/agoranomos_pipelines/outcome.py, ADR-0035): the task of the load
-succeeds when it took an account, so that its asset starts the transform for it, and returns the
-line of the failed accounts, with which the last task, check_accounts, fails the run; a load that
-took no account fails its task.
+"""Tests of how a run of the daily load of Google Ads, of Meta, of TikTok or of GA4 ends when some
+of its accounts failed (airflow/dags/agoranomos_pipelines/outcome.py, ADR-0035): the task of the
+load succeeds when it took an account, so that its asset starts the transform for it, and returns
+the line of the failed accounts, with which the last task, check_accounts, fails the run; a load
+that took no account fails its task.
 
 Airflow is not in the development environment, so each DAG file is imported with stand-ins of the
 parts of airflow.sdk that it and the modules of the package use (airflow_stand_in.py), and with a
