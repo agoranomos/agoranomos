@@ -5,8 +5,7 @@ safe to repeat, so that a step that fails leaves its work to the next run:
   the schema ops older than 90 days, the rows of _dlt_loads older than 90 days that no load, no
   state of dlt and no pin needs any more, and those of the loads of the kind intraday older than 14
   days, the accepted rows of the kind intraday of core.loads older than 14 days that no fact
-  reads (ADR-0051), the months of the journals of restatements older than 13 months, and the
-  Variables that the watcher mode of Cosmos leaves behind for a run older than 90 days; the rows
+  reads (ADR-0051), and the months of the journals of restatements older than 13 months; the rows
   of the kinds window and history of core.loads stay, as the facts of the days of their windows
   may still read them;
 - the upkeep of the partitions of the core (ADR-0036, ADR-0039): the partitions of the current
@@ -37,7 +36,7 @@ import re
 import shlex
 import shutil
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -110,23 +109,6 @@ JOURNAL_MONTHS = 13
 INTRADAY_DAYS = 14
 # How long the rows of _dlt_loads stay (ADR-0044), but those that a load, dlt or a pin still needs.
 DLT_LOADS_DAYS = 90
-# The Airflow Variables in which the producer of the watcher mode of Cosmos 1.16.0 keeps the backup
-# of its XComs when its last write to the task store failed, named cosmos_xcom_backup__<DAG>__
-# [<task group>__]<run>, with every character of the ID of the run that is not a letter, a digit, a
-# hyphen or an underscore as _ (cosmos/operators/_watcher/xcom.py). A failed run leaves its
-# Variable behind (astronomer/astronomer-cosmos#2823), and a Variable has no time of its own, so
-# its age is that of the moment in the ID of its run, as Airflow 3.4.0 makes the IDs of the runs:
-# <type>__<ISO moment>, with a random suffix when the run has no logical date (DagRun.
-# generate_run_id, and the types of DagRunType). A Variable of a run older than VARIABLE_DAYS, the
-# time that the database of Airflow keeps a run, goes; one whose name holds no such ID of a run, as
-# a run that a person named, stays.
-VARIABLE_PREFIX = "cosmos_xcom_backup__"
-VARIABLE_DAYS = 90
-VARIABLE_MOMENT = re.compile(
-    r"__(?:backfill|scheduled|manual|operator_triggered|asset_triggered|asset_materialization)"
-    r"__(\d{4})-(\d{2})-(\d{2})T(\d{2})_(\d{2})_(\d{2})"
-)
-
 # The tables of ops into which the maintenance writes what it did, which dbt creates, empty, with
 # their columns (dbt/models/ops), and how long their rows stay, by their column of time.
 # tests/unit/test_maintenance.py compares the columns with the models.
@@ -837,45 +819,6 @@ def clean_core_loads(run_id: str, days: int = INTRADAY_DAYS) -> dict[str, int]:
             )
         record_steps(connection, run_id, steps)
     return deleted
-
-
-def variable_moment(key: str) -> datetime | None:
-    """The moment in the ID of the run of a Variable of the backup of Cosmos, in UTC, or None: the
-    last moment that its name holds, as the ID of the run comes last."""
-    found = VARIABLE_MOMENT.findall(key)
-    if not found:
-        return None
-    try:
-        return datetime(*map(int, found[-1]), tzinfo=UTC)
-    except ValueError:
-        return None
-
-
-def clean_cosmos_variables(
-    keys: Iterable[str],
-    delete: Callable[[str], None],
-    now: datetime,
-    days: int = VARIABLE_DAYS,
-) -> tuple[list[str], list[str]]:
-    """Delete each Variable of the backup of the watcher mode of Cosmos whose run is older than
-    days, through delete, and return the names deleted and those kept for they hold no moment.
-    The names are those that the Task SDK lists with the prefix, from the database of Airflow."""
-    deleted: list[str] = []
-    undated: list[str] = []
-    for key in keys:
-        if not key.startswith(VARIABLE_PREFIX):
-            continue
-        moment = variable_moment(key)
-        if moment is None:
-            undated.append(key)
-            continue
-        if moment < now - timedelta(days=days):
-            delete(key)
-            deleted.append(key)
-    log.info("Deleted %d Variables of Cosmos of runs older than %d days", len(deleted), days)
-    if undated:
-        log.info("Kept %d Variables of Cosmos whose names hold no moment", len(undated))
-    return deleted, undated
 
 
 # The bytes of the heap of each partition of a fact whose month is in the window of restatements,
