@@ -214,21 +214,36 @@ def days_of(params):
 class Graph:
     """The stand-in of the Graph API: each request is (method, url, params), and its answer is what
     the test sets in before, or the default answer of the reference. before(method, path, params)
-    returns a response, or None for the default."""
+    returns a response, or None for the default. tokens holds the token of the header
+    Authorization of each request, or None for one without it; a request that carries the
+    parameter access_token, or a signed one without the header, fails the test, so that no URL or
+    body carries the token."""
 
     def __init__(self):
         self.requests = []
+        self.tokens = []
         self.before = lambda method, path, params: None
         self.headers = {}
         self.polls = 0
         self.runs = []
 
-    def answer(self, method, url, params):
+    def answer(self, method, url, params, headers):
         self.requests.append((method, url, dict(params)))
         parts = urlsplit(url)
         assert parts.hostname == "graph.facebook.com"
         assert parts.path.startswith("/v27.0/")
         path = parts.path.removeprefix("/v27.0/")
+        assert "access_token" not in params, "the token in a URL or a body"
+        assert "access_token" not in parts.query, "the token in a URL"
+        signed = headers.get("Authorization")
+        if path == "oauth/access_token":
+            # The refresh carries its secrets in its query, as Meta documents it, and no header.
+            assert signed is None
+            self.tokens.append(None)
+        else:
+            assert set(headers) == {"Authorization"}
+            assert signed.startswith("Bearer ")
+            self.tokens.append(signed.removeprefix("Bearer "))
         found = self.before(method, path, params)
         if found is not None:
             return found
@@ -393,11 +408,11 @@ def meta(monkeypatch, tmp_path):
         def __init__(self, **settings):
             made["clients"].append(settings)
 
-        def get(self, url, params):
-            return graph.answer("GET", url, params)
+        def get(self, url, params, headers):
+            return graph.answer("GET", url, params, headers)
 
-        def post(self, url, data):
-            return graph.answer("POST", url, data)
+        def post(self, url, data, headers):
+            return graph.answer("POST", url, data, headers)
 
     modules = {
         "dlt": types.ModuleType("dlt"),
@@ -623,11 +638,11 @@ def test_a_load_asks_v27_for_each_account_in_the_order_of_adr_0050(meta):
     assert paths(graph) == [("GET", path) for path in order] + [
         ("GET", path.replace(ONE, TWO)) for path in order
     ]
-    # Eight calls for each account (ADR-0050), and the token of .env, with no proof without the
-    # App Secret, on each.
+    # Eight calls for each account (ADR-0050), and the token of .env in the header of each, with
+    # no proof without the App Secret.
     assert len(graph.requests) == 16
+    assert graph.tokens == [TOKEN] * 16
     for _, _, params in graph.requests:
-        assert params["access_token"] == TOKEN
         assert "appsecret_proof" not in params
     assert made["clients"][0] == {
         "request_timeout": 120,
@@ -743,8 +758,79 @@ def test_a_list_with_deleted_fails_its_account_as_meta_refuses_it(meta, monkeypa
     monkeypatch.setattr(module, "LIST_STATUSES", module.EVERY_STATUS)
     with pytest.raises(module.MetaAdsError, match="2 of 2 Meta ad accounts failed") as raised:
         module.load(NOW, extensions)
-    assert "400 Invalid parameter (code 100, subcode 1815001)" in str(raised.value)
+    # The error gives what Meta writes for a person after its message, as the stand S6 saw it.
+    assert (
+        "400 Invalid parameter; Cannot request deleted objects: Requests for deleted objects are "
+        "not supported at this endpoint (code 100, subcode 1815001)"
+    ) in str(raised.value)
     assert paths(made["graph"])[:2] == [("GET", f"act_{ONE}"), ("GET", f"act_{ONE}/campaigns")]
+
+
+def test_an_error_gives_what_meta_writes_for_a_person_cut_and_scrubbed(meta):
+    # error_user_title and error_user_msg come in the locale of the token, here in Russian, and
+    # are shown as data after the message, each cut to 500 characters, with no secret.
+    module, _, made, extensions = meta
+    long = "x" * 600
+    made["graph"].before = lambda method, path, params: (
+        error(
+            200,
+            None,
+            "Permissions error",
+            title="Нет доступа",
+            text=f"Токен {TOKEN} не видит аккаунт {long}",
+        )
+        if path == f"act_{ONE}"
+        else None
+    )
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load(NOW, extensions)
+    text = str(raised.value)
+    assert f"Meta ad account {ONE}: 400 Permissions error; Нет доступа: Токен *** не видит " in text
+    assert TOKEN not in text
+    # The message of a person is scrubbed, then cut to 500 characters.
+    told = f"Токен *** не видит аккаунт {long}"[:500]
+    assert f"; Нет доступа: {told} (code 200" in text
+    assert "x" * 500 not in text
+    assert text.endswith(" (code 200, subcode None)")
+
+
+@pytest.mark.parametrize("field", ["message", "text"])
+def test_a_token_across_the_cut_of_500_characters_leaves_none_of_it(meta, field):
+    # The token starts 10 characters before the cut of its text: a cut before the scrub would
+    # leave those 10, which no scrub can find.
+    module, _, made, extensions = meta
+    across = "y" * 490 + TOKEN + "z" * 20
+    texts = {"message": across, "title": "A title", "text": "A text"} | {field: across}
+    made["graph"].before = lambda method, path, params: (
+        error(200, None, **texts) if path == f"act_{ONE}" else None
+    )
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load(NOW, extensions)
+    text = str(raised.value)
+    assert "y" * 490 + "***" + "z" * 7 in text
+    assert TOKEN[:4] not in text
+
+
+def test_an_error_without_a_text_for_a_person_reads_as_before(meta):
+    module, _, made, extensions = meta
+    made["graph"].before = lambda method, path, params: (
+        error(200, None, "Permissions error") if path == f"act_{ONE}" else None
+    )
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load(NOW, extensions)
+    assert f"Meta ad account {ONE}: 400 Permissions error (code 200, subcode None)" in str(
+        raised.value
+    )
+
+
+def test_a_title_or_a_text_for_a_person_alone_is_shown_alone(meta):
+    module, _, _, _ = meta
+    scrub = module.Secrets({"secret"}).scrub
+    assert module.for_a_person({"error_user_title": "A title"}, scrub) == "; A title"
+    assert module.for_a_person({"error_user_msg": "A secret", "error_user_title": ""}, scrub) == (
+        "; A ***"
+    )
+    assert module.for_a_person({"message": "An error"}, scrub) == ""
 
 
 def test_the_statistics_of_a_deleted_ad_that_no_list_returns_reach_raw(meta):
@@ -900,7 +986,8 @@ def test_every_page_comes_through_paging_next_with_the_sign_in_of_the_load(meta)
     [_, second] = [
         params for _, url, params in graph.requests if url == f"{BASE}/act_{ONE}/campaigns"
     ]
-    assert second == {"fields": "id,name", "limit": "500", "after": "MQ", "access_token": TOKEN}
+    assert second == {"fields": "id,name", "limit": "500", "after": "MQ"}
+    assert set(graph.tokens) == {TOKEN}
 
 
 def test_a_next_page_on_another_host_fails_the_account_and_sends_it_no_token(meta):
@@ -1000,6 +1087,25 @@ def test_an_error_of_throttling_waits_and_asks_again(meta):
     assert paths(graph).count(("GET", f"act_{ONE}/adsets")) == 3
 
 
+def test_the_wait_after_an_error_says_that_the_error_causes_it(meta, caplog):
+    module, _, made, extensions = meta
+    caplog.set_level(logging.INFO, logger="agoranomos_pipelines.meta_ads")
+    refused = {"count": 0}
+
+    def before(method, path, params):
+        if path == f"act_{ONE}/adsets" and refused["count"] < 1:
+            refused["count"] += 1
+            return error(2, 1504044, "Service temporarily unavailable")
+        return None
+
+    made["graph"].before = before
+    module.load(NOW, extensions)
+    assert made["waits"] == [60]
+    assert "waiting 60 s because of the error, not the use of the account (at " in caplog.text
+    assert "asking again, attempt 2 of 5" in caplog.text
+    assert "the use of the account is at" not in caplog.text
+
+
 @pytest.mark.parametrize(("code", "subcode"), [(613, 1487742), (4, 1504022), (80000, 2446079)])
 def test_throttling_that_does_not_end_fails_the_account_after_five_calls(meta, code, subcode):
     module, _, made, extensions = meta
@@ -1040,7 +1146,8 @@ def test_a_synchronous_request_that_is_too_large_goes_again_as_a_report_run(meta
     [run] = graph.runs
     assert run["level"] == "ad"
     assert json.loads(run["filtering"])[0]["field"] == "ad.effective_status"
-    assert run["access_token"] == TOKEN
+    assert "access_token" not in run
+    assert set(graph.tokens) == {TOKEN}
     # POST, then polls after 5 and 10 seconds, the second completed, then the results.
     asked = paths(graph)
     at = asked.index(("POST", f"act_{ONE}/insights"))
@@ -1053,6 +1160,111 @@ def test_a_synchronous_request_that_is_too_large_goes_again_as_a_report_run(meta
     assert made["waits"] == [5, 10]
     [(rows, _)] = made["pipelines"][0].runs
     assert len([row for row in rows["insights_ad"] if row["account_id"] == ONE]) == 28
+
+
+# The synchronous timeouts of the Ads Insights Error Codes, and the unknown error that the stand S6
+# (#220) saw on the insights of the level adset on 25 November 2026, with the messages of the page.
+SYNC_TIMEOUTS = [
+    (100, 1504018, "Request Timed Out"),
+    (2, 1504038, "Request Timed Out"),
+    (2, 1504044, "Service temporarily unavailable"),
+]
+
+
+def synchronous(graph, account_id, level):
+    return [
+        params
+        for method, url, params in graph.requests
+        if method == "GET"
+        and url == f"{BASE}/act_{account_id}/insights"
+        and params.get("level") == level
+    ]
+
+
+@pytest.mark.parametrize(("code", "subcode", "message"), SYNC_TIMEOUTS)
+def test_a_synchronous_timeout_of_insights_goes_to_a_report_run_with_no_retry(
+    meta, code, subcode, message
+):
+    module, _, made, extensions = meta
+    graph = made["graph"]
+
+    def before(method, path, params):
+        if method == "GET" and path == f"act_{ONE}/insights" and params.get("level") == "adset":
+            return error(code, subcode, message)
+        return None
+
+    graph.before = before
+    module.load(NOW, extensions)
+    # One synchronous request, no wait of throttling, and a report run of the same request.
+    assert len(synchronous(graph, ONE, "adset")) == 1
+    [run] = graph.runs
+    assert run["level"] == "adset"
+    assert json.loads(run["filtering"])[0]["field"] == "adset.effective_status"
+    assert made["waits"] == [5, 10]
+    [(rows, _)] = made["pipelines"][0].runs
+    assert len([row for row in rows["insights_adset"] if row["account_id"] == ONE]) == 28
+    journal = {row["account_id"]: row for row in rows["_agoranomos_loads"]}
+    assert journal[ONE]["status"] == "loaded"
+
+
+@pytest.mark.parametrize("path", [f"act_{ONE}", f"act_{ONE}/adsets"])
+def test_the_unknown_error_on_the_account_or_a_list_still_waits_and_asks_again(meta, path):
+    module, _, made, extensions = meta
+    graph = made["graph"]
+    refused = {"count": 0}
+
+    def before(method, asked, params):
+        if asked == path and refused["count"] < 2:
+            refused["count"] += 1
+            return error(2, 1504044, "Service temporarily unavailable")
+        return None
+
+    graph.before = before
+    module.load(NOW, extensions)
+    assert made["waits"] == [60, 120]
+    assert paths(graph).count(("GET", path)) == 3
+    assert not graph.runs
+
+
+def test_the_unknown_error_on_the_results_of_a_report_run_waits_and_asks_again(meta):
+    module, _, made, extensions = meta
+    graph = made["graph"]
+    refused = {"count": 0}
+
+    def before(method, path, params):
+        if path == f"{RUN_ID}/insights" and refused["count"] < 2:
+            refused["count"] += 1
+            return error(2, 1504044, "Service temporarily unavailable")
+        return None
+
+    graph.before = before
+    portion = module.Portion((ONE,), date(2026, 1, 1), date(2026, 3, 31))
+    module.load(NOW, extensions, portion=portion)
+    assert [run["level"] for run in graph.runs] == ["account", "campaign", "adset", "ad"]
+    assert paths(graph).count(("GET", f"{RUN_ID}/insights")) == 6
+    assert made["waits"][2:4] == [60, 120]
+
+
+def test_a_synchronous_timeout_of_code_100_on_a_list_fails_the_account_at_once(meta):
+    module, _, made, extensions = meta
+    graph = made["graph"]
+    graph.before = lambda method, path, params: (
+        error(100, 1504018, "Request Timed Out") if path == f"act_{ONE}/adsets" else None
+    )
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load(NOW, extensions)
+    # Outside the synchronous insights, code 100 is no temporary error: no retry, no report run.
+    assert f"Meta ad account {ONE}: 400 Request Timed Out (code 100, subcode 1504018)" in str(
+        raised.value
+    )
+    assert paths(graph).count(("GET", f"act_{ONE}/adsets")) == 1
+    assert made["waits"] == []
+    assert not graph.runs
+
+
+def test_the_timeouts_of_the_tests_are_those_of_the_source(meta):
+    module, *_ = meta
+    assert {(code, subcode) for code, subcode, _ in SYNC_TIMEOUTS} == module.SYNC_TIMEOUTS
 
 
 def test_a_portion_takes_its_days_through_report_runs_as_a_load_of_history(meta):
@@ -1145,30 +1357,25 @@ def test_a_report_run_that_fails_fails_the_account_and_a_skipped_one_is_asked_ag
         module.load(NOW, extensions, portion=portion)
     assert len(graph.runs) == 2
     polls = [params for _, url, params in graph.requests if url == f"{BASE}/{RUN_ID}"]
-    assert [sorted(params) for params in polls] == [
-        ["access_token", "fields"],
-        ["access_token", "fields"],
-        ["access_token"],
-    ]
+    assert [sorted(params) for params in polls] == [["fields"], ["fields"], []]
+    assert set(graph.tokens) == {TOKEN}
 
 
-def failed_run(code, subcode, message):
+def failed_run(code, subcode, message, title=None, text=None):
     """The answer of a report run that failed, read without fields, with the fields of its error
     that Meta returns by default since v25.0 (Limits and best practices, read on 15 November
-    2026)."""
-    return StandInResponse(
-        200,
-        {
-            "id": RUN_ID,
-            "async_status": "Job Failed",
-            "async_percent_completion": 0,
-            "error_code": code,
-            "error_subcode": subcode,
-            "error_message": message,
-            "error_user_title": "A title",
-            "error_user_msg": "A message for a person",
-        },
-    )
+    2026), and error_user_title and error_user_msg when title and text are given."""
+    body = {
+        "id": RUN_ID,
+        "async_status": "Job Failed",
+        "async_percent_completion": 0,
+        "error_code": code,
+        "error_subcode": subcode,
+        "error_message": message,
+    }
+    if title is not None:
+        body |= {"error_user_title": title, "error_user_msg": text}
+    return StandInResponse(200, body)
 
 
 def failing_runs(graph, failure, when):
@@ -1256,6 +1463,20 @@ def test_a_report_run_that_fails_with_an_error_to_retry_later_is_asked_again(met
     )
     module.load(NOW, extensions, portion=portion)
     assert [run["level"] for run in graph.runs] == ["account", "account", "campaign", "adset", "ad"]
+
+
+def test_a_report_run_that_fails_gives_what_meta_writes_for_a_person(meta):
+    module, _, made, extensions = meta
+    graph = made["graph"]
+    failed = failed_run(100, 3191001, "Permission Error", "A title", f"No access for {TOKEN}")
+    failing_runs(graph, failed, lambda asked: True)
+    portion = module.Portion((ONE,), date(2026, 1, 1), date(2026, 3, 31))
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load(NOW, extensions, portion=portion)
+    assert str(raised.value).endswith(
+        f"report run {RUN_ID} ended with Job Failed: Permission Error; A title: No access for *** "
+        "(code 100, subcode 3191001)"
+    )
 
 
 def test_a_report_run_that_fails_with_another_error_fails_the_account_at_once(meta):
@@ -1497,6 +1718,18 @@ def test_the_parameters_of_a_url_are_scrubbed_before_the_secrets(meta):
     assert "def" not in scrubbed
 
 
+def test_the_credentials_of_a_header_authorization_are_scrubbed(meta):
+    # A token that the load does not know is masked in a header all the same.
+    module, _, _, _ = meta
+    scrubbed = module.Secrets().scrub(
+        "{'User-Agent': 'dlt/1.32.0', 'Authorization': 'Bearer UnknownToken0123'}"
+    )
+    assert scrubbed == "{'User-Agent': 'dlt/1.32.0', 'Authorization': 'Bearer ***'}"
+    assert module.Secrets().scrub("Authorization: Bearer Other-Token") == (
+        "Authorization: Bearer ***"
+    )
+
+
 def test_the_token_is_never_in_a_log_or_an_error(meta, monkeypatch, caplog):
     # A request that fails with the URL in the text of its error, as requests writes one, and an
     # error of the API that repeats the token: neither the line of the task, the journal nor the
@@ -1540,7 +1773,9 @@ def test_the_token_is_never_in_a_log_or_an_error(meta, monkeypatch, caplog):
             assert secret not in text
     assert "access_token=***&appsecret_proof=***" in str(raised.value)
     assert "Error validating access token *** with ***" in str(raised.value)
-    # Every call carried the proof of the token, and the task masks it.
+    # Every call carried the token in its header and the proof as a parameter, and the task masks
+    # the proof.
+    assert set(made["graph"].tokens) == {TOKEN}
     for _, _, params in made["graph"].requests:
         assert params["appsecret_proof"] == proof
     assert proof in masked
@@ -1572,17 +1807,19 @@ def test_a_token_that_expires_is_refreshed_and_kept_in_a_variable(meta, monkeypa
         "refreshed_at": NOW.isoformat(),
     }
     assert new in masked
+    assert graph.tokens[0] is None
+    assert graph.tokens[1:] == [new] * (len(graph.requests) - 1)
     for _, _, params in graph.requests[1:]:
-        assert params["access_token"] == new
         assert (
             params["appsecret_proof"]
             == hmac.new(SECRET.encode(), new.encode(), hashlib.sha256).hexdigest()
         )
     # Within 30 days the load takes the token of the Variable, and refreshes it no more.
     graph.requests.clear()
+    graph.tokens.clear()
     module.load(NOW + timedelta(days=29), extensions, variables=variables, mask=masked.append)
     assert ("GET", "oauth/access_token") not in paths(graph)
-    assert graph.requests[0][2]["access_token"] == new
+    assert graph.tokens[0] == new
     # From 30 days it refreshes the token of the Variable.
     graph.requests.clear()
     module.load(NOW + timedelta(days=30), extensions, variables=variables, mask=masked.append)

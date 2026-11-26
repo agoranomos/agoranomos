@@ -33,8 +33,11 @@
     {%- endif %}
 {%- endmacro %}
 
-{% macro tiktok_stats(relation, platform, level='campaign') %}
-{%- call nonzero(['impressions', 'clicks', 'spend', 'platform_conversions', 'platform_conversion_value']) %}
+{#- The statistics of a level by day. Their conversions are those of the optimization event, so
+    the campaigns pass conversions, the staging model of their conversions, and a campaign day
+    whose measures are zero stays when it has complete payments or their value (nonzero). -#}
+{% macro tiktok_stats(relation, platform, level='campaign', conversions=none) %}
+{%- call nonzero(['impressions', 'clicks', 'spend', 'platform_conversions', 'platform_conversion_value'], conversions) %}
 select
     cast(left(cast(dimensions__stat_time_day as text), 10) as date) as report_date,
     '{{ platform }}' as platform,
