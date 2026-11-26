@@ -764,10 +764,11 @@ metabase_sql() {
     --tuples-only --no-align --field-separator="$FIELD_SEPARATOR" --set=ON_ERROR_STOP=1 "$@"
 }
 
-# The SQL of the OAuth clients, on the tables of Metabase 0.64.1, which are not an API: the stack
-# tests check them (ADR-0031). The live tokens: those that are not revoked and whose expiry, in
-# milliseconds since 1970, is to come; a refresh token without one does not expire. A text that a
-# client or a person gave, such as the name of a client, loses its control characters.
+# The SQL of the OAuth clients, on the tables of Metabase 0.64.9.1, unchanged since 0.64.1, which
+# are not an API: the stack tests check them (ADR-0031). The live tokens: those that are not
+# revoked and whose expiry, in milliseconds since 1970, is to come; a refresh token without one does
+# not expire. A text that a client or a person gave, such as the name of a client, loses its
+# control characters.
 oauth_live_sql() {
   cat << 'SQL'
 WITH live AS (

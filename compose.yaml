@@ -571,7 +571,7 @@ services:
         condition: service_completed_successfully
 
   metabase:
-    image: metabase/metabase:v0.64.1@sha256:fcf3ad4c00f303d96c63233967a24f0d0348bbb725d4704ee1961f9185674e13
+    image: metabase/metabase:v0.64.9.1@sha256:8dae9b3d4cf26d1442dadc589b115449b1652a69bbeb33d5dac74bbc51bc88ff
     profiles: [core]
     restart: unless-stopped
     # The user that the entrypoint of the image would create and switch to, from the first process,
@@ -583,7 +583,8 @@ services:
     environment:
       # Java gives its heap a quarter of the memory limit unless it is told otherwise, which would
       # leave Metabase short: half of the limit goes to the heap, and the other half holds what
-      # Java needs besides, about 0.5 GiB for Metabase 0.64.1 (classes, threads and buffers).
+      # Java needs besides, about 0.5 GiB for Metabase 0.64.1 (classes, threads and buffers), as
+      # measured on 8 October 2026; 0.64.9.1, with a newer Clojure, is not measured yet.
       JAVA_OPTS: -XX:MaxRAMPercentage=50
       MB_DB_TYPE: postgres
       MB_DB_HOST: platform-db
@@ -602,6 +603,10 @@ services:
       # Metabase over the network of the stack, without HTTPS (MB_REDIRECT_ALL_REQUESTS_TO_HTTPS
       # stays unset).
       MB_SITE_URL: ${AGORANOMOS_SITE_URL:-http://localhost:${METABASE_PORT:-3000}}
+      # The anonymous statistics. From 0.64.5 the same switch also keeps Metabase from sending
+      # events to Metabase Track, and its relay for the embedding SDK, /api/metaplow-proxy, then
+      # answers 503 and forwards nothing (src/metabase/analytics/settings.clj and
+      # analytics/api/metaplow_proxy.clj at the tag v0.64.9.1).
       MB_ANON_TRACKING_ENABLED: "false"
       MB_CHECK_FOR_UPDATES: "false"
       # A connection of Metabase to a database may go to a private network, where the warehouse
@@ -610,9 +615,14 @@ services:
       # neither private nor public, such as the documentation range 192.0.2.0/24 (ADR-0021,
       # checked on Metabase 0.64.1, as of October 2026). Metabase 0.64 allows all by default.
       MB_WAREHOUSE_ALLOWED_NETWORKS: allow-private
+      # The GeoJSON files of custom maps, which an admin names by their URL: public addresses only,
+      # as Metabase 0.64.1 always did. 0.64.9 added the setting, with allow-private by default on a
+      # self-hosted Metabase, which would let a map fetch from the private networks of the stack
+      # (src/metabase/geojson/settings.clj at the tag v0.64.9.1).
+      MB_GEOJSON_ALLOWED_NETWORKS: external-only
       # Passwords and sessions on the internet (ADR-0019): ./agoranomos init --server sets passwords
       # of at least 15 characters, strong-enough, for new and changed passwords, and a sign-out after
-      # 24 hours without activity. Local mode keeps the defaults of Metabase 0.64.1: normal, 6
+      # 24 hours without activity. Local mode keeps the defaults of Metabase 0.64.9.1: normal, 6
       # characters and a digit, and no timeout, which an empty MB_SESSION_TIMEOUT gives, because
       # Metabase reads an empty variable as unset.
       MB_PASSWORD_COMPLEXITY: ${METABASE_PASSWORD_COMPLEXITY:-normal}
@@ -664,7 +674,7 @@ services:
       # below answers it.
       MB_SEND_EMAIL_ON_FIRST_LOGIN_FROM_NEW_DEVICE: "false"
       # The log of the queries that Metabase runs, query_execution, keeps 90 days and not the 720
-      # of Metabase (ADR-0044). Metabase 0.64.1 takes the setting from the environment alone, at 30
+      # of Metabase (ADR-0044). Metabase 0.64.9.1 takes the setting from the environment alone, at 30
       # days at least, and does not show it in its API. This image writes neither audit_log nor
       # view_log, which the setting covers too. query_execution is partitioned by month, and once
       # it is all on partitions a month goes whole when it ends before the limit: a row stays 90
