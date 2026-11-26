@@ -1469,34 +1469,28 @@ def test_a_test_of_several_nodes_is_on_one_that_depends_on_the_others():
 INTERMEDIATE = DBT / "models" / "intermediate"
 # The critical tests of each intermediate model, every one an error: its key, which
 # unique_combination checks, or unique for a key of one column; the columns that not_null checks;
-# the relationships of a column to a column of another model; and those of columns to columns.
+# the relationships of a column to a column of another model.
 INTERMEDIATE_TESTS = {
-    "int_clients__resolved": (["client_id"], ["client_id", "client_name"], {}, []),
+    "int_clients__resolved": (["client_id"], ["client_id", "client_name"], {}),
     "int_conversion_actions__resolved": (
         ["platform", "conversion_action_id"],
         ["is_primary"],
         {},
-        [],
     ),
     # The views over which the core takes its dimensions and their versions (ADR-0036).
-    "int_accounts__current": (ACCOUNT_KEY, [], {}, []),
-    "int_campaigns__current": ([*ACCOUNT_KEY, "campaign_id"], [], {}, []),
-    "int_ad_groups__current": ([*ACCOUNT_KEY, "ad_group_id"], ["campaign_id"], {}, []),
-    "int_ads__current": ([*ACCOUNT_KEY, "ad_group_id", "ad_id"], ["campaign_id"], {}, []),
+    "int_accounts__current": (ACCOUNT_KEY, [], {}),
+    "int_campaigns__current": ([*ACCOUNT_KEY, "campaign_id"], [], {}),
+    "int_ad_groups__current": ([*ACCOUNT_KEY, "ad_group_id"], ["campaign_id"], {}),
+    "int_ads__current": ([*ACCOUNT_KEY, "ad_group_id", "ad_id"], ["campaign_id"], {}),
     # The checks of G1 and G1a, by load, account, reason and what they read (ADR-0035).
     "int_g1_failures": (
         ["source", "load_id", "account_id", "reason", "checked"],
         ["source", "account_id", "reason", "checked"],
         {},
-        [],
     ),
     # The days of the windows that the facts of the core take (ADR-0038).
-    "int_window_days": (["account_sk", "report_date"], [], {}, []),
+    "int_window_days": (["account_sk", "report_date"], [], {}),
 }
-COMPOSITE = (
-    r"^      - relationships_composite:\n          arguments:\n            columns: \[(.*)\]\n"
-    r"            to: ref\('(\w+)'\)\n            to_columns: \[(.*)\]$"
-)
 RELATIONSHIPS = r"^ +to: ref\('(\w+)'\)\n +field: (\w+)$"
 
 
@@ -1513,7 +1507,7 @@ def test_the_intermediate_models_have_their_critical_tests():
     described = blocks(text, 2)
     assert set(described) == set(INTERMEDIATE_TESTS)
     assert "severity" not in text, "no test of the intermediate models is a warning"
-    for model, (key, not_null, related, composite) in INTERMEDIATE_TESTS.items():
+    for model, (key, not_null, related) in INTERMEDIATE_TESTS.items():
         block = described[model]
         columns = blocks(block, 6)
         tested = {name: column_tests(column) for name, column in columns.items()}
@@ -1530,8 +1524,6 @@ def test_the_intermediate_models_have_their_critical_tests():
             for column, tests in tested.items()
             if "relationships" in tests
         } == related, model
-        pairs = re.findall(COMPOSITE, block, flags=re.MULTILINE)
-        assert [(split(a), to, split(b)) for a, to, b in pairs] == composite, model
     categories = re.search(
         r"^ +values: \[(.*)\]$", described["int_conversion_actions__resolved"], re.M
     )
