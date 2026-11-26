@@ -28,7 +28,9 @@
 	respond @setup 404
 
 	# Two endpoints of Metabase 0.63 and 0.64 that forward what they get to servers of Metabase on
-	# the internet, with no sign-in, whatever the settings say (ADR-0021). Prefixes again.
+	# the internet, with no sign-in, whatever the settings say (ADR-0021). Prefixes again. The
+	# relay of Metabase Track of 0.64.5, /api/metaplow-proxy, reads MB_ANON_TRACKING_ENABLED, which
+	# compose.yaml sets to false, and then forwards nothing.
 	@relays path /api/analytics-proxy* /api/product-feedback*
 	respond @relays 404
 
@@ -40,12 +42,15 @@
 	@register path /oauth/register*
 	respond @register 404
 
-	# An OAuth token reaches only the MCP server (ADR-0031). Metabase 0.64.1 takes a token only from
-	# the Authorization header, and its UI signs in with a cookie and sends no such header, so a
-	# request that carries one is refused on every path but /api/mcp, exactly: a token with mb:full,
-	# which reaches the whole REST API of Metabase, reaches nothing else through the proxy. A public
-	# client, which has no secret, gets its tokens at /oauth/token; one that sends its secret in that
-	# header does not. The * matches the header with any value, and only when it is there
+	# An OAuth token reaches only the MCP server (ADR-0031). Metabase 0.64.9.1 takes a token only
+	# from the Authorization header (extract-bearer-token in src/metabase/oauth_server/core.clj, as
+	# in 0.64.1), and its UI signs in with a cookie and sends no such header, so a request that
+	# carries one is refused on every path but /api/mcp, exactly: a token with mb:full, which reaches
+	# the whole REST API of Metabase, reaches nothing else through the proxy. Since 0.64.3 a token
+	# with only the scopes of MCP reaches no endpoint of the REST API at all
+	# (metabase/metabase#84248). A public client, which has no secret, gets its tokens at
+	# /oauth/token; one that sends its secret in that header does not. The * matches the header
+	# with any value, and only when it is there
 	# (matchHeaders in modules/caddyhttp/matchers.go of Caddy 2.11.9).
 	@token {
 		header Authorization *

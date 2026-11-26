@@ -149,8 +149,10 @@ TODAY_FILTERS = tuple(name for name in MART_FILTERS[AD_STATS] if name != "period
 # through a join along the foreign keys, in either direction (chain_filter.clj at the tag v0.64.1).
 # With the fields of each mart, the campaigns of one mart would join every other mart through the
 # clients, row by row, which ran into the statement timeout of metabase_reader on the demo (checked
-# on the stand, October 2026); with the fields of one mart, the values come with no join. The
-# statistics, unlike the mart ad_campaigns, offer only the campaigns that have some.
+# on the stand, October 2026); with the fields of one mart, the values come with no join. 0.64.4
+# and 0.64.7 keep that join from multiplying rows (metabase/metabase#83955 and #87098), which this
+# layout does not need either way. The statistics, unlike the mart ad_campaigns, offer only the
+# campaigns that have some.
 LINKED_FILTERS = ("client", "platform", "account", "campaign")
 LINKED_MART = AD_STATS
 
