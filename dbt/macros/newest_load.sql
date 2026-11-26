@@ -202,24 +202,83 @@ where d.status = 'pinned'
     and its journal, so a list is whole once its load is, and staging reads, for each account, the
     rows of the newest load that took it (newest_lists): an account that failed in a load keeps the
     list of the load before, and an entity that the newest list no longer names is not read, so
-    that the dimension of the core can say that the platform no longer lists it. relation is the
-    table, through demo_source or relation_or_empty, with its column _dlt_load_id, source_name its
-    source, loads the relation of core.loads, which the model passes as source('core', 'loads'),
-    so that its dependency is in its text, and account how its rows, r, name the account as the
-    journal does, as SQL: by default as newest_load_keys gives it for the facts of the source. The
-    result is a subquery with an alias, as relation_or_empty gives one. -#}
-{% macro newest_list(relation, source_name, loads, account=none) -%}
+    that the dimension of the core can say that the platform no longer lists it.
+    The newest load of each account is the table stg_loads__newest_lists, which each run of the
+    transform builds once, before the staging views of the lists, with the statistics of
+    PostgreSQL, as stg_loads__newest_days is for the facts: as a subquery over core.loads, the
+    planner took the lists of a source for one row, and the views of the current entities, which
+    join the lists of every platform, compared each ad with every other (C8 of the audit of 24
+    November 2026). relation is the table, through demo_source or relation_or_empty, with its
+    column _dlt_load_id, source_name its source, lists the ref of stg_loads__newest_lists, which
+    the model passes, so that its dependency is in its text, and account how its rows, r, name the
+    account as the journal does, as SQL: by default as newest_load_keys gives it for the facts of
+    the source. The result is a subquery with an alias, as relation_or_empty gives one. -#}
+{% macro newest_list(relation, source_name, lists, account=none) -%}
     {%- set account = newest_load_keys(source_name)[0] if account is none else account -%}
 (select r.*
 from (select * from {{ relation }}) as r
-join ({{ newest_lists(source_name, loads) }}) as l
-    on l.load_id = r._dlt_load_id and l.account_id = {{ account }}
+join (
+    select list_key
+    {#- The table, or, while a run has not filled it yet, its rows of the source as a query, as
+        for newest_load. #}
+    {%- if execute and load_relation(lists) is none %}
+    from ({{ newest_lists(source_name, pinned_loads_journal()) }}) as lists
+    {%- else %}
+    from {{ lists }}
+    {%- endif %}
+    where source = '{{ source_name[4:] }}'
+) as l
+    on l.list_key = {{ newest_list_key(source_name, 'r._dlt_load_id', account) }}
 ) as newest_list
 {%- endmacro %}
 
+{#- The key of a list, the source, the load and the account in one column, as SQL from the SQL of
+    each, so that the planner estimates the join of a table of raw with its lists from the
+    statistics of that column, as newest_load_key does for the days. -#}
+{% macro newest_list_key(source_name, load_id, account) -%}
+    '{{ source_name[4:] }}|' || {{ load_id }} || '|' || {{ account }}
+{%- endmacro %}
+
+{#- The platform or source and the account of a row in one column, as SQL from the SQL of each: the
+    current campaigns, ad groups and ads join their accounts and the accounts of the lists on it.
+    On the two columns of relations without statistics, such as their CTEs, the planner multiplies
+    two guesses and takes the join for one row, and so joined the lists of 200 accounts again for
+    each of 15,000 ads (C8 of the audit of 24 November 2026); on one, it guesses once. -#}
+{% macro account_key(platform, account) -%}
+    {{ platform }} || '|' || {{ account }}
+{%- endmacro %}
+
+{#- The sources that take lists: those whose rows name an account, the ad platforms and web
+    analytics (newest_load_sources); a source of rates has one account and no list. -#}
+{% macro newest_list_sources() -%}
+    {%- set found = [] -%}
+    {%- for source_name, keys in newest_load_sources().items() -%}
+        {%- if keys[0] is not none %}{% do found.append(source_name) %}{% endif -%}
+    {%- endfor -%}
+    {{- return(found) -}}
+{%- endmacro %}
+
+{#- The newest list of each account of every source that takes lists: the rows of lists, the ref
+    of stg_loads__newest_lists, or, while a run has not filled the table yet, the same rows as a
+    query, as in newest_list. -#}
+{% macro newest_list_accounts(lists) -%}
+    {%- if execute and load_relation(lists) is none -%}
+        {%- for source_name in newest_list_sources() %}
+{%- if not loop.first %}
+union all
+{%- endif %}
+{{ newest_lists(source_name, pinned_loads_journal()) }}
+        {%- endfor %}
+    {%- else -%}
+select source, account_id, load_id, finished_at, list_key
+from {{ lists }}
+    {%- endif -%}
+{%- endmacro %}
+
 {#- For each account of a source, the newest load whose lists staging reads, from loads, the
-    relation of core.loads, with the moment when it ended: the source, the account, the load and
-    finished_at.
+    relation of core.loads, with the moment when it ended and the key of newest_list_key: the
+    source, the account, the load, finished_at and list_key, the rows of stg_loads__newest_lists of
+    one source.
     * The newest load is the one with the largest load id among the pinned and the accepted loads
       that took the account, and its lists are read only when it is a pinned one, as the core
       holds those of an accepted load: so an older load that ends after a newer one was accepted
@@ -234,7 +293,12 @@ join ({{ newest_lists(source_name, loads) }}) as l
     core holds. -#}
 {% macro newest_lists(source_name, loads) -%}
     {%- set source = source_name[4:] -%}
-select n.source, n.account_id, n.load_id, n.finished_at
+select
+    n.source,
+    n.account_id,
+    n.load_id,
+    n.finished_at,
+    {{ newest_list_key(source_name, 'n.load_id', 'n.account_id') }} as list_key
 from (
     select distinct on (l.account_id) l.source, l.account_id, l.load_id, l.finished_at, l.status
     from {{ loads }} as l

@@ -5,4 +5,4 @@
     'ad_group_ad__status': 'text', 'ad_group_ad__ad__resource_name': 'text',
     'ad_group_ad__ad__id': 'text', 'ad_group_ad__ad__name': 'text', 'ad_group_ad__ad__type': 'text',
     '_dlt_load_id': 'text',
-}), 'raw_google_ads', source('core', 'loads')), 'google_ads') }}
+}), 'raw_google_ads', ref('stg_loads__newest_lists')), 'google_ads') }}

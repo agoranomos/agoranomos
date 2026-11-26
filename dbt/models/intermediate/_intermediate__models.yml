@@ -122,9 +122,10 @@ models:
       the first and the last day of the statistics that this run reads. platform, account_id and
       campaign_id are its key. The snapshot dim_campaign_versions and the dimension
       core.dim_campaign read it. It reads the staging models of the campaigns and of their
-      statistics of each platform, int_accounts__current, core.dim_account, core.loads and
-      core.dim_campaign as the runs before this one left it. Its tests guard the core: when one of
-      them fails, dbt does not build the models that read this one.
+      statistics of each platform, int_accounts__current, core.dim_account, stg_loads__newest_lists
+      and core.dim_campaign as the runs before this one left it. A table that each run fills anew.
+      Its tests guard the core: when one of them fails, dbt does not build the models that read
+      this one.
     data_tests:
       - unique_combination:
           arguments:
@@ -168,9 +169,9 @@ models:
       statistics that this run reads. platform, account_id and ad_group_id are its key. The snapshot
       dim_ad_group_versions and the dimension core.dim_ad_group read it. It reads the staging models
       of the ad groups and of their statistics of each platform, int_accounts__current,
-      core.dim_account, core.loads and core.dim_ad_group as the runs before this one left it. Its
-      tests guard the core: when one of them fails, dbt does not build the models that read this
-      one.
+      core.dim_account, stg_loads__newest_lists and core.dim_ad_group as the runs before this one
+      left it. A table that each run fills anew. Its tests guard the core: when one of them fails,
+      dbt does not build the models that read this one.
     data_tests:
       - unique_combination:
           arguments:
@@ -219,8 +220,9 @@ models:
       account_id, ad_group_id and ad_id are its key, as an ad is defined only inside its ad group.
       The snapshot dim_ad_versions and the dimension core.dim_ad read it. It reads the staging
       models of the ads and of their statistics of each platform, int_accounts__current,
-      core.dim_account, core.loads and core.dim_ad as the runs before this one left it. Its tests
-      guard the core: when one of them fails, dbt does not build the models that read this one.
+      core.dim_account, stg_loads__newest_lists and core.dim_ad as the runs before this one left it.
+      A table that each run fills anew. Its tests guard the core: when one of them fails, dbt does
+      not build the models that read this one.
     data_tests:
       - unique_combination:
           arguments:

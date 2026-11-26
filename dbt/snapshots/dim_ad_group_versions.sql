@@ -1,5 +1,5 @@
 {#- core.dim_ad_group_versions, the versions of the ad groups (ADR-0036): a snapshot of dbt over the
-    view int_ad_groups__current, as dim_campaign_versions is over that of the campaigns. No
+    table int_ad_groups__current, as dim_campaign_versions is over that of the campaigns. No
     connector gives the dates or the budget of an ad group yet, so they are none. -#}
 {% snapshot dim_ad_group_versions %}
 select
