@@ -32,7 +32,7 @@ import os
 import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 
 import dlt
 
@@ -63,6 +63,7 @@ from agoranomos_pipelines.loads import (
     row_counts,
     run,
 )
+from agoranomos_pipelines.windows import daily_window
 
 log = logging.getLogger(__name__)
 
@@ -463,25 +464,25 @@ def load_history(code: str, now: datetime) -> dict[str, int]:
 
 
 def load_daily(code: str, now: datetime) -> dict[str, int]:
-    """The daily load of a platform (ADR-0025): for each account, the days from the day after the
-    last that a whole load took, or from the first day of the reload window of the platform when
-    that is earlier, to yesterday of the account. A platform whose dataset holds no load yet, or was
-    loaded by a release before v0.5, gets its history, and an account that no load has recorded,
-    the days of the history. The rates of demo_fx start earlier still, as a load of history, when
-    the core needs their history again (rates_history)."""
+    """The daily load of a platform (ADR-0025): for each account, the days of the reload window of
+    the platform to yesterday of the account, starting a day earlier for each missed load, from the
+    last day that a whole load took (windows.daily_window). A platform whose dataset holds no load
+    yet, or was loaded by a release before v0.5, gets its history, and an account that no load has
+    recorded, the days of the history. The rates of demo_fx start earlier still, as a load of
+    history, when the core needs their history again (rates_history)."""
     platform = PLATFORMS[code]
     last = last_loads(code)
     if last is None:
         return load_history(code, now)
     history = platform.module.windows(now)
-    reload_days = timedelta(days=platform.window_days - 1)
+    width = platform.window_days
     again = rates_history(code)
 
     def usual(account_id: str) -> date:
         start, end = history[account_id]
         if account_id not in last:
             return start
-        return min(last[account_id][1] + timedelta(days=1), end - reload_days)
+        return daily_window(end, last[account_id][1], width)[0]
 
     def first(account: Account) -> date:
         start = usual(account.account_id)

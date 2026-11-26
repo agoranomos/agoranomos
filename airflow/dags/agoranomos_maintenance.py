@@ -11,10 +11,10 @@ The retention of ADR-0044:
 - clean_dlt_loads deletes, as the loader role, the rows of _dlt_loads of each raw schema older than
   90 days, and those of the loads of the kind intraday older than 14 days, but those that the next
   load, dlt or the next pin still reads.
-- clean_core_loads deletes, as transformer, the accepted rows of the kind window of core.loads
-  older than 13 months, and those of the kind intraday older than 14 days that no fact reads
-  (ADR-0051), but those that a run or a load still reads, and none whose row _dlt_loads still
-  holds; a row of the kind history stays.
+- clean_core_loads deletes, as transformer, the accepted rows of the kind intraday of core.loads
+  older than 14 days that no fact reads (ADR-0051), but those that a run or a load still reads,
+  and none whose row _dlt_loads still holds; a row of the kind window or history stays, as the
+  facts of the days of its window may still read it.
 - drop_old_journal_months drops the months of the journals of restatements older than 13 months,
   through core.drop_partition, and leaves a month that is in use to the next run.
 - clean_cosmos_variables deletes the Variables cosmos_xcom_backup__* of the runs older than 90 days,

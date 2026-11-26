@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Connect Meta with an app and a system user of the deployment
 
+Superseded in part by [ADR-0055](0055-read-each-day-at-the-end-of-its-window-and-keep-the-loads.md): `last accepted day + 1` in the window of a daily load of "The windows and the history", which becomes `last accepted day + 2 − 28`, so that each day that a stop leaves is read again at the full age of its window. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 [ADR-0032](0032-connect-google-ads-first-with-the-reference-rates-of-the-ecb.md) connected Google Ads first and left Meta to a record of its own, because the default access tier of the Marketing API is "For development only". Later records already decided parts of the connector of Meta: [ADR-0034](0034-define-a-basic-data-set-and-the-modules-of-an-extended-one.md) gives every real source a first load of 36 months; [ADR-0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) checks the campaigns of each account against its totals from the platform (G0a) and keeps a failed account out of the core; [ADR-0036](0036-model-the-core-as-narrow-facts-and-versioned-dimensions.md) asks for `effective_status` on each level, so that removed entities come too, and a common state beside the status of the platform; [ADR-0038](0038-load-by-copy-and-write-the-core-by-whole-days.md) sets the window of restatements of Meta to 28 days and the history to portions by quarters.
