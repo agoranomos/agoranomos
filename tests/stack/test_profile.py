@@ -2,8 +2,9 @@
 API of Metabase what the records leave to a measurement: each card of the dashboard Advertising
 against the threshold of 2 seconds of ADR-0037, the first values of its linked filters on the view
 of the campaigns, the scan of the values of fields, twenty clients at once, a run of the transform
-beside a core of that size, and a run of the short cycle of the current day, with the cards of the
-overview while it runs (ADR-0051).
+beside a core of that size, a run of the short cycle of the current day, with the cards of the
+overview while it runs (ADR-0051), and the models that read the lists of the entities, in runs of
+the transform with a whole load that lists every synthetic account.
 
 They run only when AGORANOMOS_PROFILE names a profile of synthetic.py, agency or limit, on a stack
 without the demo that may take the rows: the workflow Profile runs them on a schedule and by hand
@@ -20,7 +21,9 @@ assertions print names, counts and times, never a secret.
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import os
+import re
 import statistics
 import threading
 import time
@@ -37,7 +40,7 @@ import synthetic
 from airflow_api import api, trigger, unpause, wait_for_run
 from metabase_content import item, warehouse_database_id
 from raw_loads import run_in_tasks
-from stack_helpers import http_json, ops_growth, ops_sizes, wait_for
+from stack_helpers import http_json, ops_growth, ops_sizes, wait_for, warehouse_output
 
 PROFILE = os.environ.get("AGORANOMOS_PROFILE", "")
 pytestmark = pytest.mark.skipif(
@@ -418,6 +421,228 @@ def test_a_run_of_the_transform_beside_the_core_of_the_profile(env, airflow_url,
 def quantile(values: list[float], share: float) -> float:
     ordered = sorted(values)
     return ordered[min(len(ordered) - 1, int(share * len(ordered)))] if ordered else 0.0
+
+
+# The models that read the lists of the newest load of each account (dbt/macros/newest_load.sql):
+# the staging models of the lists, through newest_list, and the current campaigns, ad groups and
+# ads, which also call newest_lists for the accounts whose list the run reads; and the models
+# after them whose time follows the lists.
+LIST_READERS = re.compile(
+    r"^(stg_[a-z0-9_]+__(accounts|campaigns|ad_groups|ads)|int_(campaigns|ad_groups|ads)__current)$"
+)
+AFTER_THE_LISTS = re.compile(
+    r"^(int_accounts__current|int_g1_failures|account_quarantine"
+    r"|dim_(account|campaign|ad_group|ad)|dim_(campaign|ad_group|ad)_versions)$"
+)
+# Each node of a run of the transform that the hooks of elementary recorded, by the ID of the run
+# of Airflow, which each task gives dbt (ops_transform_nodes.sql).
+NODE_TIMES = """
+SELECT r.name, r.resource_type, r.execution_time
+FROM ops.dbt_run_results AS r
+JOIN ops.dbt_invocations AS i ON i.invocation_id = r.invocation_id
+WHERE i.job_run_id = '{run}' AND r.unique_id NOT LIKE '%.elementary.%'
+"""
+
+
+def node_times(env, run) -> dict[str, tuple[str, float]]:
+    """The time of each node of a run of the transform in dbt, with its type, by name."""
+    found: dict[str, tuple[str, float]] = {}
+    output = warehouse_output(env, NODE_TIMES.format(run=run["dag_run_id"].replace("'", "''")))
+    for line in output.splitlines():
+        name, kind, seconds_ = line.split("|")
+        found[name] = (kind, found.get(name, (kind, 0.0))[1] + float(seconds_ or 0))
+    return found
+
+
+def owners(times: dict[str, tuple[str, float]]) -> dict[str, str]:
+    """The model or snapshot of each node: itself, or for a test the model whose name comes first
+    in the name of the test, as dbt names a generic test after the model that it tests."""
+    models = sorted(
+        (name for name, (kind, _) in times.items() if kind in ("model", "snapshot")),
+        key=len,
+        reverse=True,
+    )
+    found = {}
+    for name in times:
+        hits = [(name.find(model), -len(model), model) for model in models if model in name]
+        found[name] = min(hits)[2] if hits else name
+    return found
+
+
+def by_model(times: dict[str, tuple[str, float]], pattern: re.Pattern) -> dict[str, float]:
+    """The seconds of each model that the pattern names, with its tests."""
+    found: dict[str, float] = {}
+    for name, owner in owners(times).items():
+        if pattern.match(owner):
+            found[owner] = found.get(owner, 0.0) + times[name][1]
+    return found
+
+
+def explain_view(env, view: str) -> tuple[int, float, int, str]:
+    """A read of a view of staging as transformer, by EXPLAIN ANALYZE: its rows, its time in the
+    database in seconds, and the most loops of a node of its plan, with that node."""
+    output = warehouse_output(
+        env,
+        f"EXPLAIN (ANALYZE, FORMAT JSON) SELECT * FROM {view}",  # noqa: S608 (a name of the catalog)
+        "transformer",
+    )
+    [plan] = json.loads(output)
+    loops, kind = 0, ""
+    todo = [plan["Plan"]]
+    while todo:
+        node = todo.pop()
+        if node.get("Actual Loops", 0) > loops:
+            loops, kind = node["Actual Loops"], node["Node Type"]
+        todo += node.get("Plans", [])
+    return plan["Plan"]["Actual Rows"], plan["Execution Time"] / 1000, loops, kind
+
+
+def transform(env, airflow_url, token) -> dict[str, Any]:
+    """A run of the transform that succeeded, after which the synthetic accounts get their clients
+    back."""
+    try:
+        run = trigger(airflow_url, token, TRANSFORM)
+        run = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=3600)
+    finally:
+        synthetic.restore_accounts(env)
+    assert run["state"] == "success", run["state"]
+    return run
+
+
+@pytest.mark.transform
+def test_the_lists_of_a_whole_load_beside_the_core_of_the_profile(env, airflow_url, token, profile):
+    # C8 of the audit of 24 November 2026: the models that read the lists of the newest load of
+    # each account join each list in raw with a subquery over core.loads (newest_lists), the form
+    # that R5 (#191) found pathological for the days of the facts, and no measurement had a whole
+    # load with lists at the density of a profile: the run of the transform above reads no load,
+    # and a load of the short cycle takes no list (ADR-0051). So the journal of the loads first
+    # gets the history that the maintenance keeps, and a run of the transform reads no load beside
+    # it; then a whole load of every platform lists every synthetic account with its campaigns, ad
+    # groups and ads, and a run reads it, the first run that sees these lists; then a second whole
+    # load gives the same lists, as a daily load does, and its pinned rows are read through the
+    # views of staging before its run reads it. The load has a window of the day before the
+    # period, on which the core holds no statistics, so the runs write no fact: the time of the
+    # write of a window is R5's (#191). The time of each node comes from the records of
+    # elementary, a model with its tests.
+    chosen, found = profile
+    assert found.first, found
+    day = found.first - timedelta(days=1)
+    warehouse_output(env, synthetic.history_sql(found.first, found.last))
+    # The test of G3 asks for a rate on every day of the windows that a run reads.
+    reporting = env.get("AGORANOMOS_REPORTING_CURRENCY") or "USD"
+    warehouse_output(env, synthetic.rates_sql(day, day, reporting))
+    journal = warehouse_output(env, "SELECT count(*) FROM core.loads")
+    rows = synthetic.list_rows(env)
+    unpause(airflow_url, token, TRANSFORM)
+    runs: dict[str, dict[str, Any]] = {}
+    before = load()
+    runs["No load"] = transform(env, airflow_url, token)
+    first_load = f"{time.time():.6f}"
+    warehouse_output(env, synthetic.whole_load_sql(first_load, day))
+    runs["First whole load"] = transform(env, airflow_url, token)
+    second_load = f"{time.time():.6f}"
+    warehouse_output(env, synthetic.whole_load_sql(second_load, day, pin=True))
+    views = warehouse_output(
+        env,
+        "SELECT table_schema || '.' || table_name FROM information_schema.views "
+        "WHERE table_schema = 'staging' ORDER BY table_name",
+    ).splitlines()
+    read = {}
+    for view in views:
+        if LIST_READERS.match(view.split(".")[1]):
+            read[view.split(".")[1]] = explain_view(env, view)
+    # The plan of the slowest of them, for the report.
+    slowest_view = max(read, key=lambda view: read[view][1])
+    plan = warehouse_output(
+        env,
+        f"EXPLAIN (ANALYZE) SELECT * FROM staging.{slowest_view}",  # noqa: S608 (a name of the catalog)
+        "transformer",
+    )
+    runs["Second whole load"] = transform(env, airflow_url, token)
+    after = load()
+    quarantined = warehouse_output(
+        env,
+        "SELECT count(*) FROM core.account_quarantine "  # noqa: S608 (two load ids of the test)
+        f"WHERE load_id IN ('{first_load}', '{second_load}')",
+    )
+    times = {name: node_times(env, run) for name, run in runs.items()}
+
+    def total(name: str, pattern: re.Pattern | None = None) -> float:
+        if pattern is None:
+            return sum(seconds_ for _, seconds_ in times[name].values())
+        return sum(by_model(times[name], pattern).values())
+
+    names = list(runs)
+    lines = [
+        f"The journal of the loads holds {int(journal):,} rows; a whole load lists "
+        + ", ".join(f"{count:,} {kind.replace('_', ' ')}" for kind, count in rows.items())
+        + f". Load of the host before → after: {before} → {after}. Accounts in quarantine "
+        f"from the two whole loads: {quarantined}.",
+        "",
+        "| Run | Duration in Airflow | Nodes of dbt, summed | Models that read the lists, with "
+        "their tests | Their share | The models after them | Their share |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+    ]
+    for name in names:
+        whole, lists, later = total(name), total(name, LIST_READERS), total(name, AFTER_THE_LISTS)
+        lines.append(
+            f"| {name} | {seconds(runs[name]):.0f} s | {whole:.0f} s | {lists:.1f} s "
+            f"| {lists / (whole or 1):.1%} | {later:.1f} s | {later / (whole or 1):.1%} |"
+        )
+    for title, pattern in (
+        ("Model that reads the lists, with its tests", LIST_READERS),
+        ("Model after them, with its tests", AFTER_THE_LISTS),
+    ):
+        models = {name: by_model(times[name], pattern) for name in names}
+        ordered = sorted(models[names[-1]], key=models[names[-1]].get, reverse=True)
+        lines += ["", f"| {title} | " + " | ".join(names) + " |", "|---|" + "---:|" * len(names)]
+        lines += [
+            f"| {model} | " + " | ".join(f"{models[n].get(model, 0):.2f} s" for n in names) + " |"
+            for model in ordered
+        ]
+    lines += [
+        "",
+        "| View of staging, read with the second whole load pinned | Rows | Time in the database "
+        "| Most loops of a node |",
+        "|---|---:|---:|---|",
+    ]
+    lines += [
+        f"| {view} | {rows_:,} | {elapsed:.3f} s | {loops:,} ({kind}) |"
+        for view, (rows_, elapsed, loops, kind) in sorted(
+            read.items(), key=lambda item: item[1][1], reverse=True
+        )
+    ]
+    slowest = sorted(times[names[-1]].items(), key=lambda item: item[1][1], reverse=True)[:10]
+    lines += [
+        "",
+        "| The ten slowest nodes of the last run | " + " | ".join(names) + " |",
+        "|---|" + "---:|" * len(names),
+    ]
+    lines += [
+        f"| {node} | "
+        + " | ".join(f"{times[n].get(node, ('', 0.0))[1]:.2f} s" for n in names)
+        + " |"
+        for node, _ in slowest
+    ]
+    lines += [
+        "",
+        f"<details><summary>The plan of {slowest_view}</summary>",
+        "",
+        "```",
+        *plan.splitlines(),
+        "```",
+        "",
+        "</details>",
+    ]
+    report(f"The lists of a whole load, {shape(chosen, found)}", lines)
+    listed = {kind: 0 for kind in rows}
+    for view, (rows_, *_) in read.items():
+        for kind in rows:
+            if view.endswith(f"__{kind}") and view.startswith("stg_"):
+                listed[kind] += rows_
+    assert all(times.values()), "elementary recorded no node of a run"
+    assert listed == rows, (listed, rows)
+    assert quarantined == "0", quarantined
 
 
 def run_now(airflow_url, token, run) -> dict[str, Any]:

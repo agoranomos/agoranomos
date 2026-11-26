@@ -1000,8 +1000,6 @@ def test_preflight_compares_nothing_for_a_backups_folder_that_does_not_exist_yet
 @pytest.mark.parametrize(
     ("setting", "value"),
     [
-        ("BACKUP_TIME", "3am"),
-        ("BACKUP_TIME", "24:00"),
         ("BACKUP_KEEP_DAILY", "0"),
         ("BACKUP_KEEP_WEEKLY", "x"),
         ("AGORANOMOS_UID", "auto"),
@@ -1014,6 +1012,23 @@ def test_preflight_stops_on_a_setting_of_the_backups_that_cannot_work(cli, setti
     assert setting in result.stderr
     # Local mode without the ops profile runs no backup service, so it has nothing to stop on.
     set_env(cli, COMPOSE_PROFILES="core,demo")
+    assert cli.run("preflight").returncode == 0
+
+
+@pytest.mark.parametrize("profiles", ["core,demo,ops", "core,demo", "core"])
+@pytest.mark.parametrize("value", ["3am", "24:00", "3:00"])
+def test_preflight_stops_on_a_backup_time_that_is_no_time_of_day_in_every_mode(
+    cli, profiles, value
+):
+    # The backup service of the ops profile runs at BACKUP_TIME, and the DAGs of the short cycle,
+    # which keep their runs an hour from it in every mode, stop their import on such a value
+    # (airflow/dags/agoranomos_pipelines/intraday.py).
+    cli.run("init")
+    set_env(cli, COMPOSE_PROFILES=profiles, BACKUP_TIME=value)
+    result = cli.run("preflight")
+    assert result.returncode == 1
+    assert "BACKUP_TIME in .env must be a time of day as HH:MM, such as 03:00" in result.stderr
+    set_env(cli, BACKUP_TIME="23:59")
     assert cli.run("preflight").returncode == 0
 
 
@@ -1032,6 +1047,26 @@ def test_preflight_stops_on_a_time_zone_that_the_backups_cannot_use(cli, tmp_pat
     )
     # A machine without the files of the time zones leaves the check to the backup service.
     assert cli.run("preflight", AGORANOMOS_ZONEINFO=str(tmp_path / "none")).returncode == 0
+
+
+@pytest.mark.parametrize("profiles", ["core,demo", "core"])
+def test_preflight_stops_on_a_time_zone_of_the_backup_in_local_mode_without_ops(
+    cli, tmp_path, profiles
+):
+    # No backup service runs, but the DAGs of the short cycle keep their runs an hour from
+    # BACKUP_TIME in BACKUP_TZ, and stop their import on a zone that they do not know.
+    zoneinfo = tmp_path / "zoneinfo"
+    (zoneinfo / "Europe").mkdir(parents=True)
+    (zoneinfo / "Europe" / "Berlin").write_bytes(b"TZif")
+    cli.run("init")
+    set_env(cli, COMPOSE_PROFILES=profiles, BACKUP_TZ="Europe/Berln")
+    result = cli.run("preflight", AGORANOMOS_ZONEINFO=str(zoneinfo))
+    assert result.returncode == 1
+    assert (
+        "BACKUP_TZ in .env is not a time zone, such as Europe/Berlin: Europe/Berln" in result.stderr
+    )
+    set_env(cli, BACKUP_TZ="Europe/Berlin")
+    assert cli.run("preflight", AGORANOMOS_ZONEINFO=str(zoneinfo)).returncode == 0
 
 
 def test_preflight_warns_when_server_mode_runs_without_the_backups(cli):

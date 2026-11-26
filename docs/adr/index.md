@@ -87,7 +87,7 @@ agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0038](0038-load-by-copy-and-write-the-core-by-whole-days.md) | Load with COPY into the raw layer, and write the core by whole days of an account | accepted | 2026-10-31 |
 | [0039](0039-run-one-dbt-build-in-the-watcher-mode.md) | Run one dbt build in the watcher mode of Cosmos, with a DAG of maintenance | accepted | 2026-10-31 |
 | [0040](0040-size-the-stack-by-profiles-and-derive-the-settings-of-postgresql.md) | Size the stack by profiles, and derive the settings of PostgreSQL from its memory limit | accepted | 2026-10-31 |
-| [0041](0041-run-an-agency-as-one-deployment.md) | Run an agency as one deployment | proposed | 2026-10-31 |
+| [0041](0041-run-an-agency-as-one-deployment.md) | Run an agency as one deployment | accepted | 2026-11-01 |
 | [0042](0042-take-the-rates-from-the-bank-of-italy-and-the-national-bank-of-kazakhstan.md) | Take the exchange rates from the Bank of Italy and the National Bank of Kazakhstan | accepted | 2026-10-31 |
 | [0043](0043-define-the-metrics-in-the-warehouse-and-give-agents-tools-over-the-marts.md) | Define the metrics in the warehouse, and give agents tools over the marts | accepted | 2026-10-31 |
 | [0044](0044-keep-the-core-for-good-and-change-it-by-migrations.md) | Keep the core for good, change it by migrations, and back it up before each one | accepted | 2026-10-31 |
@@ -104,4 +104,4 @@ agoranomos is pre-alpha. A record states a decision, and the components it descr
 | [0055](0055-read-each-day-at-the-end-of-its-window-and-keep-the-loads.md) | Read each day at the end of its window, and keep the daily loads for good | accepted | 2026-11-24 |
 | [0056](0056-count-roas-by-the-value-of-the-primary-actions.md) | Count ROAS by the value of the primary conversion actions | accepted | 2026-11-26 |
 | [0057](0057-keep-the-default-channel-group-in-the-key-of-the-sessions.md) | Keep the default channel group in the key of the sessions of web analytics | accepted | 2026-11-26 |
-| [0059](0059-upgrade-from-the-previous-minor-release-only.md) | Upgrade from the previous minor release only | proposed | 2026-11-26 |
+| [0059](0059-upgrade-from-the-previous-minor-release-only.md) | Upgrade from the previous minor release only | accepted | 2026-11-26 |
