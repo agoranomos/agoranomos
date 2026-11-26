@@ -55,6 +55,7 @@ COUNT = ("type/BigInteger", "int8")
 INTEGER = ("type/Integer", "int4")
 NUMBER = ("type/Decimal", "numeric")
 MOMENT = ("type/DateTimeWithLocalTZ", "timestamptz")
+BOOLEAN = ("type/Boolean", "bool")
 COLUMN_TYPES = {
     "accounts": COUNT,
     "models": COUNT,
@@ -66,6 +67,7 @@ COLUMN_TYPES = {
     "last_loaded_at": MOMENT,
     "hours_since_load": NUMBER,
     "loads": COUNT,
+    "is_in_settings": BOOLEAN,
     "started_at": MOMENT,
     "minutes": NUMBER,
     "node_name": TEXT,
@@ -132,6 +134,7 @@ TITLES = {
     "last_loaded_at": "Last Load",
     "hours_since_load": "Hours Since Load",
     "loads": "Loads",
+    "is_in_settings": "In the Settings",
     "started_at": "Started",
     "minutes": "Minutes",
     "node_name": "Node",
@@ -195,8 +198,13 @@ ONE_DECIMAL = frozenset(
     }
 )
 # An account is late when its last load is older than this, in hours: the daily load runs once a
-# day, so a day and a half leaves room for a run that took long or was retried.
+# day, so a day and a half leaves room for a run that took long or was retried. An account that the
+# settings of the model do not name, as one taken out of extensions/model/clients.toml, is never
+# late: its platform no longer loads it, and ops.ops_loads keeps its last load for good. A source of
+# the rates, which the settings do not name, counts, as does the alert of late accounts of the
+# watcher (agoranomos_pipelines/watcher.py).
 LATE_HOURS = 36
+IN_SETTINGS = "is_in_settings IS NOT FALSE"
 # The last run of the transform: the run of Airflow whose last node ended last.
 LAST_RUN = (
     "WITH last_run AS (",
@@ -225,7 +233,8 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "name": "Late accounts",
         "description": (
             f"How many accounts of the platforms were last loaded more than {LATE_HOURS} hours "
-            "ago, as the record of the loads says."
+            "ago, as the record of the loads says, of those that the settings of the model name "
+            "and of the sources of the rates."
         ),
         "display": "scalar",
         "columns": ("accounts",),
@@ -233,6 +242,7 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "SELECT count(*) AS accounts",
             "FROM ops.ops_loads",
             f"WHERE hours_since_load > {LATE_HOURS}",
+            f"    AND {IN_SETTINGS}",
         ),
         "layout": {"row": 0, "col": 0, "size_x": 6, "size_y": 3},
     },
@@ -308,7 +318,8 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "name": "Last load of each account",
         "description": (
             "The last day that a load took for each account of each platform, in the time zone of "
-            "the account, when that load ran, and how many hours ago."
+            "the account, when that load ran, how many hours ago, and whether the settings of the "
+            "model name the account: those that they do not name come last and are never late."
         ),
         "display": "table",
         "columns": (
@@ -318,11 +329,13 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
             "last_loaded_at",
             "hours_since_load",
             "loads",
+            "is_in_settings",
         ),
         "query": sql(
-            "SELECT platform, account_id, last_day_loaded, last_loaded_at, hours_since_load, loads",
+            "SELECT platform, account_id, last_day_loaded, last_loaded_at, hours_since_load,",
+            "    loads, is_in_settings",
             "FROM ops.ops_loads",
-            "ORDER BY hours_since_load DESC, platform, account_id",
+            f"ORDER BY {IN_SETTINGS} DESC, hours_since_load DESC, platform, account_id",
         ),
         "layout": {"row": 8, "col": 0, "size_x": 24, "size_y": 9},
     },

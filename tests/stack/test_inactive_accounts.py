@@ -1,7 +1,8 @@
 """An account that leaves the settings of the model (ADR-0044): the core keeps its data, the views
 of the marts go on showing it with the client unassigned and is_account_active false, the test
-assert_every_account_with_data_is_in_the_settings warns, and an account that the settings name
-again is active again, with its client.
+assert_every_account_with_data_is_in_the_settings warns, the account is never late, as
+ops.ops_loads, the card Late accounts and the check of the watcher see it, and an account that the
+settings name again is active again, with its client.
 
 The demo names its accounts in a file of the base package, which a deployment cannot take an
 account out of. So the test checks that the newest run of the transform ran the new test, which
@@ -17,6 +18,7 @@ The assertions print IDs, counts and states, never a secret.
 import json
 
 import pytest
+from agoranomos_pipelines import watcher
 from airflow_api import is_busy, wait_for_dag
 from stack_helpers import active_variant, compose, wait_for, warehouse_output
 
@@ -49,6 +51,17 @@ PUT_BACK = (
     "SELECT * FROM json_populate_recordset(NULL::raw_settings.account_clients, '{rows}')"
 )
 INACTIVE = "SELECT platform || ' ' || account_id FROM core.dim_account WHERE NOT is_active"
+# Whether ops.ops_loads says that the settings name each of the two, and the accounts that the late
+# check of the watcher compares.
+IN_SETTINGS = (
+    "SELECT string_agg(platform || ' ' || account_id || ' ' || "  # noqa: S608 (IDs of the demo)
+    "coalesce(is_in_settings::text, 'none'), ',' ORDER BY platform, account_id) "
+    f"FROM ops.ops_loads WHERE (platform, account_id) IN ({PAIRS})"
+)
+CHECKED = (
+    f"SELECT source || ' ' || account_id FROM ({watcher.LATE_SQL}) "  # noqa: S608 (a constant)
+    "AS late(source, account_id, last_day, time_zone)"
+)
 # dbt by hand, in the container that runs the tasks of Airflow, which has the password of
 # transformer, with a target and a log folder outside the project, which is mounted read-only
 # (CONTRIBUTING.md), and the tests of each node selected as the transform selects them.
@@ -144,6 +157,11 @@ def test_an_account_that_leaves_the_settings_keeps_its_data_and_is_no_longer_act
         assert int(rows) > 0, key
         assert (clients, active) == (CLIENT, "true"), key
     inactive = set(warehouse_output(env, INACTIVE).splitlines())
+    left = {f"{platform} {account}" for platform, account in LEAVING}
+    named = ",".join(f"{key} true" for key in sorted(left))
+    assert warehouse_output(env, IN_SETTINGS) == named
+    checked = set(warehouse_output(env, CHECKED).splitlines())
+    assert left <= checked
     settings = warehouse_output(env, SETTINGS, "loader")
     found = len(json.loads(settings))
     assert found == len(LEAVING), f"the settings hold {found} rows of the two, not one of each"
@@ -152,8 +170,11 @@ def test_an_account_that_leaves_the_settings_keeps_its_data_and_is_no_longer_act
         assert build_the_registry() == ("warn", len(LEAVING))
         # The registry keeps both, no longer active, with the client unassigned, and the views show
         # every row that they showed, which follows the client of the account.
-        left = {f"{platform} {account}" for platform, account in LEAVING}
         assert set(warehouse_output(env, INACTIVE).splitlines()) == inactive | left
+        # Neither is late any more: ops.ops_loads keeps their last loads with is_in_settings false,
+        # which the card Late accounts leaves out, and the watcher compares the others alone.
+        assert warehouse_output(env, IN_SETTINGS) == named.replace(" true", " false")
+        assert set(warehouse_output(env, CHECKED).splitlines()) == checked - left
         for key, where in LEAVING.items():
             rows, total, *_ = before[key]
             assert shown(env, *where, *key).split("|") == [rows, total, "unassigned", "false"]
@@ -165,6 +186,8 @@ def test_an_account_that_leaves_the_settings_keeps_its_data_and_is_no_longer_act
     # Named again, each is active again, with its client and all its data.
     assert back == ("pass", 0)
     assert set(warehouse_output(env, INACTIVE).splitlines()) == inactive
+    assert warehouse_output(env, IN_SETTINGS) == named
+    assert set(warehouse_output(env, CHECKED).splitlines()) == checked
     for key, where in LEAVING.items():
         assert shown(env, *where, *key).split("|") == before[key]
     assert listed(env, "4170000012") == f"{CLIENT}|true"

@@ -1571,13 +1571,12 @@ G2_SUMS = [
 
 
 def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
-    # Clicks above impressions, an account of no client, a missing day and lower levels above their
-    # parents can be right, so they warn; so can primary actions that do not add up to
+    # Clicks above impressions, a missing day and lower levels above their parents can be right,
+    # so they warn; so can primary actions that do not add up to
     # conversions_primary, as a campaign day that only the report of conversions of Google Ads
     # holds has no row of statistics (ADR-0036). They read the views of the marts.
     wanted = {
         "assert_clicks_within_impressions": ({"ad_stats_campaign_daily"}, True),
-        "assert_every_account_has_a_client": ({"ad_accounts"}, True),
         "assert_every_day_of_an_account_has_statistics": ({"ad_stats_campaign_daily"}, True),
         "assert_primary_actions_add_up_to_the_conversions": (
             {"ad_conversions_campaign_daily", "ad_stats_campaign_daily"},
@@ -1598,7 +1597,8 @@ def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
         "assert_no_source_is_stopped": ({"int_g1_failures"}, True),
         # An account that leaves the settings keeps its data (ADR-0044): it warns, with the
         # registry that sets the activity, over the facts as the runs before left them, which are
-        # ancestors of the registry through G1a, so it runs in the task of dim_account.
+        # ancestors of the registry through G1a, so it runs in the task of dim_account. It is the
+        # one warning of an account that no setting names, of the client unassigned (ADR-0024).
         "assert_every_account_with_data_is_in_the_settings": (
             {
                 "dim_account",
