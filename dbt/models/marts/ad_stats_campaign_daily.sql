@@ -19,9 +19,11 @@
 -- when the day on which its load ended, in the time zone of the account, is at least the window of
 -- restatements of its platform after the day of the row, and the day is whole: a daily load takes
 -- again only the days of the window, so no later load changes the row (ADR-0037, ADR-0038). It
--- follows the load and not the calendar, so a day that a load took young before a stop of the
--- stack longer than the window is never final. A row whose load or platform the view does not find
--- is not final, rather than none.
+-- follows the load and not the calendar: after a missed daily load, or a stop of any length, the
+-- next window starts a day earlier for each missed load, so each day is read once at the age of the
+-- window or more and becomes final then (windows.daily_window of
+-- airflow/dags/agoranomos_pipelines/windows.py). A row whose load or platform the view does not
+-- find is not final, rather than none.
 -- Metabase reads the marts layer only.
 -- The test of the primary actions reads the view of the conversions by action, which dbt orders
 -- before it: depends_on: {{ ref('ad_conversions_campaign_daily') }}

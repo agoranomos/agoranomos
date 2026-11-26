@@ -614,9 +614,10 @@ def test_a_daily_load_brings_every_day_after_the_last_load(env, airflow_url, tok
     # rows after the new end of each window go too: a load with rows outside its window is what the
     # checks of the transform put an account in quarantine for (date_outside_window), which would
     # empty the marts of web analytics for the tests after this one.
-    # The daily load brings every day after the last of each account and the window of each other
-    # platform, in the pool of the loads of the demo, and the rows that staging reads are what the
-    # generator makes, without a hole or a duplicate.
+    # The daily load brings every day after the last of each account, from the window of
+    # restatements before it, so that the days of the stop are read at the age of that window
+    # (ADR-0055), and the window of each other platform, in the pool of the loads of the demo, and
+    # the rows that staging reads are what the generator makes, without a hole or a duplicate.
     web = platforms.PLATFORMS["demo_web"]
     ends = dict(
         line.split("|")
@@ -680,7 +681,9 @@ def test_a_daily_load_brings_every_day_after_the_last_load(env, airflow_url, tok
         assert {a: end for a, (_, end) in windows.items()} == yesterdays, code
         for account_id, (start, end) in windows.items():
             if platform is web:
-                assert start == lagged[account_id] + timedelta(days=1), account_id
+                # [min(last + 1 - W, last end + 2 - W), last], and the stop is longer than W.
+                wanted_start = lagged[account_id] + timedelta(days=2 - platform.window_days)
+                assert start == wanted_start, account_id
             else:
                 assert (end - start).days + 1 == platform.window_days, (code, account_id)
         assert in_warehouse(env, code, later) == expected(code, later, moment(history)), code
