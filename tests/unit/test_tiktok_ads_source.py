@@ -295,7 +295,12 @@ class TikTok:
             }
             return StandInResponse(200, ok([row]))
         if path == REPORT:
-            rows = [report_row(params["data_level"], day) for day in days_of(params)]
+            asked = json.loads(params["metrics"])
+            rows = []
+            for day in days_of(params):
+                row = report_row(params["data_level"], day)
+                row["metrics"] = {k: v for k, v in row["metrics"].items() if k in asked}
+                rows.append(row)
             return StandInResponse(200, ok(rows))
         rows = [{**row, "advertiser_id": params["advertiser_id"]} for row in LISTS[path]]
         return StandInResponse(200, ok(rows))
@@ -1255,3 +1260,202 @@ def test_the_command_fails_with_one_line_and_no_secret(api_module, monkeypatch, 
     assert captured.out == ""
     assert captured.err.startswith("tiktok connect: the exchange reads the app ID")
     assert SECRET not in captured.err
+
+
+# The whole loads of the two advertisers up to their yesterday at NOW: the 27th at UTC-8, the 28th
+# in Berlin, as recorded() gives them, the day of the load and its last day.
+WHOLE = [
+    (ONE, date(2026, 10, 28), date(2026, 10, 27)),
+    (TWO, date(2026, 10, 29), date(2026, 10, 28)),
+]
+
+
+def test_an_intraday_load_takes_the_current_day_of_each_advertiser_without_conversions(tiktok):
+    # ADR-0051 (#412): at 02:00 UTC on 29 October it is still the 28th at UTC-8 and the 29th in
+    # Berlin, the days in which TikTok takes start_date and end_date. A whole load covers the day
+    # before of each, so each takes its current day alone, as a load of the kind intraday, into
+    # report_campaign_daily and the journal, and nothing else.
+    module, state, made, extensions = tiktok
+    state.update(loads=1, reloads=WHOLE)
+    counts = module.load_intraday(NOW, extensions)
+    assert counts == {"report_campaign_daily": 2}
+    rows, hints = last_run(made)
+    assert set(rows) == {"report_campaign_daily", "_agoranomos_loads"}
+    # The hints of the table, the columns of the conversions among them, which stay empty.
+    columns = hints["report_campaign_daily"]["columns"]
+    assert set(columns) == set(module.HINTS["report_campaign_daily"]["columns"])
+    assert "metrics__conversion" in columns
+    assert hints["report_campaign_daily"]["write_disposition"] == "append"
+    record = {row["account_id"]: row for row in rows["_agoranomos_loads"]}
+    assert {
+        advertiser: (row["window_from"], row["window_to"], row["as_of"], row["kind"], row["status"])
+        for advertiser, row in record.items()
+    } == {
+        ONE: (date(2026, 10, 28), date(2026, 10, 28), date(2026, 10, 28), "intraday", "loaded"),
+        TWO: (date(2026, 10, 29), date(2026, 10, 29), date(2026, 10, 29), "intraday", "loaded"),
+    }
+    days = {p["advertiser_id"]: (p["start_date"], p["end_date"]) for p in reports(made["api"])}
+    assert days == {ONE: ("2026-10-28", "2026-10-28"), TWO: ("2026-10-29", "2026-10-29")}
+    # No conversion, complete payment or value: a partial day has none, not zero.
+    stats = rows["report_campaign_daily"]
+    assert [(row["advertiser_id"], row["dimensions"]["stat_time_day"]) for row in stats] == [
+        (ONE, "2026-10-28 00:00:00"),
+        (TWO, "2026-10-29 00:00:00"),
+    ]
+    assert all(
+        set(row["metrics"]) == {"campaign_name", "currency", "spend", "impressions", "clicks"}
+        for row in stats
+    )
+
+
+def test_an_intraday_load_asks_the_advertiser_and_the_report_of_its_campaigns(tiktok):
+    # Two calls for each advertiser, against seven and their pages for a daily load: no list, no
+    # totals, no ad group and no ad.
+    module, state, made, extensions = tiktok
+    state.update(loads=1, reloads=WHOLE)
+    module.load_intraday(NOW, extensions)
+    api = made["api"]
+    assert paths(api) == ["advertiser/info/", REPORT, "advertiser/info/", REPORT]
+    [params, _] = reports(api)
+    assert params["advertiser_id"] == ONE
+    assert params["report_type"] == "BASIC"
+    assert params["data_level"] == "AUCTION_CAMPAIGN"
+    assert json.loads(params["dimensions"]) == ["campaign_id", "stat_time_day"]
+    assert json.loads(params["metrics"]) == [
+        "campaign_name",
+        "currency",
+        "spend",
+        "impressions",
+        "clicks",
+    ]
+    # The campaigns at every status, deleted ones too, as for the daily load.
+    assert json.loads(params["filtering"]) == [
+        {
+            "field_name": "campaign_status",
+            "filter_type": "IN",
+            "filter_value": json.dumps(["STATUS_ALL"]),
+        }
+    ]
+    assert {headers["Access-Token"] for _, _, headers in api.requests} == {TOKEN}
+
+
+def test_an_intraday_load_takes_the_day_before_while_no_whole_load_covers_it(tiktok):
+    # ADR-0051, "The day before, after midnight": between midnight in the advertiser and the daily
+    # load at 12:17 UTC, the day before goes on growing, in the same report as the current day.
+    module, state, made, extensions = tiktok
+    state.update(
+        loads=1,
+        reloads=[
+            (ONE, date(2026, 10, 27), date(2026, 10, 26)),
+            (TWO, date(2026, 10, 28), date(2026, 10, 27)),
+        ],
+    )
+    module.load_intraday(NOW, extensions)
+    rows, _ = last_run(made)
+    windows = {
+        row["account_id"]: (row["window_from"], row["window_to"])
+        for row in rows["_agoranomos_loads"]
+    }
+    assert windows == {
+        ONE: (date(2026, 10, 27), date(2026, 10, 28)),
+        TWO: (date(2026, 10, 28), date(2026, 10, 29)),
+    }
+    assert len(rows["report_campaign_daily"]) == 4
+    assert len(reports(made["api"])) == 2
+
+
+def test_an_intraday_load_leaves_an_advertiser_without_a_whole_load_for_its_first_daily_load(
+    tiktok, caplog, monkeypatch
+):
+    module, state, made, extensions = tiktok
+    state.update(loads=1, reloads=WHOLE[1:])
+    with caplog.at_level("INFO"):
+        module.load_intraday(NOW, extensions)
+    assert {p["advertiser_id"] for p in reports(made["api"])} == {TWO}
+    assert f"1 TikTok advertisers ({ONE}) have had no whole load yet" in caplog.text
+    # With no whole load at all, nothing: no token is needed, no request, no run of dlt.
+    monkeypatch.delenv("TIKTOK_ADS_ACCESS_TOKEN")
+    made["api"].requests.clear()
+    made["pipelines"].clear()
+    state.update(loads=None, reloads=[])
+    assert module.load_intraday(NOW, extensions) is None
+    assert made["api"].requests == []
+    assert [pipeline.runs for pipeline in made["pipelines"]] == [[]]
+
+
+def test_an_intraday_load_records_only_the_advertisers_that_it_took_and_fails_at_the_end(tiktok):
+    # A failed advertiser leaves no row: a row of the status failed would hold it in quarantine
+    # (load_failed) with its daily window, for a day that the next cycle reads again.
+    module, state, made, extensions = tiktok
+    state.update(loads=1, reloads=WHOLE)
+    made["api"].before = lambda path, params: (
+        refusal(40001, "No permission")
+        if path == REPORT and params["advertiser_id"] == TWO
+        else None
+    )
+    with pytest.raises(module.AdvertisersFailed) as raised:
+        module.load_intraday(NOW, extensions)
+    assert str(raised.value).startswith(
+        f"1 of 2 TikTok advertisers failed, the other 1 is loaded: TikTok advertiser {TWO}: "
+        f"{REPORT} answered 200 No permission (code 40001"
+    )
+    rows, _ = last_run(made)
+    assert [row["account_id"] for row in rows["_agoranomos_loads"]] == [ONE]
+    assert {row["advertiser_id"] for row in rows["report_campaign_daily"]} == {ONE}
+    # When every advertiser fails, nothing is written.
+    made["pipelines"].clear()
+    made["api"].before = lambda path, params: refusal(40001, "No permission")
+    with pytest.raises(module.AdvertisersFailed, match="none is loaded"):
+        module.load_intraday(NOW, extensions)
+    assert [pipeline.runs for pipeline in made["pipelines"]] == [[]]
+
+
+def test_a_report_of_the_current_day_cut_at_20000_ads_reads_the_list_to_split_it(tiktok):
+    # The short cycle takes no list, but a report that TikTok cuts goes again by groups of the IDs
+    # of its campaigns, as in a daily load: the list is read then, into the folder of the
+    # advertiser, and is not loaded.
+    module, state, made, extensions = tiktok
+    state.update(loads=1, reloads=WHOLE[:1])
+
+    def before(path, params):
+        if path == REPORT and "campaign_ids" not in params.get("filtering", ""):
+            rows = [report_row("AUCTION_CAMPAIGN", day) for day in days_of(params)]
+            return StandInResponse(200, ok(rows), {"X-Tt-Ads-Throttle": "only top 20k"})
+        return None
+
+    made["api"].before = before
+    module.load_intraday(NOW, extensions)
+    assert paths(made["api"]) == ["advertiser/info/", REPORT, "campaign/get/", REPORT]
+    [_, split] = reports(made["api"])
+    assert json.loads(json.loads(split["filtering"])[1]["filter_value"]) == [CAMPAIGN]
+    rows, _ = last_run(made)
+    assert set(rows) == {"report_campaign_daily", "_agoranomos_loads"}
+    assert len(rows["report_campaign_daily"]) == 1
+
+
+def test_a_report_of_the_current_day_that_times_out_is_split_and_never_asked_again_as_it_was(
+    tiktok,
+):
+    module, state, made, extensions = tiktok
+    state.update(loads=1, reloads=[(ONE, date(2026, 10, 27), date(2026, 10, 26))])
+    asked = []
+
+    def before(path, params):
+        if path != REPORT:
+            return None
+        key = (params["start_date"], params["end_date"], params.get("filtering"))
+        assert key not in asked, "a request that timed out went again as it was"
+        asked.append(key)
+        if params["start_date"] != params["end_date"]:
+            raise Timeout("Read timed out")
+        return None
+
+    made["api"].before = before
+    module.load_intraday(NOW, extensions)
+    assert [(first, last) for first, last, _ in asked] == [
+        ("2026-10-27", "2026-10-28"),
+        ("2026-10-27", "2026-10-27"),
+        ("2026-10-28", "2026-10-28"),
+    ]
+    rows, _ = last_run(made)
+    assert len(rows["report_campaign_daily"]) == 2

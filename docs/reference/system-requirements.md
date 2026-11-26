@@ -141,7 +141,7 @@ So the warehouse at the limit takes about 30 to 35 GB of data, 8 GB of WAL, 2.6 
 
 ## The short cycle of the current day
 
-Every `AGORANOMOS_INTRADAY_HOURS` hours, 3 by default, the short cycle loads the current day of each account of Google Ads, and of `demo_search` with the demo, and each such load starts a full run of the transform, as dear in orchestration as a daily run, however few rows it writes ([ADR-0051](../adr/0051-take-the-current-day-as-a-load-of-the-kind-intraday.md), [Configuration](configuration.md#google-ads)). Eight cycles a day are eight more runs of the transform, in the hours when people read.
+Every `AGORANOMOS_INTRADAY_HOURS` hours, 3 by default, the short cycle loads the current day of each account of Google Ads, of Meta and of TikTok, and of `demo_search` with the demo, and each such load starts a full run of the transform, or the loads of one cycle, which start at the same minute, start one or two, as dear in orchestration as a daily run, however few rows it writes ([ADR-0051](../adr/0051-take-the-current-day-as-a-load-of-the-kind-intraday.md), [Configuration](configuration.md#google-ads)). Eight cycles a day are eight more runs of the transform, in the hours when people read.
 
 Measured on the runners of GitHub, which the stack tests and the workflow Profile use ([How to measure](#how-to-measure)), on 19 November 2026:
 

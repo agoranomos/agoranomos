@@ -119,6 +119,10 @@ from agoranomos_pipelines.history import missing as missing
 from agoranomos_pipelines.history import next_portion as next_portion
 from agoranomos_pipelines.history import planned, portion_from
 from agoranomos_pipelines.history import quarter as quarter
+
+# The last day that a whole load of an account covers, which the short cycles of Google Ads, Meta
+# and TikTok share, under the name that this module had before.
+from agoranomos_pipelines.intraday import whole_end as whole_end
 from agoranomos_pipelines.loads import (
     APPEND,
     DATE,
@@ -473,17 +477,6 @@ def last_day(
     if account_id in journal:
         return journal[account_id][1]
     return None
-
-
-def whole_end(
-    account_id: str, core: dict[str, date], journal: dict[str, tuple[date, date]]
-) -> date | None:
-    """The last day that a whole load of an account covers, accepted in the core or whole in the
-    journal, pinned or not: the short cycle takes the day before today while this is earlier. None
-    when no whole load has taken the account, which the short cycle then leaves for its first daily
-    load."""
-    known = [day for day in (core.get(account_id), journal.get(account_id, (None, None))[1]) if day]
-    return max(known) if known else None
 
 
 def intraday_days(now: datetime, time_zone: str, whole: date) -> tuple[date, date]:

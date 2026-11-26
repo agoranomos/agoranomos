@@ -46,7 +46,7 @@ x-airflow: &airflow
     # (agoranomos_pipelines/rates.py); marts-init gets it too.
     AGORANOMOS_RATES_SOURCE: ${AGORANOMOS_RATES_SOURCE:-auto}
     # The hours between two loads of the current day (ADR-0051), which the DAG processor reads when
-    # it parses the DAG of the short cycle, and its tasks when they run: a divisor of 24, or 0 for
+    # it parses the DAGs of the short cycle, and their tasks when they run: a divisor of 24, or 0 for
     # none (agoranomos_pipelines/intraday.py).
     AGORANOMOS_INTRADAY_HOURS: ${AGORANOMOS_INTRADAY_HOURS:-3}
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
@@ -355,6 +355,26 @@ services:
             "google_ads_load",
             "1",
             "The loads of Google Ads, one at a time (ADR-0051)",
+        ]
+        main()
+        # The pools of the loads of Meta and of TikTok, one at a time each: the daily load, its runs
+        # of the history and the short cycle of the current day (ADR-0051).
+        sys.argv = [
+            "airflow",
+            "pools",
+            "set",
+            "meta_ads_load",
+            "1",
+            "The loads of Meta, one at a time (ADR-0051)",
+        ]
+        main()
+        sys.argv = [
+            "airflow",
+            "pools",
+            "set",
+            "tiktok_ads_load",
+            "1",
+            "The loads of TikTok, one at a time (ADR-0051)",
         ]
         main()
         # The user ai, as which the MCP server of Airflow signs in (ADR-0030): while its switch is on,

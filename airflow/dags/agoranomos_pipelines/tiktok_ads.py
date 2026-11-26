@@ -64,6 +64,23 @@ whole load in _agoranomos_loads; with neither, the load takes its usual window. 
 watermark of each advertiser in the asset state store of Airflow 3.3 as a cache of the warehouse,
 which never moves a window (watermarks).
 
+The short cycle (ADR-0051): every few hours, the DAG agoranomos_tiktok_ads_intraday loads the
+current day of each advertiser in its time zone, and the day before while no whole load, of the
+kind window or history, covers it, as a load of the kind intraday (load_intraday): the advertiser,
+for its time zone, and the synchronous report BASIC of its campaigns on those days with the metrics
+of INTRADAY_LEVEL, its spend, impressions and clicks without conversions, so that a partial day has
+none, not zero. That is two calls for each advertiser, and a page more for each PAGE_SIZE campaign
+days. TikTok gives these metrics of a basic report as real-time data, with "a latency of 30
+minutes", up to two hours "in extreme cases", adjusted the next day, and takes start_date and
+end_date in the time zone of the advertiser (Data latency for reports, Reporting FAQs, v1.3, read on
+26 November 2026). The load takes no list, no totals, no ad group and no ad, keeps no watermark,
+and takes only the advertisers that a whole load has taken (intraday.whole_end); its rows go into
+report_campaign_daily, with a row of the kind intraday for each advertiser in the journal, and
+staging takes a whole load of a day before an intraday one. No watermark counts it. A report of the
+short cycle that TikTok cuts at 20,000 ads, or that times out on one day, reads the list of the
+campaigns of the advertiser into its staging folder to go again by groups of their IDs, as a daily
+load does, and loads no list.
+
 A load reads each advertiser whole before dlt sees any of it, into a file for each table on disk, a
 page at a time. An error of the API on one advertiser is caught at the advertiser, which leaves
 nothing in the load; the load takes the other advertisers, records the failed one in
@@ -81,7 +98,7 @@ import tempfile
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from time import monotonic, sleep
@@ -92,6 +109,7 @@ import dlt
 from dlt.destinations.exceptions import DatabaseUndefinedRelation
 from dlt.sources.helpers.requests import Client, RequestException, Timeout
 
+from agoranomos_pipelines import intraday
 from agoranomos_pipelines.history import Portion, history_start, planned, portion_from
 from agoranomos_pipelines.loads import (
     APPEND,
@@ -255,6 +273,12 @@ LEVELS = {
         ("campaign_id", "adgroup_id", "ad_name", *TOTALS, *CONVERSIONS),
     ),
 }
+# The level of the report of a load of the kind intraday (ADR-0051): that of the campaigns, with
+# their names and the metrics of the totals but no conversions, which a day in progress does not
+# have yet, so that they stay none and not zero. dlt writes the rows into report_campaign_daily
+# under its hints.
+INTRADAY_TABLE = "report_campaign_daily"
+INTRADAY_LEVEL = replace(LEVELS[INTRADAY_TABLE], metrics=("campaign_name", *TOTALS))
 # The lists and the facts of each advertiser, in the order of their requests: the totals of the
 # advertiser right before the report of its campaigns, which G0a checks against them.
 ENTITIES = tuple(EDGES)
@@ -355,7 +379,13 @@ def token() -> str:
 
 def yesterday(now: datetime, time_zone: str) -> date:
     """The last day that a load at now takes of an advertiser: yesterday in its time zone."""
-    return now.astimezone(ZoneInfo(time_zone)).date() - timedelta(days=1)
+    return today(now, time_zone) - timedelta(days=1)
+
+
+def today(now: datetime, time_zone: str) -> date:
+    """The current day of an advertiser at now, in its time zone, in which TikTok takes the days of
+    a report: the day of a load, and the last day of a load of the kind intraday."""
+    return now.astimezone(ZoneInfo(time_zone)).date()
 
 
 def window(last: date, last_end: date | None) -> tuple[date, date]:
@@ -394,9 +424,9 @@ def checked(advertiser_ids: Iterable[str]) -> list[str]:
 def accepted(pipeline, advertiser_ids: Iterable[str]) -> dict[str, date]:
     """The last day that the core accepted for each advertiser: the end of the window of its
     newest accepted whole load in core.loads, which loader may read (ADR-0038). A load of the
-    kind intraday does not count, as ADR-0051 requires of every reader of window_to, though
-    this connector writes none: one would move the next window past the days that it did not
-    read."""
+    kind intraday, of the short cycle, does not count, as ADR-0051 requires of every reader of
+    window_to: after a stop of 120 days, one of the first day back would move the next window past
+    the days that no whole load read."""
     # IDs of checked digits, and constants of this module.
     wanted = ", ".join(f"'{advertiser_id}'" for advertiser_id in checked(advertiser_ids))
     try:
@@ -708,15 +738,17 @@ def written_report(
     file: TextIO,
     lists: dict[str, Path],
     ids: tuple[str, list[str]] | None = None,
+    level: Level | None = None,
 ) -> None:
     """Write the report of a level of an advertiser over days, at most RANGE_DAYS, to file, each
     row with the advertiser_id of the request. A report that TikTok cuts at 20,000 ads goes again
     by groups of IDS_PER_FILTER IDs of its level from its list; one that times out goes again
     split, after the file is cut back to where its rows began: by halves of its days, and, for one
     day below the advertiser, by groups of CAMPAIGNS_PER_FILTER campaigns. A day that still times
-    out fails the advertiser."""
+    out fails the advertiser. level is that of the table, or INTRADAY_LEVEL for the short cycle,
+    whose lists read a list only when one is needed (Lists)."""
     subject = f"TikTok advertiser {advertiser_id}"
-    level = LEVELS[table]
+    level = LEVELS[table] if level is None else level
     start = file.tell()
     api.cut = False
     try:
@@ -731,7 +763,7 @@ def written_report(
             middle = days[0] + (days[1] - days[0]) // 2
             log.warning("%s; asking again by halves of its days", error)
             for part in ((days[0], middle), (middle + timedelta(days=1), days[1])):
-                written_report(api, advertiser_id, table, part, file, lists, ids)
+                written_report(api, advertiser_id, table, part, file, lists, ids, level)
             return
         if level.ids is None or ids is not None:
             raise
@@ -740,7 +772,9 @@ def written_report(
             raise
         log.warning("%s; asking again by groups of %d campaigns", error, CAMPAIGNS_PER_FILTER)
         for group in chunks(campaigns, CAMPAIGNS_PER_FILTER):
-            written_report(api, advertiser_id, table, days, file, lists, ("campaign_ids", group))
+            written_report(
+                api, advertiser_id, table, days, file, lists, ("campaign_ids", group), level
+            )
         return
     if api.cut and ids is None and level.ids is not None:
         file.seek(start)
@@ -755,7 +789,7 @@ def written_report(
             len(found),
         )
         for group in chunks(found, IDS_PER_FILTER):
-            written_report(api, advertiser_id, table, days, file, lists, (level.ids, group))
+            written_report(api, advertiser_id, table, days, file, lists, (level.ids, group), level)
 
 
 @dataclass
@@ -793,6 +827,56 @@ def advertiser_info(api: Api, advertiser_id: str) -> dict:
     return found[0]
 
 
+def write_list(api: Api, advertiser_id: str, table: str, path: Path) -> None:
+    """Write every page of a list of an advertiser, campaigns, adgroups or ads, at every
+    primary_status and of both origins, to the file path, each row with the advertiser_id of the
+    request."""
+    subject = f"TikTok advertiser {advertiser_id}"
+    params = {
+        "advertiser_id": advertiser_id,
+        "fields": json.dumps(list(FIELDS[table])),
+        "filtering": json.dumps(
+            {"primary_status": STATUS_ALL, "campaign_system_origins": list(ORIGINS)}
+        ),
+    }
+    with path.open("w", encoding="utf-8") as file:
+        for row in api.pages(subject, EDGES[table], params):
+            file.write(json.dumps({"advertiser_id": advertiser_id, **row}) + "\n")
+
+
+class Lists(dict):
+    """The files of the lists of an advertiser in a load of the short cycle, which reads none: a
+    list is read into the folder of the advertiser when written_report first needs it, to split a
+    report that TikTok cut at 20,000 ads or that timed out, and is not loaded."""
+
+    def __init__(self, api: Api, advertiser_id: str, folder: Path):
+        super().__init__()
+        self.api, self.advertiser_id, self.folder = api, advertiser_id, folder
+
+    def __missing__(self, table: str) -> Path:
+        path = self.folder / f"{table}.jsonl"
+        log.info(
+            "TikTok advertiser %s: reading its %s to split a report of the current day",
+            self.advertiser_id,
+            table,
+        )
+        write_list(self.api, self.advertiser_id, table, path)
+        self[table] = path
+        return path
+
+
+def current_day(api: Api, advertiser_id: str, advertiser: dict, now: datetime) -> date:
+    """The current day of an advertiser at now in its time zone, the timezone of its row. A time
+    zone that agoranomos does not know raises TikTokAdsError."""
+    try:
+        return today(now, str(advertiser.get("timezone")))
+    except (ZoneInfoNotFoundError, ValueError):
+        raise api.fail(
+            f"TikTok advertiser {advertiser_id}",
+            "the advertiser has no time zone that agoranomos knows",
+        ) from None
+
+
 def read_advertiser(
     api: Api,
     advertiser_id: str,
@@ -809,10 +893,7 @@ def read_advertiser(
     replaces whole days, and a part of one would lose the rest (ADR-0035)."""
     subject = f"TikTok advertiser {advertiser_id}"
     advertiser = advertiser_info(api, advertiser_id)
-    try:
-        last_day_of_advertiser = yesterday(now, str(advertiser.get("timezone")))
-    except (ZoneInfoNotFoundError, ValueError):
-        raise api.fail(subject, "the advertiser has no time zone that agoranomos knows") from None
+    last_day_of_advertiser = current_day(api, advertiser_id, advertiser, now) - timedelta(days=1)
     if days is None:
         first, last = window(last_day_of_advertiser, last_end)
     else:
@@ -830,16 +911,7 @@ def read_advertiser(
     try:
         for table in ENTITIES:
             path = folder / f"{table}.jsonl"
-            params = {
-                "advertiser_id": advertiser_id,
-                "fields": json.dumps(list(FIELDS[table])),
-                "filtering": json.dumps(
-                    {"primary_status": STATUS_ALL, "campaign_system_origins": list(ORIGINS)}
-                ),
-            }
-            with path.open("w", encoding="utf-8") as file:
-                for row in api.pages(subject, EDGES[table], params):
-                    file.write(json.dumps({"advertiser_id": advertiser_id, **row}) + "\n")
+            write_list(api, advertiser_id, table, path)
             files[table] = path
         for table in FACTS:
             path = folder / f"{table}.jsonl"
@@ -851,6 +923,35 @@ def read_advertiser(
         shutil.rmtree(folder, ignore_errors=True)
         raise
     return Read(advertiser, (first, last), files)
+
+
+def read_intraday(api: Api, advertiser_id: str, now: datetime, whole: date, staging: Path) -> Read:
+    """Read the current day of an advertiser, and the day before while no whole load covers it,
+    whole being the last day that one covers (intraday.days): the advertiser, which gives its time
+    zone, and then the report of its campaigns on those days at INTRADAY_LEVEL, into a file in the
+    folder of the advertiser under staging. An error raises TikTokAdsError and leaves nothing of the
+    advertiser."""
+    advertiser = advertiser_info(api, advertiser_id)
+    days = intraday.days(current_day(api, advertiser_id, advertiser, now), whole)
+    # The ID is checked digits.
+    folder = staging / advertiser_id
+    folder.mkdir()
+    path = folder / f"{INTRADAY_TABLE}.jsonl"
+    try:
+        with path.open("w", encoding="utf-8") as file:
+            written_report(
+                api,
+                advertiser_id,
+                INTRADAY_TABLE,
+                days,
+                file,
+                Lists(api, advertiser_id, folder),
+                level=INTRADAY_LEVEL,
+            )
+    except TikTokAdsError:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+    return Read(advertiser, days, {INTRADAY_TABLE: path})
 
 
 def staged_rows(read: dict[str, Read], table: str) -> Iterator[dict]:
@@ -996,6 +1097,91 @@ def load(
             remember(cache, cached, read)
     for table, rows in sorted(counts.items()):
         log.info("Loaded %d rows into %s.%s, as of %s", rows, DATASET, table, now.isoformat())
+    log.info("%d calls to the TikTok API for %d advertisers", api.requests, len(wanted))
+    if failed:
+        raise AdvertisersFailed(failure_line(failed, len(read)))
+    return counts
+
+
+def load_intraday(
+    now: datetime, extensions: Path = EXTENSIONS, mask: Callable[[str], None] = lambda value: None
+) -> dict[str, int] | None:
+    """Load the current day of the advertisers of the deployment at now, the moment of the read, as
+    a load of the kind intraday (ADR-0051): for each advertiser of clients.toml that a whole load
+    has taken, the report of its campaigns on its current day, and on the day before while no whole
+    load covers it (read_intraday), each read whole before dlt sees any of it, into
+    report_campaign_daily and the journal, in one run. Return the rows of each table that dlt
+    reports, or None when no advertiser has had a whole load yet, which loads nothing and asks
+    TikTok nothing; mask hides the token in the logs of Airflow. The watermarks stay as they were.
+    When an advertiser failed, the load takes the others and raises AdvertisersFailed at the end. A
+    failed advertiser leaves no row in the journal: a row of the status failed would make the
+    newest pinned load of the advertiser a failed one, which holds it in quarantine (load_failed),
+    its daily window with it, for a day in progress that the next cycle reads again; when every
+    advertiser failed, nothing is written."""
+    warn_of_the_sunset(now)
+    named = advertisers(extensions)
+    os.environ.update(DLT_SETTINGS)
+    with open_pipeline() as pipeline, tempfile.TemporaryDirectory(prefix="tiktok-ads-") as staging:
+        journal = recorded(pipeline) if has_loads(pipeline) else {}
+        core = accepted(pipeline, named)
+        wholes = {item: intraday.whole_end(item, core, journal) for item in named}
+        first = sorted(advertiser_id for advertiser_id, end in wholes.items() if end is None)
+        if first:
+            log.info(
+                "%d TikTok advertisers (%s) have had no whole load yet: the current day of each "
+                "comes after its first daily load",
+                len(first),
+                ", ".join(first),
+            )
+        wanted = {advertiser_id: end for advertiser_id, end in wholes.items() if end is not None}
+        if not wanted:
+            log.info("No TikTok advertiser has had a whole load yet: no current day to load")
+            return None
+        access_token = token()
+        mask(access_token)
+        api = Api(Secrets(), access_token)
+        read: dict[str, Read] = {}
+        failed: dict[str, TikTokAdsError] = {}
+        for advertiser_id, whole in wanted.items():
+            try:
+                read[advertiser_id] = read_intraday(api, advertiser_id, now, whole, Path(staging))
+            except TikTokAdsError as error:
+                log.error("%s; the load goes on with the other advertisers", error)
+                failed[advertiser_id] = error
+        counts: dict[str, int] = {}
+        if read:
+            loaded_at = datetime.now(UTC)
+            record = [
+                {
+                    "account_id": advertiser_id,
+                    # The current day of the advertiser, the last of the window.
+                    "as_of": item.window[1],
+                    "window_from": item.window[0],
+                    "window_to": item.window[1],
+                    "now": now,
+                    "loaded_at": loaded_at,
+                    "status": LOADED,
+                    "error": None,
+                    "kind": INTRADAY,
+                }
+                for advertiser_id, item in sorted(read.items())
+            ]
+            stats = staged_rows(read, INTRADAY_TABLE)
+            resources = [
+                dlt.resource(or_marker(stats), name=INTRADAY_TABLE, **own(HINTS[INTRADAY_TABLE])),
+                # In the same run as the report, so under the same _dlt_load_id.
+                dlt.resource(record, name=LOADS, **own(LOAD_HINTS)),
+            ]
+            run(pipeline, resources)
+            counts = row_counts(pipeline)
+    for table, rows in sorted(counts.items()):
+        log.info(
+            "Loaded %d rows of the current day into %s.%s, as of %s",
+            rows,
+            DATASET,
+            table,
+            now.isoformat(),
+        )
     log.info("%d calls to the TikTok API for %d advertisers", api.requests, len(wanted))
     if failed:
         raise AdvertisersFailed(failure_line(failed, len(read)))

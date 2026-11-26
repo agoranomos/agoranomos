@@ -1,6 +1,7 @@
 """Tests of the short cycle of the current day (ADR-0051): its period and its days
-(airflow/dags/agoranomos_pipelines/intraday.py), and the DAGs of Google Ads and of the demo that
-run it (airflow/dags/agoranomos_google_ads_intraday.py, agoranomos_demo_intraday.py).
+(airflow/dags/agoranomos_pipelines/intraday.py), and the DAGs of Google Ads, of Meta, of TikTok
+and of the demo that run it (airflow/dags/agoranomos_google_ads_intraday.py,
+agoranomos_meta_ads_intraday.py, agoranomos_tiktok_ads_intraday.py, agoranomos_demo_intraday.py).
 
 Airflow is not in the development environment, so the DAG file is imported with stand-ins of the
 parts of airflow.sdk that it and the module of the assets use: the decorators keep the function of
@@ -79,14 +80,33 @@ def test_a_load_takes_the_current_day_and_the_day_before_while_no_whole_load_cov
     assert intraday.days(today, yesterday - timedelta(days=120)) == (yesterday, today)
 
 
+def test_the_last_whole_day_is_the_later_of_the_core_and_the_journal_or_none():
+    # Google Ads, Meta and TikTok share it: an account that no whole load has taken waits for its
+    # first daily load, as the check of the accounts knows an account from the list of a whole one.
+    core = {"a": date(2026, 10, 27)}
+    journal = {
+        "a": (date(2026, 10, 27), date(2026, 10, 26)),
+        "b": (date(2026, 10, 29), date(2026, 10, 28)),
+    }
+    assert intraday.whole_end("a", core, journal) == date(2026, 10, 27)
+    assert intraday.whole_end("a", {}, journal) == date(2026, 10, 26)
+    assert intraday.whole_end("b", core, journal) == date(2026, 10, 28)
+    assert intraday.whole_end("c", core, journal) is None
+
+
 def test_the_minute_keeps_away_from_the_daily_loads_and_the_watcher():
-    # Meta at 10:07 and Google Ads at 10:37 UTC, the watcher at 4, 19, 34 and 49 past each hour.
+    # Meta at 10:07, Google Ads at 10:37 and TikTok at 12:17 UTC, the watcher at 4, 19, 34 and 49
+    # past each hour.
     taken = set()
-    for name in ("agoranomos_meta_ads_daily.py", "agoranomos_google_ads_daily.py"):
+    for name in (
+        "agoranomos_meta_ads_daily.py",
+        "agoranomos_google_ads_daily.py",
+        "agoranomos_tiktok_ads_daily.py",
+    ):
         text = (ROOT / "airflow" / "dags" / name).read_text(encoding="utf-8")
         [line] = [line for line in text.splitlines() if line.startswith("SCHEDULE = ")]
         taken.add(int(line.split('("')[1].split()[0]))
-    assert taken == {7, 37}
+    assert taken == {7, 17, 37}
     assert intraday.MINUTE not in taken | {4, 19, 34, 49}
 
 
@@ -142,6 +162,8 @@ def stand_in_sdk(made: dict, context: dict) -> dict[str, types.ModuleType]:
         return decorate
 
     sdk.dag = dag
+    # The Variables of Airflow, which the short cycle of Meta passes to its load.
+    sdk.Variable = types.SimpleNamespace(name="Variable")
     sdk.CronTriggerTimetable = lambda cron, timezone: ("cron", cron, timezone)
     sdk.get_current_context = lambda: context
     exceptions = types.ModuleType("airflow.sdk.exceptions")
@@ -172,6 +194,8 @@ def dag_file(monkeypatch):
     moments a test sets, and the DAGs whose runs a task asked for."""
     names = (
         "agoranomos_google_ads_intraday",
+        "agoranomos_meta_ads_intraday",
+        "agoranomos_tiktok_ads_intraday",
         "agoranomos_demo_intraday",
         "agoranomos_pipelines.assets",
     )
@@ -402,9 +426,10 @@ def test_the_load_of_the_demo_takes_the_moment_of_the_run_and_skips_without_a_wh
     assert len(moments) == 2
 
 
-def test_compose_sets_the_pool_and_gives_the_setting_to_every_airflow_service():
+def test_compose_sets_the_pools_and_gives_the_setting_to_every_airflow_service():
     compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
-    assert '"google_ads_load",\n            "1",' in compose
+    for pool in ("google_ads_load", "meta_ads_load", "tiktok_ads_load"):
+        assert f'"{pool}",\n            "1",' in compose, pool
     # In the environment that every Airflow service shares, the DAG processor among them.
     shared = compose.split("environment: &airflow-environment\n")[1].split("\n  volumes:")[0]
     assert "    AGORANOMOS_INTRADAY_HOURS: ${AGORANOMOS_INTRADAY_HOURS:-3}\n" in shared
@@ -413,3 +438,179 @@ def test_compose_sets_the_pool_and_gives_the_setting_to_every_airflow_service():
     # The profile of an agency turns it off until a cycle is measured on it (ADR-0051).
     agency = example.split("# Agency profile (ADR-0040)")[1].split("\n\n")[0]
     assert "\n#   AGORANOMOS_INTRADAY_HOURS=0" in agency
+
+
+# The short cycles of Meta and of TikTok (#412), as that of Google Ads: the DAG, the code of its
+# platform, its pool, the task of its load and that of the daily load, and its asset.
+PLATFORMS = {
+    "agoranomos_meta_ads_intraday": (
+        "meta_ads",
+        "meta_ads_load",
+        "load_meta_ads_intraday",
+        "agoranomos_meta_ads_daily",
+        "load_meta_ads",
+        "RAW_META_ADS_INTRADAY",
+        "RAW_META_ADS",
+    ),
+    "agoranomos_tiktok_ads_intraday": (
+        "tiktok_ads",
+        "tiktok_ads_load",
+        "load_tiktok_ads_intraday",
+        "agoranomos_tiktok_ads_daily",
+        "load_tiktok_ads",
+        "RAW_TIKTOK_ADS_INTRADAY",
+        "RAW_TIKTOK_ADS",
+    ),
+}
+
+
+@pytest.mark.parametrize("dag_name", sorted(PLATFORMS))
+@pytest.mark.parametrize(("hours", "cron"), [(None, "27 */3 * * *"), ("6", "27 */6 * * *")])
+def test_the_dags_of_meta_and_tiktok_run_as_that_of_google_ads_and_start_paused(
+    dag_file, dag_name, hours, cron
+):
+    # The same moments as the short cycle of Google Ads, so that the loads of one cycle start the
+    # transform once or twice and not once each.
+    module, made = dag_file(hours, dag_name)
+    assert ("cron", cron, "UTC") == module.SCHEDULE
+    arguments = made["dag"]
+    assert arguments["dag_id"] == dag_name
+    assert arguments["schedule"] == module.SCHEDULE
+    assert arguments["max_active_runs"] == 1
+    assert arguments["is_paused_upon_creation"] is True
+    assert arguments["catchup"] is False
+    assert arguments["dagrun_timeout"] <= timedelta(hours=1)
+    defaults = arguments["default_args"]
+    longest = (defaults["retries"] + 1) * defaults["execution_timeout"] + defaults[
+        "retries"
+    ] * defaults["retry_delay"]
+    assert longest <= arguments["dagrun_timeout"]
+    google, _ = dag_file(hours)
+    assert module.SCHEDULE == google.SCHEDULE
+
+
+@pytest.mark.parametrize("dag_name", sorted(PLATFORMS))
+def test_the_dags_of_meta_and_tiktok_have_no_schedule_at_0_and_refuse_another_period(
+    dag_file, dag_name
+):
+    module, made = dag_file("0", dag_name)
+    assert module.SCHEDULE is None
+    assert made["dag"]["schedule"] is None
+    with pytest.raises(ValueError, match=r"AGORANOMOS_INTRADAY_HOURS in \.env must be"):
+        dag_file("5", dag_name)
+
+
+@pytest.mark.parametrize("dag_name", sorted(PLATFORMS))
+def test_the_load_runs_in_the_pool_of_its_platform_with_the_daily_load_and_its_own_asset(
+    dag_file, dag_name
+):
+    _, pool, task_id, daily, daily_task, asset_name, daily_asset = PLATFORMS[dag_name]
+    module, made = dag_file(None, dag_name)
+    assert pool == module.LOAD_POOL
+    assert daily == module.DAILY
+    load = made["tasks"][task_id]
+    assert load.arguments["pool"] == pool
+    [asset] = load.arguments["outlets"]
+    assert asset.uri == dag_name
+    assets = sys.modules["agoranomos_pipelines.assets"]
+    assert asset is getattr(assets, asset_name)
+    assert asset in assets.LOADED
+    assert asset is not getattr(assets, daily_asset)
+    # The task of the daily load, and so its runs of the history, is in the same pool.
+    text = (ROOT / "airflow" / "dags" / f"{daily}.py").read_text("utf-8")
+    assert f'LOAD_POOL = "{pool}"' in text
+    assert f'@task(task_id="{daily_task}", outlets=[{daily_asset}], pool=LOAD_POOL)' in text
+    assert made["tasks"]["due"].kind == "short_circuit"
+    assert "pool" not in made["tasks"]["due"].arguments
+
+
+@pytest.mark.parametrize("dag_name", sorted(PLATFORMS))
+def test_a_run_of_meta_or_tiktok_skips_while_its_daily_load_runs_or_once_it_waited_too_long(
+    dag_file, dag_name
+):
+    daily = PLATFORMS[dag_name][3]
+    _, made = dag_file("3", dag_name)
+    due = made["tasks"]["due"].function
+    assert due() is True
+    assert made["asked"] == [(daily, ("queued", "running"))]
+    made["active"] = 1
+    assert due() is False
+    made["active"] = 0
+    made["context"]["dag_run"].run_after = datetime.now(UTC) - timedelta(hours=3, minutes=1)
+    assert due() is False
+
+
+def stand_in_connector(monkeypatch, code: str, failure: str):
+    """A stand-in of the module of a connector, agoranomos_pipelines.<code>, and of loads, whose
+    load_intraday gives the answers that a test puts into the list it returns, after it records
+    its moment and its arguments."""
+    connector = types.ModuleType(f"agoranomos_pipelines.{code}")
+    loads = types.ModuleType("agoranomos_pipelines.loads")
+    loads.credentials = lambda: {"password": "loader-password"}
+    connector.TOKEN, connector.APP_SECRET = "META_ADS_ACCESS_TOKEN", "META_ADS_APP_SECRET"
+
+    class Failed(Exception):
+        pass
+
+    setattr(connector, failure, Failed)
+    answers, calls = [], []
+
+    def load_intraday(now, **arguments):
+        calls.append((now, arguments))
+        found = answers.pop(0)
+        if isinstance(found, Exception):
+            raise found
+        return found
+
+    connector.load_intraday = load_intraday
+    package = importlib.import_module("agoranomos_pipelines")
+    monkeypatch.setitem(sys.modules, f"agoranomos_pipelines.{code}", connector)
+    monkeypatch.setitem(sys.modules, "agoranomos_pipelines.loads", loads)
+    monkeypatch.setattr(package, code, connector, raising=False)
+    monkeypatch.setattr(package, "loads", loads, raising=False)
+    return answers, calls, Failed
+
+
+@pytest.mark.parametrize(
+    ("dag_name", "failure", "line"),
+    [
+        ("agoranomos_meta_ads_intraday", "AccountsFailed", "1 of 2 Meta ad accounts failed"),
+        ("agoranomos_tiktok_ads_intraday", "AdvertisersFailed", "1 of 2 TikTok advertisers failed"),
+    ],
+)
+def test_the_load_of_meta_or_tiktok_skips_without_a_whole_load_and_fails_with_the_line(
+    dag_file, monkeypatch, dag_name, failure, line
+):
+    # A skipped task updates no asset, so the transform does not run for nothing; a load that
+    # failed for some accounts fails without a retry, with the line of the connector, as the daily
+    # load does.
+    code, _, task_id, *_ = PLATFORMS[dag_name]
+    _, made = dag_file("3", dag_name)
+    monkeypatch.setenv("META_ADS_ACCESS_TOKEN", "stand-in-token")
+    monkeypatch.delenv("META_ADS_APP_SECRET", raising=False)
+    answers, calls, failed = stand_in_connector(monkeypatch, code, failure)
+    exceptions = sys.modules["airflow.sdk.exceptions"]
+    load = made["tasks"][task_id].function
+    answers.append({"campaigns": 3})
+    before = datetime.now(UTC)
+    assert load() is None
+    [(now, arguments)] = calls
+    # The moment of the read, which gives the current day of each account.
+    assert before <= now <= datetime.now(UTC)
+    assert arguments["mask"] == made["masked"].append
+    if code == "meta_ads":
+        # The Variables of Airflow keep a token that expires, as for the daily load.
+        assert arguments["variables"] is sys.modules["airflow.sdk"].Variable
+        assert made["masked"] == ["loader-password", "stand-in-token"]
+    else:
+        assert made["masked"] == ["loader-password"]
+    answers.append(None)
+    with pytest.raises(exceptions.AirflowSkipException, match=f"of {code} has had a whole load"):
+        load()
+    answers.append(failed(line))
+    with pytest.raises(exceptions.AirflowFailException, match=line):
+        load()
+    made["context"]["dag_run"].run_after = datetime.now(UTC) - timedelta(hours=4)
+    with pytest.raises(exceptions.AirflowSkipException, match="waited longer than the period"):
+        load()
+    assert len(calls) == 3

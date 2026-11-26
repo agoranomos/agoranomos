@@ -166,10 +166,13 @@ def test_airflow_init_cleans_its_database_last_in_two_calls(tmp_path):
     result, calls = run_init(tmp_path)
     assert result.returncode == 0, result.stderr
     assert result.stderr == ""
-    # After the setup of the database, the admin, the pools and the user ai.
+    # After the setup of the database, the admin, the pools and the user ai: the pools of dbt, of
+    # the loads of the demo, and of those of Google Ads, Meta and TikTok (ADR-0051).
     assert [call[:2] for call in calls] == [
         ["db", "check-migrations"],
         ["users", "create"],
+        ["pools", "set"],
+        ["pools", "set"],
         ["pools", "set"],
         ["pools", "set"],
         ["pools", "set"],

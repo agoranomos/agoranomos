@@ -1219,7 +1219,7 @@ EOF
     *) problem "METABASE_SCAN_TIME in .env must be a whole hour as HH:00, such as 12:00: Metabase starts a daily scan at the start of an hour" ;;
   esac
   # The hours between two loads of the current day (ADR-0051): a divisor of 24, so that the loads
-  # fall at the same hours every day, or 0 for none. The DAG of the short cycle checks it too, for
+  # fall at the same hours every day, or 0 for none. The DAGs of the short cycle check it too, for
   # a start through plain docker compose.
   case "$(setting AGORANOMOS_INTRADAY_HOURS 3)" in
     0 | 1 | 2 | 3 | 4 | 6 | 8 | 12 | 24) ;;

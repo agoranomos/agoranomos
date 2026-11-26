@@ -73,3 +73,16 @@ def days(current: date, whole: date) -> tuple[date, date]:
     the day before goes on growing (ADR-0051). Both come in one read."""
     before = current - timedelta(days=1)
     return (current if whole >= before else before), current
+
+
+def whole_end(
+    account_id: str, core: dict[str, date], journal: dict[str, tuple[date, date]]
+) -> date | None:
+    """The last day that a whole load of an account covers, accepted in the core (core, the last
+    accepted day of each account) or whole in the journal (journal, as loads.recorded gives it),
+    pinned or not: the short cycle takes the day before today while this is earlier (days). None
+    when no whole load has taken the account, which the short cycle then leaves for its first daily
+    load, as the check of the accounts of the transform knows an account of an intraday load from
+    the list of a whole load. Google Ads, Meta and TikTok share it."""
+    known = [day for day in (core.get(account_id), journal.get(account_id, (None, None))[1]) if day]
+    return max(known) if known else None

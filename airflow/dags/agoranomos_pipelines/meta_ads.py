@@ -62,6 +62,20 @@ whole load in _agoranomos_loads; with neither, the load takes its usual window. 
 watermark of each account in the asset state store of Airflow 3.3 as a cache of the warehouse,
 which never moves a window (watermarks).
 
+The short cycle (ADR-0051): every few hours, the DAG agoranomos_meta_ads_intraday loads the current
+day of each account in its time zone, and the day before while no whole load, of the kind window or
+history, covers it, as a load of the kind intraday (load_intraday): the account, for its time zone,
+and the impressions, link clicks and spend of its campaigns on those days, synchronously, with no
+actions, so that a partial day has no conversions, none and not zero; a request that would go to a
+report run in a daily load goes to one here too, which must complete within INTRADAY_ENDS. That is
+two calls for each account, and a page more for each LIMIT campaign days. Meta reports insights in
+the time zone of the ad account and refreshes them every 15 minutes (Limits and best practices of
+the Insights API, read on 26 November 2026). The load takes no list, no totals, no ad set and no
+ad, keeps no watermark, and takes only the accounts that a whole load has taken
+(intraday.whole_end); its rows go into insights_campaign, with a row of the kind intraday for each
+account in the journal, and staging takes a whole load of a day before an intraday one. No
+watermark counts it.
+
 A load reads each account whole before dlt sees any of it, into a file for each table on disk, a
 page at a time. An error of the API on one account is caught at the account, which leaves nothing
 in the load; the load takes the other accounts, records the failed account in _agoranomos_loads
@@ -93,6 +107,7 @@ import dlt
 from dlt.destinations.exceptions import DatabaseUndefinedRelation
 from dlt.sources.helpers.requests import Client, RequestException, Timeout
 
+from agoranomos_pipelines import intraday
 from agoranomos_pipelines.history import (
     Portion,
     history_start,
@@ -236,6 +251,11 @@ SYNC_TIMEOUTS = frozenset({(100, 1504018), (2, 1504038), (2, 1504044)})
 # load has no such time: its 28 days go synchronously.
 PORTION_STARTS = 60 * 60
 PORTION_ENDS = 90 * 60
+# The time of a load of the short cycle, within the execution_timeout of 20 minutes of its task in
+# agoranomos_meta_ads_intraday: a report run that has not completed INTRADAY_ENDS seconds after the
+# load began fails its account, which the next cycle reads again, and the five minutes after it are
+# for dlt.
+INTRADAY_ENDS = 15 * 60
 # The values of effective_status, every value that the references of the edges and the objects
 # list as of November 2026: the edges campaigns and adsets of an ad account, and the field
 # effective_status of an ad, list twelve; the field of a campaign six, and that of an ad set seven,
@@ -336,6 +356,11 @@ FIELDS = {
     "insights_adset": (*ACCOUNT, "campaign_id", "adset_id", "adset_name", *STATS, *ACTIONS),
     "insights_ad": (*ACCOUNT, "campaign_id", "adset_id", "ad_id", "ad_name", *STATS, *ACTIONS),
 }
+# The fields of the insights of the campaigns in a load of the kind intraday (ADR-0051): those of
+# insights_campaign but the actions and their attribution, so that a day in progress has no
+# conversions, none and not zero, as the conversions of a day keep coming for 28 days. dlt writes
+# the rows into insights_campaign under its hints, and no child table of actions gets a row.
+INTRADAY_FIELDS = (*ACCOUNT, "campaign_id", "campaign_name", *STATS)
 # The edge of each list, and the level of each table of insights.
 EDGES = {"campaigns": "campaigns", "adsets": "adsets", "ads": "ads"}
 LEVELS = {
@@ -491,7 +516,13 @@ def fingerprint(token: str) -> str:
 
 def yesterday(now: datetime, time_zone: str) -> date:
     """The last day that a load at now takes of an account: yesterday in its time zone."""
-    return now.astimezone(ZoneInfo(time_zone)).date() - timedelta(days=1)
+    return today(now, time_zone) - timedelta(days=1)
+
+
+def today(now: datetime, time_zone: str) -> date:
+    """The current day of an account at now, in its time zone, in which Meta reports its insights:
+    the day of a load, and the last day of a load of the kind intraday."""
+    return now.astimezone(ZoneInfo(time_zone)).date()
 
 
 def window(last: date, last_end: date | None) -> tuple[date, date]:
@@ -526,8 +557,9 @@ def checked(account_ids: Iterable[str]) -> list[str]:
 def accepted(pipeline, account_ids: Iterable[str]) -> dict[str, date]:
     """The last day that the core accepted for each account: the end of the window of its newest
     accepted whole load in core.loads, which loader may read (ADR-0038). A load of the kind
-    intraday does not count, as ADR-0051 requires of every reader of window_to, though this
-    connector writes none: one would move the next window past the days that it did not read."""
+    intraday, of the short cycle, does not count, as ADR-0051 requires of every reader of
+    window_to: after a stop of 120 days, one of the first day back would move the next window past
+    the days that no whole load read."""
     # IDs of checked digits, and constants of this module.
     wanted = ", ".join(f"'{account_id}'" for account_id in checked(account_ids))
     try:
@@ -773,8 +805,10 @@ class Api:
         self.secrets = secrets
         self.client = Client(**CLIENT)
         self.requests = 0
-        # The moment, by monotonic(), by which a report run of a portion completes, or None.
+        # The moment, by monotonic(), by which a report run of a portion or of the short cycle
+        # completes, or None, and what the failure of an account says when it passes.
         self.deadline: float | None = None
+        self.out_of_time = ""
         self.headers: dict[str, str] = {}
         self.auth: dict[str, str] = {}
         if token is not None:
@@ -986,15 +1020,18 @@ def current_token(
     return new
 
 
-def insights_params(level: str, days: tuple[date, date]) -> dict[str, str]:
+def insights_params(
+    level: str, days: tuple[date, date], fields: tuple[str, ...] | None = None
+) -> dict[str, str]:
     """The parameters of the insights of a level over days, a row a day: the fields of its table,
-    and below the account the filter on the effective_status of the level over every value and the
-    windows of attribution (the reference of the insights of an ad account, read on 15 November
-    2026)."""
+    or fields, and below the account the filter on the effective_status of the level over every
+    value and, when the fields hold the actions, the windows of attribution (the reference of the
+    insights of an ad account, read on 15 November 2026)."""
     table = f"insights_{level}"
+    asked = FIELDS[table] if fields is None else fields
     params = {
         "level": level,
-        "fields": ",".join(FIELDS[table]),
+        "fields": ",".join(asked),
         "time_range": json.dumps({"since": days[0].isoformat(), "until": days[1].isoformat()}),
         "time_increment": "1",
         "limit": str(LIMIT),
@@ -1009,7 +1046,8 @@ def insights_params(level: str, days: tuple[date, date]) -> dict[str, str]:
                 }
             ]
         )
-        params["action_attribution_windows"] = json.dumps(list(WINDOWS))
+        if "actions" in asked:
+            params["action_attribution_windows"] = json.dumps(list(WINDOWS))
     return params
 
 
@@ -1059,15 +1097,12 @@ def poll(api: Api, subject: str, run_id: str) -> dict:
     """The answer of the report run at which it ends: Job Completed at 100 percent, Job Skipped,
     or Job Failed, which is read once more without fields, so that it carries the fields of its
     error, which Meta returns by default. A run that has not ended after REPORT_TIMEOUT seconds of
-    waits, or that would not end before api.deadline, the time of a portion, fails the account."""
+    waits, or that would not end before api.deadline, the time of a portion or of the short cycle,
+    fails the account with api.out_of_time."""
     waited, wait = 0, POLL_FIRST
     while waited < REPORT_TIMEOUT:
         if api.deadline is not None and monotonic() + wait > api.deadline:
-            raise api.fail(
-                subject,
-                f"report run {run_id} had not completed when the time of the portion ran out, "
-                f"{PORTION_ENDS // 60} minutes after the load began; a later portion asks again",
-            )
+            raise api.fail(subject, f"report run {run_id} had not completed when {api.out_of_time}")
         sleep(wait)
         waited += wait
         body = api.call(
@@ -1092,7 +1127,13 @@ def poll(api: Api, subject: str, run_id: str) -> dict:
 
 
 def written_insights(
-    api: Api, account_id: str, level: str, days: tuple[date, date], file: TextIO, by_report: bool
+    api: Api,
+    account_id: str,
+    level: str,
+    days: tuple[date, date],
+    file: TextIO,
+    by_report: bool,
+    fields: tuple[str, ...] | None = None,
 ) -> None:
     """Write the insights of a level of an account over days to file: synchronously, and as a
     report run when the synchronous request is too large, times out, fails on the server or is
@@ -1100,9 +1141,9 @@ def written_insights(
     these, after the file is cut back to where its rows began; or as a report run at once,
     by_report. A report run with too much data, refused at its POST or failed with an error of
     TOO_LARGE, goes by calendar months (ADR-0050), and a month with too much data fails the
-    account."""
+    account. fields are those of the table of the level, or those of a load of the short cycle."""
     subject = f"Meta ad account {account_id}"
-    params = insights_params(level, days)
+    params = insights_params(level, days, fields)
     if not by_report:
         start = file.tell()
         try:
@@ -1124,7 +1165,7 @@ def written_insights(
         file.truncate()
         log.warning("%s: too much data for one report run of %s; by months", subject, level)
         for part in parts:
-            written_insights(api, account_id, level, part, file, by_report=True)
+            written_insights(api, account_id, level, part, file, by_report=True, fields=fields)
 
 
 @dataclass
@@ -1135,6 +1176,29 @@ class Read:
     account: dict
     window: tuple[date, date]
     files: dict[str, Path]
+
+
+def ad_account(api: Api, account_id: str) -> dict:
+    """The row of an account, with its time zone, which every load reads first. An answer of
+    another account or of none raises MetaAdsError."""
+    subject = f"Meta ad account {account_id}"
+    account = api.call(
+        subject, "GET", f"{BASE}/act_{account_id}", {"fields": ",".join(FIELDS["ad_accounts"])}
+    )
+    if str(account.get("account_id")) != account_id:
+        raise api.fail(subject, "the API returned another account or none")
+    return account
+
+
+def current_day(api: Api, account_id: str, account: dict, now: datetime) -> date:
+    """The current day of an account at now in its time zone, the timezone_name of its row. A time
+    zone that agoranomos does not know raises MetaAdsError."""
+    try:
+        return today(now, str(account.get("timezone_name")))
+    except (ZoneInfoNotFoundError, ValueError):
+        raise api.fail(
+            f"Meta ad account {account_id}", "the account has no time zone that agoranomos knows"
+        ) from None
 
 
 def read_account(
@@ -1154,15 +1218,8 @@ def read_account(
     days before it are lost. An error raises MetaAdsError and leaves nothing of the account: a
     window replaces whole days, and a part of one would lose the rest (ADR-0035)."""
     subject = f"Meta ad account {account_id}"
-    account = api.call(
-        subject, "GET", f"{BASE}/act_{account_id}", {"fields": ",".join(FIELDS["ad_accounts"])}
-    )
-    if str(account.get("account_id")) != account_id:
-        raise api.fail(subject, "the API returned another account or none")
-    try:
-        last_day_of_account = yesterday(now, str(account.get("timezone_name")))
-    except (ZoneInfoNotFoundError, ValueError):
-        raise api.fail(subject, "the account has no time zone that agoranomos knows") from None
+    account = ad_account(api, account_id)
+    last_day_of_account = current_day(api, account_id, account, now) - timedelta(days=1)
     earliest = oldest(now)
     if days is None:
         first, last = window(last_day_of_account, last_end)
@@ -1217,6 +1274,29 @@ def read_account(
     return Read(account, (first, last), files)
 
 
+def read_intraday(api: Api, account_id: str, now: datetime, whole: date, staging: Path) -> Read:
+    """Read the current day of an account, and the day before while no whole load covers it,
+    whole being the last day that one covers (intraday.days): the account, which gives its time
+    zone, and then the insights of its campaigns on those days with INTRADAY_FIELDS, synchronously,
+    or as a report run where a daily load would ask one, into a file in the folder of the account
+    under staging. An error raises MetaAdsError and leaves nothing of the account."""
+    account = ad_account(api, account_id)
+    days = intraday.days(current_day(api, account_id, account, now), whole)
+    # The ID is checked digits.
+    folder = staging / account_id
+    folder.mkdir()
+    path = folder / "insights_campaign.jsonl"
+    try:
+        with path.open("w", encoding="utf-8") as file:
+            written_insights(
+                api, account_id, "campaign", days, file, by_report=False, fields=INTRADAY_FIELDS
+            )
+    except MetaAdsError:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+    return Read(account, days, {"insights_campaign": path})
+
+
 def staged_rows(read: dict[str, Read], table: str) -> Iterator[dict]:
     """The rows of a table of each account read, from its file, as the API gave them."""
     for account in read.values():
@@ -1259,6 +1339,20 @@ def warn_of_the_sunset(now: datetime) -> None:
         )
 
 
+def signed_in(now: datetime, variables, mask: Callable[[str], None]) -> Api:
+    """The Graph API, signed in with the settings of .env and the token of current_token, with the
+    proof of the App Secret masked in the logs of Airflow."""
+    config = settings()
+    secrets = Secrets()
+    secrets.add(config.token)
+    secrets.add(config.app_secret)
+    api = Api(secrets)
+    api.sign_in(current_token(api, config, now, variables, mask), config.app_secret)
+    if "appsecret_proof" in api.auth:
+        mask(api.auth["appsecret_proof"])
+    return api
+
+
 def load(
     now: datetime,
     extensions: Path = EXTENSIONS,
@@ -1291,14 +1385,7 @@ def load(
             )
         wanted = list(portion.accounts)
     kind = WINDOW if portion is None else HISTORY
-    config = settings()
-    secrets = Secrets()
-    secrets.add(config.token)
-    secrets.add(config.app_secret)
-    api = Api(secrets)
-    api.sign_in(current_token(api, config, now, variables, mask), config.app_secret)
-    if "appsecret_proof" in api.auth:
-        mask(api.auth["appsecret_proof"])
+    api = signed_in(now, variables, mask)
     os.environ.update(DLT_SETTINGS)
     with open_pipeline() as pipeline, tempfile.TemporaryDirectory(prefix="meta-ads-") as staging:
         journal = recorded(pipeline) if has_loads(pipeline) else {}
@@ -1311,6 +1398,10 @@ def load(
         began = monotonic()
         if portion is not None:
             api.deadline = began + PORTION_ENDS
+            api.out_of_time = (
+                f"the time of the portion ran out, {PORTION_ENDS // 60} minutes after the load "
+                "began; a later portion asks again"
+            )
         for account_id in wanted:
             if portion is not None and (read or failed) and monotonic() - began >= PORTION_STARTS:
                 # Not read and not in the journal: the plan gives it to the next portion.
@@ -1384,6 +1475,99 @@ def load(
             len(read) + len(failed),
             ", ".join(left),
         )
+    if failed:
+        raise AccountsFailed(failure_line(failed, len(read)))
+    return counts
+
+
+def load_intraday(
+    now: datetime,
+    extensions: Path = EXTENSIONS,
+    variables=None,
+    mask: Callable[[str], None] = lambda value: None,
+) -> dict[str, int] | None:
+    """Load the current day of the accounts of the deployment at now, the moment of the read, as a
+    load of the kind intraday (ADR-0051): for each account of clients.toml that a whole load has
+    taken, the insights of its campaigns on its current day, and on the day before while no whole
+    load covers it (read_intraday), each read whole before dlt sees any of it, into
+    insights_campaign and the journal, in one run. Return the rows of each table that dlt reports,
+    or None when no account has had a whole load yet, which loads nothing and asks Meta nothing.
+    variables and mask are those of load, for a token that expires. The watermarks stay as they
+    were. When an account failed, the load takes the other accounts and raises AccountsFailed at
+    the end. A failed account leaves no row in the journal: a row of the status failed would make
+    the newest pinned load of the account a failed one, which holds the account in quarantine
+    (load_failed), its daily window with it, for a day in progress that the next cycle reads
+    again; when every account failed, nothing is written."""
+    warn_of_the_sunset(now)
+    named = accounts(extensions)
+    os.environ.update(DLT_SETTINGS)
+    with open_pipeline() as pipeline, tempfile.TemporaryDirectory(prefix="meta-ads-") as staging:
+        journal = recorded(pipeline) if has_loads(pipeline) else {}
+        core = accepted(pipeline, named)
+        wholes = {account_id: intraday.whole_end(account_id, core, journal) for account_id in named}
+        first = sorted(account_id for account_id, end in wholes.items() if end is None)
+        if first:
+            log.info(
+                "%d Meta ad accounts (%s) have had no whole load yet: the current day of each "
+                "comes after its first daily load",
+                len(first),
+                ", ".join(first),
+            )
+        wanted = {account_id: end for account_id, end in wholes.items() if end is not None}
+        if not wanted:
+            log.info("No Meta ad account has had a whole load yet: no current day to load")
+            return None
+        api = signed_in(now, variables, mask)
+        api.deadline = monotonic() + INTRADAY_ENDS
+        api.out_of_time = (
+            f"the time of the short cycle ran out, {INTRADAY_ENDS // 60} minutes after the load "
+            "began; the next cycle asks again"
+        )
+        read: dict[str, Read] = {}
+        failed: dict[str, MetaAdsError] = {}
+        for account_id, whole in wanted.items():
+            try:
+                read[account_id] = read_intraday(api, account_id, now, whole, Path(staging))
+            except MetaAdsError as error:
+                log.error("%s; the load goes on with the other accounts", error)
+                failed[account_id] = error
+        counts: dict[str, int] = {}
+        if read:
+            loaded_at = datetime.now(UTC)
+            record = [
+                {
+                    "account_id": account_id,
+                    # The current day of the account, the last of the window.
+                    "as_of": account.window[1],
+                    "window_from": account.window[0],
+                    "window_to": account.window[1],
+                    "now": now,
+                    "loaded_at": loaded_at,
+                    "status": LOADED,
+                    "error": None,
+                    "kind": INTRADAY,
+                }
+                for account_id, account in sorted(read.items())
+            ]
+            stats = staged_rows(read, "insights_campaign")
+            resources = [
+                dlt.resource(
+                    or_marker(stats), name="insights_campaign", **own(HINTS["insights_campaign"])
+                ),
+                # In the same run as the insights, so under the same _dlt_load_id.
+                dlt.resource(record, name=LOADS, **own(LOAD_HINTS)),
+            ]
+            run(pipeline, resources)
+            counts = row_counts(pipeline)
+    for table, rows in sorted(counts.items()):
+        log.info(
+            "Loaded %d rows of the current day into %s.%s, as of %s",
+            rows,
+            DATASET,
+            table,
+            now.isoformat(),
+        )
+    log.info("%d calls to the Graph API for %d accounts", api.requests, len(wanted))
     if failed:
         raise AccountsFailed(failure_line(failed, len(read)))
     return counts
