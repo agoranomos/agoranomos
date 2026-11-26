@@ -7,7 +7,13 @@ the alerts that it sends of it through Apprise (ADR-0045):
   window_to of its loaded whole loads in core.loads, of the kinds window and history, is before the
   day that the lag of its platform expects: a day ends at midnight in the time zone of the account,
   and the core is to hold it LAG_DAYS later. A load of the kind intraday, of a day still in
-  progress, does not count (ADR-0051): it would hide a daily load that stopped;
+  progress, does not count (ADR-0051): it would hide a daily load that stopped. An account is
+  active unless core.dim_account says that the settings of the model do not name it, as one taken
+  out of extensions/model/clients.toml, whose platform no longer loads it: a source of the rates,
+  which the registry does not hold, counts. The card Late accounts of the Ops collection counts
+  the same accounts, by is_in_settings of ops.ops_loads (metabase/ops.py). A late account that
+  leaves the settings is gone at the first run of the watcher after the run of the transform that
+  marks it, as any problem that goes away;
 - backup: the status that the backup service of the ops profile publishes in the volume
   backup-status, as its health check judges it: backup_failed when its last run failed, and
   backup_late when its last good backup is more than 26 hours old, or there is none 26 hours after
@@ -383,6 +389,8 @@ TABLE_SQL = (
 )
 
 QUARANTINE_SQL = "SELECT platform, account_id, reason, since FROM ops.ops_quarantine"
+# The accounts whose last whole day the late check compares, with their time zones: an account that
+# the registry marks as not active is left out, and one that it does not hold is kept.
 LATE_SQL = (
     "SELECT l.source, l.account_id, max(l.window_to), a.time_zone"
     " FROM core.loads AS l"

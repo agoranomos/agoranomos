@@ -9,7 +9,7 @@ A source goes through every layer of the model ([ADR-0025](../../../docs/adr/002
 
 ## Decide first
 
-- **The shape.** Each API shape has one macro in `dbt/macros/shapes/`, which the demo and the connector of that platform share: `google_ads_v25`, `meta_v26`, `tiktok_v1_3` and `ga4_v1beta`, and for the rates `euro_rates` of the demo, which `ecb_exr`, `bank_of_italy_rates` and `nbk_rates` follow for the ECB, the Bank of Italy and the NBK. A source of a shape that exists calls its macros. A new shape gets a new macro file, which follows the rules of ADR-0025:
+- **The shape.** Each API shape has one macro in `dbt/macros/shapes/`, which the demo and the connector of that platform share: `google_ads_v26`, `meta_v26`, `tiktok_v1_3` and `ga4_v1beta`, and for the rates `euro_rates` of the demo, which `ecb_exr`, `bank_of_italy_rates` and `nbk_rates` follow for the ECB, the Bank of Italy and the NBK. A source of a shape that exists calls its macros. A new shape gets a new macro file, which follows the rules of ADR-0025:
     - money as `numeric(18,6)`, in the currency of the account, through the macros of `dbt/macros/numbers.sql`;
     - a name of a platform through `to_name` of `dbt/macros/names.sql`, as an empty one is none;
     - `report_date` in the time zone of the account;
