@@ -95,7 +95,7 @@ Each mart is a view over the core under its name of v0.4, with the columns of v0
 
 ## Clients
 
-A deployment is one business, which groups its ad accounts into clients ([ADR-0024](../adr/0024-one-deployment-is-one-business.md)). Name them in `extensions/model/clients.toml`:
+A deployment is one business, which groups its ad accounts into clients ([ADR-0024](../adr/0024-one-deployment-is-one-business.md)), or one agency, with its clients as clients, which only its staff read ([ADR-0041](../adr/0041-run-an-agency-as-one-deployment.md)). Name them in `extensions/model/clients.toml`:
 
 ```toml
 [clients.acme]

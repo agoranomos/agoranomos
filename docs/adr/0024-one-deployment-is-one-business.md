@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # One deployment is one business, and clients group its ad accounts
 
+Superseded in part by [ADR-0041](0041-run-an-agency-as-one-deployment.md): the sentence "An agency or a freelancer runs one deployment for each business that it serves" of "One business", the rule of one deployment for each business, as an agency whose clients get no login runs one deployment for all of them, which only its staff read. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 agoranomos is to model the advertising statistics of a business: its ad accounts on several platforms and its web analytics, and later its CRM ([ADR-0025](0025-model-advertising-statistics-once.md)). A business often runs more than one brand, shop or legal entity, each with ad accounts of its own, and people ask for the numbers of each. An agency or a freelancer serves several businesses. What one deployment holds decides what a sum over the marts means, and what the permissions of Metabase and the planned AI access have to separate.
