@@ -18,6 +18,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from test_windows import MISSED, assert_each_day_becomes_final
 
 # 14:07 UTC on Friday 20 November 2026, when the DAG runs: the 20th in Berlin, and already the 21st
 # on Kiritimati, at UTC+14.
@@ -496,12 +497,21 @@ def test_the_window_is_14_days_to_yesterday_in_the_time_zone_of_each_property(ga
     ]
     assert {r["kind"] for r in journal} == {"window"}
     assert {r["status"] for r in journal} == {"loaded"}
-    # After a stop, from the day after the last that the core accepted.
+    # After a stop, from the day after the oldest that the load of the last day that the core
+    # accepted read at the age of 14 days.
     made["requests"].clear()
     made["pipelines"].clear()
     state["accepted"] = [("111111111", date(2026, 10, 1))]
     module.load(NOW, extensions)
-    assert reports(made)[0]["dateRanges"] == [{"startDate": "2026-10-02", "endDate": "2026-11-19"}]
+    assert reports(made)[0]["dateRanges"] == [{"startDate": "2026-09-19", "endDate": "2026-11-19"}]
+
+
+@pytest.mark.parametrize("missed", MISSED.values(), ids=MISSED.keys())
+def test_each_day_of_a_property_is_read_once_at_the_age_of_its_window(missed, ga4):
+    # windows.daily_window: after 0, 1, 2 or N missed daily loads, or a stop longer than the
+    # window, each day is read at the age of 14 days or more, and no day is left out.
+    module = ga4[0]
+    assert_each_day_becomes_final(module.window, 14, missed)
 
 
 def test_a_portion_of_the_history_takes_its_days_with_the_kind_history(ga4):
