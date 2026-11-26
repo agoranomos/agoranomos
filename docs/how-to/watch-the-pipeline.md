@@ -14,11 +14,11 @@ Sign in to Metabase as [Run agoranomos locally](run-locally.md#sign-in) says and
 
 ## What it shows
 
-- **Late accounts**: how many accounts were last loaded more than 36 hours ago. The daily load of the demo runs once a day, so a number above 0 means that a load did not run or failed: look at `agoranomos_demo_daily` in Airflow.
+- **Late accounts**: how many accounts were last loaded more than 36 hours ago, of those that the settings of the model name and of the sources of the rates. The daily load of the demo runs once a day, so a number above 0 means that a load did not run or failed: look at `agoranomos_demo_daily` in Airflow. An account taken out of `extensions/model/clients.toml` is never late, as its platform no longer loads it ([Manage clients and accounts](manage-clients-and-accounts.md#take-an-account-out)).
 - **Accounts in quarantine**: the accounts that the last run of the transform kept out of the core, with the reason, since when, and what the check found ([When an account is in quarantine](#when-an-account-is-in-quarantine)). The demo has none.
 - **Failed models** and **Failed or warned tests**: the models, seeds and snapshots that failed, and the tests that warned, failed or ended in an error, in the last run of the transform. The demo leaves one day of one account out on purpose, so one test, `assert_every_day_of_an_account_has_statistics`, warns on every run of the demo. A test whose name starts with `assert_the_core_holds_` checks that a fact of the core adds up to what staging read for the days that the run wrote ([The data model](../reference/data-model.md#the-facts-and-the-journals-of-restatements)): when it fails, the write lost or doubled rows, the run is red, and the next run writes the same days again.
 - **Warehouse, MB**: the room that the tables of the warehouse take, with their indexes.
-- **Last load of each account**: the last day that a load took for each account of each platform, in the time zone of the account, when it was loaded, and how many hours ago.
+- **Last load of each account**: the last day that a load took for each account of each platform, in the time zone of the account, when it was loaded, how many hours ago, and whether the settings of the model name the account, **In the Settings**: an account that they no longer name comes last, and a source of the rates has no value there.
 - **Duration of each run of the transform, last 30 days**, and the **slowest models of the last run**.
 - **Models that failed, last 30 days**, with what dbt said of each, and **tests that warned or failed, last 30 days**, by model, column and kind of test.
 - **Largest tables of the warehouse**: the 20 tables that take the most room, with the rows that PostgreSQL estimates for each.
