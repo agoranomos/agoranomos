@@ -528,6 +528,9 @@ def test_the_lists_of_a_whole_load_beside_the_core_of_the_profile(env, airflow_u
     assert found.first, found
     day = found.first - timedelta(days=1)
     warehouse_output(env, synthetic.history_sql(found.first, found.last))
+    # The test of G3 asks for a rate on every day of the windows that a run reads.
+    reporting = env.get("AGORANOMOS_REPORTING_CURRENCY") or "USD"
+    warehouse_output(env, synthetic.rates_sql(day, day, reporting))
     journal = warehouse_output(env, "SELECT count(*) FROM core.loads")
     rows = synthetic.list_rows(env)
     unpause(airflow_url, token, TRANSFORM)
