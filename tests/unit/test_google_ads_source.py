@@ -18,6 +18,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from test_windows import MISSED, assert_each_day_becomes_final
 
 # 02:00 UTC on Thursday 29 October 2026: still the 28th in Los Angeles, the 29th in Berlin.
 NOW = datetime(2026, 10, 29, 2, 0, tzinfo=UTC)
@@ -460,7 +461,19 @@ def test_the_first_load_takes_90_days_and_a_later_one_at_least_90_days(ads):
     assert module.window(last, None) == (date(2026, 7, 31), last)
     assert module.history_start(last) == date(2023, 10, 1)
     assert module.window(last, date(2026, 10, 27)) == (date(2026, 7, 31), last)
-    assert module.window(last, date(2026, 6, 1)) == (date(2026, 6, 2), last)
+    # A missed load: a day earlier, so that 31 July, which the load of 27 October would
+    # have read at the age of 90 days, is read at 91.
+    assert module.window(last, date(2026, 10, 26)) == (date(2026, 7, 30), last)
+    # After a stop, back to the day after the oldest that the last load read at 90 days.
+    assert module.window(last, date(2026, 6, 1)) == (date(2026, 3, 5), last)
+
+
+@pytest.mark.parametrize("missed", MISSED.values(), ids=MISSED.keys())
+def test_each_day_of_an_account_is_read_once_at_the_age_of_its_window(missed, ads):
+    # windows.daily_window: after 0, 1, 2 or N missed daily loads, or a stop longer than the
+    # window, each day is read at the age of 90 days or more, and no day is left out.
+    module = ads[0]
+    assert_each_day_becomes_final(module.window, 90, missed)
 
 
 def test_a_quarter_runs_from_its_first_to_its_last_day(ads):
@@ -1076,11 +1089,11 @@ def test_a_dataset_of_a_release_before_v0_5_takes_the_usual_window_of_each_accou
 
 
 def test_the_window_starts_after_the_last_day_that_the_core_accepted(ads):
-    # ADR-0038: [min(yesterday + 1 - 90, last accepted day + 1), yesterday], with the last accepted
+    # [min(yesterday + 1 - 90, last accepted day + 2 - 90), yesterday], with the last accepted
     # day from core.loads, which loader may read. The first account was accepted up to 1 June, so
-    # its window reaches back to the 2nd, by month, though its newest whole load ended on 26
+    # its window reaches back to 5 March, by month, though its newest whole load ended on 26
     # October; the second has no accepted load, as before the first run of the transform that read
-    # one, and starts after its newest whole load, from 90 days back.
+    # one, and counts from its newest whole load, from 90 days back.
     module, state, made, extensions = ads
     state.update(
         loads=2,
@@ -1097,14 +1110,14 @@ def test_the_window_starts_after_the_last_day_that_the_core_accepted(ads):
         for row in rows["_agoranomos_loads"]
     }
     assert windows == {
-        "1111111111": (date(2026, 6, 2), date(2026, 10, 27)),
+        "1111111111": (date(2026, 3, 5), date(2026, 10, 27)),
         "2222222222": (date(2026, 7, 31), date(2026, 10, 28)),
     }
-    # The longer window goes in a request for each calendar month, June to October.
+    # The longer window goes in a request for each calendar month, March to October.
     gaql = [
         q for url, q, _ in made["requests"] if "1111111111" in url and " FROM customer WHERE " in q
     ]
-    assert len(gaql) == 5
+    assert len(gaql) == 8
     [query] = [q for q in made["pipelines"][0].queries if "core.loads" in q]
     assert query == (
         "SELECT account_id, max(window_to) FROM core.loads "
@@ -1166,9 +1179,10 @@ def test_the_cache_never_moves_a_window_and_the_log_says_when_it_differs(ads, ca
         module.load(NOW, extensions, cache=cache)
     [(rows, _)] = made["pipelines"][0].runs
     windows = {row["account_id"]: row["window_from"] for row in rows["_agoranomos_loads"]}
-    # The first account starts after the end of March in the journal, the second, which neither
-    # the journal nor the core knows, takes its usual window.
-    assert windows == {"1111111111": date(2026, 4, 1), "2222222222": date(2026, 7, 31)}
+    # The first account counts from the end of March in the journal, back to the day after the
+    # oldest that its load read at the age of 90 days, the second, which neither the journal
+    # nor the core knows, takes its usual window.
+    assert windows == {"1111111111": date(2026, 1, 2), "2222222222": date(2026, 7, 31)}
     assert (
         "Google Ads account 1111111111: Airflow keeps 2026-10-26 as the last day of its newest "
         "load, the warehouse 2026-03-31; the window follows the warehouse"
@@ -1730,7 +1744,8 @@ def test_a_stop_of_120_days_still_closes_by_itself_after_an_intraday_load(ads):
     # ADR-0051: the core accepted the whole days of the account in Berlin up to 30 June, then the
     # loads stopped for 120 days, and on the first day back an intraday load of 29 October came
     # first, which the core accepted, in core.loads and in the journal. The last accepted day stays
-    # 30 June, so the daily window starts on 1 July, and not 90 days back, which would lose 30 days.
+    # 30 June, so the daily window starts on 3 April, the day after the oldest that the load of 30
+    # June read at the age of 90 days, and not 90 days back, which would lose 120 days.
     module, state, made, extensions = ads
     warehouse = Warehouse()
     berlin = "2222222222"
@@ -1745,7 +1760,7 @@ def test_a_stop_of_120_days_still_closes_by_itself_after_an_intraday_load(ads):
     [(rows, _)] = pipeline[-1].runs
     record = {row["account_id"]: row for row in rows["_agoranomos_loads"]}
     assert (record[berlin]["window_from"], record[berlin]["window_to"]) == (
-        date(2026, 7, 1),
+        date(2026, 4, 3),
         date(2026, 10, 28),
     )
     # The account in Los Angeles, which no load took, takes its usual window.

@@ -15,11 +15,12 @@ import re
 import sys
 import types
 from collections import Counter
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from itertools import pairwise
 from pathlib import Path
 
 import pytest
+from test_windows import MISSED, assert_each_day_becomes_final
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "bank_of_italy"
@@ -221,9 +222,9 @@ def test_the_window_and_the_history_are_those_of_the_ecb(bank):
     assert windows.restatement_window_days(ecb.CODE) == 14
     # The first load takes the history, from the first day of the month 37 months back.
     assert module.window(NOW, None) == (date(2023, 10, 1), date(2026, 11, 12), "history")
-    # A later one, the day after the last loaded, or the last fourteen days when that is earlier.
+    # A later one, the last fourteen days, a day earlier for each missed load.
     assert module.window(NOW, date(2026, 10, 20)) == (
-        date(2026, 10, 21),
+        date(2026, 10, 8),
         date(2026, 11, 12),
         "window",
     )
@@ -237,6 +238,22 @@ def test_the_window_and_the_history_are_those_of_the_ecb(bank):
     assert module.window(NOW, last, date(2024, 1, 1)) == (date(2024, 1, 1), last, "history")
     assert module.window(NOW, last, date(2026, 11, 5)) == (date(2026, 10, 30), last, "window")
     assert module.window(NOW, None, date(2022, 1, 1)) == (date(2022, 1, 1), last, "history")
+
+
+@pytest.mark.parametrize("missed", MISSED.values(), ids=MISSED.keys())
+def test_each_day_of_the_rates_is_read_once_at_the_age_of_its_window(missed, bank):
+    # windows.daily_window: after 0, 1, 2 or N missed daily loads, or a stop longer than the
+    # window, each day is read at the age of 14 days or more, and no day is left out; the first
+    # load takes the history, and every later one is of the kind window.
+    module = bank[0]
+
+    def window(last, last_end):
+        now = datetime.combine(last + timedelta(days=1), time(12), UTC)
+        first, end, kind = module.window(now, last_end)
+        assert kind == ("history" if last_end is None else "window")
+        return first, end
+
+    assert_each_day_becomes_final(window, 14, missed)
 
 
 def test_the_history_asks_for_the_weekdays_of_37_months(bank):

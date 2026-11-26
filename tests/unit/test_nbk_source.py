@@ -20,11 +20,12 @@ import itertools
 import re
 import sys
 import types
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 from pathlib import Path
 from xml.etree import ElementTree
 
 import pytest
+from test_windows import MISSED, assert_each_day_becomes_final
 
 FIXTURES = Path(__file__).parent / "fixtures" / "nbk"
 # A Thursday, at 16:13 in Astana (UTC+5), when the DAG runs.
@@ -232,9 +233,10 @@ def test_the_first_load_takes_37_months_as_the_load_of_the_ecb(nbk):
 
 
 def test_a_later_load_takes_the_new_days_and_at_least_the_last_fourteen(nbk):
+    # The last fourteen days, a day earlier for each missed load.
     module, _, _ = nbk
     assert module.window(NOW, date(2026, 10, 20)) == (
-        date(2026, 10, 21),
+        date(2026, 10, 8),
         date(2026, 11, 12),
         "window",
     )
@@ -252,6 +254,22 @@ def test_a_load_takes_the_history_again_from_the_day_that_the_core_needs(nbk):
     assert module.window(NOW, last, date(2026, 11, 5)) == (date(2026, 10, 30), last, "window")
     assert module.window(NOW, None, date(2022, 1, 1)) == (date(2022, 1, 1), last, "history")
     assert module.window(NOW, None, date(2024, 1, 1)) == (date(2023, 10, 1), last, "history")
+
+
+@pytest.mark.parametrize("missed", MISSED.values(), ids=MISSED.keys())
+def test_each_day_of_the_rates_is_read_once_at_the_age_of_its_window(missed, nbk):
+    # windows.daily_window: after 0, 1, 2 or N missed daily loads, or a stop longer than the
+    # window, each day is read at the age of 14 days or more, and no day is left out; the first
+    # load takes the history, and every later one is of the kind window.
+    module = nbk[0]
+
+    def window(last, last_end):
+        now = datetime.combine(last, time(12), UTC)
+        first, end, kind = module.window(now, last_end)
+        assert kind == ("history" if last_end is None else "window")
+        return first, end
+
+    assert_each_day_becomes_final(window, 14, missed)
 
 
 def test_a_weekday_gives_every_item_as_the_feed_names_it(nbk):

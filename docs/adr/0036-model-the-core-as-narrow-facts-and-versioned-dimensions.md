@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # Model the core as narrow facts by grain, with dimensions that keep their versions
 
+Superseded in part by [ADR-0055](0055-read-each-day-at-the-end-of-its-window-and-keep-the-loads.md): "13 months" of the row `core.loads` of "The facts", as the accepted loads of the kinds `window` and `history` stay for good. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 [ADR-0025](0025-model-advertising-statistics-once.md) models statistics as wide tables: each fact in `marts` carries its names and both currencies, and dbt rebuilds all of it on every run. [ADR-0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) moves the permanent data into a schema `core`, which needs a model of its own.

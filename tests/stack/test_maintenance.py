@@ -56,9 +56,11 @@ LOADS = {
     "1710000000.0": (10, [("a3", "2024-03-09", "2024-03-08", "loaded")], True, False),
 }
 KEPT_LOADS = ["1700172800.9", "1700259200.11", "1710000000.0"]
-# Rows of core.loads of the source of the test: (account, load, status, months ago).
+# Rows of core.loads of the source of the test: (account, load, status, months ago). Every row of
+# the kind window stays, whatever its age: the fact of the oldest day of each daily window names
+# its load alone, and the views read when it ended for loaded_at and is_final.
 CORE_LOADS = [
-    # b1: the two old accepted loads go, the young one stays.
+    # b1: two old accepted loads and a young one.
     ("b1", "1600000000.0", "accepted", 20),
     ("b1", "1610000000.0", "accepted", 15),
     ("b1", "1690000000.0", "accepted", 1),
@@ -66,7 +68,7 @@ CORE_LOADS = [
     ("b2", "1600000000.0", "pinned", 20),
     ("b2", "1610000000.0", "accepted", 15),
     ("b2", "1690000000.0", "accepted", 1),
-    # b3: its one accepted load, where its next window starts, whatever its age.
+    # b3: its one accepted load, from which its next window counts.
     ("b3", "1600000000.0", "accepted", 20),
     # b4: an old accepted load whose row _dlt_loads of the raw schema still holds, which a pin
     # would take again, and a newer one.
@@ -74,6 +76,8 @@ CORE_LOADS = [
     ("b4", "1690000000.0", "accepted", 1),
 ]
 KEPT_CORE_LOADS = [
+    ("b1", "1600000000.0"),
+    ("b1", "1610000000.0"),
     ("b1", "1690000000.0"),
     ("b2", "1600000000.0"),
     ("b2", "1610000000.0"),
@@ -464,6 +468,7 @@ def test_core_loads_keep_what_staging_and_the_next_window_read(env, run):
         "SELECT string_agg(account_id || '|' || load_id, ',' ORDER BY account_id, load_id)"  # noqa: S608 (names, dates and a tag of the test)
         f" FROM core.loads WHERE source = '{run.tag}' AND account_id LIKE 'b%'",
     ).split(",")
+    # Of the kind window, every row, those older than 13 months too.
     assert left == [f"{account}|{load}" for account, load in KEPT_CORE_LOADS]
     # Of the kind intraday, those older than 14 days that nothing reads go (ADR-0051).
     intraday = sql(
@@ -523,7 +528,7 @@ def test_ops_records_the_steps_of_the_maintenance(env, run):
     for table in maintenance.FACTS:
         assert f"analyze_the_facts|core.{table}|" in steps, table
     assert f"clean_dlt_loads|{run.schema}._dlt_loads|4" in steps
-    assert f"clean_core_loads|core.loads of {run.tag}|4" in steps
+    assert f"clean_core_loads|core.loads of {run.tag}|2" in steps
     # The partitions that the tests dropped, and the months of the journal that they made, at
     # least: a stack that started in an earlier month has more.
     made = {step.split("|")[1] for step in steps if step.startswith("make_partitions|")}
