@@ -38,7 +38,7 @@ The checks are configured in `.pre-commit-config.yaml` and run by [prek](https:/
 
 A rule of hadolint that does not fit a line is ignored on that line, with a comment above it that says why (`# hadolint ignore=DL3022`).
 
-The workflow Trivy builds the three images that the stack builds, those of `airflow/`, `ai/` and `caddy/`, and scans each for known vulnerabilities of its system packages and of the Python and Go packages that it holds. It fails on one of the severity CRITICAL or HIGH that has a fixed version. It runs on a pull request that changes one of those folders, every week and by hand, and is not a required check.
+The workflow Trivy builds the three images that the stack builds, those of `airflow/`, `ai/` and `caddy/`, and scans each for known vulnerabilities of its system packages and of the Python and Go packages that it holds. It fails on one of the severity CRITICAL or HIGH that has a fixed version. It runs on a pull request and a push to `main` that change what an image installs, its Dockerfile, a lock file that it installs or the packages of the dbt project, every week and by hand, and is not a required check.
 
 CI also scans the whole git history for secrets. You can do the same on a full clone (not a shallow one) with:
 

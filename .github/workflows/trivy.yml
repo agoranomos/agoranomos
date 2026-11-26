@@ -8,8 +8,10 @@ name: Trivy
 # a vulnerability of the severity CRITICAL or HIGH that has a fixed version (--ignore-unfixed): one
 # that no update can fix yet is left to the next run. The images that the stack pulls as they are,
 # such as those of PostgreSQL and Metabase, are not scanned.
-# The workflow runs on a pull request and a push to main that change a file of the three images,
-# every week, as new vulnerabilities are published about images that did not change, and by hand.
+# The workflow runs on a pull request and a push to main that change what the three images
+# install: their Dockerfiles, the lock files that they install and the packages of the dbt
+# project, as a change of a DAG or of a plugin brings no package; every week, as new
+# vulnerabilities are published about images that did not change; and by hand.
 # It is not a required check: a base image can have a vulnerability that no change of this
 # repository fixes, and the maintainer decides what waits for it.
 # Trivy runs from its official image, pinned by digest, which Renovate keeps current. The image is
@@ -18,16 +20,24 @@ name: Trivy
 on:
   pull_request:
     paths:
-      - "airflow/**"
-      - "ai/**"
-      - "caddy/**"
+      - airflow/Dockerfile
+      - airflow/requirements.txt
+      - airflow/dbt-requirements.txt
+      - dbt/packages.yml
+      - ai/Dockerfile
+      - ai/requirements.txt
+      - caddy/Dockerfile
       - .github/workflows/trivy.yml
   push:
     branches: [main]
     paths:
-      - "airflow/**"
-      - "ai/**"
-      - "caddy/**"
+      - airflow/Dockerfile
+      - airflow/requirements.txt
+      - airflow/dbt-requirements.txt
+      - dbt/packages.yml
+      - ai/Dockerfile
+      - ai/requirements.txt
+      - caddy/Dockerfile
       - .github/workflows/trivy.yml
   schedule:
     - cron: "23 4 * * 2" # Tuesday 04:23 UTC
