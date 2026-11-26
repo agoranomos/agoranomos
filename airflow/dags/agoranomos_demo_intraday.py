@@ -1,19 +1,21 @@
 """The current day of the demo of agoranomos, every few hours (ADR-0051).
 
 agoranomos_demo_intraday runs every AGORANOMOS_INTRADAY_HOURS hours of .env, 3 by default, at 27
-minutes past the hour in UTC, from midnight, as the short cycle of Google Ads does, and loads with
-dlt, as the loader role, into raw_demo_search, the platform of the demo in the shape of Google Ads,
-for each of its accounts that a whole load has taken, its current day in its time zone, and the day
-before while no whole load covers it: the impressions, clicks and cost of its campaigns so far, as
-the share of the day that has passed at the moment of the run in the time zone of the account,
-without conversions, as a load of the kind intraday (agoranomos_pipelines/demo/sources.py,
-load_intraday). The moment is the run's, so a retry loads as of the same moment, and a moment always
-gives the same numbers. The load updates an asset of its own, which starts the transform, and the
-transform takes it like any load: the rows of a day that only such a load took are partial in the
-core (is_partial_day), and the card Today, as of the load, of the dashboard Advertising shows them,
-until agoranomos_demo_daily takes the day the next morning and replaces them whole. With 0, the DAG
-has no schedule; a value that is neither 0 nor a divisor of 24 stops the parse of this file with a
-line that says so (agoranomos_pipelines/intraday.py), as ./agoranomos stops before up.
+minutes past the hour in UTC, at hours that keep at least an hour from the start of the daily
+backup, BACKUP_TIME in BACKUP_TZ (ADR-0020), from 01:27 with the defaults, as the short cycle of
+Google Ads does, and loads with dlt, as the loader role, into raw_demo_search, the platform of the
+demo in the shape of Google Ads, for each of its accounts that a whole load has taken, its current
+day in its time zone, and the day before while no whole load covers it: the impressions, clicks and
+cost of its campaigns so far, as the share of the day that has passed at the moment of the run in
+the time zone of the account, without conversions, as a load of the kind intraday
+(agoranomos_pipelines/demo/sources.py, load_intraday). The moment is the run's, so a retry loads as
+of the same moment, and a moment always gives the same numbers. The load updates an asset of its
+own, which starts the transform, and the transform takes it like any load: the rows of a day that
+only such a load took are partial in the core (is_partial_day), and the card Today, as of the load,
+of the dashboard Advertising shows them, until agoranomos_demo_daily takes the day the next morning
+and replaces them whole. With 0, the DAG has no schedule; a value that is neither 0 nor a divisor of
+24 stops the parse of this file with a line that says so (agoranomos_pipelines/intraday.py), as
+./agoranomos stops before up.
 
 The loads of the demo run one at a time in the pool demo_load, this one, the history and the daily
 load. The first task, due, skips the run while a run of agoranomos_demo_history is queued or
@@ -45,8 +47,8 @@ log = logging.getLogger(__name__)
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
 # The hours between two loads, from AGORANOMOS_INTRADAY_HOURS, which compose.yaml gives the DAG
-# processor and the tasks: a value that is not allowed stops the parse of this file. 0 gives no
-# schedule.
+# processor and the tasks, with BACKUP_TIME and BACKUP_TZ, which the hours of the runs keep away
+# from: a value that is not allowed stops the parse of this file. 0 gives no schedule.
 HOURS = intraday.period()
 CRON = intraday.cron(HOURS)
 SCHEDULE = None if CRON is None else CronTriggerTimetable(CRON, timezone="UTC")
