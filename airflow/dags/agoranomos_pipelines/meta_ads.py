@@ -107,6 +107,7 @@ from agoranomos_pipelines.loads import (
     DLT_SETTINGS,
     FAILED,
     HISTORY,
+    INTRADAY,
     LOAD_HINTS,
     LOADED,
     LOADS,
@@ -121,7 +122,7 @@ from agoranomos_pipelines.loads import (
     run,
 )
 from agoranomos_pipelines.settings.files import load_settings
-from agoranomos_pipelines.windows import restatement_window_days
+from agoranomos_pipelines.windows import daily_window, restatement_window_days
 
 log = logging.getLogger(__name__)
 
@@ -502,15 +503,12 @@ def yesterday(now: datetime, time_zone: str) -> date:
 
 
 def window(last: date, last_end: date | None) -> tuple[date, date]:
-    """The days of a load of an account whose last day is last, as ADR-0038 gives them,
-    [min(last + 1 - W, last_end + 1), last], where W is the window of restatements of Meta in the
-    seed of the platforms (windows.py), read now, and last_end the last day that the core accepted
-    for the account: the last W days when none is known yet, else the days from the day after it,
-    or from the first of the last W days when that is earlier."""
-    usual = last - timedelta(days=restatement_window_days(CODE) - 1)
-    if last_end is None:
-        return usual, last
-    return min(last_end + timedelta(days=1), usual), last
+    """The days of a load of an account whose last day is last, [min(last + 1 - W,
+    last_end + 2 - W), last] (windows.daily_window), where W is the window of restatements of Meta
+    in the seed of the platforms (windows.py), read now, and last_end the last day that the core
+    accepted for the account: the last W days when none is known yet, else a window that starts a
+    day earlier for each missed load, so that each day is read at the age of W days or more."""
+    return daily_window(last, last_end, restatement_window_days(CODE))
 
 
 def months(first: date, last: date) -> list[tuple[date, date]]:
@@ -535,7 +533,9 @@ def checked(account_ids: Iterable[str]) -> list[str]:
 
 def accepted(pipeline, account_ids: Iterable[str]) -> dict[str, date]:
     """The last day that the core accepted for each account: the end of the window of its newest
-    accepted load in core.loads, which loader may read (ADR-0038)."""
+    accepted whole load in core.loads, which loader may read (ADR-0038). A load of the kind
+    intraday does not count, as ADR-0051 requires of every reader of window_to, though this
+    connector writes none: one would move the next window past the days that it did not read."""
     # IDs of checked digits, and constants of this module.
     wanted = ", ".join(f"'{account_id}'" for account_id in checked(account_ids))
     try:
@@ -543,7 +543,7 @@ def accepted(pipeline, account_ids: Iterable[str]) -> dict[str, date]:
             rows = client.execute_sql(
                 "SELECT account_id, max(window_to) FROM core.loads "  # noqa: S608
                 f"WHERE source = '{CODE}' AND status = 'accepted' AND outcome = '{LOADED}' "
-                f"AND account_id IN ({wanted}) GROUP BY account_id"
+                f"AND kind <> '{INTRADAY}' AND account_id IN ({wanted}) GROUP BY account_id"
             )
     except DatabaseUndefinedRelation:
         return {}
