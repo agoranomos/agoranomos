@@ -1233,6 +1233,22 @@ EOF
   # The MCP servers of the container ai (ADR-0030): their switches, local mode, and the ai profile.
   message=$(ai_servers_problem)
   [ -z "$message" ] || problem "$message"
+  # The time of the daily backup and its time zone (ADR-0020), in every mode: the backup service of
+  # the ops profile runs at that time, and the DAGs of the short cycle, which keep their runs an
+  # hour from it, stop their import on a value that is not a time of day or a time zone
+  # (airflow/dags/agoranomos_pipelines/intraday.py).
+  case "$(setting BACKUP_TIME 03:00)" in
+    [01][0-9]:[0-5][0-9] | 2[0-3]:[0-5][0-9]) ;;
+    *) problem "BACKUP_TIME in .env must be a time of day as HH:MM, such as 03:00" ;;
+  esac
+  # The image of the databases and that of Airflow have the time zones of the IANA database, as
+  # Linux and macOS have them in /usr/share/zoneinfo: a machine without that folder leaves the
+  # check to them.
+  backup_tz=$(setting BACKUP_TZ UTC)
+  zoneinfo=${AGORANOMOS_ZONEINFO:-/usr/share/zoneinfo}
+  if [ "$backup_tz" != UTC ] && [ -d "$zoneinfo" ] && [ ! -f "$zoneinfo/$backup_tz" ]; then
+    problem "BACKUP_TZ in .env is not a time zone, such as Europe/Berlin: $backup_tz"
+  fi
   # The backup service of the ops profile runs as AGORANOMOS_UID and reads its schedule from .env.
   if ops_mode; then
     message=$(backup_user_problem)
@@ -1245,10 +1261,6 @@ EOF
         warn "the backup service runs as UID $(env_get AGORANOMOS_UID) (AGORANOMOS_UID in .env), and the backups folder $owned_folder belongs to UID $folder_owner: Docker Desktop maps the owner of a shared folder, so the service can write there, but a Linux server would not let it"
       fi
     fi
-    case "$(setting BACKUP_TIME 03:00)" in
-      [01][0-9]:[0-5][0-9] | 2[0-3]:[0-5][0-9]) ;;
-      *) problem "BACKUP_TIME in .env must be a time of day as HH:MM, such as 03:00" ;;
-    esac
     for keep_setting in BACKUP_KEEP_DAILY BACKUP_KEEP_WEEKLY BACKUP_KEEP_MONTHLY; do
       case "$(setting "$keep_setting" 1)" in
         '' | *[!0-9]*) problem "$keep_setting in .env must be a whole number" ;;
@@ -1257,13 +1269,6 @@ EOF
     # Zeros only, such as 0 or 00: the service reads a number, and stops on it.
     if [ -z "$(setting BACKUP_KEEP_DAILY 7 | tr -d 0)" ]; then
       problem "BACKUP_KEEP_DAILY in .env must be at least 1: the newest backup always stays"
-    fi
-    # The image of the databases has the time zones of the IANA database, as Linux and macOS
-    # have them in /usr/share/zoneinfo: a machine without that folder leaves the check to it.
-    backup_tz=$(setting BACKUP_TZ UTC)
-    zoneinfo=${AGORANOMOS_ZONEINFO:-/usr/share/zoneinfo}
-    if [ "$backup_tz" != UTC ] && [ -d "$zoneinfo" ] && [ ! -f "$zoneinfo/$backup_tz" ]; then
-      problem "BACKUP_TZ in .env is not a time zone, such as Europe/Berlin: $backup_tz"
     fi
   elif server_mode; then
     # A .env of server mode from before the backups lists server and not ops, and init changes a
