@@ -22,9 +22,12 @@
 
 {#- The statistics of a level by day: FROM campaign, FROM ad_group or FROM ad_group_ad. The
     connector of Google Ads reads metrics.all_conversions and its value too (all_conversions), and
-    the demo platform demo_search does not, so it has none of them. -#}
-{% macro google_ads_stats(relation, platform, level='campaign', all_conversions=false) %}
-{%- call nonzero(['impressions', 'clicks', 'spend', 'platform_conversions', 'platform_conversion_value', 'all_conversions', 'all_conversion_value']) %}
+    the demo platform demo_search does not, so it has none of them. The campaigns pass
+    conversions, the staging model of the report by conversion action, and a campaign day whose
+    measures are zero stays when that report gives it a conversion or a value (nonzero), as for
+    an action that metrics.conversions leaves out on demo_search. -#}
+{% macro google_ads_stats(relation, platform, level='campaign', all_conversions=false, conversions=none) %}
+{%- call nonzero(['impressions', 'clicks', 'spend', 'platform_conversions', 'platform_conversion_value', 'all_conversions', 'all_conversion_value'], conversions) %}
 select
     cast(segments__date as date) as report_date,
     '{{ platform }}' as platform,

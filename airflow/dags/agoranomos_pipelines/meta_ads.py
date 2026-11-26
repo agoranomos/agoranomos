@@ -728,23 +728,41 @@ def usage(headers) -> Usage:
     )
 
 
-def graph_error(response) -> tuple[int | None, int | None, str]:
-    """The code, the subcode and the message of an error of the Graph API, which it writes as
-    {"error": {"message": ..., "type": ..., "code": ..., "error_subcode": ..., "fbtrace_id": ...}}
-    (Handling errors, https://developers.facebook.com/docs/graph-api/guides/error-handling/, read on
-    15 November 2026), or the start of a body that is not one."""
+def for_a_person(error: dict, scrub: Callable[[str], str]) -> str:
+    """What Meta writes about an error for a person, error_user_title and error_user_msg, as
+    "; <title>: <message>", or "" when it writes neither: "The title of the dialog, if shown" and
+    "The message to display to the user", in the language of "the locale of the API request"
+    (Handling errors, read on 25 November 2026), which is that of the token. Each is scrubbed and
+    then cut to 500 characters, so that a secret across the cut leaves none of its characters.
+    They are data to show, and nothing acts on them."""
+    said = [
+        scrub(str(error[key]))[:500]
+        for key in ("error_user_title", "error_user_msg")
+        if error.get(key) not in (None, "")
+    ]
+    return "; " + ": ".join(said) if said else ""
+
+
+def graph_error(response, scrub: Callable[[str], str]) -> tuple[int | None, int | None, str]:
+    """The code, the subcode and the message of an error of the Graph API, with what for_a_person
+    gives, which it writes as {"error": {"message": ..., "type": ..., "code": ..., "error_subcode":
+    ..., "error_user_title": ..., "error_user_msg": ..., "fbtrace_id": ...}} (Handling errors,
+    https://developers.facebook.com/docs/graph-api/guides/error-handling/, read on 15 November 2026,
+    and for error_user_title and error_user_msg on 25 November 2026), or the start of a body that
+    is not one. Each text is scrubbed and then cut to 500 characters, so that a secret across the
+    cut leaves none of its characters."""
     try:
         body = response.json()
     except ValueError:
-        return None, None, (response.text or "")[:500]
+        return None, None, scrub(response.text or "")[:500]
     error = body.get("error") if isinstance(body, dict) else None
     if not isinstance(error, dict):
-        return None, None, json.dumps(body)[:500]
+        return None, None, scrub(json.dumps(body))[:500]
     code, subcode = error.get("code"), error.get("error_subcode")
     return (
         code if isinstance(code, int) else None,
         subcode if isinstance(subcode, int) else None,
-        str(error.get("message", ""))[:500],
+        scrub(str(error.get("message", "")))[:500] + for_a_person(error, scrub),
     )
 
 
@@ -849,7 +867,7 @@ class Api:
                 if not isinstance(body, dict):
                     raise self.fail(subject, "an answer that is not a JSON object")
                 return body
-            code, subcode, message = graph_error(response)
+            code, subcode, message = graph_error(response, self.secrets.scrub)
             said = f"{response.status_code} {message} (code {code}, subcode {subcode})"
             if (code, subcode) == TOO_MUCH_DATA:
                 raise self.fail(subject, said, TooMuchData)
@@ -1025,8 +1043,10 @@ def report_run(api: Api, subject: str, account_id: str, params: dict[str, str], 
         if status != FAILED_JOB:
             found = None
         elif found[0] is not None:
-            message = ended.get("error_message") or "no message"
-            said += f": {message} (code {found[0]}, subcode {found[1]})"
+            # Scrubbed before the cut, as graph_error does, and scrubbed again with the rest.
+            message = api.secrets.scrub(str(ended.get("error_message") or "no message"))[:500]
+            person = for_a_person(ended, api.secrets.scrub)
+            said += f": {message}{person} (code {found[0]}, subcode {found[1]})"
         if found in TOO_LARGE:
             raise api.fail(subject, said, TooMuchData)
         if (status == SKIPPED or found in RETRY_LATER) and attempt < REPORT_ATTEMPTS:

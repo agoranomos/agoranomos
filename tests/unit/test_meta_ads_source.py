@@ -694,8 +694,79 @@ def test_a_list_with_deleted_fails_its_account_as_meta_refuses_it(meta, monkeypa
     monkeypatch.setattr(module, "LIST_STATUSES", module.EVERY_STATUS)
     with pytest.raises(module.MetaAdsError, match="2 of 2 Meta ad accounts failed") as raised:
         module.load(NOW, extensions)
-    assert "400 Invalid parameter (code 100, subcode 1815001)" in str(raised.value)
+    # The error gives what Meta writes for a person after its message, as the stand S6 saw it.
+    assert (
+        "400 Invalid parameter; Cannot request deleted objects: Requests for deleted objects are "
+        "not supported at this endpoint (code 100, subcode 1815001)"
+    ) in str(raised.value)
     assert paths(made["graph"])[:2] == [("GET", f"act_{ONE}"), ("GET", f"act_{ONE}/campaigns")]
+
+
+def test_an_error_gives_what_meta_writes_for_a_person_cut_and_scrubbed(meta):
+    # error_user_title and error_user_msg come in the locale of the token, here in Russian, and
+    # are shown as data after the message, each cut to 500 characters, with no secret.
+    module, _, made, extensions = meta
+    long = "x" * 600
+    made["graph"].before = lambda method, path, params: (
+        error(
+            200,
+            None,
+            "Permissions error",
+            title="Нет доступа",
+            text=f"Токен {TOKEN} не видит аккаунт {long}",
+        )
+        if path == f"act_{ONE}"
+        else None
+    )
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load(NOW, extensions)
+    text = str(raised.value)
+    assert f"Meta ad account {ONE}: 400 Permissions error; Нет доступа: Токен *** не видит " in text
+    assert TOKEN not in text
+    # The message of a person is scrubbed, then cut to 500 characters.
+    told = f"Токен *** не видит аккаунт {long}"[:500]
+    assert f"; Нет доступа: {told} (code 200" in text
+    assert "x" * 500 not in text
+    assert text.endswith(" (code 200, subcode None)")
+
+
+@pytest.mark.parametrize("field", ["message", "text"])
+def test_a_token_across_the_cut_of_500_characters_leaves_none_of_it(meta, field):
+    # The token starts 10 characters before the cut of its text: a cut before the scrub would
+    # leave those 10, which no scrub can find.
+    module, _, made, extensions = meta
+    across = "y" * 490 + TOKEN + "z" * 20
+    texts = {"message": across, "title": "A title", "text": "A text"} | {field: across}
+    made["graph"].before = lambda method, path, params: (
+        error(200, None, **texts) if path == f"act_{ONE}" else None
+    )
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load(NOW, extensions)
+    text = str(raised.value)
+    assert "y" * 490 + "***" + "z" * 7 in text
+    assert TOKEN[:4] not in text
+
+
+def test_an_error_without_a_text_for_a_person_reads_as_before(meta):
+    module, _, made, extensions = meta
+    made["graph"].before = lambda method, path, params: (
+        error(200, None, "Permissions error") if path == f"act_{ONE}" else None
+    )
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load(NOW, extensions)
+    assert f"Meta ad account {ONE}: 400 Permissions error (code 200, subcode None)" in str(
+        raised.value
+    )
+
+
+def test_a_title_or_a_text_for_a_person_alone_is_shown_alone(meta):
+    module, _, _, _ = meta
+    scrub = module.Secrets({"secret"}).scrub
+    assert module.for_a_person({"error_user_title": "A title"}, scrub) == "; A title"
+    assert module.for_a_person({"error_user_msg": "A secret", "error_user_title": ""}, scrub) == (
+        "; A ***"
+    )
+    assert module.for_a_person({"message": "An error"}, scrub) == ""
 
 
 def test_the_statistics_of_a_deleted_ad_that_no_list_returns_reach_raw(meta):
@@ -1226,23 +1297,21 @@ def test_a_report_run_that_fails_fails_the_account_and_a_skipped_one_is_asked_ag
     assert set(graph.tokens) == {TOKEN}
 
 
-def failed_run(code, subcode, message):
+def failed_run(code, subcode, message, title=None, text=None):
     """The answer of a report run that failed, read without fields, with the fields of its error
     that Meta returns by default since v25.0 (Limits and best practices, read on 15 November
-    2026)."""
-    return StandInResponse(
-        200,
-        {
-            "id": RUN_ID,
-            "async_status": "Job Failed",
-            "async_percent_completion": 0,
-            "error_code": code,
-            "error_subcode": subcode,
-            "error_message": message,
-            "error_user_title": "A title",
-            "error_user_msg": "A message for a person",
-        },
-    )
+    2026), and error_user_title and error_user_msg when title and text are given."""
+    body = {
+        "id": RUN_ID,
+        "async_status": "Job Failed",
+        "async_percent_completion": 0,
+        "error_code": code,
+        "error_subcode": subcode,
+        "error_message": message,
+    }
+    if title is not None:
+        body |= {"error_user_title": title, "error_user_msg": text}
+    return StandInResponse(200, body)
 
 
 def failing_runs(graph, failure, when):
@@ -1330,6 +1399,20 @@ def test_a_report_run_that_fails_with_an_error_to_retry_later_is_asked_again(met
     )
     module.load(NOW, extensions, portion=portion)
     assert [run["level"] for run in graph.runs] == ["account", "account", "campaign", "adset", "ad"]
+
+
+def test_a_report_run_that_fails_gives_what_meta_writes_for_a_person(meta):
+    module, _, made, extensions = meta
+    graph = made["graph"]
+    failed = failed_run(100, 3191001, "Permission Error", "A title", f"No access for {TOKEN}")
+    failing_runs(graph, failed, lambda asked: True)
+    portion = module.Portion((ONE,), date(2026, 1, 1), date(2026, 3, 31))
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load(NOW, extensions, portion=portion)
+    assert str(raised.value).endswith(
+        f"report run {RUN_ID} ended with Job Failed: Permission Error; A title: No access for *** "
+        "(code 100, subcode 3191001)"
+    )
 
 
 def test_a_report_run_that_fails_with_another_error_fails_the_account_at_once(meta):

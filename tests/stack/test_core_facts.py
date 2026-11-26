@@ -236,12 +236,19 @@ def idle(env, airflow_url, token):
     ],
 )
 def test_each_fact_holds_rows_with_a_measure_from_the_load_of_their_day(env, idle, fact, measures):
-    # A row whose measures are all zero stays out (ADR-0036), and each row carries the load that
-    # wrote it, a load of its account in core.loads whose window covers its day.
+    # A row whose measures are all zero stays out (ADR-0036), but a row of a campaign that has a
+    # conversion on its day, and each row carries the load that wrote it, a load of its account in
+    # core.loads whose window covers its day.
     total = int(warehouse_output(env, f"SELECT count(*) FROM core.{fact}"))  # noqa: S608 (a fact of this file)
     assert total > 0, f"core.{fact} holds no row of the demo"
-    zeros = " AND ".join(f"coalesce({measure}, 0) = 0" for measure in measures.split(", "))
-    empty = warehouse_output(env, f"SELECT count(*) FROM core.{fact} WHERE {zeros}")  # noqa: S608
+    zeros = " AND ".join(f"coalesce(f.{measure}, 0) = 0" for measure in measures.split(", "))
+    if fact == "ad_stats_campaign_daily":
+        zeros += (
+            " AND NOT EXISTS (SELECT FROM core.ad_conversions_campaign_daily AS c "
+            "WHERE c.account_sk = f.account_sk AND c.campaign_id = f.campaign_id "
+            "AND c.report_date = f.report_date)"
+        )
+    empty = warehouse_output(env, f"SELECT count(*) FROM core.{fact} AS f WHERE {zeros}")  # noqa: S608
     assert int(empty) == 0, f"core.{fact} holds rows whose measures are all zero"
     unloaded = warehouse_output(
         env,

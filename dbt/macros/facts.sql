@@ -13,11 +13,12 @@
     windows come from the task of the pin, outside any model (pin_loads.sql). The rows come from
     staging, of the days of int_window_days, which leaves out the accounts in quarantine and the
     sources that stop (ADR-0035), as integers, numeric(18,6) and char(3), the types of the tables
-    of the migrations; staging has left out a row whose measures are all zero (ADR-0036,
-    macros/numbers.sql). A day that only a load of the kind intraday took is partial (ADR-0051): a
-    day of the fact of campaigns alone, whose rows carry is_partial_day, as that load brings the
-    statistics of campaigns and nothing else. No other fact reads it, so none takes it for an empty
-    day, and a whole load replaces the partial rows with its day. -#}
+    of the migrations; staging has left out a row whose measures are all zero, but a row of the
+    statistics of a campaign that has a conversion on its day (ADR-0036, macros/numbers.sql). A
+    day that only a load of the kind intraday took is partial (ADR-0051): a day of the fact of
+    campaigns alone, whose rows carry is_partial_day, as that load brings the statistics of
+    campaigns and nothing else. No other fact reads it, so none takes it for an empty day, and a
+    whole load replaces the partial rows with its day. -#}
 
 {#- The first day that the pinned windows reach, as SQL: the lower bound of the delete of a fact,
     its incremental_predicates, and of the hooks and tests of the facts, so that PostgreSQL reads
