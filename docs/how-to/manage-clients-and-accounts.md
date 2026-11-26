@@ -1,6 +1,6 @@
 # Manage clients and accounts
 
-A deployment of agoranomos is one business, which groups its ad accounts and its properties of web analytics into clients ([ADR-0024](../adr/0024-one-deployment-is-one-business.md)). The file `extensions/model/clients.toml`, in the folder that `AGORANOMOS_EXTENSIONS_DIR` names, lists the clients and the accounts of each, and the first task of each run of the transform reads it. [The data model](../reference/data-model.md#clients) gives the form of the file, and [Configuration](../reference/configuration.md#the-settings-of-the-model) its limits.
+A deployment of agoranomos is one business, which groups its ad accounts and its properties of web analytics into clients ([ADR-0024](../adr/0024-one-deployment-is-one-business.md)), or one agency, whose clients are its own and which only its staff read: no client gets a login ([ADR-0041](../adr/0041-run-an-agency-as-one-deployment.md)). The file `extensions/model/clients.toml`, in the folder that `AGORANOMOS_EXTENSIONS_DIR` names, lists the clients and the accounts of each, and the first task of each run of the transform reads it. [The data model](../reference/data-model.md#clients) gives the form of the file, and [Configuration](../reference/configuration.md#the-settings-of-the-model) its limits.
 
 ## Add a client or an account
 
