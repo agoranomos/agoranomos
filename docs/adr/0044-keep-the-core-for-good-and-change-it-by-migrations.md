@@ -8,6 +8,8 @@ decision-makers: Andrei Gromov
 
 Superseded in part by [ADR-0046](0046-pin-the-loads-before-the-transform-and-accept-them-before-the-cleanup.md): "By partition" for `core.loads` in "Retention", as that table has no partitions and its rows past 13 months are deleted. The rest of this record stays accepted.
 
+Superseded in part by [ADR-0055](0055-read-each-day-at-the-end-of-its-window-and-keep-the-loads.md): the 13 months of `core.loads` in "Retention", with the deletion of its rows past 13 months that ADR-0046 gave it, as the accepted loads of the kinds `window` and `history` stay for good. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 [ADR-0035](0035-keep-four-layers-and-erase-the-raw-layer-after-acceptance.md) erases the raw layer, so data older than the window of an API exists only in the core. The maintainer asks that a new release changes the schema with no reload of the history, that a deployment runs for years with only updates from its user, and that a person can rely on a dashboard for three years back.
