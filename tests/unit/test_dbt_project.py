@@ -1571,13 +1571,12 @@ G2_SUMS = [
 
 
 def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
-    # Clicks above impressions, an account of no client, a missing day and lower levels above their
-    # parents can be right, so they warn; so can primary actions that do not add up to
+    # Clicks above impressions, a missing day and lower levels above their parents can be right,
+    # so they warn; so can primary actions that do not add up to
     # conversions_primary, as a campaign day that only the report of conversions of Google Ads
     # holds has no row of statistics (ADR-0036). They read the views of the marts.
     wanted = {
         "assert_clicks_within_impressions": ({"ad_stats_campaign_daily"}, True),
-        "assert_every_account_has_a_client": ({"ad_accounts"}, True),
         "assert_every_day_of_an_account_has_statistics": ({"ad_stats_campaign_daily"}, True),
         "assert_primary_actions_add_up_to_the_conversions": (
             {"ad_conversions_campaign_daily", "ad_stats_campaign_daily"},
@@ -1598,7 +1597,8 @@ def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
         "assert_no_source_is_stopped": ({"int_g1_failures"}, True),
         # An account that leaves the settings keeps its data (ADR-0044): it warns, with the
         # registry that sets the activity, over the facts as the runs before left them, which are
-        # ancestors of the registry through G1a, so it runs in the task of dim_account.
+        # ancestors of the registry through G1a, so it runs in the task of dim_account. It is the
+        # one warning of an account that no setting names, of the client unassigned (ADR-0024).
         "assert_every_account_with_data_is_in_the_settings": (
             {
                 "dim_account",
@@ -1859,7 +1859,7 @@ def test_each_staging_model_of_google_ads_is_one_call_of_the_shape_that_the_demo
         assert text.rstrip().endswith(end), model
         # No model names a seed, as none of the demo does: the checks of int_g1_failures read them.
         assert "depends_on" not in text, model
-    macros = (DBT / "macros" / "shapes" / "google_ads_v25.sql").read_text(encoding="utf-8")
+    macros = (DBT / "macros" / "shapes" / "google_ads_v26.sql").read_text(encoding="utf-8")
     assert "{% macro google_ads_customers(relation, platform) %}" in macros
     assert "{% macro google_ads_conversion_actions(relation, platform) %}" in macros
     assert "{% macro google_ads_totals(relation, platform) %}" in macros
@@ -3009,7 +3009,7 @@ def test_the_versions_of_the_entities_are_snapshots_of_the_views_of_staging():
 # The common state of an entity by the status of each shape of an API (ADR-0036), within the values
 # that the tables of the core allow.
 STATES = {
-    "google_ads_v25.sql": (
+    "google_ads_v26.sql": (
         "google_ads_state",
         {"ENABLED": "active", "PAUSED": "paused", "REMOVED": "removed"},
         ("campaign__status", "ad_group__status", "ad_group_ad__status"),
@@ -3262,10 +3262,10 @@ def test_g1_reads_the_fact_tables_of_raw_of_each_source_that_names_an_account():
     ]
     # The spend of each table, as the shape of its platform reads it.
     shapes = {
-        "raw_demo_search": "google_ads_v25.sql",
+        "raw_demo_search": "google_ads_v26.sql",
         "raw_demo_social": "meta_v26.sql",
         "raw_demo_video": "tiktok_v1_3.sql",
-        "raw_google_ads": "google_ads_v25.sql",
+        "raw_google_ads": "google_ads_v26.sql",
         "raw_meta_ads": "meta_v26.sql",
         "raw_tiktok_ads": "tiktok_v1_3.sql",
     }
@@ -3312,7 +3312,7 @@ def test_g0a_checks_the_campaigns_of_an_account_against_its_totals_on_each_day()
     for measure in ("impressions", "clicks"):
         assert f"coalesce(t.{measure}, 0)::bigint as {measure}" in model, measure
     assert "coalesce(t.spend, 0)::numeric(18,6) as spend" in model
-    shape = (DBT / "macros" / "shapes" / "google_ads_v25.sql").read_text(encoding="utf-8")
+    shape = (DBT / "macros" / "shapes" / "google_ads_v26.sql").read_text(encoding="utf-8")
     assert "    _dlt_load_id as load_id\nfrom {{ relation }}" in shape
 
 
@@ -3327,7 +3327,7 @@ def test_the_facts_of_statistics_take_all_the_conversions_of_the_platform():
     assert "cast(r.all_conversion_value as numeric(18,6)) as all_conversion_value" in facts
     # No row is left out but those of a partial day, which only the campaigns take (ADR-0051).
     assert re.findall(r"\nwhere .*", facts) == ["\nwhere not d.is_partial_day"]
-    google = (DBT / "macros" / "shapes" / "google_ads_v25.sql").read_text(encoding="utf-8")
+    google = (DBT / "macros" / "shapes" / "google_ads_v26.sql").read_text(encoding="utf-8")
     stats = google[google.index("{% macro google_ads_stats(") :]
     stats = stats[: stats.index("{% endmacro %}")]
     assert "'all_conversions', 'all_conversion_value'], conversions) %}" in stats
@@ -3359,7 +3359,7 @@ def test_a_campaign_day_with_a_conversion_keeps_its_row_of_statistics():
         assert f"converted.{key} = reported.{key}" in macro, key
     assert "or converted.report_date is not null" in macro
     for shape, macro in (
-        ("google_ads_v25.sql", "google_ads_stats"),
+        ("google_ads_v26.sql", "google_ads_stats"),
         ("meta_v26.sql", "meta_stats"),
         ("tiktok_v1_3.sql", "tiktok_stats"),
     ):

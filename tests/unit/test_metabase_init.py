@@ -1151,17 +1151,23 @@ def scan_of_the_template() -> str:
     return value
 
 
-def test_the_scan_comes_at_least_an_hour_after_the_nightly_load():
-    # The first whole hour that does: Metabase 0.64.1 starts a daily scan at the start of an hour.
-    text = (REPO / "airflow" / "dags" / "agoranomos_google_ads_daily.py").read_text("utf-8")
-    [(minute, hour)] = re.findall(
+def test_the_scan_comes_at_least_an_hour_after_every_daily_load():
+    # The first whole hour after the DAG of the base package that starts last: Metabase 0.64.1
+    # starts a daily scan at the start of an hour. A new connector with a later load fails this.
+    pattern = re.compile(
         r'^SCHEDULE = CronTriggerTimetable\("(\d+) (\d+) \* \* \*", timezone="UTC"\)$',
-        text,
         flags=re.MULTILINE,
     )
-    load = int(hour) * 60 + int(minute)
+    loads = {}
+    for path in sorted((REPO / "airflow" / "dags").glob("agoranomos_*_daily.py")):
+        found = pattern.findall(path.read_text("utf-8"))
+        assert len(found) == 1, path.name
+        [(minute, hour)] = found
+        loads[path.name] = int(hour) * 60 + int(minute)
+    assert {"agoranomos_ga4_daily.py", "agoranomos_tiktok_ads_daily.py"} <= set(loads)
+    last = max(loads.values())
     scan = scan_of_the_template()
-    assert int(scan[:2]) * 60 == math.ceil((load + 60) / 60) * 60
+    assert int(scan[:2]) * 60 == math.ceil((last + 60) / 60) * 60
     assert mi.SCAN_TIME.fullmatch(scan)
 
 

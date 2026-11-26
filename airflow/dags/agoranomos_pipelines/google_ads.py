@@ -9,7 +9,7 @@ account in GOOGLE_ADS_LOGIN_CUSTOMER_ID when the service account reaches the acc
 It asks googleAds:searchStream of the REST interface of the Google Ads API, version API_VERSION, for
 each account, and keeps each result as the API gives it, which dlt writes in snake_case with nested
 objects joined by __: the shape that demo_search mimics, which the macros of
-dbt/macros/shapes/google_ads_v25.sql read (none of their fields changed in v26).
+dbt/macros/shapes/google_ads_v26.sql read (none of their fields changed in v26).
 
 A load first reads each account (customer), then its campaigns, its ad groups, its ads and its
 conversion actions, the full lists of the account, and then, by day, the totals of the account

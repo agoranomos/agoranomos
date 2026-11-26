@@ -92,10 +92,17 @@ def test_metabase_reader_reads_no_table_of_elementary(env, transform_run):
 
 
 def test_the_loads_of_every_account_are_in_ops(env, transform_run):
-    text = warehouse_output(env, "SELECT platform || '|' || account_id FROM ops.ops_loads")
+    # The settings of the demo name every account and property of the demo, and demo_fx, the
+    # source of the rates of the demo, has none of the settings, so every row counts for the late
+    # accounts.
+    text = warehouse_output(
+        env,
+        "SELECT platform || '|' || account_id || '|' || coalesce(is_in_settings::text, 'none') "
+        "FROM ops.ops_loads",
+    )
     shown = {tuple(line.split("|")) for line in text.splitlines()}
     accounts = {
-        (code, account.account_id)
+        (code, account.account_id, "none" if code == "demo_fx" else "true")
         for code, platform in platforms.PLATFORMS.items()
         for account in platform.module.accounts()
     }
