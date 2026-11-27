@@ -103,6 +103,7 @@ nav = [
     { "ADR-0054: Connect GA4 with a service account of the deployment" = "adr/0054-connect-ga4-with-a-service-account-of-the-deployment.md" },
     { "ADR-0055: Read each day at the end of its window, and keep the daily loads for good" = "adr/0055-read-each-day-at-the-end-of-its-window-and-keep-the-loads.md" },
     { "ADR-0056: Count ROAS by the value of the primary conversion actions" = "adr/0056-count-roas-by-the-value-of-the-primary-actions.md" },
+    { "ADR-0057: Keep the default channel group in the key of the sessions of web analytics" = "adr/0057-keep-the-default-channel-group-in-the-key-of-the-sessions.md" },
     { "ADR-0059: Upgrade from the previous minor release only" = "adr/0059-upgrade-from-the-previous-minor-release-only.md" },
   ] },
 ]

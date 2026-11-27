@@ -886,11 +886,12 @@ models:
               has_field_values: list
   - name: web_sessions_daily
     description: >-
-      Sessions of web analytics by day, property, source, medium and campaign, a view over
-      core.web_sessions_daily. One row is one combination of source, medium and campaign of one
-      property on one day, in the time zone of the property: report_date, property_id,
-      session_source, session_medium, session_campaign_name and session_campaign_id together are its
-      key. A session whose links carried the ID of exactly one ad campaign of the core in utm_id
+      Sessions of web analytics by day, property, source, medium, campaign and default channel
+      group, a view over core.web_sessions_daily. One row is one combination of source, medium,
+      campaign and default channel group of one property on one day, in the time zone of the
+      property: report_date, property_id, session_source, session_medium, session_campaign_name,
+      session_campaign_id and session_default_channel_group together are its key, as web analytics
+      can split the sessions of one campaign of a day between two groups (ADR-0057). A session whose links carried the ID of exactly one ad campaign of the core in utm_id
       names its platform and account (ad_platform, ad_account_id). Revenue is in the currency of the
       property (currency) and in the reporting currency (reporting_currency), at the rate of the day
       of the row; add up revenue across properties with total_revenue_reporting. Its platforms are
@@ -909,7 +910,7 @@ models:
     data_tests:
       - unique_combination:
           arguments:
-            columns: [report_date, property_id, session_source, session_medium, session_campaign_name, session_campaign_id]
+            columns: [report_date, property_id, session_source, session_medium, session_campaign_name, session_campaign_id, session_default_channel_group]
           config:
             where: >-
               report_date between (select min(window_from) from core.loads

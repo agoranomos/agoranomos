@@ -23,9 +23,11 @@ models:
   - name: stg_demo_web__sessions_daily
     description: >-
       The sessions of the properties of demo_web, one row for each property, day in the time zone of
-      the property, source, medium and campaign of the sessions, with the default channel group that
-      web analytics gives them. report_date, property_id, session_source, session_medium,
-      session_campaign_name and session_campaign_id are its key. int_g1_failures checks its rows for
+      the property, source, medium, campaign and default channel group of the sessions, as GA4
+      gives them; on some days the sessions of a campaign of demo_search are split between two
+      groups. report_date, property_id, session_source, session_medium, session_campaign_name,
+      session_campaign_id and session_default_channel_group are its key (ADR-0057), and a row
+      without a group takes (not set). int_g1_failures checks its rows for
       each account, and holds an account whose rows fail out of the core and the marts (ADR-0035).
       Its tests guard the marts: when one of them fails, dbt does not rebuild the models that read
       this one.

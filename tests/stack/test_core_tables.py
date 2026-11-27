@@ -313,8 +313,9 @@ ROWS = {
     ),
     "web_sessions_daily": (
         "(account_sk, session_source, session_medium, session_campaign_name, session_campaign_id, "
-        "report_date, sessions, engaged_sessions, currency, load_sk)",
-        "(-1, 'test', 'test', 'test', 'test', {day}, 1, 1, 'USD', 1)",
+        "session_default_channel_group, report_date, sessions, engaged_sessions, currency, "
+        "load_sk)",
+        "(-1, 'test', 'test', 'test', 'test', 'test', {day}, 1, 1, 'USD', 1)",
     ),
 }
 # A month long before every window, and its day.

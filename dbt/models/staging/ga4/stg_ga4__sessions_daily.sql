@@ -1,4 +1,4 @@
--- stg_ga4__sessions_daily.sql: their sessions by day, source, medium and campaign.
+-- stg_ga4__sessions_daily.sql: their sessions by day, source, medium, campaign and channel group.
 {{ ga4_sessions_daily(newest_load(relation_or_empty(source('raw_ga4', 'report_sessions_daily'), {
     'property': 'text', 'date': 'text', 'session_source': 'text', 'session_medium': 'text',
     'session_campaign_name': 'text', 'session_campaign_id': 'text',

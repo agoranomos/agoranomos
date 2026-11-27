@@ -65,8 +65,11 @@ date_trunc('month', current_date - 92)::date
         false,
     ),
     'web_sessions_daily': (
-        ['session_source', 'session_medium', 'session_campaign_name', 'session_campaign_id'],
-        ['session_default_channel_group'],
+        [
+            'session_source', 'session_medium', 'session_campaign_name', 'session_campaign_id',
+            'session_default_channel_group',
+        ],
+        [],
         ['sessions', 'engaged_sessions', 'key_events', 'total_revenue'],
         false,
     ),

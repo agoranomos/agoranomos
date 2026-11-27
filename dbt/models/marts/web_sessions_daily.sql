@@ -1,5 +1,5 @@
--- Sessions of web analytics by day, property, source, medium and campaign, a view over the core
--- (ADR-0037): one row of core.web_sessions_daily, with the property and its client, the ad
+-- Sessions of web analytics by day, property, source, medium, campaign and default channel group,
+-- a view over the core (ADR-0037, ADR-0057): one row of core.web_sessions_daily, with the property and its client, the ad
 -- campaign whose ID the links carried in utm_id when exactly one campaign of the core has it,
 -- revenue in the currency of the property and in the reporting currency at the rate of its day,
 -- when its load ended and whether the row is final, as ad_stats_campaign_daily has it, and the

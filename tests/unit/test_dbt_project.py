@@ -178,7 +178,7 @@ MART_KEYS = {
     ),
     "web_sessions_daily": (
         "[report_date, property_id, session_source, session_medium, session_campaign_name, "
-        "session_campaign_id]"
+        "session_campaign_id, session_default_channel_group]"
     ),
     "ad_platforms": "[platform]",
     "ad_accounts": "[platform, account_id]",
@@ -1013,6 +1013,7 @@ CHECKED = {
             "session_medium",
             "session_campaign_name",
             "session_campaign_id",
+            "session_default_channel_group",
         ],
         [
             "report_date",
@@ -1021,6 +1022,7 @@ CHECKED = {
             "session_medium",
             "session_campaign_name",
             "session_campaign_id",
+            "session_default_channel_group",
             "sessions",
         ],
         ["sessions", "engaged_sessions", "key_events"],
