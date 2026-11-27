@@ -73,8 +73,8 @@ def load_nbk() -> None:
         # are in agoranomos_pipelines/nbk.py, and these retry the task, also after a new column of
         # the API waited past the lock timeout of the loader role for a run of the transform that
         # reads the table (ADR-0046). The wait doubles with each retry, from 5 to 10 minutes and
-        # then from 10 to 20, which max_retry_delay cuts to 10: Airflow 3.3.2 takes a multiplier
-        # here, and True would be 1, no backoff.
+        # then from 10 to 20, which max_retry_delay cuts to 10: Airflow 3.4.0 takes a multiplier
+        # here, and reads True as 2.0.
         "retries": 2,
         "retry_delay": timedelta(minutes=5),
         "retry_exponential_backoff": 2.0,

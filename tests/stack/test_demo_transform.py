@@ -165,7 +165,7 @@ BROKEN_TEST = "not_null_stg_demo_search__campaigns_observed_name"
 STAGING_BUILD = "dbt.stg_demo_search__campaigns_model_build"
 # The lines in which Cosmos says how it parsed the dbt project (cosmos/dbt/graph.py, Cosmos 1.16.0),
 # from the logs that the DAG processor writes for the file of the transform DAG, as JSON lines, into
-# dag_processor/<day>/<bundle>/ of the volume airflow-logs (Airflow 3.3.2); latest links to the
+# dag_processor/<day>/<bundle>/ of the volume airflow-logs (Airflow 3.4.0); latest links to the
 # newest day. The DAG processor has no secret, and only these events are printed.
 PARSES = """
 import json

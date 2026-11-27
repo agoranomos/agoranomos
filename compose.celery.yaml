@@ -146,7 +146,7 @@ services:
       # Lets the Celery worker finish its tasks when it stops (a warm shutdown).
       DUMB_INIT_SETSID: "0"
       # A worker runs the tasks, which reach Airflow through its execution API with the token that
-      # the scheduler gives each of them: the security model of Airflow 3.3.2 gives a worker neither
+      # the scheduler gives each of them: the security model of Airflow 3.4.0 gives a worker neither
       # the connection string of the metadata database nor the key that signs the tokens ("Workers
       # should not have access to the signing key"). The worker extends the scheduler of
       # compose.yaml, which has both, so !reset takes them away here, from the scheduler that it

@@ -2,11 +2,11 @@
 of sending that the DAG agoranomos_watcher shares (ADR-0045).
 
 The addresses are AGORANOMOS_ALERT_URLS of .env, one or more addresses of Apprise, such as
-tgram://<token>/<chat>, separated by spaces or commas. Only the scheduler and the service that runs
-the tasks get it (compose.yaml), and with no value nothing is sent and Apprise is not imported. The
-addresses are secrets: no line of this module names one, the log of Apprise goes through a filter
-that puts *** in place of every address and of every long part of one, and a task masks them in its
-log through Airflow (mask_addresses).
+tgram://<token>/<chat>, separated by spaces, commas or semicolons. Only the scheduler and the
+service that runs the tasks get it (compose.yaml), and with no value nothing is sent and Apprise is
+not imported. The addresses are secrets: no line of this module names one, the log of Apprise goes
+through a filter that puts *** in place of every address and of every long part of one, and a task
+masks them in its log through Airflow (mask_addresses).
 
 The listener on_dag_run_failed runs in the scheduler, which calls it when a run of any DAG ends
 failed, those of extensions/ too, also when the kernel killed the process of a task, which a
@@ -46,7 +46,7 @@ log = logging.getLogger(__name__)
 
 # The setting of .env with the addresses of Apprise.
 SETTING = "AGORANOMOS_ALERT_URLS"
-# What Airflow passes as msg to on_dag_run_failed from the scheduler, as of Airflow 3.3.2
+# What Airflow passes as msg to on_dag_run_failed from the scheduler, as of Airflow 3.4.0
 # (airflow/models/dagrun.py and airflow/jobs/scheduler_job_runner.py): the reasons that a message
 # names. Another reason shows as dag_run_failed.
 RUN_REASONS = frozenset({"task_failure", "timed_out", "all_tasks_deadlocked"})
@@ -57,10 +57,10 @@ QUEUE_SIZE = 50
 # What a message shows in place of an ID that is not plain.
 NOT_SHOWN = "(an ID that is not shown)"
 PLAIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
-# Where one address of a list ends: spaces or commas before the scheme of the next, as Apprise
-# splits a list (URL_DETECTION_RE of apprise/utils/parse.py, Apprise 1.13.1), so that a comma
-# inside an address, such as in a list of recipients, stays in it.
-SEPARATOR = re.compile(r"[\s,]+(?=[A-Za-z][A-Za-z0-9+.-]{0,31}://)")
+# Where one address of a list ends: spaces, commas or semicolons before the scheme of the next, as
+# Apprise splits a list (URL_DETECTION_RE of apprise/utils/parse.py, Apprise 2.1.0), so that a
+# comma inside an address, such as in a list of recipients, stays in it.
+SEPARATOR = re.compile(r"[\s,;]+(?=[A-Za-z][A-Za-z0-9+.-]{0,31}://)")
 # The parts of an address between its delimiters that the filter of the log of Apprise also hides:
 # tokens, chat IDs, hosts and paths of four characters or more, as Apprise names a chat or a host
 # in a line that says that a send failed.
@@ -98,7 +98,7 @@ def addresses(value: str) -> list[str]:
     """The addresses of a value of the setting, one by one."""
     found = []
     for part in SEPARATOR.split(value.strip()):
-        address = part.strip(" \t\r\n,")
+        address = part.strip(" \t\r\n,;")
         if address:
             found.append(address)
     return found

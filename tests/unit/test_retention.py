@@ -22,8 +22,9 @@ COMPOSE = REPO_ROOT / "compose.yaml"
 DAG_FILE = REPO_ROOT / "airflow" / "dags" / "agoranomos_maintenance.py"
 MAINTENANCE = REPO_ROOT / "airflow" / "dags" / "agoranomos_pipelines" / "maintenance.py"
 
-# The tables that R4 (#190) checked with airflow db clean on Airflow 3.3.2: every table that the
-# command takes but dag.
+# The tables that R4 (#190) checked with airflow db clean, as Airflow 3.4.0 names them: every table
+# that the command takes but dag. Airflow 3.4.0 keeps the earlier tries of a task in task_instance,
+# where 3.3.2 had task_instance_history, and the XComs in xcom_v2, with those of 3.3.2 in xcom_v1.
 CLEANED = {
     "asset_event",
     "callback",
@@ -38,15 +39,12 @@ CLEANED = {
     "revoked_token",
     "session",
     "task_instance",
-    "task_instance_history",
     "task_reschedule",
     "task_state_store",
     "trigger",
-    "xcom",
+    "xcom_v1",
+    "xcom_v2",
 }
-# The tables that Airflow 3.3.2 filters by a column dag_id that they lack, and those with rows of no
-# DAG: a call with --exclude-dag-ids leaves them as they are.
-UNFILTERED = {"asset_event", "deadline", "job", "log", "task_reschedule"}
 
 # Stands in for airflow.__main__: main() writes each command line to FAKE_RECORD, one JSON list a
 # line, and makes a db clean fail as FAKE_FAIL says: integrity raises an error of its own class
@@ -162,7 +160,7 @@ def option(call: list[str], name: str) -> str:
     return call[call.index(name) + 1]
 
 
-def test_airflow_init_cleans_its_database_last_in_two_calls(tmp_path):
+def test_airflow_init_cleans_its_database_last_in_one_call(tmp_path):
     result, calls = run_init(tmp_path)
     assert result.returncode == 0, result.stderr
     assert result.stderr == ""
@@ -177,27 +175,20 @@ def test_airflow_init_cleans_its_database_last_in_two_calls(tmp_path):
         ["pools", "set"],
         ["pools", "set"],
         ["db", "clean"],
-        ["db", "clean"],
     ]
-    first, second = calls[-2:]
-    tables = [set(option(call, "--tables").split(",")) for call in (first, second)]
-    # Every table that R4 checked, each in one call, and never dag, which a stop of more than 90
-    # days would empty before the DAG processor runs, with the pauses of the DAGs.
-    assert tables[0] | tables[1] == CLEANED
-    assert not tables[0] & tables[1]
-    assert "dag" not in tables[0] | tables[1]
-    # The first call keeps the manual run of the demo history; the second takes the tables that
-    # such a filter misses.
-    assert option(first, "--exclude-dag-ids") == "agoranomos_demo_history"
-    assert "--exclude-dag-ids" not in second
-    assert tables[1] == UNFILTERED
-    for call in (first, second):
-        assert call[-2:] == ["--skip-archive", "--yes"]
-        # A failure of a table warns and does not stop the job.
-        assert "--error-on-cleanup-failure" not in call
-        assert "--dag-ids" not in call
-        limit = datetime.fromisoformat(option(call, "--clean-before-timestamp"))
-        assert abs(limit - (datetime.now(UTC) - timedelta(days=90))) < timedelta(minutes=1)
+    call = calls[-1]
+    # Every table that R4 checked, and never dag, which a stop of more than 90 days would empty
+    # before the DAG processor runs, with the pauses of the DAGs.
+    assert set(option(call, "--tables").split(",")) == CLEANED
+    # The call keeps the manual run of the demo history; Airflow 3.4.0 applies the filter to the
+    # tables that reach their DAG through another, and keeps the rows of no DAG in the cleanup.
+    assert option(call, "--exclude-dag-ids") == "agoranomos_demo_history"
+    assert call[-2:] == ["--skip-archive", "--yes"]
+    # A failure of a table warns and does not stop the job.
+    assert "--error-on-cleanup-failure" not in call
+    assert "--dag-ids" not in call
+    limit = datetime.fromisoformat(option(call, "--clean-before-timestamp"))
+    assert abs(limit - (datetime.now(UTC) - timedelta(days=90))) < timedelta(minutes=1)
 
 
 @pytest.mark.parametrize(
@@ -215,17 +206,14 @@ def test_a_failed_cleanup_warns_in_one_line_and_the_job_succeeds(tmp_path, fail,
     # such as one of integrity, would end the job and stop ./agoranomos up.
     result, calls = run_init(tmp_path, fail)
     assert result.returncode == 0, result.stderr
-    # Both calls ran, and each says in one line that its tables keep their rows, without the rest
-    # of the error.
-    assert [call[:2] for call in calls[-2:]] == [["db", "clean"], ["db", "clean"]]
-    lines = result.stderr.splitlines()
-    assert len(lines) == 2, lines
-    for line, call in zip(lines, calls[-2:], strict=True):
-        tables = option(call, "--tables")
-        assert line == (
-            f"airflow-init: the database of Airflow keeps its old rows of {tables} until the next"
-            f" start: the cleanup failed with {error}"
-        ), line
+    # The call ran, and says in one line that its tables keep their rows, without the rest of the
+    # error.
+    assert calls[-1][:2] == ["db", "clean"]
+    tables = option(calls[-1], "--tables")
+    assert result.stderr.splitlines() == [
+        f"airflow-init: the database of Airflow keeps its old rows of {tables} until the next"
+        f" start: the cleanup failed with {error}"
+    ]
 
 
 def test_metabase_keeps_the_log_of_its_queries_90_days():

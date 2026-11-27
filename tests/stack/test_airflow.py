@@ -80,7 +80,7 @@ def test_every_component_is_healthy(airflow_url):
 
 
 def test_the_api_needs_a_token(airflow_url):
-    # Airflow 3.3.2 answers a request without a token with 401 and {"detail": "Not authenticated"}.
+    # Airflow 3.4.0 answers a request without a token with 401 and {"detail": "Not authenticated"}.
     status, body = http_json("GET", f"{airflow_url}/api/v2/dags")
     assert status == 401, body
 
@@ -109,9 +109,9 @@ def airflow_init_again(airflow_url, token):
         # run, and a larger pool lets the scheduler start more processes of dbt than the memory of
         # the container of the tasks holds until airflow-init puts the size back. With 5 slots, a
         # pull request (#315, 13 November 2026) had four at once, and the kernel stopped two. A pool
-        # of 0 slots, which Airflow 3.3.2 accepts, only holds its tasks back.
+        # of 0 slots, which Airflow 3.4.0 accepts, only holds its tasks back.
         slots = POOLS[name] - 1
-        # Airflow 3.3.2 answers 422 to a body without the name and include_deferred, as the UI
+        # Airflow 3.4.0 answers 422 to a body without the name and include_deferred, as the UI
         # sends.
         edit = {"pool": name, "slots": slots, "include_deferred": pool["include_deferred"]}
         path = f"/api/v2/pools/{name}?update_mask=slots"
@@ -186,7 +186,9 @@ def test_tasks_run_where_the_executor_puts_them(airflow_url, token, selfcheck_ru
     # The LocalExecutor runs a task as a process of the scheduler, and the CeleryExecutor on a
     # worker: the task instance records the host that ran it, and a container's host name is its ID.
     service = "airflow-worker" if active_variant() == "celery" else "airflow-scheduler"
-    host = compose("exec", "-T", service, "hostname").stdout.strip()
+    # The image of Airflow 3.4.0, on the Docker Hardened Images, has no hostname command.
+    hostname = "import socket; print(socket.gethostname())"
+    host = compose("exec", "-T", service, "python", "-c", hostname).stdout.strip()
     assert [i["hostname"] for i in task_instances(airflow_url, token, selfcheck_run)] == [host]
 
 

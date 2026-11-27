@@ -125,9 +125,9 @@ def load_google_ads() -> str | None:
         # Retries are explicit, as the contract of the sources asks (ADR-0004): those of a request
         # are in agoranomos_pipelines/google_ads.py, and these retry the task, also after a new
         # column of the API waited past the lock timeout of the loader role for a run of the
-        # transform that reads the table (ADR-0046). The wait doubles with each retry, from 10 to
-        # 20 minutes and then from 20 to 40, which max_retry_delay cuts to 20: Airflow 3.3.2 takes
-        # a multiplier here, and True would be 1, no backoff.
+        # transform that reads the table (ADR-0046). The wait doubles with each retry, from 10 to 20
+        # minutes and then from 20 to 40, which max_retry_delay cuts to 20: Airflow 3.4.0 takes a
+        # multiplier here, and reads True as 2.0.
         "retries": 2,
         "retry_delay": timedelta(minutes=10),
         "retry_exponential_backoff": 2.0,

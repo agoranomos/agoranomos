@@ -147,6 +147,11 @@ def test_the_addresses_split_where_the_next_scheme_starts(plugin):
     ]
 
 
+def test_a_semicolon_splits_the_addresses_as_in_apprise_2(plugin):
+    # Apprise 2.1.0 also takes a semicolon between two addresses (URL_DETECTION_RE).
+    assert plugin.addresses(f"{JSON};{TELEGRAM} ; {SLACK};") == [JSON, TELEGRAM, SLACK]
+
+
 def test_the_secret_parts_hold_each_address_and_its_long_parts(plugin):
     parts = plugin.secret_parts(f"{TELEGRAM} {SLACK}")
     assert parts[0] == f"{TELEGRAM} {SLACK}"

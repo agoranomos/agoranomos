@@ -45,7 +45,7 @@ WAREHOUSE_CREDENTIALS = ("WAREHOUSE_LOADER_PASSWORD", "DBT_ENV_SECRET_WAREHOUSE_
 TASK_RUNNER = {"local": "airflow-scheduler", "celery": "airflow-worker"}
 # What the Celery worker does not get of the settings that it would take from the scheduler: the
 # connection string of the metadata database and the key that signs the tokens of Airflow. The
-# security model of Airflow 3.3.2 keeps both from workers: a task reaches Airflow through the
+# security model of Airflow 3.4.0 keeps both from workers: a task reaches Airflow through the
 # execution API, with the token that the scheduler gives it.
 KEPT_FROM_THE_WORKER = ("AIRFLOW__API_AUTH__JWT_SECRET", "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN")
 
@@ -1290,7 +1290,7 @@ JOB_CHECKS = {"airflow-dag-processor": "DagProcessorJob", "airflow-triggerer": "
 
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_the_dag_processor_and_the_triggerer_check_their_jobs_without_airflow(variant):
-    # Airflow 3.3.2 has a health server for the scheduler only, and airflow jobs check imports
+    # Airflow 3.4.0 has a health server for the scheduler only, and airflow jobs check imports
     # Airflow at every check: so both run the same short Python of compose.yaml, which reads the job
     # table (tests/unit/test_airflow_job_check.py), each with the type of its own job. Five
     # failures 30 seconds apart make a service unhealthy. The check holds no secret: it reads the

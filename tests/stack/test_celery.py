@@ -105,7 +105,7 @@ def test_the_check_of_the_worker_starts_no_airflow():
 
 def test_the_worker_holds_neither_the_metadata_database_nor_the_signing_key():
     # The names of the variables in the running worker, never their values: the security model of
-    # Airflow 3.3.2 keeps both from workers, and compose.celery.yaml takes them away.
+    # Airflow 3.4.0 keeps both from workers, and compose.celery.yaml takes them away.
     names = compose("exec", "-T", "airflow-worker", "sh", "-c", "env | cut -d= -f1").stdout.split()
     assert "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN" not in names
     assert "AIRFLOW__API_AUTH__JWT_SECRET" not in names

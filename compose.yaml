@@ -64,6 +64,12 @@ x-airflow: &airflow
     AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY:?run ./agoranomos init}
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?run ./agoranomos init}
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    # A DAG that runs on assets takes the events that came while its run was queued or running in
+    # one run once that run ends, as before Airflow 3.4.0, which makes one run for each event of a
+    # single asset or of an OR of assets by default: the history of a source plans once after the
+    # runs of the transform that ended meanwhile, and not once for each of them. The DAG processor
+    # reads it when it parses a DAG.
+    AIRFLOW__SCHEDULER__BATCH_ASSET_EVENTS: "true"
     # New DAG files appear within a minute (the default is 300 seconds).
     AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "60"
     # A DAG file that has not changed is parsed again every five minutes (the default is 30 seconds):
@@ -117,7 +123,7 @@ x-airflow: &airflow
       condition: service_completed_successfully
 
 # The health check of the DAG processor and of the triggerer, which have no health server in Airflow
-# 3.3.2: it passes while the job of the type that it gets as its argument runs in this container and
+# 3.4.0: it passes while the job of the type that it gets as its argument runs in this container and
 # has sent a heartbeat in the last 30 seconds, as airflow jobs check would say. Each job sends one
 # every 5 seconds, and Airflow records the host name of the container with it. The check reads the
 # job table of the metadata database with psycopg2 and does not import Airflow, which airflow jobs
@@ -421,50 +427,45 @@ services:
         # in: this job runs before the DAG processor, so after a stop of more than 90 days every row
         # of dag would look old here, and the DAGs would come back paused. The only run of the demo
         # history is manual, which db clean does not keep, and demo-init would run the pipeline
-        # again without it: so the first call leaves out the rows of that DAG. The second takes the
-        # tables that a filter by DAG misses in Airflow 3.3.2: it filters asset_event, deadline and
-        # task_reschedule by a column dag_id that they lack, and fails on them, and log and job hold
-        # rows without a DAG, which NOT IN never selects. dag_run brings deadline into the first
-        # call, which therefore warns that it did not clean deadline, and the second cleans it. A
-        # table that a later Airflow adds is not cleaned until it is listed here: compare the lists
-        # with airflow db clean --help at an upgrade of Airflow. A failure leaves the rows to the next
-        # start and does not stop this one: db clean itself warns and goes on when a table fails with
-        # an operational or a programming error of the database, and any other error, such as one of
+        # again without it: so the call leaves out the rows of that DAG. It still cleans the rows
+        # of no DAG, such as those of log and job, and the tables that reach their DAG through
+        # another, such as deadline and task_reschedule (Airflow 3.4.0). task_instance holds the
+        # earlier tries of a task too, and xcom_v1 the XComs from before Airflow 3.4.0. A table that
+        # a later Airflow adds is not cleaned until it is listed here: compare the list with airflow
+        # db clean --help at an upgrade of Airflow. A failure leaves the rows to the next start and
+        # does not stop this one: db clean itself warns and goes on when a table fails with an
+        # operational or a programming error of the database, and any other error, such as one of
         # integrity, ends in the except below with one line, and the job succeeds.
         import pendulum
 
         before = pendulum.now("UTC").subtract(days=90).to_iso8601_string()
-        cleanups = [
-            (
-                "callback,connection_test_request,dag_run,dag_version,import_error,"
-                "partitioned_asset_key_log,revoked_token,session,task_instance,task_instance_history,"
-                "task_state_store,trigger,xcom",
-                ["--exclude-dag-ids", "agoranomos_demo_history"],
-            ),
-            ("asset_event,deadline,job,log,task_reschedule", []),
+        tables = (
+            "asset_event,callback,connection_test_request,dag_run,dag_version,deadline,import_error,"
+            "job,log,partitioned_asset_key_log,revoked_token,session,task_instance,task_reschedule,"
+            "task_state_store,trigger,xcom_v1,xcom_v2"
+        )
+        sys.argv = [
+            "airflow",
+            "db",
+            "clean",
+            "--clean-before-timestamp",
+            before,
+            "--tables",
+            tables,
+            "--exclude-dag-ids",
+            "agoranomos_demo_history",
+            "--skip-archive",
+            "--yes",
         ]
-        for tables, options in cleanups:
-            sys.argv = [
-                "airflow",
-                "db",
-                "clean",
-                "--clean-before-timestamp",
-                before,
-                "--tables",
-                tables,
-                *options,
-                "--skip-archive",
-                "--yes",
-            ]
-            try:
-                main()
-            except (Exception, SystemExit) as error:
-                reason = (str(error).splitlines() or [""])[0]
-                print(
-                    f"airflow-init: the database of Airflow keeps its old rows of {tables} until the"
-                    f" next start: the cleanup failed with {type(error).__name__}: {reason}",
-                    file=sys.stderr,
-                )
+        try:
+            main()
+        except (Exception, SystemExit) as error:
+            reason = (str(error).splitlines() or [""])[0]
+            print(
+                f"airflow-init: the database of Airflow keeps its old rows of {tables} until the"
+                f" next start: the cleanup failed with {type(error).__name__}: {reason}",
+                file=sys.stderr,
+            )
     environment:
       <<: *airflow-environment
       _AIRFLOW_DB_MIGRATE: "true"

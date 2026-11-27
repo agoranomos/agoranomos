@@ -11,7 +11,7 @@ the task first. The child processes of the task, such as dbt, inherit the value.
 process raise its own value without any privilege.
 
 One thing stands in the way: Airflow marks the process of a task non-dumpable (prctl with
-PR_SET_DUMPABLE, in airflow/sdk/execution_time/supervisor.py as of Airflow 3.3.2), so that task code
+PR_SET_DUMPABLE, in airflow/sdk/execution_time/supervisor.py as of Airflow 3.4.0), so that task code
 cannot read the memory of the other processes of its user. For such a process the kernel gives the
 files of /proc/self to root, and the write fails with "Permission denied". So the plugin makes the
 process dumpable for the write alone, and non-dumpable again right after it, before any code of a
@@ -36,7 +36,7 @@ health check at 700, whose loss leaves the container unhealthy until the schedul
 the tasks go on. The scheduler forks each of them once, so they cover the first two such rounds in
 its life. The LocalExecutor workers keep 0, like the scheduler: an idle worker blocks in the get of
 a multiprocessing.SimpleQueue, which holds the read lock of the queue while it waits (as of
-Airflow 3.3.2 and Python 3.13), and if the kernel stops the worker that holds it, the other workers
+Airflow 3.4.0 and Python 3.13), and if the kernel stops the worker that holds it, the other workers
 wait for that lock for ever, and no task runs until the scheduler restarts.
 
 The plugin learns what a child of the scheduler runs from multiprocessing
@@ -77,13 +77,13 @@ PR_SET_DUMPABLE = 4
 # The restriction of ptrace by Yama: the file exists only in a kernel that has Yama, and reads 0
 # (no restriction), 1, 2 or 3.
 YAMA_PTRACE_SCOPE = Path("/proc/sys/kernel/yama/ptrace_scope")
-# What the task runner passes to on_starting, as of Airflow 3.3.2; the scheduler, the triggerer and
+# What the task runner passes to on_starting, as of Airflow 3.4.0; the scheduler, the triggerer and
 # the DAG processor pass their jobs instead. The class is matched by its module and name, so that
 # the services that run no task do not import the task runner.
 TASK_RUNNER = ("airflow.sdk.execution_time.task_runner", "TaskRunnerMarker")
 # What the scheduler passes to on_starting: its job, from Job.__init__, before it forks serve-logs,
 # its health check and the LocalExecutor workers (airflow/jobs/job.py and
-# airflow/cli/commands/scheduler_command.py, as of Airflow 3.3.2). The triggerer and the DAG
+# airflow/cli/commands/scheduler_command.py, as of Airflow 3.4.0). The triggerer and the DAG
 # processor pass a job too, so the command line tells the scheduler apart.
 JOB = ("airflow.jobs.job", "Job")
 SCHEDULER_COMMAND = "scheduler"

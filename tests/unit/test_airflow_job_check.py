@@ -132,7 +132,7 @@ def test_the_check_passes_while_the_job_of_this_container_sends_heartbeats(tmp_p
     assert "FROM job WHERE job_type = %s AND hostname = %s" in query
     assert "state = 'running'" in query
     # [dag_processor] health_check_threshold and [triggerer] triggerer_health_check_threshold:
-    # 30 seconds by default in Airflow 3.3.2.
+    # 30 seconds by default in Airflow 3.4.0.
     assert "latest_heartbeat > now() - interval '30 seconds'" in query
     assert record["closed"] is True
 

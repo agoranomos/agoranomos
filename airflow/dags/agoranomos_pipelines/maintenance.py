@@ -49,7 +49,7 @@ log = logging.getLogger(__name__)
 # Where compose.yaml mounts the volume of the logs of Airflow, airflow-logs, in every Airflow
 # container: the logs of the tasks, dag_id=<dag>/run_id=<run>/task_id=<task>/attempt=<n>.log, and
 # those of the DAG processor, dag_processor/<day>/<bundle>/<file>.log, with the link
-# dag_processor/latest to the folder of the day (Airflow 3.3.2).
+# dag_processor/latest to the folder of the day (Airflow 3.4.0).
 LOGS = "/opt/airflow/logs"
 LOG_RETENTION_DAYS = 30
 # The folders that the deletion of their files leaves empty go once they have been empty for a day,

@@ -17,7 +17,7 @@ RAW_DEMO_PLATFORMS = {code: Asset(asset_uri(platform)) for code, platform in PLA
 # The five platforms of the demo as one condition: each has loaded since the last run of the
 # transform. The history and the daily load take them one after another, in one run of their DAG,
 # so one load of the demo starts one run of the transform, after its last platform. As five
-# conditions of their own, Airflow 3.3.2 would start a run after the first platform, keep the
+# conditions of their own, Airflow 3.4.0 would start a run after the first platform, keep the
 # events of the other four while it runs, as the DAG allows one run at a time, and start one more
 # run for them when it ends: two runs for one load, the first reading tables whose days the loads
 # still replace, which nothing prevents until the pinning of ADR-0038. The pinning is what lets
