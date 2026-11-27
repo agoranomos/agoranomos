@@ -47,6 +47,13 @@ repos:
     hooks:
       - id: shellcheck
 
+  # hadolint for the Dockerfiles of the images that the stack builds (airflow/, ai/ and caddy/). The
+  # package installs the binary of a release of hadolint and checks its SHA-256, so no Docker runs.
+  - repo: https://github.com/AleksaC/hadolint-py
+    rev: v2.15.1
+    hooks:
+      - id: hadolint
+
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1
     hooks:

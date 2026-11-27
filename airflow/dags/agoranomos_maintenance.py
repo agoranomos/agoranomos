@@ -10,7 +10,9 @@ The retention of ADR-0044:
   in the schema ops, as the transformer role. The Ops collection reads the last 30 days.
 - clean_dlt_loads deletes, as the loader role, the rows of _dlt_loads of each raw schema older than
   90 days, and those of the loads of the kind intraday older than 14 days, but those that the next
-  load, dlt or the next pin still reads.
+  load, dlt or the next pin still reads, and then the rows of the journal of the loads,
+  _agoranomos_loads, whose load _dlt_loads no longer holds, and those of a load that did not end
+  after a day.
 - clean_core_loads deletes, as transformer, the accepted rows of the kind intraday of core.loads
   older than 14 days that no fact reads (ADR-0051), but those that a run or a load still reads,
   and none whose row _dlt_loads still holds; a row of the kind window or history stays, as the

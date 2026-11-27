@@ -15,7 +15,8 @@ sources:
           in it, which the task of the pin of each run of the transform copies from the journal
           _agoranomos_loads of the source once the load is whole, before the tasks of dbt, with
           its window, or its error for a failed account, and the status pinned until the core
-          accepts it. stg_loads__newest_days reads the loads of each run from it.
+          accepts it. stg_loads__newest_days and stg_loads__newest_lists read the loads of each run
+          from it.
       - name: dim_account
         description: >-
           The registry of the accounts of the core, which the model dim_account writes, as the runs

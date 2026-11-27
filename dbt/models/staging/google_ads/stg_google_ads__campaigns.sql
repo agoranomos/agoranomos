@@ -3,4 +3,4 @@
     'customer__id': 'text', 'campaign__resource_name': 'text', 'campaign__id': 'text',
     'campaign__name': 'text', 'campaign__status': 'text',
     'campaign__advertising_channel_type': 'text', '_dlt_load_id': 'text',
-}), 'raw_google_ads', source('core', 'loads')), 'google_ads') }}
+}), 'raw_google_ads', ref('stg_loads__newest_lists')), 'google_ads') }}

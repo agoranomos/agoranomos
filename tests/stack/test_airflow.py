@@ -437,6 +437,32 @@ def test_the_loads_of_the_real_sources_stay_paused(airflow_url, token, dag_id):
     assert body["is_paused"] is True
 
 
+@pytest.mark.parametrize(
+    ("dag_id", "load"),
+    [
+        (GOOGLE_ADS_DAILY, "load_google_ads"),
+        (GOOGLE_ADS_INTRADAY, "load_google_ads_intraday"),
+        (META_ADS_DAILY, "load_meta_ads"),
+        (TIKTOK_ADS_DAILY, "load_tiktok_ads"),
+        (GA4_DAILY, "load_ga4"),
+    ],
+)
+def test_a_load_of_accounts_ends_with_the_check_of_its_accounts(airflow_url, token, dag_id, load):
+    # The task of a load that took some accounts succeeds, so that its asset starts the transform
+    # for them, and check_accounts fails the run with the line of the others. Airflow gives a run
+    # the state of its leaves, so the check is the one leaf, and none_failed marks it
+    # upstream_failed after a load that failed, which fails the run too
+    # (airflow/dags/agoranomos_pipelines/outcome.py).
+    wait_for_dag(airflow_url, token, dag_id)
+    status, body = api(airflow_url, token, "GET", f"/api/v2/dags/{dag_id}/tasks")
+    assert status == 200, body
+    tasks = {task["task_id"]: task for task in body["tasks"]}
+    leaves = sorted(task_id for task_id, task in tasks.items() if not task["downstream_task_ids"])
+    assert leaves == ["check_accounts"], leaves
+    assert tasks[load]["downstream_task_ids"] == ["check_accounts"]
+    assert tasks["check_accounts"]["trigger_rule"] == "none_failed"
+
+
 @pytest.mark.parametrize("service", sorted(JOB_CHECKS))
 def test_the_check_of_a_job_passes_for_the_job_of_its_own_container_only(service):
     # The health check of compose.yaml, run in the container as Docker runs it: it passes for the

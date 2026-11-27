@@ -527,6 +527,11 @@ def test_a_load_of_tiktok_reaches_the_core_and_the_marts(env, airflow_url, token
             "SELECT count(DISTINCT account_id) || '|' || count(*) || '|' || sum(impressions) "  # noqa: S608 (IDs of the test)
             "|| '|' || sum(clicks) || '|' || sum(spend) || '|' || sum(conversions) "
             "|| '|' || sum(conversions_primary) || '|' || min(currency) "
+            "|| '|' || sum(conversion_value_primary) || '|' || count(conversion_value) "
+            "|| '|' || round(sum(conversion_value_primary_reporting) "
+            "/ nullif(sum(spend_reporting), 0), 6) "
+            "|| '|' || coalesce((sum(conversion_value_reporting) "
+            "/ nullif(sum(spend_reporting), 0))::text, 'none') "
             "FROM marts.ad_stats_campaign_daily WHERE platform = 'tiktok_ads' "
             f"AND account_id = '{HEALTHY}'",
             "metabase_reader",
@@ -539,6 +544,13 @@ def test_a_load_of_tiktok_reaches_the_core_and_the_marts(env, airflow_url, token
             Decimal(payments * days),
         ], shown
         assert shown[7] == "USD", shown
+        # The value of the primary actions, the complete payments: Primary ROAS has a value on
+        # TikTok, and ROAS, whose metric conversion has no value, none (ADR-0056). The advertiser
+        # is in USD, the reporting currency of the stack.
+        paid = sum(Decimal(d[5]) for d in DAY.values())
+        assert [Decimal(shown[8]), shown[9]] == [paid * days, "0"], shown
+        assert abs(Decimal(shown[10]) - paid / spend) <= Decimal("0.000001"), shown
+        assert shown[11] == "none", shown
         actions = rows(
             env,
             "SELECT conversion_action_id || '|' || conversion_category || '|' || is_primary "  # noqa: S608 (IDs of the test)

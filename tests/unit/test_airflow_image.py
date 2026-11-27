@@ -52,6 +52,9 @@ def dockerfile() -> str:
     return (AIRFLOW / "Dockerfile").read_text(encoding="utf-8")
 
 
+# The command that makes the folder of the plugins, as root, before they are copied into it.
+PLUGINS_FOLDER = "install -d -m 0755 /opt/agoranomos/plugins"
+
 # A backslash at the end of a line, maybe followed by blanks: the instruction goes on in the next.
 CONTINUATION = re.compile(r"\\[ \t]*$")
 
@@ -266,11 +269,12 @@ def test_the_image_gives_the_folder_of_the_export_to_nobody_and_keeps_its_user()
     folders = (
         "install -d -o 65534 -g 65534 -m 0755 /opt/agoranomos/metadata /opt/agoranomos/manifest"
     )
-    assert ("RUN", folders) in found
     root = found.index(("USER", "root"))
-    assert found[root + 1] == ("RUN", folders)
-    # The next instruction makes the folder of the plugins, as root (below).
-    assert found[root + 3] == ("USER", "${AIRFLOW_UID}")
+    keyword, commands = found[root + 1]
+    assert keyword == "RUN"
+    # The same instruction makes the folder of the plugins, as root (below).
+    assert [command.strip() for command in commands.split("&&")] == [folders, PLUGINS_FOLDER]
+    assert found[root + 2] == ("USER", "${AIRFLOW_UID}")
 
 
 def test_the_image_installs_the_plugins_where_only_root_may_write_them():
@@ -285,12 +289,15 @@ def test_the_image_installs_the_plugins_where_only_root_may_write_them():
     # COPY --chmod gives a folder that it has to create the mode of the file, 0644, and nobody could
     # enter /opt/agoranomos, where the DAGs and the dbt project are mounted: so root makes the
     # folder, with the mode 0755, before the plugins are copied into it.
-    folder = ("RUN", "install -d -m 0755 /opt/agoranomos/plugins")
-    assert folder in found
+    [folder] = [
+        number
+        for number, (keyword, arguments) in enumerate(found)
+        if keyword == "RUN" and PLUGINS_FOLDER in [part.strip() for part in arguments.split("&&")]
+    ]
     for name in plugins:
         copy = ("COPY", f"--chmod=0644 plugins/{name} /opt/agoranomos/plugins/{name}")
         assert copy in found
-        assert found.index(folder) < found.index(copy)
+        assert folder < found.index(copy)
     assert environment(dockerfile())["AIRFLOW__CORE__PLUGINS_FOLDER"] == "/opt/agoranomos/plugins"
 
 

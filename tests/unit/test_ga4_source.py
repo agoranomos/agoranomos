@@ -626,6 +626,8 @@ def test_a_failed_property_has_no_flag_and_the_others_load(ga4, caplog):
         "1 of 2 GA4 properties failed, the other 1 is loaded: GA4 property 111111111: 403 "
     )
     assert "PERMISSION_DENIED" in str(raised.value)
+    # One property loaded: the task of the DAG succeeds with the line (outcome.py).
+    assert raised.value.loaded == 1
     rows, _ = last_run(made)
     failed, loaded = rows["_agoranomos_loads"]
     assert (failed["account_id"], failed["status"], failed["window_from"]) == (
@@ -642,6 +644,23 @@ def test_a_failed_property_has_no_flag_and_the_others_load(ga4, caplog):
         "https://analyticsadmin.googleapis.com/v1beta/properties/111111111"
     ]
     assert made["waits"] == []
+
+
+def test_a_load_whose_every_property_failed_writes_the_journal_alone(ga4):
+    module, state, made, extensions = ga4
+    for property_id in ("111111111", "222222222"):
+        state["statuses"][(property_id, "get")] = [
+            (403, error_body(403, "PERMISSION_DENIED", "User does not have permission."))
+        ]
+    with pytest.raises(
+        module.PropertiesFailed, match="2 of 2 GA4 properties failed, none"
+    ) as raised:
+        module.load(NOW, extensions)
+    # None loaded: the task of the DAG fails with the line (outcome.py).
+    assert raised.value.loaded == 0
+    rows, _ = last_run(made)
+    assert list(rows) == ["_agoranomos_loads"]
+    assert [row["status"] for row in rows["_agoranomos_loads"]] == ["failed", "failed"]
 
 
 def test_a_server_error_is_asked_again_twice_and_the_fourth_fails_the_property(ga4):

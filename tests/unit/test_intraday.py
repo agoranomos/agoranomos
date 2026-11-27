@@ -4,8 +4,8 @@ keep an hour from the daily backup (ADR-0020), and its days
 run it (airflow/dags/agoranomos_google_ads_intraday.py, agoranomos_demo_intraday.py).
 
 Airflow is not in the development environment, so the DAG file is imported with stand-ins of the
-parts of airflow.sdk that it and the module of the assets use: the decorators keep the function of
-each task, so that a test calls it with a context of its own."""
+parts of airflow.sdk that it and the modules of the package use (airflow_stand_in.py): the
+decorators keep the function of each task, so that a test calls it with a context of its own."""
 
 import importlib
 import itertools
@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 from agoranomos_pipelines import intraday
+from airflow_stand_in import WITH_AIRFLOW, forget, import_dag
 
 ROOT = Path(__file__).resolve().parents[2]
 NOW = datetime(2026, 10, 29, 12, 27, tzinfo=UTC)
@@ -238,80 +239,6 @@ def test_the_minute_keeps_away_from_the_daily_loads_and_the_watcher():
     assert intraday.MINUTE not in taken | {4, 19, 34, 49}
 
 
-class Node:
-    """A task in the stand-in of a DAG, which >> chains."""
-
-    def __rshift__(self, other):
-        return other
-
-
-class StandInTask:
-    """A task of the stand-in of airflow.sdk: the decorated function, with its arguments."""
-
-    def __init__(self, function, kind, arguments):
-        self.function, self.kind, self.arguments = function, kind, arguments
-
-    def __call__(self):
-        return Node()
-
-
-def stand_in_sdk(made: dict, context: dict) -> dict[str, types.ModuleType]:
-    """The parts of airflow.sdk that the DAG file and the module of the assets import."""
-    sdk = types.ModuleType("airflow.sdk")
-
-    class Asset:
-        def __init__(self, uri):
-            self.uri = uri
-
-    sdk.Asset = Asset
-    sdk.AssetAll = sdk.AssetAny = lambda *assets: assets
-
-    def task(**arguments):
-        return lambda function: made["tasks"].setdefault(
-            arguments["task_id"], StandInTask(function, "task", arguments)
-        )
-
-    def short_circuit(**arguments):
-        return lambda function: made["tasks"].setdefault(
-            arguments["task_id"], StandInTask(function, "short_circuit", arguments)
-        )
-
-    task.short_circuit = short_circuit
-    sdk.task = task
-
-    def dag(**arguments):
-        def decorate(function):
-            def build():
-                made["dag"] = arguments
-                function()
-
-            return build
-
-        return decorate
-
-    sdk.dag = dag
-    sdk.CronTriggerTimetable = lambda cron, timezone: ("cron", cron, timezone)
-    sdk.get_current_context = lambda: context
-    exceptions = types.ModuleType("airflow.sdk.exceptions")
-
-    class AirflowFailException(Exception):
-        pass
-
-    class AirflowSkipException(Exception):
-        pass
-
-    exceptions.AirflowFailException = AirflowFailException
-    exceptions.AirflowSkipException = AirflowSkipException
-    log = types.ModuleType("airflow.sdk.log")
-    log.mask_secret = made["masked"].append
-    return {
-        "airflow": types.ModuleType("airflow"),
-        "airflow.sdk": sdk,
-        "airflow.sdk.exceptions": exceptions,
-        "airflow.sdk.log": log,
-    }
-
-
 @pytest.fixture
 def dag_file(monkeypatch):
     """A function that imports a DAG file of the short cycle, that of Google Ads unless dag_name
@@ -321,7 +248,7 @@ def dag_file(monkeypatch):
     names = (
         "agoranomos_google_ads_intraday",
         "agoranomos_demo_intraday",
-        "agoranomos_pipelines.assets",
+        *WITH_AIRFLOW,
     )
 
     def imported(hours: str | None, dag_name: str = "agoranomos_google_ads_intraday"):
@@ -335,15 +262,12 @@ def dag_file(monkeypatch):
             ),
         }
         made["active"], made["context"], made["asked"] = 0, context, []
-        for name, module in stand_in_sdk(made, context).items():
-            monkeypatch.setitem(sys.modules, name, module)
         if hours is None:
             monkeypatch.delenv(intraday.SETTING, raising=False)
         else:
             monkeypatch.setenv(intraday.SETTING, hours)
-        for name in names:
-            sys.modules.pop(name, None)
-        return importlib.import_module(dag_name), made
+        forget(monkeypatch, names)
+        return import_dag(monkeypatch, dag_name, made, context), made
 
     yield imported
     for name in names:
@@ -431,6 +355,20 @@ def test_the_load_runs_in_the_pool_of_google_ads_and_updates_an_asset_of_its_own
     assert "pool" not in made["tasks"]["due"].arguments
 
 
+def test_the_last_task_checks_the_accounts_after_the_load_and_passes_after_a_skip(dag_file):
+    # A run that due skips skips both tasks after it, and a load that skips leaves the check to run
+    # and pass: none_failed, unlike all_success, does not skip after a skip, and fails, as
+    # upstream_failed, after a load that failed (agoranomos_pipelines/outcome.py).
+    _, made = dag_file("3")
+    tasks = made["tasks"]
+    assert tasks["load_google_ads_intraday"].upstream == ["due"]
+    check = tasks["check_accounts"]
+    assert check.upstream == ["load_google_ads_intraday"]
+    assert check.arguments["trigger_rule"] == "none_failed"
+    assert "outlets" not in check.arguments
+    assert "pool" not in check.arguments
+
+
 def test_a_run_skips_while_the_daily_load_runs_or_once_it_waited_longer_than_the_period(dag_file):
     _, made = dag_file("3")
     due = made["tasks"]["due"].function
@@ -451,7 +389,9 @@ def test_the_load_skips_without_an_account_to_load_or_after_a_long_wait(dag_file
     google_ads.key_info = lambda: {"private_key": "stand-in key"}
 
     class AccountsFailed(Exception):
-        pass
+        def __init__(self, line, loaded):
+            super().__init__(line)
+            self.loaded = loaded
 
     google_ads.AccountsFailed = AccountsFailed
     answers = []
@@ -463,18 +403,31 @@ def test_the_load_skips_without_an_account_to_load_or_after_a_long_wait(dag_file
     monkeypatch.setattr(package, "loads", loads, raising=False)
     exceptions = sys.modules["airflow.sdk.exceptions"]
     load = made["tasks"]["load_google_ads_intraday"].function
+    check = made["tasks"]["check_accounts"].function
     answers.append({"campaign_stats": 3})
     assert load() is None
+    assert check(None) is None
     assert made["masked"] == ["loader-password", "stand-in key"]
     answers.append(None)
     with pytest.raises(exceptions.AirflowSkipException, match="no account of google_ads"):
         load()
 
-    def failing(now):
-        raise AccountsFailed("1 of 2 Google Ads accounts failed")
+    def failing(loaded):
+        def load_intraday(now):
+            raise AccountsFailed(f"1 of {1 + loaded} Google Ads accounts failed", loaded)
 
-    google_ads.load_intraday = failing
+        return load_intraday
+
+    # One account loaded: the task succeeds, so that its asset starts the transform, and the last
+    # task fails the run with the line.
+    google_ads.load_intraday = failing(1)
+    line = load()
+    assert line == "1 of 2 Google Ads accounts failed"
     with pytest.raises(exceptions.AirflowFailException, match="1 of 2"):
+        check(line)
+    # None loaded: the task fails, and starts nothing.
+    google_ads.load_intraday = failing(0)
+    with pytest.raises(exceptions.AirflowFailException, match="1 of 1"):
         load()
     made["context"]["dag_run"].run_after = datetime.now(UTC) - timedelta(hours=4)
     with pytest.raises(exceptions.AirflowSkipException, match="waited longer than the period"):

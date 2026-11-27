@@ -27,9 +27,11 @@ kind intraday that has ended and waits for its pin holds the plan back as any su
 
 An account that the newest load of its history failed for, an error of its API or a Meta account
 that ran out of the time of its portion, is set aside (failures), so that it never holds up the
-other accounts of its source: a portion that fails for an account fails the task of its load,
-which then updates no asset, so the next plan waits for a run of the transform that another load
-starts, and a portion that took the account again and again would hold the others as long. The
+other accounts of its source: a portion that fails for every account it takes fails the task of
+its load, which then updates no asset, so the next plan waits for a run of the transform that
+another load starts, and a portion that took the account again and again would hold the others as
+long; one that fails for some of its accounts fails its run after the transform has started for
+the others (outcome.py), and would fail it again and again. The
 portions go on without it, and once no other account lacks a day, a portion takes it again, the
 account that failed longest ago first, if a load of its usual window has ended with it loaded since
 it failed: an account that its platform refuses whole waits for that, and one whose history alone

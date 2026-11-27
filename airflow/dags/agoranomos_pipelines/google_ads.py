@@ -79,8 +79,9 @@ part of one would lose the rest; an answer whose connection breaks after it has 
 again first, up to three times in all. The load takes the other accounts, records the failed
 account in _agoranomos_loads with the status failed and the text of the error, keeps its row of
 customers as the last load saw it, and fails at the end with one line that lists the accounts and
-their errors (ADR-0004, ADR-0035). What the API returns is data: a campaign name can carry any
-text, and nothing here acts on it."""
+their errors (ADR-0004, ADR-0035); the task of the load succeeds when it took another account, so
+that the transform takes it, and the run fails after it (outcome.py). What the API returns is
+data: a campaign name can carry any text, and nothing here acts on it."""
 
 from __future__ import annotations
 
@@ -349,10 +350,16 @@ class AnswerBrokeOff(GoogleAdsError):
 
 
 class AccountsFailed(GoogleAdsError):
-    """The load took the other accounts, and these failed: one line that counts them and lists each
-    account with the error of the API, as the contract of the sources asks (ADR-0004). A retry of
-    the task would repeat the whole load and gain nothing: the next load takes the days that the
+    """The load took the other accounts, if any, and these failed: one line that counts them and
+    lists each account with the error of the API (ADR-0004), and loaded, how many accounts the load
+    took. The task of the load succeeds when it took one, so that the transform takes them, and the
+    last task of the DAG fails the run with the line; with none, the task fails (outcome.py). A
+    retry would repeat the whole load and gain nothing: the next load takes the days that the
     failed accounts missed."""
+
+    def __init__(self, line: str, loaded: int) -> None:
+        super().__init__(line)
+        self.loaded = loaded
 
 
 def accounts(extensions: Path = EXTENSIONS) -> list[str]:
@@ -1111,7 +1118,7 @@ def load(
         log.info("Loaded %d rows into %s.%s, as of %s", rows, DATASET, table, now.isoformat())
     log.info("%d requests to the Google Ads API for %d accounts", api.requests, len(wanted))
     if failed:
-        raise AccountsFailed(failure_line(failed, len(read)))
+        raise AccountsFailed(failure_line(failed, len(read)), len(read))
     return counts
 
 
@@ -1178,5 +1185,5 @@ def load_intraday(now: datetime, extensions: Path = EXTENSIONS) -> dict[str, int
         )
     log.info("%d requests to the Google Ads API for %d accounts", api.requests, len(wanted))
     if failed:
-        raise AccountsFailed(failure_line(failed, len(read)))
+        raise AccountsFailed(failure_line(failed, len(read)), len(read))
     return counts

@@ -4,4 +4,4 @@
     'customer__descriptive_name': 'text', 'customer__currency_code': 'text',
     'customer__time_zone': 'text', 'customer__manager': 'boolean', 'customer__status': 'text',
     '_dlt_load_id': 'text',
-}), 'raw_google_ads', source('core', 'loads')), 'google_ads') }}
+}), 'raw_google_ads', ref('stg_loads__newest_lists')), 'google_ads') }}
