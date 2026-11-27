@@ -28,7 +28,8 @@
 -- * The days without a rate of an account in quarantine with missing_rate (macros/quarantine.sql),
 --   as of a currency new to the core whose window starts before that of the last load of the
 --   rates, whose earlier loads the core has accepted and the raw layer no longer holds: the days
---   of its loads that wait for the core on which the core holds no rate of its currency. They
+--   of its loads that wait for the core before the first rate of its currency that the core
+--   holds from a source, on which it holds no row of it, the days that the check holds out. They
 --   count among the days without a rate of the source that the core holds the currency from, so
 --   that its next load takes the history again, and the run that reads it takes the account out
 --   of quarantine; not among first_day_without_rate and days_without_rate, which are those of the
@@ -273,7 +274,7 @@ held_loads as (
 -- order published on a day that a run read: it names no day, and no load takes the history for
 -- it. Its account stays in quarantine, as for a currency that the source lacks (ADR-0042).
 held_sources as (
-    select h.currency, h.since, n.source
+    select h.currency, h.since, n.source, f.first_rate
     from (
         select currency, min(pinned_at) as since
         from held_loads
@@ -290,13 +291,25 @@ held_sources as (
         end
         limit 1
     ) as n on true
+    -- The first day on which the core holds a rate of the currency from a source of the order,
+    -- before which the check of the rates holds the account out (macros/quarantine.sql).
+    cross join lateral (
+        select min(r.rate_date) as first_rate
+        from rates as r
+        where r.currency = h.currency
+            and r.rate_source in (select source from listed)
+    ) as f
 ),
 
--- Each day of those loads on which the core holds no rate of their currency, and which no load of
--- the history of its source has covered since the first of the loads was pinned: such a load
--- ended in a run that read the list of the account, and so wrote each rate of the currency that
--- the source published on its days. A day before the first rate that the source published of the
--- currency so asks for the history once, and not with every load of the source. They count among
+-- Each day of those loads before the first rate of their currency that the core holds from a
+-- source, on which it holds no row of it, the days for which the check of the rates holds the
+-- account out, and which no load of the history of its source has covered since the first of the
+-- loads was pinned: such a load ended in a run that read the list of the account, and so wrote
+-- each rate of the currency that the source published on its days. A day before the first rate
+-- that the source published of the currency so asks for the history once, and not with every load
+-- of the source. A day after that first rate, as the partial day of today of a load of the kind
+-- intraday beyond the last day of the table, names none: the model carries the rate to it, and a
+-- load of the history, which ends at its usual last day, would never cover it. They count among
 -- the days without a rate of the source, and not among first_day_without_rate and
 -- days_without_rate, which are those of the facts: the account is in quarantine, and Ops says why.
 held_missing as (
@@ -309,7 +322,10 @@ held_missing as (
             cast(h.window_from as timestamp), cast(h.window_to as timestamp), interval '1 day'
         ) as day
     ) as d
-    where not exists (select from rates as r where r.rate_date = d.day and r.currency = h.currency)
+    where d.day < s.first_rate
+        and not exists (
+            select from rates as r where r.rate_date = d.day and r.currency = h.currency
+        )
         and not exists (
             select
             from {{ source('core', 'loads') }} as a

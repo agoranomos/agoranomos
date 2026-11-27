@@ -85,7 +85,8 @@ models:
       file no longer gives, as after an entry is removed, or does not hold a rate that the file
       gives, which count among the days without a rate of the source of their currency, so that
       its next load takes their history again. And the days of the loads that wait for the core of
-      an account in quarantine with missing_rate, on which the core holds no rate of its currency,
+      an account in quarantine with missing_rate before the first rate of its currency that the
+      core holds from a source, on which it holds no row of it,
       as of a currency new to the core whose window starts before that of the last load of the
       rates: they count among the days without a rate of the source that the core holds the
       currency from, so that its next load takes their history again, and not among those of the

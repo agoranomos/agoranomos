@@ -114,6 +114,22 @@ def selected(argv: list[str]) -> tuple[str, list[str], list[str], dict]:
 
 
 SEEDS = "package:agoranomos,resource_type:seed"
+# The views of staging that the model of the rates and the view of Ops of the rates read.
+RATES_STAGING = [
+    "stg_settings__rates",
+    "stg_bank_of_italy__rates_daily",
+    "stg_nbk__rates_daily",
+    "stg_ecb__rates_daily",
+    "stg_demo_fx__rates_daily",
+    "stg_demo_search__accounts",
+    "stg_demo_social__accounts",
+    "stg_demo_video__accounts",
+    "stg_google_ads__accounts",
+    "stg_meta_ads__accounts",
+    "stg_tiktok_ads__accounts",
+    "stg_demo_web__properties",
+    "stg_ga4__properties",
+]
 
 
 @pytest.mark.parametrize(
@@ -124,14 +140,14 @@ SEEDS = "package:agoranomos,resource_type:seed"
         (
             True,
             True,
-            [SEEDS, "marts", "stg_settings__rates", "core_fx_rates_daily", "ops_rates"],
+            [SEEDS, "marts", *RATES_STAGING, "core_fx_rates_daily", "ops_rates"],
             ["test", "unit_test"],
             {"rebuild_views": True, "recompute_rates": True},
         ),
         (
             False,
             True,
-            [SEEDS, "+marts", "ops_rates"],
+            [SEEDS, "+marts", *RATES_STAGING, "ops_rates"],
             [],
             {"rebuild_views": True, "recompute_rates": True},
         ),
@@ -202,6 +218,37 @@ def test_the_view_of_the_rates_has_the_columns_that_the_job_reads():
         assert column in mi.GAPS
 
 
+def test_each_build_of_the_rates_builds_every_view_of_staging_that_they_read():
+    # An upgrade starts before the first run of the transform of the release: a view of staging
+    # that the model of the rates or the view of Ops of the rates reads, and that the release before
+    # lacked, as the lists of TikTok and GA4 after v0.6.0, does not exist yet, and a build of
+    # either without it fails marts-init. So each build that selects either selects every view of
+    # staging that they ref, read from their text, but the tables that only a run of the
+    # transform fills, as stg_loads__newest_days: a new list of G1 cannot break the upgrade.
+    staging = DBT / "models" / "staging"
+    read: set[str] = set()
+    for path in (
+        DBT / "models" / "core" / f"{mi.RATES}.sql",
+        DBT / "models" / "ops" / f"{mi.OPS_RATES}.sql",
+    ):
+        read |= set(re.findall(r"ref\('(stg_\w+)'\)", path.read_text(encoding="utf-8")))
+    views = set()
+    for name in read:
+        [model] = staging.rglob(f"{name}.sql")
+        if "materialized=" not in model.read_text(encoding="utf-8"):
+            views.add(name)
+    assert views == read - {"stg_loads__newest_days"}
+    assert set(mi.RATES_STAGING) == views
+    assert len(mi.RATES_STAGING) == len(views)
+    for snapshots in (True, False):
+        state = mi.State(snapshots=snapshots, other_currency=True, ops=True)
+        for argv in (mi.command(state), mi.ops_command(state)):
+            nodes = flag(argv, "--select")
+            assert views <= set(nodes), (snapshots, sorted(views - set(nodes)))
+            assert "stg_loads__newest_days" not in nodes
+            assert not any(node.startswith("+") and node != "+marts" for node in nodes)
+
+
 def test_the_job_waits_for_the_nodes_of_the_transform_that_write(capsys):
     code, connection, dbt = run_job([(False,), (True, False, False)])
     assert code == 0
@@ -247,11 +294,11 @@ def test_the_job_builds_the_views_of_ops_where_a_transform_has_made_elementary(
     assert code == 0
     first, second = dbt.calls
     variables = {"rebuild_views": True} | ({"recompute_rates": True} if other else {})
-    # With the view of the rates of the file, which ops.ops_rates reads and which an upgrade
-    # starts without.
+    # With the views of staging that ops.ops_rates reads, of which an upgrade starts without the
+    # rates of the file and the lists of the sources that the release adds.
     assert selected(second) == (
         "build",
-        ["stg_settings__rates", mi.OPS],
+        [*RATES_STAGING, mi.OPS],
         ["test", "unit_test"],
         variables,
     )

@@ -69,7 +69,7 @@ LOAD_STATUS = (
 )
 # The rates of the currency of the test that the core holds in a reporting currency.
 HELD = (
-    "SELECT count(*) || '|' || coalesce(min(rate_date)::text, '') || '|' "
+    "SELECT count(*) || '|' || coalesce(min(rate_date)::text, '') || '|' "  # noqa: S608 (a constant of this file)
     "|| coalesce(string_agg(DISTINCT rate_source, ','), '') FROM core.fx_rates_daily "
     f"WHERE currency = '{CURRENCY}' AND reporting_currency = '{{currency}}'"
 )
@@ -205,9 +205,7 @@ def test_a_currency_new_to_the_core_waits_in_quarantine_for_the_history_of_its_r
         # The core keeps the rates of the currency of the account in quarantine that the run read,
         # from the first that the demo published, so ops.ops_rates knows its source and names the
         # days without a rate among those of demo_fx, and not among those of the facts.
-        count, held_from, sources = warehouse_output(env, HELD.format(currency=currency)).split(
-            "|"
-        )
+        count, held_from, sources = warehouse_output(env, HELD.format(currency=currency)).split("|")
         assert (held_from, sources) == (str(published), "demo_fx"), (held_from, sources)
         assert int(count) > 0, count
         [gaps] = rows(env, OPS)

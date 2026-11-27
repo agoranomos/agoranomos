@@ -3052,6 +3052,18 @@ def test_ops_names_the_days_of_an_account_in_quarantine_without_a_rate_once():
         "                and d.day between a.window_from and a.window_to\n",
     ):
         assert line in held, line
+    # Only the days that the check of the rates holds the account out for: before the first rate
+    # of the currency that the core holds from a source of the order, and without a row of it. A
+    # day after it, as the partial day of today beyond the last day of the table, would make each
+    # load of the source take the whole history again, as no load of the history covers it.
+    assert (
+        "        select min(r.rate_date) as first_rate\n        from rates as r\n"
+        "        where r.currency = h.currency\n"
+        "            and r.rate_source in (select source from listed)\n"
+    ) in sources
+    missing = held[held.index("held_missing as (") :]
+    assert "    where d.day < s.first_rate\n        and not exists (\n" in missing
+    assert "select from rates as r where r.rate_date = d.day and r.currency = h.currency" in missing
     gaps = view[view.index("gaps as (") : view.index("off_the_file as (")]
     assert "held_missing" not in gaps
     by_source = view[view.index("gaps_by_source as (") : view.index("-- The rows:")]

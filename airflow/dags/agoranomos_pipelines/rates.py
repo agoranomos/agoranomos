@@ -31,7 +31,8 @@ core holds no rate of, so the rates that the core holds keep their source.
 The same row counts the days without a rate of an account in quarantine with missing_rate
 (dbt/macros/quarantine.sql), as of a currency new to the core whose window starts before the
 window of the last load of the rates: the days of its loads that wait for the core, pinned and not
-accepted, on which the core holds no rate of its currency. The core keeps the rates of the
+accepted, before the first rate of its currency that the core holds from a source, on which it
+holds no row of it, the days that the check holds out. The core keeps the rates of the
 currencies of the accounts that a run reads, those in quarantine too, so its source is the first in
 the order that the core holds a rate of that currency from; the load takes the history from the
 first of those days as above, and the run of the transform that reads it takes the account out of
