@@ -84,8 +84,15 @@ models:
       never late; and the days off the file, on which the core holds a rate of the file that the
       file no longer gives, as after an entry is removed, or does not hold a rate that the file
       gives, which count among the days without a rate of the source of their currency, so that
-      its next load takes their history again. ./agoranomos status warns when a rate is late, when
-      a day has no rate, and when a day is off the file.
+      its next load takes their history again. And the days of the loads that wait for the core of
+      an account in quarantine with missing_rate, on which the core holds no rate of its currency,
+      as of a currency new to the core whose window starts before that of the last load of the
+      rates: they count among the days without a rate of the source that the core holds the
+      currency from, so that its next load takes their history again, and not among those of the
+      facts. A currency of which the core holds no rate names no such day, nor does a day that a
+      load of the history of that source has covered since the first of those loads was pinned.
+      ./agoranomos status warns when a rate is late, when a day has no rate, and when a day is off
+      the file.
     columns:
       - name: reporting_currency
         description: '{{ doc("reporting_currency") }}'
@@ -121,12 +128,15 @@ models:
           The first day without a rate, as first_day_without_rate, or off the file, as
           first_day_off_the_file, of the currencies whose newest rate in the core comes from the
           source of the row, or, for the first source of the order, of those without a rate in the
-          core; none when every such day has one. The next load of the source takes the history of
-          the rates again from it (agoranomos_pipelines/rates.py).
+          core, or of a load that waits for the core of an account in quarantine with missing_rate
+          whose currency the core holds from the source; none when every such day has one. The
+          next load of the source takes the history of the rates again from it
+          (agoranomos_pipelines/rates.py).
       - name: days_without_rate_of_source
         description: >-
-          How many calendar days without a rate or off the file the currencies of
-          first_day_without_rate_of_source have: 0 when each of them has one.
+          How many calendar days without a rate, off the file or of an account in quarantine
+          without a rate the currencies of first_day_without_rate_of_source have: 0 when each of
+          them has one.
       - name: first_day_off_the_file
         description: >-
           The first day of the facts of a currency but the reporting currency on which the core

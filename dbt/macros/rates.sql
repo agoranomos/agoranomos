@@ -5,7 +5,7 @@
     a day without one, with a flag. The setting AGORANOMOS_RATES_SOURCE gives the sources and their
     order (rates_chain), and the demo serves only a deployment that holds no rate of them. The
     model core_fx_rates_daily writes the table, and the checks of G1 (quarantine.sql) find an
-    account whose currency has no rate at all, both through rates_known. -#}
+    account whose currency has no rate on a day of its window, both through rates_known. -#}
 
 {#- The sources of the rates, in their order, as the setting AGORANOMOS_RATES_SOURCE of .env gives
     them, which compose.yaml passes to dbt; auto, the default, is nbk for a reporting currency of
@@ -37,9 +37,11 @@
 {%- endmacro %}
 
 {#- The sources of the rates as the check of the rates names them (quarantine.sql), as SQL text: the
-    order of AGORANOMOS_RATES_SOURCE, or demo_fx while no source of the order has a rate, neither in
-    its staging model nor in core.fx_rates_daily, as in the demo, which then serves (rates_known).
-    staged maps the code of each source to its staging model, rates is core.fx_rates_daily. -#}
+    order of AGORANOMOS_RATES_SOURCE; or demo_fx while the demo serves, as on the demo stack: it has
+    rates, in its staging model or in core.fx_rates_daily, and no source of the order has one
+    (rates_known). A deployment without the demo, whose sources have no rate yet, as before the
+    first load of the Bank of Italy, gets the order, never demo_fx. staged maps the code of each
+    source to its staging model, rates is core.fx_rates_daily. -#}
 {% macro rates_named(staged, rates) -%}
     {%- set chain = rates_chain() -%}
     {%- set named = ('the sources of the rates, ' if chain | length > 1 else 'the source of the rates, ') ~ chain | join(', ') -%}
@@ -50,7 +52,10 @@
         {%- endfor %}
         or exists (select from {{ rates }} where rate_source in ('{{ chain | join("', '") }}'))
         then '{{ named }}'
-    else 'the source of the rates, demo_fx'
+    when exists (select from {{ staged['demo_fx'] }})
+        or exists (select from {{ rates }} where rate_source = 'demo_fx')
+        then 'the source of the rates, demo_fx'
+    else '{{ named }}'
 end)
 {%- endmacro %}
 

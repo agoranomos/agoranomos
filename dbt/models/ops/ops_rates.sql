@@ -25,6 +25,17 @@
 --   and none of a source of the order in any reporting currency, as on the demo stack: a load of
 --   that source then takes their history again. Each fact gives the first and the last day of an
 --   account through its index of the account and the day.
+-- * The days without a rate of an account in quarantine with missing_rate (macros/quarantine.sql),
+--   as of a currency new to the core whose window starts before that of the last load of the
+--   rates, whose earlier loads the core has accepted and the raw layer no longer holds: the days
+--   of its loads that wait for the core on which the core holds no rate of its currency. They
+--   count among the days without a rate of the source that the core holds the currency from, so
+--   that its next load takes the history again, and the run that reads it takes the account out
+--   of quarantine; not among first_day_without_rate and days_without_rate, which are those of the
+--   facts. Two guards keep a load from taking the history again and again: a currency of which
+--   the core holds no rate names no day, as no source of the order published it on a day that a
+--   run read; and a day that a load of the history of that source has covered since the first of
+--   those loads was pinned names none, as the source has no rate of it.
 -- * The rates of the file of the deployment, extensions/model/rates.toml (stg_settings__rates): a
 --   row of the source deployment while the file has an entry, with the last day that it covers
 --   and no age, as a rate that the deployment gives is never late. And the days off the file: of
@@ -36,6 +47,16 @@
 --   days_without_rate, as the core holds a rate on them.
 {%- set chain = rates_chain() %}
 {%- set links = chain + ['demo_fx'] %}
+{%- set lists = [
+    (ref('stg_demo_search__accounts'), 'account_id'),
+    (ref('stg_demo_social__accounts'), 'account_id'),
+    (ref('stg_demo_video__accounts'), 'account_id'),
+    (ref('stg_google_ads__accounts'), 'account_id'),
+    (ref('stg_meta_ads__accounts'), 'account_id'),
+    (ref('stg_tiktok_ads__accounts'), 'account_id'),
+    (ref('stg_demo_web__properties'), 'property_id'),
+    (ref('stg_ga4__properties'), 'property_id'),
+] %}
 with rates as (
     select *
     from {{ ref('core_fx_rates_daily') }}
@@ -222,9 +243,91 @@ off_the_file as (
     where off_the_file
 ),
 
+-- The loads that wait for the core, pinned and not accepted, of each account that the last run
+-- of the transform held in quarantine for days without a rate (int_g1_failures, missing_rate),
+-- with the currency that its list gives: no fact of the core holds their days.
+held_loads as (
+    select l.currency::text as currency, p.window_from, p.window_to, p.pinned_at
+    from (
+        select distinct source, account_id
+        from {{ ref('int_g1_failures') }}
+        where reason = 'missing_rate'
+    ) as q
+    join (
+        select distinct source, account_id, currency
+        from ({{ listed_currencies(lists) }}) as listed_accounts
+    ) as l
+        on l.source = q.source and l.account_id = q.account_id
+    join {{ source('core', 'loads') }} as p
+        on p.source = q.source and p.account_id = q.account_id
+    where p.status = 'pinned'
+        and p.outcome = 'loaded'
+        and l.currency is not null
+        and l.currency <> {{ reporting_currency() }}
+),
+
+-- The source of each such currency, the first in the order of those of the rows that the core
+-- holds a rate of it from, and when the first of those loads was pinned. The core keeps the rates
+-- of the currencies of the accounts that a run reads, those in quarantine too
+-- (core_fx_rates_daily), so a currency of which it holds no rate is one that no source of the
+-- order published on a day that a run read: it names no day, and no load takes the history for
+-- it. Its account stays in quarantine, as for a currency that the source lacks (ADR-0042).
+held_sources as (
+    select h.currency, h.since, n.source
+    from (
+        select currency, min(pinned_at) as since
+        from held_loads
+        group by currency
+    ) as h
+    join lateral (
+        select r.rate_source as source
+        from (select distinct rate_source from rates where currency = h.currency) as r
+        where r.rate_source in (select source from listed)
+        order by case r.rate_source
+            {%- for code in links %}
+            when '{{ code }}' then {{ loop.index }}
+            {%- endfor %}
+        end
+        limit 1
+    ) as n on true
+),
+
+-- Each day of those loads on which the core holds no rate of their currency, and which no load of
+-- the history of its source has covered since the first of the loads was pinned: such a load
+-- ended in a run that read the list of the account, and so wrote each rate of the currency that
+-- the source published on its days. A day before the first rate that the source published of the
+-- currency so asks for the history once, and not with every load of the source. They count among
+-- the days without a rate of the source, and not among first_day_without_rate and
+-- days_without_rate, which are those of the facts: the account is in quarantine, and Ops says why.
+held_missing as (
+    select s.source, d.day
+    from held_loads as h
+    join held_sources as s on s.currency = h.currency
+    cross join lateral (
+        select cast(day as date) as day
+        from generate_series(
+            cast(h.window_from as timestamp), cast(h.window_to as timestamp), interval '1 day'
+        ) as day
+    ) as d
+    where not exists (select from rates as r where r.rate_date = d.day and r.currency = h.currency)
+        and not exists (
+            select
+            from {{ source('core', 'loads') }} as a
+            where a.source = s.source
+                and a.kind = 'history'
+                and a.status = 'accepted'
+                and a.pinned_at >= s.since
+                and d.day between a.window_from and a.window_to
+        )
+),
+
 gaps_by_source as (
     select source, min(day) as first_day, count(distinct day) as days
-    from missing
+    from (
+        select source, day from missing
+        union all
+        select source, day from held_missing
+    ) as without_rate
     group by source
 ),
 

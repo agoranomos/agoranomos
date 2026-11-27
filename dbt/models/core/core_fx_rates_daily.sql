@@ -4,6 +4,13 @@
 -- AGORANOMOS_RATES_SOURCE give, through the base currency of the first source with no rounding
 -- (macros/rates.sql). The model merges into the table of the migrations (dbt_project.yml), and
 -- only the rows that are new or that changed, so a run that brings no new rate writes no row.
+-- * The currencies of the accounts: those of core.dim_account, and those of the accounts that the
+--   lists of this run give, also of an account in quarantine. A currency new to the core whose
+--   account goes to quarantine with missing_rate for the days before its first rate in this run
+--   (macros/quarantine.sql) so gets the rates that the run reads of it, which the raw layer loses
+--   once the core accepts their loads, and ops_rates knows from which source to take the history
+--   of the days before (agoranomos_pipelines/rates.py); a currency that no source publishes gets
+--   no row.
 -- * The days that a run computes: those of the windows of the loads of the rates that it reads,
 --   each of which takes the last 14 days again (ADR-0042), so that a rate that a source publishes
 --   late, or corrects, replaces a carried one; every day after the last that the table holds, to
@@ -47,6 +54,16 @@
     'ecb': ref('stg_ecb__rates_daily'),
     'demo_fx': ref('stg_demo_fx__rates_daily'),
 } %}
+{%- set lists = [
+    (ref('stg_demo_search__accounts'), 'account_id'),
+    (ref('stg_demo_social__accounts'), 'account_id'),
+    (ref('stg_demo_video__accounts'), 'account_id'),
+    (ref('stg_google_ads__accounts'), 'account_id'),
+    (ref('stg_meta_ads__accounts'), 'account_id'),
+    (ref('stg_tiktok_ads__accounts'), 'account_id'),
+    (ref('stg_demo_web__properties'), 'property_id'),
+    (ref('stg_ga4__properties'), 'property_id'),
+] %}
 with existing as (
     select *
     from {{ this }}
@@ -66,9 +83,15 @@ window_days as (
     from {{ ref('int_window_days') }}
 ),
 
+-- The currencies of the registry of accounts, those of the accounts that the lists of this run
+-- give, also of one in quarantine, and the reporting currency.
 currencies as (
     select distinct currency::text as currency
     from {{ ref('dim_account') }}
+    where currency is not null
+    union
+    select distinct currency::text
+    from ({{ listed_currencies(lists) }}) as l
     where currency is not null
     union
     select {{ reporting_currency() }}
