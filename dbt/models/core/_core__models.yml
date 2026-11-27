@@ -507,7 +507,9 @@ models:
             to_columns: [account_sk, campaign_id]
           config:
             where: >-
-              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              report_date between (select min(window_from) from core.loads
+              where status = 'pinned' and outcome = 'loaded')
+              and (select max(window_to) from core.loads where status = 'pinned'
               and outcome = 'loaded')
             tags: [critical]
     columns:
@@ -566,7 +568,9 @@ models:
                 field: currency_code
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
                 tags: [critical]
       - name: load_sk
@@ -594,7 +598,9 @@ models:
             to_columns: [account_sk, ad_group_id]
           config:
             where: >-
-              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              report_date between (select min(window_from) from core.loads
+              where status = 'pinned' and outcome = 'loaded')
+              and (select max(window_to) from core.loads where status = 'pinned'
               and outcome = 'loaded')
             tags: [critical]
     columns:
@@ -656,7 +662,9 @@ models:
                 field: currency_code
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
                 tags: [critical]
       - name: load_sk
@@ -678,7 +686,9 @@ models:
             to_columns: [account_sk, ad_group_id, ad_id]
           config:
             where: >-
-              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              report_date between (select min(window_from) from core.loads
+              where status = 'pinned' and outcome = 'loaded')
+              and (select max(window_to) from core.loads where status = 'pinned'
               and outcome = 'loaded')
             tags: [critical]
     columns:
@@ -743,7 +753,9 @@ models:
                 field: currency_code
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
                 tags: [critical]
       - name: load_sk
@@ -764,7 +776,9 @@ models:
             to_columns: [account_sk, campaign_id]
           config:
             where: >-
-              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              report_date between (select min(window_from) from core.loads
+              where status = 'pinned' and outcome = 'loaded')
+              and (select max(window_to) from core.loads where status = 'pinned'
               and outcome = 'loaded')
             tags: [critical]
     columns:
@@ -787,7 +801,9 @@ models:
                 field: conversion_action_sk
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
                 tags: [critical]
       - name: report_date
@@ -826,7 +842,9 @@ models:
                 field: currency_code
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
                 tags: [critical]
       - name: load_sk
@@ -898,7 +916,9 @@ models:
                 field: currency_code
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
                 tags: [critical]
       - name: load_sk

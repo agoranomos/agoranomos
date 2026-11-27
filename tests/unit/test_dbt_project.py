@@ -203,8 +203,10 @@ FACT_MARTS = (
     "ad_stats_ad_daily",
 )
 WINDOW_WHERE = (
-    "where: >-\n{pad}report_date >= (select min(window_from) from core.loads where status = "
-    "'pinned'\n{pad}and outcome = 'loaded')\n"
+    "where: >-\n{pad}report_date between (select min(window_from) from core.loads\n"
+    "{pad}where status = 'pinned' and outcome = 'loaded')\n"
+    "{pad}and (select max(window_to) from core.loads where status = 'pinned'\n"
+    "{pad}and outcome = 'loaded')\n"
 )
 
 
@@ -409,7 +411,7 @@ def test_every_test_of_a_view_of_a_fact_reads_the_days_of_the_windows():
         assert tests, name
         # Every test, of the model and of each column, has the where of the window in its config.
         whereas = re.findall(
-            r"^ +where: >-\n +report_date >= \(select min\(window_from\)", block, re.M
+            r"^ +where: >-\n +report_date between \(select min\(window_from\)", block, re.M
         )
         assert len(whereas) == len(tests), name
         assert "data_tests: [" not in block, name
@@ -3527,6 +3529,10 @@ PARTIAL_DAY_FACTS = {"ad_stats_campaign_daily"}
 WINDOW_START = (
     "(select min(window_from) from core.loads where status = 'pinned' and outcome = 'loaded')"
 )
+# The upper bound, which the tests of the facts and of their views read up to (#444).
+WINDOW_END = (
+    "(select max(window_to) from core.loads where status = 'pinned' and outcome = 'loaded')"
+)
 
 
 def test_the_facts_of_the_core_replace_whole_days_of_the_windows():
@@ -3611,13 +3617,14 @@ def test_the_window_of_the_facts_is_a_subquery_on_the_pinned_loads():
     # database, and refuses a macro of the project in the where of a test; a subquery on
     # core.loads in their text lets PostgreSQL prune the partitions when the statement runs.
     assert facts_macro("window_start").split("-%}", 1)[1].strip() == WINDOW_START
+    assert facts_macro("window_end").split("-%}", 1)[1].strip() == WINDOW_END
     text = (CORE / "_core__models.yml").read_text(encoding="utf-8")
     conditions = re.findall(r"^( +)where: >-\n((?:\1  .*\n)+)", text, flags=re.M)
     assert len(conditions) == 10, len(conditions)
     for _, lines in conditions:
         assert (
             " ".join(line.strip() for line in lines.splitlines())
-            == f"report_date >= {WINDOW_START}"
+            == f"report_date between {WINDOW_START} and {WINDOW_END}"
         )
     # The bound of the freeze is that of the trigger of each fact, so that a fact lifts it when it
     # is to replace a row of a frozen month, as a load of history that comes again does.

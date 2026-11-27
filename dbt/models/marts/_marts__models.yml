@@ -126,7 +126,9 @@ models:
             columns: [report_date, platform, account_id, campaign_id]
           config:
             where: >-
-              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              report_date between (select min(window_from) from core.loads
+              where status = 'pinned' and outcome = 'loaded')
+              and (select max(window_to) from core.loads where status = 'pinned'
               and outcome = 'loaded')
     columns:
       - name: report_date
@@ -136,7 +138,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -151,7 +155,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -177,7 +183,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -203,7 +211,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -227,7 +237,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -251,7 +263,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -285,7 +299,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -321,7 +337,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
           - accepted_values:
               name: ad_stats_campaign_daily_has_one_reporting_currency
@@ -329,7 +347,9 @@ models:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -344,7 +364,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -518,7 +540,9 @@ models:
             columns: [report_date, platform, account_id, campaign_id, conversion_action_id]
           config:
             where: >-
-              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              report_date between (select min(window_from) from core.loads
+              where status = 'pinned' and outcome = 'loaded')
+              and (select max(window_to) from core.loads where status = 'pinned'
               and outcome = 'loaded')
     columns:
       - name: report_date
@@ -528,7 +552,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -639,7 +665,9 @@ models:
                 values: ["purchase", "lead", "sign_up", "add_to_cart", "app_install", "other"]
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -672,7 +700,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -705,7 +735,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
           - accepted_values:
               name: ad_conversions_campaign_daily_has_one_reporting_currency
@@ -713,7 +745,9 @@ models:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -840,7 +874,9 @@ models:
             columns: [report_date, property_id, session_source, session_medium, session_campaign_name, session_campaign_id]
           config:
             where: >-
-              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              report_date between (select min(window_from) from core.loads
+              where status = 'pinned' and outcome = 'loaded')
+              and (select max(window_to) from core.loads where status = 'pinned'
               and outcome = 'loaded')
     columns:
       - name: report_date
@@ -1025,7 +1061,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
           - accepted_values:
               name: web_sessions_daily_has_one_reporting_currency
@@ -1033,7 +1071,9 @@ models:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -1779,7 +1819,9 @@ models:
             columns: [report_date, platform, account_id, ad_group_id]
           config:
             where: >-
-              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              report_date between (select min(window_from) from core.loads
+              where status = 'pinned' and outcome = 'loaded')
+              and (select max(window_to) from core.loads where status = 'pinned'
               and outcome = 'loaded')
     columns:
       - name: report_date
@@ -1789,7 +1831,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -1804,7 +1848,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -1830,7 +1876,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -1856,7 +1904,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -1880,7 +1930,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -1904,7 +1956,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -1928,7 +1982,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -1962,7 +2018,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -1998,7 +2056,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
           - accepted_values:
               name: ad_stats_ad_group_daily_has_one_reporting_currency
@@ -2006,7 +2066,9 @@ models:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -2021,7 +2083,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -2191,7 +2255,9 @@ models:
             columns: [report_date, platform, account_id, ad_group_id, ad_id]
           config:
             where: >-
-              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              report_date between (select min(window_from) from core.loads
+              where status = 'pinned' and outcome = 'loaded')
+              and (select max(window_to) from core.loads where status = 'pinned'
               and outcome = 'loaded')
     columns:
       - name: report_date
@@ -2201,7 +2267,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -2216,7 +2284,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -2242,7 +2312,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -2268,7 +2340,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -2292,7 +2366,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -2316,7 +2392,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -2340,7 +2418,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -2364,7 +2444,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -2398,7 +2480,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -2434,7 +2518,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
           - accepted_values:
               name: ad_stats_ad_daily_has_one_reporting_currency
@@ -2442,7 +2528,9 @@ models:
                 values: ["{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"]
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:
@@ -2457,7 +2545,9 @@ models:
           - not_null:
               config:
                 where: >-
-                  report_date >= (select min(window_from) from core.loads where status = 'pinned'
+                  report_date between (select min(window_from) from core.loads
+                  where status = 'pinned' and outcome = 'loaded')
+                  and (select max(window_to) from core.loads where status = 'pinned'
                   and outcome = 'loaded')
         config:
           meta:

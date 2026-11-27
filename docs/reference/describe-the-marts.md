@@ -180,11 +180,13 @@ A mart is a view over the core ([ADR-0037](../adr/0037-serve-the-marts-as-views-
             columns: [report_date, platform, account_id, campaign_id]
           config:
             where: >-
-              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              report_date between (select min(window_from) from core.loads
+              where status = 'pinned' and outcome = 'loaded')
+              and (select max(window_to) from core.loads where status = 'pinned'
               and outcome = 'loaded')
 ```
 
-Each test of a view of a fact reads the days of the windows that the run of the transform pinned, with the same `where`, as a test of the whole view would read every partition of its fact. `type/PK` for Metabase stays in `meta`.
+Each test of a view of a fact reads the days from the first to the last day of the windows that the run of the transform pinned, with the same `where`, as a test of the whole view would read every partition of its fact, and a test with the first day alone would read every day from a window of history to the current day. `type/PK` for Metabase stays in `meta`.
 
 ## Comments in the warehouse
 
