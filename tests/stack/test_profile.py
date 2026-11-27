@@ -40,7 +40,15 @@ import synthetic
 from airflow_api import api, trigger, unpause, wait_for_run
 from metabase_content import item, warehouse_database_id
 from raw_loads import run_in_tasks
-from stack_helpers import http_json, ops_growth, ops_sizes, wait_for, warehouse_output
+from stack_helpers import (
+    active_variant,
+    compose,
+    http_json,
+    ops_growth,
+    ops_sizes,
+    wait_for,
+    warehouse_output,
+)
 
 PROFILE = os.environ.get("AGORANOMOS_PROFILE", "")
 pytestmark = pytest.mark.skipif(
@@ -497,6 +505,35 @@ def explain_view(env, view: str) -> tuple[int, float, int, str]:
     return plan["Plan"]["Actual Rows"], plan["Execution Time"] / 1000, loops, kind
 
 
+def build_newest_lists() -> None:
+    """dbt run of stg_loads__newest_lists in the container of the tasks, as transformer, as each run
+    of the transform builds it after its pin: the views of staging of the lists read the newest
+    load of each account from it (dbt/macros/newest_load.sql)."""
+    service = "airflow-worker" if active_variant() == "celery" else "airflow-scheduler"
+    work = "/tmp/agoranomos_profile_lists"  # noqa: S108 (a folder in the container, not on this host)
+    result = compose(
+        "exec",
+        "-T",
+        service,
+        "/opt/airflow/dbt_venv/bin/dbt",
+        "--quiet",
+        "--no-use-colors",
+        "run",
+        "--select",
+        "stg_loads__newest_lists",
+        "--project-dir",
+        "/opt/agoranomos/dbt",
+        "--profiles-dir",
+        "/opt/agoranomos/dbt",
+        "--target-path",
+        f"{work}/target",
+        "--log-path",
+        f"{work}/logs",
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout[-3000:]
+
+
 def transform(env, airflow_url, token) -> dict[str, Any]:
     """A run of the transform that succeeded, after which the synthetic accounts get their clients
     back."""
@@ -520,7 +557,8 @@ def test_the_lists_of_a_whole_load_beside_the_core_of_the_profile(env, airflow_u
     # it; then a whole load of every platform lists every synthetic account with its campaigns, ad
     # groups and ads, and a run reads it, the first run that sees these lists; then a second whole
     # load gives the same lists, as a daily load does, and its pinned rows are read through the
-    # views of staging before its run reads it. The load has a window of the day before the
+    # views of staging before its run reads it, once the table of the newest lists is built as
+    # the run builds it after the pin. The load has a window of the day before the
     # period, on which the core holds no statistics, so the runs write no fact: the time of the
     # write of a window is R5's (#191). The time of each node comes from the records of
     # elementary, a model with its tests.
@@ -542,6 +580,7 @@ def test_the_lists_of_a_whole_load_beside_the_core_of_the_profile(env, airflow_u
     runs["First whole load"] = transform(env, airflow_url, token)
     second_load = f"{time.time():.6f}"
     warehouse_output(env, synthetic.whole_load_sql(second_load, day, pin=True))
+    build_newest_lists()
     views = warehouse_output(
         env,
         "SELECT table_schema || '.' || table_name FROM information_schema.views "

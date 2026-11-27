@@ -1,4 +1,4 @@
-{#- core.dim_ad_versions, the versions of the ads (ADR-0036): a snapshot of dbt over the view
+{#- core.dim_ad_versions, the versions of the ads (ADR-0036): a snapshot of dbt over the table
     int_ads__current, as dim_campaign_versions is over that of the campaigns. An ad is defined only
     inside its ad group, which is part of its key. -#}
 {% snapshot dim_ad_versions %}

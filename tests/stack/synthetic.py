@@ -384,7 +384,7 @@ Lists = dict[str, tuple[str, dict[str, tuple[str, str]]]]
 
 
 def google_lists(accounts: str) -> Lists:
-    """The lists of the shape of Google Ads (dbt/macros/shapes/google_ads_v25.sql): the table of
+    """The lists of the shape of Google Ads (dbt/macros/shapes/google_ads_v26.sql): the table of
     each kind, and its columns with their type and their SQL. The status comes from the common
     state of the core, so that a second load gives what the first one left."""
 

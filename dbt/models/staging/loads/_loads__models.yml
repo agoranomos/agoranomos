@@ -40,3 +40,38 @@ models:
           fact compares with the same of each row; the day as its number of days since 1 January
           2000, and no account for a source of rates.
         data_tests: [not_null]
+  - name: stg_loads__newest_lists
+    description: >-
+      The newest load of each account of each source that takes lists, one row each, whose lists of
+      the accounts, campaigns, ad groups, ads, conversion actions and properties the staging models
+      of the lists read (ADR-0038, ADR-0046): of the loads in core.loads with the status pinned or
+      accepted that took the account, and not of the kind intraday, which takes no list (ADR-0051),
+      the one with the largest load ID, compared as a number, when it is a pinned one; the core
+      holds the lists of an accepted load, so an account whose newest load is accepted has no row.
+      The current campaigns, ad groups and ads read from it the accounts whose list this run reads.
+      Each run of the transform fills the table anew before the staging models of the lists. The
+      account is as the journal names it: the ID of a property for demo_web and ga4.
+      source and account_id are its key. Its tests guard the marts: when one of them fails, dbt
+      does not rebuild the models that read this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [source, account_id]
+    columns:
+      - name: source
+        description: '{{ doc("source") }}'
+        data_tests: [not_null]
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests: [not_null]
+      - name: load_id
+        description: '{{ doc("load_id") }}'
+        data_tests: [not_null]
+      - name: finished_at
+        description: '{{ doc("finished_at") }}'
+        data_tests: [not_null]
+      - name: list_key
+        description: >-
+          The source, the load and the account in one text, which a staging model of a list
+          compares with the same of each row of its table in raw.
+        data_tests: [not_null]

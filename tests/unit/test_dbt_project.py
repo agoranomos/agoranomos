@@ -758,7 +758,9 @@ def test_the_seeds_go_to_staging_and_comment_their_tables():
 def test_the_intermediate_models_are_views_in_staging():
     # ADR-0025: until an AI role needs to tell them apart, intermediate models are views in staging,
     # but for the checks of G1 and the days of the windows of the facts, which each run fills anew,
-    # as the days of the pin are (ADR-0035, ADR-0038).
+    # as the days of the pin are (ADR-0035, ADR-0038), and the current campaigns, ad groups and
+    # ads, which their versions, their dimensions and their tests read four times a run (C8 of the
+    # audit of 24 November 2026).
     project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
     pattern = r"^    intermediate:\n      \+schema: staging\n      \+materialized: view$"
     assert re.search(pattern, project, flags=re.MULTILINE)
@@ -767,7 +769,13 @@ def test_the_intermediate_models_are_views_in_staging():
         for path in (DBT / "models" / "intermediate").glob("*.sql")
         if "materialized=" in path.read_text(encoding="utf-8")
     }
-    assert tables == {"int_g1_failures", "int_window_days"}
+    assert tables == {
+        "int_g1_failures",
+        "int_window_days",
+        "int_campaigns__current",
+        "int_ad_groups__current",
+        "int_ads__current",
+    }
 
 
 def test_the_reporting_currency_is_written_one_way_everywhere():
@@ -1139,7 +1147,7 @@ def test_each_staging_model_of_a_platform_is_one_call_of_the_shape_of_its_api():
             else:
                 assert tables[0] not in facts, (code, model)
                 account = LIST_ACCOUNTS.get((code, model))
-                loads = "source('core', 'loads')" + (f", {account}" if account else "")
+                loads = "ref('stg_loads__newest_lists')" + (f", {account}" if account else "")
                 relations[0] = f"newest_list({relations[0]}, '{dataset}', {loads})"
             relations = ", ".join(relations)
             arguments = ", ".join(
@@ -1206,6 +1214,44 @@ def test_staging_reads_the_newest_pinned_load_of_each_account_and_day():
     assert 'post_hook=["analyze {{ this }}"]' in model
     assert "{%- for source_name in newest_load_sources() %}" in model
     assert "{{ pinned_loads(source_name, source('core', 'loads')) }}" in model
+    # The lists too: the newest load of each account is a table of each run, with its statistics,
+    # joined by one key, as a subquery over core.loads made the planner take a list for one row
+    # and compare each ad with every other in the current entities (C8 of the audit of 24 November
+    # 2026), and its rows as a query before a run has filled it.
+    newest_list = text[text.index("{% macro newest_list(") :]
+    newest_list = newest_list[: newest_list.index("{%- endmacro %}")]
+    assert "{%- if execute and load_relation(lists) is none %}" in newest_list
+    assert "    from ({{ newest_lists(source_name, pinned_loads_journal()) }}) as lists" in (
+        newest_list
+    )
+    assert "    from {{ lists }}\n" in newest_list
+    assert "    on l.list_key = {{ newest_list_key(source_name, 'r._dlt_load_id', account) }}" in (
+        newest_list
+    )
+    assert "{{ newest_list_key(source_name, 'n.load_id', 'n.account_id') }} as list_key" in lists
+    accounts = text[text.index("{% macro newest_list_accounts(") :]
+    accounts = accounts[: accounts.index("{%- endmacro %}")]
+    assert "{%- if execute and load_relation(lists) is none -%}" in accounts
+    assert "{{ newest_lists(source_name, pinned_loads_journal()) }}" in accounts
+    assert "from {{ lists }}" in accounts
+    model = (STAGING / "loads" / "stg_loads__newest_lists.sql").read_text(encoding="utf-8")
+    assert "materialized='incremental'" in model
+    assert 'pre_hook=["{% if is_incremental() %}delete from {{ this }}{% endif %}"]' in model
+    assert 'post_hook=["analyze {{ this }}"]' in model
+    assert "{%- for source_name in newest_list_sources() %}" in model
+    assert "{{ newest_lists(source_name, source('core', 'loads')) }}" in model
+    # The sources that take lists are those whose rows name an account: every source of the
+    # newest loads but the rates, which have one account and no list.
+    assert "{%- if keys[0] is not none %}{% do found.append(source_name) %}{% endif -%}" in text
+    # The current entities are tables of each run, with their statistics, which their versions,
+    # their dimension and their tests read.
+    for view in ENTITIES.values():
+        current = (INTERMEDIATE / f"{view}.sql").read_text(encoding="utf-8")
+        config = model_config(current)
+        assert "materialized='incremental'" in config, view
+        assert "incremental_strategy='append'" in config, view
+        assert 'pre_hook=["{% if is_incremental() %}delete from {{ this }}{% endif %}"]' in config
+        assert 'post_hook=["analyze {{ this }}"]' in config, view
     sources = (STAGING / "loads" / "_loads__sources.yml").read_text(encoding="utf-8")
     assert "  - name: core\n" in sources
     assert "    schema: core\n" in sources
@@ -1894,7 +1940,7 @@ def test_each_staging_model_of_google_ads_is_one_call_of_the_shape_that_the_demo
                 *converted("google_ads", model),
             ]
         )
-        loads = "ref('stg_loads__newest_days')" if by_load else "source('core', 'loads')"
+        loads = "ref('stg_loads__newest_days')" if by_load else "ref('stg_loads__newest_lists')"
         end = f"}}), 'raw_google_ads', {loads}), {arguments}) }}}}"
         assert text.rstrip().endswith(end), model
         # No model names a seed, as none of the demo does: the checks of int_g1_failures read them.
@@ -2072,7 +2118,7 @@ def test_each_staging_model_of_meta_ads_is_one_call_of_the_shape_that_the_demo_s
         by_load = model in BY_LOAD
         reader = "newest_load" if by_load else "newest_list"
         assert text.count(f"{{{{ {macro}({reader}({relations[0]}") == 1, model
-        loads = "ref('stg_loads__newest_days')" if by_load else "source('core', 'loads')"
+        loads = "ref('stg_loads__newest_days')" if by_load else "ref('stg_loads__newest_lists')"
         assert f"}}), 'raw_meta_ads', {loads})" in text, model
         # The child tables of the actions follow the rows of their insights, in this order.
         assert [text.index(relation) for relation in relations] == sorted(
@@ -2221,7 +2267,7 @@ def test_every_union_of_the_platforms_reads_meta_ads_and_the_loads_show_it():
         for name in staged:
             assert f"from {{{{ ref('{name}') }}}}" in text, (model, name)
         if model != "int_conversion_actions__resolved" and model != "int_accounts__current":
-            assert "{{ newest_lists('raw_meta_ads', source('core', 'loads')) }}" in text, model
+            assert "{{ newest_list_accounts(ref('stg_loads__newest_lists')) }}" in text, model
     totals = (DBT / "models" / "core" / "platform_totals_daily.sql").read_text(encoding="utf-8")
     assert "from {{ ref('stg_meta_ads__account_totals') }}" in totals
     loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
@@ -2316,7 +2362,7 @@ def test_each_staging_model_of_tiktok_ads_is_one_call_of_the_shape_that_the_demo
         by_load = model in BY_LOAD
         reader = "newest_load" if by_load else "newest_list"
         assert text.count(f"{{{{ {macro}({reader}({relation}") == 1, model
-        loads = "ref('stg_loads__newest_days')" if by_load else "source('core', 'loads')"
+        loads = "ref('stg_loads__newest_days')" if by_load else "ref('stg_loads__newest_lists')"
         assert f"}}), 'raw_tiktok_ads', {loads})" in text, model
         assert text.count("relation_or_empty(") == 1, model
         arguments = ", ".join(
@@ -2523,7 +2569,7 @@ def test_every_union_of_the_platforms_reads_tiktok_ads_and_the_loads_show_it():
         for name in staged:
             assert f"from {{{{ ref('{name}') }}}}" in text, (model, name)
         if model != "int_conversion_actions__resolved" and model != "int_accounts__current":
-            assert "{{ newest_lists('raw_tiktok_ads', source('core', 'loads')) }}" in text, model
+            assert "{{ newest_list_accounts(ref('stg_loads__newest_lists')) }}" in text, model
     totals = (DBT / "models" / "core" / "platform_totals_daily.sql").read_text(encoding="utf-8")
     assert "from {{ ref('stg_tiktok_ads__account_totals') }}" in totals
     loads = (DBT / "models" / "ops" / "ops_loads.sql").read_text(encoding="utf-8")
@@ -2595,7 +2641,7 @@ def test_each_staging_model_of_ga4_is_one_call_of_the_shape_that_the_demo_shares
         else:
             # The name of a property holds its ID after properties/, as in demo_web.
             account = LIST_ACCOUNTS[("demo_web", model)]
-            assert f"}}), 'raw_ga4', source('core', 'loads'), {account})" in text, model
+            assert f"}}), 'raw_ga4', ref('stg_loads__newest_lists'), {account})" in text, model
         assert text.count("relation_or_empty(") == 1, model
         assert text.rstrip().endswith("), 'ga4') }}"), model
         assert "depends_on" not in text, model
@@ -2740,7 +2786,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 429, counted
+    assert counted == 435, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text
@@ -3046,19 +3092,27 @@ def test_the_views_of_the_core_take_their_accounts_from_one_place():
         assert "from {{ ref('int_accounts__current') }} as a" in text, view
         assert "join {{ ref('dim_account') }} as d" in text, view
         # The accounts whose newest list this run reads, of every platform of the ads, and the
-        # entities of the core that such a list no longer names (ADR-0036).
-        for source in (*(f"raw_{code}" for code in SHAPED_ADS), *(f"raw_{c}" for c in REAL_ADS)):
-            assert f"{{{{ newest_lists('{source}', source('core', 'loads')) }}}}" in text, view
+        # entities of the core that such a list no longer names (ADR-0036), from the table of
+        # the newest lists, with its statistics (C8 of the audit of 24 November 2026).
+        assert "lists as (\n    {{ newest_list_accounts(ref('stg_loads__newest_lists')) }}\n)" in (
+            text
+        ), view
+        assert "newest_lists(" not in text, view
+        # The accounts and the accounts of the lists join on one key, which the planner estimates
+        # once, and never on the platform and the account apart.
+        assert text.count("{{ account_key(") == 8, view
+        assert "and a.account_id = " not in text, view
+        assert "and l.account_id = " not in text, view
         assert f"from {{{{ source('core', '{dimension}') }}}} as k" in text, view
         assert "when l.account_id is not null then false" in text, view
         model = (CORE / f"{dimension}.sql").read_text(encoding="utf-8")
         assert f"from {{{{ ref('{view}') }}}}" in model, dimension
 
 
-def test_the_versions_of_the_entities_are_snapshots_of_the_views_of_staging():
+def test_the_versions_of_the_entities_are_snapshots_of_the_models_of_staging():
     # ADR-0036 and R1 (#187): snapshots with the strategy check on a list of columns, hard_deletes
     # ignore and dbt_valid_to_current, in core, which transformer owns and so describes; each
-    # reads a view of staging and never a source, which fails while its table does not exist.
+    # reads a model of staging and never a source, which fails while its table does not exist.
     project = PROJECT_FILE.read_text(encoding="utf-8")
     assert 'snapshot-paths: ["snapshots"]' in project
     section = (
