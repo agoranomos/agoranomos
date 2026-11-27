@@ -340,14 +340,24 @@ where unknown_time_zone
     each, as SQL: lists are the staging models of the lists, each with the column of its account.
     The check of the rates reads them, the rates of the core, which keep the currencies of the
     accounts that a run reads, those in quarantine too (core_fx_rates_daily), and ops_rates, which
-    names the days without a rate of an account in quarantine. -#}
+    names the days without a rate of an account in quarantine.
+    Each list goes through relation_or_empty: marts-init builds the rates of the core and the
+    views of ops at the first ./agoranomos up of a release, before any run of the transform, and a
+    list that the release before lacked, as those of TikTok and GA4 after v0.6.0, does not exist
+    yet. Such a list then gives no currency, as the deployment has no account of its source.
+    marts-init builds no list itself: dbt replaces a view by dropping the old one with cascade,
+    which would take int_accounts__current and the views over it until the next run of the
+    transform, also between two nodes of a run. A list that exists keeps the definition of its
+    release until that run, which gives these three columns too, as the check of the rates of
+    v0.6.0 read them. In a run
+    of the transform every list exists, as dbt builds each before the nodes that read it. -#}
 {% macro listed_currencies(lists) -%}
     {%- for relation, account in lists %}
     {%- if not loop.first %}
     union all
     {%- endif %}
     select platform as source, {{ account }} as account_id, currency
-    from {{ relation }}
+    from {{ relation_or_empty(relation, {'platform': 'text', account: 'text', 'currency': 'text'}) }}
     {%- endfor %}
 {%- endmacro %}
 
