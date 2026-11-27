@@ -73,9 +73,12 @@ GROUPS: tuple[tuple[str, ...], ...] = (
         "test_missed_load.py",
         "test_ops.py",
     ),
-    # 4: the transform, TikTok, the alerts and the image.
+    # 4: the transform, TikTok, the short cycles of Meta and of TikTok, the alerts and the image.
     (
         "test_demo_transform.py",  # 39, and 39 to 41
+        # Four loads and one run of the transform, as test_meta_ads.py before its second run: about
+        # 8 minutes by that file, not measured yet (#412, 26 November 2026).
+        "test_short_cycle.py",
         # A load and a run of the transform, as test_meta_ads.py: about 8 minutes by that file,
         # not measured yet (C5d of #225, 23 November 2026).
         "test_tiktok_ads.py",

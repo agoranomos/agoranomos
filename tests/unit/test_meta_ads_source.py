@@ -205,6 +205,12 @@ def insight(account_id, level, day):
     return row
 
 
+def only(row, params):
+    """A row with the fields that a request names alone, as the Graph API answers."""
+    asked = params["fields"].split(",")
+    return {name: value for name, value in row.items() if name in asked}
+
+
 def days_of(params):
     found = json.loads(params["time_range"])
     first, last = date.fromisoformat(found["since"]), date.fromisoformat(found["until"])
@@ -294,14 +300,16 @@ class Graph:
         if path == f"{RUN_ID}/insights":
             asked = self.runs[-1]
             account_id = ONE
-            rows = [insight(account_id, asked["level"], day) for day in days_of(asked)]
+            rows = [only(insight(account_id, asked["level"], day), asked) for day in days_of(asked)]
             return StandInResponse(
                 200, {"data": rows, "paging": {"cursors": {"before": "MA", "after": "MQ"}}}
             )
         account_id = path.split("/")[0].removeprefix("act_")
         edge = path.split("/")[1]
         if edge == "insights":
-            rows = [insight(account_id, params["level"], day) for day in days_of(params)]
+            rows = [
+                only(insight(account_id, params["level"], day), params) for day in days_of(params)
+            ]
             return StandInResponse(200, {"data": rows, "paging": {}}, self.headers)
         # The lists refuse DELETED in effective_status, alone or with other values, as the stand
         # S6 saw in November 2026, and return no deleted object.
@@ -1892,3 +1900,246 @@ def test_the_ids_of_a_query_are_checked_account_ids_only(meta):
     for wrong in ([], ["act_1"], ["1'; DROP TABLE x; --"]):
         with pytest.raises(ValueError, match="one account ID of digits"):
             module.checked(wrong)
+
+
+# The whole loads of the two accounts up to their yesterday at NOW: the 27th in Los Angeles, the
+# 28th in Berlin, as recorded() gives them, the day of the load and its last day.
+WHOLE = [
+    (ONE, date(2026, 10, 28), date(2026, 10, 27)),
+    (TWO, date(2026, 10, 29), date(2026, 10, 28)),
+]
+
+
+def insights_requests(graph):
+    return {
+        url.removeprefix(f"{BASE}/act_").split("/")[0]: params
+        for method, url, params in graph.requests
+        if method == "GET" and url.endswith("/insights")
+    }
+
+
+def test_an_intraday_load_takes_the_current_day_of_each_account_without_actions(meta):
+    # ADR-0051 (#412): at 02:00 UTC on 29 October it is still the 28th in Los Angeles and the 29th
+    # in Berlin. A whole load covers the day before of each, so each takes its current day alone,
+    # in the time zone in which Meta reports its insights, as a load of the kind intraday, into
+    # insights_campaign and the journal, and nothing else.
+    module, state, made, extensions = meta
+    state.update(loads=1, reloads=WHOLE)
+    counts = module.load_intraday(NOW, extensions)
+    assert counts == {"insights_campaign": 2}
+    [(rows, hints)] = made["pipelines"][0].runs
+    assert set(rows) == {"insights_campaign", "_agoranomos_loads"}
+    assert hints["insights_campaign"]["write_disposition"] == "append"
+    assert set(hints["insights_campaign"]["columns"]) == set(module.columns("insights_campaign"))
+    record = {row["account_id"]: row for row in rows["_agoranomos_loads"]}
+    assert {
+        account_id: (row["window_from"], row["window_to"], row["as_of"], row["kind"], row["status"])
+        for account_id, row in record.items()
+    } == {
+        ONE: (date(2026, 10, 28), date(2026, 10, 28), date(2026, 10, 28), "intraday", "loaded"),
+        TWO: (date(2026, 10, 29), date(2026, 10, 29), date(2026, 10, 29), "intraday", "loaded"),
+    }
+    asked = insights_requests(made["graph"])
+    assert json.loads(asked[ONE]["time_range"]) == {"since": "2026-10-28", "until": "2026-10-28"}
+    assert json.loads(asked[TWO]["time_range"]) == {"since": "2026-10-29", "until": "2026-10-29"}
+    # The rows carry no actions, so a partial day has no conversions, none and not zero.
+    stats = rows["insights_campaign"]
+    assert [(row["account_id"], row["date_start"]) for row in stats] == [
+        (ONE, "2026-10-28"),
+        (TWO, "2026-10-29"),
+    ]
+    assert all("actions" not in row and "action_values" not in row for row in stats)
+    assert stats[0]["spend"] == "12.34"
+
+
+def test_an_intraday_load_asks_the_account_and_the_insights_of_its_campaigns(meta):
+    # Two calls for each account, each a point of its score, against eight and their pages for a
+    # daily load: no list, no totals, no ad set and no ad, and no report run.
+    module, state, made, extensions = meta
+    state.update(loads=1, reloads=WHOLE)
+    module.load_intraday(NOW, extensions)
+    graph = made["graph"]
+    assert paths(graph) == [
+        ("GET", f"act_{ONE}"),
+        ("GET", f"act_{ONE}/insights"),
+        ("GET", f"act_{TWO}"),
+        ("GET", f"act_{TWO}/insights"),
+    ]
+    params = insights_requests(graph)[ONE]
+    assert params["level"] == "campaign"
+    assert params["fields"] == (
+        "account_id,account_name,account_currency,campaign_id,campaign_name,date_start,"
+        "date_stop,impressions,clicks,inline_link_clicks,spend"
+    )
+    assert "action_attribution_windows" not in params
+    assert params["time_increment"] == "1"
+    # The campaigns at every effective_status, deleted ones too, as for the daily load.
+    [filtering] = json.loads(params["filtering"])
+    assert filtering["field"] == "campaign.effective_status"
+    assert filtering["value"] == list(module.LEVEL_STATUSES["campaign"])
+    # Signed in as the daily load is, with the token in the header.
+    assert set(graph.tokens) == {TOKEN}
+
+
+def test_an_intraday_load_takes_the_day_before_while_no_whole_load_covers_it(meta):
+    # ADR-0051, "The day before, after midnight": between midnight in the account and the daily
+    # load at 10:07 UTC, the day before goes on growing, in the same request as the current day.
+    module, state, made, extensions = meta
+    state.update(
+        loads=1,
+        reloads=[
+            (ONE, date(2026, 10, 27), date(2026, 10, 26)),
+            (TWO, date(2026, 10, 28), date(2026, 10, 27)),
+        ],
+    )
+    module.load_intraday(NOW, extensions)
+    [(rows, _)] = made["pipelines"][0].runs
+    windows = {
+        row["account_id"]: (row["window_from"], row["window_to"])
+        for row in rows["_agoranomos_loads"]
+    }
+    assert windows == {
+        ONE: (date(2026, 10, 27), date(2026, 10, 28)),
+        TWO: (date(2026, 10, 28), date(2026, 10, 29)),
+    }
+    asked = insights_requests(made["graph"])
+    assert json.loads(asked[TWO]["time_range"]) == {"since": "2026-10-28", "until": "2026-10-29"}
+    assert len(rows["insights_campaign"]) == 4
+    # The day that the core accepted counts too, the later of the two.
+    state.update(accepted=[(ONE, date(2026, 10, 27))])
+    made["pipelines"].clear()
+    module.load_intraday(NOW, extensions)
+    [(rows, _)] = made["pipelines"][0].runs
+    windows = {row["account_id"]: row["window_from"] for row in rows["_agoranomos_loads"]}
+    assert windows[ONE] == date(2026, 10, 28)
+
+
+def test_an_intraday_load_leaves_an_account_without_a_whole_load_for_its_first_daily_load(
+    meta, caplog
+):
+    # The check of the accounts of the transform knows an account of an intraday load from the
+    # list of a whole load (dbt/macros/quarantine.sql), so an account that none has taken waits.
+    module, state, made, extensions = meta
+    state.update(loads=1, reloads=WHOLE[1:])
+    with caplog.at_level("INFO"):
+        module.load_intraday(NOW, extensions)
+    assert {path.split("/")[0] for _, path in paths(made["graph"])} == {f"act_{TWO}"}
+    assert f"1 Meta ad accounts ({ONE}) have had no whole load yet" in caplog.text
+    # With no whole load at all, nothing: no request, no run of dlt.
+    made["graph"].requests.clear()
+    made["pipelines"].clear()
+    state.update(loads=None, reloads=[])
+    assert module.load_intraday(NOW, extensions) is None
+    assert made["graph"].requests == []
+    assert [pipeline.runs for pipeline in made["pipelines"]] == [[]]
+
+
+def test_an_intraday_load_records_only_the_accounts_that_it_took_and_fails_at_the_end(meta):
+    # A failed account leaves no row: a row of the status failed would hold it in quarantine
+    # (load_failed) with its daily window, for a day that the next cycle reads again.
+    module, state, made, extensions = meta
+    state.update(loads=1, reloads=WHOLE)
+    graph = made["graph"]
+    graph.before = lambda method, path, params: (
+        error(200, message="Permissions error") if path.startswith(f"act_{TWO}") else None
+    )
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load_intraday(NOW, extensions)
+    assert str(raised.value).startswith(
+        f"1 of 2 Meta ad accounts failed, the other 1 is loaded: Meta ad account {TWO}: 400 "
+        "Permissions error (code 200"
+    )
+    # One loaded, so the task of the load succeeds and check_accounts fails the run.
+    assert raised.value.loaded == 1
+    [(rows, _)] = made["pipelines"][0].runs
+    assert [row["account_id"] for row in rows["_agoranomos_loads"]] == [ONE]
+    assert {row["account_id"] for row in rows["insights_campaign"]} == {ONE}
+    # When every account fails, nothing is written.
+    made["pipelines"].clear()
+    graph.before = lambda method, path, params: error(200, message="Permissions error")
+    with pytest.raises(module.AccountsFailed, match="none is loaded") as raised:
+        module.load_intraday(NOW, extensions)
+    # None loaded, so the task of the load fails (agoranomos_pipelines/outcome.py).
+    assert raised.value.loaded == 0
+    assert [pipeline.runs for pipeline in made["pipelines"]] == [[]]
+
+
+def test_an_intraday_load_refreshes_a_token_that_expires_as_the_daily_load_does(meta, monkeypatch):
+    # The same sign-in: the token of the Variable while it is young, and a refresh once it is 30
+    # days old, kept in the Variable for the daily load, which never runs at the same time (the
+    # pool meta_ads_load of one slot).
+    module, state, made, extensions = meta
+    monkeypatch.setenv("META_ADS_APP_ID", APP)
+    monkeypatch.setenv("META_ADS_APP_SECRET", SECRET)
+    state.update(loads=1, reloads=WHOLE)
+    variables, masked = Variables(), []
+    module.load_intraday(NOW, extensions, variables=variables, mask=masked.append)
+    [(key, value, _)] = variables.sets
+    assert key == module.VARIABLE
+    assert value["token"] == "RefreshedToken9876543210"
+    assert "RefreshedToken9876543210" in masked
+    signed = [token for token in made["graph"].tokens if token is not None]
+    assert set(signed) == {"RefreshedToken9876543210"}
+    # Each signed call carries the proof of the refreshed token.
+    expected = hmac.new(SECRET.encode(), b"RefreshedToken9876543210", hashlib.sha256).hexdigest()
+    proofs = {
+        params.get("appsecret_proof")
+        for _, url, params in made["graph"].requests
+        if not url.endswith("oauth/access_token")
+    }
+    assert proofs == {expected}
+
+
+def test_a_synchronous_timeout_of_the_current_day_goes_to_a_report_run_of_the_same_fields(meta):
+    # As in a daily load: no synchronous retry, and a report run of the same request, with no
+    # actions.
+    module, state, made, extensions = meta
+    state.update(loads=1, reloads=WHOLE[:1])
+    graph = made["graph"]
+    graph.before = lambda method, path, params: (
+        error(2, 1504044, "Service temporarily unavailable")
+        if method == "GET" and path == f"act_{ONE}/insights"
+        else None
+    )
+    module.load_intraday(NOW, extensions)
+    [run] = graph.runs
+    assert run["fields"] == ",".join(module.INTRADAY_FIELDS)
+    assert "action_attribution_windows" not in run
+    [(rows, _)] = made["pipelines"][0].runs
+    assert [row["date_start"] for row in rows["insights_campaign"]] == ["2026-10-28"]
+    assert all("actions" not in row for row in rows["insights_campaign"])
+
+
+def test_a_report_run_of_the_current_day_that_runs_past_its_time_fails_its_account(meta, clock):
+    # A report run that would not complete 15 minutes after the load began fails its account, so
+    # that the task ends within its 20 minutes and the next cycle reads the account again.
+    module, state, made, extensions = meta
+    state.update(loads=1, reloads=WHOLE[:1])
+    graph = made["graph"]
+
+    def before(method, path, params):
+        if method == "GET" and path == f"act_{ONE}/insights":
+            return error(100, 1487534, "Please reduce the amount of data")
+        if path == RUN_ID and "fields" in params:
+            clock["at"] += 5 * 60
+            return StandInResponse(
+                200, {"async_status": "Job Running", "async_percent_completion": 1}
+            )
+        return None
+
+    graph.before = before
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load_intraday(NOW, extensions)
+    assert (
+        "had not completed when the time of the short cycle ran out, 15 minutes after the load "
+        "began; the next cycle asks again" in str(raised.value)
+    )
+    assert made["waits"] == [5, 10, 20]
+    assert [pipeline.runs for pipeline in made["pipelines"]] == [[]]
+
+
+def test_the_time_of_the_short_cycle_fits_the_timeout_of_its_task(meta):
+    module, _, _, _ = meta
+    text = (DAGS / "agoranomos_meta_ads_intraday.py").read_text(encoding="utf-8")
+    assert '"execution_timeout": timedelta(minutes=20)' in text
+    assert module.INTRADAY_ENDS <= 20 * 60 - 5 * 60

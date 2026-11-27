@@ -49,10 +49,12 @@ def test_no_dag_file_imports_another():
         "agoranomos_google_ads_intraday",
         "agoranomos_meta_ads_daily",
         "agoranomos_meta_ads_history",
+        "agoranomos_meta_ads_intraday",
         "agoranomos_nbk_daily",
         "agoranomos_selfcheck",
         "agoranomos_tiktok_ads_daily",
         "agoranomos_tiktok_ads_history",
+        "agoranomos_tiktok_ads_intraday",
     } <= stems
     for path in DAG_FILES:
         others = stems - {path.stem}
@@ -70,14 +72,14 @@ RAW_NBK = "postgres://warehouse-db:5432/warehouse/raw_nbk/rates_daily"
 
 
 def test_the_transform_runs_when_the_demo_the_rates_or_a_platform_have_loaded():
-    # Any of ten conditions (ADR-0039): all five assets of the demo, the asset of the rates of the
-    # ECB, that of the rates of the Bank of Italy (ADR-0042), that of Google Ads (ADR-0032), that of
-    # Meta (ADR-0050), that of GA4 (ADR-0054), that of the rates of the NBK (ADR-0042), that of
-    # TikTok (ADR-0053), or that of the short cycle of the current day of Google Ads or of the demo
-    # (ADR-0051). The five of the demo stay one condition, so that one run of the history or of
-    # the daily load starts one run of the transform, after its last platform, and not one after
-    # its first platform and one more for the other four, the first reading tables whose days the
-    # loads still replace. One run at a time, as before.
+    # Any of twelve conditions (ADR-0039): all five assets of the demo, the asset of the rates of
+    # the ECB, that of the rates of the Bank of Italy (ADR-0042), that of Google Ads (ADR-0032),
+    # that of Meta (ADR-0050), that of GA4 (ADR-0054), that of the rates of the NBK (ADR-0042),
+    # that of TikTok (ADR-0053), or that of the short cycle of the current day of Google Ads, of
+    # Meta, of TikTok or of the demo (ADR-0051). The five of the demo stay one condition, so that
+    # one run of the history or of the daily load starts one run of the transform, after its last
+    # platform, and not one after its first platform and one more for the other four, the first
+    # reading tables whose days the loads still replace. One run at a time, as before.
     text = (DAGS / "agoranomos_demo_transform.py").read_text(encoding="utf-8")
     assert "schedule=LOADED" in text
     assert "max_active_runs=1" in text
@@ -92,10 +94,13 @@ def test_the_transform_runs_when_the_demo_the_rates_or_a_platform_have_loaded():
     assert (
         "LOADED = AssetAny(\n    DEMO_LOADED,\n    RAW_ECB,\n    RAW_BANK_OF_ITALY,\n"
         "    RAW_GOOGLE_ADS,\n    RAW_META_ADS,\n    RAW_GA4,\n    RAW_NBK,\n    RAW_TIKTOK_ADS,\n"
-        "    RAW_GOOGLE_ADS_INTRADAY,\n    RAW_DEMO_INTRADAY,\n)"
+        "    RAW_GOOGLE_ADS_INTRADAY,\n    RAW_META_ADS_INTRADAY,\n    RAW_TIKTOK_ADS_INTRADAY,\n"
+        "    RAW_DEMO_INTRADAY,\n)"
     ) in assets
     assert 'RAW_GOOGLE_ADS_INTRADAY = Asset("agoranomos_google_ads_intraday")' in assets
     assert 'RAW_DEMO_INTRADAY = Asset("agoranomos_demo_intraday")' in assets
+    assert 'RAW_META_ADS_INTRADAY = Asset("agoranomos_meta_ads_intraday")' in assets
+    assert 'RAW_TIKTOK_ADS_INTRADAY = Asset("agoranomos_tiktok_ads_intraday")' in assets
     assert "DEMO_LOADED |" not in assets
 
 
@@ -634,7 +639,7 @@ def test_the_load_of_meta_runs_before_that_of_google_ads_and_keeps_its_watermark
     assert 'SCHEDULE = CronTriggerTimetable("7 10 * * *", timezone="UTC")' in text
     assert 'CronTriggerTimetable("37 10 * * *"' in GOOGLE_ADS_DAILY.read_text(encoding="utf-8")
     assert decorators(META_ADS_DAILY)["load_meta_ads"] == [
-        "task(task_id='load_meta_ads', outlets=[RAW_META_ADS])"
+        "task(task_id='load_meta_ads', outlets=[RAW_META_ADS], pool=LOAD_POOL)"
     ]
     assert 'cache=context["asset_state_store"][RAW_META_ADS]' in text
     assets = ASSETS.read_text(encoding="utf-8")
@@ -716,7 +721,7 @@ def test_the_load_of_tiktok_runs_after_its_data_fix_and_keeps_its_watermarks():
     assert 'CronTriggerTimetable("37 10 * * *"' in GOOGLE_ADS_DAILY.read_text(encoding="utf-8")
     assert 'CronTriggerTimetable("7 10 * * *"' in META_ADS_DAILY.read_text(encoding="utf-8")
     assert decorators(TIKTOK_ADS_DAILY)["load_tiktok_ads"] == [
-        "task(task_id='load_tiktok_ads', outlets=[RAW_TIKTOK_ADS])"
+        "task(task_id='load_tiktok_ads', outlets=[RAW_TIKTOK_ADS], pool=LOAD_POOL)"
     ]
     assert 'cache=context["asset_state_store"][RAW_TIKTOK_ADS]' in text
     assets = ASSETS.read_text(encoding="utf-8")

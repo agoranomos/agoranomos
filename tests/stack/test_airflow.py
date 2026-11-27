@@ -35,11 +35,14 @@ GOOGLE_ADS_HISTORY = "agoranomos_google_ads_history"
 GOOGLE_ADS_INTRADAY = "agoranomos_google_ads_intraday"
 META_ADS_DAILY = "agoranomos_meta_ads_daily"
 META_ADS_HISTORY = "agoranomos_meta_ads_history"
+# The short cycles of the current day of Meta and of TikTok, which start paused too (ADR-0051).
+META_ADS_INTRADAY = "agoranomos_meta_ads_intraday"
 # The load of the rates of the NBK, which starts paused too (ADR-0042).
 NBK_DAILY = "agoranomos_nbk_daily"
 # The load of TikTok, which starts paused too (ADR-0053).
 TIKTOK_ADS_DAILY = "agoranomos_tiktok_ads_daily"
 TIKTOK_ADS_HISTORY = "agoranomos_tiktok_ads_history"
+TIKTOK_ADS_INTRADAY = "agoranomos_tiktok_ads_intraday"
 
 # The load of GA4 and its history, which start paused too (ADR-0054).
 GA4_DAILY = "agoranomos_ga4_daily"
@@ -58,8 +61,9 @@ TASK_RUNNERS = [s for s in ("airflow-scheduler", "airflow-worker") if s in LONG_
 # the type of the job.
 JOB_CHECKS = {"airflow-dag-processor": "DagProcessorJob", "airflow-triggerer": "TriggererJob"}
 # The pools that airflow-init sets on every start, and their sizes: the tasks of dbt (ADR-0027),
-# the loads of the demo, one at a time, and those of Google Ads, one at a time (ADR-0051).
-POOLS = {"dbt": 2, "demo_load": 1, "google_ads_load": 1}
+# the loads of the demo, one at a time, and those of Google Ads, of Meta and of TikTok, one at a
+# time each (ADR-0051).
+POOLS = {"dbt": 2, "demo_load": 1, "google_ads_load": 1, "meta_ads_load": 1, "tiktok_ads_load": 1}
 
 
 @pytest.fixture(scope="module")
@@ -132,7 +136,8 @@ def test_each_pool_has_its_slots_and_comes_back_at_the_next_start(
     # The tasks of dbt run in theirs at most two at a time, whatever AIRFLOW_PARALLELISM allows: the
     # memory of the container of the tasks has room for two processes of dbt (ADR-0027). The loads
     # of the history and of the daily load of the demo run in theirs one at a time, and so do the
-    # daily load of Google Ads, its history and its short cycle of the current day (ADR-0051).
+    # daily load of Google Ads, of Meta and of TikTok, its history and its short cycle of the
+    # current day, in the pool of each platform (ADR-0051).
     pools, _ = airflow_init_again
     assert pools[name]["slots"] == POOLS[name], pools[name]
     status, pool = api(airflow_url, token, "GET", f"/api/v2/pools/{name}")
@@ -397,9 +402,11 @@ def test_the_dag_processor_reports_no_import_error(airflow_url, token):
         GOOGLE_ADS_INTRADAY,
         META_ADS_DAILY,
         META_ADS_HISTORY,
+        META_ADS_INTRADAY,
         NBK_DAILY,
         TIKTOK_ADS_DAILY,
         TIKTOK_ADS_HISTORY,
+        TIKTOK_ADS_INTRADAY,
         GA4_DAILY,
         GA4_HISTORY,
     ):
@@ -419,9 +426,11 @@ def test_the_dag_processor_reports_no_import_error(airflow_url, token):
         GOOGLE_ADS_INTRADAY,
         META_ADS_DAILY,
         META_ADS_HISTORY,
+        META_ADS_INTRADAY,
         NBK_DAILY,
         TIKTOK_ADS_DAILY,
         TIKTOK_ADS_HISTORY,
+        TIKTOK_ADS_INTRADAY,
         GA4_DAILY,
         GA4_HISTORY,
     ],
@@ -443,7 +452,9 @@ def test_the_loads_of_the_real_sources_stay_paused(airflow_url, token, dag_id):
         (GOOGLE_ADS_DAILY, "load_google_ads"),
         (GOOGLE_ADS_INTRADAY, "load_google_ads_intraday"),
         (META_ADS_DAILY, "load_meta_ads"),
+        (META_ADS_INTRADAY, "load_meta_ads_intraday"),
         (TIKTOK_ADS_DAILY, "load_tiktok_ads"),
+        (TIKTOK_ADS_INTRADAY, "load_tiktok_ads_intraday"),
         (GA4_DAILY, "load_ga4"),
     ],
 )
