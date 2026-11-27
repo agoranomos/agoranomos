@@ -350,14 +350,21 @@ where unknown_time_zone
     transform, also between two nodes of a run. A list that exists keeps the definition of its
     release until that run, which gives these three columns too, as the check of the rates of
     v0.6.0 read them. In a run
-    of the transform every list exists, as dbt builds each before the nodes that read it. -#}
+    of the transform every list exists, as dbt builds each before the nodes that read it. A list
+    given as a string, the name of a table that a test of the stack makes as a stand-in, is read as
+    it is: relation_or_empty needs a relation, and a temporary table that the compiled SQL makes
+    does not exist when dbt compiles it. -#}
 {% macro listed_currencies(lists) -%}
     {%- for relation, account in lists %}
     {%- if not loop.first %}
     union all
     {%- endif %}
     select platform as source, {{ account }} as account_id, currency
+    {%- if relation is string %}
+    from {{ relation }}
+    {%- else %}
     from {{ relation_or_empty(relation, {'platform': 'text', account: 'text', 'currency': 'text'}) }}
+    {%- endif %}
     {%- endfor %}
 {%- endmacro %}
 

@@ -79,6 +79,11 @@ OPS = (
     "|| coalesce(first_day_without_rate_of_source::text, '') || '|' "
     "|| days_without_rate_of_source FROM ops.ops_rates WHERE rate_source = 'demo_fx'"
 )
+# The rows of the rates of the demo in raw of the loads that the core has not accepted.
+UNACCEPTED_RATES = (
+    "SELECT count(*) FROM raw_demo_fx.rates_daily AS r WHERE NOT EXISTS (SELECT FROM core.loads "
+    "AS l WHERE l.source = 'demo_fx' AND l.load_id = r._dlt_load_id AND l.status = 'accepted')"
+)
 # The daily load of the rates of the demo as its task makes it, as of a moment.
 LOAD_DAILY = """
 import sys
@@ -161,6 +166,13 @@ def idle(env, airflow_url, token):
         f"WHERE currency = '{CURRENCY}' OR reporting_currency = '{CURRENCY}'",
     )
     assert held == "0", f"core.fx_rates_daily holds rates of {CURRENCY}: see the docstring"
+    # A load of the rates of the demo that the core has not accepted, as the history that
+    # test_rates.py keeps in raw, would give the run the rates of the days before the window of
+    # the load of the test: a run of the transform accepts it and cleans raw first.
+    if warehouse_output(env, UNACCEPTED_RATES) != "0":
+        green(*transform(airflow_url, token))
+    left = warehouse_output(env, UNACCEPTED_RATES)
+    assert left == "0", f"raw_demo_fx holds {left} rows of loads that the core has not accepted"
 
 
 def test_a_currency_new_to_the_core_waits_in_quarantine_for_the_history_of_its_rates(

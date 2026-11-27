@@ -210,11 +210,17 @@ def test_the_rates_read_a_list_of_accounts_that_does_not_exist_yet_as_empty():
     text = (DBT / "macros" / "quarantine.sql").read_text(encoding="utf-8")
     body = text[text.index("{% macro listed_currencies(") :]
     body = body[: body.index("{%- endmacro %}")]
+    # A relation of ref() goes through relation_or_empty; a string, the name of a table that a
+    # test of the stack makes as a stand-in, is read as it is, as load_relation needs a relation.
     assert (
+        "    {%- if relation is string %}\n"
+        "    from {{ relation }}\n"
+        "    {%- else %}\n"
         "    from {{ relation_or_empty(relation, {'platform': 'text', account: 'text', "
         "'currency': 'text'}) }}\n"
+        "    {%- endif %}\n"
     ) in body
-    assert body.count("from ") == 1
+    assert body.count("from ") == 2
     for path in (
         DBT / "models" / "core" / f"{mi.RATES}.sql",
         DBT / "models" / "ops" / f"{mi.OPS_RATES}.sql",
