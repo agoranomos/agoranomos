@@ -1,0 +1,84 @@
+name: Trivy
+
+# Builds the three images that ./agoranomos up builds, the Airflow image (airflow/), the container
+# ai (ai/) and the proxy of server mode (caddy/), and scans each with Trivy for known
+# vulnerabilities, both of the packages of its system and of the Python and Go packages that it
+# holds (ADR-0012). So the scan covers the lock files with hashes too, airflow/dbt-requirements.txt
+# and ai/requirements.txt, and airflow/requirements.txt, as the images install them. A job fails on
+# a vulnerability of the severity CRITICAL or HIGH that has a fixed version (--ignore-unfixed): one
+# that no update can fix yet is left to the next run. The images that the stack pulls as they are,
+# such as those of PostgreSQL and Metabase, are not scanned.
+# The workflow runs on a pull request and a push to main that change what the three images
+# install: their Dockerfiles, the lock files that they install and the packages of the dbt
+# project, as a change of a DAG or of a plugin brings no package; every week, as new
+# vulnerabilities are published about images that did not change; and by hand.
+# It is not a required check: a base image can have a vulnerability that no change of this
+# repository fixes, and the maintainer decides what waits for it.
+# Trivy runs from its official image, pinned by digest, which Renovate keeps current. The image is
+# built with Docker and saved into the workspace as a file, which Trivy reads: a container step
+# cannot reach the daemon of Docker.
+on:
+  pull_request:
+    paths:
+      - airflow/Dockerfile
+      - airflow/requirements.txt
+      - airflow/dbt-requirements.txt
+      - dbt/packages.yml
+      - ai/Dockerfile
+      - ai/requirements.txt
+      - caddy/Dockerfile
+      - .github/workflows/trivy.yml
+  push:
+    branches: [main]
+    paths:
+      - airflow/Dockerfile
+      - airflow/requirements.txt
+      - airflow/dbt-requirements.txt
+      - dbt/packages.yml
+      - ai/Dockerfile
+      - ai/requirements.txt
+      - caddy/Dockerfile
+      - .github/workflows/trivy.yml
+  schedule:
+    - cron: "23 4 * * 2" # Tuesday 04:23 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  image:
+    name: Image (${{ matrix.image }})
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [airflow, ai, caddy]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the image
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          # The Airflow image takes the dbt project from a second build context, as compose.yaml
+          # gives it.
+          contexts=()
+          if [ "$IMAGE" = airflow ]; then
+            contexts=(--build-context dbt=./dbt)
+          fi
+          docker build "${contexts[@]}" --tag "agoranomos-$IMAGE:scan" "./$IMAGE"
+          docker save --output image.tar "agoranomos-$IMAGE:scan"
+      - name: Scan the image
+        uses: docker://aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+        with:
+          args: >-
+            image --input image.tar --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed
+            --exit-code 1 --no-progress
