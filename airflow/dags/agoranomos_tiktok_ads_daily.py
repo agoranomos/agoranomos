@@ -23,9 +23,13 @@ start one from the form of the run to load a period again.
 The DAG starts paused: a deployment unpauses it once its token and its advertisers are in place
 ([Connect TikTok](docs/how-to/connect-tiktok.md)). A load without a token, or without an advertiser
 of tiktok_ads in clients.toml, fails with a line that says so. An error of the API on one
-advertiser does not stop the others: the load takes them, records the failed advertiser in its
-journal, and the task fails at the end, without a retry, with one line that lists the advertisers
-and their errors (ADR-0035). A repeat is safe: each load replaces the days that it covers.
+advertiser does not stop the others: the load takes them and records the failed advertiser in its
+journal (ADR-0035). The task of the load then succeeds, so that its asset starts the transform for
+the advertisers that it took, and the last task, check_accounts, fails the run, without a retry,
+with one line that lists the advertisers and their errors, so that the alert of a failed run goes
+(outcome.py of the package); when no advertiser loaded, the task of the load fails with that line
+and starts nothing. A retry of the task, after any other error, loads every advertiser again. A
+repeat is safe: each load replaces the days that it covers.
 
 Its load runs in the pool tiktok_ads_load of one slot, which airflow-init sets on every start, with
 that of agoranomos_tiktok_ads_intraday, which loads the current day of each advertiser every few
@@ -37,9 +41,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from agoranomos_pipelines import outcome
 from agoranomos_pipelines.assets import RAW_TIKTOK_ADS
 from airflow.sdk import CronTriggerTimetable, Param, dag, get_current_context, task
-from airflow.sdk.exceptions import AirflowFailException
 from airflow.sdk.log import mask_secret
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
@@ -79,7 +83,7 @@ LOAD_POOL = "tiktok_ads_load"
 
 
 @task(task_id="load_tiktok_ads", outlets=[RAW_TIKTOK_ADS], pool=LOAD_POOL)
-def load_tiktok_ads() -> None:
+def load_tiktok_ads() -> str | None:
     # dlt is imported here and not at the top: the DAG processor parses this file often.
     from agoranomos_pipelines import loads, tiktok_ads
 
@@ -99,9 +103,11 @@ def load_tiktok_ads() -> None:
             mask=mask_secret,
         )
     except tiktok_ads.AdvertisersFailed as failed:
-        # The load took the other advertisers, so a retry would repeat it for nothing, and the next
-        # load takes the days that the failed advertisers missed. The line lists them (ADR-0004).
-        raise AirflowFailException(str(failed)) from None
+        # A retry would repeat the load for nothing, and the next load takes the days that the
+        # failed advertisers missed. The line lists them (ADR-0004): check_accounts fails the run
+        # with it, after the transform has started for the other advertisers, if any.
+        return outcome.line_of(failed)
+    return None
 
 
 @dag(
@@ -135,7 +141,7 @@ def load_tiktok_ads() -> None:
     doc_md=__doc__,
 )
 def agoranomos_tiktok_ads_daily():
-    load_tiktok_ads()
+    outcome.check_accounts(load_tiktok_ads())
 
 
 agoranomos_tiktok_ads_daily()

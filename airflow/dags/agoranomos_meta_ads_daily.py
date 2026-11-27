@@ -24,9 +24,13 @@ the form of the run to load a period again.
 The DAG starts paused: a deployment unpauses it once its token and its accounts are in place
 ([Connect Meta](docs/how-to/connect-meta.md)). A load without a token, or without an account of
 meta_ads in clients.toml, fails with a line that says so. An error of the API on one account does
-not stop the others: the load takes them, records the failed account in its journal, and the task
-fails at the end, without a retry, with one line that lists the accounts and their errors
-(ADR-0035). A repeat is safe: each load replaces the days that it covers.
+not stop the others: the load takes them and records the failed account in its journal
+(ADR-0035). The task of the load then succeeds, so that its asset starts the transform for the
+accounts that it took, and the last task, check_accounts, fails the run, without a retry, with one
+line that lists the accounts and their errors, so that the alert of a failed run goes (outcome.py
+of the package); when no account loaded, the task of the load fails with that line and starts
+nothing. A retry of the task, after any other error, loads every account again. A repeat is safe:
+each load replaces the days that it covers.
 
 Its load runs in the pool meta_ads_load of one slot, which airflow-init sets on every start, with
 that of agoranomos_meta_ads_intraday, which loads the current day of each account every few hours
@@ -40,9 +44,9 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime, timedelta
 
+from agoranomos_pipelines import outcome
 from agoranomos_pipelines.assets import RAW_META_ADS
 from airflow.sdk import CronTriggerTimetable, Param, Variable, dag, get_current_context, task
-from airflow.sdk.exceptions import AirflowFailException
 from airflow.sdk.log import mask_secret
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
@@ -82,7 +86,7 @@ LOAD_POOL = "meta_ads_load"
 
 
 @task(task_id="load_meta_ads", outlets=[RAW_META_ADS], pool=LOAD_POOL)
-def load_meta_ads() -> None:
+def load_meta_ads() -> str | None:
     # dlt is imported here and not at the top: the DAG processor parses this file often.
     from agoranomos_pipelines import loads, meta_ads
 
@@ -106,9 +110,11 @@ def load_meta_ads() -> None:
             mask=mask_secret,
         )
     except meta_ads.AccountsFailed as failed:
-        # The load took the other accounts, so a retry would repeat it for nothing, and the next
-        # load takes the days that the failed accounts missed. The line lists them (ADR-0004).
-        raise AirflowFailException(str(failed)) from None
+        # A retry would repeat the load for nothing, and the next load takes the days that the
+        # failed accounts missed. The line lists them (ADR-0004): check_accounts fails the run
+        # with it, after the transform has started for the other accounts, if any.
+        return outcome.line_of(failed)
+    return None
 
 
 @dag(
@@ -142,7 +148,7 @@ def load_meta_ads() -> None:
     doc_md=__doc__,
 )
 def agoranomos_meta_ads_daily():
-    load_meta_ads()
+    outcome.check_accounts(load_meta_ads())
 
 
 agoranomos_meta_ads_daily()

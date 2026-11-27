@@ -80,8 +80,9 @@ A load reads each account whole before dlt sees any of it, into a file for each 
 page at a time. An error of the API on one account is caught at the account, which leaves nothing
 in the load; the load takes the other accounts, records the failed account in _agoranomos_loads
 with the status failed and the text of the error, and fails at the end with one line that lists
-the accounts and their errors (ADR-0004, ADR-0035). What the API returns is data: a campaign name
-can carry any text, and nothing here acts on it."""
+the accounts and their errors (ADR-0004, ADR-0035); the task of the load succeeds when it took
+another account, so that the transform takes it, and the run fails after it (outcome.py). What the
+API returns is data: a campaign name can carry any text, and nothing here acts on it."""
 
 from __future__ import annotations
 
@@ -198,9 +199,15 @@ CLIENT = {
 # documentation/ads-commerce/marketing-api/overview/rate-limiting, and of the Graph API,
 # https://developers.facebook.com/docs/graph-api/overview/rate-limiting/); and 1 and 2, for which
 # the Graph API says to wait and retry (https://developers.facebook.com/docs/graph-api/guides/
-# error-handling/), all read on 15 November 2026.
+# error-handling/), all read on 15 November 2026. Code 2 with the subcodes of INVALID_REQUEST is the
+# exception: a mistake of the request, which no retry helps.
 THROTTLED = frozenset({4, 17, 613, 80000, 80003, 80004, 80014})
 TEMPORARY = frozenset({1, 2})
+# The errors that fail the account at once, with no retry: code 2 with subcode 1504041, "Invalid
+# Breakdowns", and with 1504042, "Invalid Custom Metrics", mistakes of the request, on a synchronous
+# or an asynchronous request (Ads Insights Error Codes, https://developers.facebook.com/
+# documentation/ads-commerce/marketing-api/insights/error-codes, read on 25 November 2026).
+INVALID_REQUEST = frozenset({(2, 1504041), (2, 1504042)})
 THROTTLE_ATTEMPTS = 5
 # Too much data per call: code 100 with subcode 1487534, on a synchronous or an asynchronous
 # request (Limits and best practices of the Insights API, https://developers.facebook.com/
@@ -413,9 +420,16 @@ class TooMuchData(Slow):
 
 
 class AccountsFailed(MetaAdsError):
-    """The load took the other accounts, and these failed: one line that counts them and lists each
-    account with the error of the API (ADR-0004). A retry of the task would repeat the whole load
-    and gain nothing: the next load takes the days that the failed accounts missed."""
+    """The load took the other accounts, if any, and these failed: one line that counts them and
+    lists each account with the error of the API (ADR-0004), and loaded, how many accounts the load
+    took. The task of the load succeeds when it took one, so that the transform takes them, and the
+    last task of the DAG fails the run with the line; with none, the task fails (outcome.py). A
+    retry would repeat the whole load and gain nothing: the next load takes the days that the
+    failed accounts missed."""
+
+    def __init__(self, line: str, loaded: int) -> None:
+        super().__init__(line)
+        self.loaded = loaded
 
 
 @dataclass
@@ -875,8 +889,9 @@ class Api:
         a temporary one, waits and asks again, up to THROTTLE_ATTEMPTS calls; too much data per
         call raises TooMuchData, a timeout or an error of the server after the retries of dlt
         raises Slow, and so does an error whose code and subcode are in slow, at once, which only
-        the synchronous request of insights passes, with SYNC_TIMEOUTS; any other error raises
-        MetaAdsError, with the error of the API and no secret.
+        the synchronous request of insights passes, with SYNC_TIMEOUTS; an error in INVALID_REQUEST
+        raises MetaAdsError at once, with no retry; any other error raises MetaAdsError, with the
+        error of the API and no secret.
         Each call counts in the score of the account."""
         for attempt in range(1, THROTTLE_ATTEMPTS + 1):
             sent = {**params, **(self.auth if sign else {})}
@@ -909,6 +924,8 @@ class Api:
                 raise self.fail(subject, said, Slow)
             if (code, subcode) in slow:
                 raise self.fail(subject, said, Slow)
+            if (code, subcode) in INVALID_REQUEST:
+                raise self.fail(subject, said)
             if code in THROTTLED | TEMPORARY and attempt < THROTTLE_ATTEMPTS:
                 wait = found.reset or THROTTLE_WAIT * 2 ** (attempt - 1)
                 log.warning(
@@ -1476,7 +1493,7 @@ def load(
             ", ".join(left),
         )
     if failed:
-        raise AccountsFailed(failure_line(failed, len(read)))
+        raise AccountsFailed(failure_line(failed, len(read)), len(read))
     return counts
 
 
@@ -1569,5 +1586,5 @@ def load_intraday(
         )
     log.info("%d calls to the Graph API for %d accounts", api.requests, len(wanted))
     if failed:
-        raise AccountsFailed(failure_line(failed, len(read)))
+        raise AccountsFailed(failure_line(failed, len(read)), len(read))
     return counts

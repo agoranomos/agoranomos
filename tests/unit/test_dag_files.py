@@ -710,7 +710,7 @@ def test_the_load_of_tiktok_starts_paused_and_masks_its_token():
         ["CronTriggerTimetable", "Param", "dag", "get_current_context", "task"],
     ) in imports(TIKTOK_ADS_DAILY)
     assert "except tiktok_ads.AdvertisersFailed as failed:" in text
-    assert "raise AirflowFailException(str(failed)) from None" in text
+    assert "return outcome.line_of(failed)" in text
 
 
 def test_the_load_of_tiktok_runs_after_its_data_fix_and_keeps_its_watermarks():

@@ -6,6 +6,8 @@ decision-makers: Andrei Gromov
 
 # One deployment is one business, and clients group its ad accounts
 
+Superseded in part by [ADR-0041](0041-run-an-agency-as-one-deployment.md): the sentence "An agency or a freelancer runs one deployment for each business that it serves" of "One business", the rule of one deployment for each business, as an agency whose clients get no login runs one deployment for all of them, which only its staff read. The rest of this record stays accepted.
+
 ## Context and Problem Statement
 
 agoranomos is to model the advertising statistics of a business: its ad accounts on several platforms and its web analytics, and later its CRM ([ADR-0025](0025-model-advertising-statistics-once.md)). A business often runs more than one brand, shop or legal entity, each with ad accounts of its own, and people ask for the numbers of each. An agency or a freelancer serves several businesses. What one deployment holds decides what a sum over the marts means, and what the permissions of Metabase and the planned AI access have to separate.
@@ -61,6 +63,6 @@ The other options were not chosen for these reasons:
 
 ## More Information
 
-* **Implementation status, as of October 2026:** in place for v0.2.0: `marts.clients`, the client of each account in `marts.ad_accounts` and in the facts, `extensions/model/clients.toml` with its checks, its load into `raw_settings` by the first task of the transform, the clients of the demo from a file of the base package, and the default client `unassigned` with the test that warns about it. The hosted version is planned for later.
+* **Implementation status, as of October 2026:** in place for v0.2.0: `marts.clients`, the client of each account in `marts.ad_accounts` and in the facts, `extensions/model/clients.toml` with its checks, its load into `raw_settings` by the first task of the transform, the clients of the demo from a file of the base package, and the default client `unassigned` with the test that warns about it. As of November 2026 that test is `assert_every_account_with_data_is_in_the_settings` of [ADR-0044](0044-keep-the-core-for-good-and-change-it-by-migrations.md), which warns while the core holds rows of an account that no file names: the connectors load only the accounts that the files name, so such an account has data from before it left them, and `assert_every_account_has_a_client`, which warned about the same accounts a second time, is gone. The hosted version is planned for later.
 * Metabase: "Row and column security is only available on Pro and Enterprise plans" ([Row and column security](https://www.metabase.com/docs/latest/permissions/row-and-column-security), the documentation of Metabase 0.64, read on 12 October 2026).
 * Related decisions: [ADR-0004](0004-ingest-with-dlt.md) (sources load with dlt as `loader`), [ADR-0013](0013-keep-extensions-apart-from-the-base-package.md) (extensions apart from the base package), [ADR-0016](0016-keep-the-metadata-of-the-marts-as-code.md) (a data file of the deployment, the overrides of the metadata), [ADR-0025](0025-model-advertising-statistics-once.md) (the model).

@@ -921,6 +921,8 @@ def test_a_code_other_than_0_fails_the_advertiser_even_with_http_200(tiktok):
         f"1 of 2 TikTok advertisers failed, the other 1 is loaded: TikTok advertiser {ONE}: "
         "ad/get/ answered 200 Insufficient advertiser permission (code 40001"
     )
+    # One advertiser loaded: the task of the DAG succeeds with the line (outcome.py).
+    assert raised.value.loaded == 1
     rows = last_run(made)[0]
     # Nothing of the failed advertiser, and its neighbor whole.
     assert {r["advertiser_id"] for r in rows["campaigns"]} == {TWO}
@@ -933,8 +935,11 @@ def test_a_code_other_than_0_fails_the_advertiser_even_with_http_200(tiktok):
 def test_a_load_whose_every_advertiser_failed_writes_the_journal_alone(tiktok):
     module, _, made, extensions = tiktok
     made["api"].before = lambda path, params: refusal(40105, "Invalid access token")
-    with pytest.raises(module.AdvertisersFailed, match="2 of 2 TikTok advertisers failed, none"):
+    with pytest.raises(
+        module.AdvertisersFailed, match="2 of 2 TikTok advertisers failed, none"
+    ) as raised:
         module.load(NOW, extensions)
+    assert raised.value.loaded == 0
     rows = last_run(made)[0]
     assert list(rows) == ["_agoranomos_loads"]
     assert [r["status"] for r in rows["_agoranomos_loads"]] == ["failed", "failed"]
@@ -1399,14 +1404,18 @@ def test_an_intraday_load_records_only_the_advertisers_that_it_took_and_fails_at
         f"1 of 2 TikTok advertisers failed, the other 1 is loaded: TikTok advertiser {TWO}: "
         f"{REPORT} answered 200 No permission (code 40001"
     )
+    # One loaded, so the task of the load succeeds and check_accounts fails the run.
+    assert raised.value.loaded == 1
     rows, _ = last_run(made)
     assert [row["account_id"] for row in rows["_agoranomos_loads"]] == [ONE]
     assert {row["advertiser_id"] for row in rows["report_campaign_daily"]} == {ONE}
     # When every advertiser fails, nothing is written.
     made["pipelines"].clear()
     made["api"].before = lambda path, params: refusal(40001, "No permission")
-    with pytest.raises(module.AdvertisersFailed, match="none is loaded"):
+    with pytest.raises(module.AdvertisersFailed, match="none is loaded") as raised:
         module.load_intraday(NOW, extensions)
+    # None loaded, so the task of the load fails (agoranomos_pipelines/outcome.py).
+    assert raised.value.loaded == 0
     assert [pipeline.runs for pipeline in made["pipelines"]] == [[]]
 
 

@@ -25,10 +25,12 @@ leaves them out, so that a period, a KPI and its comparison take whole days, as 
 (metrics.py).
 
 The conversions of the statistics of the campaigns are those of the primary conversion actions of
-the deployment, conversions_primary, which every platform has, Meta included, and the tab of the
-platforms shows beside them the own metric of conversions of each platform, conversions, as its
-account shows it. The statistics of the ad groups and of the ads have only the metric of the
-platform: their conversions of the primary actions are a module (ADR-0036).
+the deployment, conversions_primary, which every platform has, Meta included, and their ROAS is
+the value of the same actions, Primary ROAS, which Meta and TikTok report too (ADR-0056). The tab
+of the platforms shows beside them the own metric of conversions of each platform, conversions,
+its value and its ROAS, as its account shows them. The statistics of the ad groups and of the ads
+have only the metric of the platform: their conversions of the primary actions are a module
+(ADR-0036).
 
 The questions need the fields of the marts for their filters: until Metabase shows the marts,
 before the first run of the transform, the dashboard waits, and a later start makes it.
@@ -84,6 +86,7 @@ KPIS = (
     "roas",
     "cost_per_primary_conversion",
     "primary_conversion_rate",
+    "primary_roas",
 )
 
 # The filters of the questions, by the names of their template tags: their display names, the type
@@ -149,8 +152,10 @@ TODAY_FILTERS = tuple(name for name in MART_FILTERS[AD_STATS] if name != "period
 # through a join along the foreign keys, in either direction (chain_filter.clj at the tag v0.64.1).
 # With the fields of each mart, the campaigns of one mart would join every other mart through the
 # clients, row by row, which ran into the statement timeout of metabase_reader on the demo (checked
-# on the stand, October 2026); with the fields of one mart, the values come with no join. The
-# statistics, unlike the mart ad_campaigns, offer only the campaigns that have some.
+# on the stand, October 2026); with the fields of one mart, the values come with no join. 0.64.4
+# and 0.64.7 keep that join from multiplying rows (metabase/metabase#83955 and #87098), which this
+# layout does not need either way. The statistics, unlike the mart ad_campaigns, offer only the
+# campaigns that have some.
 LINKED_FILTERS = ("client", "platform", "account", "campaign")
 LINKED_MART = AD_STATS
 
@@ -198,7 +203,9 @@ OTHER_TITLES = {
 }
 OTHER_TITLES["platform"] = "Platform Code"
 # Money in the reporting currency, and the decimals of the other numbers of the marts.
-MONEY = frozenset({"spend_reporting", "conversion_value_reporting"})
+MONEY = frozenset(
+    {"spend_reporting", "conversion_value_reporting", "conversion_value_primary_reporting"}
+)
 DECIMALS = {"conversions": 0, "conversions_primary": 0, "all_conversions": 0, "key_events": 0}
 
 # The texts of the cards of text, as facts for people and AI clients.
@@ -209,7 +216,10 @@ ABOUT = (
     "actions of this deployment, as each platform counts them, so a sum across platforms can count "
     "one conversion more than once; the tab Platforms shows beside them the conversions in the own "
     "metric of each platform, as its account shows them. The value of the conversions, and so "
-    "ROAS, is that of the own metric of each platform, none on Meta. The key events come from web "
+    "ROAS, is that of the primary actions too, which Meta and TikTok report, and each platform "
+    "credits a conversion by its own attribution model and windows, so a ROAS across platforms can "
+    "count the value of one purchase more than once; the tab Platforms shows beside it the ROAS of "
+    "the own metric of each platform, none on Meta and TikTok. The key events come from web "
     "analytics, which dates each by its event and credits it to one source, so they differ from "
     "the conversions of the platforms. Every card but Today, as of the load, counts the days that "
     "a whole load took: a day still in progress shows on that card alone."
@@ -306,8 +316,11 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
     clients."""
     ctr, cpc, cpm = kpis["ctr"], kpis["cpc"], kpis["cpm"]
     cpa, rate, roas = kpis["cost_per_conversion"], kpis["conversion_rate"], kpis["roas"]
-    # The KPIs of the primary actions, of the statistics of the campaigns alone.
+    # The KPIs of the primary actions, of the statistics of the campaigns alone: their ROAS stands
+    # where the cards of the campaigns show a ROAS, and the tab of the platforms shows both
+    # (ADR-0056).
     cpp, prate = kpis["cost_per_primary_conversion"], kpis["primary_conversion_rate"]
+    proas = kpis["primary_roas"]
     # The statistics of the campaigns, with the conversions of the primary actions, and those of
     # the ad groups and the ads, with the metric of the platform.
     results = [*totals("spend_reporting", "impressions", "clicks", "conversions_primary")]
@@ -319,9 +332,9 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
         "ctr",
         "cpc",
         cpp.slug,
-        "roas",
+        proas.slug,
     )
-    kpi_sql = [ratio(k) for k in (ctr, cpc, cpp, roas)]
+    kpi_sql = [ratio(k) for k in (ctr, cpc, cpp, proas)]
     lower_results = [*totals("spend_reporting", "impressions", "clicks", "conversions")]
     lower_measures = (
         "spend_reporting",
@@ -378,7 +391,7 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
             ratio(cpp),
             2,
         ),
-        trend("roas", "ROAS", roas.description, AD_STATS, roas.slug, ratio(roas), 3),
+        trend("roas", "ROAS", proas.description, AD_STATS, proas.slug, ratio(proas), 3),
         trend(
             "clicks",
             "Clicks",
@@ -478,12 +491,12 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
                 "spend_reporting",
                 "conversions_primary",
                 cpp.slug,
-                roas.slug,
+                proas.slug,
             ),
             "query": grouped(
                 AD_STATS,
                 ("platform_name",),
-                [*totals("spend_reporting", "conversions_primary"), ratio(cpp), ratio(roas)],
+                [*totals("spend_reporting", "conversions_primary"), ratio(cpp), ratio(proas)],
                 "spend_reporting DESC",
             ),
             "layout": {"row": 17, "col": 0, "size_x": 12, "size_y": 6},
@@ -523,12 +536,12 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
                 "spend_reporting",
                 "conversions_primary",
                 cpp.slug,
-                roas.slug,
+                proas.slug,
             ),
             "query": grouped(
                 AD_STATS,
                 ("campaign_name", "platform_name"),
-                [*totals("spend_reporting", "conversions_primary"), ratio(cpp), ratio(roas)],
+                [*totals("spend_reporting", "conversions_primary"), ratio(cpp), ratio(proas)],
                 "spend_reporting DESC",
                 limit=10,
             ),
@@ -559,8 +572,9 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
             "name": "Results by platform",
             "description": (
                 "The statistics and every KPI of each platform: the conversions of the primary "
-                "conversion actions of the deployment, and the conversions in the own metric of "
-                "the platform, as its account shows them, none on Meta, with the KPIs of each."
+                "conversion actions of the deployment and their value, and the conversions in the "
+                "own metric of the platform and their value, as its account shows them, none on "
+                "Meta and no value on TikTok, with the KPIs of each, ROAS among them."
             ),
             "display": "table",
             "mart": AD_STATS,
@@ -571,16 +585,21 @@ def questions(kpis: Mapping[str, metrics.Declared]) -> tuple[dict[str, Any], ...
                 "clicks",
                 "conversions_primary",
                 "conversions",
+                "conversion_value_primary_reporting",
                 "conversion_value_reporting",
-                *(k.slug for k in (ctr, cpc, cpm, cpp, prate, cpa, rate, roas)),
+                *(k.slug for k in (ctr, cpc, cpm, cpp, prate, proas, cpa, rate, roas)),
             ),
             "query": grouped(
                 AD_STATS,
                 ("platform_name",),
                 [
                     *results,
-                    *totals("conversions", "conversion_value_reporting"),
-                    *(ratio(k) for k in (ctr, cpc, cpm, cpp, prate, cpa, rate, roas)),
+                    *totals(
+                        "conversions",
+                        "conversion_value_primary_reporting",
+                        "conversion_value_reporting",
+                    ),
+                    *(ratio(k) for k in (ctr, cpc, cpm, cpp, prate, proas, cpa, rate, roas)),
                 ],
                 "spend_reporting DESC",
             ),

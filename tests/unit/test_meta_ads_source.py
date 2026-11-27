@@ -1026,6 +1026,8 @@ def test_a_paging_that_is_not_an_object_fails_the_account_only(meta):
     with pytest.raises(module.AccountsFailed, match="1 of 2 Meta ad accounts failed") as raised:
         module.load(NOW, extensions)
     assert "an answer whose paging is not an object" in str(raised.value)
+    # One account loaded: the task of the DAG succeeds with the line (outcome.py).
+    assert raised.value.loaded == 1
 
 
 def test_a_use_above_75_percent_waits_for_the_reset_time_and_is_logged(meta, caplog):
@@ -1232,6 +1234,22 @@ def test_the_unknown_error_on_the_account_or_a_list_still_waits_and_asks_again(m
     assert made["waits"] == [60, 120]
     assert paths(graph).count(("GET", path)) == 3
     assert not graph.runs
+
+
+@pytest.mark.parametrize(
+    ("subcode", "name"), [(1504041, "Invalid Breakdowns"), (1504042, "Invalid Custom Metrics")]
+)
+def test_a_mistake_of_the_request_fails_the_account_at_once_with_no_wait(meta, subcode, name):
+    module, _, made, extensions = meta
+    graph = made["graph"]
+    graph.before = lambda method, path, params: (
+        error(2, subcode, name) if path == f"act_{ONE}/adsets" else None
+    )
+    with pytest.raises(module.AccountsFailed) as raised:
+        module.load(NOW, extensions)
+    assert f"{name} (code 2, subcode {subcode})" in str(raised.value)
+    assert paths(graph).count(("GET", f"act_{ONE}/adsets")) == 1
+    assert made["waits"] == []
 
 
 def test_the_unknown_error_on_the_results_of_a_report_run_waits_and_asks_again(meta):
@@ -1701,8 +1719,9 @@ def test_a_load_whose_every_account_failed_writes_the_journal_alone(meta):
     )
     with pytest.raises(
         module.AccountsFailed, match="2 of 2 Meta ad accounts failed, none is loaded"
-    ):
+    ) as raised:
         module.load(NOW, extensions)
+    assert raised.value.loaded == 0
     [(rows, _)] = made["pipelines"][0].runs
     assert list(rows) == ["_agoranomos_loads"]
 
@@ -2030,14 +2049,18 @@ def test_an_intraday_load_records_only_the_accounts_that_it_took_and_fails_at_th
         f"1 of 2 Meta ad accounts failed, the other 1 is loaded: Meta ad account {TWO}: 400 "
         "Permissions error (code 200"
     )
+    # One loaded, so the task of the load succeeds and check_accounts fails the run.
+    assert raised.value.loaded == 1
     [(rows, _)] = made["pipelines"][0].runs
     assert [row["account_id"] for row in rows["_agoranomos_loads"]] == [ONE]
     assert {row["account_id"] for row in rows["insights_campaign"]} == {ONE}
     # When every account fails, nothing is written.
     made["pipelines"].clear()
     graph.before = lambda method, path, params: error(200, message="Permissions error")
-    with pytest.raises(module.AccountsFailed, match="none is loaded"):
+    with pytest.raises(module.AccountsFailed, match="none is loaded") as raised:
         module.load_intraday(NOW, extensions)
+    # None loaded, so the task of the load fails (agoranomos_pipelines/outcome.py).
+    assert raised.value.loaded == 0
     assert [pipeline.runs for pipeline in made["pipelines"]] == [[]]
 
 

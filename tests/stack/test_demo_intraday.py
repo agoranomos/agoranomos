@@ -249,7 +249,9 @@ def idle(env, airflow_url, token):
 def test_the_setting_gives_the_short_cycle_its_schedule_or_none(env, airflow_url, token):
     # The DAG in Airflow has the schedule of the setting in .env, none at 0, as CI runs the stack;
     # parsed in the container of the DAG processor, its file gives the schedule of the other value
-    # too (agoranomos_pipelines/intraday.py).
+    # too (agoranomos_pipelines/intraday.py). The hours keep away from the daily backup, BACKUP_TIME
+    # and BACKUP_TZ of .env, which compose.yaml gives the DAG processor, empty taking 03:00 and UTC.
+    backup = intraday.backup_minutes(env.get("BACKUP_TIME") or "", env.get("BACKUP_TZ") or "")
     hours = intraday.period(env.get("AGORANOMOS_INTRADAY_HOURS") or "")
     body = wait_for_dag(airflow_url, token, INTRADAY)
     summary = body.get("timetable_summary")
@@ -257,8 +259,11 @@ def test_the_setting_gives_the_short_cycle_its_schedule_or_none(env, airflow_url
         assert body.get("next_dagrun_run_after") is None, body.get("next_dagrun_run_after")
         assert (summary or "None") == "None", summary
     else:
-        assert summary == intraday.cron(hours), summary
-    for value, wanted in (("0", "None|NullTimetable"), ("3", "27 */3 * * *|CronTriggerTimetable")):
+        assert summary == intraday.cron(hours, backup), summary
+    for value, wanted in (
+        ("0", "None|NullTimetable"),
+        ("3", f"{intraday.cron(3, backup)}|CronTriggerTimetable"),
+    ):
         result = compose(
             "exec",
             "-T",

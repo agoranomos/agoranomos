@@ -4,19 +4,26 @@ Graph API faked, reaches the core and marts.ad_stats_campaign_daily through the 
 transform; an account whose campaigns do not add up to its totals goes to quarantine with
 totals_differ (G0a of ADR-0035), and a run after it that reads no new load of Meta does not stop
 the source for the one account that it still holds; an ad that only the statistics name gets a
-stub in its dimension (ADR-0036); and a campaign day with no impressions, link clicks or spend and
-a purchase keeps its row of statistics, whose conversions_primary counts the purchase (ADR-0036).
+stub in its dimension (ADR-0036); a campaign day with no impressions, link clicks or spend and
+a purchase keeps its row of statistics, whose conversions_primary counts the purchase (ADR-0036);
+and a campaign day whose row lacks impressions and clicks, with spend and link clicks of zero and
+a purchase, as the stand saw in October 2026, reaches the core with 0 impressions and its purchase,
+and keeps its account out of quarantine.
+A load that the Graph API refuses for one of its two accounts ends as its task does, with the line
+of the refused account, and the next run of the transform takes the other into the core, while
+the refused one goes to quarantine with load_failed (agoranomos_pipelines/outcome.py, ADR-0035).
 
 No load reaches Meta, and no answer comes from a real account: the answers below are faked by hand
 from the reference of the Marketing API v27.0, as tests/unit/test_meta_ads_source.py fakes them,
 and the stand-in of the HTTP client of dlt answers each request with them in the container of the
-tasks. The test names two Meta ad accounts of its own, with IDs that no account has, in
+tasks. Each test names two Meta ad accounts of its own, with IDs that no account has, in
 extensions/model/clients.toml, loads them as of the newest load of demo_social, so that the rates
 of the demo cover their days, and runs the transform. In its finally it deletes every row of the
-two accounts from raw_meta_ads, from the core, as the superuser with the thaw of ADR-0035, from the
-tables of staging that the run wrote, and the file, so that the demo is as before and no later
-test finds an account that left the settings. If it is killed before that, run the cleanup of
-REMOVE by hand as the superuser of the warehouse, and delete extensions/model/clients.toml.
+three accounts of the tests from raw_meta_ads, from the core, as the superuser with the thaw of
+ADR-0035, from the tables of staging that the run wrote, and the file, so that the demo is as
+before and no later test finds an account that left the settings. If it is killed before that,
+run the cleanup of REMOVE by hand as the superuser of the warehouse, and delete
+extensions/model/clients.toml.
 
 The assertions print IDs, days, counts, sums and states, never a secret: the token of the load is
 a stand-in of low entropy.
@@ -44,6 +51,11 @@ ASSETS = 5
 HEALTHY, DIFFERING = "900000000000001", "900000000000002"
 ACCOUNTS = (HEALTHY, DIFFERING)
 IN_ACCOUNTS = "('" + "', '".join(ACCOUNTS) + "')"
+# An account that the Graph API refuses, for the load that fails for some of its accounts: the
+# second test names it with the healthy one.
+REFUSED = "900000000000003"
+EVERY_ACCOUNT = (*ACCOUNTS, REFUSED)
+IN_EVERY_ACCOUNT = "('" + "', '".join(EVERY_ACCOUNT) + "')"
 CLIENTS = f"""\
 [clients.meta-stack-test]
 name = "Meta of the stack test"
@@ -58,6 +70,12 @@ platform = "meta_ads"
 account_id = "{DIFFERING}"
 client = "meta-stack-test"
 """
+# The settings of the second test: the healthy account and the refused one.
+PARTLY = CLIENTS.replace(DIFFERING, REFUSED)
+# The answer, with the status 403, to each request about the refused account: an error of the Graph
+# API faked by hand in the form that meta_ads.graph_error reads, with a code that the load neither
+# waits for nor asks again, so that it fails the account at once.
+REFUSAL = {"message": "Permissions error", "type": "OAuthException", "code": 200}
 # A stand-in of the token of the system user, of low entropy: no request leaves the container.
 TOKEN = "stand-in-token-of-the-meta-stack-test"
 
@@ -77,6 +95,11 @@ STUB = ("120200000000303", "120200000000201", "120200000000101", "Boots, blue")
 # impressions, link clicks or spend, as the stand S6 (#220) saw on two campaign days, and no ad set
 # in the insights: its row of statistics stays, with zeros, for its conversion (ADR-0036).
 CONVERTED = ("120200000000103", "Gloves")
+# A second deleted campaign with the same purchase, whose rows lack impressions and clicks, with
+# spend "0" and inline_link_clicks "0", as the stand saw in the campaigns of one account on each
+# day of 1 to 27 October 2026: the shape reads them as 0 impressions (meta_impressions in
+# dbt/macros/shapes/meta_v26.sql), so G1 finds no missing measure.
+ABSENT = ("120200000000104", "Scarves")
 CONVERTED_ACTIONS = (
     [{"action_type": "offsite_conversion.fb_pixel_purchase", "value": "1", "7d_click": "1"}],
     [{"action_type": "offsite_conversion.fb_pixel_purchase", "value": "49.90"}],
@@ -123,9 +146,11 @@ TOTALS = {
 
 # A load of Meta as of a moment, through meta_ads.load, with the HTTP client of dlt replaced by a
 # stand-in that answers each request of the Graph API with the answers above, given as JSON, for
-# every day of the time_range that the request asks for, and fails a request whose token is not in
-# the header Authorization or is in its URL. dlt reads the password of loader from the environment
-# of the container, and the script prints the rows of each table.
+# every day of the time_range that the request asks for, refuses every request about an account
+# whose answers are a refusal, and fails a request whose token is not in the header Authorization
+# or is in its URL. dlt reads the password of loader from the environment of the container, and
+# the script prints the rows of each table, or, after a load that failed for some accounts, what
+# the task of the DAG returns then (agoranomos_pipelines/outcome.py).
 LOAD = """
 import json
 import os
@@ -171,6 +196,8 @@ class Graph:
         assert headers == {"Authorization": "Bearer " + token}, "a request without the token"
         account_id = path.split("/")[0].removeprefix("act_")
         account = faked[account_id]
+        if "refusal" in account:
+            return Answer({"error": account["refusal"]}, 403)
         if "/" not in path:
             return Answer(account["account"])
         edge = path.split("/")[1]
@@ -200,14 +227,22 @@ class Graph:
 
 
 meta_ads.Client = Graph
-counts = meta_ads.load(now)
-print(json.dumps(counts, sort_keys=True))
+try:
+    counts = meta_ads.load(now)
+except meta_ads.AccountsFailed as failed:
+    # As the task of the DAG ends: with the line, when the load took another account.
+    from agoranomos_pipelines import outcome
+
+    print(json.dumps({"line": outcome.line_of(failed)}))
+else:
+    print(json.dumps(counts, sort_keys=True))
 """
 
 
 def answers() -> dict:
-    """The answers of the Graph API for each account of the test, by request: the account, its
-    lists, and the rows of insights of each level for one day."""
+    """The answers of the Graph API for each account of the tests, by request: the account, its
+    lists, and the rows of insights of each level for one day, and for the refused account the
+    error of each request."""
     found = {}
     for account_id in ACCOUNTS:
         named = {"account_id": account_id, "account_name": f"Stack test {account_id[-1]}"}
@@ -283,6 +318,9 @@ def answers() -> dict:
         insights["campaign"].append(
             row | measures("0", "0", "0") | converted | {"action_values": valued}
         )
+        row = named | {"campaign_id": ABSENT[0], "campaign_name": ABSENT[1]}
+        row |= {"inline_link_clicks": "0", "spend": "0"}
+        insights["campaign"].append(row | converted | {"action_values": valued})
         for ad_id, ad_set_id, campaign_id, name, *_ in (*LISTED_ADS, STUB):
             row = named | {"campaign_id": campaign_id, "adset_id": ad_set_id, "ad_id": ad_id}
             row["ad_name"] = name
@@ -301,6 +339,7 @@ def answers() -> dict:
             "ads": ads,
             "insights": insights,
         }
+    found[REFUSED] = {"refusal": REFUSAL}
     return found
 
 
@@ -385,7 +424,7 @@ BEGIN
     END IF;
 END $$;
 COMMIT;
-""".replace("{accounts}", ", ".join(f"'{account}'" for account in ACCOUNTS))
+""".replace("{accounts}", ", ".join(f"'{account}'" for account in EVERY_ACCOUNT))
 
 
 def rows(env, sql, role="postgres"):
@@ -463,7 +502,7 @@ def test_a_load_of_meta_reaches_the_core_and_the_marts(env, airflow_url, token):
         # The core holds every day of the healthy account, and so does the view of the marts,
         # with the primary actions of the seed, the purchases and the leads of the pixel, and no
         # metric of conversions of the platform, which Meta does not have. Each day has a row of
-        # the deleted campaign too, with zeros, for its purchase.
+        # each deleted campaign too, with zeros, for its purchase.
         spend = sum(Decimal(s) for _, _, s in DAY.values())
         impressions = sum(int(i) for i, _, _ in DAY.values())
         clicks = sum(int(c) for _, c, _ in DAY.values())
@@ -475,7 +514,7 @@ def test_a_load_of_meta_reaches_the_core_and_the_marts(env, airflow_url, token):
             f"WHERE a.platform = 'meta_ads' AND a.account_id = '{HEALTHY}'",
         ).split("|")
         assert [int(core[0]), int(core[1]), int(core[2]), Decimal(core[3])] == [
-            (len(DAY) + 1) * days,
+            (len(DAY) + 2) * days,
             impressions * days,
             clicks * days,
             spend * days,
@@ -485,16 +524,30 @@ def test_a_load_of_meta_reaches_the_core_and_the_marts(env, airflow_url, token):
             "SELECT count(DISTINCT account_id) || '|' || count(*) || '|' || sum(impressions) "
             "|| '|' || sum(clicks) || '|' || sum(spend) || '|' || sum(conversions_primary) "
             "|| '|' || count(conversions) || '|' || min(currency) "
+            "|| '|' || sum(conversion_value_primary) || '|' || count(conversion_value) "
+            "|| '|' || round(sum(conversion_value_primary_reporting) "
+            "/ nullif(sum(spend_reporting), 0), 6) "
+            "|| '|' || coalesce((sum(conversion_value_reporting) "
+            "/ nullif(sum(spend_reporting), 0))::text, 'none') "
             "FROM marts.ad_stats_campaign_daily WHERE platform = 'meta_ads'",
             "metabase_reader",
         ).split("|")
-        assert shown[:3] == ["1", str((len(DAY) + 1) * days), str(impressions * days)], shown
+        assert shown[:3] == ["1", str((len(DAY) + 2) * days), str(impressions * days)], shown
         assert [int(shown[3]), Decimal(shown[4]), Decimal(shown[5])] == [
             clicks * days,
             spend * days,
-            Decimal(4 * days),
+            Decimal(5 * days),
         ], shown
-        assert shown[6:] == ["0", "USD"], shown
+        assert shown[6:8] == ["0", "USD"], shown
+        # The value of the primary actions, the purchases of the pixel of the three campaigns that
+        # have one, the two deleted ones with the same purchase: Primary ROAS has a value on Meta,
+        # and ROAS, of the own metric, none (ADR-0056). The account is in USD, the reporting
+        # currency of the stack.
+        purchases = (ACTIONS[CAMPAIGNS[0][0]][1][0], *[CONVERTED_ACTIONS[1][0]] * 2)
+        value = sum(Decimal(v["value"]) for v in purchases)
+        assert [Decimal(shown[8]), shown[9]] == [value * days, "0"], shown
+        assert abs(Decimal(shown[10]) - value / spend) <= Decimal("0.000001"), shown
+        assert shown[11] == "none", shown
         # The row of the deleted campaign on each day: its zeros, as Meta gave them, its name from
         # its statistics, and the purchase of the pixel in conversions_primary.
         zeros = rows(
@@ -506,6 +559,43 @@ def test_a_load_of_meta_reaches_the_core_and_the_marts(env, airflow_url, token):
             "metabase_reader",
         )
         assert zeros == [f"{CONVERTED[1]}|0|0|0.000000|none|1.000000|false"] * days, zeros
+        # The rows without impressions and clicks: 0 impressions in the core, its purchase in the
+        # conversions of the core, and the same row in the view of the marts.
+        absent = warehouse_output(
+            env,
+            "SELECT count(*) || '|' || sum(f.impressions) || '|' || sum(f.clicks) || '|' "  # noqa: S608 (IDs of the test)
+            "|| sum(f.spend) FROM core.ad_stats_campaign_daily AS f "
+            "JOIN core.dim_account AS a ON a.account_sk = f.account_sk "
+            f"WHERE a.platform = 'meta_ads' AND a.account_id = '{HEALTHY}' "
+            f"AND f.campaign_id = {ABSENT[0]}",
+        ).split("|")
+        assert [int(absent[0]), int(absent[1]), int(absent[2]), Decimal(absent[3])] == [
+            days,
+            0,
+            0,
+            Decimal(0),
+        ], absent
+        purchases = warehouse_output(
+            env,
+            "SELECT count(*) || '|' || sum(f.conversions) || '|' || sum(f.conversion_value) "  # noqa: S608 (IDs of the test)
+            "FROM core.ad_conversions_campaign_daily AS f "
+            "JOIN core.dim_account AS a ON a.account_sk = f.account_sk "
+            f"WHERE a.platform = 'meta_ads' AND a.account_id = '{HEALTHY}' "
+            f"AND f.campaign_id = {ABSENT[0]}",
+        ).split("|")
+        assert [int(purchases[0]), Decimal(purchases[1]), Decimal(purchases[2])] == [
+            days,
+            Decimal(days),
+            Decimal("49.90") * days,
+        ], purchases
+        shown_absent = rows(
+            env,
+            "SELECT campaign_name || '|' || impressions || '|' || clicks || '|' || spend || '|' "  # noqa: S608 (IDs of the test)
+            "|| conversions_primary FROM marts.ad_stats_campaign_daily "
+            f"WHERE platform = 'meta_ads' AND campaign_id = '{ABSENT[0]}' ORDER BY report_date",
+            "metabase_reader",
+        )
+        assert shown_absent == [f"{ABSENT[1]}|0|0|0.000000|1.000000"] * days, shown_absent
         actions = rows(
             env,
             "SELECT conversion_action_id || '|' || conversion_category || '|' || is_primary "
@@ -547,6 +637,7 @@ def test_a_load_of_meta_reaches_the_core_and_the_marts(env, airflow_url, token):
             "120200000000101|ACTIVE|active",
             "120200000000102|ARCHIVED|removed",
             f"{CONVERTED[0]}||other",
+            f"{ABSENT[0]}||other",
         ], states
         ads = rows(
             env,
@@ -595,3 +686,82 @@ def test_a_load_of_meta_reaches_the_core_and_the_marts(env, airflow_url, token):
         )
         == []
     )
+
+
+def test_a_load_that_fails_for_one_account_brings_the_other_into_the_core(env, airflow_url, token):
+    folder = env.get("AGORANOMOS_EXTENSIONS_DIR") or "./extensions"
+    path = (REPO_ROOT / folder).resolve() / "model" / "clients.toml"
+    assert not path.exists(), "extensions/model/clients.toml is in the way of this test"
+    wait_for_dag(airflow_url, token, TRANSFORM)
+    idle(airflow_url, token)
+    warehouse_output(env, REMOVE)
+    now = last_moment(env, "demo_social")
+    path.write_text(PARTLY, encoding="utf-8")
+    try:
+        result = run_in_tasks(
+            env,
+            LOAD,
+            now.isoformat(),
+            json.dumps(answers()),
+            environment={"META_ADS_ACCESS_TOKEN": TOKEN},
+        )
+        # The load took the healthy account and ended as its task does: with the line of the
+        # refused one, which check_accounts fails the run with, and no exception, so that the asset
+        # of the task starts the transform.
+        [line] = json.loads(result.stdout.strip().splitlines()[-1]).values()
+        assert line.startswith(
+            f"1 of 2 Meta ad accounts failed, the other 1 is loaded: Meta ad account {REFUSED}: "
+            "403 Permissions error (code 200"
+        ), line
+        # The journal holds the window of the healthy account and the refused one with no window.
+        journal = rows(
+            env,
+            "SELECT account_id || '|' || status || '|' || coalesce(window_from::text, 'none') "  # noqa: S608 (IDs of the test)
+            "|| '|' || coalesce(window_to::text, 'none') "
+            f"FROM raw_meta_ads._agoranomos_loads WHERE account_id IN {IN_EVERY_ACCOUNT} "
+            "ORDER BY 1",
+        )
+        assert len(journal) == 2, journal
+        healthy, status, first, last = journal[0].split("|")
+        assert (healthy, status) == (HEALTHY, "loaded"), journal
+        assert journal[1] == f"{REFUSED}|failed|none|none", journal
+        days = (date.fromisoformat(last) - date.fromisoformat(first)).days + 1
+        unpause(airflow_url, token, TRANSFORM)
+        run = trigger(airflow_url, token, TRANSFORM)
+        run = wait_for_run(airflow_url, token, TRANSFORM, run["dag_run_id"], timeout=1800)
+        assert run["state"] == "success", run["state"]
+
+        # The core accepted the healthy account and holds its days, and the refused one is in
+        # quarantine with load_failed, its row of the journal pinned; one of two stops no source.
+        statuses = rows(
+            env,
+            "SELECT account_id || '|' || status FROM core.loads "  # noqa: S608 (IDs of the test)
+            f"WHERE source = 'meta_ads' AND account_id IN {IN_EVERY_ACCOUNT} ORDER BY 1",
+        )
+        assert statuses == [f"{HEALTHY}|accepted", f"{REFUSED}|pinned"], statuses
+        quarantined = rows(
+            env,
+            "SELECT platform || '|' || account_id || '|' || reason FROM ops.ops_quarantine "
+            "WHERE platform = 'meta_ads' ORDER BY 1",
+            "metabase_reader",
+        )
+        assert quarantined == [f"meta_ads|{REFUSED}|load_failed"], quarantined
+        held = warehouse_output(
+            env,
+            "SELECT count(*) FROM core.ad_stats_campaign_daily AS f "  # noqa: S608 (IDs of the test)
+            "JOIN core.dim_account AS a ON a.account_sk = f.account_sk "
+            f"WHERE a.platform = 'meta_ads' AND a.account_id = '{HEALTHY}'",
+        )
+        # The campaigns of DAY and the two deleted campaigns with a purchase, as in the test above.
+        assert int(held) == (len(DAY) + 2) * days, held
+        shown = rows(
+            env,
+            "SELECT DISTINCT account_id FROM marts.ad_stats_campaign_daily "
+            "WHERE platform = 'meta_ads'",
+            "metabase_reader",
+        )
+        assert shown == [HEALTHY], shown
+    finally:
+        idle(airflow_url, token)
+        warehouse_output(env, REMOVE)
+        path.unlink(missing_ok=True)

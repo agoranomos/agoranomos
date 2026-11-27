@@ -24,6 +24,25 @@
     {%- endif %}
 {%- endmacro %}
 
+{#- The impressions of a row of the insights. The reference of the insights of the Marketing API
+    says nothing of a field that a row lacks (as of November 2026), and Meta sends a row with no
+    impressions and no clicks: the stand saw such a row of the campaigns of one account on each of
+    27 days of October 2026, with spend "0" and inline_link_clicks "0", one of them with a
+    conversion. Such a row reads as 0 impressions, as nothing on it was delivered. A row that lacks
+    its impressions and has a spend, a link click or a click keeps NULL, which G1 holds in
+    quarantine with missing_measure (ADR-0035), and G0a, against the totals of the account, stays
+    the guard against a real loss. -#}
+{% macro meta_impressions() -%}
+    case
+        when {{ to_count('impressions') }} is null
+            and {{ to_number('spend') }} = 0
+            and {{ to_count('inline_link_clicks') }} = 0
+            and coalesce({{ to_count('clicks') }}, 0) = 0
+            then 0
+        else {{ to_count('impressions') }}
+    end
+{%- endmacro %}
+
 {#- The statistics of a level by day. Meta counts no conversion in them, so the campaigns pass
     conversions, the staging model of their conversions, and a campaign day whose impressions,
     clicks and spend are zero stays when one of its actions has a count or a value (nonzero). -#}
@@ -35,7 +54,7 @@ select
     account_id,
     campaign_id,
     {{- meta_level(level) }}
-    {{ to_count('impressions') }} as impressions,
+    {{ meta_impressions() }} as impressions,
     {#- Clicks to the site: the clicks of Meta count every click (ADR-0025). -#}
     {{ to_count('inline_link_clicks') }} as clicks,
     {{ to_number('spend') }} as spend,

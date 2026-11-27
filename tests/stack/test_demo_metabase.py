@@ -323,8 +323,10 @@ def test_a_description_written_into_the_columns_of_a_question_is_reverted(
     env, metabase_url, session
 ):
     # The metadata of the columns of a question is what people and AI clients read as their display
-    # names and descriptions; Metabase 0.64.1 keeps what a request sends there with the query
-    # unchanged. The next start drops it, and Metabase computes it again from the query.
+    # names and descriptions; Metabase 0.64 keeps what a request sends there with the query
+    # unchanged. The next start drops it, and Metabase computes it again from the query: 0.64.9.1
+    # with fewer keys than 0.64.1 did, without the fingerprint of the values, so the test compares
+    # what a reader of the columns sees, their names, display names and types, and no description.
     question = item(metabase_url, session, "demo/spend-by-day")
     computed = question["result_metadata"]
     assert computed, "Metabase computed no metadata for the question"
@@ -342,7 +344,13 @@ def test_a_description_written_into_the_columns_of_a_question_is_reverted(
         interval=2,
         message="Metabase did not compute the metadata of the question again",
     )
-    assert metadata == computed
+    stable = ("name", "display_name", "base_type", "field_ref")
+    assert [{key: column.get(key) for key in stable} for column in metadata] == [
+        {key: column.get(key) for key in stable} for column in computed
+    ], metadata
+    assert not any(column.get("description") == "Written by a stack test" for column in metadata), (
+        metadata
+    )
 
 
 def test_another_account_cannot_put_anything_into_the_package(metabase_url, session):

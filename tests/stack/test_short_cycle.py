@@ -4,7 +4,8 @@ with the HTTP of their APIs faked, after a whole load of the same account, reach
 partial day of the fact of campaigns, with no conversions, in no other fact, and puts no account in
 quarantine, through the next run of the transform; the shapes of Meta and of TikTok read a load
 without actions or conversions as the shape of Google Ads reads one of its short cycle, which
-tests/stack/test_partial_day.py checks on demo_search.
+tests/stack/test_partial_day.py checks on demo_search. Their DAGs start paused, at the hours of
+the short cycle of Google Ads, which keep an hour from the daily backup.
 
 No load reaches Meta or TikTok, and no answer comes from a real account: the answers below are faked
 by hand from the references of the Marketing API v27.0 and of the TikTok API for Business v1.3, as
@@ -27,6 +28,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
+from agoranomos_pipelines import intraday
 from airflow_api import is_busy, trigger, unpause, wait_for_dag, wait_for_run
 from raw_loads import last_moment, run_in_tasks
 from stack_helpers import REPO_ROOT, wait_for, warehouse_output
@@ -422,6 +424,29 @@ def of_the_test(platform: str = "a.platform", account_id: str = "a.account_id") 
         f"({platform} = '{source}' AND {account_id} = '{account}')"
         for source, account in ACCOUNTS.items()
     )
+
+
+@pytest.mark.parametrize(
+    "dag_id", ["agoranomos_meta_ads_intraday", "agoranomos_tiktok_ads_intraday"]
+)
+def test_the_short_cycles_of_meta_and_tiktok_run_at_the_hours_of_that_of_google_ads(
+    env, airflow_url, token, dag_id
+):
+    # The schedule of the setting in .env, at hours an hour away from the daily backup, BACKUP_TIME
+    # and BACKUP_TZ of .env, empty taking 03:00 and UTC, as tests/stack/test_demo_intraday.py reads
+    # it, or none at 0; the same as that of Google Ads, so that one cycle starts one or two runs of
+    # the transform.
+    backup = intraday.backup_minutes(env.get("BACKUP_TIME") or "", env.get("BACKUP_TZ") or "")
+    hours = intraday.period(env.get("AGORANOMOS_INTRADAY_HOURS") or "")
+    body = wait_for_dag(airflow_url, token, dag_id)
+    summary = body.get("timetable_summary")
+    if hours == 0:
+        assert (summary or "None") == "None", summary
+    else:
+        assert summary == intraday.cron(hours, backup), summary
+    google = wait_for_dag(airflow_url, token, "agoranomos_google_ads_intraday")
+    assert summary == google.get("timetable_summary"), (summary, google.get("timetable_summary"))
+    assert body["is_paused"] is True
 
 
 def test_the_short_cycles_of_meta_and_tiktok_reach_the_core_as_partial_days(

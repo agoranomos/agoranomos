@@ -203,8 +203,10 @@ FACT_MARTS = (
     "ad_stats_ad_daily",
 )
 WINDOW_WHERE = (
-    "where: >-\n{pad}report_date >= (select min(window_from) from core.loads where status = "
-    "'pinned'\n{pad}and outcome = 'loaded')\n"
+    "where: >-\n{pad}report_date between (select min(window_from) from core.loads\n"
+    "{pad}where status = 'pinned' and outcome = 'loaded')\n"
+    "{pad}and (select max(window_to) from core.loads where status = 'pinned'\n"
+    "{pad}and outcome = 'loaded')\n"
 )
 
 
@@ -409,7 +411,7 @@ def test_every_test_of_a_view_of_a_fact_reads_the_days_of_the_windows():
         assert tests, name
         # Every test, of the model and of each column, has the where of the window in its config.
         whereas = re.findall(
-            r"^ +where: >-\n +report_date >= \(select min\(window_from\)", block, re.M
+            r"^ +where: >-\n +report_date between \(select min\(window_from\)", block, re.M
         )
         assert len(whereas) == len(tests), name
         assert "data_tests: [" not in block, name
@@ -455,7 +457,9 @@ def test_the_primary_conversions_of_a_campaign_are_a_lateral_join_of_one_row():
     # that does not read them, as an aggregate with no GROUP BY returns one row. The primary
     # actions are an array that the query reads once, a condition of the index of that key. A
     # partial day has no conversions, so the column is none on it, and 0 on a whole day of a
-    # campaign without a primary conversion (ADR-0051, C3a of #223).
+    # campaign without a primary conversion (ADR-0051, C3a of #223). The same lookup sums the value
+    # of those actions, so that a question that reads both columns of the primary actions still
+    # makes one lookup for each row (ADR-0056).
     text = (DBT / "models" / "marts" / "ad_stats_campaign_daily.sql").read_text(encoding="utf-8")
     column = (
         "    cast(\n"
@@ -464,11 +468,19 @@ def test_the_primary_conversions_of_a_campaign_are_a_lateral_join_of_one_row():
         "    ) as conversions_primary,\n"
     )
     assert column in text
-    # Only the column reads the join, so that the planner can leave it out.
-    assert re.findall(r"\bq\.\w+", text) == ["q.conversions_primary"]
+    assert PRIMARY_VALUE_COLUMNS in text
+    # Only the columns of the primary actions read the join, so that the planner can leave it out.
+    assert re.findall(r"\bq\.\w+", text) == [
+        "q.conversions_primary",
+        "q.conversion_value_primary",
+        "q.conversion_value_primary",
+    ]
     assert text.endswith(
         "left join lateral (\n"
-        "    select sum(coalesce(x.all_conversions, x.conversions)) as conversions_primary\n"
+        "    select\n"
+        "        sum(coalesce(x.all_conversions, x.conversions)) as conversions_primary,\n"
+        "        sum(coalesce(x.all_conversion_value, x.conversion_value))\n"
+        "            as conversion_value_primary\n"
         "    from {{ ref('core_ad_conversions_campaign_daily') }} as x\n"
         "    where x.account_sk = f.account_sk\n"
         "        and x.campaign_id = f.campaign_id\n"
@@ -509,16 +521,19 @@ def test_each_view_of_a_fact_ends_with_whether_its_row_is_final():
         whole = "not f.is_partial_day\n        and " if name in PARTIAL_DAY_FACTS else ""
         body = "\n".join(line for line in view.splitlines() if not line.startswith("--"))
         columns = body.split("\nfrom ", 1)[0] + "\nfrom "
-        # The view of sessions has the four flags of GA4 after it (C8b of #228).
+        # The view of sessions has the four flags of GA4 after it (C8b of #228), and the views of
+        # statistics the value of the primary actions (ADR-0056).
         end = "    ) as is_final\nfrom "
-        after = WEB_FLAG_COLUMNS if name in FLAGGED_MARTS else end
+        after = AFTER_IS_FINAL.get(name, end)
         assert columns.endswith(final.format(age=whole + age).replace(end, after)), name
         assert columns.count("is_final") == 1, name
         assert "platforms(ref('seed_ad_platforms'))" in view, name
         assert "left join {{ source('core', 'loads') }} as l\n    on l.load_sk = f.load_sk" in view
-        # The last column of the contract but the flags, with its doc block and its metadata.
+        # The last column of the contract but the flags and the value of the primary actions, with
+        # its doc block and its metadata.
         last = blocks(described[name], 6)
         flags = list(LOAD_FLAGS) if name in FLAGGED_MARTS else []
+        flags = list(PRIMARY_VALUES) if name in STATS_MARTS else flags
         assert list(last)[len(last) - len(flags) - 1 :] == ["is_final", *flags], name
         assert last["is_final"] == (
             "      - name: is_final\n"
@@ -549,6 +564,39 @@ FLAGGED_MARTS = ("web_sessions_daily",)
 WEB_FLAG_COLUMNS = (
     "    ) as is_final,\n" + "".join(f"    l.{flag},\n" for flag in LOAD_FLAGS)[:-2] + "\nfrom "
 )
+# The views of statistics end with the value of the primary conversion actions, after is_final
+# (ADR-0056): that of the campaigns from the lateral join of conversions_primary, 0 on a whole day
+# without a primary conversion and none on a partial day, in the currency of the account and at
+# the rate of its day, as conversion_value_reporting is computed, and none at the lower levels,
+# whose conversions by action are a module (ADR-0036).
+STATS_MARTS = ("ad_stats_campaign_daily", "ad_stats_ad_group_daily", "ad_stats_ad_daily")
+PRIMARY_VALUES = ("conversion_value_primary", "conversion_value_primary_reporting")
+PRIMARY_VALUE_COLUMNS = (
+    "    ) as is_final,\n"
+    "    cast(\n"
+    "        case when not f.is_partial_day then coalesce(q.conversion_value_primary, 0) end\n"
+    "        as numeric(18,6)\n"
+    "    ) as conversion_value_primary,\n"
+    "    cast(\n"
+    "        case when not f.is_partial_day\n"
+    "            then coalesce(q.conversion_value_primary, 0) * r.rate_into_reporting_currency\n"
+    "        end\n"
+    "        as numeric(18,6)\n"
+    "    ) as conversion_value_primary_reporting\n"
+    "from "
+)
+NULL_VALUE_COLUMNS = (
+    "    ) as is_final,\n"
+    "    cast(null as numeric(18,6)) as conversion_value_primary,\n"
+    "    cast(null as numeric(18,6)) as conversion_value_primary_reporting\n"
+    "from "
+)
+AFTER_IS_FINAL = {
+    "web_sessions_daily": WEB_FLAG_COLUMNS,
+    "ad_stats_campaign_daily": PRIMARY_VALUE_COLUMNS,
+    "ad_stats_ad_group_daily": NULL_VALUE_COLUMNS,
+    "ad_stats_ad_daily": NULL_VALUE_COLUMNS,
+}
 
 
 def test_the_flags_of_a_load_go_from_the_journal_through_the_pin_to_the_view_of_sessions():
@@ -1469,34 +1517,28 @@ def test_a_test_of_several_nodes_is_on_one_that_depends_on_the_others():
 INTERMEDIATE = DBT / "models" / "intermediate"
 # The critical tests of each intermediate model, every one an error: its key, which
 # unique_combination checks, or unique for a key of one column; the columns that not_null checks;
-# the relationships of a column to a column of another model; and those of columns to columns.
+# the relationships of a column to a column of another model.
 INTERMEDIATE_TESTS = {
-    "int_clients__resolved": (["client_id"], ["client_id", "client_name"], {}, []),
+    "int_clients__resolved": (["client_id"], ["client_id", "client_name"], {}),
     "int_conversion_actions__resolved": (
         ["platform", "conversion_action_id"],
         ["is_primary"],
         {},
-        [],
     ),
     # The views over which the core takes its dimensions and their versions (ADR-0036).
-    "int_accounts__current": (ACCOUNT_KEY, [], {}, []),
-    "int_campaigns__current": ([*ACCOUNT_KEY, "campaign_id"], [], {}, []),
-    "int_ad_groups__current": ([*ACCOUNT_KEY, "ad_group_id"], ["campaign_id"], {}, []),
-    "int_ads__current": ([*ACCOUNT_KEY, "ad_group_id", "ad_id"], ["campaign_id"], {}, []),
+    "int_accounts__current": (ACCOUNT_KEY, [], {}),
+    "int_campaigns__current": ([*ACCOUNT_KEY, "campaign_id"], [], {}),
+    "int_ad_groups__current": ([*ACCOUNT_KEY, "ad_group_id"], ["campaign_id"], {}),
+    "int_ads__current": ([*ACCOUNT_KEY, "ad_group_id", "ad_id"], ["campaign_id"], {}),
     # The checks of G1 and G1a, by load, account, reason and what they read (ADR-0035).
     "int_g1_failures": (
         ["source", "load_id", "account_id", "reason", "checked"],
         ["source", "account_id", "reason", "checked"],
         {},
-        [],
     ),
     # The days of the windows that the facts of the core take (ADR-0038).
-    "int_window_days": (["account_sk", "report_date"], [], {}, []),
+    "int_window_days": (["account_sk", "report_date"], [], {}),
 }
-COMPOSITE = (
-    r"^      - relationships_composite:\n          arguments:\n            columns: \[(.*)\]\n"
-    r"            to: ref\('(\w+)'\)\n            to_columns: \[(.*)\]$"
-)
 RELATIONSHIPS = r"^ +to: ref\('(\w+)'\)\n +field: (\w+)$"
 
 
@@ -1513,7 +1555,7 @@ def test_the_intermediate_models_have_their_critical_tests():
     described = blocks(text, 2)
     assert set(described) == set(INTERMEDIATE_TESTS)
     assert "severity" not in text, "no test of the intermediate models is a warning"
-    for model, (key, not_null, related, composite) in INTERMEDIATE_TESTS.items():
+    for model, (key, not_null, related) in INTERMEDIATE_TESTS.items():
         block = described[model]
         columns = blocks(block, 6)
         tested = {name: column_tests(column) for name, column in columns.items()}
@@ -1530,8 +1572,6 @@ def test_the_intermediate_models_have_their_critical_tests():
             for column, tests in tested.items()
             if "relationships" in tests
         } == related, model
-        pairs = re.findall(COMPOSITE, block, flags=re.MULTILINE)
-        assert [(split(a), to, split(b)) for a, to, b in pairs] == composite, model
     categories = re.search(
         r"^ +values: \[(.*)\]$", described["int_conversion_actions__resolved"], re.M
     )
@@ -1571,13 +1611,12 @@ G2_SUMS = [
 
 
 def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
-    # Clicks above impressions, an account of no client, a missing day and lower levels above their
-    # parents can be right, so they warn; so can primary actions that do not add up to
+    # Clicks above impressions, a missing day and lower levels above their parents can be right,
+    # so they warn; so can primary actions that do not add up to
     # conversions_primary, as a campaign day that only the report of conversions of Google Ads
     # holds has no row of statistics (ADR-0036). They read the views of the marts.
     wanted = {
         "assert_clicks_within_impressions": ({"ad_stats_campaign_daily"}, True),
-        "assert_every_account_has_a_client": ({"ad_accounts"}, True),
         "assert_every_day_of_an_account_has_statistics": ({"ad_stats_campaign_daily"}, True),
         "assert_primary_actions_add_up_to_the_conversions": (
             {"ad_conversions_campaign_daily", "ad_stats_campaign_daily"},
@@ -1598,7 +1637,8 @@ def test_the_singular_tests_of_the_model_are_errors_unless_a_row_can_be_right():
         "assert_no_source_is_stopped": ({"int_g1_failures"}, True),
         # An account that leaves the settings keeps its data (ADR-0044): it warns, with the
         # registry that sets the activity, over the facts as the runs before left them, which are
-        # ancestors of the registry through G1a, so it runs in the task of dim_account.
+        # ancestors of the registry through G1a, so it runs in the task of dim_account. It is the
+        # one warning of an account that no setting names, of the client unassigned (ADR-0024).
         "assert_every_account_with_data_is_in_the_settings": (
             {
                 "dim_account",
@@ -1859,7 +1899,7 @@ def test_each_staging_model_of_google_ads_is_one_call_of_the_shape_that_the_demo
         assert text.rstrip().endswith(end), model
         # No model names a seed, as none of the demo does: the checks of int_g1_failures read them.
         assert "depends_on" not in text, model
-    macros = (DBT / "macros" / "shapes" / "google_ads_v25.sql").read_text(encoding="utf-8")
+    macros = (DBT / "macros" / "shapes" / "google_ads_v26.sql").read_text(encoding="utf-8")
     assert "{% macro google_ads_customers(relation, platform) %}" in macros
     assert "{% macro google_ads_conversion_actions(relation, platform) %}" in macros
     assert "{% macro google_ads_totals(relation, platform) %}" in macros
@@ -2056,6 +2096,54 @@ def test_each_staging_model_of_meta_ads_is_one_call_of_the_shape_that_the_demo_s
     assert "{{ to_count('inline_link_clicks') }} as total_clicks" in totals
     assert "{{ to_count('inline_link_clicks') }} as clicks" in shape("meta_stats")
     assert "_dlt_load_id as load_id" in totals
+
+
+def test_a_row_of_meta_without_impressions_and_with_nothing_delivered_reads_zero():
+    # The stand saw rows of the insights of the campaigns of Meta without impressions and clicks,
+    # with spend "0", inline_link_clicks "0" and, on one day, a conversion, which kept the
+    # account in quarantine with missing_measure once nonzero kept the row (#408). The shape reads
+    # such a row as 0 impressions, and only such a row: one that lacks its impressions and has a
+    # spend, a link click or a click keeps NULL for G1, which stays the same for every source.
+    macros = (DBT / "macros" / "shapes" / "meta_v26.sql").read_text(encoding="utf-8")
+
+    def shape(name):
+        body = macros[macros.index(f"{{% macro {name}(") :]
+        end = "{%- endmacro %}" if name == "meta_impressions" else "{% endmacro %}"
+        return body[: body.index(end)]
+
+    impressions = shape("meta_impressions")
+    assert impressions.startswith("{% macro meta_impressions() -%}\n    case\n")
+    assert (
+        "        when {{ to_count('impressions') }} is null\n"
+        "            and {{ to_number('spend') }} = 0\n"
+        "            and {{ to_count('inline_link_clicks') }} = 0\n"
+        "            and coalesce({{ to_count('clicks') }}, 0) = 0\n"
+        "            then 0\n"
+        "        else {{ to_count('impressions') }}\n"
+        "    end\n"
+    ) in impressions
+    stats = shape("meta_stats")
+    assert "    {{ meta_impressions() }} as impressions,\n" in stats
+    assert "to_count('impressions')" not in stats
+    # The totals of the account, the platform side of G0a, read the impressions as Meta sends
+    # them; G0a counts a missing sum as zero on either side.
+    assert "{{ to_count('impressions') }} as total_impressions" in shape("meta_totals")
+    for other in ("google_ads_v26.sql", "tiktok_v1_3.sql"):
+        text = (DBT / "macros" / "shapes" / other).read_text(encoding="utf-8")
+        assert "{{ to_count('metrics__impressions') }} as impressions," in text, other
+    # Every table of the insights that meta_stats reads has the columns of the rule, the fields
+    # that the connector hints and the demo writes, so that a table whose loads had no row with
+    # impressions still has the column.
+    hinted = meta_ads_columns()
+    demo = (DBT / "macros" / "demo_source.sql").read_text(encoding="utf-8")
+    for table in ("insights_campaign", "insights_adset", "insights_ad"):
+        assert {"impressions", "clicks", "inline_link_clicks", "spend"} <= hinted[table], table
+        start = demo.index(f"'raw_demo_social.{table}': {{")
+        columns = set(re.findall(r"'(\w+)': '[\w ]+'", demo[start : demo.index("},", start)]))
+        assert {"impressions", "clicks", "inline_link_clicks", "spend"} <= columns, table
+    # G1 still holds a missing impression of every source.
+    metrics = macro_text("quarantine_fact_kinds")
+    assert "{%- set metrics = ['impressions', 'clicks', 'spend'] -%}" in metrics
 
 
 def test_the_columns_of_the_empty_tables_of_meta_ads_are_the_fields_of_its_requests():
@@ -3009,7 +3097,7 @@ def test_the_versions_of_the_entities_are_snapshots_of_the_views_of_staging():
 # The common state of an entity by the status of each shape of an API (ADR-0036), within the values
 # that the tables of the core allow.
 STATES = {
-    "google_ads_v25.sql": (
+    "google_ads_v26.sql": (
         "google_ads_state",
         {"ENABLED": "active", "PAUSED": "paused", "REMOVED": "removed"},
         ("campaign__status", "ad_group__status", "ad_group_ad__status"),
@@ -3262,10 +3350,10 @@ def test_g1_reads_the_fact_tables_of_raw_of_each_source_that_names_an_account():
     ]
     # The spend of each table, as the shape of its platform reads it.
     shapes = {
-        "raw_demo_search": "google_ads_v25.sql",
+        "raw_demo_search": "google_ads_v26.sql",
         "raw_demo_social": "meta_v26.sql",
         "raw_demo_video": "tiktok_v1_3.sql",
-        "raw_google_ads": "google_ads_v25.sql",
+        "raw_google_ads": "google_ads_v26.sql",
         "raw_meta_ads": "meta_v26.sql",
         "raw_tiktok_ads": "tiktok_v1_3.sql",
     }
@@ -3312,7 +3400,7 @@ def test_g0a_checks_the_campaigns_of_an_account_against_its_totals_on_each_day()
     for measure in ("impressions", "clicks"):
         assert f"coalesce(t.{measure}, 0)::bigint as {measure}" in model, measure
     assert "coalesce(t.spend, 0)::numeric(18,6) as spend" in model
-    shape = (DBT / "macros" / "shapes" / "google_ads_v25.sql").read_text(encoding="utf-8")
+    shape = (DBT / "macros" / "shapes" / "google_ads_v26.sql").read_text(encoding="utf-8")
     assert "    _dlt_load_id as load_id\nfrom {{ relation }}" in shape
 
 
@@ -3327,7 +3415,7 @@ def test_the_facts_of_statistics_take_all_the_conversions_of_the_platform():
     assert "cast(r.all_conversion_value as numeric(18,6)) as all_conversion_value" in facts
     # No row is left out but those of a partial day, which only the campaigns take (ADR-0051).
     assert re.findall(r"\nwhere .*", facts) == ["\nwhere not d.is_partial_day"]
-    google = (DBT / "macros" / "shapes" / "google_ads_v25.sql").read_text(encoding="utf-8")
+    google = (DBT / "macros" / "shapes" / "google_ads_v26.sql").read_text(encoding="utf-8")
     stats = google[google.index("{% macro google_ads_stats(") :]
     stats = stats[: stats.index("{% endmacro %}")]
     assert "'all_conversions', 'all_conversion_value'], conversions) %}" in stats
@@ -3359,7 +3447,7 @@ def test_a_campaign_day_with_a_conversion_keeps_its_row_of_statistics():
         assert f"converted.{key} = reported.{key}" in macro, key
     assert "or converted.report_date is not null" in macro
     for shape, macro in (
-        ("google_ads_v25.sql", "google_ads_stats"),
+        ("google_ads_v26.sql", "google_ads_stats"),
         ("meta_v26.sql", "meta_stats"),
         ("tiktok_v1_3.sql", "tiktok_stats"),
     ):
@@ -3487,6 +3575,10 @@ PARTIAL_DAY_FACTS = {"ad_stats_campaign_daily"}
 WINDOW_START = (
     "(select min(window_from) from core.loads where status = 'pinned' and outcome = 'loaded')"
 )
+# The upper bound, which the tests of the facts and of their views read up to (#444).
+WINDOW_END = (
+    "(select max(window_to) from core.loads where status = 'pinned' and outcome = 'loaded')"
+)
 
 
 def test_the_facts_of_the_core_replace_whole_days_of_the_windows():
@@ -3571,13 +3663,14 @@ def test_the_window_of_the_facts_is_a_subquery_on_the_pinned_loads():
     # database, and refuses a macro of the project in the where of a test; a subquery on
     # core.loads in their text lets PostgreSQL prune the partitions when the statement runs.
     assert facts_macro("window_start").split("-%}", 1)[1].strip() == WINDOW_START
+    assert facts_macro("window_end").split("-%}", 1)[1].strip() == WINDOW_END
     text = (CORE / "_core__models.yml").read_text(encoding="utf-8")
     conditions = re.findall(r"^( +)where: >-\n((?:\1  .*\n)+)", text, flags=re.M)
     assert len(conditions) == 10, len(conditions)
     for _, lines in conditions:
         assert (
             " ".join(line.strip() for line in lines.splitlines())
-            == f"report_date >= {WINDOW_START}"
+            == f"report_date between {WINDOW_START} and {WINDOW_END}"
         )
     # The bound of the freeze is that of the trigger of each fact, so that a fact lifts it when it
     # is to replace a row of a frozen month, as a load of history that comes again does.

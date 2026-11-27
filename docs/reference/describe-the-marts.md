@@ -142,7 +142,7 @@ A mart declares its KPIs under `config: meta: metabase: metrics:`, and `metabase
 
 **Names.** A metric of Metabase belongs to one table, so a KPI of three marts is three metrics, and each is named by one rule, `<KPI> (<level>)`, the level of its mart included, as `CTR (Campaigns)`, `CTR (Ad Groups)` and `CTR (Ads)`. The level is in every name, with no plain `CTR` for one of them: the lists and the searches of Metabase and of its MCP server show a metric by its name, and the totals of the levels differ, as the ad groups and the ads leave out Performance Max. The KPI comes first, so the metrics of one KPI stand together in a list. The description of each starts with what its level covers, then defines the KPI, and the glossary holds the KPI once, as `CTR`, with its definition and the names of its metrics. The column of the value of a metric is the KPI alone, so a card on a tab of one level shows `CTR`.
 
-A mart that declares metrics also has two keys under `config: meta: metabase:`: `metric_level`, the level in the names of its metrics, such as `Ad Groups`, which no other mart has, and `metric_scope`, the sentence that starts their descriptions, such as what the level leaves out. The marts of one KPI share its declaration through an anchor of YAML: each KPI of `ad_stats_campaign_daily` that the marts of ad groups and of ads share has one, such as `- &ctr`, and they take them as `metrics: [*ctr, *cpc, *cpm, *cost_per_conversion, *conversion_rate, *roas]`. The two KPIs of the primary conversion actions of the deployment, `Cost per Primary Conversion` and `Primary Conversion Rate`, over `conversions_primary`, are of the campaigns alone, as that column is none in the statistics of the ad groups and of the ads ([ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md)).
+A mart that declares metrics also has two keys under `config: meta: metabase:`: `metric_level`, the level in the names of its metrics, such as `Ad Groups`, which no other mart has, and `metric_scope`, the sentence that starts their descriptions, such as what the level leaves out. The marts of one KPI share its declaration through an anchor of YAML: each KPI of `ad_stats_campaign_daily` that the marts of ad groups and of ads share has one, such as `- &ctr`, and they take them as `metrics: [*ctr, *cpc, *cpm, *cost_per_conversion, *conversion_rate, *roas]`. The three KPIs of the primary conversion actions of the deployment, `Cost per Primary Conversion` and `Primary Conversion Rate` over `conversions_primary`, and `Primary ROAS` over `conversion_value_primary_reporting` ([ADR-0056](../adr/0056-count-roas-by-the-value-of-the-primary-actions.md)), are of the campaigns alone, as those columns are none in the statistics of the ad groups and of the ads ([ADR-0037](../adr/0037-serve-the-marts-as-views-over-the-core.md)).
 
 | Key | Required | What it holds |
 |---|---|---|
@@ -180,17 +180,19 @@ A mart is a view over the core ([ADR-0037](../adr/0037-serve-the-marts-as-views-
             columns: [report_date, platform, account_id, campaign_id]
           config:
             where: >-
-              report_date >= (select min(window_from) from core.loads where status = 'pinned'
+              report_date between (select min(window_from) from core.loads
+              where status = 'pinned' and outcome = 'loaded')
+              and (select max(window_to) from core.loads where status = 'pinned'
               and outcome = 'loaded')
 ```
 
-Each test of a view of a fact reads the days of the windows that the run of the transform pinned, with the same `where`, as a test of the whole view would read every partition of its fact. `type/PK` for Metabase stays in `meta`.
+Each test of a view of a fact reads the days from the first to the last day of the windows that the run of the transform pinned, with the same `where`, as a test of the whole view would read every partition of its fact, and a test with the first day alone would read every day from a window of history to the current day. `type/PK` for Metabase stays in `meta`.
 
 ## Comments in the warehouse
 
 `+persist_docs` in `dbt/dbt_project.yml` makes dbt write the descriptions into the comments of the tables, views and columns that it builds, so SQL clients see them too, and so do AI clients through the tools `list_tables` and `describe_table` of the MCP server of the warehouse (`ai/tools.yaml`). dbt does not comment the tables of the sources.
 
-Metabase copies the comment of a table or column into its description when it syncs, but only while that description is empty, as of Metabase 0.63.19 and 0.64.1: a changed description does not reach Metabase this way. In 0.64.1, a sync no longer fills the description of a column that someone cleared in Metabase either. The jobs that apply the metadata on every start bring it there instead.
+Metabase copies the comment of a table or column into its description when it syncs, but only while that description is empty, as of Metabase 0.63.19 and 0.64.1: a changed description does not reach Metabase this way. In 0.64.1, a sync no longer fills the description of a column that someone cleared in Metabase either. The jobs that apply the metadata on every start bring it there instead. Metabase 0.64.6 moved the values that someone set on tables and fields back into its tables of them, `metabase_table` and `metabase_field`, so that a sync leaves them alone ([metabase/metabase#86150](https://github.com/metabase/metabase/pull/86150)); this paragraph and the display name of `null` above are not checked yet on 0.64.9.1, which the stack pins.
 
 ## A deployment's own words
 

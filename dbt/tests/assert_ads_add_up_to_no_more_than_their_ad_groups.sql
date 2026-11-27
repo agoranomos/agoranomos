@@ -13,7 +13,7 @@ with ads as (
         sum(clicks) as clicks,
         sum(spend) as spend
     from {{ ref('ad_stats_ad_daily') }}
-    where report_date >= {{ window_start() }}
+    where report_date between {{ window_start() }} and {{ window_end() }}
     group by report_date, platform, account_id, ad_group_id
 )
 

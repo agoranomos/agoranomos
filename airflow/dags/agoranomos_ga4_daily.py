@@ -23,18 +23,22 @@ form of the run to load a period again.
 The DAG starts paused: a deployment unpauses it once its key and its properties are in place
 ([Connect GA4](docs/how-to/connect-ga4.md)). A load without a key, or without a property of ga4 in
 clients.toml, fails with a line that says so. An error of the API on one property does not stop
-the others: the load takes them, records the failed property in its journal, and the task fails at
-the end, without a retry, with one line that lists the properties and their errors (ADR-0035). A
-repeat is safe: each load replaces the days that it covers.
+the others: the load takes them and records the failed property in its journal (ADR-0035). The
+task of the load then succeeds, so that its asset starts the transform for the properties that it
+took, and the last task, check_accounts, fails the run, without a retry, with one line that lists
+the properties and their errors, so that the alert of a failed run goes (outcome.py of the
+package); when no property loaded, the task of the load fails with that line and starts nothing. A
+retry of the task, after any other error, loads every property again. A repeat is safe: each load
+replaces the days that it covers.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from agoranomos_pipelines import outcome
 from agoranomos_pipelines.assets import RAW_GA4
 from airflow.sdk import CronTriggerTimetable, Param, dag, get_current_context, task
-from airflow.sdk.exceptions import AirflowFailException
 from airflow.sdk.log import mask_secret
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
@@ -71,7 +75,7 @@ PARAMS = {
 
 
 @task(task_id="load_ga4", outlets=[RAW_GA4])
-def load_ga4() -> None:
+def load_ga4() -> str | None:
     # dlt and google-auth are imported here and not at the top: the DAG processor parses this file
     # often.
     from agoranomos_pipelines import ga4, loads
@@ -87,9 +91,11 @@ def load_ga4() -> None:
     try:
         ga4.load(context["dag_run"].run_after, portion=portion)
     except ga4.PropertiesFailed as failed:
-        # The load took the other properties, so a retry would repeat it for nothing, and the next
-        # load takes the days that the failed properties missed. The line lists them (ADR-0004).
-        raise AirflowFailException(str(failed)) from None
+        # A retry would repeat the load for nothing, and the next load takes the days that the
+        # failed properties missed. The line lists them (ADR-0004): check_accounts fails the run
+        # with it, after the transform has started for the other properties, if any.
+        return outcome.line_of(failed)
+    return None
 
 
 @dag(
@@ -122,7 +128,7 @@ def load_ga4() -> None:
     doc_md=__doc__,
 )
 def agoranomos_ga4_daily():
-    load_ga4()
+    outcome.check_accounts(load_ga4())
 
 
 agoranomos_ga4_daily()
