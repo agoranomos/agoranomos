@@ -22,9 +22,10 @@ time as theirs: the APIs and their quotas are apart.
 
 The DAG starts paused: a deployment unpauses it with agoranomos_ga4_daily, once its key and its
 properties are in place ([Connect GA4](docs/how-to/connect-ga4.md)). A run of the load of a portion
-that fails for a property fails its task, which updates no asset, so the next plan comes after the
-next run of the transform that succeeds, which another load starts. The property then holds up no
-other (agoranomos_pipelines/history.py, failures).
+that fails for some of its properties fails, and its asset starts the transform for the others,
+whose end starts the next plan; one that fails for every property fails its task, which updates no
+asset, so the next plan comes after the next run of the transform that succeeds, which another
+load starts. The failed property then holds up no other (agoranomos_pipelines/history.py, failures).
 """
 
 from __future__ import annotations

@@ -8,7 +8,8 @@ ended after the pin. Each load of the demo appends its rows under its own _dlt_l
 that succeeds accepts the loads that it read and deletes their rows from raw (ADR-0035): so these
 are the rows of the loads that no run has read yet, and a test reads them between a load and the
 run that reads it. A day whose newest load is accepted is the core's, as a day of the history that
-the window of a newer history no longer reaches. The journal and _dlt_loads keep every load.
+the window of a newer history no longer reaches. The journal and _dlt_loads keep every load that
+no run has pinned.
 
 A test that needs rows in raw for the next run makes a load of its own with load_platform, as a
 daily load does, in the container of the tasks and outside Airflow, so that no asset event starts

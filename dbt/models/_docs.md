@@ -145,6 +145,14 @@ The value of the conversions of all_conversions, as the ad platform reports it, 
 The conversions of the primary conversion actions of the deployment (is_primary) of the campaign on the day, added up from ad_conversions_campaign_daily, with all_conversions where the platform has it, so that an action that the own metric of the platform leaves out counts too; 0 for a campaign without any on a whole day, and none on a partial day (is_partial_day), which has no conversions, as conversions, conversion_value and all_conversions are none there. It is the choice of the deployment in extensions/model/conversion_actions.toml, which can differ from conversions, the metric that the account shows. None in a table by ad group or ad, as the conversions by action of those levels are a module of the extended set that is not built yet.
 {% enddocs %}
 
+{% docs conversion_value_primary %}
+The value of the conversions of the primary conversion actions of the deployment (is_primary) of the campaign on the day, in the currency of the account (see currency), added up from ad_conversions_campaign_daily, with all_conversion_value where the platform has it, as conversions_primary adds up their conversions: the value of the purchases of Meta and of the complete payments of TikTok, whose own metric of conversions has no value, among them. 0 for a campaign without a primary conversion on a whole day, and none on a partial day (is_partial_day), as conversions_primary is. It is the choice of the deployment, which can differ from conversion_value, the value that the account shows. Each platform credits a conversion to its own ads by its own attribution model and windows, so a sum over several platforms can count the value of one purchase more than once. None in a table by ad group or ad, as the conversions by action of those levels are a module of the extended set that is not built yet.
+{% enddocs %}
+
+{% docs conversion_value_primary_reporting %}
+The value of the primary conversion actions of the row, conversion_value_primary, in the reporting currency (see reporting_currency), at the rate of its report_date in fx_rates_daily, as conversion_value_reporting is computed, to six decimal places; none where conversion_value_primary is none or the day has no rate.
+{% enddocs %}
+
 {% docs fx_rate_into_reporting_currency %}
 The rate of the day of the row from the currency of the row into the reporting currency, from core.fx_rates_daily, which names its sources, with no rounding: an amount of the row times this rate is the amount of the columns that end in _reporting. The reporting currency has the rate 1; none on a day that has no rate.
 {% enddocs %}
@@ -159,6 +167,10 @@ Whether the rate of the row is the last published one before its day, on a day w
 
 {% docs loaded_at %}
 When the load of the ad platform or the web analytics that wrote the row into the core ended, from core.loads, which keeps each load that a row of the core names.
+{% enddocs %}
+
+{% docs finished_at %}
+When the load or the step of the row ended, with its time zone: in stg_loads__newest_lists the newest load of the account whose lists the run reads, as core.loads holds it, which the current campaigns, ad groups and ads take as the moment when a list last named an entity; in ops_maintenance_steps a step of the maintenance.
 {% enddocs %}
 
 {% docs is_account_active %}

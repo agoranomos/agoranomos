@@ -12,7 +12,9 @@ ENV RUNTIME__DLTHUB_TELEMETRY=false \
 # Inside an Airflow task, dlt also takes its settings from Airflow Variables, which the Op role may
 # create: such a Variable could send the connection of a load, with its password, to another host.
 # The loads hand dlt their connection themselves and need no Variable, so dlt reads none;
-# compose.yaml sets the same.
+# compose.yaml sets the same. hadolint takes the word SECRETS in the name for a secret: the value is
+# a switch that turns a reader of secrets off.
+# hadolint ignore=DL3064
 ENV PROVIDERS__ENABLE_AIRFLOW_SECRETS=false
 
 # The two caches of Cosmos stay out of Airflow Variables, which the Op role may edit. A DAG of Cosmos
@@ -51,7 +53,8 @@ RUN python -m venv /opt/airflow/dbt_venv \
 # packages-install-path of dbt_project.yml, /opt/airflow/dbt_packages, so that no task of dbt needs
 # the network. The two files come from the build context dbt, which compose.yaml adds; dbt deps
 # writes its lock file and logs next to them, so their folder belongs to the user of the image, and
-# stays: its parent belongs to root.
+# stays: its parent belongs to root. hadolint takes the context dbt for a stage of this file.
+# hadolint ignore=DL3022
 COPY --from=dbt --chown=airflow:root dbt_project.yml packages.yml /tmp/agoranomos/dbt-deps/
 RUN /opt/airflow/dbt_venv/bin/dbt deps --project-dir /tmp/agoranomos/dbt-deps
 
@@ -60,10 +63,12 @@ RUN /opt/airflow/dbt_venv/bin/dbt deps --project-dir /tmp/agoranomos/dbt-deps
 # these folders Docker would give the volumes to root, and the job could not write them
 # (compose.yaml). The folder of the plugins is made here too, as root, for the COPY below. These
 # come last, so that the layers above stay in the cache of Docker. The image then runs as the user
-# of the base.
+# of the base, 50000 in AIRFLOW_UID, which hadolint cannot read; root is 0 in every image.
+# hadolint ignore=DL3066
 USER root
-RUN install -d -o 65534 -g 65534 -m 0755 /opt/agoranomos/metadata /opt/agoranomos/manifest
-RUN install -d -m 0755 /opt/agoranomos/plugins
+RUN install -d -o 65534 -g 65534 -m 0755 /opt/agoranomos/metadata /opt/agoranomos/manifest \
+    && install -d -m 0755 /opt/agoranomos/plugins
+# hadolint ignore=DL3066
 USER ${AIRFLOW_UID}
 
 # The plugins of agoranomos: agoranomos_alerts.py sends an alert through Apprise when a run of a DAG

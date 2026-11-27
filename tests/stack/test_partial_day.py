@@ -142,14 +142,17 @@ WHOLE_SPEND = (
     "GROUP BY 1 ORDER BY 1"
 )
 # The conversions of the mart of the campaigns: the partial rows, those of them with a conversion
-# that is not none, and the whole rows whose primary conversions are none, which the view gives as
-# 0 on a whole day of a campaign without a primary conversion (C3a of #223).
+# that is not none, and the whole rows whose primary conversions or their value are none, which the
+# view gives as 0 on a whole day of a campaign without a primary conversion (C3a of #223,
+# ADR-0056).
 CONVERSIONS = (
     "SELECT count(*) FILTER (WHERE is_partial_day), "
     "count(*) FILTER (WHERE is_partial_day AND (conversions_primary IS NOT NULL "
     "OR conversions IS NOT NULL OR conversion_value IS NOT NULL "
-    "OR all_conversions IS NOT NULL)), "
-    "count(*) FILTER (WHERE NOT is_partial_day AND conversions_primary IS NULL) "
+    "OR all_conversions IS NOT NULL OR conversion_value_primary IS NOT NULL "
+    "OR conversion_value_primary_reporting IS NOT NULL)), "
+    "count(*) FILTER (WHERE NOT is_partial_day "
+    "AND (conversions_primary IS NULL OR conversion_value_primary IS NULL)) "
     "FROM marts.ad_stats_campaign_daily"
 )
 # The CTR of the whole days of the mart, as the metric CTR (Campaigns) computes it.
@@ -315,10 +318,11 @@ def quarantine(env):
 
 def partial_rows_of_the_mart(env) -> int:
     """The number of partial rows of the mart of the campaigns, after a check that none of them
-    has a conversion and that every whole row has its primary conversions, 0 if it has none."""
+    has a conversion or a value of one, and that every whole row has its primary conversions and
+    their value, 0 if it has none."""
     [(partial, converted, unknown)] = rows(env, CONVERSIONS, "metabase_reader")
     assert converted == "0", f"{converted} partial rows of the mart have conversions"
-    assert unknown == "0", f"{unknown} whole rows of the mart have no conversions_primary"
+    assert unknown == "0", f"{unknown} whole rows of the mart lack the primary conversions"
     return int(partial)
 
 

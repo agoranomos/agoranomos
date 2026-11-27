@@ -96,16 +96,26 @@ def test_a_kpi_of_the_dashboard_is_the_ratio_of_sql_over_the_mart(
         "SELECT platform_name, round(sum(clicks)::numeric / nullif(sum(impressions), 0), 6), "
         "round(sum(spend_reporting) / nullif(sum(conversions), 0), 6), "
         "round(sum(spend_reporting) / nullif(sum(conversions_primary), 0), 6), "
-        "sum(conversions_primary) "
+        "sum(conversions_primary), "
+        "round(sum(conversion_value_primary_reporting) / nullif(sum(spend_reporting), 0), 6), "
+        "round(sum(conversion_value_reporting) / nullif(sum(spend_reporting), 0), 6) "
         "FROM marts.ad_stats_campaign_daily WHERE NOT is_partial_day GROUP BY platform_name"
     )
     for line in warehouse_output(env, sql).splitlines():
-        platform, ctr, cpa, primary_cpa, primary = line.split("|")
+        platform, ctr, cpa, primary_cpa, primary, primary_roas, roas = line.split("|")
         assert abs(Decimal(str(shown[platform]["ctr"])) - Decimal(ctr)) <= TOLERANCE, platform
         # The conversions of the primary actions, which every platform has, Meta included.
         assert Decimal(str(shown[platform]["conversions_primary"])) == Decimal(primary), platform
         cost = Decimal(str(shown[platform]["cost_per_primary_conversion"]))
         assert abs(cost - Decimal(primary_cpa)) <= TOLERANCE, platform
+        # The ROAS of the value of the primary actions, which every platform of the demo reports
+        # (ADR-0056), beside that of the own metric, none on demo_social and demo_video.
+        value = Decimal(str(shown[platform]["primary_roas"]))
+        assert abs(value - Decimal(primary_roas)) <= TOLERANCE, platform
+        if roas == "":
+            assert shown[platform]["roas"] is None, platform
+        else:
+            assert abs(Decimal(str(shown[platform]["roas"])) - Decimal(roas)) <= TOLERANCE
         # conversions is the metric of the platform, which Meta, and so demo_social, has none of
         # (ADR-0037): its cost per conversion is none.
         if cpa == "":

@@ -11,6 +11,19 @@
 -- they name no other campaign. Only the accounts of int_accounts__current enter (ADR-0035). The
 -- versions of the campaigns, the snapshot dim_campaign_versions, and the dimension core.dim_campaign
 -- read it, and it reads core.dim_campaign as the runs before this one left it.
+-- A table that each run of the transform fills anew, once, with its statistics: the versions,
+-- the dimension and the tests of the model read it, and as a view each of the four reads ran its
+-- query again, over rows of which the planner knew nothing (C8 of the audit of 24 November
+-- 2026). Incremental, with its rows deleted first, as int_window_days. Its accounts and the
+-- accounts of the lists join on one key (account_key), so that the planner does not take them
+-- for one row.
+{{ config(
+    materialized='incremental',
+    incremental_strategy='append',
+    on_schema_change='sync_all_columns',
+    pre_hook=["{% if is_incremental() %}delete from {{ this }}{% endif %}"],
+    post_hook=["analyze {{ this }}"],
+) }}
 with listed as (
     select
         platform, account_id, campaign_id, observed_name, campaign_status, campaign_state,
@@ -79,24 +92,15 @@ reported as (
 -- of the entities of an account come in the same load as its statistics (ADR-0038), and a list is
 -- read even when it names no campaign.
 lists as (
-    {{ newest_lists('raw_demo_search', source('core', 'loads')) }}
-    union all
-    {{ newest_lists('raw_demo_social', source('core', 'loads')) }}
-    union all
-    {{ newest_lists('raw_demo_video', source('core', 'loads')) }}
-    union all
-    {{ newest_lists('raw_google_ads', source('core', 'loads')) }}
-    union all
-    {{ newest_lists('raw_meta_ads', source('core', 'loads')) }}
-    union all
-    {{ newest_lists('raw_tiktok_ads', source('core', 'loads')) }}
+    {{ newest_list_accounts(ref('stg_loads__newest_lists')) }}
 ),
 
 accounts as (
     select a.platform, a.account_id, d.account_sk
     from {{ ref('int_accounts__current') }} as a
     join {{ ref('dim_account') }} as d
-        on d.platform = a.platform and d.account_id = a.account_id
+        on {{ account_key('d.platform', 'd.account_id') }}
+        = {{ account_key('a.platform', 'a.account_id') }}
 ),
 
 -- The campaigns of the core of the accounts of this run, as the runs before this one left them.
@@ -117,7 +121,8 @@ campaigns as (
     select k.platform, k.account_id, k.campaign_id_text
     from known as k
     join lists as l
-        on l.source = k.platform and l.account_id = k.account_id
+        on {{ account_key('l.source', 'l.account_id') }}
+        = {{ account_key('k.platform', 'k.account_id') }}
 )
 
 select
@@ -152,7 +157,8 @@ select
     r.last_report_date
 from campaigns as c
 join accounts as a
-    on a.platform = c.platform and a.account_id = c.account_id
+    on {{ account_key('a.platform', 'a.account_id') }}
+    = {{ account_key('c.platform', 'c.account_id') }}
 left join listed as n
     on n.platform = c.platform and n.account_id = c.account_id and n.campaign_id = c.campaign_id
 left join reported as r
@@ -161,4 +167,5 @@ left join known as k
     on k.platform = c.platform and k.account_id = c.account_id
     and k.campaign_id_text = c.campaign_id
 left join lists as l
-    on l.source = c.platform and l.account_id = c.account_id
+    on {{ account_key('l.source', 'l.account_id') }}
+    = {{ account_key('c.platform', 'c.account_id') }}

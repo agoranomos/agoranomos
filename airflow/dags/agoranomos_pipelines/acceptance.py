@@ -17,10 +17,10 @@ each step safe to repeat, in this order:
    progress write between the two (#188); a table that holds another row, or whose lock does not
    come within LOCK_TIMEOUT, loses the rows by DELETE instead.
 
-The journal of the loads of each source, _agoranomos_loads, and the tables of dlt stay whole: the
-next load of the demo and of the rates starts its window from the journal (loads.recorded), the pin
+The journal of the loads of each source, _agoranomos_loads, and the tables of dlt stay: the next
+load of the demo and of the rates starts its window from the journal (loads.recorded), the pin
 reads the journal and _dlt_loads, dlt restores its state from _dlt_pipeline_state, and the DAG of
-maintenance cleans _dlt_loads by its own rules (maintenance.py).
+maintenance cleans _dlt_loads by its own rules, and the journal with it (maintenance.py).
 
 A step that fails leaves nothing half done: the acceptance is one statement, and the cleanup of
 each table one transaction, and a row that is accepted and not deleted yet is read by no run, as

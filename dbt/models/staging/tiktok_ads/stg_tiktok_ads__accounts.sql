@@ -2,4 +2,4 @@
 {{ tiktok_accounts(newest_list(relation_or_empty(source('raw_tiktok_ads', 'advertisers'), {
     'advertiser_id': 'text', 'name': 'text', 'currency': 'text', 'timezone': 'text',
     'display_timezone': 'text', 'status': 'text', '_dlt_load_id': 'text', '_dlt_id': 'text',
-}), 'raw_tiktok_ads', source('core', 'loads')), 'tiktok_ads') }}
+}), 'raw_tiktok_ads', ref('stg_loads__newest_lists')), 'tiktok_ads') }}

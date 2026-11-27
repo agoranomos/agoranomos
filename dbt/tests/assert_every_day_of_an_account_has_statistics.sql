@@ -7,7 +7,7 @@
 with rows as (
     select platform, account_id, report_date
     from {{ ref('ad_stats_campaign_daily') }}
-    where report_date >= {{ window_start() }}
+    where report_date between {{ window_start() }} and {{ window_end() }}
 ),
 
 bounds as (
