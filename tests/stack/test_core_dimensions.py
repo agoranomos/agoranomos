@@ -364,11 +364,21 @@ CURRENT_CAMPAIGN = (
 )
 
 
+def build_current_campaigns():
+    """dbt run of int_campaigns__current in the container of the tasks, as transformer, as a run of
+    the transform builds it: a table that each run fills anew, which reads the lists of raw as they
+    are now."""
+    command = ["exec", "-T", task_service(), DBT, "--quiet", "--no-use-colors", "run"]
+    command += ["--select", "int_campaigns__current", "--project-dir", PROJECT]
+    command += ["--profiles-dir", PROJECT, "--target-path", f"{WORK}-lists/target"]
+    command += ["--log-path", f"{WORK}-lists/logs"]
+    result = compose(*command, check=False)
+    assert result.returncode == 0, result.stdout[-3000:]
+
+
 @pytest.mark.demo
 @pytest.mark.transform
-def test_the_views_of_the_entities_read_the_newest_list_of_each_account(
-    env, airflow_url, token, built
-):
+def test_the_current_entities_read_the_newest_list_of_each_account(env, airflow_url, token, built):
     # Each load appends the full list of the entities of each account, and staging reads the list
     # of the newest load of the account that the runs pinned (ADR-0038). A campaign that the newest
     # list no longer names keeps the attributes that the core holds, and is no longer listed; a
@@ -377,8 +387,9 @@ def test_the_views_of_the_entities_read_the_newest_list_of_each_account(
     # loads the last days of demo_search again, as of its newest load, which gives the same lists,
     # and runs the transform with its acceptance skipped, which leaves the load pinned and its rows
     # in raw. Then it takes one campaign out of the newest list and renames another, as loader, and
-    # puts both back in a finally; it reads the views and runs no transform after that, so the core
-    # stays as it is. The next run reads the load again and accepts it.
+    # puts both back in a finally; it reads the view of staging and builds the table of the current
+    # campaigns again, as a run does, and runs no transform after that, so the core stays as it is.
+    # The next run reads the load again and accepts it.
     now = last_moment(env, "demo_search")
     load_platform(env, "demo_search", now, (now - timedelta(days=4)).date())
     transform_keeping_raw(airflow_url, token)
@@ -419,12 +430,14 @@ def test_the_views_of_the_entities_read_the_newest_list_of_each_account(
         warehouse_output(env, name_it.format(name=RENAMED, row=renamed_row), "loader")
         count = len(listed) - 1
         assert warehouse_output(env, staged) == f"{count}|{count}|{load_id}|{load_id}"
+        build_current_campaigns()
         assert warehouse_output(env, CURRENT_CAMPAIGN.format(dropped)) == f"{held}|f"
         now = warehouse_output(env, CURRENT_CAMPAIGN.format(renamed)).split("|")
         assert (now[0], now[4], now[5]) == (RENAMED, finished_at, "t"), now
     finally:
         warehouse_output(env, hide.format(load=load_id, row=dropped_row), "loader")
         warehouse_output(env, name_it.format(name=name, row=renamed_row), "loader")
+        build_current_campaigns()
     assert warehouse_output(env, staged) == f"{len(listed)}|{len(listed)}|{load_id}|{load_id}"
 
 

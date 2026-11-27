@@ -6,4 +6,4 @@
     'conversion_action__include_in_conversions_metric': 'boolean',
     'conversion_action__primary_for_goal': 'boolean',
     '_dlt_load_id': 'text',
-}), 'raw_google_ads', source('core', 'loads')), 'google_ads') }}
+}), 'raw_google_ads', ref('stg_loads__newest_lists')), 'google_ads') }}

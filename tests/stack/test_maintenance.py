@@ -2,16 +2,16 @@
 running stack, on a history that the tests accrue: the partitions of the months ahead, two of which
 they drop first, empty; old months of a journal of restatements; a raw schema of their own, as dlt
 and the journal of the loads leave one after a stop of more than 90 days, with rows of core.loads
-for its source, pinned and accepted, some older than 13 months; and totals of a platform for their
-source. The demo adds its history of 18 months, whose frozen months the maintenance freezes, and its
-raw schema raw_demo_search, whose rows of _dlt_loads the tests age by 100 days, as a stop of the
-stack does.
+for its source, pinned and accepted, some older than 13 months, and rows of the journal of loads
+that did not end, old and young; and totals of a platform for their source. The demo adds its
+history of 18 months, whose frozen months the maintenance freezes, and its raw schema
+raw_demo_search, whose rows of _dlt_loads the tests age by 100 days, as a stop of the stack does.
 
 The tests put back what they changed: they drop their schema, delete their rows of core.loads, of
 core.platform_totals_daily and of ops, and the months of the journal that they made, make the
-partitions that they dropped again, and give raw_demo_search its rows of _dlt_loads back as they
-were. No migration and no grant changes. The assertions print names, counts and dates, never a
-secret.
+partitions that they dropped again, and give raw_demo_search its rows of _dlt_loads and of its
+journal back as they were. No migration and no grant changes. The assertions print names, counts
+and dates, never a secret.
 """
 
 import secrets
@@ -54,6 +54,13 @@ LOADS = {
     "1710000000.0": (10, [("a3", "2024-03-09", "2024-03-08", "loaded")], True, False),
 }
 KEPT_LOADS = ["1700172800.9", "1700259200.11", "1710000000.0"]
+# A load that did not end leaves rows in the journal and none in _dlt_loads: those of an old one go
+# with the journal of the loads whose row _dlt_loads no longer holds, and a young one, which may
+# still be running, keeps them. Its load id is the moment two hours ago, as dlt makes one.
+UNFINISHED_LOAD = "1700345600.7"
+YOUNG_LOAD = "(extract(epoch FROM now() - interval '2 hours'))::text"
+# The journal after the run: the rows of the loads that _dlt_loads keeps, and of the young load.
+KEPT_JOURNAL = [*KEPT_LOADS, "young"]
 # Rows of core.loads of the source of the test: (account, load, status, months ago). Every row of
 # the kind window stays, whatever its age: the fact of the oldest day of each daily window names
 # its load alone, and the views read when it ended for loaded_at and is_final.
@@ -183,6 +190,12 @@ def raw_schema_sql(schema, source):
                 f" {f"'{as_of}'" if as_of else 'NULL'}, {day}, {day}, now(), now(), '{status}',"
                 f" NULL, '{load_id}', '{load_id}{account}');"
             )
+    for load_id, account in ((f"'{UNFINISHED_LOAD}'", "a4"), (YOUNG_LOAD, "a5")):
+        lines.append(
+            f"INSERT INTO {schema}._agoranomos_loads VALUES ('{account}', current_date,"  # noqa: S608 (names, dates and a tag of the test)
+            " current_date - 1, current_date - 1, now(), now(), 'loaded', NULL,"
+            f" {load_id}, 'unfinished{account}');"
+        )
     lines.append("RESET ROLE;")
     # The pinned loads in core.loads, with windows of recent days, so that a run of the transform
     # in between would not read further back than it does.
@@ -284,6 +297,8 @@ def run(env, airflow_url, token):
             sql(
                 env,
                 f"CREATE TABLE {saved}.demo_loads AS SELECT * FROM raw_demo_search._dlt_loads;"  # noqa: S608 (names, dates and a tag of the test)
+                f" CREATE TABLE {saved}.demo_journal AS"
+                " SELECT * FROM raw_demo_search._agoranomos_loads;"
                 " UPDATE raw_demo_search._dlt_loads SET inserted_at = inserted_at"
                 f" - interval '{STOPPED} days'",
             )
@@ -306,11 +321,45 @@ def run(env, airflow_url, token):
                 if demo
                 else ""
             ),
+            demo_journal=(
+                sql(env, f"SELECT count(*) FROM {saved}.demo_journal")  # noqa: S608 (names, dates and a tag of the test)
+                + "|"
+                + sql(env, "SELECT count(*) FROM raw_demo_search._agoranomos_loads")
+                if demo
+                else ""
+            ),
+            # The rows of the journal of the demo older than a day whose load _dlt_loads no
+            # longer holds: none, as they go with it.
+            demo_orphans=(
+                sql(
+                    env,
+                    "SELECT count(*) FROM raw_demo_search._agoranomos_loads AS j"
+                    " WHERE NOT EXISTS (SELECT FROM raw_demo_search._dlt_loads AS d"
+                    " WHERE d.load_id = j._dlt_load_id)"
+                    r" AND CASE WHEN j._dlt_load_id ~ '^[0-9]+(\.[0-9]+)?$'"
+                    " THEN to_timestamp(j._dlt_load_id::double precision) END"
+                    " < now() - interval '1 day'",
+                )
+                if demo
+                else ""
+            ),
             own_before=own_before,
             own_after=reads(env, schema),
+            own_journal=sql(
+                env,
+                "SELECT string_agg(CASE WHEN account_id = 'a5' THEN 'young' ELSE _dlt_load_id END,"  # noqa: S608 (names, dates and a tag of the test)
+                f" ',' ORDER BY _dlt_load_id::numeric) FROM {schema}._agoranomos_loads",
+            ).split(","),
             tasks=task_instances(airflow_url, token, finished),
         )
     finally:
+        if demo and sql(env, f"SELECT to_regclass('{saved}.demo_journal') IS NOT NULL") == "t":
+            sql(
+                env,
+                "INSERT INTO raw_demo_search._agoranomos_loads"  # noqa: S608 (names, dates and a tag of the test)
+                f" SELECT s.* FROM {saved}.demo_journal AS s WHERE NOT EXISTS (SELECT FROM"
+                " raw_demo_search._agoranomos_loads AS j WHERE j._dlt_id = s._dlt_id)",
+            )
         if demo and sql(env, f"SELECT to_regclass('{saved}.demo_loads') IS NOT NULL") == "t":
             sql(
                 env,
@@ -441,6 +490,12 @@ def test_dlt_loads_keep_after_a_stop_what_the_loads_dlt_and_the_pin_read(env, ru
     assert run.own_after["whole loads"] is True
 
 
+def test_the_journal_goes_with_dlt_loads_and_keeps_a_load_in_progress(run):
+    # The rows of the loads whose row _dlt_loads lost go, and so do those of the old load that did
+    # not end; what the loads, dlt and the pin read stays as it was (above).
+    assert run.own_journal == KEPT_JOURNAL
+
+
 def test_core_loads_keep_what_staging_and_the_next_window_read(env, run):
     left = sql(
         env,
@@ -474,6 +529,10 @@ def test_a_stop_of_100_days_keeps_what_the_demo_reads(run):
     # The rows that none of them reads went, and those that one reads stayed.
     before, after = map(int, run.demo_rows.split("|"))
     assert 0 < after <= before
+    # The journal lost the rows of the loads that _dlt_loads lost, and no other.
+    before, after = map(int, run.demo_journal.split("|"))
+    assert 0 < after <= before
+    assert run.demo_orphans == "0"
 
 
 def test_ops_records_the_disk_and_metabase_reads_it(env, run):
@@ -502,6 +561,7 @@ def test_ops_records_the_steps_of_the_maintenance(env, run):
     for table in maintenance.FACTS:
         assert f"analyze_the_facts|core.{table}|" in steps, table
     assert f"clean_dlt_loads|{run.schema}._dlt_loads|4" in steps
+    assert f"clean_dlt_loads|{run.schema}._agoranomos_loads|4" in steps
     assert f"clean_core_loads|core.loads of {run.tag}|2" in steps
     # The partitions that the tests dropped, and the months of the journal that they made, at
     # least: a stack that started in an earlier month has more.
