@@ -202,6 +202,49 @@ def test_the_view_of_the_rates_has_the_columns_that_the_job_reads():
         assert column in mi.GAPS
 
 
+def test_the_rates_read_a_list_of_accounts_that_does_not_exist_yet_as_empty():
+    # The first up of a release builds the rates of the core and ops.ops_rates before any run of
+    # the transform, and a list of accounts that the release before lacked, as those of TikTok and
+    # GA4 after v0.6.0, does not exist yet: the rates read each list through relation_or_empty,
+    # with the three columns that they take, so that a missing one gives no currency.
+    text = (DBT / "macros" / "quarantine.sql").read_text(encoding="utf-8")
+    body = text[text.index("{% macro listed_currencies(") :]
+    body = body[: body.index("{%- endmacro %}")]
+    # A relation of ref() goes through relation_or_empty; a string, the name of a table that a
+    # test of the stack makes as a stand-in, is read as it is, as load_relation needs a relation.
+    assert (
+        "    {%- if relation is string %}\n"
+        "    from {{ relation }}\n"
+        "    {%- else %}\n"
+        "    from {{ relation_or_empty(relation, {'platform': 'text', account: 'text', "
+        "'currency': 'text'}) }}\n"
+        "    {%- endif %}\n"
+    ) in body
+    assert body.count("from ") == 2
+    for path in (
+        DBT / "models" / "core" / f"{mi.RATES}.sql",
+        DBT / "models" / "ops" / f"{mi.OPS_RATES}.sql",
+    ):
+        model = path.read_text(encoding="utf-8")
+        assert "{{ listed_currencies(lists) }}" in model, path.name
+        assert not re.search(r"from \{\{ ref\('stg_\w+__(accounts|properties)'\)", model)
+
+
+@pytest.mark.parametrize("snapshots", [True, False])
+@pytest.mark.parametrize("other", [True, False])
+def test_no_build_of_the_job_builds_a_list_of_accounts(snapshots, other):
+    # dbt replaces a view by dropping the old one with cascade: a rebuild of a list of accounts
+    # or of properties would drop int_accounts__current and the views over it on every start,
+    # until the next run of the transform, and a node of a run that reads them between two nodes
+    # would fail. The rates read a list that does not exist yet as empty instead.
+    state = mi.State(snapshots=snapshots, other_currency=other, ops=True)
+    for argv in (mi.command(state), mi.ops_command(state)):
+        nodes = flag(argv, "--select")
+        lists = [n for n in nodes if re.fullmatch(r"\+?stg_\w+__(accounts|properties)", n)]
+        assert lists == [], (snapshots, other, lists)
+        assert not any(n.startswith("+") and n != "+marts" for n in nodes), nodes
+
+
 def test_the_job_waits_for_the_nodes_of_the_transform_that_write(capsys):
     code, connection, dbt = run_job([(False,), (True, False, False)])
     assert code == 0

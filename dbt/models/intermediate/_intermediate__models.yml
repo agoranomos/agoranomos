@@ -271,8 +271,9 @@ models:
       accounts and properties for an account listed twice, a currency outside ISO 4217 and a time
       zone outside IANA; the journal of the loads for an account whose newest pinned load failed,
       and for an account that the loads name and no list gives; the rates for an account whose
-      currency has no rate into the reporting currency, neither in the loads of the rates that this
-      run reads nor in core.fx_rates_daily; and the fact tables of raw for rows outside the window
+      currency has no rate into the reporting currency on a day of its window, from the loads of
+      the rates that this run reads and core.fx_rates_daily, as the model of the rates would write
+      it, which a test of G3 would otherwise find after the write; and the fact tables of raw for rows outside the window
       of their load and a spend with more than six decimal places. G0a compares the impressions,
       clicks and spend of the campaigns of each account and day with the totals that its platform
       gives for the account in the same load, where its loads bring them, as those of Google Ads

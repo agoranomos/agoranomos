@@ -3053,6 +3053,9 @@ def test_the_rates_of_the_core_merge_the_days_that_a_run_brings():
         "source:core.loads",
         # The rates of the file of the deployment, which go before the sources (C7 of #227).
         "stg_settings__rates",
+        # The lists of the accounts that the run reads, whose currencies the core keeps, those
+        # of an account in quarantine too.
+        *ACCOUNT_LISTS,
     }
     assert "round(" not in text
     assert "published_on < rate_date as is_carried_forward" in text
@@ -3075,6 +3078,102 @@ def test_the_rates_of_the_core_merge_the_days_that_a_run_brings():
     # A load of the ECB reads the last 14 days again (ADR-0042), its window in the seed.
     ecb = {r["platform"]: r for r in seed_rows("seed_ad_platforms")}["ecb"]
     assert ecb["restatement_window_days"] == "14"
+
+
+# The staging models of the lists of the accounts and of the properties, in the order in which the
+# check of the rates, the rates of the core and ops_rates read them.
+ACCOUNT_LISTS = [
+    "stg_demo_search__accounts",
+    "stg_demo_social__accounts",
+    "stg_demo_video__accounts",
+    "stg_google_ads__accounts",
+    "stg_meta_ads__accounts",
+    "stg_tiktok_ads__accounts",
+    "stg_demo_web__properties",
+    "stg_ga4__properties",
+]
+
+
+def test_the_check_of_the_rates_counts_the_days_as_the_rates_of_the_core_write_them():
+    # ADR-0042 and ADR-0035: the model carries the first rate that a source published of a
+    # currency to each day after it and gives none before it, and the check counts the days the
+    # same way, so an account in a currency new to the core whose window starts before that of the
+    # last load of the rates goes to quarantine for the days before, and never fails G3 and the run
+    # for every account, as it did when the check counted such a currency on every day.
+    body = macro_text("quarantine_rate_findings")
+    assert "    select currency, min(published_on) as first_day\n    from known\n" in body
+    assert "        and (f.first_day is null or d.day < f.first_day)\n" in body
+    assert "not exists (select from sourced as s where s.currency = l.currency)" not in body
+    # The detail names the days of a currency that a source has from a later day.
+    assert "when u.currency not in (select currency from sourced) then ''" in body
+    assert body.count("quarantine_days('u.day')") == 3
+    # The check, the rates of the core and ops_rates read the same lists, those of G1.
+    statement = next(s for s in hooks() if "quarantine_rate_findings([" in s)
+    assert re.findall(r"ref\('(stg_\w+__(?:accounts|properties))'\)", statement) == ACCOUNT_LISTS
+    for path in (CORE / f"{RATES_MODEL}.sql", DBT / "models" / "ops" / "ops_rates.sql"):
+        text = path.read_text(encoding="utf-8")
+        lists = text[text.index("{%- set lists = [") :]
+        lists = lists[: lists.index("] %}")]
+        assert re.findall(r"ref\('(\w+)'\)", lists) == ACCOUNT_LISTS, path.name
+    # The rates of the core keep the currencies of the accounts that the run reads, of one in
+    # quarantine too, so that the core holds the rates that the run read of a new currency.
+    model = (CORE / f"{RATES_MODEL}.sql").read_text(encoding="utf-8")
+    assert "    from ({{ listed_currencies(lists) }}) as l\n" in model
+
+
+def test_ops_names_the_days_of_an_account_in_quarantine_without_a_rate_once():
+    # ADR-0042: the days of the loads of an account in quarantine with missing_rate that lack a rate
+    # count among those of the source that the core holds the currency from, so its next load takes
+    # the history again (agoranomos_pipelines/rates.py), and not among those of the facts.
+    view = (DBT / "models" / "ops" / "ops_rates.sql").read_text(encoding="utf-8")
+    assert {"int_g1_failures", "source:core.loads", *ACCOUNT_LISTS} <= set(referenced(view))
+    held = view[view.index("held_loads as (") : view.index("gaps_by_source as (")]
+    assert "        where reason = 'missing_rate'\n" in held
+    assert "    where p.status = 'pinned'\n        and p.outcome = 'loaded'\n" in held
+    # A currency of which the core holds no rate, as one that no source publishes, names no day:
+    # an inner lateral join, where the facts fall back on the first source.
+    sources = held[held.index("held_sources as (") : held.index("held_missing as (")]
+    assert "    join lateral (\n" in sources
+    assert "left join lateral" not in sources
+    assert "serving" not in sources
+    # A day that a load of the history of that source has covered since the account was first
+    # pinned names none, so the history comes once for it and not with every load.
+    for line in (
+        "            where a.source = s.source\n",
+        "                and a.kind = 'history'\n",
+        "                and a.status = 'accepted'\n",
+        "                and a.pinned_at >= s.since\n",
+        "                and d.day between a.window_from and a.window_to\n",
+    ):
+        assert line in held, line
+    # Only the days that the check of the rates holds the account out for: before the first rate
+    # of the currency that the core holds from a source of the order, and without a row of it. A
+    # day after it, as the partial day of today beyond the last day of the table, would make each
+    # load of the source take the whole history again, as no load of the history covers it.
+    assert (
+        "        select min(r.rate_date) as first_rate\n        from rates as r\n"
+        "        where r.currency = h.currency\n"
+        "            and r.rate_source in (select source from listed)\n"
+    ) in sources
+    missing = held[held.index("held_missing as (") :]
+    assert "    where d.day < s.first_rate\n        and not exists (\n" in missing
+    assert "select from rates as r where r.rate_date = d.day and r.currency = h.currency" in missing
+    gaps = view[view.index("gaps as (") : view.index("off_the_file as (")]
+    assert "held_missing" not in gaps
+    by_source = view[view.index("gaps_by_source as (") : view.index("-- The rows:")]
+    assert "        select source, day from held_missing\n" in by_source
+
+
+def test_the_detail_of_a_missing_rate_names_the_demo_only_while_it_serves():
+    # ADR-0042: on a deployment without the demo, whose sources have no rate yet, the detail of
+    # missing_rate names the sources of the order, never demo_fx.
+    rates = (DBT / "macros" / "rates.sql").read_text(encoding="utf-8")
+    body = rates[rates.index("{% macro rates_named(") :]
+    body = body[: body.index("{%- endmacro %}")]
+    assert "    else 'the source of the rates, demo_fx'\n" not in body
+    assert "    when exists (select from {{ staged['demo_fx'] }})\n" in body
+    assert "        or exists (select from {{ rates }} where rate_source = 'demo_fx')\n" in body
+    assert body.rstrip().endswith("    else '{{ named }}'\nend)")
 
 
 def test_the_views_of_the_core_take_their_accounts_from_one_place():

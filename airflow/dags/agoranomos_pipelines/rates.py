@@ -28,6 +28,18 @@ pins it, reads every rate of those days, computes them in the reporting currency
 cleans it as any other load. A load of the history fills only the days and currencies that the
 core holds no rate of, so the rates that the core holds keep their source.
 
+The same row counts the days without a rate of an account in quarantine with missing_rate
+(dbt/macros/quarantine.sql), as of a currency new to the core whose window starts before the
+window of the last load of the rates: the days of its loads that wait for the core, pinned and not
+accepted, before the first rate of its currency that the core holds from a source, on which it
+holds no row of it, the days that the check holds out. The core keeps the rates of the
+currencies of the accounts that a run reads, those in quarantine too, so its source is the first in
+the order that the core holds a rate of that currency from; the load takes the history from the
+first of those days as above, and the run of the transform that reads it takes the account out of
+quarantine. A currency of which the core holds no rate, as one that no source publishes, names no
+day, and nor does a day that a load of the history of that source has covered since the first of
+those loads was pinned: so no load takes the history again and again for it (ops_rates.sql).
+
 The rates of the file of the deployment, extensions/model/rates.toml, go before every source
 (core_fx_rates_daily), and a day that the file covers, as the core holds its rate, needs no
 history. A day whose rate the core holds from the file where the file no longer gives it, as after
@@ -47,9 +59,9 @@ The load takes no history:
   run of the transform has not ended or failed; that run computes its days, and a load of the
   history after another would bring the same.
 
-So while a source lacks the rate of one of its currencies on some of those days, each of its loads
-takes the history again, once a day, until the core holds them. A failure to read the core costs
-the history and not the load: the load takes its usual window, and the next one asks again.
+So while a source lacks the rate of one of its currencies on some days of the facts, each of its
+loads takes the history again, once a day, until the core holds them. A failure to read the core
+costs the history and not the load: the load takes its usual window, and the next one asks again.
 
 The view and core.fx_rates_daily are read as transformer, which writes the core and reads it, in a
 transaction that only reads, and the journal of the source and core.loads as loader, through the

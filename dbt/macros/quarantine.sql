@@ -10,9 +10,9 @@
     account failed for it; the loads name an account that no list gives; two rows share a key, or
     a list gives the account twice; a row misses a part of its key; an ID of a campaign, an ad
     group or an ad in raw is not a whole number that fits bigint; the currency of the account is
-    not one of ISO 4217; its time zone is not one of IANA; no source of the rates has a rate of
-    its currency into the reporting currency, nor the file of the deployment on a day of the run
-    (ADR-0042); a spend has more than six decimal places;
+    not one of ISO 4217; its time zone is not one of IANA; its currency has no rate into the
+    reporting currency on a day of the run, from the sources of the rates or the file of the
+    deployment (ADR-0042); a spend has more than six decimal places;
     a measure is missing or below zero; a load holds rows outside its window; the rows of the
     campaigns of a load do not add up to the totals of the account that the platform gives in the
     same load (G0a); a load has no row on the days of its window while the core holds spend on
@@ -339,43 +339,89 @@ from accounts
 where unknown_time_zone
 {%- endmacro %}
 
-{#- The check of the rates (ADR-0042): an account whose currency has no rate into the reporting
-    currency on a day that this run reads of it, so that the core takes no fact that a view could
-    not convert, and no rate of 1 or 0 stands for a missing one. A currency has a rate on every day
-    when a source of the order of AGORANOMOS_RATES_SOURCE (rates_chain) has one, among the rates of
-    the loads that this run reads or in core.fx_rates_daily as the runs before this one left it
-    from a source; a day of such a currency before its first rate is a gap, which the test of G3
-    finds after the write of the rates. A currency that no source has has a rate only on the days
-    of the entries of the file of the deployment whose quote is the reporting currency or a
-    currency of which the sources give a rate, as the model writes the rows of an entry inside its
-    range alone and never carries them over (core_fx_rates_daily), and on the days on which
-    core.fx_rates_daily holds a rate of it, as from an entry that the file no longer has. Only the
-    accounts that the pinned loads of this run name, on their days, as only they write the core; a
-    currency outside ISO 4217 has a reason of its own, and the reporting currency needs no rate.
-    lists are the staging models of the accounts and the properties, each with the column of its
-    account; currencies the seed of ISO 4217; days the table stg_loads__newest_days; staged the
-    staging models of the rates of each source by its code, rates core.fx_rates_daily and loads
-    core.loads (macros/rates.sql); given the rates of the file of the deployment,
-    stg_settings__rates. The detail of a currency that the file names says so, with the days that
-    its entries leave out. -#}
-{% macro quarantine_rate_findings(lists, currencies, days, staged, rates, loads, given) -%}
-with listed as (
+{#- The accounts that the lists of the accounts and of the properties give, with the currency of
+    each, as SQL: lists are the staging models of the lists, each with the column of its account.
+    The check of the rates reads them, the rates of the core, which keep the currencies of the
+    accounts that a run reads, those in quarantine too (core_fx_rates_daily), and ops_rates, which
+    names the days without a rate of an account in quarantine.
+    Each list goes through relation_or_empty: marts-init builds the rates of the core and the
+    views of ops at the first ./agoranomos up of a release, before any run of the transform, and a
+    list that the release before lacked, as those of TikTok and GA4 after v0.6.0, does not exist
+    yet. Such a list then gives no currency, as the deployment has no account of its source.
+    marts-init builds no list itself: dbt replaces a view by dropping the old one with cascade,
+    which would take int_accounts__current and the views over it until the next run of the
+    transform, also between two nodes of a run. A list that exists keeps the definition of its
+    release until that run, which gives these three columns too, as the check of the rates of
+    v0.6.0 read them. In a run
+    of the transform every list exists, as dbt builds each before the nodes that read it. A list
+    given as a string, the name of a table that a test of the stack makes as a stand-in, is read as
+    it is: relation_or_empty needs a relation, and a temporary table that the compiled SQL makes
+    does not exist when dbt compiles it. -#}
+{% macro listed_currencies(lists) -%}
     {%- for relation, account in lists %}
     {%- if not loop.first %}
     union all
     {%- endif %}
     select platform as source, {{ account }} as account_id, currency
+    {%- if relation is string %}
     from {{ relation }}
+    {%- else %}
+    from {{ relation_or_empty(relation, {'platform': 'text', account: 'text', 'currency': 'text'}) }}
+    {%- endif %}
     {%- endfor %}
+{%- endmacro %}
+
+{#- The check of the rates (ADR-0042): an account whose currency has no rate into the reporting
+    currency on a day that this run reads of it, so that the core takes no fact that a view could
+    not convert, and no rate of 1 or 0 stands for a missing one. The check counts the days as the
+    model of the rates writes them (core_fx_rates_daily): an account that passes has a rate on each
+    day of its windows, which the test of G3 then finds, and an account that would fail G3, and so
+    the whole run, goes to quarantine instead.
+    * A currency has a rate on each day from the first day on which a source of the order of
+      AGORANOMOS_RATES_SOURCE (rates_chain) published one, among the rates of the loads that this
+      run reads and those that core.fx_rates_daily holds as published from a source (rates_known),
+      as the model carries the last rate published over each day after it, and gives none before
+      it. A day before the first rate has none, as when the core holds no rate of a currency and
+      the window of its account starts before the window of the last load of the rates: the core
+      has accepted the loads of the rates of the days before, and the raw layer no longer holds
+      them (ADR-0035, ADR-0046). ops_rates names such a day, so that the next load of the source of
+      the currency takes the history of the rates again (agoranomos_pipelines/rates.py), and the
+      run that reads it takes the account out of quarantine.
+    * A day on which core.fx_rates_daily holds a rate of the currency has one, as the model keeps
+      the rows that it holds, also one from an entry that the file no longer has.
+    * The rates of the file of the deployment count on the days of their entries whose quote is
+      the reporting currency or a currency of which the sources give a rate, as the model writes
+      the rows of an entry inside its range alone and never carries them over.
+    The test of G3 stays as the net for any other gap. Only the accounts that the pinned loads of
+    this run name, on their days, as only they write the core; a currency outside ISO 4217 has a
+    reason of its own, and the reporting currency needs no rate. lists are the staging models of
+    the accounts and the properties, each with the column of its account (listed_currencies);
+    currencies the seed of ISO 4217; days the table stg_loads__newest_days; staged the staging
+    models of the rates of each source by its code, rates core.fx_rates_daily and loads core.loads
+    (macros/rates.sql); given the rates of the file of the deployment, stg_settings__rates. The
+    detail names the sources of the order (rates_named), and the days without a rate of a currency
+    that a source has from a later day or that the file names. -#}
+{% macro quarantine_rate_findings(lists, currencies, days, staged, rates, loads, given) -%}
+with listed as (
+    {{ listed_currencies(lists) }}
 ),
 
--- The currencies that a source of the order has: the rows of the file of the deployment in the
--- table count only on their days, below.
+-- The rates that the sources of the order give, and the first day of each currency. The rows of
+-- the file of the deployment in the table count only on their days, below.
+known as (
+    {{ rates_known(staged, rates, days, loads, 'select currency from listed union select quote_currency from ' ~ given) }}
+),
+
+first_rates as (
+    select currency, min(published_on) as first_day
+    from known
+    group by currency
+),
+
+-- The currencies that a source of the order has, for the quotes of the file.
 sourced as (
-    select distinct currency
-    from (
-        {{ rates_known(staged, rates, days, loads, 'select currency from listed union select quote_currency from ' ~ given) }}
-    ) as known
+    select currency
+    from first_rates
     union
     select currency::text
     from {{ rates }}
@@ -391,8 +437,9 @@ quoted as (
         or g.quote_currency in (select currency from sourced)
 ),
 
--- The days that this run reads of each account whose currency no source has, on which neither
--- an entry of the file nor core.fx_rates_daily gives it a rate.
+-- The days that this run reads of each account on which its currency has no rate: before the
+-- first rate of the sources, or on every day without one, and neither an entry of the file nor
+-- core.fx_rates_daily gives it one.
 uncovered as (
     select distinct l.source, l.account_id, l.currency, d.day
     from listed as l
@@ -400,9 +447,11 @@ uncovered as (
         on d.source = l.source and d.account_id = l.account_id
     join {{ currencies }} as c
         on c.currency_code = l.currency
+    left join first_rates as f
+        on f.currency = l.currency
     where d.source in ('{{ quarantine_sources() | join("', '") }}')
         and l.currency <> {{ reporting_currency() }}
-        and not exists (select from sourced as s where s.currency = l.currency)
+        and (f.first_day is null or d.day < f.first_day)
         and not exists (
             select
             from quoted as q
@@ -427,9 +476,16 @@ select
         || ' from ' || {{ rates_named(staged, rates) }}
         || case
             when not exists (select from {{ given }} as g where g.currency = u.currency)
-                then ''
+                then case
+                    when u.currency not in (select currency from sourced) then ''
+                    else ' ' || {{ quarantine_days('u.day') }}
+                end
             when not exists (select from quoted as q where q.currency = u.currency)
                 then ', nor from extensions/model/rates.toml, whose quote has no rate either'
+                    || case
+                        when u.currency not in (select currency from sourced) then ''
+                        else ', ' || {{ quarantine_days('u.day') }}
+                    end
             else ', nor from extensions/model/rates.toml ' || {{ quarantine_days('u.day') }}
         end as detail
 from uncovered as u

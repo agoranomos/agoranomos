@@ -82,6 +82,10 @@ GROUPS: tuple[tuple[str, ...], ...] = (
         # A load and a run of the transform, as test_meta_ads.py: about 8 minutes by that file,
         # not measured yet (C5d of #225, 23 November 2026).
         "test_tiktok_ads.py",
+        # Two loads of demo_social, two of the rates of the demo, one of them the history, and three
+        # runs of the transform: about 20 minutes by test_rates_of_the_file.py, not measured yet
+        # (27 November 2026).
+        "test_rates_of_a_new_currency.py",
         "test_airflow_image.py",
         "test_alerts.py",
         "test_helpers.py",
