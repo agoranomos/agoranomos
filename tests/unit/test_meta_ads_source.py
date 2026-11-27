@@ -1018,6 +1018,8 @@ def test_a_paging_that_is_not_an_object_fails_the_account_only(meta):
     with pytest.raises(module.AccountsFailed, match="1 of 2 Meta ad accounts failed") as raised:
         module.load(NOW, extensions)
     assert "an answer whose paging is not an object" in str(raised.value)
+    # One account loaded: the task of the DAG succeeds with the line (outcome.py).
+    assert raised.value.loaded == 1
 
 
 def test_a_use_above_75_percent_waits_for_the_reset_time_and_is_logged(meta, caplog):
@@ -1709,8 +1711,9 @@ def test_a_load_whose_every_account_failed_writes_the_journal_alone(meta):
     )
     with pytest.raises(
         module.AccountsFailed, match="2 of 2 Meta ad accounts failed, none is loaded"
-    ):
+    ) as raised:
         module.load(NOW, extensions)
+    assert raised.value.loaded == 0
     [(rows, _)] = made["pipelines"][0].runs
     assert list(rows) == ["_agoranomos_loads"]
 

@@ -996,8 +996,12 @@ def test_an_error_in_the_middle_of_an_account_leaves_nothing_of_it_in_the_load(a
         ],
         failing_at={"2222222222": "FROM ad_group_ad WHERE"},
     )
-    with pytest.raises(module.AccountsFailed, match=f"the other 1 is loaded: {ERROR[:35]}"):
+    with pytest.raises(
+        module.AccountsFailed, match=f"the other 1 is loaded: {ERROR[:35]}"
+    ) as raised:
         module.load(NOW, extensions)
+    # One account loaded: the task of the DAG succeeds with the line (outcome.py).
+    assert raised.value.loaded == 1
     assert requested(made).count("2222222222") == 1 + 4 + 5 + 1
     assert requested(made).count("1111111111") == 1 + 4 + 7
     [(rows, hints)] = made["pipelines"][0].runs
@@ -1034,6 +1038,8 @@ def test_a_load_whose_every_account_failed_writes_the_journal_alone(ads):
         "2 of 2 Google Ads accounts failed, none is loaded: "
         f"{ERROR.replace('2222222222', '1111111111')}; {ERROR}"
     )
+    # None loaded: the task of the DAG fails with the line (outcome.py).
+    assert raised.value.loaded == 0
     [(rows, _)] = made["pipelines"][0].runs
     assert set(rows) == {"_agoranomos_loads"}
     assert [(row["account_id"], row["status"]) for row in rows["_agoranomos_loads"]] == [
@@ -1715,8 +1721,9 @@ def test_an_intraday_load_records_only_the_accounts_that_it_took_and_fails_at_th
     # When every account fails, nothing is written.
     made["pipelines"].clear()
     state["failing"] = {"1111111111", "2222222222"}
-    with pytest.raises(module.AccountsFailed, match="none is loaded"):
+    with pytest.raises(module.AccountsFailed, match="none is loaded") as raised:
         module.load_intraday(NOW, extensions)
+    assert raised.value.loaded == 0
     assert [pipeline.runs for pipeline in made["pipelines"]] == [[]]
 
 

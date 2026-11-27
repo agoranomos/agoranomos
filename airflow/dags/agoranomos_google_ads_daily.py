@@ -20,9 +20,13 @@ The DAG starts paused: a deployment unpauses it once its key and its accounts ar
 the DAG of the rates of the ECB with it ([Connect Google Ads](docs/how-to/connect-google-ads.md)).
 A load without a key, or without an account of google_ads in clients.toml, fails with a line that
 says so. An error of the API on one account, or an answer that breaks off, does not stop the
-others: the load takes them, records the failed account in its journal, and the task fails at the
-end, without a retry, with one line that lists the accounts and their errors (ADR-0035); the next
-load takes the days that they missed.
+others: the load takes them and records the failed account in its journal (ADR-0035). The task of
+the load then succeeds, so that its asset starts the transform for the accounts that it took, and
+the last task, check_accounts, fails the run, without a retry, with one line that lists the
+accounts and their errors, so that the alert of a failed run goes (outcome.py of the package);
+when no account loaded, the task of the load fails with that line and starts nothing.
+The next load takes the days that the failed accounts missed. A retry of the task, after any other
+error, loads every account again.
 A repeat is safe: each load replaces the days that it covers.
 
 Its load runs in the pool google_ads_load of one slot, which airflow-init sets on every start, with
@@ -35,9 +39,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from agoranomos_pipelines import outcome
 from agoranomos_pipelines.assets import RAW_GOOGLE_ADS
 from airflow.sdk import CronTriggerTimetable, Param, dag, get_current_context, task
-from airflow.sdk.exceptions import AirflowFailException
 from airflow.sdk.log import mask_secret
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
@@ -76,7 +80,7 @@ LOAD_POOL = "google_ads_load"
 
 
 @task(task_id="load_google_ads", outlets=[RAW_GOOGLE_ADS], pool=LOAD_POOL)
-def load_google_ads() -> None:
+def load_google_ads() -> str | None:
     # dlt and google-auth are imported here and not at the top: the DAG processor parses this file
     # often.
     from agoranomos_pipelines import google_ads, loads
@@ -96,9 +100,11 @@ def load_google_ads() -> None:
             portion=portion,
         )
     except google_ads.AccountsFailed as failed:
-        # The load took the other accounts, so a retry would repeat it for nothing, and the next
-        # load takes the days that the failed accounts missed. The line lists them (ADR-0004).
-        raise AirflowFailException(str(failed)) from None
+        # A retry would repeat the load for nothing, and the next load takes the days that the
+        # failed accounts missed. The line lists them (ADR-0004): check_accounts fails the run
+        # with it, after the transform has started for the other accounts, if any.
+        return outcome.line_of(failed)
+    return None
 
 
 @dag(
@@ -135,7 +141,7 @@ def load_google_ads() -> None:
     doc_md=__doc__,
 )
 def agoranomos_google_ads_daily():
-    load_google_ads()
+    outcome.check_accounts(load_google_ads())
 
 
 agoranomos_google_ads_daily()
