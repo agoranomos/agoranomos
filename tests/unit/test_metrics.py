@@ -91,8 +91,9 @@ SHARED = ("ctr", "cpc", "cpm", "cost_per_conversion", "conversion_rate", "roas")
 def test_the_campaign_mart_declares_the_kpis_of_adr_0034_and_the_others_take_them():
     # The six KPIs, each the sum of one column over the sum of another, money in the reporting
     # currency (docs/reference/describe-the-marts.md), declared once and taken by the marts of
-    # ad groups and ads at their own levels; the two of the primary conversion actions are of the
-    # campaigns alone, as conversions_primary is none below them (ADR-0037).
+    # ad groups and ads at their own levels; the three of the primary conversion actions are of the
+    # campaigns alone, as conversions_primary and conversion_value_primary_reporting are none below
+    # them (ADR-0037, ADR-0056).
     text = MARTS_YAML.read_text(encoding="utf-8")
     block = text.split("          metric_level: Campaigns\n", 1)[1].split("    data_tests:", 1)[0]
     found = [
@@ -118,6 +119,13 @@ def test_the_campaign_mart_declares_the_kpis_of_adr_0034_and_the_others_take_the
         ("roas", "ROAS", "conversion_value_reporting", "spend_reporting", "number"),
         (None, "Cost per Primary Conversion", "spend_reporting", "conversions_primary", "currency"),
         (None, "Primary Conversion Rate", "conversions_primary", "clicks", "percent"),
+        (
+            None,
+            "Primary ROAS",
+            "conversion_value_primary_reporting",
+            "spend_reporting",
+            "number",
+        ),
     ]
     assert block.count(f'currency: "{CURRENCY}"') == 4
     assert "scale: 1000" in block
@@ -125,6 +133,16 @@ def test_the_campaign_mart_declares_the_kpis_of_adr_0034_and_the_others_take_the
     assert levels == ["Campaigns", "Ad Groups", "Ads"]
     shared = "          metrics: [" + ", ".join(f"*{a}" for a in SHARED) + "]\n"
     assert text.count(shared) == 2
+    # Primary ROAS is of the campaigns alone, and says that the platforms attribute by their own
+    # models, so a sum over platforms can count one purchase more than once; ROAS says that it
+    # has no value on Meta and TikTok (ADR-0056).
+    assert text.count("            - name: Primary ROAS\n") == 1
+    primary = block.split("- name: Primary ROAS\n", 1)[1].split("numerator:", 1)[0]
+    primary = " ".join(primary.split())
+    assert "the value of one purchase more than once" in primary
+    roas = " ".join(block.split("name: ROAS\n", 1)[1].split("numerator:", 1)[0].split())
+    assert "It has no value on Meta" in roas
+    assert "and on TikTok, whose metric has no value" in roas
 
 
 def test_a_metric_names_two_columns_of_its_mart_and_a_format():

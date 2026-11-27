@@ -2503,6 +2503,23 @@ def test_the_questions_on_the_campaigns_take_whole_days():
             assert "is_partial_day" not in query, question["key"]
 
 
+def test_the_roas_of_the_demo_is_that_of_the_primary_actions():
+    # ADR-0056: the ROAS of the demo divides the value of the primary conversion actions, which
+    # every platform reports, demo_social and demo_video included, by the spend, as the cost per
+    # conversion counts the primary actions; no question reads the value of the own metric of the
+    # platforms for it.
+    assert di.ROAS == (
+        "sum(conversion_value_primary_reporting) / nullif(sum(spend_reporting), 0) AS roas"
+    )
+    showing = {q["key"] for q in di.QUESTIONS if "roas" in q["columns"]}
+    assert showing == {"roas", "by-platform", "top-campaigns"}
+    for key in showing:
+        query = QUESTIONS[key]["query"]
+        assert di.ROAS in query, key
+        assert "conversion_value_reporting" not in query, key
+        assert "primary conversion actions" in QUESTIONS[key]["description"], key
+
+
 def test_each_dashboard_sets_the_filters_of_each_of_its_cards(airflow, metabase):
     assert di.main(env_for(airflow, metabase)) == 0
     for key, (name, _) in di.DASHBOARDS.items():

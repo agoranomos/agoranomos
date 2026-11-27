@@ -24,6 +24,7 @@ KPIS = (
     ("ROAS", "conversion_value_reporting", "spend_reporting", 1, "number"),
     ("Cost per Primary Conversion", "spend_reporting", "conversions_primary", 1, "currency"),
     ("Primary Conversion Rate", "conversions_primary", "clicks", 1, "percent"),
+    ("Primary ROAS", "conversion_value_primary_reporting", "spend_reporting", 1, "number"),
 )
 # The columns of the marts that the questions read or filter on.
 COLUMNS = {
@@ -41,6 +42,7 @@ COLUMNS = {
         "spend_reporting",
         "conversion_value_reporting",
         "is_partial_day",
+        "conversion_value_primary_reporting",
     ),
     ad.AD_GROUP_STATS: (
         "report_date",
@@ -339,6 +341,7 @@ def test_the_campaigns_count_the_primary_actions_and_the_lower_levels_the_platfo
         if question["mart"] == ad.AD_STATS:
             assert "conversions_primary" in columns or "conversions" not in columns, key
             assert "cost_per_conversion" not in columns or key == "by-platform", key
+            assert "roas" not in columns or key == "by-platform", key
         elif question["mart"] in (ad.AD_GROUP_STATS, ad.AD_STATS_OF_ADS):
             assert "conversions_primary" not in columns, key
             assert {"conversions", "cost_per_conversion"} <= columns, key
@@ -350,6 +353,55 @@ def test_the_campaigns_count_the_primary_actions_and_the_lower_levels_the_platfo
     assert "ad_state" in by_key["ads"]["columns"]
     # The table of the actions counts every conversion of each, as the primary ones add up.
     assert ad.ALL_CONVERSIONS in by_key["by-action"]["query"]
+
+
+def test_the_roas_of_the_campaigns_is_that_of_the_primary_actions():
+    # ADR-0056: the trend ROAS, the tables of the platforms, of the top campaigns and of the
+    # campaigns take Primary ROAS, over the value of the primary actions, as they take the cost
+    # per primary conversion; Results by platform shows both, with both values, and the lower
+    # levels keep ROAS, the only one that they have.
+    kpis = ad.kpis_of(export())
+    primary = kpis["primary_roas"]
+    assert ad.ratio(primary) == (
+        "sum(conversion_value_primary_reporting) / nullif(sum(spend_reporting), 0) AS primary_roas"
+    )
+    by_key = {q["key"]: q for q in ad.questions(kpis) if "key" in q}
+    trend = by_key["roas"]
+    assert (trend["name"], trend["description"]) == (
+        "ROAS",
+        primary.description + " Each period of the time grouping, the last compared with the one "
+        "before.",
+    )
+    assert trend["columns"] == ("report_date", "primary_roas")
+    for key in ("roas", "platforms", "top-campaigns", "campaigns"):
+        columns = by_key[key]["columns"]
+        assert "primary_roas" in columns, key
+        assert "roas" not in columns, key
+        assert ad.ratio(primary) in by_key[key]["query"], key
+        assert ad.ratio(kpis["roas"]) not in by_key[key]["query"], key
+    platforms = by_key["by-platform"]["columns"]
+    assert {"primary_roas", "roas"} <= set(platforms)
+    value = platforms.index("conversion_value_reporting")
+    assert platforms[value - 1] == "conversion_value_primary_reporting"
+    assert (
+        "sum(conversion_value_primary_reporting) AS conversion_value_primary_reporting"
+        in (by_key["by-platform"]["query"])
+    )
+    for key in ("ad-groups", "ads"):
+        assert "roas" in by_key[key]["columns"], key
+        assert "primary_roas" not in by_key[key]["columns"], key
+    # The value of the primary actions is money of the reporting currency, and the column of the
+    # KPI shows its name.
+    built = {q.key: q for q in package().questions}
+    settings = built["by-platform"].visualization_settings["column_settings"]
+    assert settings['["name","conversion_value_primary_reporting"]'] == {
+        "column_title": "Conversion Value Primary Reporting",
+        "number_style": "currency",
+        "currency": CURRENCY,
+    }
+    assert settings['["name","primary_roas"]'] == {"column_title": "Primary ROAS", "decimals": 2}
+    assert "The value of the conversions, and so ROAS, is that of the primary" in ad.ABOUT
+    assert "the value of one purchase more than once" in ad.ABOUT
 
 
 def test_a_chart_of_two_metrics_names_each_and_gives_its_y_axis_no_title():

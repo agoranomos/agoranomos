@@ -10,9 +10,11 @@ models:
       up money across accounts with the columns that end in _reporting. conversions is the own
       metric of conversions of the platform, as its account shows it, and none on Meta, which has no
       such metric; conversions_primary is the sum of the conversions of the primary conversion
-      actions of the deployment, which ad_conversions_campaign_daily has by action. A row whose
-      measures are all zero is kept only when ad_conversions_campaign_daily has a conversion of its
-      campaign on its day, which conversions_primary then counts. Its platforms are those of
+      actions of the deployment, which ad_conversions_campaign_daily has by action, and
+      conversion_value_primary the sum of their value, which Meta and TikTok report too, while
+      conversion_value, of the own metric, is none on both. A row whose measures are all zero is
+      kept only when ad_conversions_campaign_daily has a conversion of its campaign on its day,
+      which conversions_primary then counts. Its platforms are those of
       ad_platforms with the kind ads. A row of a day still in progress in its account, which only a
       load of the kind intraday took, has is_partial_day, with impressions, clicks and spend so far
       and no conversions, until a whole load replaces the day; the metrics of Metabase and every
@@ -33,8 +35,9 @@ models:
           # for each KPI (ADR-0034, docs/reference/describe-the-marts.md#metrics). Each is the sum
           # of numerator over the sum of denominator, times scale, over the rows that a question
           # selects. The marts of ad groups and ads take the first six, each by its anchor; the
-          # two of the primary conversion actions are of this level alone, as conversions_primary
-          # is none at the levels of ad groups and ads (ADR-0037). A metric of this mart leaves out
+          # three of the primary conversion actions are of this level alone, as conversions_primary
+          # and conversion_value_primary_reporting are none at the levels of ad groups and ads
+          # (ADR-0037, ADR-0056). A metric of this mart leaves out
           # the rows of a partial day, is_partial_day (metabase/metrics.py, ADR-0051).
           metric_level: Campaigns
           metric_scope: >-
@@ -96,7 +99,9 @@ models:
                 Return on ad spend: the value of the conversions in the own metric of conversions
                 of the platform for each unit of spend, the sum of conversion_value_reporting
                 divided by the sum of spend_reporting, both in the reporting currency; 4.2 means
-                4.20 of value for each 1.00 spent.
+                4.20 of value for each 1.00 spent. It has no value on Meta, which has no metric of
+                conversions of its own, and on TikTok, whose metric has no value, so over several
+                platforms it divides the value of those that report one by the spend of all.
               numerator: conversion_value_reporting
               denominator: spend_reporting
               format: number
@@ -120,6 +125,20 @@ models:
               numerator: conversions_primary
               denominator: clicks
               format: percent
+            - name: Primary ROAS
+              description: >-
+                Return on ad spend of the primary conversion actions of the deployment: the value
+                of their conversions for each unit of spend, the sum of
+                conversion_value_primary_reporting divided by the sum of spend_reporting, both in
+                the reporting currency; 4.2 means 4.20 of value for each 1.00 spent. The primary
+                actions are the choice of the deployment, so this can differ from the ROAS that
+                the account shows; it has a value on every platform that reports a value for
+                them, Meta and TikTok included. Each platform credits a conversion to its own ads
+                by its own attribution model and windows, so a ROAS over several platforms can
+                count the value of one purchase more than once.
+              numerator: conversion_value_primary_reporting
+              denominator: spend_reporting
+              format: number
     data_tests:
       - unique_combination:
           arguments:
@@ -511,6 +530,25 @@ models:
               display_name: Is Final
               semantic_type: type/Category
               has_field_values: list
+      - name: conversion_value_primary
+        data_type: numeric(18,6)
+        description: '{{ doc("conversion_value_primary") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Primary Conversion Value
+              semantic_type: null
+              has_field_values: none
+      - name: conversion_value_primary_reporting
+        data_type: numeric(18,6)
+        description: '{{ doc("conversion_value_primary_reporting") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Primary Conversion Value in Reporting Currency
+              semantic_type: type/Currency
+              has_field_values: none
+              currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
   - name: ad_conversions_campaign_daily
     description: >-
       Conversions by day, campaign and conversion action on every platform, a view over
@@ -1793,13 +1831,13 @@ models:
       currency (reporting_currency), at the rate of the day of the row
       (fx_rate_into_reporting_currency); add up money across accounts with the columns that end in
       _reporting. conversions is the own metric of conversions of the platform, and none on Meta;
-      conversions_primary is none at this level, as the conversions by action of ad groups are a
-      module. The ad groups of a campaign can add up to less than ad_stats_campaign_daily, as a
-      campaign of Performance Max has none. A row whose measures are all zero is not kept. Its
-      platforms are those of ad_platforms with the kind ads. A row is final, is_final, when the load
-      that wrote it ended at least the window of restatements of its platform after its day, so that
-      no later load changes it. Its tests read the days of the windows that the run of the transform
-      pinned.
+      conversions_primary and conversion_value_primary are none at this level, as the conversions by
+      action of ad groups are a module. The ad groups of a campaign can add up to less than
+      ad_stats_campaign_daily, as a campaign of Performance Max has none. A row whose measures are
+      all zero is not kept. Its platforms are those of ad_platforms with the kind ads. A row is
+      final, is_final, when the load that wrote it ended at least the window of restatements of its
+      platform after its day, so that no later load changes it. Its tests read the days of the
+      windows that the run of the transform pinned.
     config:
       # The table that dbt builds has exactly these columns, with these types, or the build fails.
       contract:
@@ -2221,6 +2259,25 @@ models:
               display_name: Is Final
               semantic_type: type/Category
               has_field_values: list
+      - name: conversion_value_primary
+        data_type: numeric(18,6)
+        description: '{{ doc("conversion_value_primary") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Primary Conversion Value
+              semantic_type: null
+              has_field_values: none
+      - name: conversion_value_primary_reporting
+        data_type: numeric(18,6)
+        description: '{{ doc("conversion_value_primary_reporting") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Primary Conversion Value in Reporting Currency
+              semantic_type: type/Currency
+              has_field_values: none
+              currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
   - name: ad_stats_ad_daily
     description: >-
       Advertising statistics by day and ad on every platform, a view over core.ad_stats_ad_daily.
@@ -2231,11 +2288,11 @@ models:
       (currency) and in the reporting currency (reporting_currency), at the rate of the day of the
       row (fx_rate_into_reporting_currency); add up money across accounts with the columns that end
       in _reporting. conversions is the own metric of conversions of the platform, and none on Meta;
-      conversions_primary is none at this level, as the conversions by action of ads are a module. A
-      row whose measures are all zero is not kept. Its platforms are those of ad_platforms with the
-      kind ads. A row is final, is_final, when the load that wrote it ended at least the window of
-      restatements of its platform after its day, so that no later load changes it. Its tests read
-      the days of the windows that the run of the transform pinned.
+      conversions_primary and conversion_value_primary are none at this level, as the conversions by
+      action of ads are a module. A row whose measures are all zero is not kept. Its platforms are
+      those of ad_platforms with the kind ads. A row is final, is_final, when the load that wrote it
+      ended at least the window of restatements of its platform after its day, so that no later load
+      changes it. Its tests read the days of the windows that the run of the transform pinned.
     config:
       # The table that dbt builds has exactly these columns, with these types, or the build fails.
       contract:
@@ -2683,6 +2740,25 @@ models:
               display_name: Is Final
               semantic_type: type/Category
               has_field_values: list
+      - name: conversion_value_primary
+        data_type: numeric(18,6)
+        description: '{{ doc("conversion_value_primary") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Primary Conversion Value
+              semantic_type: null
+              has_field_values: none
+      - name: conversion_value_primary_reporting
+        data_type: numeric(18,6)
+        description: '{{ doc("conversion_value_primary_reporting") }}'
+        config:
+          meta:
+            metabase:
+              display_name: Primary Conversion Value in Reporting Currency
+              semantic_type: type/Currency
+              has_field_values: none
+              currency: "{{ env_var('AGORANOMOS_REPORTING_CURRENCY', 'USD') }}"
   - name: ad_groups
     description: >-
       The ad groups of every ad platform, ad sets of Meta among them, one row each, a view over
