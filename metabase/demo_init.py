@@ -235,11 +235,12 @@ AD_WHERE = where(*AD_FILTERS)
 STATS_WHERE = AD_WHERE.replace("WHERE ", "WHERE NOT is_partial_day AND ", 1)
 # The ratios, as SQL over the sums of the rows of the answer, each null where its divisor is 0.
 # The conversions are those of the primary conversion actions of the deployment,
-# conversions_primary, which every platform has, Meta included (ADR-0037); the value of the
-# conversions is that of the own metric of conversions of each platform, none on Meta.
+# conversions_primary, which every platform has, Meta included (ADR-0037), and the value of the
+# conversions is that of the same actions, conversion_value_primary_reporting, which Meta and
+# TikTok report too (ADR-0056).
 CTR = "sum(clicks)::numeric / nullif(sum(impressions), 0) AS click_through_rate"
 CPA = "sum(spend_reporting) / nullif(sum(conversions_primary), 0) AS cost_per_conversion"
-ROAS = "sum(conversion_value_reporting) / nullif(sum(spend_reporting), 0) AS roas"
+ROAS = "sum(conversion_value_primary_reporting) / nullif(sum(spend_reporting), 0) AS roas"
 # Every conversion of an action: all_conversions where the platform has the metric, else
 # conversions, as conversions_primary adds them up for the primary actions.
 ALL_CONVERSIONS = "sum(coalesce(all_conversions, conversions)) AS all_conversions"
@@ -307,8 +308,10 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "key": "roas",
         "name": "Return on ad spend",
         "description": (
-            "The value of the conversions in the own metric of conversions of each platform, none "
-            "on Meta, divided by the spend, both in the reporting currency."
+            "The value of the conversions of the primary conversion actions of the deployment, "
+            "which every platform reports, divided by the spend, both in the reporting currency. "
+            "Each platform credits a conversion by its own attribution, so a sum across platforms "
+            "can count the value of one purchase more than once."
         ),
         "display": "scalar",
         "mart": AD_STATS,
@@ -366,8 +369,8 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "description": (
             "The impressions, clicks, spend and conversions of each platform, with the ratios "
             "between them: the click-through rate, the cost per conversion and the return on ad "
-            "spend. Money is in the reporting currency, and the conversions are those of the "
-            "primary conversion actions of the deployment."
+            "spend. Money is in the reporting currency, and the conversions and their value are "
+            "those of the primary conversion actions of the deployment."
         ),
         "display": "table",
         "mart": AD_STATS,
@@ -398,8 +401,8 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
         "name": "Top campaigns by spend",
         "description": (
             "The 20 campaigns with the most spend, with their platform and client, conversions of "
-            "the primary conversion actions of the deployment, and money in the reporting "
-            "currency."
+            "the primary conversion actions of the deployment and the return on ad spend of their "
+            "value, and money in the reporting currency."
         ),
         "display": "table",
         "mart": AD_STATS,

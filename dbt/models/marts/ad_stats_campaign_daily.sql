@@ -5,25 +5,29 @@
 -- the fact; each dimension joins on its unique key with LEFT JOIN, so that the planner leaves out
 -- those that a question does not read. The IDs are the text of the dimensions, as a cast of the
 -- fact would keep a filter on them from its index. The conversions of the primary actions are a
--- LEFT JOIN LATERAL to the conversions by action of the row: one lookup in the key of that fact
--- for each row that a question reads, however often the question names the column, and none for
--- a question that does not read it, as the planner leaves out the join of an aggregate of one
--- row. A subquery in the select list ran once for each mention, and a join to the conversions
--- grouped by the key of the row would sum the whole history for every question, as PostgreSQL
--- carries no filter of a period across a join (B16). The primary actions are an array that the
--- query reads once, so that the lookup is a condition of the index. The columns of v0.4 come
--- first, in their order, and the later ones after them. A row of a day still in progress in its
--- account, which only a load of the kind intraday took, carries is_partial_day (ADR-0051); it has
--- no conversions, so conversions_primary is none on it, as the other conversions of the row are,
--- and 0 only on a whole day of a campaign without a primary conversion. A row is final, is_final,
--- when the day on which its load ended, in the time zone of the account, is at least the window of
--- restatements of its platform after the day of the row, and the day is whole: a daily load takes
--- again only the days of the window, so no later load changes the row (ADR-0037, ADR-0038). It
--- follows the load and not the calendar: after a missed daily load, or a stop of any length, the
--- next window starts a day earlier for each missed load, so each day is read once at the age of the
--- window or more and becomes final then (windows.daily_window of
--- airflow/dags/agoranomos_pipelines/windows.py). A row whose load or platform the view does not
--- find is not final, rather than none.
+-- LEFT JOIN LATERAL to the conversions by action of the row: one lookup in the key of that fact for
+-- each row that a question reads, however often the question names the column, and none for a
+-- question that does not read it, as the planner leaves out the join of an aggregate of one row. A
+-- subquery in the select list ran once for each mention, and a join to the conversions grouped by
+-- the key of the row would sum the whole history for every question, as PostgreSQL carries no
+-- filter of a period across a join (B16). The primary actions are an array that the query reads
+-- once, so that the lookup is a condition of the index. The columns of v0.4 come first, in their
+-- order, and the later ones after them. A row of a day still in progress in its account, which only
+-- a load of the kind intraday took, carries is_partial_day (ADR-0051); it has no conversions, so
+-- conversions_primary is none on it, as the other conversions of the row are, and 0 only on a whole
+-- day of a campaign without a primary conversion. The same lookup sums the value of the primary
+-- actions, conversion_value_primary, through all_conversion_value where the platform has it, as
+-- conversions_primary sums all_conversions, and the view gives it in the reporting currency at the
+-- rate of its day, as conversion_value_reporting: 0 and none where conversions_primary is, after
+-- is_final, as a new column comes last (ADR-0056). A question that reads both columns of the
+-- primary actions makes one lookup for each row. A row is final, is_final, when the day on which
+-- its load ended, in the time zone of the account, is at least the window of restatements of its
+-- platform after the day of the row, and the day is whole: a daily load takes again only the days
+-- of the window, so no later load changes the row (ADR-0037, ADR-0038). It follows the load and not
+-- the calendar: after a missed daily load, or a stop of any length, the next window starts a day
+-- earlier for each missed load, so each day is read once at the age of the window or more and
+-- becomes final then (windows.daily_window of airflow/dags/agoranomos_pipelines/windows.py). A row
+-- whose load or platform the view does not find is not final, rather than none.
 -- Metabase reads the marts layer only.
 -- The test of the primary actions reads the view of the conversions by action, which dbt orders
 -- before it: depends_on: {{ ref('ad_conversions_campaign_daily') }}
@@ -68,7 +72,17 @@ select
         and (l.finished_at at time zone a.time_zone)::date - f.report_date
             >= p.restatement_window_days,
         false
-    ) as is_final
+    ) as is_final,
+    cast(
+        case when not f.is_partial_day then coalesce(q.conversion_value_primary, 0) end
+        as numeric(18,6)
+    ) as conversion_value_primary,
+    cast(
+        case when not f.is_partial_day
+            then coalesce(q.conversion_value_primary, 0) * r.rate_into_reporting_currency
+        end
+        as numeric(18,6)
+    ) as conversion_value_primary_reporting
 from {{ ref('core_ad_stats_campaign_daily') }} as f
 left join {{ ref('dim_account') }} as a
     on a.account_sk = f.account_sk
@@ -84,7 +98,10 @@ left join {{ ref('core_fx_rates_daily') }} as r
 left join {{ source('core', 'loads') }} as l
     on l.load_sk = f.load_sk
 left join lateral (
-    select sum(coalesce(x.all_conversions, x.conversions)) as conversions_primary
+    select
+        sum(coalesce(x.all_conversions, x.conversions)) as conversions_primary,
+        sum(coalesce(x.all_conversion_value, x.conversion_value))
+            as conversion_value_primary
     from {{ ref('core_ad_conversions_campaign_daily') }} as x
     where x.account_sk = f.account_sk
         and x.campaign_id = f.campaign_id

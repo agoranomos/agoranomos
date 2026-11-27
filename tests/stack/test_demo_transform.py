@@ -131,6 +131,8 @@ RAW_SOCIAL_CONVERSIONS = (
     "WHERE a.action_type "
     "IN ('offsite_conversion.fb_pixel_purchase', 'offsite_conversion.fb_pixel_lead')"
 )
+# Their value, which the primary actions of the campaigns add up (ADR-0056).
+RAW_SOCIAL_VALUES = RAW_SOCIAL_CONVERSIONS.replace("__actions", "__action_values")
 # The versions of the campaigns that the core keeps (ADR-0036), and the periods of the names of the
 # mart: platform, account, campaign, name, from, to, in UTC, and none for the one that holds.
 CAMPAIGN_VERSIONS = (
@@ -253,6 +255,7 @@ def history_read(env, airflow_url, token):
     # of dbt has built its node: minutes after the history, long after these reads.
     read = {code: warehouse_output(env, sql) for code, sql in RAW_SUMS.items()}
     read["social_conversions"] = warehouse_output(env, RAW_SOCIAL_CONVERSIONS)
+    read["social_values"] = warehouse_output(env, RAW_SOCIAL_VALUES)
     read["current_name"] = warehouse_output(env, CURRENT_NAME)
     last = platforms.asset_uri(platforms.PLATFORMS[platforms.LOAD_ORDER[-1]])
 
@@ -537,6 +540,14 @@ def test_the_primary_conversions_of_a_campaign_are_those_of_its_primary_actions(
     # conversions is the metric of the platform (ADR-0037), and Meta, which demo_social mimics, has
     # none: it counts each action apart.
     metric = f"SELECT count(conversions) FROM {MART} WHERE platform = 'demo_social'"  # noqa: S608 (constants of this file)
+    assert warehouse_output(env, metric) == "0"
+    # The value of the primary actions is that of the same action types in raw, so demo_social
+    # has a value for Primary ROAS and none in conversion_value (ADR-0056).
+    values = Decimal(raw_read["social_values"] or 0)
+    social = social.replace("sum(conversions_primary)", "sum(conversion_value_primary)")
+    assert Decimal(warehouse_output(env, social) or 0) == values
+    assert values > 0, "no value of a primary action of demo_social in raw"
+    metric = f"SELECT count(conversion_value) FROM {MART} WHERE platform = 'demo_social'"  # noqa: S608 (constants of this file)
     assert warehouse_output(env, metric) == "0"
 
 
