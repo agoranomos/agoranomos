@@ -463,6 +463,11 @@ def file_sql(env, core_rates):
     assert found == "0", "raw_settings.rates holds rates: extensions/model/rates.toml is in the way"
     last = date.fromisoformat(warehouse_output(env, f"SELECT max(day) FROM {RATE_DAYS}"))  # noqa: S608 (constants of this file)
     ops = compiled_node("ops-rates", "ops_rates", "models/ops/ops_rates.sql")
+    # The view reads the rates of the file from the table that a run fills from the staging view
+    # (int_rates__given): the checks read the staging view itself, which shows the entries that
+    # they put into raw_settings.rates at once, as the table shows them once a run has filled it.
+    ops, count = re.subn(r'"staging"\."int_rates__given"', '"staging"."stg_settings__rates"', ops)
+    assert count == 3, count
     return compiled_rates("file"), ops, last
 
 

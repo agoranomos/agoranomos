@@ -110,6 +110,66 @@ models:
         description: '{{ doc("first_report_date") }}'
       - name: last_report_date
         description: '{{ doc("last_report_date") }}'
+  - name: int_accounts__currencies
+    description: >-
+      The accounts of the ad platforms and the properties of web analytics that the lists of
+      accounts and of properties give, with the currency of each, one row for each source, account
+      and currency, and none for an account that only the statistics name: ops.ops_rates reads it to
+      name the days without a rate of an account in quarantine (ADR-0042). A table that each run of
+      the transform fills anew in place, so that the view ops.ops_rates stays through a run. source,
+      account_id and currency are its key. Its tests guard the Ops collection: when one of them
+      fails, dbt does not rebuild the view that reads this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [source, account_id, currency]
+          config: {tags: [critical]}
+    columns:
+      - name: source
+        description: '{{ doc("source") }}'
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
+      - name: account_id
+        description: '{{ doc("account_id") }}'
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
+      - name: currency
+        description: '{{ doc("currency") }}'
+  - name: int_rates__given
+    description: >-
+      The rates that the deployment gives in extensions/model/rates.toml, one row for each entry,
+      as stg_settings__rates gives them: one unit of currency is worth rate units of
+      quote_currency on each day from first_day to last_day (ADR-0042). ops.ops_rates reads it to
+      name the rates of the file. A table that each run of the transform fills anew in place, so
+      that the view ops.ops_rates stays through a run. currency and first_day are its key. Its
+      tests guard the Ops collection: when one of them fails, dbt does not rebuild the view that
+      reads this one.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [currency, first_day]
+          config: {tags: [critical]}
+    columns:
+      - name: currency
+        description: '{{ doc("currency") }}'
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
+      - name: quote_currency
+        description: '{{ doc("quote_currency") }}'
+      - name: rate
+        description: '{{ doc("rate") }}'
+      - name: first_day
+        description: '{{ doc("first_day") }}'
+        data_tests:
+          - not_null:
+              config: {tags: [critical]}
+      - name: last_day
+        description: '{{ doc("last_day") }}'
+      - name: origin
+        description: '{{ doc("origin") }}'
   - name: int_campaigns__current
     description: >-
       The campaigns whose data this run of the transform takes into the core, one row each, with

@@ -66,7 +66,11 @@ models:
         columns: false
     # The models of the Ops collection in Metabase (ADR-0029): views over the results that
     # elementary records and over the record of the loads, which metabase_reader may read; the
-    # tables of elementary in the same schema it may not.
+    # tables of elementary in the same schema it may not. A view of ops reads only relations that a
+    # run keeps, so that it stays through the run: the tables of the core, of elementary and of the
+    # sources, the incremental tables of staging that a run fills in place, and the marts; never a
+    # view of staging or of ops, which a run replaces by dropping the old one with cascade, and the
+    # views over it with it (tests/unit/test_dbt_project.py).
     ops:
       +schema: ops
       +materialized: view

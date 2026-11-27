@@ -6,12 +6,14 @@ question of the dashboard of the Ops collection answers in Metabase.
 The assertions print names, counts and statuses, never a secret.
 """
 
+from pathlib import Path
+
 import ops
 import pytest
 from agoranomos_pipelines.demo import platforms
 from airflow_api import dag_runs, task_instances
 from metabase_content import item, registry
-from stack_helpers import http_json, warehouse, warehouse_output
+from stack_helpers import REPO_ROOT, http_json, warehouse, warehouse_output
 
 pytestmark = [
     pytest.mark.demo,
@@ -107,6 +109,58 @@ def test_the_loads_of_every_account_are_in_ops(env, transform_run):
         for account in platform.module.accounts()
     }
     assert shown == accounts
+
+
+# The relations that each view of ops of the base package reads directly, from the rules of its
+# rewrite in the catalog, with their kind: dbt replaces a view by dropping the old one with
+# cascade, which takes every view over it, so a view that a view of ops reads goes with the next
+# run of the transform until the node of the view of ops builds it again (defect I).
+OPS_DEPENDENCIES = (
+    "SELECT DISTINCT v.relname::text || '|' || n.nspname::text || '|' || c.relname::text || '|' "
+    "|| c.relkind::text "
+    "FROM pg_catalog.pg_class AS v "
+    "JOIN pg_catalog.pg_namespace AS vn ON vn.oid = v.relnamespace "
+    "JOIN pg_catalog.pg_rewrite AS r ON r.ev_class = v.oid "
+    "JOIN pg_catalog.pg_depend AS d ON d.classid = 'pg_catalog.pg_rewrite'::regclass "
+    "AND d.objid = r.oid AND d.refclassid = 'pg_catalog.pg_class'::regclass "
+    "AND d.refobjid <> v.oid "
+    "JOIN pg_catalog.pg_class AS c ON c.oid = d.refobjid "
+    "JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace "
+    "WHERE vn.nspname = 'ops' AND v.relkind = 'v' AND v.relname = ANY(ARRAY[{names}])"
+)
+
+
+def models_of(folder: Path) -> dict[str, str]:
+    """The models of a folder of the dbt project by name, each with the text of its file."""
+    return {path.stem: path.read_text(encoding="utf-8") for path in folder.rglob("*.sql")}
+
+
+def test_no_view_of_ops_reads_a_relation_that_a_run_replaces(env, transform_run):
+    # A view of ops stays through a run of the transform, as ./agoranomos status, the Ops
+    # collection and the loads of the rates read them at any time: it reads tables, which a run
+    # fills in place, the incremental models of staging among them, and the views of marts, which
+    # a run leaves as they are (dbt/macros/marts_view.sql); never a view of staging or of ops.
+    models = REPO_ROOT / "dbt" / "models"
+    ops_models = models_of(models / "ops")
+    staging = models_of(models / "staging") | models_of(models / "intermediate")
+    views = sorted(name for name, text in ops_models.items() if "materialized=" not in text)
+    assert "ops_rates" in views
+    names = ", ".join(f"'{name}'" for name in views)
+    text = warehouse_output(env, OPS_DEPENDENCIES.format(names=names))
+    found = [tuple(line.split("|")) for line in text.splitlines()]
+    # The catalog of PostgreSQL records no dependency on its own tables, which
+    # ops_warehouse_tables reads alone.
+    read = {view for view, *_ in found}
+    assert read == set(views) - {"ops_warehouse_tables"}, sorted(read ^ set(views))
+    for view, schema, relation, kind in found:
+        if kind == "v":
+            assert schema == "marts", (view, schema, relation)
+            continue
+        assert kind in ("r", "p"), (view, schema, relation, kind)
+        if schema == "staging":
+            assert "materialized='incremental'" in staging.get(relation, ""), (view, relation)
+    assert ("ops_rates", "staging", "int_accounts__currencies", "r") in found
+    assert ("ops_rates", "staging", "int_rates__given", "r") in found
 
 
 def test_every_question_of_the_ops_dashboard_answers(metabase_url, session, transform_run):

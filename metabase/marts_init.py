@@ -34,7 +34,8 @@ rows, and metabase_reader and ai_reader may not read staging.
   change of AGORANOMOS_REPORTING_CURRENCY, also core_fx_rates_daily, with the var recompute_rates,
   which computes every day of the rates in the new currency from what the core holds (ADR-0042),
   and the view ops.ops_rates, with the view of staging of the rates of the file of the deployment
-  that both read: the views take the new currency as they are built again. The job
+  that the model reads, and the tables of those rates and of the currencies of the listed accounts
+  that the view reads: the views take the new currency as they are built again. The job
   then reads ops.ops_rates, and when the core cannot give the rates of some days in the new
   currency, as the raw layer has lost the loads of the rates that the core accepted, it says so in
   a line of warning, which ./agoranomos up shows: the next load of the rates of their source takes
@@ -44,10 +45,13 @@ rows, and metabase_reader and ai_reader may not read staging.
 
 Once dbt has ended well, where a run of the transform has made the tables of elementary that the
 views of ops read, the job builds the views and tables of ops of the base package (dbt/models/ops)
-too, in a dbt build of their own, with the view of staging of the rates of the file of the
-deployment that ops.ops_rates reads: the Ops collection of metabase-init reads them (ops.py,
-ADR-0029), and a view that the release adds, or a column that it adds to one, would otherwise make
-a question of Pipeline health fail until the next run of the transform, up to a day later. dbt
+too, in a dbt build of their own, with the two tables of staging that ops.ops_rates reads, the
+rates of the file of the deployment, with the view of staging that it takes them from, and the
+currencies of the listed accounts, which the view reads in place of the views of staging so that
+it stays through a run of the transform: the Ops collection
+of metabase-init reads them (ops.py, ADR-0029), and a view that the release adds, or a column that
+it adds to one, would otherwise make a question of Pipeline health fail until the next run of the
+transform, up to a day later. dbt
 builds them again on every run of the transform anyway, as the override of the views is for marts
 alone. A build of them that fails is a warning and no failure, as the views of marts are built:
 the questions on such a view show the error of PostgreSQL until a run of the transform builds it,
@@ -112,9 +116,17 @@ OPS = "package:agoranomos,path:models/ops"
 ELEMENTARY = ("dbt_invocations", "dbt_run_results", "elementary_test_results")
 RATES = "core_fx_rates_daily"
 # The view of staging of the rates of the file of the deployment (ADR-0042), which the model of the
-# rates and the view of Ops of the rates read: an upgrade starts before the first run of the
-# transform of the release builds it, so a build that selects either builds it too.
+# rates reads, and the table that each run fills from it in place, which the view of Ops of the
+# rates reads: an upgrade starts before the first run of the transform of the release builds them,
+# so a build that selects either reader builds them too. No view reads the view of staging, so a
+# build of it takes nothing with it.
 SETTINGS_RATES = "stg_settings__rates"
+GIVEN_RATES = "int_rates__given"
+# The table of the currencies of the accounts that the lists give, which the view of Ops of the
+# rates reads, and a build that selects the view builds it too, from the lists that exist then: a
+# list that the release before lacked gives no account. The job builds no list itself, as dbt
+# replaces a view of staging by dropping the old one with cascade, with the views over it.
+CURRENCIES = "int_accounts__currencies"
 # The view of Ops of the rates, which names the days without a rate in the reporting currency.
 OPS_RATES = "ops_rates"
 GAPS = "SELECT first_day_without_rate, days_without_rate FROM ops.ops_rates"
@@ -182,7 +194,7 @@ def command(state: State, dbt: str = DBT, project: str = PROJECT, work: str = WO
         variables["recompute_rates"] = True
         if state.snapshots:
             selected += [SETTINGS_RATES, RATES]
-        selected.append(OPS_RATES)
+        selected += [GIVEN_RATES, CURRENCIES, OPS_RATES]
     excluded = ["--exclude-resource-type", *TESTS] if state.snapshots else []
     return build(selected, excluded, variables, dbt, project, work)
 
@@ -196,7 +208,12 @@ def ops_command(
     if state.other_currency:
         variables["recompute_rates"] = True
     return build(
-        [SETTINGS_RATES, OPS], ["--exclude-resource-type", *TESTS], variables, dbt, project, work
+        [SETTINGS_RATES, GIVEN_RATES, CURRENCIES, OPS],
+        ["--exclude-resource-type", *TESTS],
+        variables,
+        dbt,
+        project,
+        work,
     )
 
 

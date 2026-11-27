@@ -54,6 +54,93 @@ def test_the_views_of_ops_leave_out_the_rows_and_the_sql_that_elementary_keeps()
         assert not found, (path.name, found)
 
 
+# The materialization of the models of each folder of dbt/models that dbt_project.yml gives, where
+# a model does not set its own.
+FOLDER_MATERIALIZATIONS = {
+    "staging": "view",
+    "intermediate": "view",
+    "marts": "view",
+    "core": "incremental",
+    "ops": "view",
+}
+# The tables of elementary that the views of ops read, incremental models of its package that a
+# run of dbt fills in place (ADR-0029).
+ELEMENTARY_TABLES = {"dbt_invocations", "dbt_run_results", "elementary_test_results"}
+
+
+def materialization(path: Path) -> str:
+    """The materialization of a model: its own config, or that of its folder."""
+    found = re.search(r"\bmaterialized='(\w+)'", path.read_text(encoding="utf-8"))
+    if found:
+        return found.group(1)
+    return FOLDER_MATERIALIZATIONS[path.relative_to(DBT / "models").parts[0]]
+
+
+def test_the_views_of_ops_read_only_relations_that_a_run_keeps():
+    # Defect I: dbt replaces a view, and a table that is not incremental, by renaming the old one
+    # and dropping it with cascade after the new one is in place, which takes every view over it
+    # until its own node builds it again. ops_rates read the view stg_settings__rates and the
+    # views of the lists of the accounts, which a run replaces early, and was gone for most of each
+    # run, while ./agoranomos status, the Ops collection and the loads of the rates read it. So a
+    # view of ops reads only the tables of the core, of elementary and of the sources, the
+    # incremental models, seeds and snapshots, which a run fills in place, and the marts, which a
+    # run leaves as they are (macros/marts_view.sql).
+    project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
+    for folder, kind in FOLDER_MATERIALIZATIONS.items():
+        pattern = rf"\n    {folder}:\n      \+schema: \w+\n      \+materialized: {kind}\n"
+        assert re.search(pattern, project), folder
+    models = {path.stem: path for path in (DBT / "models").rglob("*.sql")}
+    seeds = {path.stem for path in SEEDS.glob("*.csv")}
+    snapshots = set(
+        re.findall(
+            r"\{% snapshot (\w+) %\}",
+            "".join(path.read_text(encoding="utf-8") for path in (DBT / "snapshots").glob("*.sql")),
+        )
+    )
+    # No macro of the project refs a model, so a view's refs are those of its own text.
+    for path in (DBT / "macros").rglob("*.sql"):
+        assert not REF.search(path.read_text(encoding="utf-8")), path.name
+    views = [
+        p for p in sorted((DBT / "models" / "ops").glob("*.sql")) if materialization(p) == "view"
+    ]
+    assert {p.stem for p in views} >= {"ops_loads", "ops_quarantine", "ops_rates"}
+    for path in views:
+        text = JINJA_COMMENT.sub("", path.read_text(encoding="utf-8"))
+        for name in referenced(text):
+            if name.startswith("source:") or name in seeds or name in snapshots:
+                continue
+            model = models[name]
+            kept = materialization(model) == "incremental" or model.parent.name == "marts"
+            assert kept, (path.stem, name, materialization(model))
+        for package, name in re.findall(r"\bref\(\s*'(\w+)'\s*,\s*'(\w+)'\s*\)", text):
+            assert (package, name) in {("elementary", table) for table in ELEMENTARY_TABLES}
+        # No relation through the lists of the accounts either, which listed_currencies reads.
+        assert "listed_currencies(" not in text, path.stem
+
+
+def test_the_tables_that_ops_rates_reads_are_filled_in_place():
+    # The rates of the file and the currencies of the listed accounts, which ops_rates reads in
+    # place of the views of staging, are tables that each run fills anew with their rows deleted
+    # first, so that they keep their identity, as stg_loads__newest_lists does (#449).
+    for path in (
+        INTERMEDIATE / "int_rates__given.sql",
+        INTERMEDIATE / "int_accounts__currencies.sql",
+    ):
+        config = model_config(path.read_text(encoding="utf-8"))
+        assert "materialized='incremental'" in config, path.stem
+        assert "incremental_strategy='append'" in config, path.stem
+        assert 'pre_hook=["{% if is_incremental() %}delete from {{ this }}{% endif %}"]' in config
+        assert "full_refresh" not in config, path.stem
+    view = (DBT / "models" / "ops" / "ops_rates.sql").read_text(encoding="utf-8")
+    assert "join {{ ref('int_accounts__currencies') }} as l\n" in view
+    assert not set(referenced(view)) & {*ACCOUNT_LISTS, "stg_settings__rates"}
+    assert "    from {{ ref('int_rates__given') }} as g\n" in view
+    given = (INTERMEDIATE / "int_rates__given.sql").read_text(encoding="utf-8")
+    assert given.endswith("from {{ ref('stg_settings__rates') }}\n")
+    currencies = (INTERMEDIATE / "int_accounts__currencies.sql").read_text(encoding="utf-8")
+    assert "from ({{ listed_currencies(lists) }}) as listed\n" in currencies
+
+
 def test_elementary_records_no_rows_of_data_and_writes_into_ops():
     # The tables of elementary go to ops, which metabase_reader may enter but whose tables it may
     # not read; a test records its status and the number of rows, never the rows; the artifacts of
@@ -760,7 +847,9 @@ def test_the_intermediate_models_are_views_in_staging():
     # but for the checks of G1 and the days of the windows of the facts, which each run fills anew,
     # as the days of the pin are (ADR-0035, ADR-0038), and the current campaigns, ad groups and
     # ads, which their versions, their dimensions and their tests read four times a run (C8 of the
-    # audit of 24 November 2026).
+    # audit of 24 November 2026), and the currencies of the listed accounts and the rates of the
+    # file of the deployment, which the view ops_rates reads, so that it stays through a run
+    # (defect I).
     project = (DBT / "dbt_project.yml").read_text(encoding="utf-8")
     pattern = r"^    intermediate:\n      \+schema: staging\n      \+materialized: view$"
     assert re.search(pattern, project, flags=re.MULTILINE)
@@ -775,6 +864,8 @@ def test_the_intermediate_models_are_views_in_staging():
         "int_campaigns__current",
         "int_ad_groups__current",
         "int_ads__current",
+        "int_accounts__currencies",
+        "int_rates__given",
     }
 
 
@@ -1586,6 +1677,14 @@ INTERMEDIATE_TESTS = {
     ),
     # The days of the windows that the facts of the core take (ADR-0038).
     "int_window_days": (["account_sk", "report_date"], [], {}),
+    # The currencies of the listed accounts, which ops_rates reads (ADR-0042).
+    "int_accounts__currencies": (
+        ["source", "account_id", "currency"],
+        ["source", "account_id"],
+        {},
+    ),
+    # The rates of the file of the deployment, which ops_rates reads (ADR-0042).
+    "int_rates__given": (["currency", "first_day"], ["currency", "first_day"], {}),
 }
 RELATIONSHIPS = r"^ +to: ref\('(\w+)'\)\n +field: (\w+)$"
 
@@ -2788,7 +2887,7 @@ def test_every_test_that_blocks_carries_the_tag_critical_and_no_warning_does():
             assert (by_directory or tagged) is (not warns), (str(relative), name)
     # The tests of the base package, as of November 2026: a parser that found fewer would pass a
     # test that lost its tag.
-    assert counted == 435, counted
+    assert counted == 441, counted
     for path in sorted((DBT / "tests").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         tagged = "{{ config(tags=['critical']) }}" in text
@@ -3081,7 +3180,8 @@ def test_the_rates_of_the_core_merge_the_days_that_a_run_brings():
 
 
 # The staging models of the lists of the accounts and of the properties, in the order in which the
-# check of the rates, the rates of the core and ops_rates read them.
+# check of the rates, the rates of the core and the currencies of the listed accounts, which
+# ops_rates reads, read them.
 ACCOUNT_LISTS = [
     "stg_demo_search__accounts",
     "stg_demo_social__accounts",
@@ -3107,10 +3207,11 @@ def test_the_check_of_the_rates_counts_the_days_as_the_rates_of_the_core_write_t
     # The detail names the days of a currency that a source has from a later day.
     assert "when u.currency not in (select currency from sourced) then ''" in body
     assert body.count("quarantine_days('u.day')") == 3
-    # The check, the rates of the core and ops_rates read the same lists, those of G1.
+    # The check, the rates of the core and the currencies that ops_rates reads take the same
+    # lists, those of G1.
     statement = next(s for s in hooks() if "quarantine_rate_findings([" in s)
     assert re.findall(r"ref\('(stg_\w+__(?:accounts|properties))'\)", statement) == ACCOUNT_LISTS
-    for path in (CORE / f"{RATES_MODEL}.sql", DBT / "models" / "ops" / "ops_rates.sql"):
+    for path in (CORE / f"{RATES_MODEL}.sql", INTERMEDIATE / "int_accounts__currencies.sql"):
         text = path.read_text(encoding="utf-8")
         lists = text[text.index("{%- set lists = [") :]
         lists = lists[: lists.index("] %}")]
@@ -3126,7 +3227,9 @@ def test_ops_names_the_days_of_an_account_in_quarantine_without_a_rate_once():
     # count among those of the source that the core holds the currency from, so its next load takes
     # the history again (agoranomos_pipelines/rates.py), and not among those of the facts.
     view = (DBT / "models" / "ops" / "ops_rates.sql").read_text(encoding="utf-8")
-    assert {"int_g1_failures", "source:core.loads", *ACCOUNT_LISTS} <= set(referenced(view))
+    assert {"int_g1_failures", "source:core.loads", "int_accounts__currencies"} <= set(
+        referenced(view)
+    )
     held = view[view.index("held_loads as (") : view.index("gaps_by_source as (")]
     assert "        where reason = 'missing_rate'\n" in held
     assert "    where p.status = 'pinned'\n        and p.outcome = 'loaded'\n" in held
