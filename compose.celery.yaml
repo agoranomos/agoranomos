@@ -59,7 +59,7 @@ x-airflow-worker-check: &airflow-worker-check |
 
 services:
   broker:
-    image: valkey/valkey:9.1.4-trixie@sha256:3ab0eca823ebbf0fe352476ebac330ac9e5f14b592b9a954eab296d341e81b0e
+    image: valkey/valkey:9.2.0-trixie@sha256:1c2b25b09f354c66fe994733acdf12fcfd4bdf6f3bd92b88a93a70378d884056
     profiles: [core]
     restart: unless-stopped
     # The entrypoint of the image drops to this user only when the command is valkey-server. This command
