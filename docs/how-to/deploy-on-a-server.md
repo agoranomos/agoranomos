@@ -4,7 +4,7 @@ This guide puts agoranomos on a server of your own in server mode: Metabase on t
 
 !!! note "Pre-alpha"
 
-    This guide installs v0.6.0, the latest release. <!-- x-release-please-version -->
+    This guide installs v0.7.0, the latest release. <!-- x-release-please-version -->
     Each release has its notes on [the releases](https://github.com/agoranomos/agoranomos/releases).
 
 ## Before you begin
@@ -79,7 +79,7 @@ On the server, as `agoranomos`:
 <!-- x-release-please-start-version -->
 
 ```bash
-git clone --branch v0.6.0 https://github.com/agoranomos/agoranomos.git
+git clone --branch v0.7.0 https://github.com/agoranomos/agoranomos.git
 cd agoranomos
 ./agoranomos init --server bi.example.com
 ```
@@ -140,7 +140,7 @@ A backup on the same server is lost with the server: copy the backups to another
 
 A release upgrades from the newest release of the previous minor version, such as v0.7.0 from v0.6.0 ([ADR-0059](../adr/0059-upgrade-from-the-previous-minor-release-only.md)). A server that runs an older release takes the newest release of each minor version in turn, each with the commands below and its own backup, as [Update from an older release](run-locally.md#update-from-an-older-release) says, and copies the backups to another machine after each step.
 
-Note the commit that you run now, and take a backup, before you update the checkout: the backup records the images of the checkout as they are when it runs, and a restore needs the checkout at the commit that took it. Put the tag of the release that you update to in place of `<tag>`, such as `v0.6.0`; after `git fetch --tags`, `git tag --sort=-v:refname | head -n 1` names the newest: <!-- x-release-please-version -->
+Note the commit that you run now, and take a backup, before you update the checkout: the backup records the images of the checkout as they are when it runs, and a restore needs the checkout at the commit that took it. Put the tag of the release that you update to in place of `<tag>`, such as `v0.7.0`; after `git fetch --tags`, `git tag --sort=-v:refname | head -n 1` names the newest: <!-- x-release-please-version -->
 
 ```bash
 git rev-parse HEAD   # note this commit: the way back needs it
