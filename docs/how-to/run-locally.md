@@ -4,7 +4,7 @@ This guide starts agoranomos on your own machine in local mode: the warehouse, A
 
 !!! note "Pre-alpha"
 
-    This guide installs v0.6.0, the latest release. <!-- x-release-please-version -->
+    This guide installs v0.7.0, the latest release. <!-- x-release-please-version -->
     Each release has its notes on [the releases](https://github.com/agoranomos/agoranomos/releases), and the `main` branch holds what comes next.
 
 ## Before you begin
@@ -20,7 +20,7 @@ This guide starts agoranomos on your own machine in local mode: the warehouse, A
 <!-- x-release-please-start-version -->
 
 ```bash
-git clone --branch v0.6.0 https://github.com/agoranomos/agoranomos.git
+git clone --branch v0.7.0 https://github.com/agoranomos/agoranomos.git
 cd agoranomos
 ./agoranomos up
 ```
@@ -83,7 +83,7 @@ To delete the stack together with its data, run `docker compose down --volumes` 
 
 A release upgrades from the newest release of the previous minor version, the second number of the version, and from an earlier release of its own minor version: v0.7.0 upgrades from v0.6.0, and from no release before it ([ADR-0059](../adr/0059-upgrade-from-the-previous-minor-release-only.md)). The test of the upgrade runs that path only. From an older release, such as v0.5.0 or v0.4.5, update one minor version at a time, as [Update from an older release](#update-from-an-older-release) says.
 
-First, in the root of the checkout, get the tags of the new releases, and see whether the release that you update to changes the version of Metabase. In the commands of this section, put the tag of that release in place of `<tag>`, such as `v0.6.0`; `git tag --sort=-v:refname | head -n 1` names the newest. A checkout of the `main` branch uses `origin/main` in place of `<tag>`, and `git pull` in place of `git checkout <tag>`. <!-- x-release-please-version -->
+First, in the root of the checkout, get the tags of the new releases, and see whether the release that you update to changes the version of Metabase. In the commands of this section, put the tag of that release in place of `<tag>`, such as `v0.7.0`; `git tag --sort=-v:refname | head -n 1` names the newest. A checkout of the `main` branch uses `origin/main` in place of `<tag>`, and `git pull` in place of `git checkout <tag>`. <!-- x-release-please-version -->
 
 ```bash
 git fetch --tags

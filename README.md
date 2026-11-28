@@ -76,7 +76,7 @@ You need Docker with at least 6 GB of memory (8 GB recommended), git, and free p
 <!-- x-release-please-start-version -->
 
 ```bash
-git clone --branch v0.6.0 https://github.com/agoranomos/agoranomos.git
+git clone --branch v0.7.0 https://github.com/agoranomos/agoranomos.git
 cd agoranomos
 ./agoranomos up
 ```

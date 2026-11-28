@@ -1,5 +1,82 @@
 # Changelog
 
+## [0.7.0](https://github.com/agoranomos/agoranomos/compare/v0.6.0...v0.7.0) (2026-11-28)
+
+
+### Features
+
+* **airflow:** add short cycles of Meta and TikTok ([#446](https://github.com/agoranomos/agoranomos/issues/446)) ([7f54d74](https://github.com/agoranomos/agoranomos/commit/7f54d74f3c6fbb5c84c095c5c29806fd51b52572))
+* **dbt:** take GA4 into the core and the marts ([#385](https://github.com/agoranomos/agoranomos/issues/385)) ([f8287cf](https://github.com/agoranomos/agoranomos/commit/f8287cff2132877ad73edcff4b3dc574241f9587))
+* **dbt:** take TikTok into the core and the marts ([#381](https://github.com/agoranomos/agoranomos/issues/381)) ([befca99](https://github.com/agoranomos/agoranomos/commit/befca9953c70f4ef5d42f9a14018e485967eb07b))
+* **ga4:** keep the flags of each answer in the journal of loads ([#386](https://github.com/agoranomos/agoranomos/issues/386)) ([d2ef499](https://github.com/agoranomos/agoranomos/commit/d2ef499fedeab942bec1dad936ac449f6ef51b4b))
+* **ga4:** load the GA4 properties into the raw layer ([#378](https://github.com/agoranomos/agoranomos/issues/378)) ([58d5a40](https://github.com/agoranomos/agoranomos/commit/58d5a403db569253d4a374e59232e7e0c31140d9))
+* **marts:** count Primary ROAS by the value of the primary actions ([#432](https://github.com/agoranomos/agoranomos/issues/432)) ([933ad93](https://github.com/agoranomos/agoranomos/commit/933ad93b5a84a9a8f1c58f8f8ba0c5441c7b1d86))
+* **marts:** mark the days that no load changes any more ([#372](https://github.com/agoranomos/agoranomos/issues/372)) ([5823133](https://github.com/agoranomos/agoranomos/commit/5823133ec307d861ddad02ff13f576673f2bc49c))
+* **metabase:** add the dashboard Web analytics ([32f58a6](https://github.com/agoranomos/agoranomos/commit/32f58a6b02e7c642646d2db6c10587040e4debf1))
+* **metabase:** add the dashboard Web analytics to every deployment ([#387](https://github.com/agoranomos/agoranomos/issues/387)) ([32f58a6](https://github.com/agoranomos/agoranomos/commit/32f58a6b02e7c642646d2db6c10587040e4debf1))
+* **rates:** take the rates of a deployment from a file ([#373](https://github.com/agoranomos/agoranomos/issues/373)) ([2f4334b](https://github.com/agoranomos/agoranomos/commit/2f4334bc6e28fe5f39c6be3d3d8121484a44a7ba))
+* **tiktok:** load the history of TikTok by quarters in the background ([#380](https://github.com/agoranomos/agoranomos/issues/380)) ([3de23dd](https://github.com/agoranomos/agoranomos/commit/3de23dd80e140569abd4eb3cf6615fce81706eef))
+* **tiktok:** load the TikTok advertisers into raw ([9d3010b](https://github.com/agoranomos/agoranomos/commit/9d3010bb524f799c0118516ca88c660665778440))
+* **tiktok:** load the TikTok advertisers into the raw layer ([#379](https://github.com/agoranomos/agoranomos/issues/379)) ([9d3010b](https://github.com/agoranomos/agoranomos/commit/9d3010bb524f799c0118516ca88c660665778440))
+
+
+### Bug Fixes
+
+* **airflow:** keep the short cycle an hour off the backup ([#414](https://github.com/agoranomos/agoranomos/issues/414)) ([1066112](https://github.com/agoranomos/agoranomos/commit/1066112b4d00c0fee14e8ce33836163692a85c9b))
+* **airflow:** limit the journal of the loads ([#445](https://github.com/agoranomos/agoranomos/issues/445)) ([2908532](https://github.com/agoranomos/agoranomos/commit/29085323a6947d93c8f347260a973240d838fec8))
+* **airflow:** read each day at the end of its window ([#399](https://github.com/agoranomos/agoranomos/issues/399)) ([bfe2bc2](https://github.com/agoranomos/agoranomos/commit/bfe2bc2c65b967de9be8d786c77aed39ebc9b71a))
+* **backup:** retry a dump that a dbt run breaks ([#382](https://github.com/agoranomos/agoranomos/issues/382)) ([c860c53](https://github.com/agoranomos/agoranomos/commit/c860c53ff03870c6c84692fb49ab1b563ff47b0a))
+* **backup:** retry a dump when a table is dropped ([#389](https://github.com/agoranomos/agoranomos/issues/389)) ([a2403a2](https://github.com/agoranomos/agoranomos/commit/a2403a2011d7902eabb51d6bc2a65a8768437f73))
+* **core:** keep the channel group in the key of the sessions ([#429](https://github.com/agoranomos/agoranomos/issues/429)) ([17ed978](https://github.com/agoranomos/agoranomos/commit/17ed978aa0e73c2a6970878c309ceb623adace2c))
+* **dbt:** count a rate of the file only on the days of its entries ([#420](https://github.com/agoranomos/agoranomos/issues/420)) ([9c04802](https://github.com/agoranomos/agoranomos/commit/9c04802a18f16da303602cc4e2aa1fda13afc96f))
+* **dbt:** keep a campaign day that has only conversions ([#408](https://github.com/agoranomos/agoranomos/issues/408)) ([c4944f1](https://github.com/agoranomos/agoranomos/commit/c4944f128a8acad57c139de3f791986bf192375a))
+* **dbt:** leave primary conversions of partial days empty ([#394](https://github.com/agoranomos/agoranomos/issues/394)) ([9e176ec](https://github.com/agoranomos/agoranomos/commit/9e176ec3f0f91f5829645907f5a8f6bae3bbeee5))
+* **dbt:** quarantine an account whose days lack a rate ([#452](https://github.com/agoranomos/agoranomos/issues/452)) ([2dbdf7b](https://github.com/agoranomos/agoranomos/commit/2dbdf7b985e966a6d55ca103c24c38625387e638))
+* **dbt:** read a Meta row without impressions as zero ([#419](https://github.com/agoranomos/agoranomos/issues/419)) ([82a2061](https://github.com/agoranomos/agoranomos/commit/82a2061305c4501c2d2287b6d7a97b9e5df1a092))
+* **dbt:** stop a source by the share of all its accounts ([#411](https://github.com/agoranomos/agoranomos/issues/411)) ([798687b](https://github.com/agoranomos/agoranomos/commit/798687b403dcb05d31ad856ee414b92b8cd74432))
+* **dbt:** stop a source by the share of its accounts ([798687b](https://github.com/agoranomos/agoranomos/commit/798687b403dcb05d31ad856ee414b92b8cd74432))
+* **docs:** end the navigation column at the footer ([#363](https://github.com/agoranomos/agoranomos/issues/363)) ([88491b4](https://github.com/agoranomos/agoranomos/commit/88491b4daade16b1c1b2f4062a8c5fe5c906efff))
+* **loads:** start the transform after a partial load ([#431](https://github.com/agoranomos/agoranomos/issues/431)) ([93f70b2](https://github.com/agoranomos/agoranomos/commit/93f70b2fc0a5fd4f40c58965bca2529d5534097c))
+* **metabase:** scan the field values after the last daily load ([#413](https://github.com/agoranomos/agoranomos/issues/413)) ([c911a34](https://github.com/agoranomos/agoranomos/commit/c911a34765b583c17ddea7264e0c1f188b76bf76))
+* **meta:** fail errors that no retry helps at once ([#410](https://github.com/agoranomos/agoranomos/issues/410)) ([529c221](https://github.com/agoranomos/agoranomos/commit/529c2218dd97ca688cc474932a39f27fcb46c5e8))
+* **meta:** leave the business out of the account ([85c2544](https://github.com/agoranomos/agoranomos/commit/85c2544e63c1b98dad800261c4ba14d3f2dc9436)), closes [#220](https://github.com/agoranomos/agoranomos/issues/220)
+* **meta:** leave the business out of the request of an account ([#401](https://github.com/agoranomos/agoranomos/issues/401)) ([85c2544](https://github.com/agoranomos/agoranomos/commit/85c2544e63c1b98dad800261c4ba14d3f2dc9436))
+* **meta:** list campaigns, ad sets and ads without DELETED ([#402](https://github.com/agoranomos/agoranomos/issues/402)) ([86fe1f2](https://github.com/agoranomos/agoranomos/commit/86fe1f2bb3bd14a82eb8c8bee7c0f18f75810fbf))
+* **meta:** list objects without DELETED ([86fe1f2](https://github.com/agoranomos/agoranomos/commit/86fe1f2bb3bd14a82eb8c8bee7c0f18f75810fbf)), closes [#220](https://github.com/agoranomos/agoranomos/issues/220)
+* **meta:** say why the load waits after an error ([#409](https://github.com/agoranomos/agoranomos/issues/409)) ([f9361a9](https://github.com/agoranomos/agoranomos/commit/f9361a9776c7501f7d2cc7497abe75c79045a629))
+* **meta:** send the timeouts of synchronous insights to a report run ([#407](https://github.com/agoranomos/agoranomos/issues/407)) ([552779f](https://github.com/agoranomos/agoranomos/commit/552779ff7a3ddcd5c5ee533aea0f67633501f9bf))
+* **meta:** send the token in the header Authorization ([#405](https://github.com/agoranomos/agoranomos/issues/405)) ([7a81e91](https://github.com/agoranomos/agoranomos/commit/7a81e91b0a257b69b07225c106856b2a192f9d44))
+* **meta:** show the error that Meta writes for a person ([#406](https://github.com/agoranomos/agoranomos/issues/406)) ([9b9dca0](https://github.com/agoranomos/agoranomos/commit/9b9dca0f17e0c0de0f5663e0157c695a968b19a0))
+* **ops:** count only the accounts of the settings as late ([#417](https://github.com/agoranomos/agoranomos/issues/417)) ([c9e82fb](https://github.com/agoranomos/agoranomos/commit/c9e82fbad695be291958c71b91d7b822f99d3d24))
+
+
+### Performance Improvements
+
+* **dbt:** bound the tests of the facts by the last day of the windows ([#447](https://github.com/agoranomos/agoranomos/issues/447)) ([7be1908](https://github.com/agoranomos/agoranomos/commit/7be19086144d230a6c2ff110e0c8889810b90e64))
+* **dbt:** build the current entities as tables ([#449](https://github.com/agoranomos/agoranomos/issues/449)) ([abafba1](https://github.com/agoranomos/agoranomos/commit/abafba152667ffc7f7b3f7d6d7e3f352d32e873c))
+
+
+### Documentation
+
+* **adr:** accept ADR-0041, one deployment for an agency ([#442](https://github.com/agoranomos/agoranomos/issues/442)) ([ae477d6](https://github.com/agoranomos/agoranomos/commit/ae477d6bcb30b0c7af8a3a701c8bf00ce7b7c708))
+* **adr:** accept ADR-0059 ([#451](https://github.com/agoranomos/agoranomos/issues/451)) ([3ebca98](https://github.com/agoranomos/agoranomos/commit/3ebca985a5fa7c367b40c561cc5666c4d0d5cce8))
+* **adr:** connect GA4 with a service account of the deployment ([#370](https://github.com/agoranomos/agoranomos/issues/370)) ([3a66582](https://github.com/agoranomos/agoranomos/commit/3a665826b1f94855d8b1d422975c560d826830f7))
+* **adr:** connect TikTok with an app of the deployment ([#371](https://github.com/agoranomos/agoranomos/issues/371)) ([f776590](https://github.com/agoranomos/agoranomos/commit/f776590cd27b5977103c92cceaed1cb0df681aa8))
+* **adr:** count ROAS by the value of the primary actions ([#416](https://github.com/agoranomos/agoranomos/issues/416)) ([fe546d2](https://github.com/agoranomos/agoranomos/commit/fe546d2648e9948bed809ce6a1897f30bb8ba857))
+* **adr:** read each day at the end of its window ([#395](https://github.com/agoranomos/agoranomos/issues/395)) ([a0508c2](https://github.com/agoranomos/agoranomos/commit/a0508c2f48eb42eef22a1297deed388ad624c58f))
+* **adr:** record the answers of the audit ([#437](https://github.com/agoranomos/agoranomos/issues/437)) ([fe52b86](https://github.com/agoranomos/agoranomos/commit/fe52b86918d1b9fa32296e71819dfe47e410af2c))
+* **adr:** upgrade from the previous minor release only ([#423](https://github.com/agoranomos/agoranomos/issues/423)) ([05a40e7](https://github.com/agoranomos/agoranomos/commit/05a40e7915c178140b574f18314c02a7b0339fc4))
+* bring the docs up to date with v0.6.0 ([#366](https://github.com/agoranomos/agoranomos/issues/366)) ([d8818f2](https://github.com/agoranomos/agoranomos/commit/d8818f2b281230c20988dd5a7ec68d2a40f68818))
+* bring the documentation up to date for 0.7.0 ([#393](https://github.com/agoranomos/agoranomos/issues/393)) ([65c289d](https://github.com/agoranomos/agoranomos/commit/65c289dff57effb83d45d1acbbdaaf7bae4ffa1b))
+* check the documentation before each release ([#391](https://github.com/agoranomos/agoranomos/issues/391)) ([55c875d](https://github.com/agoranomos/agoranomos/commit/55c875d0002709775ab5522b436ee78232e65857))
+* correct what quarantine does to the marts ([#392](https://github.com/agoranomos/agoranomos/issues/392)) ([f7976c5](https://github.com/agoranomos/agoranomos/commit/f7976c5b7868784ae84d33f703fad82197690837))
+* name no version in the security policy ([#390](https://github.com/agoranomos/agoranomos/issues/390)) ([bb291f9](https://github.com/agoranomos/agoranomos/commit/bb291f98b66b2084faaabfc1674a6bee89cbf166))
+* record the security settings of GitHub ([#438](https://github.com/agoranomos/agoranomos/issues/438)) ([4f982d0](https://github.com/agoranomos/agoranomos/commit/4f982d0c3b879d9b2689d89434d69a9f4188fc8f))
+* retake the Overview tab with the card of today ([#367](https://github.com/agoranomos/agoranomos/issues/367)) ([38e6e13](https://github.com/agoranomos/agoranomos/commit/38e6e13db228fd5b1bf2793aacb54ab004798ac5)), closes [#358](https://github.com/agoranomos/agoranomos/issues/358)
+* retake the screenshots for 0.7.0 ([#396](https://github.com/agoranomos/agoranomos/issues/396)) ([0c1158d](https://github.com/agoranomos/agoranomos/commit/0c1158d6059ea2400bdb22c8cf0ce1d5f7207267))
+* run new sources on the stand before a release ([#400](https://github.com/agoranomos/agoranomos/issues/400)) ([cb9a74b](https://github.com/agoranomos/agoranomos/commit/cb9a74b1a96a8379e5f881eab3ae9ee1e2f5c6e1))
+* show the core and Meta in the pipeline picture ([#365](https://github.com/agoranomos/agoranomos/issues/365)) ([0ee4c16](https://github.com/agoranomos/agoranomos/commit/0ee4c16c6f5f5dd82d53355caae9d186f8e2ab97))
+
 ## [0.6.0](https://github.com/agoranomos/agoranomos/compare/v0.5.0...v0.6.0) (2026-11-20)
 
 
