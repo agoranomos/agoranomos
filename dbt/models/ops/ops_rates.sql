@@ -37,7 +37,7 @@
 --   the core holds no rate names no day, as no source of the order published it on a day that a
 --   run read; and a day that a load of the history of that source has covered since the first of
 --   those loads was pinned names none, as the source has no rate of it.
--- * The rates of the file of the deployment, extensions/model/rates.toml (stg_settings__rates): a
+-- * The rates of the file of the deployment, extensions/model/rates.toml (int_rates__given): a
 --   row of the source deployment while the file has an entry, with the last day that it covers
 --   and no age, as a rate that the deployment gives is never late. And the days off the file: of
 --   the facts of a currency, those on which the core holds the rate of the file where the file no
@@ -46,18 +46,15 @@
 --   count among the days without a rate of the source of their currency, so that its next load
 --   takes their history again (core_fx_rates_daily), and not among first_day_without_rate and
 --   days_without_rate, as the core holds a rate on them.
+-- The view reads only relations that a run of the transform keeps: the tables of the core, the
+-- table of the checks (int_g1_failures), the rates of the file (int_rates__given) and the
+-- currencies of the listed accounts (int_accounts__currencies), tables that each run fills anew
+-- in place, so that it stays through a run, which ./agoranomos status, the Ops collection and the
+-- loads of the rates read at any time (agoranomos_pipelines/rates.py). Over a view of staging, it
+-- went with that view early in each run, as dbt drops the old view with cascade, until its own
+-- node built it again near the end.
 {%- set chain = rates_chain() %}
 {%- set links = chain + ['demo_fx'] %}
-{%- set lists = [
-    (ref('stg_demo_search__accounts'), 'account_id'),
-    (ref('stg_demo_social__accounts'), 'account_id'),
-    (ref('stg_demo_video__accounts'), 'account_id'),
-    (ref('stg_google_ads__accounts'), 'account_id'),
-    (ref('stg_meta_ads__accounts'), 'account_id'),
-    (ref('stg_tiktok_ads__accounts'), 'account_id'),
-    (ref('stg_demo_web__properties'), 'property_id'),
-    (ref('stg_ga4__properties'), 'property_id'),
-] %}
 with rates as (
     select *
     from {{ ref('core_fx_rates_daily') }}
@@ -199,7 +196,7 @@ given as (
         g.rate,
         greatest(g.first_day, s.first_day) as first_day,
         least(g.last_day, s.last_day) as last_day
-    from {{ ref('stg_settings__rates') }} as g
+    from {{ ref('int_rates__given') }} as g
     join spans as s on s.currency = g.currency
     where g.first_day <= s.last_day
         and g.last_day >= s.first_day
@@ -246,18 +243,16 @@ off_the_file as (
 
 -- The loads that wait for the core, pinned and not accepted, of each account that the last run
 -- of the transform held in quarantine for days without a rate (int_g1_failures, missing_rate),
--- with the currency that its list gives: no fact of the core holds their days.
+-- with the currency that its list gives (int_accounts__currencies): no fact of the core holds
+-- their days.
 held_loads as (
-    select l.currency::text as currency, p.window_from, p.window_to, p.pinned_at
+    select l.currency, p.window_from, p.window_to, p.pinned_at
     from (
         select distinct source, account_id
         from {{ ref('int_g1_failures') }}
         where reason = 'missing_rate'
     ) as q
-    join (
-        select distinct source, account_id, currency
-        from ({{ listed_currencies(lists) }}) as listed_accounts
-    ) as l
+    join {{ ref('int_accounts__currencies') }} as l
         on l.source = q.source and l.account_id = q.account_id
     join {{ source('core', 'loads') }} as p
         on p.source = q.source and p.account_id = q.account_id
@@ -358,7 +353,7 @@ rows as (
     where not exists (select from listed) and not exists (select from gaps_by_source)
     union all
     select 'deployment'
-    where exists (select from {{ ref('stg_settings__rates') }})
+    where exists (select from {{ ref('int_rates__given') }})
 )
 
 select
@@ -366,7 +361,7 @@ select
     o.source::text as rate_source,
     case
         when o.source = 'deployment'
-            then (select max(last_day) from {{ ref('stg_settings__rates') }})
+            then (select max(last_day) from {{ ref('int_rates__given') }})
         else a.published_on
     end as last_rate_date,
     a.business_days::integer as business_days_since_rate,

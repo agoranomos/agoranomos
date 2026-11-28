@@ -124,14 +124,22 @@ SEEDS = "package:agoranomos,resource_type:seed"
         (
             True,
             True,
-            [SEEDS, "marts", "stg_settings__rates", "core_fx_rates_daily", "ops_rates"],
+            [
+                SEEDS,
+                "marts",
+                "stg_settings__rates",
+                "core_fx_rates_daily",
+                "int_rates__given",
+                "int_accounts__currencies",
+                "ops_rates",
+            ],
             ["test", "unit_test"],
             {"rebuild_views": True, "recompute_rates": True},
         ),
         (
             False,
             True,
-            [SEEDS, "+marts", "ops_rates"],
+            [SEEDS, "+marts", "int_rates__given", "int_accounts__currencies", "ops_rates"],
             [],
             {"rebuild_views": True, "recompute_rates": True},
         ),
@@ -203,10 +211,11 @@ def test_the_view_of_the_rates_has_the_columns_that_the_job_reads():
 
 
 def test_the_rates_read_a_list_of_accounts_that_does_not_exist_yet_as_empty():
-    # The first up of a release builds the rates of the core and ops.ops_rates before any run of
-    # the transform, and a list of accounts that the release before lacked, as those of TikTok and
-    # GA4 after v0.6.0, does not exist yet: the rates read each list through relation_or_empty,
-    # with the three columns that they take, so that a missing one gives no currency.
+    # The first up of a release builds the rates of the core, the currencies of the listed
+    # accounts and ops.ops_rates before any run of the transform, and a list of accounts that the
+    # release before lacked, as those of TikTok and GA4 after v0.6.0, does not exist yet: the rates
+    # and the currencies read each list through relation_or_empty, with the three columns that
+    # they take, so that a missing one gives no currency.
     text = (DBT / "macros" / "quarantine.sql").read_text(encoding="utf-8")
     body = text[text.index("{% macro listed_currencies(") :]
     body = body[: body.index("{%- endmacro %}")]
@@ -223,7 +232,7 @@ def test_the_rates_read_a_list_of_accounts_that_does_not_exist_yet_as_empty():
     assert body.count("from ") == 2
     for path in (
         DBT / "models" / "core" / f"{mi.RATES}.sql",
-        DBT / "models" / "ops" / f"{mi.OPS_RATES}.sql",
+        DBT / "models" / "intermediate" / f"{mi.CURRENCIES}.sql",
     ):
         model = path.read_text(encoding="utf-8")
         assert "{{ listed_currencies(lists) }}" in model, path.name
@@ -290,11 +299,13 @@ def test_the_job_builds_the_views_of_ops_where_a_transform_has_made_elementary(
     assert code == 0
     first, second = dbt.calls
     variables = {"rebuild_views": True} | ({"recompute_rates": True} if other else {})
-    # With the view of the rates of the file, which ops.ops_rates reads and which an upgrade
-    # starts without.
+    # With the tables of the rates of the file and of the currencies of the listed accounts, which
+    # ops.ops_rates reads and which an upgrade starts without, the view of the rates of the file
+    # that the first reads, and no list of the accounts: dbt replaces a view of staging by
+    # dropping the old one with cascade.
     assert selected(second) == (
         "build",
-        ["stg_settings__rates", mi.OPS],
+        ["stg_settings__rates", "int_rates__given", "int_accounts__currencies", mi.OPS],
         ["test", "unit_test"],
         variables,
     )
